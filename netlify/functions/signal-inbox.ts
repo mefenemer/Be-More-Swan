@@ -369,11 +369,11 @@ export default withLambda(async (event) => {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes('does not exist') && (msg.includes('column') || msg.includes('relation'))) {
             console.error('[signal-inbox] schema not migrated — apply db/signal-inbox-1a.sql', err);
-            return json(503, { error: 'The Signal Inbox is not set up on this environment yet.', code: 'MIGRATION_PENDING' });
+            return json(503, { error: 'Searches is not set up on this environment yet.', code: 'MIGRATION_PENDING' });
         }
         const pg = err as { code?: string; constraint_name?: string; cause?: unknown };
         console.error('[signal-inbox]', { action, orgId, assistantId, pgCode: pg?.code, cause: pg?.cause }, err);
-        return json(502, { error: 'The Signal Inbox is having trouble right now — please try again.' });
+        return json(502, { error: 'Searches is having trouble right now — please try again.' });
     }
 });
 

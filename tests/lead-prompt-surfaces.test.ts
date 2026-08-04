@@ -202,14 +202,92 @@ check('the prompt does not invent a target-persona field the form lacks', () => 
 
 console.log('\n──── the prompt points at where the button actually is ────');
 
-check('"Find New Leads" lives in the Signal Inbox toolbar, where the prompt sends users', () => {
+check('"Find New Leads" lives in that tab\'s toolbar, where the prompt sends users', () => {
     const inbox = read('src/components/assistant-signal-inbox.js');
     assert.match(inbox, /Find New Leads/,
-        'The prompt tells users the button is in the Signal Inbox toolbar, but assistant-signal-inbox.js '
+        'The prompt tells users the button is in that tab\'s toolbar, but assistant-signal-inbox.js '
         + 'no longer renders it. It has moved once already (out of the Overview action bar); if it has '
         + 'moved again, update leadGeneratorSurfaces() to name the new location.');
-    assert.match(PROMPT, /button in the Signal Inbox toolbar/,
-        'The prompt must say WHERE the button is. The Overview location is a dead end.');
+
+    // Derived from the registry, never hardcoded. The tab has already been renamed once
+    // ("Signal Inbox" → "Searches") and a literal here would have gone stale silently — pinning
+    // the OLD name while the prompt correctly used the new one, which is the test lying rather
+    // than the code. The label is the single source of truth for what the user sees on the tab.
+    const tabLabel = leadCfg?.signalInbox?.label;
+    assert.strictEqual(typeof tabLabel, 'string', 'The registry no longer gives the inbox tab a label.');
+    assert.ok(PROMPT.includes(`button in the ${tabLabel} toolbar`),
+        `The prompt must say WHERE the button is, naming the tab as the user sees it ("${tabLabel}"). `
+        + 'The Overview location is a dead end.');
+});
+
+console.log('\n──── the campaign proposal card ────');
+
+// The chat can now CREATE a campaign (discovery_campaign_proposal → chat-session.js →
+// discovery-campaigns.ts). Everything below defends the one property that makes that safe: an
+// approved proposal saves a DRAFT and spends nothing. A search costs real money per run and
+// reaches real strangers, so "the model proposed it and the user clicked once" must never be
+// enough to start it.
+
+check('the emitted type has a renderer registered under the same name', () => {
+    const registry = read('src/components/disruptive-ui-registry.js');
+    assert.match(PROMPT, /"type": "discovery_campaign_proposal"/,
+        'The prompt must document the wire shape it is told to emit.');
+    assert.match(registry, /register\('discovery_campaign_proposal'/,
+        'Nothing renders discovery_campaign_proposal — an unknown type degrades to text silently, '
+        + 'so the assistant would promise a card the user never sees.');
+});
+
+check('approving the proposal creates a DRAFT, never a running campaign', () => {
+    const chat = read('src/components/chat-session.js');
+    assert.match(chat, /asDraft:\s*true/,
+        'chat-session.js must send asDraft — without it the create path starts (and bills) a run '
+        + 'on the strength of one click in a chat window.');
+
+    const api = read('netlify/functions/discovery-campaigns.ts');
+    assert.match(api, /status:\s*asDraft\s*\?\s*'draft'\s*:\s*'active'/,
+        'discovery-campaigns.ts must map asDraft onto the draft status.');
+
+    const helper = read('src/utils/discovery.ts');
+    assert.match(helper, /if\s*\(isDraft\)\s*return/,
+        'createDiscoveryRun must return before enqueueing a job for a draft — a draft that '
+        + 'enqueues is just an active campaign with a misleading label.');
+});
+
+check('nothing dispatches a draft', () => {
+    const dispatcher = read('netlify/functions/dispatch-discovery-runs.ts');
+    assert.match(dispatcher, /eq\(discoveryCampaigns\.status,\s*'active'\)/,
+        'The dispatcher must fire only active campaigns. If this filter widens, every chat-proposed '
+        + 'draft starts spending on the next cron tick without anyone approving the run.');
+});
+
+check('starting a draft activates it, so a recurring cadence is not a dead campaign', () => {
+    const api = read('netlify/functions/discovery-campaigns.ts');
+    const runNow = span(stripComments(api), "action === 'run_now'", "action === 'list_leads'", 'the run_now action');
+    assert.match(runNow, /status === 'draft'/,
+        'run_now must promote a draft to active. Without it a chat-proposed DAILY search runs once '
+        + 'and never again — status stays draft, the dispatcher skips it, and the recurrence the '
+        + 'user agreed to silently never happens.');
+    assert.ok(!/status === 'paused'/.test(runNow),
+        'run_now must NOT resurrect a paused campaign — that would undo a human decision.');
+});
+
+check('approving the same proposal twice does not buy two campaigns', () => {
+    const api = read('netlify/functions/discovery-campaigns.ts');
+    assert.match(api, /deduped:\s*true/,
+        'The draft create path needs the idea-level dedupe: chat transcripts re-hydrate from '
+        + 'chatMessages.uiElementJson on reload, so an old proposal card comes back with live buttons.');
+});
+
+check('the card names the tab as the registry labels it', () => {
+    const registry = read('src/components/disruptive-ui-registry.js');
+    const card = span(registry, 'function renderDiscoveryCampaignProposalCard', '\n  register(', 'the proposal card');
+    const tabLabel = leadCfg?.signalInbox?.label;
+    // The card tells the user where to go and start the search they just approved. It is the last
+    // instruction in the flow, and it is plain copy with nothing to keep it honest but this check.
+    assert.ok(card.includes(`${tabLabel} tab`),
+        `The proposal card must send users to the "${tabLabel}" tab, matching the registry label. `
+        + 'The tab has been renamed once already; copy that still names the old one strands the user '
+        + 'at the final step, holding an approved search they cannot find.');
 });
 
 console.log(`\n${passed} checks passed.`);

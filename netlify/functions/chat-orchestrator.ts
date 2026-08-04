@@ -16,7 +16,7 @@
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, assistantRecords, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
@@ -284,18 +284,23 @@ function spreadsheetFallback(platform: unknown, tabLabel: string, subject: strin
 // written INTO the idea text. Naming a field the user can't find is the same class of
 // bug as naming a tool that doesn't exist.
 //
-// `Find New Leads` deliberately says "in the Signal Inbox toolbar" — it moved out of the
-// Overview action bar (see assistants.js, the toggleBtn('btn-discovery-campaigns') note)
-// and the old location is a dead end.
+// ⚠️ Tab names here are USER-FACING NAVIGATION. The tab this calls "Searches" is internally the
+// signal inbox (registry key `signalInbox`, assistant-signal-inbox.js) — it was labelled "Signal
+// Inbox" until the rename. If the label changes again and this string doesn't, the assistant
+// confidently sends users to a tab that isn't there, which is the same class of bug as the one
+// described above.
+//
+// Both "Find New Leads" and "Review Lead Ideas" say "in the Searches toolbar" — they moved out of
+// the Leads tab action bar (see assistants.js) and those old locations are dead ends.
 function leadGeneratorSurfaces(): string {
     return `YOUR OWN DASHBOARD — these are tabs and buttons on YOUR page inside this platform. They are NOT third-party products, and you must never describe them as external tools, or lump them in with LinkedIn, Apollo, Hunter, or any other outside service:
-- "Signal Inbox" tab — everything that came IN before it became a lead: what your searches found, still awaiting review. Its toolbar holds the "Find New Leads" button.
-- "Review Lead Ideas" (button on your Overview) — the lighter-weight route: you propose ideas for where this business's next customers might be found, and approving one sends you off to find, score and file matching companies. Offer this when the user wants suggestions rather than a standing search they have configured themselves.
-- "Find New Leads" (button in the Signal Inbox toolbar) — this is where a search gets created. It opens a short form: a plain-English description of who to find, an optional short name for the search, how often to run (once now / daily / weekly), max leads per run, max spend per run in £, terms to exclude, and a "review found leads before any outreach" checkbox. Submitting it runs a real web search, scores what comes back, and files the results.
+- "Searches" tab — everything that came IN before it became a lead: what your searches found, still awaiting review. This is the tab the user lands on, and its toolbar holds both the "Find New Leads" and "Review Lead Ideas" buttons.
+- "Review Lead Ideas" (button in the Searches toolbar) — the lighter-weight route: you propose ideas for where this business's next customers might be found, and approving one sends you off to find, score and file matching companies. Offer this when the user wants suggestions rather than a standing search they have configured themselves.
+- "Find New Leads" (button in the Searches toolbar) — this is where a search gets created. It opens a short form: a plain-English description of who to find, an optional short name for the search, how often to run (once now / daily / weekly), max leads per run, max spend per run in £, terms to exclude, and a "review found leads before any outreach" checkbox. Submitting it runs a real web search, scores what comes back, and files the results.
 - "Leads" tab — every lead you have scored, with its outreach draft; also where CSV lead lists are imported and exported.
 - "Conversations" tab — what happened after a lead was approved: the outreach thread and any reply.
 
-FINDING NEW LEADS — when the user asks you to find leads, create a search, build a campaign, or go looking for customers: this is squarely your job and you must NEVER refuse it or send them to an outside lead-sourcing tool. You cannot click the button for them from this chat, but you own the thinking. Write them the search brief — the exact plain-English "who to find" text to paste, folding the ideal customer profile (industries, size, location, and the specific pain signals discussed) into that one description, since the form has no separate profile fields. Suggest a short name for the search and a sensible cadence, then tell them to open the Signal Inbox tab and hit "Find New Leads" to start it. Frame it as you doing the work, because you are: the search you just wrote is what goes out and finds them.`;
+FINDING NEW LEADS — when the user asks you to find leads, create a search, build a campaign, or go looking for customers: this is squarely your job and you must NEVER refuse it or send them to an outside lead-sourcing tool. Emit the discovery_campaign_proposal uiElement (shape 3 below). Write the "who to find" brief yourself, folding the ideal customer profile (industries, size, location, and the specific pain signals discussed) into that one description, since the form has no separate profile fields. Approving it SAVES the search — the user does not have to retype anything — but saves it as a draft that has not started: a run costs real money and reaches real strangers, so they start it themselves from "Find New Leads" in the Searches tab. Say that plainly in your reply and never claim the search is already running or that leads are already coming in. Frame it as you doing the work, because you are: the search you just wrote is what goes out and finds them.`;
 }
 
 // ── Internal Data Hub persistence (Golden Rule 2) ─────────────────────────────
@@ -675,7 +680,7 @@ A user turn may also open with "[Imported records]" followed by rows from the us
 
 SPREADSHEET FALLBACK — do not assume this business uses a CRM like HubSpot, and NEVER tell the user an external system is required. Leads can reach you three ways, and you should name whichever fits what they asked: your own discovery searches (above — the answer whenever they want NEW leads); pasted straight into this chat; or imported as a CSV in the "Leads" tab of your dashboard (Excel and Google Sheets users export via File → Download → CSV), which is also where everything you produce exports back out. Never offer CSV import as the answer to "find me some leads" — that is asking the user to go do your job. Every structured result you emit here is saved to the "Leads" tab automatically, so nothing is lost when the conversation ends.
 
-Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EXACTLY ONE of the two shapes below, or null:
+Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EXACTLY ONE of the three shapes below, or null:
 {
   "reply": "your conversational message to the user",
   "uiElement": {                      // shape 1 — enough data to score
@@ -703,6 +708,22 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EXACTL
       "recordName": "<lead or company name>",
       "knownDetails": { "<field>": "<value already known from the conversation>", ... },
       "missingFields": ["<field the enricher should fill>", ...]
+    }
+  }
+}
+{
+  "reply": "your conversational message to the user",
+  "uiElement": {                      // shape 3 — the user wants NEW leads found; propose a search
+    "type": "discovery_campaign_proposal",
+    "name": "<chip-sized label, max 80 chars, e.g. 'UK creative agencies'>",
+    "idea": "<the whole brief in plain English: who to find, where, and the pain signals that mark a fit. This single field IS the targeting — there are no separate profile fields — so fold the ideal customer profile into it. Max 1000 chars.>",
+    "cadence": "one_off" | "daily" | "weekly",   // one_off unless the user asked for a standing search
+    "rationale": "<one sentence on why this targets their ideal customer>",
+    "guardrails": {                   // omit any limit the user has not expressed a view on
+      "maxLeadsPerRun": <number>,
+      "maxCostGbpPerRun": <number>,
+      "negativeKeywords": ["<term that would waste a run, e.g. a competitor>", ...],
+      "requireHumanApproval": true    // only ever false if the user explicitly asks to skip review
     }
   }
 }`,
@@ -1191,11 +1212,21 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         description: orgRow?.businessDescription ?? null,
     };
 
-    const history = await db
+    // Only user/assistant turns are ever sent to the LLM ('system' rows are audit/injected
+    // notices), and only the most recent HISTORY_LIMIT of them — so both filters belong in the
+    // query, not in a post-filter. Sessions are resumed now rather than recreated per open, so
+    // a thread can hold thousands of rows: loading all of them to discard all but 20 would grow
+    // the cost of every turn without bound. Fetched newest-first, then flipped back to
+    // chronological order for the prompt.
+    const history = (await db
         .select({ role: chatMessages.role, content: chatMessages.content, createdAt: chatMessages.createdAt })
         .from(chatMessages)
-        .where(eq(chatMessages.chatSessionId, session.id))
-        .orderBy(asc(chatMessages.createdAt), asc(chatMessages.id));
+        .where(and(
+            eq(chatMessages.chatSessionId, session.id),
+            inArray(chatMessages.role, ['user', 'assistant']),
+        ))
+        .orderBy(desc(chatMessages.createdAt), desc(chatMessages.id))
+        .limit(HISTORY_LIMIT)).reverse();
 
     // Persist the user's turn before calling the LLM so it survives a provider failure.
     const [userMessage] = await db
@@ -1250,13 +1281,9 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         }
     }
 
-    // Only user/assistant turns go to the LLM ('system' rows are audit/injected notices),
-    // capped to the most recent HISTORY_LIMIT.
+    // `history` is already role-filtered and capped by the query above.
     const llmMessages = [
-        ...history
-            .filter((m): m is typeof m & { role: 'user' | 'assistant' } => m.role === 'user' || m.role === 'assistant')
-            .slice(-HISTORY_LIMIT)
-            .map((m) => ({ role: m.role, content: m.content })),
+        ...history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
         { role: 'user' as const, content: recordContext ? `${recordContext}\n\n${message}` : message },
     ];
 

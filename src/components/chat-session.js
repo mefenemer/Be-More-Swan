@@ -373,10 +373,54 @@
       }
     }
 
+    // Outbound-search approvals bubble up from DiscoveryCampaignProposalCard
+    // (disruptive-ui-registry.js). The card cannot make this call itself — renderers only receive
+    // the uiElement, and this closure is what holds the assistantId the campaign must belong to.
+    //
+    // Saved as a DRAFT (asDraft), never a running campaign: the server creates it, enqueues
+    // nothing and spends nothing until the user starts it from the Signal Inbox. Approving a
+    // proposal in chat is agreement about WHO to look for, not authorisation to start spending.
+    //
+    // Deliberately NOT routed back through the orchestrator like the handoff flow: this is a real
+    // tenant-scoped write, and discovery-campaigns.ts already owns the IDOR guard, the guardrail
+    // clamping and the dedupe. A second path to the same table is how the two of them drift.
+    function onDiscoveryCreate(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      if (!assistantId) {
+        respond({ ok: false, error: 'This chat is not attached to an assistant, so the search cannot be saved.' });
+        return;
+      }
+      fetch('/.netlify/functions/discovery-campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          action: 'create',
+          assistantId,
+          asDraft: true,
+          name: d.name,
+          idea: d.idea,
+          cadence: d.cadence,
+          guardrails: d.guardrails || {},
+        }),
+      })
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `Save failed (HTTP ${res.status}).`);
+          respond({ ok: true, deduped: data.deduped === true });
+        })
+        .catch((err) => {
+          console.error('[ChatSession] discovery campaign create failed:', err);
+          respond({ ok: false, error: err.message });
+        });
+    }
+
     formEl.addEventListener('submit', onSubmit);
     inputEl.addEventListener('keydown', onKeydown);
     inputEl.addEventListener('input', onInput);
     container.addEventListener('handoff:response', onHandoffResponse);
+    container.addEventListener('discovery:create', onDiscoveryCreate);
 
     // Starter pills send their prompt verbatim; the first appendMessage removes the
     // zero-state (and the pills with it), so no explicit teardown is needed.
@@ -400,6 +444,7 @@
         inputEl.removeEventListener('keydown', onKeydown);
         inputEl.removeEventListener('input', onInput);
         container.removeEventListener('handoff:response', onHandoffResponse);
+        container.removeEventListener('discovery:create', onDiscoveryCreate);
         container.innerHTML = '';
       },
     };

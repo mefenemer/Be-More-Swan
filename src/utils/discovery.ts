@@ -30,12 +30,26 @@ export interface CreateRunInput {
     /** 'one_off' (default — run once now) | 'daily' | 'weekly'. */
     cadence?: 'one_off' | 'daily' | 'weekly';
     runAtHourUtc?: number;
+    /**
+     * 'active' (default) starts the campaign: a one_off is enqueued immediately and a recurring
+     * cadence begins dispatching. 'draft' creates it WITHOUT spending anything — no job is
+     * enqueued and the schedule stays disabled until a human starts it.
+     *
+     * The draft path exists for campaigns the assistant PROPOSES in chat rather than ones the
+     * user filled in a form for. A search costs real money per run (maxCostGbpPerRun) and emails
+     * real strangers downstream, so a proposal the user has merely approved in conversation must
+     * not begin spending on the strength of a model's judgement. `draft` is the table's own
+     * default status and the documented head of the lifecycle (draft → active → paused →
+     * archived); dispatch-discovery-runs.ts only ever fires `active`.
+     */
+    status?: 'draft' | 'active';
 }
 
-export interface CreateRunResult { campaignId: number; jobId: string; }
+/** `jobId` is null when nothing was enqueued — i.e. a draft, or any recurring cadence. */
+export interface CreateRunResult { campaignId: number; jobId: string | null; }
 
 /**
- * Create a campaign + guardrails + schedule and enqueue a run.
+ * Create a campaign + guardrails + schedule and (unless it is a draft) enqueue a run.
  * one_off cadence enqueues an on_demand job immediately AND records a disabled schedule
  * (so the run history has a schedule row); daily/weekly leave dispatch to the cron.
  */
@@ -51,11 +65,14 @@ export async function createDiscoveryRun(input: CreateRunInput): Promise<CreateR
         .limit(1);
     const icpSnapshot = icpFromOnboarding(assistant?.onboardingContext);
 
+    const status = input.status ?? 'active';
+    const isDraft = status === 'draft';
+
     const [campaign] = await db.insert(discoveryCampaigns).values({
         organisationId, aiAssistantId, createdBy: userId,
         name: input.name ?? null,
         idea: input.idea, targetPersona: input.targetPersona ?? null,
-        status: 'active', icpSnapshot,
+        status, icpSnapshot,
     }).returning({ id: discoveryCampaigns.id });
 
     // Guardrails — only set the columns the caller overrode; the rest take table defaults.
@@ -77,9 +94,16 @@ export async function createDiscoveryRun(input: CreateRunInput): Promise<CreateR
     const runAtHourUtc = input.runAtHourUtc ?? 8;
     await db.insert(discoverySchedules).values({
         organisationId, campaignId: campaign.id, cadence, runAtHourUtc,
-        isEnabled: cadence !== 'one_off',
+        // A draft dispatches nothing whatever its cadence. Belt and braces: the dispatcher already
+        // filters on status='active', so this is the second of two independent guards. When the
+        // draft is started, run_now flips BOTH (discovery-campaigns.ts) — leaving a recurring draft
+        // reachable only via Pause→Resume would be a campaign that silently never runs.
+        isEnabled: !isDraft && cadence !== 'one_off',
         nextRunAt: cadence === 'one_off' ? null : new Date(),
     });
+
+    // A draft costs nothing and starts nothing: no job row, so no worker picks it up.
+    if (isDraft) return { campaignId: campaign.id, jobId: null };
 
     const jobId = randomUUID();
     if (cadence === 'one_off') {

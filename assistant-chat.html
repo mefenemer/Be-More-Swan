@@ -85,11 +85,28 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const params = new URLSearchParams(window.location.search);
   let assistantId = Number(params.get('assistantId')) || null;
-  const sessionId = Number(params.get('sessionId')) || null;
+  let sessionId = Number(params.get('sessionId')) || null;
+  // ?new=1 opts out of the resume below and starts a fresh thread.
+  const forceNew = params.get('new') === '1';
 
   if (!sessionId && (!Number.isInteger(assistantId) || assistantId <= 0)) {
     showChatError('No assistant was specified — open a conversation from your workspace.');
     return;
+  }
+
+  // Continuity (matches assistant-chat-modal.js): arriving with only an assistantId resumes
+  // that assistant's newest active thread rather than minting a new one on every visit. A
+  // lookup failure resolves to null, which simply starts a new conversation.
+  let autoResumed = false;
+  if (!sessionId && !forceNew && assistantId) {
+    try {
+      const res = await fetch(
+        `/.netlify/functions/list-chat-sessions?limit=1&status=active&aiAssistantId=${assistantId}`);
+      if (res.ok) {
+        const rows = (await res.json()).sessions || [];
+        if (rows.length) { sessionId = rows[0].id; autoResumed = true; }
+      }
+    } catch { /* no history — fall through to a new conversation */ }
   }
 
   // Continuing a thread: hydrate the transcript (and the assistant identity) from the
@@ -107,14 +124,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch { /* handled below */ }
 
     if (!data?.session) {
-      showChatError('This conversation could not be found in your workspace.');
-      return;
+      // An auto-resumed thread that won't hydrate (archived or deleted since the lookup) is
+      // not an error the user asked for — drop to a new conversation. An explicit ?sessionId=
+      // still errors, exactly as it did before.
+      if (!autoResumed) {
+        showChatError('This conversation could not be found in your workspace.');
+        return;
+      }
+      sessionId = null;
+    } else {
+      assistantId = data.session.aiAssistantId;
+      assistantName = data.session.assistantName;
+      assistantRole = data.session.assistantRole;
+      initialMessages = data.messages || [];
     }
-    assistantId = data.session.aiAssistantId;
-    assistantName = data.session.assistantName;
-    assistantRole = data.session.assistantRole;
-    initialMessages = data.messages || [];
-  } else {
+  }
+
+  if (!sessionId) {
     // New conversation: resolve the assistant's display identity (and confirm it
     // belongs to this org) from the workspace roster.
     let assistant = null;

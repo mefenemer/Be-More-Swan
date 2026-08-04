@@ -285,11 +285,18 @@
         label: 'Find New Leads',
         title: 'Find New Leads',
       },
-      // Signal Inbox tab (assistant-signal-inbox.js → signal-inbox.ts). Everything that came IN
+      // "Searches" tab (assistant-signal-inbox.js → signal-inbox.ts). Everything that came IN
       // before it became a lead. Populated from saved searches with ONLY this assistant hired;
       // the social feed is additive (Phase 1b). Design: docs/lead-generator-revenue-engine-plan.md.
+      //
+      // The internals are all still named "signal inbox" — the key, the component, the function,
+      // the table — because that is what the thing IS. Only the user-facing label changed, and it
+      // changed because users read this tab as "where my searches live": both of its buttons
+      // ("Find New Leads", "Review Lead Ideas") start a search, and the filter chips ARE searches.
+      // ⚠️ If you rename it again, grep the chat-orchestrator system prompt too — it names this
+      // tab to the assistant, and a stale name there sends users to a tab that does not exist.
       signalInbox: {
-        label: 'Signal Inbox',
+        label: 'Searches',
       },
       // Conversations tab (assistant-lead-threads.js → lead-threads.ts). What happened after a
       // lead was approved: the outreach thread, the reply, the classification, and what the

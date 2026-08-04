@@ -10,8 +10,10 @@
  * dialog it injects on first open.
  *
  * Public API (attached to window):
- *   openAssistantChat({ assistantId?, sessionId? })  — open the modal (assistantId for a new
- *                                                       thread, sessionId to continue one).
+ *   openAssistantChat({ assistantId?, sessionId?, forceNew? })
+ *       assistantId  — resume that assistant's newest active thread, or start one if it has none.
+ *       sessionId    — continue this exact thread (wins over assistantId).
+ *       forceNew     — with assistantId, skip the resume and start a fresh thread.
  *   closeAssistantChat()                             — close + tear down the ChatSession.
  *
  * Requires (already loaded by workspace.html): src/components/chat-session.js,
@@ -103,6 +105,19 @@
     if (which === 'error' && detail) el('bms-chat-errdetail').textContent = detail;
   }
 
+  // Newest active thread with this assistant, or null. Any failure resolves to null so a
+  // history outage degrades to "start a new conversation" rather than blocking the chat.
+  function findLatestSession(assistantId) {
+    return fetch('/.netlify/functions/list-chat-sessions?limit=1&status=active&aiAssistantId=' + assistantId,
+      { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var rows = (d && d.sessions) || [];
+        return rows.length ? rows[0].id : null;
+      })
+      .catch(function () { return null; });
+  }
+
   // Resolve the assistant's identity (mirrors assistant-chat.html): a sessionId continues an
   // existing thread and hydrates its transcript; an assistantId starts a fresh conversation.
   function resolveConversation(assistantId, sessionId) {
@@ -169,25 +184,41 @@
       return;
     }
 
-    resolveConversation(assistantId, sessionId).then(function (info) {
-      // Guard against a race where the user closed the modal before this resolved.
-      if (!el('bms-chat-backdrop').classList.contains('ac-open')) return;
-      if (!info) {
-        showState('error', 'This conversation could not be found in your workspace.');
-        return;
-      }
-      el('bms-chat-name').textContent = info.assistantName || 'Your assistant';
-      el('bms-chat-role').textContent = info.assistantRole || 'Digital Assistant';
-      showState('chat');
-      state.chat = window.ChatSession.mount({
-        container: el('bms-chat-mount'),
-        assistantId: info.assistantId,
-        chatSessionId: info.sessionId,
-        assistantName: info.assistantName,
-        roleKey: info.assistantRoleKey,
-        initialMessages: info.initialMessages,
+    // Continuity: opening an assistant with no explicit sessionId resumes that assistant's
+    // newest active thread instead of silently minting a new one every time (which is what
+    // stranded every prior conversation). opts.forceNew is the deliberate "New chat" escape.
+    var autoResume = !sessionId && !opts.forceNew && !!assistantId;
+    var resolveSession = autoResume ? findLatestSession(assistantId) : Promise.resolve(sessionId);
+
+    resolveSession
+      .then(function (resumedId) {
+        return resolveConversation(assistantId, resumedId).then(function (info) {
+          // An auto-resumed thread that won't hydrate (archived or deleted between the two
+          // calls) is not an error the user asked for — fall through to a new conversation.
+          // A sessionId the CALLER passed still surfaces as an error, as it did before.
+          if (!info && resumedId && autoResume) return resolveConversation(assistantId, null);
+          return info;
+        });
+      })
+      .then(function (info) {
+        // Guard against a race where the user closed the modal before this resolved.
+        if (!el('bms-chat-backdrop').classList.contains('ac-open')) return;
+        if (!info) {
+          showState('error', 'This conversation could not be found in your workspace.');
+          return;
+        }
+        el('bms-chat-name').textContent = info.assistantName || 'Your assistant';
+        el('bms-chat-role').textContent = info.assistantRole || 'Digital Assistant';
+        showState('chat');
+        state.chat = window.ChatSession.mount({
+          container: el('bms-chat-mount'),
+          assistantId: info.assistantId,
+          chatSessionId: info.sessionId,
+          assistantName: info.assistantName,
+          roleKey: info.assistantRoleKey,
+          initialMessages: info.initialMessages,
+        });
       });
-    });
   }
 
   function closeAssistantChat() {

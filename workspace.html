@@ -11801,7 +11801,13 @@ function closePostReview() {
 // navigating to the standalone assistant-chat.html page. ──────────────────────────────
 let _chatModalSession = null;
 
-window.openAssistantChatModal = function(assistantId, assistantName, assistantRole, roleKey) {
+// opts.resume — continue this assistant's newest active thread instead of starting a fresh one.
+// OFF by default, and deliberately so: the seeded callers (askSwanAboutDraft, blog-studio-modal)
+// open a task-scoped conversation about one specific draft, where 20 turns of unrelated history
+// would be noise, and they consume the RETURN VALUE synchronously to seed it. Passing
+// { resume: true } makes this return a Promise<session> instead — only the roster's plain
+// "💬 Chat" button, which ignores the return value, does that.
+window.openAssistantChatModal = function(assistantId, assistantName, assistantRole, roleKey, opts) {
     const modal = document.getElementById('chat-modal');
     const root = document.getElementById('chat-modal-root');
     if (!modal || !root || !window.ChatSession) return;
@@ -11814,17 +11820,49 @@ window.openAssistantChatModal = function(assistantId, assistantName, assistantRo
     document.getElementById('chat-modal-title').textContent = assistantName || 'Your assistant';
     document.getElementById('chat-modal-role').textContent = assistantRole || 'Digital Assistant';
 
+    // Tear the previous conversation down NOW, not after the resume lookup — otherwise the old
+    // transcript stays on screen (and a close during the gap would strand a live session).
     if (_chatModalSession) { _chatModalSession.destroy(); _chatModalSession = null; }
-    _chatModalSession = window.ChatSession.mount({
-        container: root,
-        assistantId: Number(assistantId),
-        assistantName,
-        roleKey,
-    });
+
+    const mount = (chatSessionId, initialMessages) => {
+        _chatModalSession = window.ChatSession.mount({
+            container: root,
+            assistantId: Number(assistantId),
+            chatSessionId: chatSessionId || null,
+            assistantName,
+            roleKey,
+            initialMessages: initialMessages || [],
+        });
+        return _chatModalSession;
+    };
 
     modal.classList.remove('hidden');
     modal.classList.add('flex');
-    return _chatModalSession;   // callers seed the conversation via session.sendMessage()
+
+    // Default path — unchanged, synchronous, returns the session for callers to seed.
+    if (!opts || !opts.resume) return mount(null, null);
+
+    root.innerHTML = '<div class="h-full flex items-center justify-center text-sm text-gray-500">Loading your conversation…</div>';
+
+    // Any failure here resolves to a new conversation: history is a convenience, never a gate.
+    return fetch(`/.netlify/functions/list-chat-sessions?limit=1&status=active&aiAssistantId=${Number(assistantId)}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+            const rows = (d && d.sessions) || [];
+            if (!rows.length) return null;
+            return fetch(`/.netlify/functions/get-chat-session?chatSessionId=${rows[0].id}`)
+                .then(r => r.ok ? r.json() : null)
+                .catch(() => null);
+        })
+        .catch(() => null)
+        .then(data => {
+            // The user may have closed the modal while this was in flight.
+            if (modal.classList.contains('hidden')) return null;
+            root.innerHTML = '';
+            return data?.session
+                ? mount(data.session.id, data.messages || [])
+                : mount(null, null);
+        });
 };
 
 window.closeAssistantChatModal = function() {

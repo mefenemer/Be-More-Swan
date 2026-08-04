@@ -301,7 +301,7 @@ window.generateAssistantCardHTML = function(assistant) {
         ${metricsHtml}
         ${quickActionsHtml}
         <div class="mt-auto pt-4 border-t border-gray-50 flex justify-between items-center">
-            <button type="button" onclick="event.stopPropagation(); window.openAssistantChatModal ? window.openAssistantChatModal('${assistant.id}', '${(assistant.name || 'Your assistant').replace(/'/g, '&#39;')}', '${role.replace(/'/g, '&#39;')}', '${(assistant.roleKey || '').replace(/'/g, '&#39;')}') : (window.location.href = 'assistant-chat.html?assistantId=${assistant.id}')"
+            <button type="button" onclick="event.stopPropagation(); window.openAssistantChatModal ? window.openAssistantChatModal('${assistant.id}', '${(assistant.name || 'Your assistant').replace(/'/g, '&#39;')}', '${role.replace(/'/g, '&#39;')}', '${(assistant.roleKey || '').replace(/'/g, '&#39;')}', { resume: true }) : (window.location.href = 'assistant-chat.html?assistantId=${assistant.id}')"
                class="px-3.5 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition cursor-pointer">💬 Chat</button>
             <span class="text-sm font-bold text-gray-900 group-hover:text-emerald-700 transition-colors">View Details &rarr;</span>
         </div>
@@ -2899,15 +2899,10 @@ function _applyDashboardRegistry(data) {
         setText('detail-rq-primary-label', cfg.primaryAction?.label || 'Create a Post');
     }
 
-    // Role-specific Overview secondary action — the Lead Generator's "Review Lead Ideas"
-    // replaces the (hidden) social "Review Pending Items" button. Shown + wired from the
-    // registry's ideasReview config; the component (assistant-lead-ideas.js) drives the modal.
-    const ideas = cfg.ideasReview;
-    toggleBtn('btn-lead-ideas', !!ideas);
-    if (ideas) {
-        setText('lead-ideas-label', ideas.label || 'Review Lead Ideas');
-        window.AssistantLeadIdeas?.init({ assistantId: data.id, cfg: ideas });
-    }
+    // The Lead Generator's "Review Lead Ideas" is no longer wired here: like "Find New Leads"
+    // before it, the button moved out of this (Leads tab) action bar into the Searches toolbar,
+    // and assistant-signal-inbox.js init()s the component itself on click. registry.ideasReview
+    // still carries the config; the inbox reads it from the registry directly.
     // Lead Generator "Find New Leads" — outbound discovery campaigns. No longer wired here: the
     // button moved out of this (Leads tab) action bar into the Signal Inbox toolbar, and
     // assistant-signal-inbox.js init()s the component itself on click. registry.discoveryCampaigns
@@ -3015,7 +3010,7 @@ function _applyDashboardRegistry(data) {
     const signalInbox = cfg.signalInbox;
     toggle('maintab-btn-signals', !!signalInbox);
     if (signalInbox) {
-        setText('signals-tab-label', signalInbox.label || 'Signal Inbox');
+        setText('signals-tab-label', signalInbox.label || 'Searches');
         window.AssistantSignalInbox?.init({ assistantId: data.id, cfg: signalInbox });
     }
 

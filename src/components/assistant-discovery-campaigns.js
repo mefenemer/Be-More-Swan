@@ -115,14 +115,24 @@
 
   function campaignCard(c) {
     const chip = STATUS_CHIP[c.latestJobStatus] || 'bg-gray-50 text-gray-500 border-gray-200';
-    const statusLabel = c.latestJobStatus ? esc(c.latestJobStatus) : 'no runs yet';
     const running = c.latestJobStatus === 'queued' || c.latestJobStatus === 'processing';
     const paused = c.status === 'paused';
+    // A draft is a search the assistant proposed in chat and the user approved, which has never
+    // run and is spending nothing. It reads as "no runs yet" otherwise — indistinguishable from a
+    // live campaign that simply hasn't fired, which is the difference the user needs to see.
+    // Reuses the amber chip classes already compiled into style.css (no Tailwind rebuild).
+    const draft = c.status === 'draft' && !c.latestJobStatus;
+    const statusLabel = draft ? 'draft — not started' : c.latestJobStatus ? esc(c.latestJobStatus) : 'no runs yet';
     const ghost = 'px-2.5 py-1 bg-white border border-gray-200 text-gray-600 hover:border-gray-300 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed';
     // Primary action: Cancel while a run is in flight, else Run now (blocked while paused).
+    // A draft says "Start search" and is emphasised, because it is the ONLY thing standing between
+    // an approved proposal and any leads — and starting it is also what activates a recurring
+    // cadence server-side (discovery-campaigns.ts run_now).
     const primaryBtn = running
       ? `<button type="button" data-dc-cancel="${c.id}" class="px-3 py-1.5 bg-white border border-gray-200 text-red-600 hover:border-red-300 hover:bg-red-50 text-xs font-bold rounded-lg transition">Cancel run</button>`
-      : `<button type="button" data-dc-run="${c.id}" class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed" ${paused ? 'disabled title="Resume this campaign to run it"' : ''}>Run now</button>`;
+      : draft
+        ? `<button type="button" data-dc-run="${c.id}" class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition">Start search</button>`
+        : `<button type="button" data-dc-run="${c.id}" class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed" ${paused ? 'disabled title="Resume this campaign to run it"' : ''}>Run now</button>`;
     return `
       <div class="border border-gray-200 rounded-xl p-4 ${paused ? 'opacity-70' : ''}" data-campaign="${c.id}" data-dc-idea-val="${esc(c.idea)}"
            data-dc-name-val="${esc(c.name || '')}"
@@ -131,7 +141,7 @@
            data-dc-approval-val="${c.requireHumanApproval === false ? '0' : '1'}">
         <div class="flex items-start justify-between gap-3">
           <p class="font-semibold text-gray-900 text-sm min-w-0">${esc(c.name || c.idea)}</p>
-          <span class="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border ${paused ? 'bg-gray-100 text-gray-500 border-gray-200' : chip}">${paused ? 'paused' : statusLabel}</span>
+          <span class="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border ${paused ? 'bg-gray-100 text-gray-500 border-gray-200' : draft ? STATUS_CHIP.queued : chip}">${paused ? 'paused' : statusLabel}</span>
         </div>
         ${c.name ? `<p class="text-xs text-gray-500 mt-0.5">${esc(c.idea)}</p>` : ''}
         <p class="text-xs text-gray-500 mt-1">${Number(c.leadsFound || 0)} lead${Number(c.leadsFound) === 1 ? '' : 's'} found</p>

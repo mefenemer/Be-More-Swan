@@ -58,6 +58,32 @@ export default withLambda(async (event) => {
         const cadence = ['one_off', 'daily', 'weekly'].includes(String(body.cadence)) ? String(body.cadence) as 'one_off' | 'daily' | 'weekly' : 'one_off';
         const guardrails = (body.guardrails && typeof body.guardrails === 'object') ? body.guardrails as Record<string, unknown> : {};
 
+        // `asDraft` is the chat path (a DiscoveryCampaignProposalCard the user approved in
+        // conversation): create the campaign but spend nothing until a human starts it. The form
+        // never sets it — a user who filled the form in and pressed "Start finding leads" has
+        // already made the decision this flag defers.
+        const asDraft = body.asDraft === true;
+
+        // Approving the same proposal twice must not buy two campaigns. It is a live risk rather
+        // than a theoretical one: chat transcripts re-hydrate from chatMessages.uiElementJson on
+        // reload, so an old proposal card comes back with working buttons. Scoped to the draft
+        // path on purpose — re-submitting the FORM with the same idea is a deliberate act, and
+        // silently handing back the old campaign would look like the button was broken.
+        if (asDraft) {
+            const [existing] = await db.select({ id: discoveryCampaigns.id })
+                .from(discoveryCampaigns)
+                .where(and(
+                    eq(discoveryCampaigns.organisationId, orgId),
+                    eq(discoveryCampaigns.aiAssistantId, assistantId),
+                    eq(discoveryCampaigns.idea, idea),
+                    ne(discoveryCampaigns.status, 'archived'),
+                ))
+                .limit(1);
+            if (existing) {
+                return json(200, { campaignId: existing.id, jobId: null, cadence, deduped: true, searchConfigured: isSearchConfigured() });
+            }
+        }
+
         const result = await createDiscoveryRun({
             db, organisationId: orgId, userId, aiAssistantId: assistantId,
             // Optional: the Signal Inbox filters by this, falling back to a truncated idea.
@@ -74,9 +100,10 @@ export default withLambda(async (event) => {
                 ...(Array.isArray(guardrails.excludedDomains) ? { excludedDomains: (guardrails.excludedDomains as unknown[]).filter((x): x is string => typeof x === 'string') } : {}),
                 ...(typeof guardrails.requireHumanApproval === 'boolean' ? { requireHumanApproval: guardrails.requireHumanApproval } : {}),
             },
+            status: asDraft ? 'draft' : 'active',
         });
 
-        return json(200, { ...result, cadence, searchConfigured: isSearchConfigured() });
+        return json(200, { ...result, cadence, asDraft, searchConfigured: isSearchConfigured() });
     }
 
     // ── list campaigns for an assistant ─────────────────────────────────────────
@@ -116,11 +143,25 @@ export default withLambda(async (event) => {
     // ── enqueue an on-demand run for an existing campaign ───────────────────────
     if (action === 'run_now') {
         const campaignId = Number(body.campaignId);
-        const [campaign] = await db.select({ id: discoveryCampaigns.id })
+        const [campaign] = await db.select({ id: discoveryCampaigns.id, status: discoveryCampaigns.status })
             .from(discoveryCampaigns)
             .where(and(eq(discoveryCampaigns.id, campaignId), eq(discoveryCampaigns.organisationId, orgId)))
             .limit(1);
         if (!campaign) return json(404, { error: 'Campaign not found.' });
+
+        // Starting a draft is what promotes it. Without this a chat-proposed DAILY campaign would
+        // run exactly once and never again — status stays 'draft', which the dispatcher filters
+        // out, so the recurrence the user agreed to would silently never happen. Only 'draft'
+        // promotes: resurrecting a deliberately 'paused' campaign here would undo a human's
+        // decision, and the UI disables Run now for paused anyway.
+        if (campaign.status === 'draft') {
+            await db.update(discoveryCampaigns)
+                .set({ status: 'active', updatedAt: new Date() })
+                .where(eq(discoveryCampaigns.id, campaignId));
+            await db.update(discoverySchedules)
+                .set({ isEnabled: sql`${discoverySchedules.cadence} <> 'one_off'`, updatedAt: new Date() })
+                .where(eq(discoverySchedules.campaignId, campaignId));
+        }
 
         const [inflight] = await db.select({ id: discoveryJobs.id })
             .from(discoveryJobs)

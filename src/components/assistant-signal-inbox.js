@@ -150,6 +150,8 @@
             <input type="checkbox" data-si-filtered ${state.showFiltered ? 'checked' : ''} class="cursor-pointer">
             Show filtered (${c.filtered})
           </label>
+          <button type="button" data-si-lead-ideas
+            class="px-2.5 py-1 text-xs font-bold rounded-lg border bg-white text-gray-600 border-gray-200 hover:border-gray-300 transition">Review Lead Ideas</button>
           <button type="button" data-si-new-search
             class="px-2.5 py-1 text-xs font-bold rounded-lg border bg-white text-emerald-700 border-emerald-200 hover:border-emerald-300 hover:bg-emerald-50 transition">Find New Leads</button>
         </div>
@@ -224,6 +226,7 @@
     h.querySelector('[data-si-more]')?.addEventListener('click', () => load({ append: true }));
     // Two of these can be on screen at once (toolbar + empty state), so bind them as a set.
     h.querySelectorAll('[data-si-new-search]').forEach((b) => b.addEventListener('click', openNewSearch));
+    h.querySelector('[data-si-lead-ideas]')?.addEventListener('click', openLeadIdeas);
   }
 
   /**
@@ -245,6 +248,25 @@
       cfg: window.AssistantDashboardRegistry?.get('lead_qualifier')?.discoveryCampaigns,
     });
     dc.open();
+  }
+
+  /**
+   * "Review Lead Ideas" → assistant-lead-ideas.js, the lighter-weight sibling of a standing
+   * search: the assistant proposes where to look, and approving one files matching companies.
+   * Moved here from the Leads tab action bar for the same reason the search button was — both
+   * are "go and find me more", which belongs at the top of the funnel, not in the record list.
+   *
+   * Same init-then-open shape as openNewSearch: that component's open() also no-ops without an
+   * assistantId, and nothing else on the page wires it any more.
+   */
+  function openLeadIdeas() {
+    const li = window.AssistantLeadIdeas;
+    if (!li || !state.assistantId) return;
+    li.init({
+      assistantId: state.assistantId,
+      cfg: window.AssistantDashboardRegistry?.get('lead_qualifier')?.ideasReview,
+    });
+    li.open();
   }
 
   async function load(opts) {
@@ -269,7 +291,7 @@
       // The columns arrive with db/signal-inbox-1a.sql, a MANUAL apply. Say so plainly rather than
       // showing a generic failure the user can do nothing with.
       state.error = err.code === 'MIGRATION_PENDING'
-        ? 'The Signal Inbox is not set up on this environment yet.'
+        ? 'Searches is not set up on this environment yet.'
         : (err.message || 'Could not load your signals.');
     } finally {
       state.loading = false;

@@ -571,7 +571,7 @@
            it is the top of the funnel. Hidden by default, shown by _applyDashboardRegistry.
            assistant-signal-inbox.js → signal-inbox.ts. Design: docs/lead-generator-revenue-engine-plan.md -->
       <button type="button" id="maintab-btn-signals" data-maintab="signals" class="main-tab-btn hidden">
-        <span id="signals-tab-label">Signal Inbox</span>
+        <span id="signals-tab-label">Searches</span>
         <!-- `hidden` loses to `inline-flex` (equal specificity, emitted later in style.css), so the
              starting state is pinned inline too — otherwise an empty amber pill shows until the
              first count lands. The JS that toggles it sets style.display for the same reason. -->
@@ -761,17 +761,10 @@
         Review Pending Items
         <span id="review-pending-count" class="hidden ml-0.5 min-w-[1.5rem] h-6 px-1.5 inline-flex items-center justify-center rounded-full text-xs font-black bg-amber-100 text-amber-700"></span>
       </button>
-      <!-- Role-specific secondary action — Lead Generator's "Review Lead Ideas" (assistant-lead-ideas.js).
-           Hidden by default; shown + wired per role by _applyDashboardRegistry from registry.ideasReview. -->
-      <button type="button" id="btn-lead-ideas"
-        class="hidden flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-extrabold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-2xl shadow-sm transition-colors cursor-pointer">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-        <span id="lead-ideas-label">Review Lead Ideas</span>
-      </button>
-      <!-- The Lead Generator's "Find New Leads" outbound discovery button used to sit here, in the
-           Leads tab. It moved to the Signal Inbox toolbar (assistant-signal-inbox.js), which is
-           where a search's output actually lands and is this role's landing tab — the Leads tab is
-           downstream of the action and a search files nothing into it directly. -->
+      <!-- The Lead Generator's two "go and find me more" buttons — "Find New Leads" (outbound
+           discovery) and "Review Lead Ideas" — both used to sit here, in the Leads tab. They moved
+           to the Searches toolbar (assistant-signal-inbox.js), which is this role's landing tab and
+           the top of its funnel; the Leads tab is downstream of both actions. -->
     </div>
 
     <!-- "Ask your memory" — the conversational surface over the account graph (Phase 3 §5.5,

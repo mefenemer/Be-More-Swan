@@ -3,7 +3,7 @@
  *
  * "Review Lead Ideas" flow for the Lead Generator (roleKey lead_qualifier) on
  * assistant-detail.html — the role-relevant replacement for the social "Review
- * Pending Items" button. Drives the Overview #btn-lead-ideas button and a modal:
+ * Pending Items" button. Opened from the Searches toolbar (assistant-signal-inbox.js):
  *
  *   • Propose ideas   → POST lead-generation { action:'generate_ideas' }
  *   • List ideas      → POST lead-generation { action:'list_ideas' }
@@ -13,7 +13,7 @@
  *                       handled here vs handed off to another assistant.
  *   • Decline an idea → POST lead-generation { action:'decline_idea', ideaId }
  *
- * Wiring (assistants.js → _applyDashboardRegistry):
+ * Wiring (assistant-signal-inbox.js, on click — assistants.js no longer wires this):
  *   window.AssistantLeadIdeas.init({ assistantId, cfg });   // cfg = registry.ideasReview
  *
  * Every idea/lead field is stored LLM output — treat as untrusted, escape on render.
@@ -216,15 +216,13 @@
     refresh();
   }
 
+  // Callers own their own trigger — this only loads state. The old #btn-lead-ideas wiring lived
+  // here until that button was removed from the Leads tab; the Searches toolbar is now the single
+  // entry point and binds its own click. Idempotent: safe to call on every open.
   function init({ assistantId, cfg }) {
     if (!assistantId) return;
     state.assistantId = assistantId;
     state.cfg = cfg || null;
-    const btn = document.getElementById('btn-lead-ideas');
-    if (btn && !btn.dataset.ideasWired) {
-      btn.dataset.ideasWired = '1';
-      btn.addEventListener('click', open);
-    }
   }
 
   window.AssistantLeadIdeas = { init, open };

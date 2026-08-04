@@ -687,6 +687,136 @@
   // Alias for callers/routes that use the PascalCase component name as the type key.
   register('HandoffProposalCard', renderHandoffProposalCard);
 
+  // ── Built-in: Discovery Campaign Proposal Card ──────────────────────────────
+  // Renderer for the lead-qualifier route's outbound-search wire shape
+  // (chat-orchestrator.ts): { type: 'discovery_campaign_proposal', name, idea,
+  //   cadence: 'one_off'|'daily'|'weekly', rationale?,
+  //   guardrails?: { maxLeadsPerRun?, maxCostGbpPerRun?, negativeKeywords?: string[],
+  //                  requireHumanApproval?: boolean } }
+  //
+  // The whole point of this card is that the assistant STOPS here. Approving saves the search
+  // as a DRAFT — it spends nothing and finds nothing until the user starts it from the Signal
+  // Inbox. A run costs real money per run and emails real strangers downstream, so nothing may
+  // begin on the strength of a model's judgement plus one click in a chat window.
+  //
+  // Indigo/purple, matching HandoffProposalCard: in this transcript's visual language that means
+  // "an action awaiting your approval", not a finished deliverable (the emerald cards).
+  //
+  // Approve dispatches a bubbling 'discovery:create' CustomEvent — chat-session.js owns the call
+  // because it is what knows the assistantId; the renderer only ever receives `ui`. detail.respond
+  // is how the outcome gets back here, since a create can fail (no session, no such assistant) and
+  // a card that always claims success is worse than no card.
+  function renderDiscoveryCampaignProposalCard(ui, esc) {
+    const CADENCE_LABEL = {
+      one_off: 'Runs once, when you start it',
+      daily: 'Every day at 08:00 UTC, once started',
+      weekly: 'Every week, once started',
+    };
+    const cadence = typeof ui.cadence === 'string' && CADENCE_LABEL[ui.cadence] ? ui.cadence : 'one_off';
+    const idea = typeof ui.idea === 'string' ? ui.idea.trim() : '';
+    const name = typeof ui.name === 'string' && ui.name.trim() ? ui.name.trim() : 'Untitled search';
+    const g = (ui.guardrails && typeof ui.guardrails === 'object') ? ui.guardrails : {};
+
+    // Only state limits the proposal actually set. Printing the table defaults here would be
+    // inventing numbers the server was never told, which the user would then read as a promise.
+    const limits = [];
+    if (typeof g.maxLeadsPerRun === 'number') limits.push(`Up to ${esc(String(g.maxLeadsPerRun))} leads per run`);
+    if (typeof g.maxCostGbpPerRun === 'number') limits.push(`Max £${esc(String(g.maxCostGbpPerRun))} per run`);
+    if (Array.isArray(g.negativeKeywords) && g.negativeKeywords.length) {
+      limits.push(`Excluding: ${esc(g.negativeKeywords.filter((k) => typeof k === 'string').join(', '))}`);
+    }
+    if (g.requireHumanApproval !== false) limits.push('You review every lead before any outreach');
+
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <div class="flex items-start gap-3 mb-3">
+        <div class="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-xl shrink-0">🔍</div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">New search · Approval needed</p>
+          <p class="font-bold text-gray-900 truncate">${esc(name)}</p>
+        </div>
+      </div>
+
+      ${idea ? `
+        <p class="text-xs font-bold text-indigo-700 uppercase tracking-wide mb-1">Who I'll look for</p>
+        <p class="text-sm text-gray-700 mb-3 whitespace-pre-wrap break-words">${esc(idea)}</p>` : ''}
+
+      ${ui.rationale ? `
+        <p class="text-sm text-gray-700 mb-3"><span class="font-bold text-indigo-900">Why:</span> ${esc(ui.rationale)}</p>` : ''}
+
+      <ul class="mb-4 space-y-1">
+        <li class="text-xs text-gray-600">• ${esc(CADENCE_LABEL[cadence])}</li>
+        ${limits.map((l) => `<li class="text-xs text-gray-600">• ${l}</li>`).join('')}
+      </ul>
+
+      <div class="flex items-center gap-2" data-dcp-actions>
+        <button type="button" data-dcp-approve
+          class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          Save this search
+        </button>
+        <button type="button" data-dcp-decline
+          class="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          Not this one
+        </button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-dcp-status></p>
+    `;
+
+    const status = el.querySelector('[data-dcp-status]');
+    function say(text, tone) {
+      status.textContent = text;
+      status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`;
+    }
+    function setBusy(busy) {
+      el.querySelectorAll('[data-dcp-approve], [data-dcp-decline]').forEach((b) => { b.disabled = busy; });
+    }
+
+    el.addEventListener('click', (e) => {
+      const approve = e.target.closest('[data-dcp-approve]');
+      const decline = e.target.closest('[data-dcp-decline]');
+      if (!approve && !decline) return;
+
+      if (decline) {
+        setBusy(true);
+        say('Search declined.');
+        return;
+      }
+
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('discovery:create', {
+        bubbles: true,
+        detail: {
+          name,
+          idea,
+          cadence,
+          guardrails: g,
+          // Re-enabling on failure is the point: a transient error must leave the user able to
+          // try again rather than stranding an approved proposal with two dead buttons.
+          respond({ ok, deduped, error }) {
+            if (ok) {
+              // Tab name must match assistant-dashboard-registry.js `signalInbox.label` — it has
+              // been renamed once already ("Signal Inbox" → "Searches"). Pinned by
+              // tests/lead-prompt-surfaces.test.ts so this copy cannot drift off the tab silently.
+              say(deduped
+                ? 'Already saved — find it under Find New Leads in your Searches tab.'
+                : 'Saved as a draft — open Find New Leads in your Searches tab to start it.');
+              return;
+            }
+            setBusy(false);
+            say(error || 'Could not save that search — please try again.', 'error');
+          },
+        },
+      }));
+    });
+
+    return el;
+  }
+
+  register('discovery_campaign_proposal', renderDiscoveryCampaignProposalCard);
+  register('DiscoveryCampaignProposalCard', renderDiscoveryCampaignProposalCard);
+
   // ── Built-in: Action Item Assignment Card ───────────────────────────────────
   // Renderer for the meeting-note-taker route's wire shape (chat-orchestrator.ts):
   // { type: 'action_item_assignment', meetingSummary, decisionsMade?: string[],

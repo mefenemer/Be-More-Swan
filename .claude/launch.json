@@ -2,6 +2,32 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-dcp-card",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4248",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/941084e0-8504-433b-ba55-ca15e27a49d1/scratchpad/dcpharness"
+      ],
+      "port": 4248,
+      "autoPort": false
+    },
+    {
+      "name": "component-harness-chat-resume",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4246",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/27a85da5-f3e5-41e8-9da5-a5dd4025bbc6/scratchpad/chatharness"
+      ],
+      "port": 4246,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-strategy",
       "runtimeExecutable": "python3",
       "runtimeArgs": [
