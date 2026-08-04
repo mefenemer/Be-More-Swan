@@ -63,7 +63,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 'no stop-word padding), tags (array of 3-6 short lowercase strings). No markdown, no extra text.',
             messages: [{
                 role: 'user',
-                content: `Title: ${post.title}\n\nBody:\n${excerpt(post.bodyMarkdown, 1500)}`,
+                content: `Title: ${post.title}\n\nBody:\n${await excerpt(post.bodyMarkdown, 1500)}`,
             }],
         });
 

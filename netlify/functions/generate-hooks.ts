@@ -56,7 +56,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 '[{"h1":"...","intro":"..."}]. No markdown, no extra text.',
             messages: [{
                 role: 'user',
-                content: `Title: ${post.title}\n\nPost excerpt:\n${excerpt(post.bodyMarkdown, 600)}`,
+                content: `Title: ${post.title}\n\nPost excerpt:\n${await excerpt(post.bodyMarkdown, 600)}`,
             }],
         });
 

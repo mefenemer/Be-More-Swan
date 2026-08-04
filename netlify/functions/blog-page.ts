@@ -117,7 +117,7 @@ export default withLambda(async (event: HandlerEvent) => {
         baseUrl,
     });
 
-    const description = post.metaDescription || excerpt(String(payload?.html || ''), 200) || siteName;
+    const description = post.metaDescription || await excerpt(String(payload?.html || ''), 200) || siteName;
 
     const html = renderBlogPage({
         title: post.metaTitle || post.title,

@@ -39,17 +39,18 @@ export interface SyndicatablePost {
 }
 
 /** Project a published blog_posts row into the text-only payload adapters consume, or null if empty. */
-export function projectPost(post: SyndicatablePost): BlogDestinationPost | null {
+// Async only because rendering reaches `marked` through a dynamic import — see markdown-render.ts.
+export async function projectPost(post: SyndicatablePost): Promise<BlogDestinationPost | null> {
     // Syndicated copies are TEXT ONLY (docs/blog-media-composition-plan.md §3.5): our media URLs are
     // presigned/expiring and Pexels is hotlink-only, so external platforms receive no media rather
     // than links that 404 or breach a licence. bodyHtml is derived from the SAME stripped source
     // because the HTML adapters (WordPress/Ghost/WordPress.com) send `bodyHtml || bodyMarkdown`.
-    const syndicatedMarkdown = stripMediaForSyndication(post.bodyMarkdown || '');
+    const syndicatedMarkdown = await stripMediaForSyndication(post.bodyMarkdown || '');
     if (!syndicatedMarkdown.trim()) return null;
     return {
         title: post.title,
         bodyMarkdown: syndicatedMarkdown,
-        bodyHtml: renderMarkdown(syndicatedMarkdown) || null,
+        bodyHtml: await renderMarkdown(syndicatedMarkdown) || null,
         canonicalUrl: post.canonicalUrl ?? null,
         tags: Array.isArray(post.tags) ? (post.tags as unknown[]).map(String) : [],
         coverImageUrl: null,
@@ -71,7 +72,7 @@ export async function syndicatePublishedPost(
     const connected = (await listBlogDestinations(db, organisationId)).filter((d) => d.connected);
     if (!connected.length) return {};
 
-    const projected = projectPost(post);
+    const projected = await projectPost(post);
     if (!projected) return {}; // media-only post: nothing to syndicate as text
 
     const existing = (post.destinations as Record<string, unknown>) || {};

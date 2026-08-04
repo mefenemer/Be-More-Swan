@@ -11,17 +11,51 @@
 // share ONE directive tokenizer (src/lib/marked-bms-directives.js) so the Studio's preview can't
 // disagree with what actually publishes — see docs/blog-media-composition-plan.md §3.2.
 
-import { Marked } from 'marked';
+// ⚠️ TYPE-ONLY import. `marked` is ESM-only (v18: "type": "module", and even its `require`
+// condition points at marked.esm.js). A VALUE import here compiles to `require("marked")` in the
+// CJS function bundle, which throws ERR_REQUIRE_ESM on the deploy runtime and takes the whole
+// function down at module load — before any handler runs. A type-only import is erased entirely,
+// so it costs nothing at runtime. See loadMarked() below. DO NOT make this a value import.
+import type { Marked as MarkedType } from 'marked';
 import sanitizeHtml from 'sanitize-html';
 // Plain .js, UMD-ish, deliberately shared with the browser — see that file's header.
 import { install as installDirectives } from '../lib/marked-bms-directives.js';
 
-// An ISOLATED marked instance: registering extensions on the shared singleton would leak blog
-// directives into every other server-side marked caller.
-// NOTE: no `resolveUrl` is passed — that is what keeps media src-less in the snapshot. Presigned
-// R2 URLs expire and this payload is immutable + CDN-cached, so a baked-in src would produce posts
-// whose media 404s hours after publish. widget-api injects a fresh src at read time instead.
-const md = installDirectives(new Marked(), {});
+/**
+ * The isolated, directive-enabled marked instance, loaded on first use.
+ *
+ * ── Why this is async, and why the two exports below are too ─────────────────
+ * `marked` cannot be `require()`d from the CJS function bundle (see the import note above), and
+ * Netlify's bundler externalises it rather than inlining it, so the only portable way to reach it
+ * is a dynamic `import()` — which is asynchronous. That is the entire reason renderMarkdown() and
+ * excerpt() return promises; the parsing itself is still synchronous.
+ *
+ * ⚠️ This bit everyone locally-invisibly: Node 22.12+ ALLOWS `require()` of ESM, so a static import
+ * works on a modern dev machine and fails only once deployed. Local success proves nothing here.
+ *
+ * The promise is cached, not the resolved value, so concurrent callers share one import and one
+ * instance per container.
+ *
+ * An ISOLATED instance: registering extensions on the shared singleton would leak blog directives
+ * into every other server-side marked caller.
+ * NOTE: no `resolveUrl` is passed — that is what keeps media src-less in the snapshot. Presigned
+ * R2 URLs expire and this payload is immutable + CDN-cached, so a baked-in src would produce posts
+ * whose media 404s hours after publish. widget-api injects a fresh src at read time instead.
+ */
+let mdPromise: Promise<MarkedType> | null = null;
+
+function loadMarked(): Promise<MarkedType> {
+    if (!mdPromise) {
+        mdPromise = import('marked')
+            .then(({ Marked }) => installDirectives(new Marked(), {}) as MarkedType)
+            .catch((err) => {
+                // Reset so a transient failure does not poison every later call in this container.
+                mdPromise = null;
+                throw err;
+            });
+    }
+    return mdPromise;
+}
 
 // Conservative allowlist — standard long-form blog structure, no scripts/iframes/embeds.
 // `video`/`audio`/`source` carry inline media (plan §3.4); `div` exists ONLY for column layouts and
@@ -104,15 +138,20 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
 
 /**
  * Render Markdown to sanitised, embed-safe HTML.
- * Synchronous: marked is configured for sync parsing (no async extensions here).
+ *
+ * Async only because `marked` has to be reached through a dynamic import (see loadMarked). The
+ * parse and the sanitise are both synchronous, and sanitisation is still unconditional — this is
+ * the boundary that stops a stored XSS executing on a customer's own domain.
  */
-export function renderMarkdown(mdSource: string): string {
+export async function renderMarkdown(mdSource: string): Promise<string> {
+    const md = await loadMarked();
     const rawHtml = md.parse(mdSource ?? '', { async: false, gfm: true, breaks: false }) as string;
     return sanitizeHtml(rawHtml, SANITIZE_OPTIONS);
 }
 
 /** Plain-text excerpt (tags stripped, collapsed whitespace) for list views / meta descriptions. */
-export function excerpt(mdSource: string, maxChars = 200): string {
+export async function excerpt(mdSource: string, maxChars = 200): Promise<string> {
+    const md = await loadMarked();
     const text = sanitizeHtml(md.parse(mdSource ?? '', { async: false, gfm: true }) as string, {
         allowedTags: [],
         allowedAttributes: {},

@@ -8,7 +8,11 @@
 
 import { createHash, createHmac, randomUUID } from 'crypto';
 import { and, eq, ne } from 'drizzle-orm';
-import { marked } from 'marked';
+// NOTE: `marked` is NOT imported at module scope. It is ESM-only, and a static import compiles to
+// `require("marked")` in the CJS function bundle — which throws ERR_REQUIRE_ESM at MODULE LOAD on
+// the deploy runtime, killing every function that transitively imports this file before its handler
+// ever runs. That is exactly what put publish-blog-posts in a crash loop. Loaded dynamically in
+// stripMediaForSyndication() instead.
 import { blogPosts, contentAssets, contentProvenance, widgetConfigs } from '../../db/schema';
 import { renderMarkdown, excerpt } from './markdown-render';
 import { isC2paSigningEnabled, signStoredImageAsset, type ManifestSummary } from './c2pa-sign';
@@ -50,7 +54,11 @@ type BlogPostRow = typeof blogPosts.$inferSelect;
  * Columns are UNWRAPPED rather than dropped — a column holds the author's prose as well as their
  * media, and dropping the container would silently delete their words.
  */
-export function stripMediaForSyndication(bodyMarkdown: string): string {
+export async function stripMediaForSyndication(bodyMarkdown: string): Promise<string> {
+    // Dynamic import: the only portable way to reach an ESM-only package from a CJS bundle. Node
+    // supports import() of ESM from CJS on every version; require() of it does not exist before
+    // Node 22.12, and the deploy runtime is older than that.
+    const { marked } = await import('marked');
     return stripMedia(marked, bodyMarkdown);
 }
 
@@ -106,11 +114,11 @@ export async function publishBlogPost(db: any, post: BlogPostRow, organisationId
     }
 
     // Render the immutable, embed-safe snapshot.
-    const html = renderMarkdown(post.bodyMarkdown);
+    const html = await renderMarkdown(post.bodyMarkdown);
     const publishedPayload = {
         html,
         title: post.metaTitle || post.title,
-        description: post.metaDescription || excerpt(post.bodyMarkdown, 200),
+        description: post.metaDescription || await excerpt(post.bodyMarkdown, 200),
         tags: post.tags,
         featureImage,
         renderedAt: new Date().toISOString(),

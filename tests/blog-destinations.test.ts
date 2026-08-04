@@ -172,34 +172,35 @@ check('publish mode defaults to draft (AC4-safe: never surprise-publish live)', 
     assert.equal(DEFAULT_PUBLISH_MODE, 'draft');
 });
 
-check('projectPost maps a published row to the text-only payload', () => {
-    const projected = projectPost({
-        id: 1,
-        title: 'Hello World',
-        bodyMarkdown: '# Hi\n\nBody text.',
-        canonicalUrl: 'https://blog.example.com/hello-world',
-        tags: ['Web Dev', 'AI'],
-        metaDescription: 'A short intro.',
-        destinations: {},
-    });
-    assert.ok(projected, 'a post with text projects');
-    assert.equal(projected!.title, 'Hello World');
-    assert.equal(projected!.bodyMarkdown, '# Hi\n\nBody text.');
-    assert.ok(/<h1[ >]/.test(projected!.bodyHtml || ''), 'bodyHtml is rendered from the markdown');
-    assert.equal(projected!.canonicalUrl, 'https://blog.example.com/hello-world');
-    assert.deepEqual(projected!.tags, ['Web Dev', 'AI']);
-    assert.equal(projected!.coverImageUrl, null, 'media is never handed to external platforms');
-});
-
-check('projectPost returns null for an empty / whitespace-only body', () => {
-    assert.equal(projectPost({ id: 1, title: 'X', bodyMarkdown: '   ' }), null);
-    assert.equal(projectPost({ id: 1, title: 'X', bodyMarkdown: null }), null);
-});
 
 // `check` is sync-only — an async fn handed to it would never be awaited and would pass silently.
 async function checkAsync(name: string, fn: () => Promise<void>) { await fn(); console.log(`  ✓ ${name}`); passed++; }
 
 void (async () => {
+    await checkAsync('projectPost maps a published row to the text-only payload', async () => {
+        const projected = await projectPost({
+            id: 1,
+            title: 'Hello World',
+            bodyMarkdown: '# Hi\n\nBody text.',
+            canonicalUrl: 'https://blog.example.com/hello-world',
+            tags: ['Web Dev', 'AI'],
+            metaDescription: 'A short intro.',
+            destinations: {},
+        });
+        assert.ok(projected, 'a post with text projects');
+        assert.equal(projected!.title, 'Hello World');
+        assert.equal(projected!.bodyMarkdown, '# Hi\n\nBody text.');
+        assert.ok(/<h1[ >]/.test(projected!.bodyHtml || ''), 'bodyHtml is rendered from the markdown');
+        assert.equal(projected!.canonicalUrl, 'https://blog.example.com/hello-world');
+        assert.deepEqual(projected!.tags, ['Web Dev', 'AI']);
+        assert.equal(projected!.coverImageUrl, null, 'media is never handed to external platforms');
+    });
+
+    await checkAsync('projectPost returns null for an empty / whitespace-only body', async () => {
+        assert.equal(await projectPost({ id: 1, title: 'X', bodyMarkdown: '   ' }), null);
+        assert.equal(await projectPost({ id: 1, title: 'X', bodyMarkdown: null }), null);
+    });
+
     await checkAsync('hashnode refuses a draft push rather than publishing live', async () => {
         // Must reject before any network call — the creds below are never used.
         await assert.rejects(
