@@ -42,6 +42,8 @@
     counts: { pending: 0, applied: 0, rejected: 0, expired: 0 },
     progress: null,
     vocab: null,
+    // { at, proposed, clusters, truncated, skipReason } — see lastRunLine().
+    lastRun: null,
     statusFilter: 'pending',
     // proposalId currently showing the reject form, if any.
     rejecting: null,
@@ -280,6 +282,34 @@
       </div>`;
   }
 
+  /**
+   * "Is this thing even running?" — §7.
+   *
+   * A screen that shows nothing for months is indistinguishable from a broken one, and this strip
+   * is the difference. It reports when the agent last looked and what it concluded, so the answer
+   * never requires the function logs — which is doubly true now the run is a background job whose
+   * HTTP response is only an acknowledgement.
+   */
+  function lastRunLine() {
+    const lr = state.lastRun;
+    if (!lr || !lr.at) {
+      return `<p class="text-[11px] text-gray-400 mt-4">Your assistant hasn’t reviewed your edits yet — it checks once a week.</p>`;
+    }
+    const when = new Date(lr.at);
+    const stamp = isNaN(when.getTime()) ? '' : when.toLocaleString(undefined, {
+      weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+    });
+    const outcome = lr.proposed > 0
+      ? `suggested ${lr.proposed} change${lr.proposed === 1 ? '' : 's'}`
+      : lr.clusters > 0
+        ? 'found nothing worth suggesting'
+        : 'found no repeated edits to learn from';
+    return `
+      <p class="text-[11px] text-gray-400 mt-4">
+        Last checked ${esc(stamp)} &middot; ${esc(outcome)}${lr.truncated ? ' &middot; more to review next week' : ''}
+      </p>`;
+  }
+
   function emptyState() {
     const pr = state.progress;
     return `
@@ -301,6 +331,7 @@
             'Record the outcome on a lead in your Leads tab. Once enough deals have closed, the agent can tell which targeting actually wins.',
           )}
         ` : ''}
+        ${lastRunLine()}
       </div>`;
   }
 
@@ -437,6 +468,7 @@
       state.counts = data.counts || state.counts;
       state.progress = data.progress || null;
       state.vocab = data.vocab || state.vocab;
+      state.lastRun = data.lastRun || null;
     } catch (err) {
       // db/strategy-proposals.sql is a MANUAL apply. Name that rather than showing a generic
       // failure, which sends people looking for a bug that isn't there.

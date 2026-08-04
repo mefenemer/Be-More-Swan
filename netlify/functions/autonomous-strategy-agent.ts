@@ -39,7 +39,8 @@ import { getDb } from '../../db/client';
 import { aiAssistants, strategyProposals } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
-import { isGlobalAiDisabled } from '../../src/utils/platform-config';
+import { CONFIG_KEYS, isGlobalAiDisabled, setPlatformConfig } from '../../src/utils/platform-config';
+import { triggerStrategyAgentRun } from '../../src/utils/trigger-strategy-agent';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { parseModelJson } from '../../src/utils/model-json';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -51,6 +52,25 @@ import { expirePendingProposals, proposeChange } from '../../src/utils/strategy-
 
 /** Assistants considered per run. One proposal each at most, so this is a generous ceiling. */
 const BATCH = 50;
+
+/**
+ * Wall-clock budget for the whole run.
+ *
+ * ⚠️ ONE ORG COSTS ~50 SECONDS — almost all of it the model rewriting the playbook. Measured on
+ * staging 2026-08-03: cold start 17:40:50, proposal written 17:41:39. That is why this function is
+ * driven by a `-background` worker rather than run inline: a synchronous Netlify function gets 10s
+ * by default and 26s at the absolute maximum, so the scheduled run was being killed every time. It
+ * only ever produced a proposal because the staging workflow's `curl --retry` handed it a second
+ * attempt and the killed invocation's write had already committed — luck, not design.
+ *
+ * Background functions get 15 minutes. This stops well short of that and leaves the remaining
+ * clusters for next week, because a run killed by the platform reports nothing at all, whereas one
+ * that stops on its own terms records what it did and why (`truncated: true`).
+ */
+const RUN_BUDGET_MS = 11 * 60_000;
+
+/** Stop starting new clusters once a single one could no longer finish inside the budget. */
+const PER_CLUSTER_RESERVE_MS = 90_000;
 
 /**
  * How far back edits count.
@@ -210,6 +230,8 @@ export interface StrategyAgentResult {
      * Carries no tenant data — a reason string, an org id and a field name.
      */
     skipReasons: string[];
+    /** True when the run stopped on its own budget with clusters left. They wait for next week. */
+    truncated: boolean;
 }
 
 /**
@@ -218,7 +240,10 @@ export interface StrategyAgentResult {
  */
 export async function runStrategyAgent(): Promise<StrategyAgentResult> {
     const db = getDb();
-    const result: StrategyAgentResult = { clusters: 0, proposed: 0, skipped: 0, expired: 0, notified: 0, skipReasons: [] };
+    const startedAt = Date.now();
+    const result: StrategyAgentResult = {
+        clusters: 0, proposed: 0, skipped: 0, expired: 0, notified: 0, skipReasons: [], truncated: false,
+    };
 
     // The expiry sweep runs FIRST and unconditionally — it is one statement, it costs nothing, and
     // it must not be skippable by an early return further down. Global (no org filter): this run is
@@ -248,6 +273,16 @@ export async function runStrategyAgent(): Promise<StrategyAgentResult> {
     };
 
     for (const c of clusters.slice(0, BATCH)) {
+        // Stop cleanly rather than being killed mid-cluster. A platform kill reports nothing; this
+        // records what was done and that more is waiting.
+        if (Date.now() - startedAt > RUN_BUDGET_MS - PER_CLUSTER_RESERVE_MS) {
+            result.truncated = true;
+            console.warn('[strategy-agent] run budget reached; remaining clusters wait for the next run', {
+                done: result.proposed + result.skipped, total: clusters.length,
+            });
+            break;
+        }
+
         const where = { org: c.organisationId, assistant: c.aiAssistantId, reason: c.editReason };
 
         // Eligibility can lapse — a workspace can lose the feature between runs. Re-check per run,
@@ -427,22 +462,55 @@ export async function runStrategyAgent(): Promise<StrategyAgentResult> {
         if (ok) result.notified++;
     }
 
+    await recordLastRun(result, startedAt);
     return result;
 }
 
-export default withLambda(async () => {
+/**
+ * Persist the run's outcome where a human can read it.
+ *
+ * §7 asks the empty state to show "the last run's timestamp and skip reason, so 'is this thing even
+ * running?' is answerable without the logs" — and that became load-bearing rather than nice-to-have
+ * once the work moved to a background function, because the HTTP response is now just an ack and
+ * the platform's function logs did not reliably surface a scheduled invocation's stdout.
+ *
+ * Best-effort: the proposals are already written, and losing the summary must not fail the run.
+ */
+async function recordLastRun(result: StrategyAgentResult, startedAt: number): Promise<void> {
     try {
-        const result = await runStrategyAgent();
-        return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(result) };
+        await setPlatformConfig(CONFIG_KEYS.STRATEGY_AGENT_LAST_RUN, {
+            at: new Date().toISOString(),
+            durationMs: Date.now() - startedAt,
+            clusters: result.clusters,
+            proposed: result.proposed,
+            skipped: result.skipped,
+            expired: result.expired,
+            notified: result.notified,
+            truncated: result.truncated,
+            // Capped: this is a diagnostic line in a UI, not an audit log.
+            skipReasons: result.skipReasons.slice(0, 10),
+        });
     } catch (err) {
-        // db/strategy-proposals.sql is a MANUAL apply — on an un-migrated environment say so rather
-        // than emitting a bare stack every week.
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes('does not exist') && (msg.includes('relation') || msg.includes('column'))) {
-            console.error('[strategy-agent] schema not migrated — apply db/strategy-proposals.sql', err);
-            return { statusCode: 200, body: JSON.stringify({ skipped: 'migration_pending' }) };
-        }
-        console.error('[strategy-agent] run failed', err);
-        return { statusCode: 500, body: JSON.stringify({ error: 'Strategy agent run failed.' }) };
+        console.error('[strategy-agent] could not record the run summary', err);
     }
+}
+
+/**
+ * The scheduled entry point — a DISPATCHER, not the worker.
+ *
+ * ⚠️ The run takes ~50s for a single org, almost all of it the model call. A synchronous Netlify
+ * function gets 10s by default and 26s at most, so doing the work here meant being killed every
+ * time. This hands off to the `-background` worker (15-minute budget) and returns immediately.
+ *
+ * The fetch IS awaited: an un-awaited background invoke can be frozen with the lambda before the
+ * request leaves the sandbox, so the worker would simply never run. Awaiting a `-background` invoke
+ * is cheap — the platform answers 202 as soon as it accepts the work.
+ */
+export default withLambda(async () => {
+    const dispatched = await triggerStrategyAgentRun('weekly-cron');
+    return {
+        statusCode: dispatched ? 202 : 500,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dispatched }),
+    };
 });

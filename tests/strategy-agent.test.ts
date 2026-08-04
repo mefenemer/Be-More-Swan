@@ -231,12 +231,49 @@ check('staging has its own workflow, because Netlify crons never fire on a branc
     assert.ok(wf.includes('staging--bemoreswan.netlify.app'), 'the workflow must target staging, never production');
 });
 
-check('the HTTP wrapper fails closed when the secret is unset', () => {
-    const wrapper = sourceOf('netlify/functions/run-strategy-agent.ts');
-    assert.ok(/if\s*\(!secret\)/.test(wrapper), 'the wrapper does not refuse when the secret is missing');
-    assert.ok(wrapper.includes('503'), 'an unconfigured trigger must be disabled, not open');
-    assert.ok(wrapper.includes('401'), 'a wrong token must be rejected');
-    assert.ok(wrapper.includes('runStrategyAgent'), 'the wrapper must run the SAME logic as the cron');
+check('both entry points fail closed when the secret is unset', () => {
+    for (const rel of [
+        'netlify/functions/run-strategy-agent.ts',
+        'netlify/functions/autonomous-strategy-agent-background.ts',
+    ]) {
+        const src = sourceOf(rel);
+        assert.ok(/if\s*\(!secret\)/.test(src), `${rel} does not refuse when the secret is missing`);
+        assert.ok(src.includes('503'), `${rel}: an unconfigured endpoint must be disabled, not open`);
+        assert.ok(src.includes('401'), `${rel}: a wrong token must be rejected`);
+    }
+});
+
+check('⚠️ the work runs in a BACKGROUND function, never inline in a scheduled one', () => {
+    // THE REGRESSION THIS GUARDS. One org costs ~50s (staging 2026-08-03: cold start 17:40:50 →
+    // proposal written 17:41:39). A synchronous Netlify function gets 10s by default, 26s at most,
+    // so running the work inline meant being killed on every tick — and the one proposal it did
+    // produce survived only because the staging workflow's `curl --retry` gave it another attempt.
+    const worker = sourceOf('netlify/functions/autonomous-strategy-agent-background.ts');
+    assert.ok(worker.includes('runStrategyAgent'), 'the background worker does not run the agent');
+
+    // Neither entry point may do the work itself — both dispatch.
+    for (const rel of [
+        'netlify/functions/autonomous-strategy-agent.ts',
+        'netlify/functions/run-strategy-agent.ts',
+    ]) {
+        const src = sourceOf(rel);
+        const handler = src.slice(src.indexOf('export default withLambda'));
+        assert.ok(!/runStrategyAgent\(/.test(handler), `${rel} runs the agent inline — it will be killed by the timeout`);
+        assert.ok(/triggerStrategyAgentRun\(/.test(handler), `${rel} does not dispatch to the background worker`);
+    }
+});
+
+check('the dispatch is AWAITED, or the worker is never invoked', () => {
+    // An un-awaited fetch can be frozen with the lambda before the request leaves the sandbox.
+    const trig = sourceOf('src/utils/trigger-strategy-agent.ts');
+    assert.ok(/await fetch\(/.test(trig), 'the background invoke must be awaited');
+    assert.ok(/-background/.test(trig), 'the trigger must target the -background function');
+});
+
+check('the run stops on its own budget rather than being killed', () => {
+    assert.ok(agentSrc.includes('RUN_BUDGET_MS'), 'no wall-clock budget');
+    assert.ok(/truncated:\s*boolean/.test(agentSrc), 'the result cannot report that work was left over');
+    assert.ok(/result\.truncated = true/.test(runBody), 'the budget never sets truncated');
 });
 
 check('every skip records a reason — "skipped: N" must never be unfalsifiable', () => {
@@ -254,13 +291,23 @@ check('every skip records a reason — "skipped: N" must never be unfalsifiable'
     assert.deepEqual(bare.map((m) => m[0].trim()), [], 'a cluster is abandoned without recording why');
 });
 
-check('the run returns its skip reasons to the caller, not just to the logs', () => {
+check('the run persists its outcome where a human can read it', () => {
     const iface = agentSrc.match(/export interface StrategyAgentResult \{([\s\S]*?)\n\}/);
     assert.ok(iface, 'StrategyAgentResult is missing');
-    assert.ok(/skipReasons:\s*string\[\]/.test(iface![1]), 'skipReasons is not part of the returned result');
-    // run-strategy-agent spreads the result into its JSON body, which the workflow prints.
-    const wrapper = sourceOf('netlify/functions/run-strategy-agent.ts');
-    assert.ok(/\.\.\.result/.test(wrapper), 'the HTTP wrapper does not return the full result');
+    assert.ok(/skipReasons:\s*string\[\]/.test(iface![1]), 'skipReasons is not part of the result');
+
+    // Once the work moved to a background function, NOBODY reads its HTTP response — the caller
+    // got a 202 and left. So the outcome has to be persisted, or "is this thing even running?"
+    // becomes unanswerable again (§7).
+    assert.ok(/recordLastRun\(/.test(runBody), 'the run does not persist a summary');
+    assert.ok(agentSrc.includes('STRATEGY_AGENT_LAST_RUN'), 'no config key for the last run');
+
+    // …and something has to actually read it back.
+    const api = sourceOf('netlify/functions/strategy-proposals.ts');
+    assert.ok(api.includes('STRATEGY_AGENT_LAST_RUN'), 'the API never reads the last-run summary');
+    assert.ok(/lastRun:/.test(api), 'the API does not return lastRun to the client');
+    const ui = readFileSync(join(root, 'src/components/assistant-strategy.js'), 'utf8');
+    assert.ok(/lastRunLine\(\)/.test(ui), 'the empty state does not show when the agent last ran');
 });
 
 check('the expiry sweep runs before the AI kill-switch can short-circuit it', () => {

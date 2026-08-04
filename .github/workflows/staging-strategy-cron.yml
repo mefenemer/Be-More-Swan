@@ -11,6 +11,11 @@
 # PENDING proposal — an inert row that a human applies from the Strategy tab having read the diff.
 # It does spend model budget, and only for orgs with the `strategy_agent` plan feature enabled.
 #
+# ⚠️ THE RESPONSE IS AN ACK, NOT A RESULT. run-strategy-agent dispatches a background worker and
+# returns 202 immediately — one org takes ~50s, which no synchronous Netlify function can hold. So
+# a green job here means "the run was accepted", NOT "a proposal was made". The outcome appears in
+# the Strategy tab (and in platform_config `strategy_agent.last_run`), never in this log.
+#
 # NOTES / LIMITATIONS (identical to staging-sequence-cron.yml):
 #  * GitHub Actions `schedule` only runs from the DEFAULT branch (main), ~5-min granularity.
 #  * Scheduled workflows only start firing once this file is on `main`.

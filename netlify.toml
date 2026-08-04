@@ -409,8 +409,15 @@ node_bundler = "esbuild"
 #
 # Offset an hour after autonomous-goal-optimizer so the two never contend for the model gateway.
 #
+# ⚠️ THIS ENTRY POINT IS A DISPATCHER, NOT THE WORKER, and it needs no timeout raise because of it.
+# One org costs ~50 seconds — almost all of it the model rewriting the playbook (measured on staging
+# 2026-08-03: cold start 17:40:50, proposal written 17:41:39). A scheduled function gets 10s by
+# default and 26s at the absolute maximum, so running the work here was killed on every tick. It
+# hands off to autonomous-strategy-agent-background (15-minute budget) with an AWAITED fetch and
+# returns 202. Do not "simplify" this back into one function.
+#
 # ⚠️ Netlify fires scheduled functions ONLY on the production deploy. Staging is a branch deploy, so
 # this never runs there — .github/workflows/staging-strategy-cron.yml pokes run-strategy-agent
-# instead. The two must stay in step.
+# instead, which dispatches the same worker. The two must stay in step.
 [functions.autonomous-strategy-agent]
   schedule = "0 5 * * 1"

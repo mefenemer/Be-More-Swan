@@ -28,6 +28,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants, revenueEvents, strategyProposals, templateFeedback, users } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
+import { CONFIG_KEYS, getPlatformConfig } from '../../src/utils/platform-config';
 import {
     MIN_SAMPLE, REJECT_REASONS, REJECT_REASON_EFFECTS, REJECT_REASON_LABELS,
     STRATEGY_AGENT_FEATURE, STRATEGY_TUNABLE_FIELDS, isProposalStatus, isRejectReason, tunableField,
@@ -95,7 +96,7 @@ export default withLambda(async (event) => {
         // ── list ──────────────────────────────────────────────────────────────
         if (action === 'list') {
             if (!enabled) {
-                return json(200, { gated: true, proposals: [], counts: {}, progress: null, vocab: null });
+                return json(200, { gated: true, proposals: [], counts: {}, progress: null, vocab: null, lastRun: null });
             }
 
             const wanted = isProposalStatus(body.status) ? body.status : null;
@@ -159,6 +160,10 @@ export default withLambda(async (event) => {
                 }),
                 counts,
                 progress: await evidenceProgress(db, orgId, assistantId),
+                // §7: "the last run's timestamp and skip reason, so 'is this thing even running?'
+                // is answerable without the logs". Necessary rather than nice now that the run is a
+                // background function whose HTTP response is only an ack.
+                lastRun: await lastStrategyRun(),
                 // Sent with the list so the reject dialog can show what each reason DOES, which is
                 // what makes the choice something other than arbitrary.
                 vocab: {
@@ -236,6 +241,33 @@ export default withLambda(async (event) => {
  * APPENDS a second terminal event (the ledger is append-only), so a naive count double-counts every
  * correction and would show a threshold as met when it is not.
  */
+/**
+ * When the weekly run last happened and what it did.
+ *
+ * Platform-wide, because the cron is — there is one run covering every org, so "when did the agent
+ * last look?" has one answer. Deliberately NOT tenant-scoped data: counts and reason strings only.
+ * Never throws; an unreadable summary just means the tab omits the line.
+ */
+async function lastStrategyRun() {
+    try {
+        const raw = await getPlatformConfig(CONFIG_KEYS.STRATEGY_AGENT_LAST_RUN);
+        if (!raw || typeof raw !== 'object') return null;
+        const r = raw as Record<string, unknown>;
+        return {
+            at: typeof r.at === 'string' ? r.at : null,
+            proposed: Number(r.proposed ?? 0),
+            clusters: Number(r.clusters ?? 0),
+            truncated: r.truncated === true,
+            // One line is enough for a diagnostic strip; the rest is in the logs.
+            skipReason: Array.isArray(r.skipReasons) && r.skipReasons.length
+                ? String(r.skipReasons[0])
+                : null,
+        };
+    } catch {
+        return null;
+    }
+}
+
 async function evidenceProgress(db: ReturnType<typeof getDb>, orgId: number, assistantId: number) {
     const [outcomes] = await db.execute<{ n: number }>(sql`
         SELECT count(*)::int AS n FROM (

@@ -33,6 +33,13 @@ export const CONFIG_KEYS = {
     // ── Session inactivity timeout (issue #127; admin-editable in Admin Portal) ──
     SESSION_INACTIVITY_TIMEOUT_MINUTES: 'session.inactivity_timeout_minutes', // number — idle minutes before the "stay signed in" countdown appears
     SESSION_COUNTDOWN_MINUTES:          'session.countdown_minutes',          // number — minutes the countdown gives the user before auto-logout
+    // ── Strategy Agent (Phase 5a §7) ──
+    // The last weekly run's outcome: { at, clusters, proposed, skipped, expired, notified,
+    // skipReasons[], truncated }. Written by the background worker, read by the Strategy tab's
+    // empty state — which is the DEFAULT state for months, so "is this thing even running?" has to
+    // be answerable without the function logs. It is also the only place that answer survives now
+    // that the run is a background function and its HTTP response is just an ack.
+    STRATEGY_AGENT_LAST_RUN: 'strategy_agent.last_run',
 } as const;
 
 export type ConfigKey = typeof CONFIG_KEYS[keyof typeof CONFIG_KEYS];
