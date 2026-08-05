@@ -44,11 +44,24 @@
 # a 301 to /powered-by.html would discard the slug and land every visitor on the generic
 # explainer — the page would load, look fine, and silently lose the attribution.
 #
-# Placement is safe: Netlify matches top-to-bottom and nothing above this matches /powered-by/*.
+# Placement is safe: Netlify matches top-to-bottom and nothing above this matches /powered-by/.
 # The X-Robots-Tag rule for "/powered-by*" further down already covers these deep links, so the
-# per-agency variants stay out of the index.
+# per-agency variants stay out of the index (verified on staging: the deep link returns
+# x-robots-tag: noindex, nofollow).
+#
+# ⚠️ ":slug" MATCHES ONE PATH SEGMENT — do not "simplify" this back to a "/*" splat.
+# A splat also swallows /powered-by/components/nav.html and /powered-by/anything/else.html, and
+# answers them with this page. That is not hypothetical: the first version of this rule used "/*",
+# and because powered-by.html fetched its nav and footer with DOCUMENT-RELATIVE paths, the page
+# resolved them against /powered-by/<slug>/ and injected a copy of ITSELF into its own nav
+# placeholder — three nested copies, no nav, no footer, on every badge link.
+#
+# powered-by.html now uses root-relative paths, which is the real fix; this narrower rule is the
+# second line of defence so a future relative path cannot resurrect the same failure. Note it does
+# NOT protect single-segment assets — /powered-by/style.css is one segment and would still match —
+# so the "keep every path absolute" rule in powered-by.html's <head> is the one that matters.
 [[redirects]]
-  from = "/powered-by/*"
+  from = "/powered-by/:slug"
   to   = "/powered-by.html"
   status = 200
 

@@ -4,7 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Powered by Be More Swan</title>
-    <link href="./style.css" rel="stylesheet">
+    <!-- ⚠️ ROOT-RELATIVE ("/style.css"), NOT "./style.css". Unlike every other page here, this one
+         is served from a SUBDIRECTORY URL: /powered-by/<agency-slug>. A document-relative href
+         resolves against that, giving /powered-by/style.css — which the /powered-by/ rewrite in
+         netlify.toml matches and answers with this HTML page, at content-type text/html. Browsers
+         refuse an HTML document as a stylesheet, so the entire page rendered unstyled on exactly
+         the URL the attribution badge points at. Keep every asset path on this page absolute. -->
+    <link href="/style.css" rel="stylesheet">
     <link rel="icon" href="/favicon/favicon.ico" sizes="any">
     <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
     <link rel="manifest" href="/favicon/manifest.json">
@@ -202,10 +208,15 @@
     // no-slug branch — so the one state that needed a way out of the page was the one state
     // rendered with no nav and no footer. A "Page Not Found" card with no navigation is a
     // dead end. Hoisted above every branch so the chrome cannot depend on which state wins.
+    // ⚠️ ROOT-RELATIVE PATHS ARE MANDATORY ON THIS PAGE — see the note on ./style.css in <head>.
+    // This page is served at /powered-by/<slug>, so a relative 'components/nav.html' resolves to
+    // /powered-by/components/nav.html, which the /powered-by/ rewrite in netlify.toml answers
+    // with THIS PAGE. The result was the page injecting a copy of itself into its own nav
+    // placeholder: three nested copies, and no actual nav or footer anywhere.
     ['nav-placeholder', 'footer-placeholder'].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
-        const src = id.includes('nav') ? 'components/nav.html' : 'components/footer.html';
+        const src = id.includes('nav') ? '/components/nav.html' : '/components/footer.html';
         fetch(src).then(r => r.text()).then(html => { el.innerHTML = html; }).catch(() => {});
     });
 
