@@ -10,6 +10,11 @@
  * locks the assistant filter (hidden picker, suppressed legend) and shows only this assistant's
  * scheduled posts and completed task-run activity (get-calendar-activity).
  *
+ * Because it is the GLOBAL calendar's fragment, its social chrome has to be switched off by role:
+ * `publishesContent` drops the platform filter and rewrites the posted/overdue status legend for
+ * roles that publish nothing (Lead Generator, AR Clerk, Support, …), whose calendar is scheduled
+ * records — a lead's chase reminder, say — plus completed runs.
+ *
  * Lifecycle (assistants.js):
  *   _applyDashboardRegistry → AssistantCalendar.register({ assistantId })   (per detail load)
  *   _activateMainTab('calendar') → AssistantCalendar.show()                 (lazy, on first open)
@@ -25,10 +30,23 @@
   // string is a lightweight cache-bust; it does not need to match the SPA's VIEW_VERSION.
   const FRAGMENT_URL = '/calendar.html?v=detail-cal';
 
-  const state = { assistantId: null };
+  const state = { assistantId: null, roleKey: null };
 
-  function register({ assistantId } = {}) {
+  function register({ assistantId, roleKey } = {}) {
     state.assistantId = assistantId != null ? Number(assistantId) : null;
+    state.roleKey = roleKey || null;
+  }
+
+  // Does this role publish to platforms? calendar.html is the GLOBAL Content Calendar fragment,
+  // so everything social in it — the platform filter, the posted/overdue legend — comes along for
+  // every role unless it is switched off. The signal is the dashboard registry's
+  // modules.hasPostingSchedule: true for the content roles (social + blog, both of which appear in
+  // the platform filter), false for the records roles, whose calendar holds only scheduled records
+  // and completed task runs. Registry default is SHOWN (`!== false`), so an unknown roleKey — which
+  // get() resolves to social_media_manager anyway — keeps the full social toolbar.
+  function publishesContent() {
+    const cfg = window.AssistantDashboardRegistry?.get(state.roleKey);
+    return (cfg?.modules || {}).hasPostingSchedule !== false;
   }
 
   async function show() {
@@ -45,7 +63,10 @@
       if (!res.ok) throw new Error(`Calendar failed to load (${res.status}).`);
       host.innerHTML = await res.text();
       if (typeof window.initCalendar === 'function') {
-        await window.initCalendar({ assistantId: state.assistantId });
+        await window.initCalendar({
+          assistantId: state.assistantId,
+          publishesContent: publishesContent(),
+        });
       }
     } catch (err) {
       host.dataset.ready = '';

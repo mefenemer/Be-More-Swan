@@ -94,9 +94,12 @@ const EXEMPT: Record<string, string> = {
     strategyTab: 'feature-gated (strategy_agent, default off) — not present for most tenants',
     // Self-hides until the organisation has memory to query. A fresh workspace has no such panel.
     memoryPanel: 'self-hides until the org has account memory — absent on a new workspace',
-    // The Overview button that OPENS this chat (kind: 'chat'). Anyone reading the assistant's reply
-    // has already pressed it; directing them to it would be a loop.
-    primaryAction: 'the button that opens this chat — the reader is already through it',
+    // `primaryAction` was exempted here as "the button that opens this chat" — it was labelled
+    // "Score New Leads" but only redirected to this page. The role no longer declares one at all
+    // (scoring is automatic: discovery runs and CSV imports score on arrival, and the one manual
+    // path is the Leads tab's own "Add Lead"), so there is nothing left to exempt. Removed rather
+    // than kept "just in case": the stale-exemption check below exists precisely to stop a dead
+    // entry silently excusing some future surface that reuses the key.
 };
 
 console.log('\n──── the prompt knows its own dashboard ────');

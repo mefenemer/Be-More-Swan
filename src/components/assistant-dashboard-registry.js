@@ -13,7 +13,15 @@
  *   cfg.modules  // → per-role UI toggles. Anything omitted defaults to SHOWN (!== false), so the
  *                //   social_media_manager entry can leave them all out; non-social roles set the
  *                //   social-only ones false. Keys:
- *                //     hasReviewQueue, hasPostingSchedule, hasSocialStrategy   (original 3)
+ *                //     hasPostingSchedule, hasSocialStrategy
+ *                //     ...hasPostingSchedule doubles as "this role publishes": the Calendar tab
+ *                //        reads it (assistant-calendar.js) to drop the platform filter and the
+ *                //        posted/overdue legend for roles that publish nothing.
+ *                //     (There was a third original flag, hasReviewQueue. Deleted: the Review Queue
+ *                //      became a core tab on every role, so it gated nothing — while every
+ *                //      non-social entry went on declaring `false`, which then read as an
+ *                //      explanation for UI that was in fact still rendering. Gate on
+ *                //      reviewQueue.kind instead, and don't reintroduce a flag nothing reads.)
  *                //     hasImpactRoi            → Overview "Impact & ROI" card (post-based ROI)
  *                //     hasCreativeBrief        → Profile ▸ Creative Brief social cards
  *                //                               (Objective & Message, Audience & Voice, Reference)
@@ -23,8 +31,10 @@
  *                //     hasReviewCadence        → Profile ▸ Notifications ▸ Review-alert cadence card
  *                //     hasContentPublishing    → Profile ▸ Notifications ▸ "Content & Publishing"
  *                //                               preference (post/draft alerts — social-only)
- *   cfg.primaryAction // → Overview's primary button { label, kind }. kind: 'generate_post' opens the
- *                //   post sheet (social); 'chat' opens the assistant's chat intake (Data Hub roles).
+ *   cfg.primaryAction // → OPTIONAL. The workspace tab's primary button { label, kind }. kind:
+ *                //   'generate_post' opens the post sheet (social); 'chat' opens the assistant's
+ *                //   chat intake (Data Hub roles). Omit it for a role with no single "do the
+ *                //   thing" action and the button is hidden outright — see lead_qualifier.
  *   cfg.reviewQueue // → the Review Queue tab's data model (ALWAYS present — every assistant has a
  *                //   review/approve gate). Shape: { kind: 'posts' | 'records', recordType? }.
  *                //   'posts'   → scheduled_posts lifecycle (social/blog), rendered by _detailRq*.
@@ -44,8 +54,9 @@
  *
  * UNIFORM TEMPLATE: every role exposes the same four core tabs in the same order —
  *   Overview · Data Hub · Review Queue · Calendar — so the layout builds user muscle
- *   memory. Only labels/content differ per role (via hubTab/reviewQueue). Calendar needs
- *   no registry config (assistant-calendar.js scopes the global calendar to this assistant).
+ *   memory. Only labels/content differ per role (via hubTab/reviewQueue). Calendar has no config
+ *   block of its own — assistant-calendar.js scopes the global calendar to this assistant — but it
+ *   does read modules.hasPostingSchedule to strip the publishing-only chrome for records roles.
  *   Secondary tabs (Goals, Automation, Activity, KB, Inspo, My Content) follow the core four
  *   and stay role-gated via `modules` (Automation) / `kbTab` (Knowledge Base) /
  *   `inspoTab` (Inspo) / `myContentTab` (My Content).
@@ -90,7 +101,7 @@
           desc: 'The signals that convert trust into business — weighed above likes and view count.',
         },
       ],
-      modules: { hasReviewQueue: true, hasPostingSchedule: true, hasSocialStrategy: true },
+      modules: { hasPostingSchedule: true, hasSocialStrategy: true },
       primaryAction: { label: 'Create a Post', kind: 'generate_post' },
       // The Review Queue IS the social command centre — surfaced as "Posts" and used as the
       // landing tab (defaultMainTab) so users open straight into their content pipeline.
@@ -162,7 +173,7 @@
         // Blog Writer its own scheduled-drafting engine, reusing the same posting_frequency /
         // posting_days / posting_times / posting_timezone context keys as the social path — so the
         // same controls configure it, with the copy retitled for long-form.
-        hasReviewQueue: false, hasPostingSchedule: true, hasSocialStrategy: false,
+        hasPostingSchedule: true, hasSocialStrategy: false,
         hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
         hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
         // Mirrors PUBLISHING_ROLE_KEYS in src/utils/notification-prefs.ts, which is the source of
@@ -228,12 +239,18 @@
         },
       ],
       modules: {
-        hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false,
+        hasPostingSchedule: false, hasSocialStrategy: false,
         hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
         hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
         hasContentPublishing: false,
       },
-      primaryAction: { label: 'Score New Leads', kind: 'chat' },
+      // No primaryAction — deliberately. It read "Score New Leads", which promised an action it
+      // could not perform: `kind: 'chat'` only redirects to the chat page. Scoring is not a thing
+      // the user triggers here anyway — discovery runs score what they find (dispatch-discovery-runs
+      // hourly + process-discovery-jobs), CSV imports are scored on import, and the one genuinely
+      // manual path already has its own button ("Add Lead" in the Leads tab → score_lead). The
+      // always-visible header "Chat" CTA covers talking to the assistant. Omitting the key HIDES
+      // the button (assistants.js gates on `!!pa`); it does not fall back to a default label.
       // `subtitle` overrides the generic records-queue line: approving a lead SENDS its drafted
       // email straight away (lead-generation.ts `send_outreach`) rather than scheduling it, so
       // the generic "approve, schedule or reject" copy described the wrong action entirely.
@@ -263,8 +280,7 @@
         importHint: 'Upload a CSV of inbound leads — one row per lead. Exporting from Excel or Google Sheets? Use File → Download → CSV.',
         importColumns: ['name', 'company', 'email', 'website', 'industry', 'headcount', 'notes'],
       },
-      // Overview "Review Lead Ideas" button (assistant-lead-ideas.js) — replaces the social
-      // "Review Pending Items" shortcut (hidden here via hasReviewQueue:false). The assistant
+      // "Review Lead Ideas" (assistant-lead-ideas.js), in the Searches toolbar. The assistant
       // proposes lead-generation ideas; on approval it finds, scores and files leads and tags
       // a next-best-action owner (handled here vs handed off). Backed by lead-generation.ts.
       ideasReview: {
@@ -355,7 +371,7 @@
         },
       ],
       modules: {
-        hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false,
+        hasPostingSchedule: false, hasSocialStrategy: false,
         hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
         hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
         hasContentPublishing: false,
@@ -403,7 +419,7 @@
         },
       ],
       modules: {
-        hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false,
+        hasPostingSchedule: false, hasSocialStrategy: false,
         hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
         hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
         hasContentPublishing: false,
@@ -460,7 +476,7 @@
         },
       ],
       modules: {
-        hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false,
+        hasPostingSchedule: false, hasSocialStrategy: false,
         hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
         hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
         hasContentPublishing: false,
@@ -508,7 +524,7 @@
         },
       ],
       modules: {
-        hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false,
+        hasPostingSchedule: false, hasSocialStrategy: false,
         hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
         hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
         hasContentPublishing: false,

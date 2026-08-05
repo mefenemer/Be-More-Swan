@@ -22,7 +22,11 @@
 
     <!-- Right: assistant filter + view toggle -->
     <div class="flex items-center gap-3 flex-wrap">
-      <!-- Platform filter -->
+      <!-- Platform filter. Social/blog roles only: the per-assistant Calendar tab injects this
+           same fragment for EVERY role (assistant-calendar.js), so a Lead Generator — which
+           publishes nothing — was being offered an Instagram/YouTube filter over a grid that can
+           only ever hold chase reminders and completed task runs. calendar.js hides it when
+           initCalendar is told the assistant doesn't publish content. -->
       <select id="cal-platform-filter"
         class="text-sm font-semibold text-gray-700 border border-gray-200 rounded-lg px-3 py-1.5 bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-500">
         <!-- All six social platforms (src/config/platform-formats.ts) plus Blog. Threads and YouTube
@@ -61,8 +65,11 @@
   <!-- #4: per-assistant colour legend -->
   <div id="cal-legend" class="hidden bg-white border-b border-gray-100 px-4 sm:px-6 py-2 flex items-center gap-4 flex-wrap"></div>
 
-  <!-- Status legend: makes the posted / scheduled / overdue markers self-explanatory -->
-  <div class="bg-white border-b border-gray-100 px-4 sm:px-6 py-2 flex items-center gap-4 flex-wrap">
+  <!-- Status legend: makes the posted / scheduled / overdue markers self-explanatory.
+       "Posted (live)" and "Overdue" are publishing vocabulary — for a non-publishing role the grid
+       holds only 🗓 scheduled records and ✓ completed task runs, so calendar.js rewrites this strip
+       (_renderStatusLegend) rather than explaining markers that role can never show. -->
+  <div id="cal-status-legend" class="bg-white border-b border-gray-100 px-4 sm:px-6 py-2 flex items-center gap-4 flex-wrap">
     <span class="inline-flex items-center gap-1.5 text-xs text-gray-500">
       <span class="text-emerald-600 font-extrabold">✓</span> Posted (live)
     </span>

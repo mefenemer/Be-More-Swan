@@ -743,9 +743,18 @@
        assistant_records (netlify/functions/assistant-records.ts). -->
   <div id="maintab-datahub" class="main-tab-content">
 
-    <!-- Primary action bar (Epic 2.1; relocated here by issue #181) — the two most common
-         intents, front and centre on the assistant's workspace tab. -->
-    <div class="flex flex-col sm:flex-row gap-3 mb-6">
+    <!-- Primary action bar (Epic 2.1; relocated here by issue #181) — the role's one "do the thing"
+         intent, front and centre on its workspace tab.
+         It used to hold a second button, "Review Pending Items", which only activated the Review
+         tab already sitting in the tab strip above it; it is gone, along with the amber pending
+         count it carried (that count still reaches the Overview Autopilot card and the status pill
+         via _setPendingReviewCount). The Lead Generator's "Find New Leads" and "Review Lead Ideas"
+         were also here once and moved to the Searches toolbar (assistant-signal-inbox.js), which is
+         that role's landing tab and the top of its funnel — the Leads tab is downstream of both.
+         So a role can now end up with nothing here at all (the Lead Generator has no primary action
+         either), and _applyDashboardRegistry hides the bar itself in that case: an empty flex row
+         still spends its mb-6 above the table. -->
+    <div id="detail-action-bar" class="flex flex-col sm:flex-row gap-3 mb-6">
       <!-- Primary action — label + handler set per role by _applyDashboardRegistry (generate_post
            opens the post sheet for social; chat opens the assistant's chat intake for Data Hub roles).
            Issue #177: starts hidden — the label/onclick below are the Social Media Manager defaults,
@@ -755,16 +764,6 @@
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
         <span id="primary-action-label">Assign New Task</span>
       </button>
-      <button type="button" id="btn-review-pending" onclick="window._activateMainTab('review-queue')"
-        class="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-extrabold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-2xl shadow-sm transition-colors cursor-pointer">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-        Review Pending Items
-        <span id="review-pending-count" class="hidden ml-0.5 min-w-[1.5rem] h-6 px-1.5 inline-flex items-center justify-center rounded-full text-xs font-black bg-amber-100 text-amber-700"></span>
-      </button>
-      <!-- The Lead Generator's two "go and find me more" buttons — "Find New Leads" (outbound
-           discovery) and "Review Lead Ideas" — both used to sit here, in the Leads tab. They moved
-           to the Searches toolbar (assistant-signal-inbox.js), which is this role's landing tab and
-           the top of its funnel; the Leads tab is downstream of both actions. -->
     </div>
 
     <!-- "Ask your memory" — the conversational surface over the account graph (Phase 3 §5.5,

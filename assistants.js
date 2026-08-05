@@ -920,8 +920,8 @@ async function _detailRqRenderGroups(statusKey) {
         const colBadge = document.getElementById('detail-rq-col-count-review');
         if (colBadge) { colBadge.textContent = groupedCount || ''; colBadge.classList.toggle('hidden', !groupedCount); }
         _setDetailRqTabBadge(groupedCount);
-        // Keep the Overview action-bar badge + status pill in sync as the queue changes (e.g. after approving).
-        window._setReviewPendingBadge?.(groupedCount);
+        // Keep the Autopilot card + status pill in sync as the queue changes (e.g. after approving).
+        window._setPendingReviewCount?.(groupedCount);
         window._updateOpSignals?.({ pendingReview: groupedCount });
     }
 
@@ -1418,7 +1418,7 @@ async function _detailRqRenderRecords(statusKey) {
         const colBadge = document.getElementById('detail-rq-col-count-review');
         if (colBadge) { colBadge.textContent = records.length || ''; colBadge.classList.toggle('hidden', !records.length); }
         _setDetailRqTabBadge(records.length);
-        window._setReviewPendingBadge?.(records.length);
+        window._setPendingReviewCount?.(records.length);
         window._updateOpSignals?.({ pendingReview: records.length });
     }
 
@@ -1746,7 +1746,7 @@ async function _detailRqRenderBlog(statusKey) {
         const colBadge = document.getElementById('detail-rq-col-count-review');
         if (colBadge) { colBadge.textContent = posts.length || ''; colBadge.classList.toggle('hidden', !posts.length); }
         _setDetailRqTabBadge(posts.length);
-        window._setReviewPendingBadge?.(posts.length);
+        window._setPendingReviewCount?.(posts.length);
         window._updateOpSignals?.({ pendingReview: posts.length });
     }
 
@@ -2124,16 +2124,16 @@ window._updateOpSignals = function(patch) {
     window._renderStatusPill();
 };
 
-// Action bar (Epic 2.1): reflect the pending-review count on the "Review Pending Items"
-// button — hidden at 0, amber pill otherwise. Replaces the retired amber strip.
-window._setReviewPendingBadge = function(count) {
-    const badge = document.getElementById('review-pending-count');
-    if (badge) {
-        badge.textContent = count || '';
-        badge.classList.toggle('hidden', !count);
-    }
-    // Keep the Autopilot card's "waiting for your review" number in sync — it's fed by the same
-    // pending-review count computed on load and after every approval/rejection (no extra fetch).
+// Fan the pending-review count out to the surfaces that display it. Called on load and after
+// every approval/rejection, from each of the queue loaders (posts / records / grouped), so those
+// callers never repeat the plumbing or pay for a second fetch.
+//
+// Was _setReviewPendingBadge: it drove the amber pill on the action bar's "Review Pending Items"
+// button, and kept the Autopilot card in step as a side errand. That button is gone — it only ever
+// activated the Review tab that sits directly above it — and the side errand was the real work all
+// along, so the name now says so.
+window._setPendingReviewCount = function(count) {
+    // The Overview Autopilot card's "waiting for your review" number.
     _syncAutopilotPending(count);
 };
 
@@ -2307,7 +2307,7 @@ window._renderAutopilotCard = function(data) {
         // and "Next post", so the card is never left showing the "—" placeholders.
         _loadBlogAutopilotStats(window._currentAssistantId, s.active);
     } else {
-        // Reflect whatever the pending-review signal last computed (kept in sync via _setReviewPendingBadge).
+        // Reflect whatever the pending-review signal last computed (kept in sync via _setPendingReviewCount).
         _syncAutopilotPending(window._detailOpSignals?.pendingReview || 0);
     }
 };
@@ -2901,23 +2901,21 @@ function _applyDashboardRegistry(data) {
     // Role-chosen landing tab (SMM opens on its "Posts" pipeline); null → HTML default (Data Hub).
     window._detailDefaultMainTab = cfg.defaultMainTab || null;
     toggle('maintab-btn-review-queue', true);
-    // Social/blog retire the Data Hub tab (cfg.hideDataHub) — and the action bar with the
-    // "Create a Post" / "Review Pending Items" buttons lives INSIDE that tab's panel. Hiding the
-    // tab button alone left the panel itself visible whenever _activateMainTab hadn't run yet, so
-    // the pair leaked in under the tab strip duplicating the Posts tab and its own header button.
-    // Gate every part of that panel on the same flag.
+    // Social/blog retire the Data Hub tab (cfg.hideDataHub) — and the action bar with the primary
+    // action ("Create a Post") lives INSIDE that tab's panel. Hiding the tab button alone left the
+    // panel itself visible whenever _activateMainTab hadn't run yet, so it leaked in under the tab
+    // strip duplicating the Posts tab and its own header button. Gate every part of it on the flag.
     const showDataHub = !cfg.hideDataHub;
     toggle('maintab-datahub', showDataHub);
-    toggleBtn('btn-review-pending', showDataHub);
+    // Review Queue tab header/columns adapt to the queue kind. Records queues (data-hub roles)
+    // approve/schedule records — there's no "Posted" state and no post-generation button here.
+    const rqIsRecords = window._detailReviewQueue.kind === 'records';
     // Per-role tab label override (e.g. meeting note-taker → "Inbox"); defaults to "Review".
     // The tab button's badge span must survive, so only its leading text node is rewritten.
     const rqLabel = window._detailReviewQueue.label || 'Review';
     setText('detail-rq-heading', rqLabel);
     const rqTabBtn = document.getElementById('maintab-btn-review-queue');
     if (rqTabBtn && rqTabBtn.firstChild && rqTabBtn.firstChild.nodeType === 3) rqTabBtn.firstChild.nodeValue = rqLabel + ' ';
-    // Review Queue tab header/columns adapt to the queue kind. Records queues (data-hub roles)
-    // approve/schedule records — there's no "Posted" state and no post-generation button here.
-    const rqIsRecords = window._detailReviewQueue.kind === 'records';
     const rqIsBlog = window._detailReviewQueue.source === 'blog_posts';
     // A role can override the subtitle from the registry (reviewQueue.subtitle) when the generic
     // copy would misdescribe what its Approve button actually does.
@@ -3008,7 +3006,22 @@ function _applyDashboardRegistry(data) {
     // reveal it only now that the role-specific label/handler below are actually being applied.
     // Roles with no Data Hub tab (social/blog) never reveal it at all: the panel it sits in is
     // hidden for them, and the Posts/Blogs tab header already carries the same "Create a Post".
-    toggleBtn('btn-primary-action', showDataHub);
+    //
+    // A role may also decline the button outright by omitting cfg.primaryAction (the Lead
+    // Generator: its work arrives from the Searches tab and its scoring is automatic, so a manual
+    // "do the thing" button had nothing to trigger). That MUST hide it rather than fall through —
+    // the branches below only relabel/rebind when they have something to apply, so revealing it
+    // with no config would ship the markup's SMM defaults: an "Assign New Task" button wired to
+    // the post-generation sheet on a role that cannot post.
+    const showPrimaryAction = showDataHub && (!!pa || data.roleKey === 'blog_writer');
+    toggleBtn('btn-primary-action', showPrimaryAction);
+    // This is now the bar's only child, so the bar lives and dies with it — drop it rather than
+    // leave an empty row holding open its bottom margin above the records table. toggleBtn, not
+    // toggle: the bar carries `flex`, and while `.hidden` currently wins over `.flex` in the
+    // compiled style.css it loses to `.inline-flex` — which side of that line a utility lands on is
+    // an artefact of build order, so force the display rather than bet the layout on it surviving
+    // the next CSS rebuild.
+    toggleBtn('detail-action-bar', showPrimaryAction);
     if (data.roleKey === 'blog_writer') {
         if (paLabel) paLabel.textContent = 'Write Blog Post';
         if (paBtn) paBtn.onclick = () => { if (window.openBlogStudio) window.openBlogStudio({ assistantId: data.id }); };
@@ -4403,8 +4416,7 @@ async function _prefetchDetailRqBadge(assistantId) {
             count = ((await res.json()).drafts || []).length;
         }
         _setDetailRqTabBadge(count);
-        // Action bar (Epic 2.1): "Review Pending Items" count badge — amber when there's work waiting.
-        window._setReviewPendingBadge?.(count);
+        window._setPendingReviewCount?.(count);
         // Feed the operational status pill (Epic 1 AC1.1.2): pending drafts → "Awaiting Human Review".
         window._updateOpSignals?.({ pendingReview: count });
     } catch { /* non-critical */ }

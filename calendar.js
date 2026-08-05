@@ -173,6 +173,12 @@ let _platformFilter  = 'all';    // 'all' | 'facebook' | 'instagram' | 'linkedin
 // When the calendar is embedded in the assistant-detail Calendar tab it is LOCKED to one
 // assistant: the assistant filter is preset + hidden, and the colour legend is suppressed.
 let _lockedAssistant = false;
+// Does the locked assistant PUBLISH? Social/blog roles post to platforms; the records roles
+// (Lead Generator, AR Clerk, Support, …) never do — their calendar holds scheduled records and
+// completed task runs only. False strips the publishing-only chrome: the platform filter and the
+// posted/overdue status legend. Always true for the global Content Calendar page, which spans
+// every assistant. See _renderStatusLegend + _renderAssistantControls.
+let _publishesContent = true;
 // Scheduled Data Hub records (leads/invoices/tickets/… with approval_status='scheduled') for the
 // locked assistant — only fetched in the assistant Calendar tab, rendered as timeline chips.
 let _scheduledRecords = [];
@@ -201,14 +207,20 @@ function _matchesPlatformFilter(platform) {
 // ── Init ──────────────────────────────────────────────────────────
 // opts.assistantId (optional) — scope the calendar to a single assistant (the assistant-detail
 // Calendar tab). Omitted → the global, all-assistants Content Calendar page.
+// opts.publishesContent (optional, default true) — false for roles that publish nothing, which
+// removes the platform filter and rewrites the status legend. Only meaningful alongside
+// assistantId: the global page always spans publishing and non-publishing assistants at once.
 window.initCalendar = async function (opts = {}) {
     if (opts.assistantId != null) {
         _assistantFilter = String(opts.assistantId);
         _lockedAssistant = true;
+        _publishesContent = opts.publishesContent !== false;
     } else {
         _assistantFilter = 'all';
         _lockedAssistant = false;
+        _publishesContent = true;
     }
+    _renderStatusLegend();
     document.getElementById('cal-btn-prev')?.addEventListener('click', _navPrev);
     document.getElementById('cal-btn-next')?.addEventListener('click', _navNext);
     document.getElementById('cal-btn-today')?.addEventListener('click', _navToday);
@@ -349,12 +361,21 @@ function _renderAssistantControls() {
         }
     }
 
+    // Platform filter — publishing roles only. A non-publishing assistant has no posts to filter,
+    // so the dropdown offered Instagram/YouTube/Blog over a grid that can only hold scheduled
+    // records and completed task runs. Hidden the same way as the locked assistant picker above;
+    // the filter is also reset to 'all' so a stale selection made on the global page can't travel
+    // in and silently filter this grid down to nothing with no visible control to undo it.
     const psel = document.getElementById('cal-platform-filter');
-    if (psel && !psel.dataset.bound) {
-        psel.dataset.bound = '1';
-        psel.addEventListener('change', () => { _platformFilter = psel.value; _render(); });
+    if (!_publishesContent) _platformFilter = 'all';
+    if (psel) {
+        psel.classList.toggle('hidden', !_publishesContent);
+        if (!psel.dataset.bound) {
+            psel.dataset.bound = '1';
+            psel.addEventListener('change', () => { _platformFilter = psel.value; _render(); });
+        }
+        psel.value = _platformFilter;
     }
-    if (psel) psel.value = _platformFilter;
 
     const legend = document.getElementById('cal-legend');
     if (legend) {
@@ -364,6 +385,30 @@ function _renderAssistantControls() {
             </span>`).join('');
         legend.classList.toggle('hidden', _lockedAssistant || _assistants.length === 0);
     }
+
+    _renderStatusLegend();
+}
+
+// Status legend strip. The publishing variant (posted / scheduled / overdue) is the markup's
+// default and is what the global Content Calendar and every social/blog assistant sees. A
+// non-publishing assistant gets the two markers its grid can actually contain — the yellow 🗓
+// chip (_recordChip: a scheduled record, e.g. a lead chase reminder) and the ✓ chip
+// (_activityChip: a completed task run). "Posted (live)" and "Overdue" are dropped: nothing on
+// this grid is ever published, and _recordChip has no overdue state to explain.
+//
+// Written in BOTH directions rather than only rewriting the non-publishing case, so it stays
+// correct if it is ever called twice against the same (already-rewritten) node.
+function _renderStatusLegend() {
+    const strip = document.getElementById('cal-status-legend');
+    if (!strip) return;
+    const item = (marker, label) =>
+        `<span class="inline-flex items-center gap-1.5 text-xs text-gray-500">${marker} ${label}</span>`;
+    strip.innerHTML = _publishesContent
+        ? item('<span class="text-emerald-600 font-extrabold">✓</span>', 'Posted (live)') +
+          item('<span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>', 'Scheduled') +
+          item('<span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>', 'Overdue')
+        : item('<span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>', 'Scheduled') +
+          item('<span class="text-gray-500 font-extrabold">✓</span>', 'Completed');
 }
 
 function _getDateRange() {
