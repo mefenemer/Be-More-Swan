@@ -14,7 +14,7 @@ import { Handler } from '@netlify/functions';
 import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, masterAssistants } from '../../db/schema';
-import { enqueueScheduleGapFill } from '../../src/utils/schedule-gap-fill';
+import { enqueueScheduleGapFill, GAP_FILL_ATTENTION_REASONS } from '../../src/utils/schedule-gap-fill';
 import { SMM_ROLE_KEYS } from '../../src/constants/roles';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -46,7 +46,18 @@ export default withLambda(async (event) => {
 
     const now = new Date();
     let jobsEnqueued = 0;
-    const skipped: Record<string, number> = { on_demand: 0, no_blueprint: 0, blocking_gaps: 0, fully_covered: 0, empty_library_skipped: 0 };
+    // Every reason enqueueScheduleGapFill can return. The tally used to ignore any reason missing
+    // from this object (`skipped[result.reason] !== undefined`), so adding a reason to the helper
+    // without adding it here silently dropped it — the counter would read all-zeroes and look
+    // healthy. Keep this list exhaustive; the test asserts it matches the union.
+    const skipped: Record<string, number> = {
+        on_demand: 0, unrecognised_cadence: 0, no_slot_in_horizon: 0,
+        no_blueprint: 0, blocking_gaps: 0, fully_covered: 0, empty_library_skipped: 0,
+    };
+    // Assistants that will never draft again until a human changes something. The user gets an
+    // in-app notification (see notifyUnreadableCadence); this is the operator's copy — a run that
+    // quietly does nothing for a tenant should be legible in the invocation log without a DB query.
+    const needsAttention: { assistantId: number; organisationId: number; reason: string }[] = [];
 
     for (const assistant of smmAssistants) {
         try {
@@ -54,6 +65,18 @@ export default withLambda(async (event) => {
             jobsEnqueued += result.enqueued;
             if (result.reason && result.reason !== 'ok' && skipped[result.reason] !== undefined) {
                 skipped[result.reason]++;
+            }
+            if (result.reason && GAP_FILL_ATTENTION_REASONS.has(result.reason)) {
+                needsAttention.push({
+                    assistantId: assistant.id,
+                    organisationId: assistant.organisationId,
+                    reason: result.reason,
+                });
+                console.warn(
+                    `draft-horizon-fill: assistant ${assistant.id} (org ${assistant.organisationId}) ` +
+                    `enqueued nothing — ${result.reason}. It has drafted no scheduled posts and will not ` +
+                    `until its posting_frequency is set to a value the cadence parser understands.`,
+                );
             }
         } catch (err) {
             console.error(`draft-horizon-fill: assistant ${assistant.id} failed`, err);
@@ -63,6 +86,8 @@ export default withLambda(async (event) => {
     return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ran: true, assistantsChecked: smmAssistants.length, jobsEnqueued, skipped }),
+        body: JSON.stringify({
+            ran: true, assistantsChecked: smmAssistants.length, jobsEnqueued, skipped, needsAttention,
+        }),
     };
 });

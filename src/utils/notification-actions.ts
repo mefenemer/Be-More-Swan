@@ -77,6 +77,10 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     post_missed: 'suggested_action', post_generation_failed: 'suggested_action',
     // Empty-Library Draft Fallback (off) — scheduled drafts were skipped; user must upload media.
     content_library_empty: 'suggested_action',
+    // The assistant's stored posting_frequency cannot be parsed, so autopilot has never run. Only a
+    // human can fix the stored value, and until they do the assistant drafts nothing at all — this
+    // belongs in "Action required", not Updates.
+    autopilot_schedule_unreadable: 'suggested_action',
     // US 5.1 — a published post is losing search traffic and the user is asked to refresh it.
     // Was uncategorised (→ 'informational'), which filed a do-something alert under Updates.
     blog_content_decay: 'suggested_action',

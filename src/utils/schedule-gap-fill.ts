@@ -13,7 +13,7 @@ import { randomUUID } from 'crypto';
 import type { getDb } from '../../db/client';
 import { aiBlueprints, scheduledPosts, contentGenerationJobs, contentAssets, notifications } from '../../db/schema';
 import { createNotification } from './notify';
-import { resolvePostingSchedule, computeScheduleSlots } from '../config/posting-cadence';
+import { resolvePostingSchedule, computeScheduleSlots, readCadence } from '../config/posting-cadence';
 import { assembleBlueprint } from './blueprint';
 import { resolveConnectedDraftPlatforms } from './auto-publish-runtime';
 import { resolveLiveSocialConnections } from './live-social-connections';
@@ -36,9 +36,26 @@ export interface GapFillAssistant {
 
 export interface GapFillResult {
     enqueued: number;
-    /** Why nothing (or fewer) jobs were enqueued — useful for cron telemetry. */
-    reason?: 'on_demand' | 'no_blueprint' | 'blocking_gaps' | 'fully_covered' | 'empty_library_skipped' | 'ok';
+    /**
+     * Why nothing (or fewer) jobs were enqueued — useful for cron telemetry.
+     *
+     * `on_demand` used to cover every empty slot list, which made the counter a lie in the one case
+     * that mattered: an assistant the user believes is on a schedule, whose posting_frequency we
+     * simply failed to parse, was tallied next to the ones deliberately switched off and thrown
+     * away. That is how an assistant went from hire to a whole month without drafting a single post
+     * while its dashboard reported autopilot ACTIVE (prod org 40, found 2026-08-05). The three
+     * states are now distinct, because only one of them is a problem:
+     *   on_demand           — the user turned scheduling off. Correct. Silent.
+     *   unrecognised_cadence— we cannot read what they set. Broken, and nobody would ever find out.
+     *   no_slot_in_horizon  — readable and scheduled, but no slot falls inside the horizon (a short
+     *                         horizon and a weekday that isn't in it). Benign; resolves itself.
+     */
+    reason?: 'on_demand' | 'unrecognised_cadence' | 'no_slot_in_horizon' | 'no_blueprint'
+        | 'blocking_gaps' | 'fully_covered' | 'empty_library_skipped' | 'ok';
 }
+
+/** The reasons that mean a human has to change something before this assistant will ever draft. */
+export const GAP_FILL_ATTENTION_REASONS: ReadonlySet<string> = new Set(['unrecognised_cadence']);
 
 const UTC_DAY = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -57,7 +74,17 @@ export async function enqueueScheduleGapFill(
     const horizonDays = assistant.draftHorizonDays ?? 7;
 
     const slots = computeScheduleSlots({ schedule, horizonDays, now });
-    if (!slots.length) return { enqueued: 0, reason: 'on_demand' };
+    if (!slots.length) {
+        // Ask the cadence parser WHY there are no slots rather than assuming the charitable answer.
+        // readCadence is the same function the Autopilot card reads, so the card and the cron can
+        // no longer disagree about whether this assistant is running.
+        const { kind } = readCadence(schedule.frequency);
+        if (kind === 'unrecognised') {
+            await notifyUnreadableCadence(db, assistant, schedule.frequency);
+            return { enqueued: 0, reason: 'unrecognised_cadence' };
+        }
+        return { enqueued: 0, reason: kind === 'on_demand' ? 'on_demand' : 'no_slot_in_horizon' };
+    }
 
     // Resolve the latest blueprint; skip if it has blocking gaps (mirror generate-post).
     let [bp] = await db
@@ -349,6 +376,54 @@ async function orgHasAvailableManualAsset(db: Db, orgId: number): Promise<boolea
         ))
         .limit(1);
     return !!row;
+}
+
+/**
+ * Tell the user their assistant is not drafting, when the reason is that we cannot read the
+ * posting schedule they set.
+ *
+ * This is the alert for the failure with no other symptom. A skipped gap-fill produced a counter in
+ * a cron response nobody reads; the Review Queue just stayed empty, and the Autopilot card (before
+ * it learned to ask readCadence) actively said ACTIVE. Prod org 40 sat like that from hire until a
+ * human happened to ask why — 9 posts in a month, none of them scheduled.
+ *
+ * Deliberately NOT sent for `on_demand`: that user switched scheduling off and does not need
+ * telling. Only an unreadable value gets here, which is always a bug on our side — the wizard
+ * accepted free text — and always needs a human to fix the stored value.
+ *
+ * Deduped to once per 3 days per assistant, matching notifyEmptyLibrarySkip. Load-bearing: the cron
+ * is hourly and a broken cadence does not self-heal, so without this the user is nagged 24x a day
+ * forever.
+ */
+async function notifyUnreadableCadence(db: Db, assistant: GapFillAssistant, frequency: unknown): Promise<void> {
+    try {
+        const [recent] = await db
+            .select({ id: notifications.id })
+            .from(notifications)
+            .where(and(
+                eq(notifications.userId, assistant.userId),
+                eq(notifications.type, 'autopilot_schedule_unreadable'),
+                sql`${notifications.metadata}->>'assistantId' = ${String(assistant.id)}`,
+                sql`${notifications.createdAt} > now() - interval '3 days'`,
+            ))
+            .limit(1);
+        if (recent) return;
+
+        // The stored value is quoted back at the user deliberately — "we cannot read your schedule"
+        // is not actionable without showing them WHICH value we mean. It is user-supplied text, so
+        // it reaches the template as a merge variable (escaped on render — see notify.ts) rather
+        // than being concatenated into the copy.
+        const stored = String(frequency ?? '').trim();
+        await createNotification(db, 'autopilot_schedule_unreadable', {
+            userId: assistant.userId,
+            context: { assistant: { name: assistant.name }, schedule: { frequency: stored } },
+            metadata: { assistantId: assistant.id, reason: 'unrecognised_cadence', frequency: stored },
+            assistantId: assistant.id,
+        });
+    } catch (err) {
+        // Never let telemetry break the cron: the other assistants in this tick still need filling.
+        console.error(`notifyUnreadableCadence: assistant ${assistant.id} failed`, err);
+    }
 }
 
 /**

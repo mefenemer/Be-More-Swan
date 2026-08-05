@@ -516,6 +516,15 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [v('batch.post_count', 'Post count phrase', '3 planned posts')],
     },
     {
+        templateKey: 'autopilot_schedule_unreadable',
+        name: 'Autopilot schedule unreadable',
+        category: 'Content',
+        type: 'autopilot_schedule_unreadable',
+        title: '{{assistant.name}} is not drafting — check the posting schedule',
+        message: '{{assistant.name}} has a posting schedule we cannot read ("{{schedule.frequency}}"), so it has not been drafting anything. Open the assistant\'s settings and pick a posting frequency from the list to start it again.',
+        variables: [ASSISTANT_NAME, v('schedule.frequency', 'Stored posting frequency', 'Every Monday, Tuesday, Wednesday, and Thursday at 8 am.')],
+    },
+    {
         templateKey: 'content_library_empty',
         name: 'Content library empty',
         category: 'Content',
