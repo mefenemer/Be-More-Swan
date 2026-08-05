@@ -34,6 +34,24 @@
   to   = "/faq.html"
   status = 301
 
+# Agency attribution badge deep links. src/utils/attribution.ts builds badge URLs as
+# /powered-by/<org-slug> and workspace.html shows the customer that exact URL to copy — but
+# nothing routed it. There is no /powered-by/ directory, so every badge issued to every customer
+# resolved to Netlify's 404 and the co-branded page was unreachable in production.
+#
+# MUST be status 200 (rewrite), not 301. powered-by.html reads the slug off the last path segment
+# of window.location.pathname, and only a rewrite leaves the browser's URL as /powered-by/<slug>;
+# a 301 to /powered-by.html would discard the slug and land every visitor on the generic
+# explainer — the page would load, look fine, and silently lose the attribution.
+#
+# Placement is safe: Netlify matches top-to-bottom and nothing above this matches /powered-by/*.
+# The X-Robots-Tag rule for "/powered-by*" further down already covers these deep links, so the
+# per-agency variants stay out of the index.
+[[redirects]]
+  from = "/powered-by/*"
+  to   = "/powered-by.html"
+  status = 200
+
 # Phase 1 External Integrations: pretty /api/* routes for the OAuth router and the
 # generic action-sync endpoint. Rewrites (status 200) — the original path survives in
 # event.rawUrl, which oauth-integrations.ts parses for :provider/:action; provider
