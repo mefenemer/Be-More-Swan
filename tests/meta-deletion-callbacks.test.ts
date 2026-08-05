@@ -137,4 +137,63 @@ test('a failed /me lookup does not abort the connect', () => {
     assert.ok(!/return \{ statusCode/.test(block), 'a /me failure must not short-circuit the OAuth callback');
 });
 
+// ── delete ≠ uninstall ───────────────────────────────────────────────────────────────────────
+// Until 2026-08-05 both Meta actions took the same soft-revoke path: the token was deleted but
+// the system_connections row survived, still carrying external_user_id (the Page / IG business
+// account id), the cached follower counts and fbUserId in metadata. Meanwhile the status page
+// Meta links the person to asserted that nothing was retained. A deletion request that does not
+// delete is the one failure mode of this file that a reviewer would treat as a misrepresentation,
+// and nothing about the code shape makes it obvious — hence these.
+test('the facebook revoke distinguishes a deletion request from an uninstall', () => {
+    assert.ok(
+        /revokeMetaConnections\(\s*fbUserId: string,\s*mode: 'revoke' \| 'erase'/.test(callbacks),
+        'revokeMetaConnections must take an explicit mode — the two callbacks are different requests',
+    );
+    assert.ok(
+        /action === 'delete' \? 'erase' : 'revoke'/.test(callbacks),
+        "only the 'delete' action may erase; 'uninstall' withdraws authorisation and keeps the row",
+    );
+});
+
+test("a facebook data-deletion request removes the connection row itself", () => {
+    const erase = callbacks.match(/if \(mode === 'revoke'\)[\s\S]*?\n\}/)?.[0] ?? '';
+    assert.ok(erase, 'could not locate the erase branch of revokeMetaConnections');
+    assert.ok(
+        /\.delete\(systemConnections\)/.test(erase),
+        'erase must DELETE the row — an UPDATE to status=revoked leaves every Meta identifier in place',
+    );
+    for (const child of ['postInsights', 'webhookEvents']) {
+        assert.ok(
+            new RegExp(`\\.delete\\(${child}\\)`).test(erase),
+            `${child}.connectionId is ON DELETE SET NULL, so erase must remove it explicitly or the Meta-derived rows are orphaned, not deleted`,
+        );
+    }
+    assert.ok(
+        erase.indexOf('.delete(postInsights)') < erase.indexOf('.delete(systemConnections)'),
+        'children must be deleted before the connection row they point at',
+    );
+});
+
+test('erase never touches the append-only audit tables', () => {
+    // db/audit-log-immutability.sql revokes UPDATE/DELETE and attaches a forbid_mutation()
+    // trigger; a DELETE against any of these raises rather than quietly doing nothing.
+    for (const immutable of ['auditLogs', 'adminAuditLog', 'gdprErasureLog', 'dpaAcceptances']) {
+        assert.ok(
+            !new RegExp(`\\.delete\\(${immutable}\\)`).test(callbacks),
+            `${immutable} is immutable by DDL — deleting from it throws`,
+        );
+    }
+});
+
+test('the deletion-status page does not overstate what was removed', () => {
+    assert.ok(
+        !/No further \$\{label\} data is retained/.test(callbacks),
+        'the old absolute claim was false: published posts and the erasure record both survive',
+    );
+    assert.ok(
+        /immutable record that this deletion took place/.test(callbacks),
+        'the status page must disclose the audit record it keeps',
+    );
+});
+
 console.log(`\n${passed} passed\n`);

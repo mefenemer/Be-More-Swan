@@ -392,16 +392,17 @@
     const close = () => {
       overlay.remove();
       state.overlay = null;
+      // Always re-read the Signal Inbox, not just when a campaign was CREATED: starting, pausing,
+      // archiving or renaming a search all change what that tab says about it, and none of them
+      // set the flag below. A user who started their draft in here and closed the modal was left
+      // staring at "Not started". One cheap request beats a surface that lies.
+      window.AssistantSignalInbox?.refresh?.();
       if (window._leadIdeasDidAddLeads) {
         window._leadIdeasDidAddLeads = false;
         window.AssistantDataHub?.init?.({
           hub: window.AssistantDashboardRegistry?.get('lead_qualifier')?.hubTab,
           assistantId: state.assistantId,
         });
-        // The modal can now be opened from the Signal Inbox too, so refresh that surface on the
-        // same signal — otherwise a user who ran a search from there closes the modal onto the
-        // stale inbox they opened it from.
-        window.AssistantSignalInbox?.refresh?.();
       }
     };
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });

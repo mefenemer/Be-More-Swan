@@ -68,10 +68,19 @@
 
             <section>
                 <h2 class="text-xl font-bold text-gray-900">5. What happens after deletion</h2>
+                <p>What happens depends on which of the routes above you used, because disconnecting an account and asking for its data to be deleted are not the same request.</p>
+                <p class="mt-2"><strong>If you disconnected inside Be More Swan (section 2), or removed the app on the platform's side without asking for deletion:</strong></p>
                 <ul class="list-disc pl-6 space-y-1 mt-2">
                     <li>The encrypted access token is deleted. We can no longer reach the platform on your behalf, and the connection is marked revoked so nothing uses it again.</li>
-                    <li>For Threads, the connection record itself is removed along with the token.</li>
-                    <li>For the other platforms, a revoked connection record is kept — including the account identifier the platform gave us and any figures we had already cached. If you want those erased too, ask us using the email route in section 4, or delete your whole account (section 6).</li>
+                    <li>A revoked connection record is kept — including the account identifier the platform gave us and any figures we had already cached — so that your publishing history still makes sense and you can reconnect later. If you want that erased too, use either of the next two routes.</li>
+                </ul>
+                <p class="mt-2"><strong>If you made a data deletion request (section 3 on the platform, or section 4 by email):</strong></p>
+                <ul class="list-disc pl-6 space-y-1 mt-2">
+                    <li>The token is deleted and the connection record itself is removed, along with the account identifiers we obtained from that platform, the follower and per-post figures we had cached, and the event payloads the platform had sent us.</li>
+                    <li>For Facebook and Instagram this happens automatically the moment the platform notifies us, and the confirmation page it shows you sets out exactly what was removed.</li>
+                </ul>
+                <p class="mt-2"><strong>In both cases:</strong></p>
+                <ul class="list-disc pl-6 space-y-1 mt-2">
                     <li>Posts that were already published to your account stay live on the platform. Only you can delete those, from the platform itself.</li>
                     <li>Drafts and content held in your Be More Swan workspace are unaffected, since they are yours rather than the platform's. Delete them in the app, or ask us to remove your whole account.</li>
                     <li>We retain audit records of the deletion itself, and any records we are legally required to keep, such as billing history.</li>

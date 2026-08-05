@@ -17,10 +17,11 @@
 // when false the inbox is still fully populated from saved searches. Plan §1.6.
 
 import { Handler } from '@netlify/functions';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
-    aiAssistants, assistantRecords, discoveredLeads, discoveryCampaigns, masterAssistants,
+    aiAssistants, assistantRecords, discoveredLeads, discoveryCampaigns, discoveryJobs,
+    discoverySchedules, masterAssistants,
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { recordEvent } from '../../src/utils/revenue-ledger';
@@ -226,14 +227,51 @@ export default withLambda(async (event) => {
                 ? encodeCursor({ occurredAt: last.occurredAt, id: last.id })
                 : null;
 
-            // The saved-search sub-filter's options.
+            // The saved-search sub-filter's options — and, since Searches is the landing tab, the
+            // state of each search. The chips alone answered "which search", never "is it running,
+            // did it ever run, and what am I meant to do next": a chat-proposed search lands here
+            // as a DRAFT that has spent nothing and found nothing, and the tab rendered that
+            // identically to a live search that had simply found nothing yet.
+            //
+            // Archived campaigns are excluded, matching discovery-campaigns.ts `list`. An archived
+            // search offers no action and cannot run; leaving it as a chip is a dead control. Its
+            // already-discovered signals still show under "All" — archiving stops a campaign, it
+            // does not retract what it found.
             const searches = await db
-                .select({ id: discoveryCampaigns.id, name: discoveryCampaigns.name, idea: discoveryCampaigns.idea, status: discoveryCampaigns.status })
+                .select({
+                    id: discoveryCampaigns.id,
+                    name: discoveryCampaigns.name,
+                    idea: discoveryCampaigns.idea,
+                    status: discoveryCampaigns.status,
+                    cadence: discoverySchedules.cadence,
+                    // Latest run first, matching the campaign list's subquery exactly — the two
+                    // surfaces show the same search and must not disagree about its state.
+                    latestJobStatus: sql<string | null>`(
+                        SELECT j.status FROM discovery_jobs j
+                        WHERE j.campaign_id = ${discoveryCampaigns.id}
+                        ORDER BY j.created_at DESC LIMIT 1
+                    )`,
+                    // When the last run REACHED A CONCLUSION, not when the newest job was created:
+                    // "last run 3 minutes ago" next to a queued job that hasn't started yet is a lie.
+                    lastFinishedAt: sql<string | null>`(
+                        SELECT j.updated_at FROM discovery_jobs j
+                        WHERE j.campaign_id = ${discoveryCampaigns.id}
+                          AND j.status IN ('completed','failed')
+                        ORDER BY j.created_at DESC LIMIT 1
+                    )`,
+                    leadsFound: sql<number>`(
+                        SELECT COALESCE(SUM(j.leads_found), 0)::int FROM discovery_jobs j
+                        WHERE j.campaign_id = ${discoveryCampaigns.id}
+                    )`,
+                })
                 .from(discoveryCampaigns)
+                .leftJoin(discoverySchedules, eq(discoverySchedules.campaignId, discoveryCampaigns.id))
                 .where(and(
                     eq(discoveryCampaigns.organisationId, orgId),
                     eq(discoveryCampaigns.aiAssistantId, assistantId),
-                ));
+                    ne(discoveryCampaigns.status, 'archived'),
+                ))
+                .orderBy(desc(discoveryCampaigns.createdAt));
 
             // Does this org also run a Social Media Assistant? Drives whether the client offers the
             // social feed at all. Absent is the NORMAL case, not an error state — see plan §4.4a.
@@ -258,6 +296,10 @@ export default withLambda(async (event) => {
                     id: s.id,
                     label: savedSearchLabel(s.name, s.idea),
                     status: s.status,
+                    cadence: s.cadence ?? 'one_off',
+                    latestJobStatus: s.latestJobStatus ?? null,
+                    lastFinishedAt: s.lastFinishedAt ? new Date(s.lastFinishedAt).toISOString() : null,
+                    leadsFound: Number(s.leadsFound ?? 0),
                 })),
             });
         }

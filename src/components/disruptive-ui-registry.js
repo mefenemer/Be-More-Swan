@@ -804,8 +804,8 @@
               // been renamed once already ("Signal Inbox" → "Searches"). Pinned by
               // tests/lead-prompt-surfaces.test.ts so this copy cannot drift off the tab silently.
               say(deduped
-                ? 'Already saved — find it under Find New Leads in your Searches tab.'
-                : 'Saved as a draft — open Find New Leads in your Searches tab to start it.');
+                ? 'Already saved — it is in your Searches tab.'
+                : 'Saved as a draft — press "Start search" on it in your Searches tab.');
               return;
             }
             setBusy(false);

@@ -313,7 +313,8 @@
             <li class="flex items-start gap-2"><span class="text-emerald-600 mt-0.5">✓</span><span><strong>After account deletion:</strong> Personal data is permanently deleted within <strong>30 days</strong> of account closure. An anonymised erasure record is retained for compliance purposes.</span></li>
             <li class="flex items-start gap-2"><span class="text-emerald-600 mt-0.5">✓</span><span><strong>Archived assistants:</strong> Kept for <strong>14 days</strong> so you can reinstate them, then permanently deleted with their associated data.</span></li>
             <li class="flex items-start gap-2"><span class="text-emerald-600 mt-0.5">✓</span><span><strong>Rejected and abandoned content:</strong> Rejected posts, unused generated media and incomplete setups are automatically cleared after <strong>30 days</strong>.</span></li>
-            <li class="flex items-start gap-2"><span class="text-emerald-600 mt-0.5">✓</span><span><strong>Audit logs:</strong> Security and compliance audit records are retained for the life of the account and removed as part of an erasure request.</span></li>
+            <li class="flex items-start gap-2"><span class="text-emerald-600 mt-0.5">✓</span><span><strong>Integration API call logs:</strong> Retained for <strong>90 days</strong>, then automatically purged.</span></li>
+            <li class="flex items-start gap-2"><span class="text-emerald-600 mt-0.5">✓</span><span><strong>Audit records:</strong> Audit logs, DPA acceptances and erasure records are <strong>append-only and immutable</strong> — the database revokes UPDATE and DELETE on them and a trigger blocks any attempt, so they cannot be altered or removed by anyone, including us. This is deliberate: they are the evidence that the other rules above were followed.</span></li>
         </ul>
     </section>
 

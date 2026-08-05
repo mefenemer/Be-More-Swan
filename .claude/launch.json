@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-signal-inbox",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4262",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/04707cf6-9115-4031-8bfc-ffec03e7315b/scratchpad/siharness"
+      ],
+      "port": 4262,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-brand-card-chat",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

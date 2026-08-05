@@ -429,6 +429,15 @@
           const data = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(data.error || `Save failed (HTTP ${res.status}).`);
           respond({ ok: true, deduped: data.deduped === true });
+          // Tell the page a search now exists. The Searches tab is usually sitting behind this
+          // chat modal, already loaded, and has no other way to learn about a write made from in
+          // here — users closed the chat onto an empty tab and concluded the assistant had done
+          // nothing, until they reloaded the page by hand. Dispatched on `document` because the
+          // modal is mounted at body level, outside the tab's own subtree, and carrying the
+          // assistantId so only the inbox this belongs to reacts.
+          document.dispatchEvent(new CustomEvent('discovery:created', {
+            detail: { assistantId, campaignId: data.campaignId ?? null, deduped: data.deduped === true },
+          }));
         })
         .catch((err) => {
           console.error('[ChatSession] discovery campaign create failed:', err);

@@ -52,7 +52,7 @@
 import { createHmac, timingSafeEqual, randomBytes } from 'crypto';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { workspaceIntegrations, systemConnections } from '../../db/schema';
+import { workspaceIntegrations, systemConnections, postInsights, webhookEvents } from '../../db/schema';
 import { storeSecret, getSecret, deleteSecret } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { deleteIntegration } from '../../src/utils/workspace-integrations';
@@ -159,8 +159,28 @@ async function revokeThreadsGrants(threadsUserId: string): Promise<number> {
  *
  * Both products are revoked together: one Meta grant backs both, so a person removing the app
  * has withdrawn consent for both regardless of which one the callback names.
+ *
+ * `mode` is the whole difference between Meta's two callbacks, and they are NOT the same request:
+ *
+ *   'revoke' (uninstall) — the person removed the app. Authorisation is withdrawn, so the token
+ *       goes and the connection stops being usable, but the row survives in a revoked state. That
+ *       keeps the reconnect path and the publishing history intelligible.
+ *   'erase'  (delete)    — the person made a formal data-deletion request. The row itself goes,
+ *       along with the data we obtained THROUGH Meta: the account identifiers it carries
+ *       (external_user_id = Page / IG business account id), the cached follower counts and
+ *       fbUserId in metadata, the per-post insight counters, and the raw inbound webhook payloads.
+ *
+ * Before 2026-08-05 both actions took the 'revoke' path, so a deletion request left every
+ * identifier in place while /api/meta/deletion-status told the person nothing was retained.
+ *
+ * What 'erase' deliberately keeps:
+ *   • scheduled_posts — the customer's OWN content and publishing record, not Meta's data. Its
+ *     connection_id FK is ON DELETE SET NULL, so the posts survive the row going.
+ *   • integration_api_calls — operational audit; already self-purges at 90 days (content-retention).
+ *   • audit_logs / gdpr_erasure_log — append-only by DDL (db/audit-log-immutability.sql); a DELETE
+ *     against them raises. Never add them here.
  */
-async function revokeMetaConnections(fbUserId: string): Promise<number> {
+async function revokeMetaConnections(fbUserId: string, mode: 'revoke' | 'erase'): Promise<number> {
     const db = getDb();
     const rows = await db
         .select({ id: systemConnections.id, vaultRefKey: systemConnections.vaultRefKey })
@@ -176,12 +196,23 @@ async function revokeMetaConnections(fbUserId: string): Promise<number> {
         if (row.vaultRefKey) await deleteSecret(db, row.vaultRefKey);
     }
 
-    if (rows.length > 0) {
+    if (rows.length === 0) return 0;
+    const ids = rows.map(r => r.id);
+
+    if (mode === 'revoke') {
         await db
             .update(systemConnections)
             .set({ status: 'revoked', isActive: false, vaultRefKey: null, updatedAt: new Date() })
-            .where(inArray(systemConnections.id, rows.map(r => r.id)));
+            .where(inArray(systemConnections.id, ids));
+        return rows.length;
     }
+
+    // Children first: both FKs are ON DELETE SET NULL, so dropping the connection row would
+    // otherwise orphan Meta-derived data rather than remove it.
+    await db.delete(postInsights).where(inArray(postInsights.connectionId, ids));
+    await db.delete(webhookEvents).where(inArray(webhookEvents.connectionId, ids));
+    await db.delete(systemConnections).where(inArray(systemConnections.id, ids));
+
     return rows.length;
 }
 
@@ -232,8 +263,13 @@ export default withLambda(async (event) => {
         return html(200, `<!doctype html><meta charset="utf-8"><title>Deletion status</title>
 <h1>Data deletion complete</h1>
 <p>Confirmation code: <code>${code.replace(/[^a-f0-9]/gi, '')}</code></p>
-<p>Your ${label} connection to Be More Swan was removed on ${String(receipt.completedAt ?? '')}, along with the
-access tokens it held. No further ${label} data is retained.</p>`);
+<p>Your ${label} connection to Be More Swan was deleted on ${String(receipt.completedAt ?? '')}. This removed the
+access tokens it held, the account identifiers we obtained from ${label}, the follower and per-post figures we had
+cached, and the event payloads ${label} had sent us.</p>
+<p>Two things are not covered by this, because they are not ${label} data: posts already published to your
+${label} account stay on ${label} and only you can remove them there, and any content drafted inside a Be More Swan
+workspace belongs to that workspace. We also keep an immutable record that this deletion took place, which is what
+lets us evidence it.</p>`);
     }
 
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -257,10 +293,13 @@ access tokens it held. No further ${label} data is retained.</p>`);
         return json(400, { error: 'Invalid signed_request.' });
     }
 
+    // 'delete' is a data-deletion request and must actually erase; 'uninstall' only withdraws
+    // authorisation. revokeThreadsGrants already deletes its row either way — a Threads grant
+    // carries no data beyond the token and the tenant id, so there is nothing to keep.
     const revoked = app === 'facebook'
-        ? await revokeMetaConnections(payload.user_id)
+        ? await revokeMetaConnections(payload.user_id, action === 'delete' ? 'erase' : 'revoke')
         : await revokeThreadsGrants(payload.user_id);
-    console.log(`[meta-callbacks] ${app}/${action}: revoked ${revoked} grant(s)`);
+    console.log(`[meta-callbacks] ${app}/${action}: ${action === 'delete' ? 'erased' : 'revoked'} ${revoked} grant(s)`);
 
     // A verified callback that matches nothing means we hold data we cannot attribute — most
     // likely a connection made before meta-oauth.ts began storing fbUserId. Meta still gets its
