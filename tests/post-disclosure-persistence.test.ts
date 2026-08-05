@@ -132,9 +132,20 @@ check('the caption write path re-asserts the footer', () => {
 
 check('chat saves a new post WITH its disclosure', () => {
     const src = readFileSync(path.join(ROOT, 'netlify/functions/chat-orchestrator.ts'), 'utf8');
-    assert.ok(!/caption: draft\.caption,/.test(src),
+
+    // Scoped to the insert's own values, not the whole file. The rule is about what is STORED as the
+    // post's caption; `draft.caption` is read legitimately elsewhere in the same function — the brand
+    // card derives its headline from the un-footered text on purpose, since a disclosure line has no
+    // business being set as display type on a picture. A file-wide regex read that as the bug.
+    const at = src.indexOf('db.insert(scheduledPosts).values({');
+    assert.notStrictEqual(at, -1, 'the chat draft insert moved — this test is guarding nothing');
+    const end = src.indexOf('.returning(', at);
+    assert.notStrictEqual(end, -1, 'could not find the end of the insert — widen the slice, do not drop it');
+    const values = src.slice(at, end);
+
+    assert.ok(!/caption: draft\.caption,/.test(values),
         'the raw model caption carries no footer — every other drafting route appends one');
-    assert.match(src, /caption: captionWithFooter,/);
+    assert.match(values, /caption: captionWithFooter,/);
     assert.match(src, /resolvePostFooter\(db, orgId, aiAssistantId\)/);
 });
 

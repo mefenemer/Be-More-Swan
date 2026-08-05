@@ -502,8 +502,8 @@ async function attachBrandCardToDrafts(
         /**
          * Fallback source for the headline when the model returned none. The RAW caption, not the
          * one written to the post: the disclosure footer belongs on the post, never set as display
-         * type on the card. Named apart from the post's own caption field so the disclosure guard in
-         * tests/post-disclosure-persistence.test.ts stays strict about `caption: draft.caption`.
+         * type on the card. Named apart from the post's own caption field so the two cannot be
+         * confused at the call site — they are deliberately different strings.
          */
         captionForHeadline: string;
     },
