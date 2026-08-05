@@ -324,8 +324,18 @@ node_bundler = "esbuild"
   schedule = "0 2 * * *"
 
 # Task 4: Silent X (Twitter) + LinkedIn token refresh — every 30 min (X tokens last ~2h)
+#
+# At :07/:37 rather than :00/:30, and this one is worth NOT batching with the drainers below.
+# X rotates its refresh token on every use: between the moment X retires the old token and the
+# moment we store the replacement, the only copy lives in the function's memory. A failed DB write
+# in that window destroys the connection outright (it did, on 2026-08-04 — see the taxonomy in
+# refresh-social-tokens.ts). :00 and :30 are exactly where the CONNECT_TIMEOUTs cluster, so this
+# was rotating credentials at the least reliable moment on the clock.
+#
+# :07 is deliberate, not arbitrary: publish-blog-posts (*/5) has just run at :05, so Neon compute
+# is warm and this rides that window rather than paying its own cold start.
 [functions.refresh-social-tokens]
-  schedule = "*/30 * * * *"
+  schedule = "7,37 * * * *"
 
 # Proactive refresh for workspace_integrations Google OAuth tokens (YouTube, Gmail, Search
 # Console) — every 30 min so a ~1h token stays warm and a dead refresh grant surfaces before

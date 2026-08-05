@@ -7,6 +7,11 @@
   <title>Assistant Setup | Be More Swan</title>
   <link href="./style.css" rel="stylesheet">
   <script src="./explainers.js?v=20260630-2" defer></script>
+  <!-- Generated from src/config/*.ts by `npm run gen:constants`. Needed here for
+       window.PostingCadence: step 3's frequency picker is rendered from the SCHEDULER'S catalogue,
+       so this wizard cannot offer a cadence the engine would silently read as "never". Not
+       deferred — buildScheduleControls() runs on DOMContentLoaded and needs it already parsed. -->
+  <script src="/src/generated/platform-constants.js"></script>
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
   <link rel="manifest" href="/favicon/manifest.json">
@@ -317,9 +322,45 @@
               <div class="ml-4 w-full">
                 <span class="block font-bold text-gray-900">On a Schedule</span>
                 <span class="block text-sm text-gray-500 mb-2">On a specific routine (like every morning at 8:00 AM, or every Friday).</span>
+                <!-- ⚠️ These four controls ARE the posting schedule. What they write
+                     (posting_frequency / posting_days / posting_times / posting_timezone) is read
+                     directly by draft-horizon-fill, so anything unparseable here means the
+                     assistant silently never drafts.
+
+                     This used to be two free-text boxes ("What is the exact frequency?"). A real
+                     tenant answered "Every Monday, Tuesday, Wednesday, and Thursday at 8 am." —
+                     a perfectly clear schedule that postsPerWeekFor reads as 0 posts/week. Their
+                     autopilot never ran once. The days and times they named were never stored at
+                     all, because nothing here asked for them. Keep every one of these a CLOSED
+                     control; never take a cadence as prose again. -->
                 <div id="schedule_detail" class="hidden mt-3 space-y-3">
-                  <input type="text" id="schedule_frequency" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm text-sm" placeholder="What is the exact frequency? (e.g., 3x a week at 9:00 AM)">
-                  <input type="text" id="schedule_timezone" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm text-sm" placeholder="What is your Timezone? (e.g., GMT, EST, CET)">
+                  <div>
+                    <label for="schedule_frequency" class="block text-xs font-bold text-gray-600 mb-1">How often should it post? *</label>
+                    <!-- Options are rendered from window.PostingCadence.all (the scheduler's own
+                         catalogue) so this list cannot drift away from what the engine understands. -->
+                    <select id="schedule_frequency" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm text-sm bg-white">
+                      <option value="">Choose a frequency…</option>
+                    </select>
+                    <span id="error-frequency" class="error-msg hidden text-red-500 text-xs font-bold mt-1 block">Pick how often your assistant should post, or choose "On Demand" above instead.</span>
+                  </div>
+                  <div>
+                    <span class="block text-xs font-bold text-gray-600 mb-1">On which days?</span>
+                    <div id="schedule_days" class="flex flex-wrap gap-2"></div>
+                    <p class="text-xs text-gray-400 mt-1">Leave all unticked for weekdays.</p>
+                  </div>
+                  <div class="flex gap-3">
+                    <div class="flex-1">
+                      <label for="schedule_time" class="block text-xs font-bold text-gray-600 mb-1">At what time?</label>
+                      <input type="time" id="schedule_time" value="09:00" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm text-sm">
+                    </div>
+                    <div class="flex-1">
+                      <label for="schedule_timezone" class="block text-xs font-bold text-gray-600 mb-1">Your timezone</label>
+                      <!-- Defaults to the browser's own zone. Previously free text stored as
+                           trigger_timezone only, so the engine fell back to Europe/London for
+                           everyone — a US tenant's "8 am" fired at 8am London. -->
+                      <select id="schedule_timezone" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm text-sm bg-white"></select>
+                    </div>
+                  </div>
                 </div>
               </div>
             </label>
@@ -897,6 +938,11 @@
   document.addEventListener("DOMContentLoaded", async () => {
     loadComponent("footer-placeholder", "./components/footer.html");
 
+    // Build the posting-schedule pickers BEFORE hydrateDraft: the generic hydrator restores by
+    // element id and assigning to a <select> with no options yet would silently discard the saved
+    // frequency.
+    buildScheduleControls();
+
     // Resume existing draft
     await hydrateDraft();
 
@@ -1170,6 +1216,9 @@
           });
 
           // 4. Retrigger UI specific toggles based on hydrated values
+          // Day checkboxes and the time/timezone pickers are not plain id-addressed scalars, so the
+          // generic hydrator above cannot restore them.
+          hydrateScheduleControls(data);
           toggleScheduleDetails();
           toggleContentSourceDetails();
           PLATFORM_CODES.forEach(p => {
@@ -1286,9 +1335,21 @@
     }
     // --- Step 3 Validation ---
     else if (currentStep === 3) {
-      if (!document.querySelector('input[name="trigger_type"]:checked')) {
+      const trigger = document.querySelector('input[name="trigger_type"]:checked');
+      if (!trigger) {
         document.getElementById('error-trigger')?.classList.remove('hidden');
         isValid = false;
+      }
+      // "On a Schedule" with no frequency chosen would store nothing the scheduler can act on, and
+      // the assistant would never draft — the exact silent failure this step was rebuilt to stop.
+      // Also catches a missing constants bundle, which leaves the picker empty.
+      if (trigger?.value === 'scheduled') {
+        const freq = document.getElementById('schedule_frequency');
+        if (!freq?.value) {
+          freq?.classList.add('input-error');
+          document.getElementById('error-frequency')?.classList.remove('hidden');
+          isValid = false;
+        }
       }
       if (!document.querySelector('input[name="content_source"]:checked')) {
         document.getElementById('error-source')?.classList.remove('hidden');
@@ -1470,6 +1531,121 @@
       content_source: source,
       content_source_detail: val(detailId),
     };
+  }
+
+  // ── Posting schedule (step 3) ───────────────────────────────────────────────────────────────
+  // These four fields are the ONLY thing standing between a hire and a working autopilot:
+  // draft-horizon-fill reads posting_frequency / posting_days / posting_times / posting_timezone
+  // off onboarding_context every hour and drafts into the Review Queue. A frequency it cannot
+  // parse means it skips the assistant forever, silently — so the frequency is a closed list taken
+  // from the engine's own catalogue, not prose.
+
+  const SCHEDULE_DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+  const SCHEDULE_DAY_LABEL = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
+
+  // A short list of common zones; the browser's own zone is added and preselected below, so a user
+  // outside this list still gets their real timezone rather than ours.
+  const SCHEDULE_TIMEZONES = [
+    'Europe/London', 'Europe/Dublin', 'Europe/Paris', 'Europe/Berlin', 'Europe/Madrid',
+    'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+    'America/Toronto', 'America/Sao_Paulo', 'Asia/Dubai', 'Asia/Kolkata', 'Asia/Singapore',
+    'Asia/Tokyo', 'Australia/Sydney', 'Pacific/Auckland', 'UTC',
+  ];
+
+  function buildScheduleControls() {
+    // Frequency — rendered from the scheduler's own catalogue (window.PostingCadence.all), so the
+    // wizard can only ever offer values the engine understands. If the constants bundle failed to
+    // load we leave the picker empty: the step's own validation then blocks, which is far better
+    // than writing a frequency nothing will honour.
+    const freq = document.getElementById('schedule_frequency');
+    const cadences = window.PostingCadence?.all;
+    if (freq && Array.isArray(cadences)) {
+      for (const c of cadences) {
+        const opt = document.createElement('option');
+        opt.value = c.label;
+        opt.textContent = c.postsPerWeek > 0 ? c.label : `${c.label} (I'll ask each time)`;
+        freq.appendChild(opt);
+      }
+      freq.value = '3 times a week';
+    } else if (freq) {
+      console.error('[onboarding] window.PostingCadence missing — cannot offer a posting frequency.');
+    }
+
+    const days = document.getElementById('schedule_days');
+    if (days && !days.childElementCount) {
+      for (const key of SCHEDULE_DAY_KEYS) {
+        const label = document.createElement('label');
+        label.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 text-sm';
+        label.innerHTML = `<input type="checkbox" id="sched_day_${key}" value="${key}" class="h-4 w-4 text-emerald-700 focus:ring-emerald-700 border-gray-300 rounded"><span>${SCHEDULE_DAY_LABEL[key]}</span>`;
+        days.appendChild(label);
+      }
+    }
+
+    const tz = document.getElementById('schedule_timezone');
+    if (tz && !tz.childElementCount) {
+      let detected = '';
+      try { detected = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { detected = ''; }
+      const list = detected && !SCHEDULE_TIMEZONES.includes(detected)
+        ? [detected, ...SCHEDULE_TIMEZONES]
+        : SCHEDULE_TIMEZONES;
+      for (const zone of list) {
+        const opt = document.createElement('option');
+        opt.value = zone;
+        opt.textContent = zone.replace(/_/g, ' ');
+        tz.appendChild(opt);
+      }
+      tz.value = detected || 'Europe/London';
+    }
+  }
+
+  /**
+   * The four onboarding_context keys the scheduler reads. Returns them together because they are
+   * one setting — see the comment above submitToBackend's spread.
+   *
+   * Not on the scheduled branch ⇒ 'On demand', which is the honest value: nothing will be drafted
+   * automatically, and the Autopilot card will say exactly that rather than implying a schedule.
+   */
+  function collectPostingSchedule() {
+    const trigger = document.querySelector('input[name="trigger_type"]:checked')?.value || null;
+    if (trigger !== 'scheduled') {
+      return { posting_frequency: 'On demand', posting_days: [], posting_times: [], posting_timezone: null };
+    }
+    const days = SCHEDULE_DAY_KEYS.filter(k => document.getElementById(`sched_day_${k}`)?.checked);
+    const time = document.getElementById('schedule_time')?.value || '';
+    return {
+      posting_frequency: document.getElementById('schedule_frequency')?.value || 'On demand',
+      // Empty is meaningful: resolvePostingSchedule falls back to weekdays / 09:00, which is a
+      // sane default and is what the summary shows.
+      posting_days: days,
+      posting_times: /^\d{2}:\d{2}$/.test(time) ? [time] : [],
+      posting_timezone: document.getElementById('schedule_timezone')?.value || null,
+    };
+  }
+
+  /** Restore the schedule controls from a saved draft (the generic hydrator only handles scalars
+   *  addressed by element id, so the day checkboxes need doing by hand). */
+  function hydrateScheduleControls(ctx) {
+    if (!ctx) return;
+    const freq = document.getElementById('schedule_frequency');
+    if (freq && ctx.posting_frequency) {
+      // A draft saved before this picker existed can hold free text. Select it only if it is a real
+      // option; otherwise leave the default rather than reintroducing an unparseable value.
+      if (Array.from(freq.options).some(o => o.value === ctx.posting_frequency)) freq.value = ctx.posting_frequency;
+    }
+    if (Array.isArray(ctx.posting_days)) {
+      for (const key of SCHEDULE_DAY_KEYS) {
+        const box = document.getElementById(`sched_day_${key}`);
+        if (box) box.checked = ctx.posting_days.includes(key);
+      }
+    }
+    if (Array.isArray(ctx.posting_times) && ctx.posting_times[0]) {
+      const t = document.getElementById('schedule_time');
+      if (t) t.value = ctx.posting_times[0];
+    }
+    const tz = document.getElementById('schedule_timezone');
+    if (tz && ctx.posting_timezone && Array.from(tz.options).some(o => o.value === ctx.posting_timezone)) {
+      tz.value = ctx.posting_timezone;
+    }
   }
 
   function generateSummary() {
@@ -1675,7 +1851,11 @@
       service_offerings: document.getElementById('val_offerings')?.value || null,
       sales_objections: document.getElementById('val_objections')?.value || null,
       tone_of_voice: document.getElementById('val_tone')?.value || null,
-      posting_frequency: document.getElementById('schedule_frequency')?.value || 'On Demand',
+      // The posting schedule the engine actually runs on. collectPostingSchedule() returns all four
+      // keys together because they are one setting — storing a frequency without the days and times
+      // is what left every tenant on the Mon-Fri/09:00/Europe/London defaults regardless of what
+      // they asked for.
+      ...collectPostingSchedule(),
       // Operational Setup (Step 3). onboardingContext is the blueprint's source for section 6, so
       // these have to be here — not only in rawInputs — to reach the assistant at all.
       ...collectOperationalSetup(),

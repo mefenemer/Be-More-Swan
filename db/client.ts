@@ -11,9 +11,30 @@ config({ path: path.resolve(process.cwd(), '.env') });
 
 // Connection pool options shared by both roles. postgres-js keeps a single cached
 // connection per serverless instance (max: 1); timeouts prevent silent hangs.
+//
+// ── Why connect_timeout is 15 and not 5 ─────────────────────────────────────────────────────────
+// It was 5s, and that was in direct conflict with how the crons are scheduled. netlify.toml
+// deliberately ALIGNS the */10 drainers and publishers into one batch so Neon can autosuspend in
+// the gaps (compute is billed by active time and the quota is project-wide — see the staging
+// outage 2026-07-11). That design guarantees most batch ticks arrive at a SUSPENDED compute, and
+// ~20 Lambdas waking it simultaneously routinely took longer than five seconds to accept a
+// connection. The pool gave up first.
+//
+// The result was a standing, unmonitored failure: in one 15-hour sample, 405 errors at :00 and 178
+// at :30 — versus 6 at :15 and :45 — every one of them `write CONNECT_TIMEOUT`. Functions failed on
+// their first SELECT and silently skipped that cycle. On 2026-08-04 the same five-second stopwatch
+// ran out in the one window where it was not recoverable (between X retiring a rotated refresh
+// token and the vault write) and permanently destroyed a live X connection.
+//
+// This is NOT connection exhaustion — prod uses Neon's pooled endpoint. It is cold-start latency,
+// so the fix is to wait for the wake rather than to stop letting it sleep: raising this preserves
+// the autosuspend design intact and costs nothing on a warm compute, where connect returns
+// immediately. The trade is that a genuinely unreachable database now takes 15s to report itself
+// instead of 5s, which the callers' own budgets must leave room for (refresh-social-tokens sizes
+// PERSIST_DEADLINE_MS against exactly this number).
 const POOL_OPTS = {
     max: 1,
-    connect_timeout: 5,   // seconds — abort if DB unreachable within 5s
+    connect_timeout: 15,  // seconds — must exceed a cold Neon compute's wake time under a batch tick
     idle_timeout: 20,     // seconds — release idle connections between invocations
     max_lifetime: 60 * 5, // seconds — rotate connections every 5 minutes
 } as const;

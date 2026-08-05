@@ -39,14 +39,23 @@
 
   <div id="chat-header" class="hidden bg-white rounded-t-2xl border border-b-0 border-gray-200 shadow-sm px-5 py-4 items-center gap-3">
     <div class="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center text-xl shrink-0">💬</div>
-    <div class="min-w-0">
+    <div class="min-w-0 grow">
       <p id="chat-assistant-name" class="font-bold text-gray-900 truncate"></p>
       <p id="chat-assistant-role" class="text-xs text-gray-500 truncate"></p>
     </div>
+    <!-- Past conversations (chat-history-panel.js) — same drawer the in-SPA modals use. -->
+    <button type="button" id="chat-history-btn" aria-expanded="false" title="Past conversations"
+      class="shrink-0 px-2.5 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-xs font-bold text-gray-700 cursor-pointer">History</button>
   </div>
 
   <!-- Chat mounts here; bounded height so the transcript scrolls, not the page -->
-  <div id="chat-root" class="hidden bg-white rounded-b-2xl border border-gray-200 shadow-sm overflow-hidden grow min-h-[24rem]" style="height: calc(100vh - 21rem);"></div>
+  <div id="chat-shell" class="hidden relative grow min-h-[24rem]" style="height: calc(100vh - 21rem);">
+    <div id="chat-root" class="absolute inset-0 bg-white rounded-b-2xl border border-gray-200 shadow-sm overflow-hidden"></div>
+    <!-- Slides in over the transcript; transform (not display) keeps its scroll position. -->
+    <div id="chat-history"
+         class="absolute top-0 left-0 bottom-0 w-[270px] max-w-[80%] bg-white border-r border-gray-200 rounded-bl-2xl shadow-lg z-[2] transition-transform duration-200 overflow-hidden"
+         style="transform:translateX(-102%)"></div>
+  </div>
 
   <!-- Loading / error states -->
   <div id="chat-loading" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-12 text-center text-gray-500">
@@ -65,6 +74,9 @@
 <script src="/src/components/disruptive-ui-registry.js"></script>
 <script src="/src/components/assistant-starter-prompts.js"></script>
 <script src="/src/components/chat-session.js"></script>
+<!-- "Past conversations" drawer shared by every chat surface — lists threads from
+     list-chat-sessions.ts, archives/restores via archive-chat-session.ts. -->
+<script src="/src/components/chat-history-panel.js"></script>
 <script>
 async function loadComponent(id, path) {
   try {
@@ -115,6 +127,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   let assistantRole = null;
   let assistantRoleKey = null;
   let initialMessages = [];
+  let sessionStatus = null;   // 'active' | 'archived' | null (a brand-new conversation)
 
   if (sessionId) {
     let data = null;
@@ -137,6 +150,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       assistantName = data.session.assistantName;
       assistantRole = data.session.assistantRole;
       initialMessages = data.messages || [];
+      sessionStatus = data.session.status;
     }
   }
 
@@ -166,7 +180,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('chat-loading').classList.add('hidden');
   document.getElementById('chat-header').classList.remove('hidden');
   document.getElementById('chat-header').classList.add('flex');
-  document.getElementById('chat-root').classList.remove('hidden');
+  document.getElementById('chat-shell').classList.remove('hidden');
 
   window.ChatSession.mount({
     container: document.getElementById('chat-root'),
@@ -175,7 +189,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     assistantName,
     roleKey: assistantRoleKey,
     initialMessages,
+    // Authoritative: an archived thread is read-only wherever it was opened from. Derived from
+    // the session's own status, not from which drawer tab was clicked.
+    readOnly: sessionStatus === 'archived',
   });
+
+  // ── History drawer ──────────────────────────────────────────────────────────────
+  // This is a full page, so a pick is a navigation rather than an in-place re-mount — the URL
+  // stays the honest record of which conversation is open, and Back works.
+  const drawerEl = document.getElementById('chat-history');
+  const historyBtn = document.getElementById('chat-history-btn');
+  let historyPanel = null;
+
+  function setDrawerOpen(open) {
+    drawerEl.style.transform = open ? 'translateX(0)' : 'translateX(-102%)';
+    historyBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    historyBtn.classList.toggle('bg-emerald-50', open);
+    historyBtn.classList.toggle('text-emerald-800', open);
+    if (open && historyPanel) historyPanel.refresh();
+  }
+
+  if (window.ChatHistoryPanel && assistantId) {
+    historyPanel = window.ChatHistoryPanel.mount({
+      container: drawerEl,
+      assistantId,
+      currentSessionId: sessionId,
+      onSelect: (id) => { window.location.search = `?sessionId=${id}`; },
+      onNew: () => { window.location.search = `?assistantId=${assistantId}&new=1`; },
+    });
+    historyBtn.addEventListener('click', () => {
+      setDrawerOpen(drawerEl.style.transform === 'translateX(-102%)');
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && drawerEl.style.transform === 'translateX(0)') setDrawerOpen(false);
+    });
+  } else {
+    historyBtn.classList.add('hidden');
+  }
 });
 </script>
 </body>

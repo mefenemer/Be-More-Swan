@@ -16,13 +16,19 @@
  *       forceNew     — with assistantId, skip the resume and start a fresh thread.
  *   closeAssistantChat()                             — close + tear down the ChatSession.
  *
+ * The header's "History" button opens a drawer (chat-history-panel.js) listing this assistant's
+ * past conversations, with archive/restore and "New conversation". Picking a thread re-mounts the
+ * ChatSession in place; archived threads mount read-only, because the orchestrator refuses writes
+ * to them.
+ *
  * Requires (already loaded by workspace.html): src/components/chat-session.js,
- * assistant-starter-prompts.js, disruptive-ui-registry.js, marked@12 + dompurify@3.
+ * chat-history-panel.js, assistant-starter-prompts.js, disruptive-ui-registry.js,
+ * marked@12 + dompurify@3.
  */
 (function () {
   'use strict';
 
-  var state = { injected: false, chat: null, escHandler: null };
+  var state = { injected: false, chat: null, history: null, assistantId: null, escHandler: null };
 
   function el(id) { return document.getElementById(id); }
 
@@ -46,8 +52,18 @@
     + '.bms-chat-close:hover{background:#e5e7eb;}'
     + '.bms-chat-disclosure{display:flex;align-items:center;gap:8px;padding:8px 20px;'
     + 'background:#eff6ff;border-bottom:1px solid #dbeafe;font-size:11px;color:#1d4ed8;font-weight:500;}'
-    + '.bms-chat-body{flex:1;min-height:0;position:relative;}'
+    + '.bms-chat-body{flex:1;min-height:0;position:relative;overflow:hidden;}'
     + '.bms-chat-mount{position:absolute;inset:0;}'
+    // History drawer: slides in over the transcript from the left. transform (not display) so it
+    // animates, and so the panel keeps its scroll position between opens.
+    + '.bms-chat-history{position:absolute;top:0;left:0;bottom:0;width:270px;max-width:80%;'
+    + 'background:#fff;border-right:1px solid #e5e7eb;box-shadow:6px 0 18px rgba(0,0,0,.06);'
+    + 'transform:translateX(-102%);transition:transform .18s ease;z-index:2;}'
+    + '.bms-chat-history.ac-open{transform:translateX(0);}'
+    + '.bms-chat-headbtn{background:#f3f4f6;border:0;border-radius:8px;height:32px;padding:0 10px;'
+    + 'font-size:12px;font-weight:700;line-height:1;cursor:pointer;color:#374151;flex-shrink:0;}'
+    + '.bms-chat-headbtn:hover{background:#e5e7eb;}'
+    + '.bms-chat-headbtn.ac-on{background:#fce7f3;color:#9d174d;}'
     + '.bms-chat-state{position:absolute;inset:0;display:flex;flex-direction:column;'
     + 'align-items:center;justify-content:center;gap:8px;text-align:center;padding:32px;color:#6b7280;}'
     + '.ac-hidden{display:none !important;}';
@@ -60,6 +76,8 @@
     +       '<div class="bms-chat-name" id="bms-chat-name"></div>'
     +       '<div class="bms-chat-role" id="bms-chat-role"></div>'
     +     '</div>'
+    +     '<button type="button" class="bms-chat-headbtn" id="bms-chat-history-btn" aria-expanded="false" '
+    +       'title="Past conversations">History</button>'
     +     '<button type="button" class="bms-chat-close" id="bms-chat-close" aria-label="Close chat">&times;</button>'
     +   '</div>'
     +   '<div class="bms-chat-disclosure" role="note">'
@@ -68,6 +86,7 @@
     +   '</div>'
     +   '<div class="bms-chat-body">'
     +     '<div class="bms-chat-mount" id="bms-chat-mount"></div>'
+    +     '<div class="bms-chat-history" id="bms-chat-history"></div>'
     +     '<div class="bms-chat-state" id="bms-chat-loading">Loading your assistant…</div>'
     +     '<div class="bms-chat-state ac-hidden" id="bms-chat-errstate">'
     +       '<div style="width:48px;height:48px;border-radius:9999px;background:#fef3c7;display:flex;align-items:center;justify-content:center;font-size:24px">🤔</div>'
@@ -90,6 +109,9 @@
     document.body.appendChild(backdrop);
 
     el('bms-chat-close').addEventListener('click', closeAssistantChat);
+    el('bms-chat-history-btn').addEventListener('click', function () {
+      setHistoryOpen(!el('bms-chat-history').classList.contains('ac-open'));
+    });
     // Click on the dimmed backdrop (outside the panel) closes.
     backdrop.addEventListener('click', function (e) {
       if (e.target === backdrop) closeAssistantChat();
@@ -132,6 +154,7 @@
             assistantRole: data.session.assistantRole,
             assistantRoleKey: null,
             sessionId: sessionId,
+            status: data.session.status,
             initialMessages: data.messages || [],
           };
         })
@@ -148,10 +171,96 @@
           assistantRole: a.role,
           assistantRoleKey: a.roleKey,
           sessionId: null,
+          status: null,
           initialMessages: [],
         };
       })
       .catch(function () { return null; });
+  }
+
+  // Mount (or re-mount) one conversation into the open modal. Shared by the initial open and by
+  // every pick in the history drawer, so a drawer selection behaves exactly like opening it.
+  //   cfg: { assistantId, sessionId, forceNew, readOnly }
+  function loadConversation(cfg) {
+    var assistantId = cfg.assistantId;
+    var sessionId = cfg.sessionId;
+
+    if (state.chat && state.chat.destroy) { state.chat.destroy(); state.chat = null; }
+    el('bms-chat-mount').innerHTML = '';
+    showState('loading');
+
+    // Continuity: opening an assistant with no explicit sessionId resumes that assistant's
+    // newest active thread instead of silently minting a new one every time (which is what
+    // stranded every prior conversation). forceNew is the deliberate "New conversation" escape.
+    var autoResume = !sessionId && !cfg.forceNew && !!assistantId;
+    var resolveSession = autoResume ? findLatestSession(assistantId) : Promise.resolve(sessionId);
+
+    return resolveSession
+      .then(function (resumedId) {
+        return resolveConversation(assistantId, resumedId).then(function (info) {
+          // An auto-resumed thread that won't hydrate (archived or deleted between the two
+          // calls) is not an error the user asked for — fall through to a new conversation.
+          // A sessionId the CALLER passed still surfaces as an error, as it did before.
+          if (!info && resumedId && autoResume) return resolveConversation(assistantId, null);
+          return info;
+        });
+      })
+      .then(function (info) {
+        // Guard against a race where the user closed the modal before this resolved.
+        if (!el('bms-chat-backdrop').classList.contains('ac-open')) return null;
+        if (!info) {
+          showState('error', 'This conversation could not be found in your workspace.');
+          return null;
+        }
+        el('bms-chat-name').textContent = info.assistantName || 'Your assistant';
+        el('bms-chat-role').textContent = info.assistantRole || 'Digital Assistant';
+        showState('chat');
+        state.chat = window.ChatSession.mount({
+          container: el('bms-chat-mount'),
+          assistantId: info.assistantId,
+          chatSessionId: info.sessionId,
+          assistantName: info.assistantName,
+          roleKey: info.assistantRoleKey,
+          initialMessages: info.initialMessages,
+          // Authoritative: an archived thread is read-only however it was reached — the drawer's
+          // hint is only a fast path, the session's own status is the truth.
+          readOnly: cfg.readOnly === true || info.status === 'archived',
+        });
+        state.assistantId = info.assistantId;
+        if (state.history) state.history.setCurrentSession(info.sessionId);
+        return info;
+      });
+  }
+
+  function setHistoryOpen(open) {
+    var drawer = el('bms-chat-history');
+    var btn = el('bms-chat-history-btn');
+    if (!drawer || !btn) return;
+    drawer.classList.toggle('ac-open', open);
+    btn.classList.toggle('ac-on', open);
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    // Re-read on every open: a thread created since the last look (or archived on another
+    // surface) should be there, and the panel is cheap to refresh.
+    if (open && state.history) state.history.refresh();
+  }
+
+  function mountHistory(assistantId) {
+    if (state.history && state.history.destroy) { state.history.destroy(); state.history = null; }
+    var host = el('bms-chat-history');
+    if (!host || !window.ChatHistoryPanel) return;
+    state.history = window.ChatHistoryPanel.mount({
+      container: host,
+      assistantId: assistantId,
+      currentSessionId: state.chat ? state.chat.getSessionId() : null,
+      onSelect: function (id, o) {
+        setHistoryOpen(false);
+        loadConversation({ assistantId: assistantId, sessionId: id, readOnly: o && o.readOnly });
+      },
+      onNew: function () {
+        setHistoryOpen(false);
+        loadConversation({ assistantId: assistantId, forceNew: true });
+      },
+    });
   }
 
   function openAssistantChat(opts) {
@@ -166,17 +275,20 @@
     }
 
     inject();
-    // Tear down any prior conversation before opening a new one.
-    if (state.chat && state.chat.destroy) { state.chat.destroy(); state.chat = null; }
-    el('bms-chat-mount').innerHTML = '';
     el('bms-chat-name').textContent = '';
     el('bms-chat-role').textContent = '';
-    showState('loading');
+    setHistoryOpen(false);
 
     el('bms-chat-backdrop').classList.add('ac-open');
     window.ScrollLock.lock('assistant-chat');
 
-    state.escHandler = function (e) { if (e.key === 'Escape') closeAssistantChat(); };
+    state.escHandler = function (e) {
+      // Esc closes the drawer first when it is open — closing the whole modal would lose the
+      // conversation the user is in the middle of picking.
+      if (e.key !== 'Escape') return;
+      if (el('bms-chat-history').classList.contains('ac-open')) setHistoryOpen(false);
+      else closeAssistantChat();
+    };
     document.addEventListener('keydown', state.escHandler);
 
     if (!sessionId && (!Number.isInteger(assistantId) || assistantId <= 0)) {
@@ -184,46 +296,21 @@
       return;
     }
 
-    // Continuity: opening an assistant with no explicit sessionId resumes that assistant's
-    // newest active thread instead of silently minting a new one every time (which is what
-    // stranded every prior conversation). opts.forceNew is the deliberate "New chat" escape.
-    var autoResume = !sessionId && !opts.forceNew && !!assistantId;
-    var resolveSession = autoResume ? findLatestSession(assistantId) : Promise.resolve(sessionId);
-
-    resolveSession
-      .then(function (resumedId) {
-        return resolveConversation(assistantId, resumedId).then(function (info) {
-          // An auto-resumed thread that won't hydrate (archived or deleted between the two
-          // calls) is not an error the user asked for — fall through to a new conversation.
-          // A sessionId the CALLER passed still surfaces as an error, as it did before.
-          if (!info && resumedId && autoResume) return resolveConversation(assistantId, null);
-          return info;
-        });
-      })
-      .then(function (info) {
-        // Guard against a race where the user closed the modal before this resolved.
-        if (!el('bms-chat-backdrop').classList.contains('ac-open')) return;
-        if (!info) {
-          showState('error', 'This conversation could not be found in your workspace.');
-          return;
-        }
-        el('bms-chat-name').textContent = info.assistantName || 'Your assistant';
-        el('bms-chat-role').textContent = info.assistantRole || 'Digital Assistant';
-        showState('chat');
-        state.chat = window.ChatSession.mount({
-          container: el('bms-chat-mount'),
-          assistantId: info.assistantId,
-          chatSessionId: info.sessionId,
-          assistantName: info.assistantName,
-          roleKey: info.assistantRoleKey,
-          initialMessages: info.initialMessages,
-        });
-      });
+    loadConversation({
+      assistantId: assistantId,
+      sessionId: sessionId,
+      forceNew: opts.forceNew,
+    }).then(function (info) {
+      // The drawer needs the resolved assistant id — a caller may have passed only a sessionId.
+      if (info) mountHistory(info.assistantId);
+    });
   }
 
   function closeAssistantChat() {
     if (!state.injected) return;
     if (state.chat && state.chat.destroy) { state.chat.destroy(); state.chat = null; }
+    if (state.history && state.history.destroy) { state.history.destroy(); state.history = null; }
+    setHistoryOpen(false);
     el('bms-chat-backdrop').classList.remove('ac-open');
     window.ScrollLock.release('assistant-chat');
     if (state.escHandler) { document.removeEventListener('keydown', state.escHandler); state.escHandler = null; }

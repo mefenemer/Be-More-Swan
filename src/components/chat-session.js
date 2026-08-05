@@ -14,6 +14,8 @@
  *                                   //   zero-state starter prompts (assistant-starter-prompts.js)
  *     initialMessages,              // optional history rows: { role, content,
  *                                   //   uiElement | uiElementJson, createdAt }
+ *     readOnly,                     // optional — an ARCHIVED transcript: renders the history
+ *                                   //   with no composer, and sendMessage() is a no-op
  *   });
  *   chat.sendMessage(text)          // programmatic send
  *   chat.getSessionId()             // number | null (set after the first reply)
@@ -83,6 +85,17 @@
       ? window.AssistantStarterPrompts.get(props.roleKey)
       : null;
 
+    // Read-only: an ARCHIVED conversation. chat-orchestrator.ts 409s on a non-active session, so
+    // a composer here would only ever produce an error — the transcript is still worth reading,
+    // which is the whole point of archiving rather than deleting. Restoring happens in the
+    // history drawer (chat-history-panel.js), not here.
+    const readOnly = props.readOnly === true;
+    const readOnlyFooterHtml = `
+        <div class="border-t border-gray-200 bg-gray-50 px-4 sm:px-6 py-4 text-center" data-chat-readonly>
+          <p class="text-sm font-semibold text-gray-700">This conversation is archived.</p>
+          <p class="text-xs text-gray-500 mt-0.5">Restore it from your conversation history to carry on.</p>
+        </div>`;
+
     const displayName = escapeHtml(assistantName || 'your assistant');
     const emptyStateHtml = starterPrompts
       ? `
@@ -111,6 +124,7 @@
       <div class="flex flex-col h-full bg-gray-50" data-chat-root>
         <div class="grow overflow-y-auto px-4 sm:px-6 py-6 space-y-4" data-chat-scroll>${emptyStateHtml}
         </div>
+        ${readOnly ? readOnlyFooterHtml : `
         <div class="border-t border-gray-200 bg-white px-4 sm:px-6 py-4">
           <div class="hidden mb-2 text-sm text-red-600 font-semibold" data-chat-error role="alert"></div>
           <form class="flex items-end gap-3" data-chat-form>
@@ -121,7 +135,7 @@
               class="px-5 py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-lg transition shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
               data-chat-send>Send</button>
           </form>
-        </div>
+        </div>`}
       </div>`;
 
     const scrollEl = container.querySelector('[data-chat-scroll]');
@@ -135,12 +149,16 @@
       scrollEl.scrollTop = scrollEl.scrollHeight;
     }
 
+    // Null-safe: the error strip and the composer live in the same footer, which read-only
+    // mode replaces wholesale.
     function showError(text) {
+      if (!errorEl) return;
       errorEl.textContent = text;
       errorEl.classList.remove('hidden');
     }
 
     function clearError() {
+      if (!errorEl) return;
       errorEl.textContent = '';
       errorEl.classList.add('hidden');
     }
@@ -249,8 +267,8 @@
 
     function setSending(value) {
       sending = value;
-      sendBtn.disabled = value;
-      inputEl.disabled = value;
+      if (sendBtn) sendBtn.disabled = value;
+      if (inputEl) inputEl.disabled = value;
     }
 
     /**
@@ -262,7 +280,9 @@
      */
     async function sendMessage(text, opts) {
       const message = String(text ?? '').trim();
-      if (!message || sending) return;
+      // An archived conversation is read-only end to end: the orchestrator would 409 anyway,
+      // so a programmatic send must not append an optimistic user bubble that never gets a reply.
+      if (readOnly || !message || sending) return;
       if (message.length > MAX_MESSAGE_CHARS) {
         showError(`Message too long (max ${MAX_MESSAGE_CHARS} characters).`);
         return;
@@ -329,7 +349,7 @@
       } finally {
         skeleton.remove();
         setSending(false);
-        inputEl.focus();
+        inputEl?.focus();
       }
     }
 
@@ -416,9 +436,13 @@
         });
     }
 
-    formEl.addEventListener('submit', onSubmit);
-    inputEl.addEventListener('keydown', onKeydown);
-    inputEl.addEventListener('input', onInput);
+    // The composer does not exist in read-only mode, so its listeners are conditional. The
+    // container-level ones stay: a hydrated transcript can still contain Disruptive UI cards.
+    if (!readOnly) {
+      formEl.addEventListener('submit', onSubmit);
+      inputEl.addEventListener('keydown', onKeydown);
+      inputEl.addEventListener('input', onInput);
+    }
     container.addEventListener('handoff:response', onHandoffResponse);
     container.addEventListener('discovery:create', onDiscoveryCreate);
 
@@ -440,9 +464,11 @@
       appendMessage,
       getSessionId: () => chatSessionId,
       destroy() {
-        formEl.removeEventListener('submit', onSubmit);
-        inputEl.removeEventListener('keydown', onKeydown);
-        inputEl.removeEventListener('input', onInput);
+        if (!readOnly) {
+          formEl.removeEventListener('submit', onSubmit);
+          inputEl.removeEventListener('keydown', onKeydown);
+          inputEl.removeEventListener('input', onInput);
+        }
         container.removeEventListener('handoff:response', onHandoffResponse);
         container.removeEventListener('discovery:create', onDiscoveryCreate);
         container.innerHTML = '';

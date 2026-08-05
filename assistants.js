@@ -515,14 +515,33 @@ function _detailSetVal(id, val) {
 // Posting Frequency is now a discrete <select>. A legacy/custom stored value (free text like
 // "twice a day", or a key like "3x_week") won't match a built-in option, so inject it as a
 // selectable option to preserve it — the backend cadence parser still understands it.
+// A stored frequency that isn't one of the options still has to be shown — dropping it would
+// silently rewrite the user's setting the next time they saved anything else on this form.
+//
+// But it must not be shown as if it were a valid choice. It gets appended LABELLED as unreadable,
+// so the one place a broken cadence is guaranteed to be seen says so. (Before: appended verbatim,
+// which made a sentence the scheduler could not parse look exactly like "3 times a week".)
 function _setFrequencySelect(val) {
     const sel = document.getElementById('edit_frequency');
     if (!sel) return;
+
+    // Populate from the scheduler's catalogue on first use. Markup carries no options of its own:
+    // a hardcoded list here is a copy that can fall out of step with what the engine understands.
+    if (!sel.childElementCount) {
+        for (const c of (window.PostingCadence?.all || [])) {
+            const opt = document.createElement('option');
+            opt.value = c.label;
+            opt.textContent = c.postsPerWeek > 0 ? c.label : `${c.label} (no automatic scheduling)`;
+            sel.appendChild(opt);
+        }
+    }
+
     const value = (val || '').toString();
     if (value && !Array.from(sel.options).some(o => o.value === value)) {
         const opt = document.createElement('option');
         opt.value = value;
-        opt.textContent = value;
+        const readable = window.PostingCadence?.isActive?.(value);
+        opt.textContent = readable ? value : `${value} — not readable, pick one above`;
         sel.appendChild(opt);
     }
     sel.value = value;
@@ -2125,6 +2144,9 @@ window._setReviewPendingBadge = function(count) {
 // onboarding_context the engine reads (posting_frequency/days/times/timezone) plus draftHorizonDays,
 // so what the user sees here is exactly what the cron will act on.
 const _AUTOPILOT_DAY_LABEL = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
+// Display wording only — never a source of truth about whether autopilot runs. Anything not in
+// here is described by its RATE ("4× a week"), not by echoing what the user typed: echoing it is
+// how a cadence the engine cannot parse came to look like a working schedule.
 const _AUTOPILOT_FREQ_PHRASE = {
     'daily': 'every day',
     '5 times a week': '5 times a week',
@@ -2135,11 +2157,22 @@ const _AUTOPILOT_FREQ_PHRASE = {
 
 // Derive a plain-language schedule summary from onboarding_context, mirroring resolvePostingSchedule's
 // defaults (3×/week, weekdays, 09:00, London) so the card matches what the engine would do.
+//
+// ⚠️ `active` and `kind` come from window.PostingCadence — the generated copy of the SCHEDULER'S OWN
+// parser (src/config/posting-cadence.ts). This card used to decide "on" with a private regex that
+// looked for the words "on demand"/"manual"; a tenant whose posting_frequency was the sentence
+// "Every Monday, Tuesday, Wednesday, and Thursday at 8 am." therefore rendered as Active while
+// draft-horizon-fill read the same string as 0 posts/week and never drafted anything, for weeks.
+// If you are tempted to test the frequency text here, don't — ask the shared parser.
 function _autopilotSummary(ctx) {
     const rawFreq = String(ctx.posting_frequency || _POSTING_DEFAULT_FREQ).trim();
     const low = rawFreq.toLowerCase();
-    const active = !!rawFreq && !/on[\s-]?demand|manual|as needed|ad[\s-]?hoc/.test(low);
-    const phrase = _AUTOPILOT_FREQ_PHRASE[low] || rawFreq;
+    // Fail SAFE if the constants bundle is missing: claim nothing rather than claim "Active".
+    const reading = window.PostingCadence?.read?.(rawFreq) || { postsPerWeek: 0, kind: 'unrecognised' };
+    const kind = reading.kind;
+    const active = kind === 'scheduled';
+    const phrase = _AUTOPILOT_FREQ_PHRASE[low]
+        || (reading.postsPerWeek > 0 ? `${reading.postsPerWeek}× a week` : rawFreq);
 
     const days = (Array.isArray(ctx.posting_days) && ctx.posting_days.length
         ? ctx.posting_days.map(d => String(d).toLowerCase().slice(0, 3)).filter(d => _AUTOPILOT_DAY_LABEL[d])
@@ -2156,7 +2189,7 @@ function _autopilotSummary(ctx) {
 
     const tzLabel = String(ctx.posting_timezone || 'Europe/London').split('/').pop().replace(/_/g, ' ');
 
-    return { active, phrase, daysLabel, timesLabel, tzLabel };
+    return { active, kind, phrase, rawFreq, daysLabel, timesLabel, tzLabel };
 }
 
 function _syncAutopilotPending(count) {
@@ -2242,6 +2275,18 @@ window._renderAutopilotCard = function(data) {
         if (horizonEl) horizonEl.textContent = String(horizon);
         // Fill in "Next post: …" from the assistant's nearest upcoming draft (async; hidden until found).
         if (!isBlog) _loadAutopilotNext(window._currentAssistantId);
+    } else if (s.kind === 'unrecognised') {
+        // The user DID ask for a schedule — we just can't read what they gave us, so nothing is being
+        // drafted. This is our bug, not their choice, and it must never render as the "off" state:
+        // that is precisely how it stayed invisible while a tenant waited weeks for posts.
+        if (pill) { pill.textContent = '● Not running'; pill.className = 'inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800'; }
+        if (headline) headline.textContent = isBlog
+            ? 'Autopilot isn’t running — we couldn’t read your schedule'
+            : 'Autopilot isn’t running — we couldn’t read your schedule';
+        if (detail) detail.textContent = `Your schedule is saved as “${s.rawFreq}”, which we can’t turn into a posting rate — so nothing is being drafted automatically. Pick a frequency below and it will start.`;
+        if (adjustBtn) adjustBtn.textContent = 'Fix schedule';
+        if (horizonStat) horizonStat.classList.add('hidden');
+        document.getElementById('autopilot-next')?.classList.add('hidden');
     } else {
         if (pill) { pill.textContent = '● Paused'; pill.className = 'inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500'; }
         if (headline) headline.textContent = isBlog

@@ -19,13 +19,21 @@ export interface PostingCadence {
 export const POSTING_CADENCES: PostingCadence[] = [
     { key: 'daily',     label: 'Daily',          postsPerWeek: 7 },
     { key: '5x_week',   label: '5 times a week', postsPerWeek: 5 },
+    // 4× was missing while the catalogue was frequency-only. Now that the hire wizard also asks
+    // which DAYS to post on, its absence was visible: a user picking Mon-Thu had no frequency that
+    // matched, and picking 3× silently drops one of the days they chose. (postsPerWeekFor already
+    // read the free text "4 times a week" as 4, so this adds no new parsing — only the option.)
+    { key: '4x_week',   label: '4 times a week', postsPerWeek: 4 },
     { key: '3x_week',   label: '3 times a week', postsPerWeek: 3 },
     { key: '2x_week',   label: '2 times a week', postsPerWeek: 2 },
     { key: 'weekly',    label: 'Weekly',         postsPerWeek: 1 },
     { key: 'on_demand', label: 'On demand',      postsPerWeek: 0 },
 ];
 
-const NUMBER_WORDS: Record<string, number> = {
+/** Exported only so scripts/gen-client-constants.ts can emit it beside the browser's copy of
+ *  postsPerWeekFor — that copy is the REAL function stringified, so its free variables have to
+ *  exist in the generated file under these exact names. Not part of the API otherwise. */
+export const NUMBER_WORDS: Record<string, number> = {
     once: 1, one: 1, twice: 2, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
 };
 
@@ -69,6 +77,58 @@ export function postsPerWeekFor(value: unknown): number {
     if (bare) return Number(bare[1]);
 
     return 0;
+}
+
+/**
+ * WHY a rate of 0 is not enough on its own.
+ *
+ * postsPerWeekFor returns 0 for two completely different situations: the user chose "On demand"
+ * (correct, intended, autopilot off) and we could not understand what they typed (a bug we are
+ * hiding). Both silently stop draft-horizon-fill, so from the scheduler's side they are the same —
+ * but they must never read the same to a HUMAN.
+ *
+ * That conflation is what let a live tenant sit dead for weeks: their posting_frequency was the
+ * sentence "Every Monday, Tuesday, Wednesday, and Thursday at 8 am." (a schedule, unmistakably),
+ * postsPerWeekFor returned 0, nothing was ever drafted — and the Autopilot card, which decided
+ * "on" with its own private regex looking for the WORDS "on demand"/"manual", cheerfully reported
+ * autopilot as running. Two parsers, one field, opposite answers, no error anywhere.
+ *
+ * So: one function, one answer, used by the scheduler AND by every surface that talks about the
+ * schedule. 'unrecognised' is the case that deserves an alarm — the user asked for something and
+ * we did not understand it.
+ */
+export type CadenceKind =
+    /** A real periodic cadence; postsPerWeek > 0 and the gap-filler will draft. */
+    | 'scheduled'
+    /** Deliberately on demand — the user drives it. Nothing wrong; nothing scheduled. */
+    | 'on_demand'
+    /** We could not parse it. NOT the user's intent — surface this, never treat it as on-demand. */
+    | 'unrecognised';
+
+export interface CadenceReading {
+    postsPerWeek: number;
+    kind: CadenceKind;
+}
+
+/** Classify a stored posting_frequency: how often, and whether we understood it at all. */
+export function readCadence(value: unknown): CadenceReading {
+    const postsPerWeek = postsPerWeekFor(value);
+    if (postsPerWeek > 0) return { postsPerWeek, kind: 'scheduled' };
+
+    const raw = String(value ?? '').trim().toLowerCase();
+    // Empty is not a mistake: resolvePostingSchedule substitutes DEFAULT_POSTING_FREQUENCY, so an
+    // unset field behaves as that default rather than as a failure to understand anything.
+    if (!raw) return { postsPerWeek: postsPerWeekFor(DEFAULT_POSTING_FREQUENCY), kind: 'scheduled' };
+
+    // A canonical key/label that resolved to 0 can only be on_demand — the catalogue has no other.
+    const canonical = POSTING_CADENCES.some(c => c.key === raw || c.label.toLowerCase() === raw);
+    if (canonical) return { postsPerWeek: 0, kind: 'on_demand' };
+
+    // Free text that SAYS on demand. Mirrors postsPerWeekFor's own first heuristic, deliberately:
+    // both must agree about which words mean "don't schedule this".
+    if (/on[\s-]?demand|as needed|ad[\s-]?hoc|manual/.test(raw)) return { postsPerWeek: 0, kind: 'on_demand' };
+
+    return { postsPerWeek: 0, kind: 'unrecognised' };
 }
 
 /** Even spacing (in hours) between posts for a given cadence; null when not periodic. */

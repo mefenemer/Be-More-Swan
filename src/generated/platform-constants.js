@@ -185,4 +185,41 @@
       return EDIT_REASON_LABELS[String(r == null ? '' : r)] || String(r == null ? '' : r);
     },
   };
+
+  // ── Posting cadence ───────────────────────────────────────────────────────
+  // From src/config/posting-cadence.ts. postsPerWeekFor and readCadence below are the REAL
+  // functions, stringified at generation time — not reimplementations. That matters more here
+  // than anywhere else in this file: the browser had its own private cadence regex, it disagreed
+  // with the scheduler, and a live tenant's autopilot sat dead for weeks while the dashboard
+  // reported it as running. There is now one parser and the browser cannot fork it again.
+  //
+  // Their free variables (POSTING_CADENCES, NUMBER_WORDS, DEFAULT_POSTING_FREQUENCY,
+  // postsPerWeekFor) resolve to the declarations directly above, so the names must match.
+  var POSTING_CADENCES = [{"key":"daily","label":"Daily","postsPerWeek":7},{"key":"5x_week","label":"5 times a week","postsPerWeek":5},{"key":"4x_week","label":"4 times a week","postsPerWeek":4},{"key":"3x_week","label":"3 times a week","postsPerWeek":3},{"key":"2x_week","label":"2 times a week","postsPerWeek":2},{"key":"weekly","label":"Weekly","postsPerWeek":1},{"key":"on_demand","label":"On demand","postsPerWeek":0}];
+  var NUMBER_WORDS = {"once":1,"one":1,"twice":2,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7};
+  var DEFAULT_POSTING_FREQUENCY = "3 times a week";
+  var postsPerWeekFor = function postsPerWeekFor(value){if(typeof value!=="string")return 0;const raw=value.trim().toLowerCase();if(!raw)return 0;const byKey=POSTING_CADENCES.find(c=>c.key===raw);if(byKey)return byKey.postsPerWeek;const byLabel=POSTING_CADENCES.find(c=>c.label.toLowerCase()===raw);if(byLabel)return byLabel.postsPerWeek;if(/on[\s-]?demand|as needed|ad[\s-]?hoc|manual/.test(raw))return 0;if(/fortnight|every (two|2) weeks|bi[\s-]?weekly/.test(raw))return .5;if(/\bdaily\b|every ?day/.test(raw))return 7;if(/\bweekly\b|every ?week/.test(raw))return 1;const perDay=raw.match(/(\d+)\s*(?:x|times)?\s*(?:per|a|\/)?\s*day/);if(perDay)return Number(perDay[1])*7;const perWeek=raw.match(/(\d+)\s*(?:x|times)?\s*(?:per|a|\/)?\s*week/);if(perWeek)return Number(perWeek[1]);for(const[word,n]of Object.entries(NUMBER_WORDS)){if(new RegExp(`\\b${word}\\b.*\\bday`).test(raw))return n*7;if(new RegExp(`\\b${word}\\b.*\\bweek`).test(raw))return n}const bare=raw.match(/^(\d+)$/);if(bare)return Number(bare[1]);return 0};
+  var readCadence = function readCadence(value){const postsPerWeek=postsPerWeekFor(value);if(postsPerWeek>0)return{postsPerWeek,kind:"scheduled"};const raw=String(value??"").trim().toLowerCase();if(!raw)return{postsPerWeek:postsPerWeekFor(DEFAULT_POSTING_FREQUENCY),kind:"scheduled"};const canonical=POSTING_CADENCES.some(c=>c.key===raw||c.label.toLowerCase()===raw);if(canonical)return{postsPerWeek:0,kind:"on_demand"};if(/on[\s-]?demand|as needed|ad[\s-]?hoc|manual/.test(raw))return{postsPerWeek:0,kind:"on_demand"};return{postsPerWeek:0,kind:"unrecognised"}};
+
+  window.PostingCadence = {
+    /** The catalogue, in canonical order. Render pickers from THIS, never a retyped list. */
+    all: POSTING_CADENCES,
+
+    /** Posts per week for a stored posting_frequency. 0 = nothing will be scheduled. */
+    postsPerWeekFor: postsPerWeekFor,
+
+    /**
+     * { postsPerWeek, kind } where kind is 'scheduled' | 'on_demand' | 'unrecognised'.
+     *
+     * Use this, not a rate of 0, to decide what to TELL the user: 'on_demand' is their choice,
+     * 'unrecognised' is us failing to understand a schedule they asked for. Never render the
+     * second as the first.
+     */
+    read: readCadence,
+
+    /** True when the scheduler will draft ahead for this cadence. */
+    isActive: function (value) {
+      return readCadence(value).kind === 'scheduled';
+    },
+  };
 })();

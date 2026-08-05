@@ -1039,14 +1039,10 @@
             <!-- Frequency -->
             <div>
               <label for="edit_frequency" id="posting-frequency-label" class="block text-sm font-bold text-gray-700 mb-1" data-explain="posting-schedule">Posting Frequency</label>
-              <select id="edit_frequency" class="w-full border border-gray-300 rounded-lg p-3 text-sm bg-white focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
-                <option value="Daily">Daily</option>
-                <option value="5 times a week">5 times a week</option>
-                <option value="3 times a week">3 times a week</option>
-                <option value="2 times a week">2 times a week</option>
-                <option value="Weekly">Weekly</option>
-                <option value="On demand">On demand (no automatic scheduling)</option>
-              </select>
+              <!-- Options are populated from window.PostingCadence.all by _setFrequencySelect —
+                   the scheduler's own catalogue. They were six hardcoded <option>s, i.e. a third
+                   hand-copy of a list that already had two copies and one silent disagreement. -->
+              <select id="edit_frequency" class="w-full border border-gray-300 rounded-lg p-3 text-sm bg-white focus:ring-2 focus:ring-emerald-700 transition shadow-sm"></select>
               <p id="posting-frequency-hint" class="text-xs text-gray-400 mt-1">How many posts per week this assistant drafts automatically.</p>
             </div>
 

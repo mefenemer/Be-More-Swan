@@ -1553,9 +1553,15 @@ window.showComplianceModals = function showComplianceModals(force) {
           <p id="chat-modal-role" class="text-xs text-gray-500 truncate"></p>
         </div>
       </div>
-      <button onclick="window.closeAssistantChatModal()" aria-label="Close" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 cursor-pointer">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-      </button>
+      <div class="flex items-center gap-1 shrink-0">
+        <!-- Past conversations (chat-history-panel.js). Hidden for seeded, task-scoped chats —
+             see openAssistantChatModal: those are about one draft, not an ongoing thread. -->
+        <button type="button" id="chat-modal-history-btn" aria-expanded="false" title="Past conversations"
+          class="hidden px-2.5 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-xs font-bold text-gray-700 cursor-pointer">History</button>
+        <button onclick="window.closeAssistantChatModal()" aria-label="Close" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 cursor-pointer">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
     </div>
     <!-- US-LEGAL-3.1: EU AI Act Art.50 — persistent AI interaction disclosure (non-dismissable),
          same notice assistant-chat.html shows on every direct AI-chat surface. -->
@@ -1568,7 +1574,13 @@ window.showComplianceModals = function showComplianceModals(force) {
     </div>
     <!-- min-h-0, not a 24rem floor: the floor existed to give this box a size back when the panel
          had none, and on a short window (landscape phone) it now overflows the panel instead. -->
-    <div id="chat-modal-root" class="flex-1 min-h-0 overflow-hidden"></div>
+    <div class="flex-1 min-h-0 relative overflow-hidden">
+      <div id="chat-modal-root" class="absolute inset-0"></div>
+      <!-- Slides in over the transcript; transform (not display) keeps its scroll position. -->
+      <div id="chat-modal-history"
+           class="absolute top-0 left-0 bottom-0 w-[270px] max-w-[80%] bg-white border-r border-gray-200 shadow-lg z-[2] transition-transform duration-200"
+           style="transform:translateX(-102%)"></div>
+    </div>
   </div>
 </div>
 
@@ -5047,18 +5059,20 @@ function formatCurrency(amount, currency) {
     }
   };
 </script>
+<!-- Platform facts (labels, char limits, media rules, video capability) and the posting-cadence
+     parser, generated from src/config/*.ts by `npm run gen:constants`. This page cannot import from
+     src/, and every constant that was retyped into it by hand eventually drifted — dropping
+     platforms from posts, letting drafts through that the server then refused, or (the cadence
+     parser) reporting autopilot as running while the scheduler drafted nothing.
+     Genuinely loaded first: this comment claimed "Loaded FIRST" while sitting BELOW the five
+     modules that read it, assistants.js among them. -->
+<script src="/src/generated/platform-constants.js"></script>
 <script src="/integrations.js"></script>
 <script src="/assets.js"></script>
 <script src="/notifications.js?v=20260711-notif-actor-popover"></script>
-<script src="/assistants.js?v=20260703-detail-rq-refresh"></script>
+<script src="/assistants.js?v=20260805-cadence-parser"></script>
 <script src="/help.js"></script>
 <script src="/my-content.js"></script>
-<!-- Platform facts (labels, char limits, media rules, video capability) generated from
-     src/config/platform-formats.ts by `npm run gen:constants`. This page cannot import from src/,
-     and every constant that was retyped into it by hand eventually drifted — dropping platforms
-     from posts, or letting drafts through that the server then refused. Loaded FIRST so every
-     module below can read window.PlatformConstants. -->
-<script src="/src/generated/platform-constants.js"></script>
 <script src="/src/components/platform-post-preview.js"></script>
 <script src="/src/components/image-overlay-editor.js"></script>
 <!-- Browser voice-note capture for the post editor's Sound layer. Capture only: it hands back a
@@ -5084,6 +5098,9 @@ function formatCurrency(amount, currency) {
      uses, embedded in-page instead of navigating to a separate page. -->
 <script src="/src/components/assistant-starter-prompts.js"></script>
 <script src="/src/components/chat-session.js"></script>
+<!-- "Past conversations" drawer shared by every chat surface — lists threads from
+     list-chat-sessions.ts, archives/restores via archive-chat-session.ts. -->
+<script src="/src/components/chat-history-panel.js"></script>
 <!-- Assistant Detail "Chat" CTA opens the conversation as a popup (self-injects markup;
      uses ChatSession above) instead of redirecting to assistant-chat.html. -->
 <script src="/src/components/assistant-chat-modal.js"></script>
@@ -11800,6 +11817,22 @@ function closePostReview() {
 // ── "💬 Chat" card action — mounts the shared ChatSession widget in a modal instead of
 // navigating to the standalone assistant-chat.html page. ──────────────────────────────
 let _chatModalSession = null;
+let _chatModalHistory = null;
+
+// The history drawer rides along with opts.resume: it is the same "ongoing conversation" surface.
+// A seeded draft chat gets no drawer, because picking a different thread mid-task would silently
+// swap the conversation the caller just seeded.
+function _chatModalSetHistoryOpen(open) {
+    const drawer = document.getElementById('chat-modal-history');
+    const btn = document.getElementById('chat-modal-history-btn');
+    if (!drawer || !btn) return;
+    drawer.style.transform = open ? 'translateX(0)' : 'translateX(-102%)';
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.classList.toggle('bg-emerald-50', open);
+    btn.classList.toggle('text-emerald-800', open);
+    // Re-read on every open: threads created since the last look, or archived on another surface.
+    if (open && _chatModalHistory) _chatModalHistory.refresh();
+}
 
 // opts.resume — continue this assistant's newest active thread instead of starting a fresh one.
 // OFF by default, and deliberately so: the seeded callers (askSwanAboutDraft, blog-studio-modal)
@@ -11824,7 +11857,8 @@ window.openAssistantChatModal = function(assistantId, assistantName, assistantRo
     // transcript stays on screen (and a close during the gap would strand a live session).
     if (_chatModalSession) { _chatModalSession.destroy(); _chatModalSession = null; }
 
-    const mount = (chatSessionId, initialMessages) => {
+    const mount = (chatSessionId, initialMessages, readOnly) => {
+        if (_chatModalSession) { _chatModalSession.destroy(); _chatModalSession = null; }
         _chatModalSession = window.ChatSession.mount({
             container: root,
             assistantId: Number(assistantId),
@@ -11832,15 +11866,54 @@ window.openAssistantChatModal = function(assistantId, assistantName, assistantRo
             assistantName,
             roleKey,
             initialMessages: initialMessages || [],
+            readOnly: readOnly === true,
         });
+        if (_chatModalHistory) _chatModalHistory.setCurrentSession(chatSessionId || null);
         return _chatModalSession;
+    };
+
+    // Hydrate one specific thread into the modal. Used by the initial resume AND by every pick
+    // in the drawer, so a drawer selection behaves exactly like opening that thread.
+    const loadSession = (sessionId, readOnly) => {
+        root.innerHTML = '<div class="h-full flex items-center justify-center text-sm text-gray-500">Loading your conversation…</div>';
+        return fetch(`/.netlify/functions/get-chat-session?chatSessionId=${sessionId}`)
+            .then(r => r.ok ? r.json() : null)
+            .catch(() => null)
+            .then(data => {
+                if (modal.classList.contains('hidden')) return null;
+                root.innerHTML = '';
+                // Authoritative: the session's own status decides read-only, not the drawer tab.
+                return data?.session
+                    ? mount(data.session.id, data.messages || [],
+                            readOnly === true || data.session.status === 'archived')
+                    : mount(null, null);
+            });
     };
 
     modal.classList.remove('hidden');
     modal.classList.add('flex');
 
+    const historyBtn = document.getElementById('chat-modal-history-btn');
+
     // Default path — unchanged, synchronous, returns the session for callers to seed.
-    if (!opts || !opts.resume) return mount(null, null);
+    if (!opts || !opts.resume) {
+        historyBtn?.classList.add('hidden');
+        return mount(null, null);
+    }
+
+    // ── Ongoing-conversation path: drawer on, resume the newest thread ──
+    historyBtn?.classList.remove('hidden');
+    _chatModalSetHistoryOpen(false);
+    if (_chatModalHistory) { _chatModalHistory.destroy(); _chatModalHistory = null; }
+    if (window.ChatHistoryPanel) {
+        _chatModalHistory = window.ChatHistoryPanel.mount({
+            container: document.getElementById('chat-modal-history'),
+            assistantId: Number(assistantId),
+            currentSessionId: null,
+            onSelect: (id, o) => { _chatModalSetHistoryOpen(false); loadSession(id, o && o.readOnly); },
+            onNew: () => { _chatModalSetHistoryOpen(false); root.innerHTML = ''; mount(null, null); },
+        });
+    }
 
     root.innerHTML = '<div class="h-full flex items-center justify-center text-sm text-gray-500">Loading your conversation…</div>';
 
@@ -11869,8 +11942,17 @@ window.closeAssistantChatModal = function() {
     const modal = document.getElementById('chat-modal');
     if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
     if (_chatModalSession) { _chatModalSession.destroy(); _chatModalSession = null; }
+    if (_chatModalHistory) { _chatModalHistory.destroy(); _chatModalHistory = null; }
+    _chatModalSetHistoryOpen(false);
     window.ChatDraftTarget = null;
 };
+
+document.addEventListener('click', (e) => {
+    if (e.target.closest('#chat-modal-history-btn')) {
+        const drawer = document.getElementById('chat-modal-history');
+        _chatModalSetHistoryOpen(drawer.style.transform === 'translateX(-102%)');
+    }
+});
 
 // ── Add / change media from the review modal ────────────────────────────────────────────────────
 // Rather than rebuild the media picker, we borrow the Work-with-AI panel (#gp-ai-media) — it already

@@ -118,8 +118,9 @@ await test('the vault write after rotation is retried, not attempted once', () =
         /PERSIST_DEADLINE_MS\s*=\s*[0-9_]+/.test(text),
         'the post-rotation vault write must have a retry budget — it is the only copy of the new token',
     );
-    // A wall-clock deadline, not an attempt count: each failed attempt burns an unknown ~5s of
-    // connect timeout, and overrunning the function budget means a hard kill with no condemn.
+    // A wall-clock deadline, not an attempt count: a failed attempt burns anywhere from
+    // milliseconds to the pool's full connect_timeout, and overrunning the function budget means a
+    // hard kill with no condemn.
     assert.ok(
         /const deadline = Date\.now\(\) \+ PERSIST_DEADLINE_MS/.test(text),
         'the retry must be bounded by wall clock, not by a fixed list of backoffs',
@@ -129,6 +130,13 @@ await test('the vault write after rotation is retried, not attempted once', () =
         deadline > 0 && deadline <= 24_000,
         `retry budget ${deadline}ms must leave room inside the ~30s scheduled-function limit`,
     );
+    // The retry gate must measure the last attempt's cost, not assume one. A single attempt can
+    // consume most of the budget (a cold-start connect), so a deadline alone does not bound total
+    // wall clock — and overrunning the function means a hard kill with no condemn and no email.
+    assert.ok(
+        /remaining < cost \+ PERSIST_RETRY_WAIT_MS/.test(text),
+        'the retry gate must compare remaining budget against the measured cost of the last attempt',
+    );
     assert.ok(
         /throw new TokenLostError/.test(text),
         'exhausting the retries must raise TokenLostError, not a generic failure',
@@ -136,6 +144,23 @@ await test('the vault write after rotation is retried, not attempted once', () =
     assert.ok(
         TokenLostError.prototype instanceof Error,
         'TokenLostError must be a real Error subclass',
+    );
+});
+
+await test('the persist budget can absorb one full cold-start connect', () => {
+    // These two numbers are only correct relative to each other. connect_timeout bounds a single
+    // attempt; PERSIST_DEADLINE_MS bounds the whole persist. If the pool's timeout is raised past
+    // the deadline, the retry loop can no longer complete even ONE attempt before giving up, and a
+    // rotated X credential is thrown away on a cold start — the exact 2026-08-04 failure.
+    const client = src('db/client.ts');
+    const connectSec = Number(/connect_timeout:\s*(\d+)/.exec(client)?.[1]);
+    const deadline = Number(
+        /PERSIST_DEADLINE_MS\s*=\s*([0-9_]+)/.exec(src('netlify/functions/refresh-social-tokens.ts'))?.[1]?.replace(/_/g, ''),
+    );
+    assert.ok(connectSec > 0, 'could not read connect_timeout from db/client.ts');
+    assert.ok(
+        deadline >= connectSec * 1000,
+        `PERSIST_DEADLINE_MS (${deadline}ms) must allow at least one full connect_timeout (${connectSec}s)`,
     );
 });
 

@@ -112,14 +112,16 @@ export class TokenLostError extends Error {
 // How long to keep trying to store a rotated credential before admitting it is lost.
 //
 // A DEADLINE, not an attempt count, because each failed attempt costs an unknown amount of wall
-// clock: the pool's connect_timeout is 5s (db/client.ts), so a fixed list of five backoffs can
-// silently add up to ~40s. This function has no `timeout` override in netlify.toml, so it runs on
-// the scheduled-function budget (~30s) — overrunning it means a hard kill with no catch, no
-// condemn and no email, which is precisely the silent failure this whole taxonomy exists to stop.
+// clock — anywhere from milliseconds (a constraint violation) to the pool's full connect_timeout,
+// which is 15s (db/client.ts). A fixed list of backoffs can therefore silently add up to far more
+// than it looks. This function has no `timeout` override in netlify.toml, so it runs on the
+// scheduled-function budget — overrunning it means a hard kill with no catch, no condemn and no
+// email, which is precisely the silent failure this whole taxonomy exists to stop.
 //
-// 20s leaves room for the provider call before it and the failure handling after it, and would
-// have covered the 2026-08-04 outage (~25s total, ~20s of it after the rotation).
-const PERSIST_DEADLINE_MS = 20_000;
+// 18s: enough for one attempt that fully absorbs a cold-start connect (the case that actually
+// matters — see the connect_timeout note in db/client.ts), while leaving the provider call before
+// it and the failure handling after it inside the budget.
+const PERSIST_DEADLINE_MS = 18_000;
 const PERSIST_RETRY_WAIT_MS = 500;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -225,11 +227,16 @@ async function persistRotatedToken(
     let lastErr: unknown;
     let attempt = 0;
 
-    // Always makes at least one attempt, then keeps probing until the budget is gone. Each failure
-    // costs ~5s of connect timeout, so this is roughly four tries — but it self-adjusts if the
-    // database is failing fast (many quick probes) or slowly (fewer, and we still exit on time).
+    // Always makes at least one attempt, then keeps probing while the budget allows.
+    //
+    // The retry gate measures how long the LAST attempt took and only goes again if that much time
+    // remains. Without it, a 15s cold-start attempt starting at t=15s would run to t=30s and blow
+    // the function budget — a deadline alone does not bound total time when a single attempt can
+    // consume most of it. Measuring instead of assuming also keeps fast failures (a constraint
+    // violation, say) retrying many times, which is the case where retrying is actually cheap.
     do {
         attempt++;
+        const started = Date.now();
         try {
             await storeSecret(db, conn.vaultRefKey!, payload);
             if (attempt > 1) {
@@ -238,11 +245,13 @@ async function persistRotatedToken(
             return;
         } catch (err) {
             lastErr = err;
+            const cost = Date.now() - started;
+            const remaining = deadline - Date.now();
             console.warn(
-                `[refresh-social-tokens] conn ${conn.id} vault write attempt ${attempt} failed ` +
-                `(${describeError(err)}) — ${Math.max(0, deadline - Date.now())}ms of budget left`,
+                `[refresh-social-tokens] conn ${conn.id} vault write attempt ${attempt} failed after ${cost}ms ` +
+                `(${describeError(err)}) — ${Math.max(0, remaining)}ms of budget left`,
             );
-            if (Date.now() + PERSIST_RETRY_WAIT_MS >= deadline) break;
+            if (remaining < cost + PERSIST_RETRY_WAIT_MS) break;
             await sleep(PERSIST_RETRY_WAIT_MS);
         }
     } while (Date.now() < deadline);

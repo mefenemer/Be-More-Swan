@@ -28,6 +28,9 @@ import {
     OUTCOMES, OUTCOME_LABELS, LOSS_REASONS, LOSS_REASON_LABELS, OUTCOMES_REQUIRING_LOSS_REASON,
 } from '../src/config/revenue-events';
 import { EDIT_REASONS, EDIT_REASON_LABELS } from '../src/config/template-feedback';
+import {
+    POSTING_CADENCES, NUMBER_WORDS, DEFAULT_POSTING_FREQUENCY, postsPerWeekFor, readCadence,
+} from '../src/config/posting-cadence';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const OUTPUT_PATH = join(root, 'src', 'generated', 'platform-constants.js');
@@ -227,6 +230,43 @@ ${formatRows}
     /** Display label for an edit reason. */
     editReasonLabel: function (r) {
       return EDIT_REASON_LABELS[String(r == null ? '' : r)] || String(r == null ? '' : r);
+    },
+  };
+
+  // ── Posting cadence ───────────────────────────────────────────────────────
+  // From src/config/posting-cadence.ts. postsPerWeekFor and readCadence below are the REAL
+  // functions, stringified at generation time — not reimplementations. That matters more here
+  // than anywhere else in this file: the browser had its own private cadence regex, it disagreed
+  // with the scheduler, and a live tenant's autopilot sat dead for weeks while the dashboard
+  // reported it as running. There is now one parser and the browser cannot fork it again.
+  //
+  // Their free variables (POSTING_CADENCES, NUMBER_WORDS, DEFAULT_POSTING_FREQUENCY,
+  // postsPerWeekFor) resolve to the declarations directly above, so the names must match.
+  var POSTING_CADENCES = ${JSON.stringify(POSTING_CADENCES)};
+  var NUMBER_WORDS = ${JSON.stringify(NUMBER_WORDS)};
+  var DEFAULT_POSTING_FREQUENCY = ${JSON.stringify(DEFAULT_POSTING_FREQUENCY)};
+  var postsPerWeekFor = ${postsPerWeekFor.toString()};
+  var readCadence = ${readCadence.toString()};
+
+  window.PostingCadence = {
+    /** The catalogue, in canonical order. Render pickers from THIS, never a retyped list. */
+    all: POSTING_CADENCES,
+
+    /** Posts per week for a stored posting_frequency. 0 = nothing will be scheduled. */
+    postsPerWeekFor: postsPerWeekFor,
+
+    /**
+     * { postsPerWeek, kind } where kind is 'scheduled' | 'on_demand' | 'unrecognised'.
+     *
+     * Use this, not a rate of 0, to decide what to TELL the user: 'on_demand' is their choice,
+     * 'unrecognised' is us failing to understand a schedule they asked for. Never render the
+     * second as the first.
+     */
+    read: readCadence,
+
+    /** True when the scheduler will draft ahead for this cadence. */
+    isActive: function (value) {
+      return readCadence(value).kind === 'scheduled';
     },
   };
 })();
