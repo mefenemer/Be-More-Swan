@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Privacy Policy | Be More Swan</title>
+    <meta name="description" content="How Be More Swan collects, uses, shares and retains personal data — lawful bases, sub-processors, AI processing, retention periods and your rights under UK GDPR.">
     <!--    <script src="https://cdn.tailwindcss.com"></script>-->
     <link href="./style.css" rel="stylesheet">
     <link rel="icon" href="/favicon/favicon.ico" sizes="any">
@@ -21,71 +22,259 @@
             Back
         </button>
         <h1 class="text-4xl font-extrabold text-gray-900 mb-8">Privacy Policy</h1>
-        <p class="text-gray-500 mb-8">Last updated: May 27, 2026</p>
+        <p class="text-gray-500 mb-8">Last updated: August 5, 2026</p>
+
+        <div class="bg-white border border-gray-200 rounded-2xl p-6 mb-10">
+            <h2 class="text-sm font-bold uppercase tracking-widest text-gray-400 mb-4">The short version</h2>
+            <ul class="list-disc pl-5 space-y-2 text-gray-600">
+                <li>Your workspace data is yours. We never sell it, and it is never used to train public AI models.</li>
+                <li>Each workspace is isolated. Your content, contacts and connected accounts are not pooled with anyone else's.</li>
+                <li>We use AI providers under contract to generate and check content. They are bound by no-training terms.</li>
+                <li>We only set cookies that are strictly necessary to keep you signed in. There is no advertising or analytics tracking on this site.</li>
+                <li>You can export your data or ask us to erase your account at any time — see <a href="#your-rights" class="text-blue-600 underline">Your rights</a>.</li>
+            </ul>
+            <p class="text-sm text-gray-500 mt-4">This summary is for orientation only. The sections below are the policy.</p>
+        </div>
 
         <div class="prose prose-emerald max-w-none text-gray-600 space-y-6">
             <section>
-                <h2 class="text-xl font-bold text-gray-900">1. Our Commitment to Data Privacy</h2>
-                <p>At Be More Swan, we understand that you are trusting us with your business operations and data. We operate on a principle of strict data isolation: your business data belongs to you, and we do not use your information to train public AI models.</p>
+                <h2 class="text-xl font-bold text-gray-900">1. Who we are, and which role we are in</h2>
+                <p>Be More Swan provides AI assistants that plan, draft, review and publish work on behalf of small businesses. We are based in the United Kingdom. You can reach us about anything in this policy at <a href="mailto:privacy@bemoreswan.com" class="text-blue-600 underline">privacy@bemoreswan.com</a>.</p>
+                <p class="mt-2">Our role under UK GDPR depends on the data:</p>
+                <ul class="list-disc pl-6 mt-2 space-y-2">
+                    <li>For the business data you put into your workspace — your content, your brand material, your contacts and leads, and the data we read from accounts you connect — we are a <strong>data processor</strong>, handling it on your instructions. You are the controller of that data, and our Data Processing Agreement governs it. You accept the DPA when you set up your organisation, and can review it in <strong>Settings &rarr; My Agreements</strong>.</li>
+                    <li>For your account, login, billing and support data, and for operating, securing and improving the platform itself, we are a <strong>data controller</strong>.</li>
+                </ul>
+                <p class="mt-2">Where we act as processor, the customer whose workspace holds your data is the first place to direct a request. We will help them respond, and we will tell you who they are if you ask us.</p>
             </section>
 
             <section>
-                <h2 class="text-xl font-bold text-gray-900">2. Data We Collect</h2>
-                <p>We collect information necessary to build and manage your digital assistants, including:</p>
-                <ul class="list-disc pl-5 space-y-2">
-                    <li>Contact details provided during onboarding.</li>
-                    <li>Workflow instructions and business process logic.</li>
-                    <li>Data processed by your assistants (e.g., email content, lead form data) solely for the purpose of executing the tasks you have requested.</li>
+                <h2 class="text-xl font-bold text-gray-900">2. What we collect</h2>
+                <p class="font-semibold text-gray-900 mt-4">Account and identity</p>
+                <p>Your name, email address, a hashed password, your organisation and job details, your role and team memberships, invitations you send or accept, and your record of accepting our Terms and DPA.</p>
+
+                <p class="font-semibold text-gray-900 mt-4">Billing</p>
+                <p>Your plan, subscription status, invoices, payment history and billing contact details. Card details are entered directly with Stripe and are never stored on our systems — we hold only the payment method's last four digits, brand and expiry as returned by Stripe.</p>
+
+                <p class="font-semibold text-gray-900 mt-4">Workspace content</p>
+                <p>Everything you or your assistants create and store: brand voice and guidelines, goals, onboarding answers and operating instructions, drafts, scheduled and published posts, blog articles, images, video, audio, text overlays, knowledge-base documents you upload, and the assistant's working memory about your business.</p>
+
+                <p class="font-semibold text-gray-900 mt-4">Data from accounts you connect</p>
+                <p>When you connect a third-party account we store an access token, held encrypted, plus the identifiers that platform gives us and the data the feature needs. Depending on what you connect, that can include social page and account IDs, post performance and follower counts, search-performance metrics, email you send and receive through a connected mailbox for outreach, calendar entries, and records from a connected CRM or helpdesk. We never store your password for those platforms. See our <a href="./data-deletion.html" class="text-blue-600 underline">Data Deletion Instructions</a> for exactly what a social connection holds and how to remove it.</p>
+
+                <p class="font-semibold text-gray-900 mt-4">Contacts, leads and people you communicate with</p>
+                <p>Contact records you create or import, leads discovered from public web sources on your instruction, email correspondence in outreach threads, replies received, and any suppression or do-not-contact markers attached to them. This is third-party personal data that we process on your behalf — see <a href="#not-a-customer" class="text-blue-600 underline">section 6</a>.</p>
+
+                <p class="font-semibold text-gray-900 mt-4">Support and communications</p>
+                <p>Messages you send through our contact form, support tickets, issue reports, email you send to our support address, and the notifications and emails we send you.</p>
+
+                <p class="font-semibold text-gray-900 mt-4">Technical and usage data</p>
+                <p>Sign-in events, session records, audit logs of significant actions, security-event records, error and diagnostic logs, API call records for connected integrations, and page-view events used to detect when an account is struggling. IP addresses recorded in audit and security tables are <strong>truncated before they are stored</strong> — the final octet of an IPv4 address, or everything after the first 64 bits of an IPv6 address, is discarded, so we retain subnet-level signal for abuse detection without an individually identifying address.</p>
+
+                <p class="mt-4">We do not ask for, and ask that you do not put into your workspace, special category data (health, biometrics, race, religion, political opinions, sex life or orientation), criminal offence data, or payment card numbers.</p>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-bold text-gray-900">3. Where it comes from</h2>
+                <ul class="list-disc pl-6 space-y-2">
+                    <li><strong>From you and your team</strong> — everything you type, upload or configure.</li>
+                    <li><strong>From platforms you connect</strong> — only after you complete that platform's own authorisation screen, and only within the permissions you grant there.</li>
+                    <li><strong>From public web sources</strong> — where you run a lead discovery search, we query a search provider and read publicly available business pages to build lead records. We look for business contact details, not personal ones.</li>
+                    <li><strong>Generated by the platform</strong> — drafts, scores, metrics, provenance records and audit entries created as your assistants work.</li>
                 </ul>
             </section>
 
             <section>
-                <h2 class="text-xl font-bold text-gray-900">3. Data Isolation and Security</h2>
-                <p>Your digital assistant's "memory" is stored in a secure, isolated vault specific to your account. We employ enterprise-grade encryption for all data at rest and in transit. We ensure that your proprietary information—such as your customer lists, pricing, or internal communications—remains confidential and is not shared with third-party model providers for training purposes.</p>
+                <h2 class="text-xl font-bold text-gray-900">4. Why we use it, and our lawful basis</h2>
+                <p>Where we act as a controller, we rely on the following bases:</p>
+                <ul class="list-disc pl-6 mt-2 space-y-2">
+                    <li><strong>Performance of a contract</strong> — creating and running your account, provisioning assistants, generating and publishing your content, taking payment, and providing support.</li>
+                    <li><strong>Legitimate interests</strong> — securing the platform and detecting abuse, keeping audit trails, diagnosing faults, measuring how features are used so we can improve them, preventing fraud and non-payment, and sending service messages about your own account. We balance these against your interests, and you can object at any time.</li>
+                    <li><strong>Legal obligation</strong> — retaining billing and tax records, responding to rights requests, and reporting personal data breaches.</li>
+                    <li><strong>Consent</strong> — where you opt in to optional emails, or authorise an integration that requires your explicit permission. You can withdraw consent at any time; withdrawing it does not affect processing already carried out.</li>
+                </ul>
+                <p class="mt-2">Where we act as a processor, we process only on your documented instructions, as set out in the DPA.</p>
             </section>
 
             <section>
-                <h2 class="text-xl font-bold text-gray-900">4. How We Use Your Data</h2>
-                <p>We use your data exclusively to:</p>
-                <ul class="list-disc pl-5 space-y-2">
-                    <li>Build, test, and deploy your custom digital assistants.</li>
-                    <li>Monitor assistant performance to ensure reliability.</li>
-                    <li>Communicate with you regarding updates to your workflows or service notifications.</li>
+                <h2 class="text-xl font-bold text-gray-900">5. AI processing — what the assistants do with your data</h2>
+                <p>Your assistants send parts of your workspace data to AI providers so they can do the work you asked for. This is worth understanding in detail.</p>
+                <ul class="list-disc pl-6 mt-2 space-y-2">
+                    <li><strong>What is sent.</strong> The instructions you configured, the relevant part of your brand and business context, the content being drafted or reviewed, and any material you explicitly attach. We send the context a task needs, not your whole workspace.</li>
+                    <li><strong>No training on your data.</strong> Our AI providers are contractually bound not to train their models on data we send through their APIs. Your data is never used to build or improve another customer's assistant.</li>
+                    <li><strong>Safety screening.</strong> Prompts pass through a content moderation check before generation, and generated content passes through a quality and compliance review before it can be approved. Both create records against your workspace.</li>
+                    <li><strong>Search and retrieval.</strong> Knowledge-base documents you upload are split into chunks and converted into numerical embeddings so assistants can search them. Those embeddings are stored in your workspace and scoped to it.</li>
+                    <li><strong>Media generation.</strong> Where you ask for an AI image or video, the prompt is sent to our media generation provider and the result is stored in your workspace.</li>
+                    <li><strong>Human control.</strong> Assistants draft; they do not decide. Content reaches a review queue for a person to approve, unless you have explicitly enabled automatic publishing and the content meets the conditions you set. AI-assisted output is labelled, and provenance records are kept.</li>
+                    <li><strong>No solely automated decisions with legal effect.</strong> Nothing in the platform makes a decision about you that produces legal effects or similarly significant effects within the meaning of Article 22.</li>
+                </ul>
+            </section>
+
+            <section id="not-a-customer">
+                <h2 class="text-xl font-bold text-gray-900">6. If you are a contact, lead or prospect</h2>
+                <p>You may be reading this because a Be More Swan customer holds a record about you, or emailed you using our platform. In that case the customer is the controller of your data and we are their processor.</p>
+                <ul class="list-disc pl-6 mt-2 space-y-2">
+                    <li>Lead records are built from information you or your business published publicly, or from details you gave the customer directly.</li>
+                    <li>Every outbound email identifies the sender and carries a way to opt out. Asking to be removed adds you to that customer's permanent suppression list, which is checked before any further send.</li>
+                    <li>A lead marked as do-not-contact is blocked at the point of sending, including in the middle of a sequence already in progress.</li>
+                    <li>You can email <a href="mailto:privacy@bemoreswan.com" class="text-blue-600 underline">privacy@bemoreswan.com</a> to object, to ask for erasure, or to find out which customer holds your record. We will pass the request to them and support them in acting on it.</li>
                 </ul>
             </section>
 
             <section>
-                <h2 class="text-xl font-bold text-gray-900">5. Your Control</h2>
-                <p>You maintain full ownership of your workflows and your proprietary business data. You may request the deletion of your data or the cancellation of your assistant at any time.</p>
-                <p class="mt-2">For step-by-step instructions on removing a connected social account and deleting the data we obtained through it, see our <a href="./data-deletion.html" class="text-blue-600 underline">Data Deletion Instructions</a>.</p>
-                
-                <p class="mt-4 font-semibold">Migration Policy:</p>
-                <p>Upon request, we will provide you with a plain-text export of your assistant's job instructions and workflow logic. Please note that while you own the logic, the specific technical architecture and integrations we have built are proprietary to Be More Swan. We do not provide direct migration of technical infrastructure or "plug-and-play" files to third-party agencies. If you choose to switch providers, we will facilitate the handover by providing your documented instructions, and upon final confirmation, we will securely purge your account-specific assistant memory and associated data.</p>
+                <h2 class="text-xl font-bold text-gray-900">7. Who we share it with</h2>
+                <p>We do not sell personal data and we do not share it for advertising. We share it in three situations only.</p>
+
+                <p class="font-semibold text-gray-900 mt-4">Sub-processors acting on our behalf</p>
+                <p>These providers process data so we can run the service. Each is under a written data processing agreement.</p>
+                <div class="overflow-x-auto mt-3">
+                    <table class="w-full text-sm text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-gray-200 text-gray-900">
+                                <th class="py-2 pr-4 font-bold">Provider</th>
+                                <th class="py-2 pr-4 font-bold">What it does</th>
+                                <th class="py-2 font-bold">Region</th>
+                            </tr>
+                        </thead>
+                        <tbody class="align-top">
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4 font-semibold">Anthropic</td><td class="py-2 pr-4">Primary AI model behind assistant drafting, chat and review</td><td class="py-2">US</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4 font-semibold">OpenAI</td><td class="py-2 pr-4">Content moderation screening; voice narration of our own product tour copy</td><td class="py-2">US</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4 font-semibold">Voyage AI</td><td class="py-2 pr-4">Embedding of knowledge-base content so assistants can search it</td><td class="py-2">US</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4 font-semibold">fal.ai</td><td class="py-2 pr-4">AI image and video generation from prompts you or your assistants supply</td><td class="py-2">US</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4 font-semibold">Neon</td><td class="py-2 pr-4">Managed PostgreSQL database — the primary store for your workspace</td><td class="py-2">EU (eu-west)</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4 font-semibold">Cloudflare R2</td><td class="py-2 pr-4">Object storage for uploaded and generated media and documents</td><td class="py-2">EU-configured bucket</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4 font-semibold">Netlify</td><td class="py-2 pr-4">Hosting, serverless functions and scheduled jobs</td><td class="py-2">US / global edge</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4 font-semibold">Amazon Web Services</td><td class="py-2 pr-4">Serverless video rendering for posts with overlays</td><td class="py-2">EU (eu-west-2, London)</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4 font-semibold">Stripe</td><td class="py-2 pr-4">Payment processing and subscription management</td><td class="py-2">US</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4 font-semibold">Resend</td><td class="py-2 pr-4">Transactional and notification email delivery</td><td class="py-2">US</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4 font-semibold">SendGrid (Twilio)</td><td class="py-2 pr-4">Receiving inbound email replies and routing them into your workspace</td><td class="py-2">US</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4 font-semibold">Serper</td><td class="py-2 pr-4">Web search queries used by lead discovery runs you start</td><td class="py-2">US</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4 font-semibold">Pexels</td><td class="py-2 pr-4">Stock imagery search — a search term is sent, no personal data</td><td class="py-2">US</td></tr>
+                            <tr><td class="py-2 pr-4 font-semibold">Canva</td><td class="py-2 pr-4">Importing designs, only where you connect a Canva account</td><td class="py-2">Australia / US</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="mt-3">A full sub-processor register listing each processor's name, the data transferred, its legal transfer basis, its region and the date we last reviewed it is available on request from <a href="mailto:privacy@bemoreswan.com" class="text-blue-600 underline">privacy@bemoreswan.com</a>. We will notify you 14 days before adding a new sub-processor that handles your personal data.</p>
+
+                <p class="font-semibold text-gray-900 mt-6">Platforms you choose to connect</p>
+                <p>When you connect an account and instruct an assistant to act on it, we send data to that platform on your behalf — for example publishing a post to Facebook, Instagram, Threads, LinkedIn, X, TikTok or YouTube, sending an email through your connected mailbox, publishing an article to your blog, or writing a record to a connected CRM, helpdesk, project or accounting tool. Those platforms are independent controllers of what they receive and their own privacy policies apply. You choose which are connected, and you can disconnect any of them at any time.</p>
+
+                <p class="font-semibold text-gray-900 mt-6">Legal and corporate</p>
+                <p>We disclose personal data where we are legally required to, to establish or defend legal claims, or to protect the rights and safety of our users. If the business is ever sold or reorganised, data may transfer to the acquirer under the same commitments; we would tell you before that happened.</p>
             </section>
 
             <section>
-                <h2 class="text-xl font-bold text-gray-900">6. Google API Services — Limited Use Disclosure</h2>
+                <h2 class="text-xl font-bold text-gray-900">8. International data transfers</h2>
+                <p>Your workspace database sits in an EU region and video rendering runs in AWS London. Some of the providers above are in the United States, so personal data may be transferred there.</p>
+                <p class="mt-2">Those transfers are covered by Standard Contractual Clauses under the UK IDTA and EU Commission Decision 2021/914, except for Stripe, where we rely on the UK–US Data Privacy Framework adequacy. For SCC transfers we have carried out a Transfer Impact Assessment evaluating: (1) the US legal framework, including FISA 702 and the EO 14086 safeguards, (2) each provider's contractual commitments, and (3) technical supplementary measures — minimising personal data in prompts, contractual no-training clauses, and limiting the context sent to AI APIs to what a task needs. The assessment forms part of our Article 30 Records of Processing Activities and is available on request.</p>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-bold text-gray-900">9. How long we keep it</h2>
+                <p>We keep personal data only as long as we need it. In practice:</p>
+                <div class="overflow-x-auto mt-3">
+                    <table class="w-full text-sm text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-gray-200 text-gray-900">
+                                <th class="py-2 pr-4 font-bold">Data</th>
+                                <th class="py-2 font-bold">Retention</th>
+                            </tr>
+                        </thead>
+                        <tbody class="align-top">
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4">Your account and workspace content</td><td class="py-2">For as long as your account is open, then erased after deletion (see below)</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4">Sign-in session</td><td class="py-2">7 days, then you are signed out</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4">Unverified sign-ups that were never confirmed</td><td class="py-2">Deleted once the verification link expires</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4">Media attached to published posts</td><td class="py-2">30 days after publication, then the stored file is deleted</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4">Media attached to rejected content</td><td class="py-2">7 days</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4">Archived posts</td><td class="py-2">30 days in the archive, then removed</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4">Empty drafts nobody worked on</td><td class="py-2">7 days</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4">Generated brand cards never attached to anything</td><td class="py-2">30 days (media a person has edited or kept is exempt)</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4">In-app notifications and integration call logs</td><td class="py-2">90 days</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4">Data export download links</td><td class="py-2">72 hours, then the link expires</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4">Account deletion cooling-off window</td><td class="py-2">24 hours, during which you can cancel the request</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4">Audit logs and security event records</td><td class="py-2">Retained as evidence; not user-deletable</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4">Records that you accepted our Terms and DPA</td><td class="py-2">Retained as consent evidence (Article 28(9))</td></tr>
+                            <tr class="border-b border-gray-100"><td class="py-2 pr-4">Record that an erasure took place</td><td class="py-2">Retained in anonymised form as proof we acted</td></tr>
+                            <tr><td class="py-2 pr-4">Invoices, payments and billing records</td><td class="py-2">7 years (HMRC requirement)</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="mt-3">When an account is deleted, we remove the workspace records and delete the stored files held for that organisation. Deletion completes within 30 days, as UK GDPR requires. The last three rows above survive it, because we are required to keep them. Cancelling a subscription is not the same as deleting an account — see the <a href="./data-deletion.html#full-account" class="text-blue-600 underline">Data Deletion Instructions</a>.</p>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-bold text-gray-900">10. How we protect it</h2>
+                <ul class="list-disc pl-6 space-y-2">
+                    <li><strong>Isolation.</strong> Every workspace is tenant-scoped, enforced in the data layer, and covered by automated tests that fail the build if one tenant could reach another's rows or files.</li>
+                    <li><strong>Encryption.</strong> Traffic is encrypted in transit with TLS. Access tokens and integration credentials are additionally encrypted at the application layer with AES-256-GCM before they are stored, under keys we rotate. Plaintext credentials are never logged and never returned to a browser.</li>
+                    <li><strong>Minimised logging.</strong> IP addresses are truncated before storage, and prompts and payloads are filtered so credentials never reach the logs.</li>
+                    <li><strong>Staff access.</strong> Support access to a customer account requires a super-admin role, is time-limited to 15 minutes, records the reason in an immutable audit log, and is blocked from taking payment, changing a password or deleting an account.</li>
+                    <li><strong>Breach response.</strong> If a personal data breach occurs and it is likely to result in a risk to you, we will notify the ICO within 72 hours and tell you where the law requires it.</li>
+                </ul>
+                <p class="mt-2">More detail on our controls is on the <a href="./trust.html" class="text-blue-600 underline">Trust &amp; Security</a> page.</p>
+            </section>
+
+            <section id="your-rights">
+                <h2 class="text-xl font-bold text-gray-900">11. Your rights</h2>
+                <p>Under UK GDPR you have the right to:</p>
+                <ul class="list-disc pl-6 mt-2 space-y-2">
+                    <li><strong>Access</strong> a copy of the personal data we hold about you.</li>
+                    <li><strong>Rectify</strong> anything inaccurate — most of it you can correct yourself in Settings.</li>
+                    <li><strong>Erase</strong> your data, subject to the records we are legally required to keep.</li>
+                    <li><strong>Restrict</strong> or <strong>object to</strong> processing based on our legitimate interests.</li>
+                    <li><strong>Port</strong> your data to another provider in a machine-readable format.</li>
+                    <li><strong>Withdraw consent</strong> where consent is what we relied on.</li>
+                </ul>
+                <p class="mt-3">To exercise any of these, email <a href="mailto:privacy@bemoreswan.com" class="text-blue-600 underline">privacy@bemoreswan.com</a> from the address on your account, or use the data controls in <strong>Settings</strong>. We acknowledge requests within 5 working days and respond within one month, which we may extend by two further months for complex requests — we will tell you if that happens. We may need to verify your identity first. There is no charge unless a request is manifestly unfounded or excessive.</p>
+                <p class="mt-2">A data export is delivered as a downloadable file, and the download link expires after 72 hours for security. Account deletion has a 24-hour cooling-off window with a cancel link emailed to you, in case the request was not made by you.</p>
+                <p class="mt-2">If you are unhappy with how we have handled your data, please tell us first so we can put it right. You also have the right to complain to the <a href="https://ico.org.uk/make-a-complaint/" class="text-blue-600 underline" target="_blank" rel="noopener noreferrer">Information Commissioner's Office</a> (ico.org.uk, 0303 123 1113), or to your local supervisory authority in the EU.</p>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-bold text-gray-900">12. Cookies and similar technologies</h2>
+                <p>We use strictly necessary cookies only. There is no advertising network, no analytics tracker and no third-party pixel on this site, which is why you are not asked to accept cookies.</p>
+                <ul class="list-disc pl-6 mt-2 space-y-2">
+                    <li><code>aura_session</code> — keeps you signed in. HttpOnly, Secure, SameSite=Lax, expires after 7 days.</li>
+                    <li><code>aura_impersonation</code> — set only during an audited support session, and expires after 15 minutes.</li>
+                </ul>
+                <p class="mt-2">Two third-party services load code in your browser when you use the app: Stripe, on the checkout and billing pages, for payment security and fraud prevention; and a public code CDN that serves the editor libraries used in the content studio. Both receive your IP address as an unavoidable part of serving a request. Neither is used to profile you.</p>
+                <p class="mt-2">We also record page views inside the signed-in app against your account, so we can tell when someone is stuck and offer help. That is first-party, stays in your workspace database, and is never shared.</p>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-bold text-gray-900">13. Google API Services — Limited Use Disclosure</h2>
                 <p>Be More Swan's use of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy" class="text-blue-600 underline" target="_blank" rel="noopener noreferrer">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
-                <p class="mt-2">Specifically, data obtained through Google API connections (including Gmail, Google Calendar, and Google Drive) will only be used to provide or improve user-facing features that are prominent in Be More Swan's user interface. This data will not be used for advertising, will not be transferred to third parties except as necessary to provide the Services or as required by law, and will not be used to train AI foundation models. Human access to this data is restricted to cases where it is necessary to provide the Services, to comply with applicable law, or where you have given express consent.</p>
+                <p class="mt-2">Specifically, data obtained through Google API connections (including Gmail, Google Calendar, Google Drive, YouTube and Search Console) will only be used to provide or improve user-facing features that are prominent in Be More Swan's user interface. This data will not be used for advertising, will not be transferred to third parties except as necessary to provide the Services or as required by law, and will not be used to train AI foundation models. Human access to this data is restricted to cases where it is necessary to provide the Services, to comply with applicable law, or where you have given express consent.</p>
             </section>
 
             <section>
-                <h2 class="text-xl font-bold text-gray-900">7. International Data Transfers</h2>
-                <p>Be More Swan is a UK-based data controller. When you use the Services, your data may be transferred to and processed in the United States by the following sub-processors:</p>
-                <ul class="list-disc pl-6 mt-2 space-y-1">
-                    <li><strong>Anthropic / OpenAI</strong> — foundation AI model inference. Transfer basis: Standard Contractual Clauses (SCCs) under UK IDTA and EU Commission Decision 2021/914, supplemented by a Transfer Impact Assessment (TIA). Contractual no-training-on-API-data clause confirmed in executed DPA.</li>
-                    <li><strong>Stripe, Inc.</strong> — payment processing and subscription management. Transfer basis: UK–US Data Privacy Framework adequacy (confirmed current). Stripe DPA executed.</li>
-                    <li><strong>Resend</strong> — transactional email delivery. Transfer basis: Standard Contractual Clauses. Resend DPA / SCCs executed.</li>
-                    <li><strong>Netlify, Inc.</strong> — serverless hosting and edge functions. Transfer basis: Netlify DPA (available at netlify.com/dpa) covering UK/EU GDPR. Executed DPA in place.</li>
-                    <li><strong>Neon / PostgreSQL host</strong> — managed PostgreSQL database. Database is hosted in an EU region (eu-west). No US transfer for stored personal data.</li>
-                </ul>
-                <p class="mt-2">For transfers to the US under SCCs, we have conducted a Transfer Impact Assessment (TIA) evaluating: (1) the US legal framework (FISA 702 / EO 14086 safeguards), (2) each provider's DPA commitments, and (3) technical supplementary measures including prompt PII minimisation, contractual no-training clauses, and data minimisation on context sent to LLM APIs. The TIA is retained as part of our Article 30 Records of Processing Activities and is available to users on request.</p>
-                <p class="mt-2">A full sub-processor register listing each processor's name, data transferred, legal transfer basis, region, and last-reviewed date is available on request by emailing <a href="mailto:privacy@bemoreswan.com" class="text-indigo-600 underline">privacy@bemoreswan.com</a>. We will notify you 14 days before adding any new sub-processor that handles your personal data.</p>
+                <h2 class="text-xl font-bold text-gray-900">14. Data from social platforms</h2>
+                <p>Data we obtain through Meta (Facebook, Instagram, Threads), LinkedIn, X, TikTok and YouTube connections is used solely to publish the content you approve and to report back on how it performed. It is not sold, not used for advertising, and not used to train AI models. Where a platform tells us you have removed our app, we revoke the connection and delete the stored token without waiting for you to ask.</p>
+                <p class="mt-2">Full details of what each connection holds, and how to remove one, are in our <a href="./data-deletion.html" class="text-blue-600 underline">Data Deletion Instructions</a>.</p>
             </section>
 
             <section>
-                <h2 class="text-xl font-bold text-gray-900">8. Changes to This Policy</h2>
-                <p>We may update this policy periodically to reflect changes in our service or legal requirements. We will notify all active subscribers of significant updates.</p>
+                <h2 class="text-xl font-bold text-gray-900">15. Ownership, export and migration</h2>
+                <p>You keep full ownership of your workflows and your proprietary business data. You can request an export of your data at any time, and you can ask us to delete your account at any time.</p>
+                <p class="mt-3 font-semibold text-gray-900">Migration policy</p>
+                <p>On request we will provide a plain-text export of your assistant's job instructions and workflow logic. While you own that logic, the technical architecture and integrations we have built are proprietary to Be More Swan. We do not provide migration of technical infrastructure or "plug-and-play" files to third-party agencies. If you switch providers we will hand over your documented instructions, and once you confirm, securely purge your account-specific assistant memory and associated data.</p>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-bold text-gray-900">16. Children</h2>
+                <p>Be More Swan is a business tool and is not directed at children. We do not knowingly collect personal data from anyone under 18. If you believe a child's data has reached us, contact <a href="mailto:privacy@bemoreswan.com" class="text-blue-600 underline">privacy@bemoreswan.com</a> and we will delete it.</p>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-bold text-gray-900">17. Changes to this policy</h2>
+                <p>We update this policy when our service or the law changes. The date at the top always reflects the current version. We notify active subscribers of significant changes by email before they take effect, and we will always give notice before a change that reduces your protections.</p>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-bold text-gray-900">18. Contact us</h2>
+                <p>Privacy and data protection: <a href="mailto:privacy@bemoreswan.com" class="text-blue-600 underline">privacy@bemoreswan.com</a><br>
+                Anything else: <a href="mailto:hello@bemoreswan.com" class="text-blue-600 underline">hello@bemoreswan.com</a></p>
+                <p class="mt-2">Related pages: <a href="./terms_of_service.html" class="text-blue-600 underline">Terms of Service</a> &middot; <a href="./trust.html" class="text-blue-600 underline">Trust &amp; Security</a> &middot; <a href="./data-deletion.html" class="text-blue-600 underline">Data Deletion Instructions</a></p>
             </section>
         </div>
     </main>

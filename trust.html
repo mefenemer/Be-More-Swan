@@ -46,7 +46,7 @@
                 <span class="text-xs font-bold uppercase tracking-widest text-emerald-700">Data Isolation</span>
                 <h2 class="text-3xl font-extrabold text-gray-900 tracking-tight mt-2 mb-4">Your data trains your assistant. No one else's.</h2>
                 <p class="text-gray-600 leading-relaxed mb-4">
-                    Every workspace runs in its own secure sandbox with strict tenant isolation, enforced at the database layer. The proprietary data you share — brand voice, customer lists, internal documents — is used only to make <em>your</em> assistants better.
+                    Every workspace is isolated by tenant. Each query is scoped to your organisation, and we are progressively adding database-level row-level security on top of that — starting with the most sensitive tables — so isolation is enforced in more than one place. The proprietary data you share — brand voice, customer lists, internal documents — is used only to make <em>your</em> assistants better.
                 </p>
                 <p class="text-gray-600 leading-relaxed">
                     It is never pooled with other customers' data, never shared, and never used to train anyone else's assistant. When you leave, it's permanently deleted within 30 days.
@@ -67,10 +67,10 @@
                 <span class="text-xs font-bold uppercase tracking-widest text-emerald-700">Safe Content Benchmark</span>
                 <h2 class="text-3xl font-extrabold text-gray-900 tracking-tight mt-2 mb-4">A safety layer nothing can switch off.</h2>
                 <p class="text-gray-600 leading-relaxed mb-4">
-                    Every piece of content your assistants produce passes through our mandatory Safe Content Benchmark. It runs at the highest priority in the system and cannot be disabled, overridden, or bypassed by any other setting — not even by us.
+                    Every assistant is governed by the Be More Swan Safe Content Benchmark — a safety layer carried at the highest priority in every system prompt. It cannot be disabled, overridden or bypassed by any workspace setting, or by your own instructions to an assistant.
                 </p>
                 <p class="text-gray-600 leading-relaxed">
-                    That means your brand integrity is protected on every output, and everything published on your behalf adheres to platform policies and community standards. No exceptions, no embarrassing surprises.
+                    It works alongside two other layers: prompts are screened before generation, and drafts land in a review queue for a person to approve. Together they make unsafe or off-brand output far less likely — but no automated safety layer catches everything, which is exactly why human review is the default.
                 </p>
             </div>
         </div>
@@ -133,13 +133,20 @@
     <div class="mb-10">
         <h1 class="text-4xl font-extrabold text-gray-900 mb-2">Compliance Details</h1>
         <!-- SC5: Last updated date -->
-        <p class="text-sm text-gray-500">Last updated: <time datetime="2026-06-10">10 June 2026</time> · Reviewed quarterly</p>
+        <p class="text-sm text-gray-500">Last updated: <time datetime="2026-08-05">5 August 2026</time> · Reviewed quarterly</p>
     </div>
 
     <!-- SC4: GDPR Compliance Statement -->
     <div class="rounded-xl bg-emerald-50 border border-emerald-200 p-5 mb-10">
         <p class="text-sm text-emerald-900">
-            <strong>GDPR Compliance:</strong> Be More Swan acts as a <strong>Data Processor</strong> under UK GDPR / EU GDPR.
+            <strong>GDPR Compliance:</strong> Be More Swan acts in two roles under UK GDPR / EU GDPR, as most business
+            software does. For the business data you put into your workspace — your content, your contacts, and the data
+            we read from the accounts you connect — we are a <strong>Data Processor</strong>, handling it on your
+            instructions and for no other purpose. For your own account, login and billing data, and for running and
+            securing the platform itself, we are a <strong>Data Controller</strong>. A Data Processing Agreement covering
+            the processor role is presented to you in-product when you set up your organisation, and your acceptance is
+            recorded; you can re-read it any time from your account settings. If you need a countersigned copy for your
+            own records, use the <a href="#dpa-request" class="underline hover:text-emerald-700">request form below</a>.
             Our full <a href="/privacy.html" class="underline hover:text-emerald-700">Privacy Policy</a> is available at <a href="/privacy.html" class="underline hover:text-emerald-700">/privacy.html</a>.
             For erasure requests, please email <a href="mailto:hello@bemoreswan.com" class="underline hover:text-emerald-700">hello@bemoreswan.com</a>.
         </p>
@@ -149,9 +156,15 @@
     <section class="mb-10">
         <h2 class="text-xl font-bold text-gray-900 mb-3">Data Residency</h2>
         <p class="text-gray-700 text-sm leading-relaxed">
-            All customer data processed and stored by Be More Swan resides within the <strong>United Kingdom / European Economic Area</strong>
-            on infrastructure provided by Netlify (Cloudflare CDN with UK/EU edge nodes) and our managed PostgreSQL provider.
-            No data is transferred outside the UK/EEA without adequate safeguards as required by UK GDPR Article 46.
+            Your primary workspace data is <strong>stored</strong> in the <strong>United Kingdom / European Economic Area</strong> — our
+            managed PostgreSQL database sits in an EU region, video rendering runs in AWS <code class="text-xs bg-gray-100 px-1 py-0.5 rounded">eu-west-2</code> (London),
+            and Netlify serves the application through UK/EU edge nodes. Uploaded and generated media is held in
+            Cloudflare R2 object storage, which is globally distributed rather than pinned to a single region.
+            Being straight with you: some <strong>processing</strong> does happen in the United States, because the AI model
+            providers, our payment processor and our transactional email provider are US-based. Every one of those transfers
+            runs under adequate safeguards as required by UK GDPR Article 46 — Standard Contractual Clauses, or the UK–US Data
+            Privacy Framework in Stripe's case — supported by a documented Transfer Impact Assessment and minimisation of the
+            data sent to model APIs. The table below names each provider and where it sits.
         </p>
     </section>
 
@@ -159,8 +172,10 @@
     <section class="mb-10">
         <h2 class="text-xl font-bold text-gray-900 mb-3">Sub-Processors</h2>
         <p class="text-gray-600 text-sm mb-4">
-            Be More Swan uses the following third-party sub-processors to deliver its services.
-            Each has been assessed for GDPR compliance and has its own Data Processing Agreement in place.
+            Be More Swan uses the following third-party sub-processors to deliver its services. Each is assessed
+            for GDPR compliance before we adopt it, and we rely on the provider's data processing terms for every
+            transfer of personal data. Where a row is marked "copy on request", email us and we will send the
+            current agreement. Several are used only if you choose to connect that service.
         </p>
         <div class="overflow-x-auto rounded-xl border border-gray-200">
             <table class="w-full text-sm text-left">
@@ -174,10 +189,28 @@
                 </thead>
                 <tbody class="divide-y divide-gray-100">
                     <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3 font-medium text-gray-800">Anthropic</td>
+                        <td class="px-4 py-3 text-gray-600">AI language model inference — the primary model behind your assistants' drafting, chat and review</td>
+                        <td class="px-4 py-3 text-gray-600">USA (SCCs applied)</td>
+                        <td class="px-4 py-3"><a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">anthropic.com/legal/privacy</a></td>
+                    </tr>
+                    <tr class="hover:bg-gray-50">
                         <td class="px-4 py-3 font-medium text-gray-800">OpenAI</td>
-                        <td class="px-4 py-3 text-gray-600">AI language model inference</td>
+                        <td class="px-4 py-3 text-gray-600">Content moderation screening and product tour narration</td>
                         <td class="px-4 py-3 text-gray-600">USA (SCCs applied)</td>
                         <td class="px-4 py-3"><a href="https://openai.com/enterprise-privacy" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">openai.com/enterprise-privacy</a></td>
+                    </tr>
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3 font-medium text-gray-800">Voyage AI</td>
+                        <td class="px-4 py-3 text-gray-600">Embedding of knowledge-base content so assistants can search it</td>
+                        <td class="px-4 py-3 text-gray-600">USA (SCCs applied)</td>
+                        <td class="px-4 py-3 text-gray-600">Copy on request</td>
+                    </tr>
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3 font-medium text-gray-800">fal.ai</td>
+                        <td class="px-4 py-3 text-gray-600">AI image and video generation from your prompts</td>
+                        <td class="px-4 py-3 text-gray-600">USA (SCCs applied)</td>
+                        <td class="px-4 py-3 text-gray-600">Copy on request</td>
                     </tr>
                     <tr class="hover:bg-gray-50">
                         <td class="px-4 py-3 font-medium text-gray-800">Stripe</td>
@@ -196,6 +229,54 @@
                         <td class="px-4 py-3 text-gray-600">Hosting, serverless functions, CDN</td>
                         <td class="px-4 py-3 text-gray-600">USA / EU edge nodes</td>
                         <td class="px-4 py-3"><a href="https://www.netlify.com/gdpr-ccpa" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">netlify.com/gdpr-ccpa</a></td>
+                    </tr>
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3 font-medium text-gray-800">Neon</td>
+                        <td class="px-4 py-3 text-gray-600">Managed PostgreSQL — where your workspace data is stored</td>
+                        <td class="px-4 py-3 text-gray-600">EU (eu-west) — no US transfer for stored data</td>
+                        <td class="px-4 py-3 text-gray-600">Copy on request</td>
+                    </tr>
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3 font-medium text-gray-800">Cloudflare</td>
+                        <td class="px-4 py-3 text-gray-600">R2 object storage — uploaded files and generated media</td>
+                        <td class="px-4 py-3 text-gray-600">Global distributed network</td>
+                        <td class="px-4 py-3"><a href="https://www.cloudflare.com/trust-hub/gdpr/" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">cloudflare.com/trust-hub/gdpr</a></td>
+                    </tr>
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3 font-medium text-gray-800">Amazon Web Services</td>
+                        <td class="px-4 py-3 text-gray-600">Lambda video rendering for post and Short overlays</td>
+                        <td class="px-4 py-3 text-gray-600">UK (eu-west-2, London)</td>
+                        <td class="px-4 py-3"><a href="https://aws.amazon.com/compliance/gdpr-center/" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">aws.amazon.com/compliance/gdpr-center</a></td>
+                    </tr>
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3 font-medium text-gray-800">Twilio SendGrid</td>
+                        <td class="px-4 py-3 text-gray-600">Inbound email parsing — turns mail sent to us into support and CRM records</td>
+                        <td class="px-4 py-3 text-gray-600">USA (SCCs applied)</td>
+                        <td class="px-4 py-3"><a href="https://www.twilio.com/en-us/legal/privacy" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">twilio.com/legal/privacy</a></td>
+                    </tr>
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3 font-medium text-gray-800">Serper</td>
+                        <td class="px-4 py-3 text-gray-600">Web search for outbound lead discovery</td>
+                        <td class="px-4 py-3 text-gray-600">USA (SCCs applied)</td>
+                        <td class="px-4 py-3 text-gray-600">Copy on request</td>
+                    </tr>
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3 font-medium text-gray-800">Google</td>
+                        <td class="px-4 py-3 text-gray-600">Only where you connect a Google account — Search Console metrics, Drive and calendar data, and sending from your own inbox</td>
+                        <td class="px-4 py-3 text-gray-600">USA / global (SCCs applied)</td>
+                        <td class="px-4 py-3"><a href="https://cloud.google.com/terms/data-processing-addendum" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">cloud.google.com/terms/dpa</a></td>
+                    </tr>
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3 font-medium text-gray-800">Canva</td>
+                        <td class="px-4 py-3 text-gray-600">Only where you connect Canva — importing your designs as post media</td>
+                        <td class="px-4 py-3 text-gray-600">Australia / global (SCCs applied)</td>
+                        <td class="px-4 py-3"><a href="https://www.canva.com/policies/privacy-policy/" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">canva.com/policies/privacy-policy</a></td>
+                    </tr>
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3 font-medium text-gray-800">Pexels</td>
+                        <td class="px-4 py-3 text-gray-600">Stock photo and video search — receives search terms, not your workspace data</td>
+                        <td class="px-4 py-3 text-gray-600">Germany (EU)</td>
+                        <td class="px-4 py-3"><a href="https://www.pexels.com/privacy-policy/" target="_blank" rel="noopener" class="text-emerald-600 underline hover:text-emerald-800">pexels.com/privacy-policy</a></td>
                     </tr>
                 </tbody>
             </table>
@@ -230,8 +311,9 @@
         <ul class="text-sm text-gray-700 space-y-2">
             <li class="flex items-start gap-2"><span class="text-emerald-600 mt-0.5">✓</span><span><strong>Active accounts:</strong> Data is retained for the duration of your subscription.</span></li>
             <li class="flex items-start gap-2"><span class="text-emerald-600 mt-0.5">✓</span><span><strong>After account deletion:</strong> Personal data is permanently deleted within <strong>30 days</strong> of account closure. An anonymised erasure record is retained for compliance purposes.</span></li>
-            <li class="flex items-start gap-2"><span class="text-emerald-600 mt-0.5">✓</span><span><strong>Audit logs:</strong> Retained for <strong>12 months</strong> for security and compliance monitoring, then purged.</span></li>
-            <li class="flex items-start gap-2"><span class="text-emerald-600 mt-0.5">✓</span><span><strong>Integration API call logs:</strong> Retained for <strong>90 days</strong>, then automatically purged.</span></li>
+            <li class="flex items-start gap-2"><span class="text-emerald-600 mt-0.5">✓</span><span><strong>Archived assistants:</strong> Kept for <strong>14 days</strong> so you can reinstate them, then permanently deleted with their associated data.</span></li>
+            <li class="flex items-start gap-2"><span class="text-emerald-600 mt-0.5">✓</span><span><strong>Rejected and abandoned content:</strong> Rejected posts, unused generated media and incomplete setups are automatically cleared after <strong>30 days</strong>.</span></li>
+            <li class="flex items-start gap-2"><span class="text-emerald-600 mt-0.5">✓</span><span><strong>Audit logs:</strong> Security and compliance audit records are retained for the life of the account and removed as part of an erasure request.</span></li>
         </ul>
     </section>
 

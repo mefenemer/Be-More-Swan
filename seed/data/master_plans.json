@@ -11,7 +11,6 @@
     "storageLimitBytes": null,
     "features": {
       "brand_memory": true,
-      "credit_topups": true,
       "free_upgrades": true,
       "my_content_hub": true,
       "roadmap_voting": false,
@@ -55,7 +54,6 @@
     "storageLimitBytes": null,
     "features": {
       "brand_memory": true,
-      "credit_topups": true,
       "free_upgrades": true,
       "my_content_hub": true,
       "roadmap_voting": false,
@@ -99,7 +97,6 @@
     "storageLimitBytes": null,
     "features": {
       "brand_memory": true,
-      "credit_topups": true,
       "free_upgrades": true,
       "my_content_hub": true,
       "roadmap_voting": true,

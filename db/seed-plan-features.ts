@@ -81,9 +81,10 @@ const DEFS: Def[] = [
     { key: 'credits_rollover', label: 'Unused Credits Roll Over', description: "Any credits you don't use carry forward to the next month",
       category: 'AI Media Generation', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: CHECK, buster: CHECK, employee: CHECK } },
-    { key: 'credit_topups', label: 'Buy Extra Credit Top-Ups', description: 'Need more? Purchase additional credits any time your allowance runs low',
-      category: 'AI Media Generation', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
-      values: { saver: CHECK, buster: CHECK, employee: CHECK } },
+    // 'credit_topups' ("Buy Extra Credit Top-Ups") removed 2026-08-05: no self-serve media-credit
+    // purchase exists. The only credit packs on sale are X post credits (create-x-credit-checkout.ts),
+    // a separate currency; media credits are grantable by admins only. Restore this row — and set
+    // plan_features.is_enabled = true again — when a media-credit checkout ships.
 
     // ── Core Features — included on every plan ─────────────────────────────────
     { key: 'safe_content_benchmark', label: 'Be More Swan Safe Content Benchmark', description: 'Built-in safety rules that keep every output on-brand and legally compliant',

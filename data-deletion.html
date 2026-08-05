@@ -17,7 +17,7 @@
     <!-- Main Content -->
     <main class="flex-grow max-w-3xl mx-auto px-4 py-16">
         <h1 class="text-4xl font-extrabold text-gray-900 mb-8">Data Deletion Instructions</h1>
-        <p class="text-gray-500 mb-8">Last updated: July 31, 2026</p>
+        <p class="text-gray-500 mb-8">Last updated: August 5, 2026</p>
 
         <div class="prose prose-emerald max-w-none text-gray-600 space-y-6">
             <section>
@@ -32,7 +32,7 @@
                     <li>An access token, held encrypted, which we use to publish approved posts and read back their performance.</li>
                     <li>The account identifiers the platform gives us — for Facebook, the Page ID; for Instagram, the business account ID and username; plus your app-scoped user ID.</li>
                     <li>Aggregate performance figures for posts we published for you, such as impressions and engagement counts.</li>
-                    <li>Follower counts, cached for up to four hours at a time.</li>
+                    <li>Follower counts, cached for up to four hours at a time. LinkedIn does not make this figure available to apps, so for LinkedIn it is whatever you enter yourself.</li>
                 </ul>
                 <p class="mt-2">We do not store your platform password, your private messages, or the contents of your inbox. We do not use your data to train public AI models.</p>
             </section>
@@ -57,6 +57,7 @@
                     <li>Choose <strong>Remove</strong>, and tick the option to delete the activity associated with the app.</li>
                 </ol>
                 <p class="mt-2">Facebook notifies us automatically when you do this. We then revoke the connection and delete the stored access token for both the Facebook and Instagram accounts covered by that permission, without any further action from you. If you asked Facebook for deletion rather than plain removal, it will show you a confirmation code and a link to a page confirming the deletion has completed.</p>
+                <p class="mt-2"><strong>Threads</strong> is a separate application with its own entry in your Meta settings, so removing our Facebook access does not remove Threads access. Remove it the same way, from the Threads app's own listing; we are notified and drop the connection in the same manner.</p>
             </section>
 
             <section>
@@ -68,8 +69,9 @@
             <section>
                 <h2 class="text-xl font-bold text-gray-900">5. What happens after deletion</h2>
                 <ul class="list-disc pl-6 space-y-1 mt-2">
-                    <li>The encrypted access token is deleted. We can no longer reach the platform on your behalf.</li>
-                    <li>The account identifiers and cached metrics obtained from that platform are removed.</li>
+                    <li>The encrypted access token is deleted. We can no longer reach the platform on your behalf, and the connection is marked revoked so nothing uses it again.</li>
+                    <li>For Threads, the connection record itself is removed along with the token.</li>
+                    <li>For the other platforms, a revoked connection record is kept — including the account identifier the platform gave us and any figures we had already cached. If you want those erased too, ask us using the email route in section 4, or delete your whole account (section 6).</li>
                     <li>Posts that were already published to your account stay live on the platform. Only you can delete those, from the platform itself.</li>
                     <li>Drafts and content held in your Be More Swan workspace are unaffected, since they are yours rather than the platform's. Delete them in the app, or ask us to remove your whole account.</li>
                     <li>We retain audit records of the deletion itself, and any records we are legally required to keep, such as billing history.</li>
@@ -78,7 +80,9 @@
 
             <section id="full-account">
                 <h2 class="text-xl font-bold text-gray-900">6. Deleting your entire account</h2>
-                <p>To close your Be More Swan account and erase your workspace, open <strong>Settings &rarr; Account</strong> and choose <strong>Delete account</strong>, or email <a href="mailto:hello@bemoreswan.com" class="text-blue-600 underline">hello@bemoreswan.com</a>. This removes your assistants, connections, drafts and published-post records. It cannot be undone.</p>
+                <p>To close your Be More Swan account and erase your workspace, email <a href="mailto:hello@bemoreswan.com" class="text-blue-600 underline">hello@bemoreswan.com</a> from the address on your account with the subject <em>Delete my account</em>. We will confirm the request, and once confirmed there is a <strong>24-hour cooling-off window</strong> — we send you an email with a cancel link, in case the request was made in error or by someone else with access to your inbox.</p>
+                <p class="mt-2">After that window closes, deletion proceeds: this removes your assistants, connections, drafts and published-post records, and it cannot be undone. Deletion is completed within 30 days, as UK GDPR requires. Two things survive it, because they must: an anonymised record that the erasure happened, and any billing history we are legally required to retain.</p>
+                <p class="mt-2">Cancelling your subscription is <strong>not</strong> the same as deleting your account. Cancelling stops the billing and stops your assistants, but leaves your workspace intact in case you return. If you want the data gone, ask us to delete the account as well. If you would like a copy of your data first, request an export before you ask for deletion — see <a href="privacy.html" class="text-blue-600 underline">our Privacy Policy</a> for your rights of access and portability.</p>
             </section>
 
             <section>
@@ -104,6 +108,10 @@
     document.addEventListener("DOMContentLoaded", async () => {
         await loadComponent("nav-placeholder", "./components/nav.html");
         loadComponent("footer-placeholder", "./components/footer.html");
+
+        // mobileMenu.js only defines setupMobileMenu(); it does not self-initialise, so the
+        // hamburger is dead on any page that forgets this call. Must run after the nav injects.
+        setupMobileMenu();
 
         // Meta's reviewers open this URL directly and unauthenticated, so the nav must stay in its
         // public shape — no dashboard/billing swap, unlike privacy.html which is also opened from
