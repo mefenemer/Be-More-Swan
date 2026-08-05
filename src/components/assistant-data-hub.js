@@ -532,23 +532,42 @@
     return bar;
   }
 
-  // A post that failed to publish is a dead end everywhere else — the Review Queue has no
-  // 'failed' column and the Calendar only shows what's still coming. So the Content Library
-  // row is where the failure is explained and where the user gets back out of it: why it
-  // failed, and a way to re-queue it now or at a chosen time (Request 6).
+  // A post that failed to publish is explained in two places — the Review Queue's Needs-attention
+  // panel and this row — so the words come from ONE place: get-social-drafts runs the post's
+  // failure_reason through diagnosePostFailure (src/utils/post-failure-diagnosis.ts) and returns
+  // the result as `failure`. This banner leads with that plain-English cause and remedy; the
+  // platform's own sentence ("(#352) Format unsupported") is kept, but folded away, because it is
+  // written for a developer and reading it is never the next step.
+  //
+  // Three ways out, all always offered whatever the diagnosis said — a classification we got wrong
+  // must not be able to remove the option the user actually needed. See _rqFailureRecoveryHtml in
+  // workspace.html, which offers the same set plus reconnect/reject.
   function failureBanner(record) {
     const p = record.data || {};
+    // Older payloads (and any surface that hasn't been through get-social-drafts) arrive without a
+    // diagnosis — fall back to the raw message rather than rendering an empty red box.
+    const f = p.failure || {
+      title: 'This post didn’t publish.',
+      remedy: 'Publish it again, or reschedule it for later.',
+      raw: p.failureMessage || null,
+    };
     const wrap = document.createElement('div');
     wrap.className = 'mb-4 rounded-xl border border-red-200 bg-red-50 p-4';
-    const reason = p.failureMessage || 'No reason was recorded for this failure.';
     const attempts = Number(p.attemptCount) || 0;
     wrap.innerHTML = `
       <p class="text-xs font-bold text-red-700 uppercase tracking-wide">Failed to publish</p>
-      <p class="text-sm text-red-800 mt-1 whitespace-pre-line">${esc(reason)}</p>
+      <p class="text-sm font-semibold text-red-900 mt-1">${esc(f.title)}</p>
+      <p class="text-sm text-red-800 mt-1">${esc(f.remedy)}</p>
       ${attempts ? `<p class="text-xs text-red-600 mt-1">After ${attempts} attempt${attempts === 1 ? '' : 's'}.</p>` : ''}
+      ${f.raw ? `<details class="mt-2">
+        <summary class="cursor-pointer text-xs text-red-500 hover:text-red-700 select-none">What the platform said</summary>
+        <p class="mt-1 font-mono text-[11px] text-red-800 bg-white/70 rounded px-2 py-1.5 border border-red-200 break-words whitespace-pre-line">${esc(f.raw)}</p>
+      </details>` : ''}
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-retry-now
           class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Try again now</button>
+        <button type="button" data-retry-edit
+          class="px-3 py-1.5 bg-white border border-red-200 text-red-700 hover:bg-red-100 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Fix the post</button>
         <input type="datetime-local" data-retry-at
           class="px-2 py-1.5 bg-white border border-red-200 text-xs text-gray-700 rounded-lg">
         <button type="button" data-retry-schedule
@@ -558,24 +577,36 @@
     `;
 
     const status = wrap.querySelector('[data-retry-status]');
-    const buttons = [wrap.querySelector('[data-retry-now]'), wrap.querySelector('[data-retry-schedule]')];
+    const buttons = [
+      wrap.querySelector('[data-retry-now]'),
+      wrap.querySelector('[data-retry-edit]'),
+      wrap.querySelector('[data-retry-schedule]'),
+    ];
 
-    async function requeue(publishDate) {
+    // mode 'edit' sends the post back to pending_approval instead of re-queueing it: 'failed' is a
+    // non-editable status, so a media or wording problem can only be fixed by moving it first.
+    async function requeue(publishDate, mode) {
       buttons.forEach((b) => { b.disabled = true; });
       status.className = 'text-xs font-semibold mt-2 text-gray-500';
-      status.textContent = 'Re-queueing…';
+      status.textContent = mode === 'edit' ? 'Reopening the post for editing…' : 'Re-queueing…';
       try {
         const res = await fetch('/.netlify/functions/retry-failed-post', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ postId: record.id, ...(publishDate ? { publishDate } : {}) }),
+          body: JSON.stringify({
+            postId: record.id,
+            ...(mode ? { mode } : {}),
+            ...(publishDate ? { publishDate } : {}),
+          }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'Could not re-queue this post.');
         status.className = 'text-xs font-semibold mt-2 text-emerald-700';
-        status.textContent = publishDate
-          ? `Rescheduled for ${new Date(data.publishDate).toLocaleString()}.`
-          : 'Back in the queue — it will publish on the next run.';
+        status.textContent = mode === 'edit'
+          ? 'Reopened for editing — it’s waiting in Review; approve it when you’re happy and it goes back out.'
+          : publishDate
+            ? `Rescheduled for ${new Date(data.publishDate).toLocaleString()}.`
+            : 'Back in the queue — it will publish on the next run.';
         // Reflect the new status in the library without the user re-opening the tab.
         refresh();
       } catch (err) {
@@ -585,15 +616,16 @@
       }
     }
 
-    buttons[0].addEventListener('click', () => requeue(null));
-    buttons[1].addEventListener('click', () => {
+    buttons[0].addEventListener('click', () => requeue(null, null));
+    buttons[1].addEventListener('click', () => requeue(null, 'edit'));
+    buttons[2].addEventListener('click', () => {
       const when = wrap.querySelector('[data-retry-at]').value;
       if (!when) {
         status.className = 'text-xs font-semibold mt-2 text-red-700';
         status.textContent = 'Pick a date and time to reschedule to.';
         return;
       }
-      requeue(new Date(when).toISOString());
+      requeue(new Date(when).toISOString(), null);
     });
 
     return wrap;

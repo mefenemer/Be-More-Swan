@@ -131,6 +131,28 @@ check('the panel never puts the platform’s own error text into an onclick', ()
     assert.ok(panel.includes('_rqEsc(f.raw)'), 'the raw message is escaped where it IS shown');
 });
 
+check('the Content Library banner explains the failure the same way Review does', () => {
+    // Two surfaces, one failed post. The Data Hub used to render only the platform's raw sentence
+    // ("(#352) Format unsupported") while Review showed the classified cause — the same post
+    // explained two different ways depending on which tab you were standing in. Both now read the
+    // `failure` object get-social-drafts attaches, and the raw text is demoted to a details element.
+    const hub = readFileSync(path.join(import.meta.dirname, '..', 'src/components/assistant-data-hub.js'), 'utf8');
+    const banner = hub.slice(hub.indexOf('function failureBanner('), hub.indexOf('function libraryDetail('));
+    assert.ok(banner.length > 0, 'the banner builder must exist');
+    assert.match(banner, /p\.failure\b/, 'the banner must read the server-side diagnosis');
+    assert.match(banner, /esc\(f\.title\)/, 'it leads with the classified cause');
+    assert.match(banner, /esc\(f\.remedy\)/, 'and with what to do about it');
+    assert.match(banner, /<details[\s\S]*esc\(f\.raw\)/, "the platform's own words go behind a details element");
+    // failureMessage stays as the fallback: an older cached payload has no `failure` and must not
+    // render an empty red box.
+    assert.match(banner, /p\.failureMessage/, 'the raw message is still honoured for back-compat');
+    // …and the same three ways out, including the one that was missing entirely.
+    assert.match(banner, /mode: 'edit'|\{ mode \}/, "'Fix the post' must reach retry-failed-post's edit mode");
+    for (const hook of ['data-retry-now', 'data-retry-edit', 'data-retry-schedule']) {
+        assert.ok(banner.includes(hook), `${hook} must be offered`);
+    }
+});
+
 check('a failed post can be opened from a cold cache', () => {
     // Everything above is unreachable if the modal will not open. openPostReview probes a list of
     // statuses when the cache is empty, and 'failed' was absent from it — so a deep link from a
