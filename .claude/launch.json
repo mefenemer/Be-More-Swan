@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-spend-sweep",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/910b87f5-f62a-4b5c-ab8d-ba353606118d/scratchpad/sweepharness/server.mjs"
+      ],
+      "port": 4250,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-dcp-card",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

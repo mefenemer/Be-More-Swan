@@ -155,7 +155,6 @@ const FIELD_CLAIMS: Record<string, RegExp> = {
     name: /optional short name for the search/,
     cadence: /how often to run \(once now \/ daily \/ weekly\)/,
     maxleads: /max leads per run/,
-    budget: /max spend per run/,
     negatives: /terms to exclude/,
     approval: /"review found leads before any outreach" checkbox/,
 };

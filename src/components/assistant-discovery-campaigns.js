@@ -90,15 +90,9 @@
           </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-3 mt-3">
-          <div>
-            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Max spend / run (£)</label>
-            <input data-dc-budget type="number" min="0" step="0.5" value="2" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
-          </div>
-          <div>
-            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Exclude (comma-sep)</label>
-            <input data-dc-negatives type="text" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm" placeholder="competitor.com, acme">
-          </div>
+        <div class="mt-3">
+          <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Exclude (comma-sep)</label>
+          <input data-dc-negatives type="text" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm" placeholder="competitor.com, acme">
         </div>
 
         <label class="flex items-center gap-2 mt-3 text-sm text-gray-700">
@@ -136,7 +130,7 @@
     return `
       <div class="border border-gray-200 rounded-xl p-4 ${paused ? 'opacity-70' : ''}" data-campaign="${c.id}" data-dc-idea-val="${esc(c.idea)}"
            data-dc-name-val="${esc(c.name || '')}"
-           data-dc-maxleads-val="${esc(c.maxLeadsPerRun ?? 50)}" data-dc-budget-val="${esc(c.maxCostGbpPerRun ?? 2)}"
+           data-dc-maxleads-val="${esc(c.maxLeadsPerRun ?? 50)}"
            data-dc-negatives-val="${esc(Array.isArray(c.negativeKeywords) ? c.negativeKeywords.join(', ') : '')}"
            data-dc-approval-val="${c.requireHumanApproval === false ? '0' : '1'}">
         <div class="flex items-start justify-between gap-3">
@@ -210,7 +204,6 @@
       cadence: root.querySelector('[data-dc-cadence]')?.value || 'one_off',
       guardrails: {
         maxLeadsPerRun: Number(root.querySelector('[data-dc-maxleads]')?.value) || undefined,
-        maxCostGbpPerRun: Number(root.querySelector('[data-dc-budget]')?.value) || undefined,
         negativeKeywords: negatives.length ? negatives : undefined,
         requireHumanApproval: !!root.querySelector('[data-dc-approval]')?.checked,
       },
@@ -317,15 +310,9 @@
             <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Who to find</label>
             <textarea data-edit-idea rows="3" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">${esc(g('data-dc-idea-val', ''))}</textarea>
           </div>
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Max leads / run</label>
-              <input data-edit-maxleads type="number" min="1" value="${esc(g('data-dc-maxleads-val', '50'))}" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
-            </div>
-            <div>
-              <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Max spend / run (£)</label>
-              <input data-edit-budget type="number" min="0" step="0.5" value="${esc(g('data-dc-budget-val', '2'))}" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
-            </div>
+          <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Max leads / run</label>
+            <input data-edit-maxleads type="number" min="1" value="${esc(g('data-dc-maxleads-val', '50'))}" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
           </div>
           <div>
             <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Exclude (comma-sep)</label>
@@ -362,7 +349,6 @@
           name: overlay.querySelector('[data-edit-name]').value.trim(),
           guardrails: {
             maxLeadsPerRun: Number(overlay.querySelector('[data-edit-maxleads]').value) || undefined,
-            maxCostGbpPerRun: Number(overlay.querySelector('[data-edit-budget]').value) || undefined,
             negativeKeywords: negatives,
             requireHumanApproval: !!overlay.querySelector('[data-edit-approval]').checked,
           },

@@ -297,7 +297,7 @@ function leadGeneratorSurfaces(): string {
     return `YOUR OWN DASHBOARD — these are tabs and buttons on YOUR page inside this platform. They are NOT third-party products, and you must never describe them as external tools, or lump them in with LinkedIn, Apollo, Hunter, or any other outside service:
 - "Searches" tab — everything that came IN before it became a lead: what your searches found, still awaiting review. This is the tab the user lands on, and its toolbar holds both the "Find New Leads" and "Review Lead Ideas" buttons.
 - "Review Lead Ideas" (button in the Searches toolbar) — the lighter-weight route: you propose ideas for where this business's next customers might be found, and approving one sends you off to find, score and file matching companies. Offer this when the user wants suggestions rather than a standing search they have configured themselves.
-- "Find New Leads" (button in the Searches toolbar) — this is where a search gets created. It opens a short form: a plain-English description of who to find, an optional short name for the search, how often to run (once now / daily / weekly), max leads per run, max spend per run in £, terms to exclude, and a "review found leads before any outreach" checkbox. Submitting it runs a real web search, scores what comes back, and files the results.
+- "Find New Leads" (button in the Searches toolbar) — this is where a search gets created. It opens a short form: a plain-English description of who to find, an optional short name for the search, how often to run (once now / daily / weekly), max leads per run, terms to exclude, and a "review found leads before any outreach" checkbox. Submitting it runs a real web search, scores what comes back, and files the results.
 - "Leads" tab — every lead you have scored, with its outreach draft; also where CSV lead lists are imported and exported.
 - "Conversations" tab — what happened after a lead was approved: the outreach thread and any reply.
 
@@ -722,7 +722,6 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EXACTL
     "rationale": "<one sentence on why this targets their ideal customer>",
     "guardrails": {                   // omit any limit the user has not expressed a view on
       "maxLeadsPerRun": <number>,
-      "maxCostGbpPerRun": <number>,
       "negativeKeywords": ["<term that would waste a run, e.g. a competitor>", ...],
       "requireHumanApproval": true    // only ever false if the user explicitly asks to skip review
     }

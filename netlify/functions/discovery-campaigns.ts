@@ -92,10 +92,13 @@ export default withLambda(async (event) => {
             targetPersona: (body.targetPersona && typeof body.targetPersona === 'object') ? body.targetPersona as Record<string, unknown> : null,
             cadence,
             runAtHourUtc: typeof body.runAtHourUtc === 'number' ? body.runAtHourUtc : undefined,
+            // maxCostGbpPerRun is intentionally NOT accepted here. It caps OUR Serper spend, not
+            // the user's — nothing bills it to them — so it is an operator ceiling that belongs to
+            // the table default (£2.00), not to a chat proposal or a form. It was accepted here
+            // once, and a model duly invented "Max £50 per run" onto an approval card.
             guardrails: {
                 ...(typeof guardrails.maxLeadsPerRun === 'number' ? { maxLeadsPerRun: guardrails.maxLeadsPerRun } : {}),
                 ...(typeof guardrails.maxLeadsPerMonth === 'number' ? { maxLeadsPerMonth: guardrails.maxLeadsPerMonth } : {}),
-                ...(typeof guardrails.maxCostGbpPerRun === 'number' ? { maxCostGbpPerRun: guardrails.maxCostGbpPerRun } : {}),
                 ...(Array.isArray(guardrails.negativeKeywords) ? { negativeKeywords: (guardrails.negativeKeywords as unknown[]).filter((x): x is string => typeof x === 'string') } : {}),
                 ...(Array.isArray(guardrails.excludedDomains) ? { excludedDomains: (guardrails.excludedDomains as unknown[]).filter((x): x is string => typeof x === 'string') } : {}),
                 ...(typeof guardrails.requireHumanApproval === 'boolean' ? { requireHumanApproval: guardrails.requireHumanApproval } : {}),
@@ -124,8 +127,8 @@ export default withLambda(async (event) => {
                     WHERE j.campaign_id = ${discoveryCampaigns.id}
                 )`,
                 // Guardrail snapshot so the Edit form can prefill without a second round-trip.
+                // Only the fields the form actually shows — maxCostGbpPerRun is operator-only.
                 maxLeadsPerRun: discoveryGuardrails.maxLeadsPerRun,
-                maxCostGbpPerRun: discoveryGuardrails.maxCostGbpPerRun,
                 negativeKeywords: discoveryGuardrails.negativeKeywords,
                 requireHumanApproval: discoveryGuardrails.requireHumanApproval,
             })
@@ -265,8 +268,8 @@ export default withLambda(async (event) => {
         const g = (body.guardrails && typeof body.guardrails === 'object') ? body.guardrails as Record<string, unknown> : null;
         if (g) {
             const patch: Record<string, unknown> = { updatedAt: new Date() };
+            // maxCostGbpPerRun is not editable — see the create branch above.
             if (typeof g.maxLeadsPerRun === 'number') patch.maxLeadsPerRun = g.maxLeadsPerRun;
-            if (typeof g.maxCostGbpPerRun === 'number') patch.maxCostGbpPerRun = String(g.maxCostGbpPerRun);
             if (Array.isArray(g.negativeKeywords)) patch.negativeKeywords = (g.negativeKeywords as unknown[]).filter((x): x is string => typeof x === 'string');
             if (typeof g.requireHumanApproval === 'boolean') patch.requireHumanApproval = g.requireHumanApproval;
             if (Object.keys(patch).length > 1) {

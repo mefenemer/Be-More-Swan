@@ -7381,7 +7381,17 @@ function rqFailedReconnect(postId) {
     rqGoConnect(_rqPostCache[postId]?.assistantId);
 }
 
-/** Archive it. Same endpoint and same content-rule side effect as rejecting a draft. */
+/**
+ * Archive a post that FAILED to publish. Same endpoint and same content-rule side effect as
+ * rejecting a draft used to be.
+ *
+ * Deliberately still approve-post action:'reject', and the last caller of that branch. Every other
+ * reject button moved to reject-post so it produces a replacement draft — but this one is not a
+ * rejection, it is filing away something that already went wrong on the way out. The button says
+ * Archive, the toast says archived, and nobody pressing it has asked for a rewrite; enqueueing one
+ * would put an unexplained new card in their queue. If that ever becomes the desired behaviour it
+ * needs its own copy change first.
+ */
 async function rqFailedReject(postId) {
     const panel = _rqFailurePanel(postId);
     const reason = (panel?.querySelector('[data-failure-reject-input]')?.value || '').trim();
@@ -12666,24 +12676,45 @@ async function rqReviewScheduleMyself() {
     say('');
 }
 
+/**
+ * Reject the post under review — and get a corrected one back.
+ *
+ * This called approve-post with action:'reject', which recorded the rejection and a Content Rule
+ * and enqueued NOTHING. Rejecting is the product's "this isn't right, try again" gesture, and it
+ * had no try-again in it: the card left the queue and nothing replaced it. reject-post is the path
+ * that redrafts (it already served the voice panel and the tuning session, which is why its header
+ * says "both callers tell the user a corrected draft is coming" — this button never did).
+ *
+ * ONE call, not one per platform. A cross-post's rows are a single card here, and the server now
+ * takes the whole group from any member — looping would enqueue a separate redraft per platform and
+ * scatter one rejected post across N new cards.
+ */
 async function rqReviewReject() {
     const reason = document.getElementById('post-review-reason').value.trim();
     if (!reason) { alert('Please enter a reason for rejecting.'); return; }
-    // Reject every platform in the group — it's one post to the reviewer.
     const targets = _rqReviewTargets();
     if (!targets.length) return;
     try {
-        for (const p of targets) {
-            const res = await fetch('/.netlify/functions/approve-post', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ postId: p.id, action: 'reject', rejectionReason: reason }),
-            });
-            const d = await res.json().catch(() => ({}));
-            if (!res.ok) { alert(d.error || 'Could not reject the post.'); return; }
-        }
-        if (window.showToast) window.showToast(targets.length > 1
-            ? `All ${targets.length} platforms rejected and archived (kept 30 days).`
-            : 'Post rejected and moved to the Archive (kept for 30 days).');
+        const res = await fetch('/.netlify/functions/reject-post', {
+            method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+            // applyAsRule preserves what the old endpoint did unconditionally — the reason becomes a
+            // Content Rule — and reject-post additionally recompiles the blueprint, so the rule
+            // reaches the redraft it is meant to steer instead of waiting for an unrelated recompile.
+            body: JSON.stringify({ postId: targets[0].id, feedbackText: reason, applyAsRule: true }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) { alert(d.error || 'Could not reject the post.'); return; }
+
+        // Say what actually happened. The redraft is best-effort by design (no blueprint, queue
+        // full, enqueue failed) and the response reports which — promising a rewrite that was
+        // skipped is the same failure as a chat assistant claiming a draft it never saved.
+        const n = (d.rejectedPostIds || []).length || targets.length;
+        const archived = n > 1
+            ? `All ${n} platforms rejected and archived (kept 30 days).`
+            : 'Post rejected and moved to the Archive (kept for 30 days).';
+        window.showToast?.(d.revisionQueued
+            ? `${archived} Your assistant is drafting a replacement — it'll appear here shortly.`
+            : archived);
         _rqReviewRefresh();
     } catch { alert('Network error — please try again.'); }
 }
@@ -14925,13 +14956,17 @@ async function gpSubmitReject() {
     if (!reason) { alert('Please enter a rejection reason.'); return; }
     if (!_gpCurrentPostId) return;
     try {
-        const res = await fetch('/.netlify/functions/approve-post', {
+        // reject-post, not approve-post action:'reject' — see rqReviewReject. Rejecting a post you
+        // just asked for should produce a better one, not a dead end.
+        const res = await fetch('/.netlify/functions/reject-post', {
             method: 'POST',
+            credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ postId: _gpCurrentPostId, action: 'reject', rejectionReason: reason }),
+            body: JSON.stringify({ postId: _gpCurrentPostId, feedbackText: reason, applyAsRule: true }),
         });
-        if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Failed to reject post.'); return; }
-        gpSetStatus('Post rejected.');
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) { alert(d.error || 'Failed to reject post.'); return; }
+        gpSetStatus(d.revisionQueued ? 'Post rejected — a replacement is being drafted.' : 'Post rejected.');
         document.getElementById('gen-post-reject-form')?.classList.add('hidden');
         document.getElementById('gen-post-preview')?.classList.add('hidden');
         setTimeout(closeGeneratePostSheet, 1500);

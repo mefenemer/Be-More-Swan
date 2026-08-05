@@ -1,11 +1,23 @@
 // netlify/functions/reject-post.ts
 // US-SMM-2.2.2: Structured post rejection with optional Content Rules Library entry.
 //
-// Rejecting is not just a delete: both callers (the voice-feedback panel and the tuning session's
-// "Revise post") tell the user a corrected draft is coming. So this endpoint (a) marks the post
-// rejected, (b) optionally saves the feedback as a Content Rule and recompiles the blueprint so the
-// rule reaches generation, and (c) enqueues a regeneration job whose draft lands back in the Review
-// Queue as pending_approval, badged "Revised". (c) is best-effort — the rejection always stands.
+// Rejecting is not just a delete. This endpoint (a) marks the post rejected — with its whole
+// cross-post group, see below, (b) optionally saves the feedback as a Content Rule and recompiles
+// the blueprint so the rule reaches generation, and (c) enqueues a regeneration job whose draft
+// lands back in the Review Queue as pending_approval, badged "Revised". (c) is best-effort — the
+// rejection always stands.
+//
+// This is now the ONLY reject path for posts. It used to serve just the voice-feedback panel and
+// the tuning session's "Revise post", while the Review Queue's own reject button — the one users
+// actually press — called approve-post with action:'reject', which recorded the rejection and a
+// Content Rule and enqueued nothing. So the product's central "this isn't right, try again" gesture
+// produced no try-again: reject everything in the queue and you got an empty queue, no explanation,
+// and (for an assistant whose autopilot was also broken) nothing ever again. Observed on prod
+// 2026-08-05, org 40: nine posts, all nine hand-rejected, queue empty.
+//
+// approve-post's reject branch is deliberately left in place for ONE remaining caller: the failed-
+// post panel's Archive button, which is a different gesture — the user is filing away a post that
+// failed to publish, not asking for a rewrite, and a surprise redraft would be wrong there.
 //
 // Compare request-post-changes.ts, which is the same pipeline for a post the user wants rewritten
 // WITHOUT recording it as rejected (it cancels the original instead).
@@ -18,7 +30,9 @@
 //     platform?: string               // scope the rule to one platform (null = all)
 //     voiceFeedback?: boolean         // came from the voice panel — send the "revising…" notice
 //   }
-//   Returns: { success, revisionJobId?, revisionQueued, revisionSkippedReason?, ruleId?, ruleText? }
+//   Returns: { success, rejectedPostIds, revisionJobId?, revisionQueued, revisionSkippedReason?,
+//              ruleId?, ruleText? }
+//   NOTE: postId may name any row of a cross-post; the whole group is rejected and redrafted once.
 //   Auth: aura_session
 
 import { Handler } from '@netlify/functions';
@@ -26,7 +40,7 @@ import jwt from 'jsonwebtoken';
 import { eq, and, desc, inArray, sql } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { getDb } from '../../db/client';
-import { scheduledPosts, contentRules, users, aiAssistants, aiBlueprints, contentGenerationJobs } from '../../db/schema';
+import { scheduledPosts, contentRules, users, aiAssistants, aiBlueprints, contentGenerationJobs, auditLogs, postIdeaSuggestions } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { assembleBlueprint } from '../../src/utils/blueprint';
 import { releasePostMedia } from '../../src/utils/release-post-media';
@@ -87,10 +101,46 @@ export default withLambda(async (event) => {
     // Content Rule, and as the context the regeneration is redrafted against.
     const feedback = feedbackText.trim();
 
-    // Mark the post as rejected
+    // ── Scope: the whole cross-post, not one platform row ────────────────────────────────────────
+    //
+    // A cross-post is ONE post to the reviewer — the Review Queue collapses its per-platform rows
+    // into a single card (crosspost_group_id), and the reject button on that card means "this idea
+    // is wrong", not "this Instagram row is wrong". The Review Queue used to express that by looping
+    // the old endpoint over every row in the group, which produced N identical Content Rules; doing
+    // the same against THIS endpoint would also enqueue N unrelated redrafts, each landing as its
+    // own card. So the group is resolved here and rejected together, then redrafted once below.
+    //
+    // Siblings already published/cancelled/rejected are left alone: a group can be part-published
+    // (each row runs its own auto-publish gate), and rejecting a live post is not what the reviewer
+    // asked for. The named post itself is guaranteed rejectable — checked above.
+    const UNREJECTABLE = new Set(['rejected', 'published', 'cancelled']);
+    const siblings = post.crosspostGroupId && post.organisationId
+        ? await db
+            .select({ id: scheduledPosts.id, platform: scheduledPosts.platform, status: scheduledPosts.status })
+            .from(scheduledPosts)
+            .where(and(
+                eq(scheduledPosts.crosspostGroupId, post.crosspostGroupId),
+                eq(scheduledPosts.organisationId, post.organisationId),
+            ))
+        : [];
+    const targets = (siblings.length ? siblings : [{ id: post.id, platform: post.platform, status: post.status }])
+        .filter(p => !UNREJECTABLE.has(p.status));
+    const targetIds = targets.map(t => t.id);
+    const groupPlatforms = [...new Set(targets.map(t => t.platform).filter((p): p is string => !!p))];
+    const isGroup = groupPlatforms.length > 1;
+
+    // Mark the post — and every still-rejectable sibling — as rejected
     await db.update(scheduledPosts)
         .set({ status: 'rejected', rejectionReason: feedback, rejectedAt: now, updatedAt: now })
-        .where(eq(scheduledPosts.id, postId));
+        .where(inArray(scheduledPosts.id, targetIds));
+
+    // Carried over from approve-post's reject branch, which the Review Queue used to call: a draft
+    // built from a user-suggested idea has NOT delivered that idea, so the idea goes back in the pool
+    // to be woven into a fresh draft. Best-effort, never blocks.
+    await db.update(postIdeaSuggestions)
+        .set({ status: 'pending', usedPostId: null, usedAt: null })
+        .where(and(inArray(postIdeaSuggestions.usedPostId, targetIds), eq(postIdeaSuggestions.status, 'in_review')))
+        .catch(() => {});
 
     // Optionally save feedback as a Content Rule
     let ruleId: number | undefined;
@@ -100,7 +150,10 @@ export default withLambda(async (event) => {
             assistantId,
             workspaceId: post.organisationId,
             ruleText: feedback,
-            platform: platform || null,
+            // An explicit scope from the caller wins. Otherwise match what approve-post did — scope
+            // the rule to the post's own platform — except for a cross-post, where the feedback is
+            // about the idea rather than one platform's rendering of it, so it stays unscoped.
+            platform: platform || (isGroup ? null : post.platform) || null,
             createdByUserId: userId,
             isActive: true,
             origin: 'rejection_feedback',
@@ -187,10 +240,16 @@ export default withLambda(async (event) => {
                         attempt: 0,
                         maxAttempts: 3,
                         contextPrompt:
-                            `Rewrite the previous ${post.platform} post, which was rejected. Do not repeat what was wrong with it: ${feedback}`
+                            `Rewrite the previous ${isGroup ? 'cross-post' : `${post.platform} post`}, which was rejected. Do not repeat what was wrong with it: ${feedback}`
                                 .slice(0, MAX_CONTEXT),
                         triggerType: 'on_demand',
                         platform: post.platform,
+                        // One idea, fanned back out across the same platforms the rejected cross-post
+                        // covered — process-content-jobs generates a single caption and clones it per
+                        // platform. Without the group id the siblings it creates would each be
+                        // standalone (it stamps job.crosspost_group_id verbatim), so one rejection
+                        // would come back as N separate Review Queue cards instead of one.
+                        ...(isGroup ? { platforms: groupPlatforms, crosspostGroupId: randomUUID() } : {}),
                         // Aim the redraft at the slot the rejected post was holding.
                         targetPublishDate: post.publishDate,
                         revisedFromPostId: postId,
@@ -225,11 +284,23 @@ export default withLambda(async (event) => {
     // src/utils/release-post-media.ts before touching this.
     void (async () => {
         try {
-            await releasePostMedia(db, [postId]);
+            await releasePostMedia(db, targetIds);
         } catch (err) {
             console.error('[reject-post] media release failed (rejection still stands):', err);
         }
     })();
+
+    // Also carried over from approve-post's reject branch. POST_REJECTED is the only record that a
+    // human — rather than a cron or a publish failure — took this post out of the queue, and
+    // audit_logs is append-only (db/audit-log-immutability.sql), so losing it in the move would have
+    // left a gap nothing could reconstruct. One row per rejected post, as before.
+    await db.insert(auditLogs).values(targetIds.map(id => ({
+        userId,
+        actionType: 'POST_REJECTED',
+        resourceType: 'scheduled_posts',
+        resourceId: String(id),
+        newState: { rejectionReason: feedback, rejectedAt: now.toISOString() },
+    }))).catch(() => {});
 
     // US-SMM-2.5.1: tell the user the revision is under way. This used to send 'post_revised' —
     // "your revised post is ready to review" — the instant the rejection was recorded, before any
@@ -256,6 +327,9 @@ export default withLambda(async (event) => {
             revisionJobId,
             revisionQueued: !!revisionJobId,
             revisionSkippedReason: revisionSkipped,
+            // Every row this rejected — the caller named one post but a cross-post takes its whole
+            // group with it, and the Review Queue needs to know what to drop from the list.
+            rejectedPostIds: targetIds,
             ruleId,
             ruleText: ruleId ? feedback : undefined,
         }),

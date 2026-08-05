@@ -691,7 +691,7 @@
   // Renderer for the lead-qualifier route's outbound-search wire shape
   // (chat-orchestrator.ts): { type: 'discovery_campaign_proposal', name, idea,
   //   cadence: 'one_off'|'daily'|'weekly', rationale?,
-  //   guardrails?: { maxLeadsPerRun?, maxCostGbpPerRun?, negativeKeywords?: string[],
+  //   guardrails?: { maxLeadsPerRun?, negativeKeywords?: string[],
   //                  requireHumanApproval?: boolean } }
   //
   // The whole point of this card is that the assistant STOPS here. Approving saves the search
@@ -719,9 +719,13 @@
 
     // Only state limits the proposal actually set. Printing the table defaults here would be
     // inventing numbers the server was never told, which the user would then read as a promise.
+    //
+    // maxCostGbpPerRun is deliberately NOT shown, and no longer proposable. It is a ceiling on OUR
+    // Serper spend (£0.001/call, so maxSearchCallsPerRun caps a run at ~£0.10 long before any £
+    // figure binds) — never the user's money, and nothing bills it to them. Rendering it put a
+    // pound sign on a card whose whole job is informed consent, and every user read it as a price.
     const limits = [];
     if (typeof g.maxLeadsPerRun === 'number') limits.push(`Up to ${esc(String(g.maxLeadsPerRun))} leads per run`);
-    if (typeof g.maxCostGbpPerRun === 'number') limits.push(`Max £${esc(String(g.maxCostGbpPerRun))} per run`);
     if (Array.isArray(g.negativeKeywords) && g.negativeKeywords.length) {
       limits.push(`Excluding: ${esc(g.negativeKeywords.filter((k) => typeof k === 'string').join(', '))}`);
     }

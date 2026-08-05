@@ -82,7 +82,9 @@ check('reject-post enqueues a real regeneration job', () => {
 
 check('the job carries the rejected post id, and the feedback as context', () => {
     const i = rejectPost.indexOf('insert(contentGenerationJobs)');
-    const body = rejectPost.slice(i, i + 1400);
+    // Window sized to the whole values() call, not a guessed byte count — a comment added inside
+    // it once pushed revisedFromPostId past a fixed 1400 and failed this check on working code.
+    const body = rejectPost.slice(i, rejectPost.indexOf('});', i));
     assert.ok(body.includes('revisedFromPostId: postId'),
         'The job must name the post it revises, or the resulting draft cannot be badged "Revised".');
     assert.ok(body.includes('contextPrompt:'),
@@ -157,6 +159,91 @@ check('"revised post is ready" is sent when it IS ready', () => {
         !/createNotification\(db,\s*'post_revised'/.test(rejectPost),
         'reject-post sends post_revised again. Sent at rejection time it announces a draft that has ' +
         'not been generated yet — the promise that made the original bug invisible.',
+    );
+});
+
+// ── The button users actually press ──────────────────────────────────────────────────────────────
+//
+// Everything above was true and shipped, and the feature still did not exist for anyone: the Review
+// Queue's own reject button called approve-post action:'reject', which records a rejection and a
+// Content Rule and enqueues nothing. reject-post was reachable only from the voice panel and the
+// tuning session. Prod org 40 hand-rejected nine posts and got nine dead ends.
+
+check('the Review Queue rejects through reject-post, not approve-post', () => {
+    const fn = workspace.slice(workspace.indexOf('async function rqReviewReject'));
+    const body = fn.slice(0, fn.indexOf('\n}'));
+    assert.ok(
+        body.includes("functions/reject-post"),
+        'rqReviewReject no longer calls reject-post, so rejecting produces no replacement draft again.',
+    );
+    assert.ok(
+        !/action:\s*'reject'/.test(body),
+        "rqReviewReject calls approve-post action:'reject' again — that path enqueues no regeneration.",
+    );
+});
+
+check('the Generate Post sheet rejects through reject-post too', () => {
+    const fn = workspace.slice(workspace.indexOf('async function gpSubmitReject'));
+    const body = fn.slice(0, fn.indexOf('\n}'));
+    assert.ok(body.includes('functions/reject-post'), 'gpSubmitReject regressed to approve-post.');
+});
+
+check('the failed-post Archive button deliberately does NOT redraft', () => {
+    // The one remaining caller of approve-post's reject branch. Archiving a post that failed to
+    // publish is not a request for a rewrite; if this ever changes it needs a copy change first.
+    const fn = workspace.slice(workspace.indexOf('async function rqFailedReject'));
+    const body = fn.slice(0, fn.indexOf('\n}'));
+    assert.ok(
+        /action:\s*'reject'/.test(body),
+        'rqFailedReject now enqueues a redraft — the user pressed Archive and was promised nothing.',
+    );
+});
+
+check('a cross-post is rejected as one post and redrafted once', () => {
+    // The client used to loop its reject over every platform row. Against this endpoint that would
+    // mean N redrafts for one rejected idea, each landing as its own Review Queue card.
+    assert.ok(
+        /crosspostGroupId/.test(rejectPost) && /inArray\(scheduledPosts\.id, targetIds\)/.test(rejectPost),
+        'reject-post no longer rejects the whole cross-post group from one member.',
+    );
+    assert.ok(
+        /platforms:\s*groupPlatforms/.test(rejectPost),
+        'the revision job carries no platforms list, so a rejected cross-post comes back single-platform.',
+    );
+    assert.ok(
+        /crosspostGroupId:\s*randomUUID\(\)/.test(rejectPost),
+        'the revision job sets no crosspost_group_id — process-content-jobs stamps it verbatim onto ' +
+        'the siblings it creates, so without one the redraft returns as N separate cards.',
+    );
+    const rqReject = workspace.slice(workspace.indexOf('async function rqReviewReject'));
+    assert.ok(
+        !/for\s*\(const p of targets\)/.test(rqReject.slice(0, rqReject.indexOf('\n}'))),
+        'rqReviewReject loops the endpoint per platform again — one rejection, N redrafts.',
+    );
+});
+
+check('nothing approve-post did on rejection was dropped in the move', () => {
+    // These two lived only in approve-post's reject branch. Moving the button without them would
+    // have silently ended idea-recycling and left a hole in an append-only audit trail.
+    assert.ok(
+        /postIdeaSuggestions/.test(rejectPost),
+        'reject-post does not return a used idea to the pool — rejecting a draft now consumes the ' +
+        'idea it was built from and no future draft can use it.',
+    );
+    assert.ok(
+        /actionType:\s*'POST_REJECTED'/.test(rejectPost),
+        'reject-post writes no POST_REJECTED audit row; audit_logs is append-only, so a rejection ' +
+        'made through the Review Queue would leave no record a human did it.',
+    );
+});
+
+check('the reply never promises a redraft that was skipped', () => {
+    // Same rule as the chat guard: revisionQueued is false when there is no blueprint, the queue is
+    // full, or the enqueue threw — and the rejection still stands, so the toast must say so.
+    const fn = workspace.slice(workspace.indexOf('async function rqReviewReject'));
+    assert.ok(
+        /revisionQueued/.test(fn.slice(0, fn.indexOf('\n}'))),
+        'the Review Queue toast ignores revisionQueued and claims a replacement unconditionally.',
     );
 });
 
