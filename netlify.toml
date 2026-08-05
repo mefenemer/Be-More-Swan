@@ -24,9 +24,14 @@
   to   = "/help.html"
   status = 301
 
+# /faq belongs to the PUBLIC marketing FAQ, not the help centre. It used to 301 to /help.html,
+# which meant the most guessable + shareable URL for faq.html landed prospects on the internal
+# Help Center — no nav, no footer, no pricing link, and a "Go to Workspace" CTA aimed at existing
+# customers. sitemap.xml submits /faq.html to search engines, so the old redirect also fought the
+# sitemap. /help and /support still point at the help centre; only /faq moved.
 [[redirects]]
   from = "/faq"
-  to   = "/help.html"
+  to   = "/faq.html"
   status = 301
 
 # Phase 1 External Integrations: pretty /api/* routes for the OAuth router and the
@@ -94,7 +99,16 @@
 [build]
   # Rebuild the Tailwind stylesheet from input.css on every deploy so style.css can never
   # drift from the markup (a stale committed style.css silently drops classes and breaks layouts).
-  command = "npm run build:css:prod && npm run build:version"
+  #
+  # build:seo-html rewrites the published HTML for crawlers: it inlines components/footer.html
+  # into the indexable marketing pages and generates faq.html's FAQPage JSON-LD from the questions
+  # actually rendered there. It runs HERE, in the deploy container, against a fresh checkout — the
+  # transformed HTML is published and never committed, so a local checkout keeps the runtime-fetch
+  # behaviour and there is one source of truth for the footer. It exits non-zero if any injection
+  # fails to match, which fails the build rather than publishing a page that quietly lost its
+  # structured data. Run `npm run build:seo-html` locally to inspect the output (it is idempotent;
+  # `git checkout -- .` afterwards).
+  command = "npm run build:css:prod && npm run build:version && npm run build:seo-html"
   functions = "netlify/functions"
 
 # ⚠️ PIN THE RUNTIME. Unset, the build and the Lambda runtime take whatever Netlify defaults to,
@@ -135,6 +149,218 @@ node_bundler = "esbuild"
   [headers.values]
     Cache-Control = "no-cache"
 
+# ── Search-engine indexing policy ───────────────────────────────────────────────
+# robots.txt deliberately carries no Disallow prefix list, because public and private page
+# names collide on their prefixes (assistants.html is public marketing; assistant-chat.html
+# is not). It defers instead to per-page noindex — which is this block.
+#
+# X-Robots-Tag rather than a <meta> tag, for two reasons:
+#   1. Many paths below are HTML *fragments* with no <head> for a meta tag to live in.
+#   2. Netlify serves every page at BOTH /foo.html and /foo. The trailing splat covers both
+#      forms; it also covers same-named assets (/assets* catches assets.js), which is why
+#      these rules set ONLY X-Robots-Tag — inert on a script, and it leaves the /*.html
+#      Cache-Control rule above untouched (Netlify merges rules that set different headers,
+#      and resolves by specificity only when two rules set the SAME header).
+#
+# This inverts an allow-list. Everything indexable is: / index about pricing contact faq
+# trust privacy terms_of_service data-deletion help assistants licenses register — those 13
+# carry <link rel=canonical> + Open Graph tags and are the entries in sitemap.xml. When you
+# add a public marketing page, add it to sitemap.xml; when you add an app page, add it here.
+
+# Workspace shell plus the view fragments it injects. These are served standalone at their
+# own URLs (Netlify publishes the repo root), but they are not pages — several have no
+# <head> at all, so a meta robots tag would have nowhere valid to live.
+[[headers]]
+  for = "/workspace*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/admin*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/dashboard*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/billing*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/assets*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/calendar*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/my-content*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/notifications*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/review-queue*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/user-settings*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/getting-started*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/help-content*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/orchestrations-content*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/assistant-*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/assistants-directory*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/components/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+
+# Authenticated app pages — everything behind auth-check.js or the session guard.
+[[headers]]
+  for = "/onboarding*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/blog-studio*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/checkout*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/integrations*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/referral*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+
+# Transactional and utility pages. No search value, and some would be actively misleading
+# as a search result (a "We'll be back shortly" maintenance page, for instance).
+[[headers]]
+  for = "/login*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/logout*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/check-email*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/verify-account*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/accept-invite*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/maintenance*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+
+# Internal-only files that the repo-root publish exposes to the open web: design mockups and
+# an unexecuted contractor legal template. noindex keeps them out of search, but the real fix
+# is to stop deploying them at all.
+[[headers]]
+  for = "/docs/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/legal/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+
+# powered-by.html is the co-branded attribution page behind a customer's "Powered by Be More Swan"
+# badge. The soft 404 this rule was originally compensating for is FIXED — its parameter-less state
+# rendered a "Page Not Found" card at HTTP 200, and now renders a real explainer of what the badge
+# means — but the rule stays, deliberately, and is no longer a stopgap:
+#
+#   • The page's whole content is per-agency (/powered-by/<slug>), so indexing it means indexing a
+#     variant per customer. That is a thin-content set built out of other businesses' names, not
+#     pages anyone searches for.
+#   • Nothing here is a search destination. The badge is the only way anyone arrives, and it is a
+#     link we already control.
+#
+# Indexing it would need a self-canonical to collapse the slug variants plus an entry in
+# sitemap.xml. That is machinery in service of a page with no organic demand — so: keep noindex.
+[[headers]]
+  for = "/powered-by*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+# ── auth-guard bindings ─────────────────────────────────────────────────────────
+# Netlify serves every page at BOTH /foo.html and /foo. These two rules used to be the whole
+# binding, and neither matches the extensionless form — so /admin returned the complete admin
+# page to anyone who asked, unauthenticated, while /admin.html correctly 302'd to login.
+# admin.html has no client-side auth-check.js, so this function was the only thing guarding it.
+#
+# The extensionless spellings of every protected page are therefore bound explicitly below.
+#
+# WHY NOT path = "/*" WITH EXCLUSIONS. A catch-all is drift-proof — a new protected page is
+# covered without anyone remembering a binding — but it puts the edge function in front of every
+# static asset on the site: style.css, every image, every .js file. That is an edge invocation on
+# each one, billed and latency-bearing, and the exclusion list becomes the thing that must not be
+# got wrong. Its one real advantage, drift-proofing, is bought more cheaply by the sync test:
+# tests/auth-guard-paths.test.ts fails the build if PROTECTED_PATHS and these bindings disagree.
+#
+# ⚠️ ADDING A PROTECTED PAGE MEANS THREE EDITS: PROTECTED_PATHS in auth-guard.ts, and BOTH
+# spellings here. The test enforces it, but it can only check what it is told to check.
+
 [[edge_functions]]
   function = "auth-guard"
   path = "/*.html" # Maintenance mode + session guard on all HTML pages
@@ -142,6 +368,27 @@ node_bundler = "esbuild"
 [[edge_functions]]
   function = "auth-guard"
   path = "/"
+
+# Extensionless spellings of PROTECTED_PATHS (netlify/edge-functions/auth-guard.ts).
+[[edge_functions]]
+  function = "auth-guard"
+  path = "/workspace"
+
+[[edge_functions]]
+  function = "auth-guard"
+  path = "/onboarding"
+
+[[edge_functions]]
+  function = "auth-guard"
+  path = "/dashboard"
+
+[[edge_functions]]
+  function = "auth-guard"
+  path = "/billing"
+
+[[edge_functions]]
+  function = "auth-guard"
+  path = "/admin"
 
 # US-GAP-7.1.1: In-memory rate limiting for sensitive endpoints
 [[edge_functions]]

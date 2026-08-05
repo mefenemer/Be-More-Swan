@@ -4,16 +4,21 @@
 # to be crawled and shared — they are the indexable form of posts the embeddable widget renders
 # client-side (the widget's hash-routed Shadow DOM is invisible to crawlers).
 #
-# Sitemaps are PER BLOG, not global: each workspace's published posts are listed at
+# The sitemap below covers the MARKETING pages only. Customer blog sitemaps are PER BLOG, not
+# global: each workspace's published posts are listed at
 #   https://bemoreswan.com/b/<widget-public-key>/sitemap.xml
 # Submit that URL in Google Search Console for your blog. There is deliberately no single
-# cross-tenant sitemap here (it would enumerate every customer's posts at one public URL).
+# cross-tenant sitemap (it would enumerate every customer's posts at one public URL).
 #
 # NOTE: authenticated app pages (dashboard, admin, workspace, billing, …) are not blocked here
-# because their names collide on prefixes with public marketing pages (e.g. assistant-catalogue.html
-# is public, assistant-chat.html is not). Keeping those out of search belongs on a per-page noindex
-# tag, not a fragile Disallow prefix list.
+# because their names collide on prefixes with public marketing pages (e.g. assistants.html is
+# public marketing, assistant-chat.html is not). Keeping those out of search belongs on a
+# per-page noindex, not a fragile Disallow prefix list — that noindex is implemented as the
+# X-Robots-Tag rules in netlify.toml, which also covers the HTML view fragments that have no
+# <head> to hold a meta tag.
 
 User-agent: *
 Allow: /
 Disallow: /api/
+
+Sitemap: https://bemoreswan.com/sitemap.xml

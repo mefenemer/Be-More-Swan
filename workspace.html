@@ -582,7 +582,9 @@ window.showComplianceModals = function showComplianceModals(force) {
     </p>
     <p class="text-xs text-gray-400 mb-5">
       By continuing, you agree to our
-      <a href="/terms.html" class="text-emerald-600 hover:underline" target="_blank">Terms of Service</a>.
+      <!-- Was /terms.html, which has never existed and has no redirect: the one link in the
+           AI-disclaimer gate every user must accept 404'd. The file is terms_of_service.html. -->
+      <a href="/terms_of_service.html" class="text-emerald-600 hover:underline" target="_blank">Terms of Service</a>.
       Be More Swan Ltd is not liable for reliance on AI-generated content.
     </p>
     <button id="btn-acknowledge-disclaimer"

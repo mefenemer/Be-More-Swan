@@ -59,6 +59,7 @@
     "build:css": "tailwindcss -i ./input.css -o ./style.css --watch",
     "build:css:prod": "tailwindcss -i ./input.css -o ./style.css",
     "build:version": "node scripts/stamp-view-version.mjs",
+    "build:seo-html": "node scripts/build-seo-html.mjs",
     "license:check": "license-checker --excludePrivatePackages --failOn 'GPL-1.0;GPL-2.0;GPL-3.0;AGPL-1.0;AGPL-3.0;EUPL-1.0;EUPL-1.1;EUPL-1.2;CDDL-1.0;CDDL-1.1'",
     "license:notices": "node scripts/generate-notices.js",
     "lint:no-encryption-import": "bash -c 'grep -rn \"from.*utils/encryption\" netlify src --include=\"*.ts\" && { echo \"ERROR: encryption.ts is deprecated — use vault.ts instead\"; exit 1; }; echo \"OK: no new imports of deprecated encryption.ts found\"'"

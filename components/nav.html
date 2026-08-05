@@ -18,6 +18,17 @@
           <a href="faq.html" class="text-gray-600 hover:text-emerald-700 font-medium transition" data-i18n="nav.faqs">FAQs</a>
           <a href="contact.html" class="text-gray-600 hover:text-emerald-700 font-medium transition" data-i18n="nav.contact">Contact</a>
           <a id="nav-login-btn" href="login.html" class="px-5 py-2 text-sm font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg border border-emerald-100 transition shadow-sm" data-i18n="nav.log_in">Log In</a>
+          <!-- The public nav ended at "Log In": every page carried a persistent CTA for people who
+               already pay and none for people who don't. Log In stays as the quiet secondary action;
+               this is the primary.
+               The handler is inline and self-contained on purpose: this file is injected via
+               innerHTML, so a <script> block here would never execute, and the pages that use the
+               nav don't all load a shared script (trust/powered-by/register/check-email have no
+               mobileMenu.js). Mirrors bmsStart()'s "known device goes to login" routing; if
+               localStorage is unavailable the href falls through to register.html unchanged. -->
+          <a id="nav-signup-btn" href="register.html"
+             onclick="try{if(localStorage.getItem('bms_known_user')==='1')this.href='login.html';}catch(e){}"
+             class="px-5 py-2 text-sm font-bold text-white bg-green-600 hover:bg-green-700 rounded-lg transition shadow-sm" data-i18n="nav.get_started">Get Started</a>
         </div>
         <div id="nav-app-links" class="hidden flex items-center space-x-8">
           <a href="dashboard.html" id="nav-link-dashboard" class="text-gray-600 hover:text-emerald-700 font-medium transition" data-i18n="nav.dashboard">Dashboard</a>
@@ -47,7 +58,10 @@
         <a href="about.html" class="block px-4 py-3 rounded-md text-base font-bold text-gray-700 hover:text-emerald-700 hover:bg-emerald-50 transition" data-i18n="nav.about">About</a>
         <a href="faq.html" class="block px-4 py-3 rounded-md text-base font-bold text-gray-700 hover:text-emerald-700 hover:bg-emerald-50 transition" data-i18n="nav.faqs">FAQs</a>
         <a href="contact.html" class="block px-4 py-3 rounded-md text-base font-bold text-gray-700 hover:text-emerald-700 hover:bg-emerald-50 transition" data-i18n="nav.contact">Contact</a>
-        <a id="nav-mobile-login-btn" href="login.html" class="block mt-4 px-4 py-3 text-center text-base font-bold text-emerald-700 bg-emerald-50 rounded-lg border border-emerald-100 shadow-sm" data-i18n="nav.log_in">Log In</a>
+        <a id="nav-mobile-signup-btn" href="register.html"
+           onclick="try{if(localStorage.getItem('bms_known_user')==='1')this.href='login.html';}catch(e){}"
+           class="block mt-4 px-4 py-3 text-center text-base font-bold text-white bg-green-600 rounded-lg shadow-sm" data-i18n="nav.get_started">Get Started</a>
+        <a id="nav-mobile-login-btn" href="login.html" class="block px-4 py-3 text-center text-base font-bold text-emerald-700 bg-emerald-50 rounded-lg border border-emerald-100 shadow-sm" data-i18n="nav.log_in">Log In</a>
       </div>
 
       <div id="mobile-app-links" style="display: none; flex-direction: column; gap: 8px;">

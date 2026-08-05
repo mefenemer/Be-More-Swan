@@ -4,6 +4,24 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Digital Assistant Library | Be More Swan</title>
+  <!-- SEO: canonical + social share metadata -->
+  <meta name="description" content="Browse the digital assistant library — specialised, pre-trained roles across marketing, sales, operations, admin, finance and customer success.">
+  <link rel="canonical" href="https://bemoreswan.com/assistants.html">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Be More Swan">
+  <meta property="og:title" content="Digital Assistant Library">
+  <meta property="og:description" content="Browse the digital assistant library — specialised, pre-trained roles across marketing, sales, operations, admin, finance and customer success.">
+  <meta property="og:url" content="https://bemoreswan.com/assistants.html">
+  <meta property="og:image" content="https://bemoreswan.com/images/og-default.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="607">
+  <meta property="og:image:alt" content="Be More Swan — your digital workforce">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Digital Assistant Library">
+  <meta name="twitter:description" content="Browse the digital assistant library — specialised, pre-trained roles across marketing, sales, operations, admin, finance and customer success.">
+  <meta name="twitter:image" content="https://bemoreswan.com/images/og-default.png">
+  <meta name="twitter:image:alt" content="Be More Swan — your digital workforce">
+  <!-- /SEO -->
   <link href="./style.css" rel="stylesheet">
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
@@ -413,9 +431,12 @@ function renderCard(a) {
   }
 
   // Live assistant
+  // Logged-out CTA used to be a bare link to pricing, which threw away the one thing the click
+  // told us: WHICH role they want. rememberIntendedRole() stashes it so the workspace catalogue
+  // can surface that role first once they've signed up and paid.
   const cta = _isLoggedIn
     ? `<button onclick="hireAssistant('${escAttr(a.roleKey)}')" class="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-800 transition">Hire Assistant</button>`
-    : `<a href="pricing.html" class="bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-emerald-800 transition">Get Started</a>`;
+    : `<a href="pricing.html" onclick="rememberIntendedRole('${escAttr(a.roleKey)}')" class="bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-emerald-800 transition">Get Started</a>`;
 
   // Every card opens the detail modal on click (buttons/links excluded). This used to be gated on
   // the role having an entry in the hardcoded copy file, which silently hid the link for most of
@@ -707,10 +728,22 @@ function hireAssistant(roleKey) {
   window.location.href = 'workspace.html?view=catalog';
 }
 
+// ── Remember which role a LOGGED-OUT visitor wants ───────────────────────────
+// The logged-in path above uses sessionStorage, which is fine because it's a single same-tab hop
+// to the workspace. The logged-out path can't: it runs pricing → register → "check your email" →
+// (email client) → verify link, and that last hop routinely opens a NEW tab, where sessionStorage
+// is empty. localStorage survives it. assistant-catalogue.html reads this and clears it.
+function rememberIntendedRole(roleKey) {
+  try { localStorage.setItem('bms_intended_role', roleKey); } catch (e) {}
+}
+
 // ── Assistant detail modal (shared component) ────────────────────────────────
 // Same CTA rule as the cards: logged-in users drop into the setup wizard,
 // visitors go to pricing to pick a plan first.
 function openAssistantDetail(roleKey) {
+  // Opening a specific role's detail is itself a statement of intent — capture it here too, so it
+  // survives whether they convert from the card CTA or from inside the modal.
+  if (!_isLoggedIn) rememberIntendedRole(roleKey);
   window.AssistantDetailModal.open(roleKey, _isLoggedIn
     ? { ctaLabel: 'Hire Role', ctaHref: `assistant-setup.html?roleKey=${encodeURIComponent(roleKey)}` }
     : { ctaLabel: 'Get Started', ctaHref: 'pricing.html' });

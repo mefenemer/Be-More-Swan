@@ -2,27 +2,56 @@
 import { Context } from "@netlify/edge-functions";
 import * as jose from 'https://deno.land/x/jose@v5.2.3/index.ts';
 
+/**
+ * Every page on this site answers to TWO URLs. Netlify publishes the repo root, so admin.html is
+ * served at both `/admin.html` and `/admin`, and the same goes for every other page.
+ *
+ * This guard used to reason entirely in the `.html` spelling: it early-returned on any path not
+ * ending in `.html`, and its protected list held only `.html` entries. Deleting four characters
+ * therefore walked straight past it — `/admin` returned the full 504KB admin page to anyone who
+ * asked, unauthenticated, because admin.html carries no client-side auth-check.js either and this
+ * function was its only guard.
+ *
+ * So: normalise first, compare second. `normalisePath` maps both spellings onto one key, and
+ * every list below is written in that normalised form.
+ */
+const normalisePath = (pathname: string): string =>
+    pathname === '/' ? '/' : pathname.replace(/\.html$/, '');
+
+/**
+ * Pages that require a valid session, normalised. MUST stay in step with the auth-guard
+ * `[[edge_functions]]` bindings in netlify.toml: this function can only protect a path it is
+ * actually invoked on, and a page listed here but not bound there is silently unprotected —
+ * exactly the failure this file is fixing. tests/auth-guard-paths.test.ts fails on drift.
+ */
+export const PROTECTED_PATHS = ['/workspace', '/onboarding', '/dashboard', '/billing', '/admin'];
+
+/** Reachable without a session — the pages you need in order to get one. */
+const ALWAYS_ALLOWED = ['/maintenance', '/login', '/logout', '/check-email', '/register'];
+
 export default async (request: Request, context: Context) => {
     const url = new URL(request.url);
+    const path = normalisePath(url.pathname);
 
-    // Skip non-HTML paths (assets, functions, etc.)
-    if (!url.pathname.endsWith('.html') && url.pathname !== '/') {
+    // Skip assets. The netlify.toml bindings mean little else reaches this function, but a
+    // request for /style.css or /images/hero.webp must never reach the config fetch below —
+    // that would put a network round trip in front of every static file on the site.
+    const lastSegment = url.pathname.slice(url.pathname.lastIndexOf('/') + 1);
+    if (lastSegment.includes('.') && !url.pathname.endsWith('.html')) {
         return context.next();
     }
 
-    // Always allow access to maintenance, login, and static pages
-    const ALWAYS_ALLOWED = ['/maintenance.html', '/login.html', '/logout.html', '/check-email.html', '/register.html'];
-    if (ALWAYS_ALLOWED.includes(url.pathname)) {
+    if (ALWAYS_ALLOWED.includes(path)) {
         return context.next();
     }
 
-    const protectedPaths = ['/workspace.html', '/onboarding.html', '/dashboard.html', '/billing.html', '/admin.html'];
+    const protectedPaths = PROTECTED_PATHS;
 
     // BUG-P0-1: JWT_SECRET required for signature verification — fail closed if missing.
     // Without it we cannot verify any token, so protect all protected routes.
     const jwtSecretRaw = Deno.env.get('JWT_SECRET');
     if (!jwtSecretRaw) {
-        if (protectedPaths.includes(url.pathname)) {
+        if (protectedPaths.includes(path)) {
             return Response.redirect(new URL('/login.html', request.url));
         }
         return context.next();
@@ -68,8 +97,16 @@ export default async (request: Request, context: Context) => {
             // the individual AI function handlers return 503 (fixes in get-assistant-context.ts,
             // provision-assistant-async.ts). No page-level redirect needed here.
 
-            // Block registration if new_registration_lock is active
-            if (cfg.registrationLocked && url.pathname === '/register.html') {
+            // Block registration if new_registration_lock is active.
+            //
+            // ⚠️ THIS BRANCH IS UNREACHABLE, and was before this file was touched. '/register' is
+            // in ALWAYS_ALLOWED above, which returns context.next() long before the config is
+            // ever fetched — so the admin "lock registrations" switch has never blocked anything.
+            // Left exactly as-is on purpose: making it work is a behaviour change, not a fix, and
+            // if the flag is already set in either database, repairing the code silently shuts
+            // off signups the moment it deploys. Check the live value of new_registration_lock
+            // first, then move this test above ALWAYS_ALLOWED.
+            if (cfg.registrationLocked && path === '/register') {
                 return Response.redirect(new URL('/login.html?locked=1', request.url), 302);
             }
         }
@@ -79,14 +116,20 @@ export default async (request: Request, context: Context) => {
     }
 
     // ── Session guard — protected pages require a valid, signature-verified JWT ─
-    if (protectedPaths.includes(url.pathname)) {
+    if (protectedPaths.includes(path)) {
+        // US-ONB-2.1.2 AC9: preserve the current URL as the post-login destination. Built from
+        // the RAW pathname, not the normalised one, so the visitor returns to the spelling they
+        // actually used. The suppression test is normalised, though: /workspace is the default
+        // landing page and does not need to be passed as an explicit redirect, and that was true
+        // of only the .html spelling before.
+        const redirectTarget = url.pathname + url.search;
+        const isDefaultDestination = path === '/workspace' && !url.search;
+
         const sessionCookie = context.cookies.get("aura_session");
         if (!sessionCookie) {
             console.log(`[auth-guard] Blocked unauthorized access to ${url.pathname}`);
-            // US-ONB-2.1.2 AC9: preserve current URL as post-login redirect destination
             const loginUrl = new URL('/login.html', request.url);
-            const fullPath = url.pathname + url.search;
-            if (fullPath !== '/workspace.html') loginUrl.searchParams.set('redirect', fullPath);
+            if (!isDefaultDestination) loginUrl.searchParams.set('redirect', redirectTarget);
             return Response.redirect(loginUrl);
         }
 
@@ -99,8 +142,7 @@ export default async (request: Request, context: Context) => {
             // Invalid signature or expired token — redirect to login
             console.log(`[auth-guard] Rejected invalid/forged JWT for ${url.pathname}`);
             const loginUrl = new URL('/login.html', request.url);
-            const fullPath = url.pathname + url.search;
-            if (fullPath !== '/workspace.html') loginUrl.searchParams.set('redirect', fullPath);
+            if (!isDefaultDestination) loginUrl.searchParams.set('redirect', redirectTarget);
             return Response.redirect(loginUrl);
         }
 

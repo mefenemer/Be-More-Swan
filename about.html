@@ -4,6 +4,24 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>About Us | Be More Swan</title>
+    <!-- SEO: canonical + social share metadata -->
+    <meta name="description" content="Why we built Be More Swan — a digital workforce designed to give small teams their time back, instead of yet another tool to learn and manage.">
+    <link rel="canonical" href="https://bemoreswan.com/about.html">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Be More Swan">
+    <meta property="og:title" content="About Be More Swan">
+    <meta property="og:description" content="Why we built Be More Swan — a digital workforce designed to give small teams their time back, instead of yet another tool to learn and manage.">
+    <meta property="og:url" content="https://bemoreswan.com/about.html">
+    <meta property="og:image" content="https://bemoreswan.com/images/og-default.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="607">
+    <meta property="og:image:alt" content="Be More Swan — your digital workforce">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="About Be More Swan">
+    <meta name="twitter:description" content="Why we built Be More Swan — a digital workforce designed to give small teams their time back, instead of yet another tool to learn and manage.">
+    <meta name="twitter:image" content="https://bemoreswan.com/images/og-default.png">
+    <meta name="twitter:image:alt" content="Be More Swan — your digital workforce">
+    <!-- /SEO -->
     <link href="./style.css" rel="stylesheet">
     <link rel="icon" href="/favicon/favicon.ico" sizes="any">
     <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
@@ -21,12 +39,9 @@
         <h1 class="text-4xl md:text-6xl font-extrabold text-gray-900 tracking-tight leading-tight mb-6 max-w-4xl mx-auto">
             Technology Should Give You <span class="text-emerald-700">Your Life Back.</span>
         </h1>
-        <p class="text-xl text-gray-500 max-w-2xl mx-auto mb-12">
+        <p class="text-xl text-gray-500 max-w-2xl mx-auto">
             Be More Swan was born from a simple refusal: the refusal to accept that building a business has to mean losing your evenings, your weekends, and your peace of mind.
         </p>
-        <img src="https://images.pexels.com/photos/1285625/pexels-photo-1285625.jpeg?auto=compress&cs=tinysrgb&w=1600"
-             alt="Serene view over a Greek island coastline, whitewashed houses above a calm blue sea"
-             class="rounded-3xl shadow-xl w-full max-w-5xl mx-auto h-[320px] md:h-[480px] object-cover">
     </div>
 </section>
 
@@ -36,7 +51,7 @@
         <div class="text-center max-w-3xl mx-auto mb-16">
             <span class="text-xs font-bold tracking-wider uppercase text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full">The Founder's Story</span>
             <h2 class="text-4xl font-extrabold text-gray-900 tracking-tight mt-4">
-                From the Corporate Grind to the Aegean Sea
+                From the Corporate Grind to a Better Way to Work
             </h2>
         </div>
 
@@ -72,13 +87,13 @@
                     </div>
                     <span class="text-xs font-bold uppercase tracking-widest text-emerald-700 relative">Chapter Two · The Escape</span>
                 </div>
-                <h3 class="text-2xl font-extrabold text-gray-900 mb-4 relative">Building Be More Swan from Syros</h3>
+                <h3 class="text-2xl font-extrabold text-gray-900 mb-4 relative">Building Be More Swan</h3>
                 <div class="space-y-4 text-gray-600 leading-relaxed flex-grow relative">
                     <p>
                         The realisation behind Be More Swan was simple: automation shouldn't be a privilege reserved for massive corporations with in-house engineering armies. Solo founders and small teams deserve the same invisible workforce — without writing a line of code.
                     </p>
                     <p>
-                        So the corporate ladder got traded for a laptop on the Greek island of Syros. Today, Be More Swan is a global tech platform run from the Aegean — living proof that with the right digital workforce, true location and time freedom aren't a fantasy. They're an operating model.
+                        So the corporate ladder got traded for a laptop and a blank page. Today, Be More Swan is a global tech platform run remotely — living proof that with the right digital workforce, true location and time freedom aren't a fantasy. They're an operating model.
                     </p>
                     <p>
                         The swan is our promise. Serene on the surface, powerful underneath. Your business should glide — and your digital team should do the furious paddling below the waterline.
@@ -130,9 +145,19 @@
         <p class="opacity-90 leading-relaxed mb-8 text-lg">
             Stop paddling frantically beneath the surface. Hire your first digital assistant today and be more swan.
         </p>
-        <a href="pricing.html" class="inline-block px-8 py-4 text-lg font-bold rounded-lg text-white bg-green-600 hover:bg-green-700 shadow-lg hover:shadow-xl transition">
-            Hire Your Assistant
-        </a>
+        <!-- This was the ONLY link in the entire page body. Someone who finished reading About and
+             wasn't ready to look at prices had nowhere to go but the footer. -->
+        <div class="flex flex-col sm:flex-row gap-3 justify-center">
+            <a href="pricing.html" class="inline-block px-8 py-4 text-lg font-bold rounded-lg text-white bg-green-600 hover:bg-green-700 shadow-lg hover:shadow-xl transition">
+                Hire Your Assistant
+            </a>
+            <a href="assistants.html" class="inline-block px-8 py-4 text-lg font-bold rounded-lg border-2 border-white/30 text-white hover:border-white/60 hover:bg-white/10 transition">
+                Browse the Assistant Library
+            </a>
+        </div>
+        <p class="opacity-80 text-sm mt-6">
+            Still deciding? <a href="faq.html" class="underline font-semibold hover:opacity-100">Read the FAQs</a> or <a href="contact.html" class="underline font-semibold hover:opacity-100">talk to us first</a>.
+        </p>
     </div>
 </section>
 

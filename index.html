@@ -4,6 +4,97 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Be More Swan | Delegate the Work You Hate</title>
+    <!-- SEO: canonical + social share metadata -->
+    <meta name="description" content="Hire pre-trained digital assistants that connect to your everyday business tools and work in the background — no code and no workflow building required.">
+    <link rel="canonical" href="https://bemoreswan.com/">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Be More Swan">
+    <meta property="og:title" content="Delegate the Work You Hate">
+    <meta property="og:description" content="Hire pre-trained digital assistants that connect to your everyday business tools and work in the background — no code and no workflow building required.">
+    <meta property="og:url" content="https://bemoreswan.com/">
+    <meta property="og:image" content="https://bemoreswan.com/images/og-default.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="607">
+    <meta property="og:image:alt" content="Be More Swan — your digital workforce">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Delegate the Work You Hate">
+    <meta name="twitter:description" content="Hire pre-trained digital assistants that connect to your everyday business tools and work in the background — no code and no workflow building required.">
+    <meta name="twitter:image" content="https://bemoreswan.com/images/og-default.png">
+    <meta name="twitter:image:alt" content="Be More Swan — your digital workforce">
+
+    <!-- Structured data. One @graph so Organization and SoftwareApplication are linked entities
+         rather than two unrelated blobs — the app's `publisher` points at the same @id the
+         Organization declares, which is what lets a consumer treat them as one thing.
+
+         Deliberately ABSENT, and please keep them absent unless the note says otherwise:
+
+         • sameAs — every social URL in this repo (facebook.com/yourpage, x.com/yourhandle, …)
+           is a form *placeholder* in assets.html, not a profile we own. sameAs is an identity
+           claim; pointing it at a non-existent page is worse than omitting it. Add real
+           profile URLs here when they exist.
+
+         • offers/price — plan prices live in the DB (see renderPlanCards in pricing.html) and
+           there is no build-time constant to bind to. pricing.html's own hardcoded fallbacks
+           have already drifted from the canonical set, which is exactly the failure mode:
+           a price in structured data can be shown verbatim in a search result, so a stale one
+           is a public misstatement about what we charge. Wire this to the DB or leave it out.
+
+         • aggregateRating/review — we have no review corpus. Marking up ratings we cannot
+           show on the page is a manual-action risk, not a ranking win. -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": "https://bemoreswan.com/#organization",
+          "name": "Be More Swan",
+          "url": "https://bemoreswan.com/",
+          "logo": {
+            "@type": "ImageObject",
+            "url": "https://bemoreswan.com/favicon/web-app-manifest-512x512.png",
+            "width": 512,
+            "height": 512
+          },
+          "image": "https://bemoreswan.com/images/og-default.png",
+          "description": "Be More Swan provides pre-trained digital assistants that connect to everyday business tools and run work in the background, without code or workflow building.",
+          "contactPoint": [
+            {
+              "@type": "ContactPoint",
+              "contactType": "customer support",
+              "email": "support@bemoreswan.com",
+              "availableLanguage": ["en", "fr", "de", "es", "pt"]
+            },
+            {
+              "@type": "ContactPoint",
+              "contactType": "sales",
+              "email": "hello@bemoreswan.com",
+              "availableLanguage": ["en", "fr", "de", "es", "pt"]
+            }
+          ]
+        },
+        {
+          "@type": "SoftwareApplication",
+          "@id": "https://bemoreswan.com/#software",
+          "name": "Be More Swan",
+          "url": "https://bemoreswan.com/",
+          "applicationCategory": "BusinessApplication",
+          "applicationSubCategory": "Business automation",
+          "operatingSystem": "Web browser",
+          "description": "Hire pre-trained digital assistants that connect to your everyday business tools and work in the background — no code and no workflow building required.",
+          "featureList": [
+            "Pre-trained assistant roles for social media, content, lead generation and back-office work",
+            "Direct connections to existing business tools",
+            "SMART goal tracking with autonomous optimisation",
+            "Human review and approval before work is published"
+          ],
+          "inLanguage": ["en", "fr", "de", "es", "pt"],
+          "publisher": { "@id": "https://bemoreswan.com/#organization" }
+        }
+      ]
+    }
+    </script>
+    <!-- /SEO -->
     <!--    <script src="https://cdn.tailwindcss.com"></script>-->
     <link id="stylesheet" href="./style.css" rel="stylesheet">
     <link rel="icon" href="/favicon/favicon.ico" sizes="any">
@@ -43,9 +134,17 @@
             </div>
         </div>
         <div class="md:w-1/2">
-            <img src="https://images.pexels.com/photos/3755021/pexels-photo-3755021.jpeg?auto=compress&cs=tinysrgb&w=800"
-                 alt="Woman relaxing peacefully with a warm drink"
-                 class="rounded-2xl shadow-xl">
+            <!-- Self-hosted (was hot-linked from images.pexels.com). See images/CREDITS.md.
+                 This is the LCP element on the homepage, so it is the one image here that must
+                 not be lazy-loaded: fetchpriority="high" and no loading="lazy". -->
+            <picture>
+                <source srcset="./images/home-hero-relaxing.webp" type="image/webp">
+                <img src="./images/home-hero-relaxing.jpg"
+                     alt="Woman relaxing peacefully with a warm drink"
+                     width="1200" height="800"
+                     fetchpriority="high" decoding="async"
+                     class="rounded-2xl shadow-xl">
+            </picture>
         </div>
     </div>
 </section>
@@ -66,17 +165,34 @@
             </div>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div class="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm flex flex-col items-center">
-                    <img src="https://images.unsplash.com/photo-1499750310107-5fef28a66643?auto=format&fit=crop&w=300&q=80" alt="Select Your Assistant" class="w-20 h-20 rounded-full mb-6 object-cover">
+                    <!-- Self-hosted, and now fetched at the size it is actually drawn: these
+                         render at 80px (w-20) but were pulled at w=300. See images/CREDITS.md. -->
+                    <picture>
+                        <source srcset="./images/home-step-1-select.webp" type="image/webp">
+                        <img src="./images/home-step-1-select.jpg" alt="Select Your Assistant"
+                             width="160" height="160" loading="lazy" decoding="async"
+                             class="w-20 h-20 rounded-full mb-6 object-cover">
+                    </picture>
                     <h3 class="text-xl font-bold mb-3">1. Select Your Assistant</h3>
                     <p class="text-gray-600">Choose from our library of specialized digital roles—from Lead Generators to Media Buyers. They come pre-trained, fully equipped, and ready to be provisioned to your workspace instantly.</p>
                 </div>
                 <div class="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm flex flex-col items-center">
-                    <img src="https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=300&q=80" alt="Connect Tools & Set SMART Goals" class="w-20 h-20 rounded-full mb-6 object-cover">
+                    <picture>
+                        <source srcset="./images/home-step-2-connect.webp" type="image/webp">
+                        <img src="./images/home-step-2-connect.jpg" alt="Connect Tools &amp; Set SMART Goals"
+                             width="160" height="160" loading="lazy" decoding="async"
+                             class="w-20 h-20 rounded-full mb-6 object-cover">
+                    </picture>
                     <h3 class="text-xl font-bold mb-3">2. Connect Tools &amp; Set SMART Goals</h3>
                     <p class="text-gray-600">Securely plug your assistant into the apps you already use (HubSpot, Shopify, Meta, and more). Tell them exactly what to achieve—like &ldquo;Increase qualified leads by 50% this month&rdquo;—using our built-in milestone tracker.</p>
                 </div>
                 <div class="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm flex flex-col items-center">
-                    <img src="https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=300&q=80" alt="Kick Off & Track Progress" class="w-20 h-20 rounded-full mb-6 object-cover">
+                    <picture>
+                        <source srcset="./images/home-step-3-track.webp" type="image/webp">
+                        <img src="./images/home-step-3-track.jpg" alt="Kick Off &amp; Track Progress"
+                             width="160" height="160" loading="lazy" decoding="async"
+                             class="w-20 h-20 rounded-full mb-6 object-cover">
+                    </picture>
                     <h3 class="text-xl font-bold mb-3">3. Kick Off &amp; Track Progress</h3>
                     <p class="text-gray-600">Review your assistant's game plan and click &ldquo;Confirm &amp; Start Working.&rdquo; They run 24/7 in the background, autonomously optimizing their own tactics to make sure you hit your targets. You only step in when they need a final approval or a creative sign-off.</p>
                 </div>
@@ -201,6 +317,8 @@
             <div class="w-full lg:w-1/2 relative">
                 <img src="./images/CatFenemer.jpeg"
                      alt="Independent creative service provider planning her brand layout on a laptop"
+                     width="1153" height="2048"
+                     loading="lazy" decoding="async"
                      class="rounded-2xl shadow-md w-full h-[450px] object-cover">
 
                 <div class="absolute top-4 left-4 bg-white/95 backdrop-blur-sm border border-emerald-100 px-4 py-2.5 rounded-xl shadow-sm flex flex-col gap-0.5 z-10 text-left">
@@ -270,9 +388,17 @@
 
             <!-- Visual Right Panel -->
             <div class="w-full lg:w-1/2 relative">
-                <img src="https://images.pexels.com/photos/4050291/pexels-photo-4050291.jpeg?auto=compress&cs=tinysrgb&w=1200"
-                     alt="Creative workspace lifestyle founder reviewing beautiful art prints at home"
-                     class="rounded-2xl shadow-md w-full h-[450px] object-cover">
+                <!-- Self-hosted (was hot-linked from images.pexels.com). See images/CREDITS.md.
+                     The h-[450px] utility overrides preflight's height:auto, so object-cover still
+                     does the cropping — width/height here are the intrinsic file dimensions. -->
+                <picture>
+                    <source srcset="./images/home-case-study-prints.webp" type="image/webp">
+                    <img src="./images/home-case-study-prints.jpg"
+                         alt="Creative workspace lifestyle founder reviewing beautiful art prints at home"
+                         width="1140" height="760"
+                         loading="lazy" decoding="async"
+                         class="rounded-2xl shadow-md w-full h-[450px] object-cover">
+                </picture>
 
                 <div class="absolute top-4 left-4 bg-white/95 backdrop-blur-sm border border-emerald-100 px-4 py-2.5 rounded-xl shadow-sm flex flex-col gap-0.5 z-10 text-left">
                     <div class="flex items-center gap-2">
@@ -340,6 +466,8 @@
             <div class="w-full lg:w-1/2 relative">
                 <img src="./images/DJ_Limi.png"
                      alt="Female DJ / producer mixing tracks on decks"
+                     width="712" height="442"
+                     loading="lazy" decoding="async"
                      class="rounded-2xl shadow-md w-full h-[450px] object-cover">
 
                 <div class="absolute top-4 left-4 bg-white/95 backdrop-blur-sm border border-emerald-100 px-4 py-2.5 rounded-xl shadow-sm flex flex-col gap-0.5 z-10 text-left">
@@ -407,6 +535,8 @@
             <div class="w-full lg:w-1/2 relative">
                 <img src="./images/Angela.jpeg"
                      alt="Smiling female nurse coach working remotely on a laptop in a bright home office"
+                     width="1067" height="384"
+                     loading="lazy" decoding="async"
                      class="rounded-2xl shadow-md w-full h-[450px] object-cover">
 
                 <div class="absolute top-4 left-4 bg-white/95 backdrop-blur-sm border border-emerald-100 px-4 py-2.5 rounded-xl shadow-sm flex flex-col gap-0.5 z-10 text-left">

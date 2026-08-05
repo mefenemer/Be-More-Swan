@@ -20,16 +20,79 @@
         <div class="w-10 h-10 border-4 border-gray-200 border-t-emerald-600 rounded-full animate-spin"></div>
     </div>
 
-    <!-- Error state -->
+    <!-- Error state — a KNOWN slug that did not resolve.
+         Reached only when ?slug= was supplied and the attribution lookup failed, so the visitor
+         followed a badge belonging to a specific agency and we could not find it. The heading no
+         longer says "Page Not Found": this is served at HTTP 200, the page genuinely exists, and
+         claiming otherwise misdescribes what happened to both the visitor and any crawler. The
+         parameter-less case is #pb-default below, NOT this. -->
     <div id="pb-error" class="hidden max-w-lg mx-auto px-4 py-32 text-center">
         <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
             </svg>
         </div>
-        <h1 class="text-2xl font-bold text-gray-900 mb-2">Page Not Found</h1>
-        <p class="text-gray-500 mb-6">This attribution link isn't active. The agency may have turned off their badge, or the link may be incorrect.</p>
-        <a href="/" class="inline-block bg-emerald-700 text-white font-bold px-6 py-3 rounded-xl hover:bg-emerald-800 transition">Visit Be More Swan</a>
+        <h1 class="text-2xl font-bold text-gray-900 mb-2">This attribution link isn't active</h1>
+        <p class="text-gray-500 mb-6">The business that shared it may have turned their badge off, or the link may have been copied incompletely. Here's what the badge means anyway.</p>
+        <div class="flex flex-col sm:flex-row gap-3 justify-center">
+            <a href="/" class="inline-block bg-emerald-700 text-white font-bold px-6 py-3 rounded-xl hover:bg-emerald-800 transition">Visit Be More Swan</a>
+            <a href="/assistants.html" class="inline-block bg-white text-gray-700 font-bold px-6 py-3 rounded-xl border border-gray-200 hover:bg-gray-50 transition">See the assistants</a>
+        </div>
+    </div>
+
+    <!-- Default state — NO ?slug= at all.
+         This is what /powered-by serves on its own, and it used to render the error card above:
+         a "Page Not Found" heading returned at HTTP 200. That is a soft 404 — hostile to anyone
+         who trims the query string or follows a badge whose link got mangled in a forward, and a
+         quality signal to crawlers that the URL is broken.
+         The page has a real subject, so it now explains it. netlify.toml still sends
+         X-Robots-Tag: noindex for /powered-by* — the fix here is for the human who lands on it,
+         not a bid to get an attribution page indexed. -->
+    <div id="pb-default" class="hidden">
+        <section class="bg-white border-b border-gray-100">
+            <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-20 text-center">
+                <div class="inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 text-xs font-bold px-4 py-2 rounded-full border border-emerald-200 mb-6">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                    </svg>
+                    Powered by Be More Swan
+                </div>
+                <h1 class="text-4xl sm:text-5xl font-extrabold text-gray-900 mb-4 leading-tight">
+                    You've seen the badge.<br>Here's what it means.
+                </h1>
+                <p class="text-xl text-gray-500 mb-10">
+                    Businesses that use Be More Swan can add a small attribution badge to the work they deliver. If you followed one here, it means part of what you received &mdash; a report, a post, a newsletter, a reply &mdash; was produced with help from a digital assistant rather than typed out by hand at 11pm.
+                </p>
+            </div>
+        </section>
+
+        <section class="py-16">
+            <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+                    <div class="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+                        <h2 class="font-bold text-gray-900 mb-2">A person still signs it off</h2>
+                        <p class="text-gray-500 text-sm leading-relaxed">Assistants draft and prepare work, but it goes through a review queue first. Someone at the business you're dealing with approved what reached you.</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+                        <h2 class="font-bold text-gray-900 mb-2">It's their voice, not ours</h2>
+                        <p class="text-gray-500 text-sm leading-relaxed">Each assistant is set up around one business &mdash; how it talks, what it sells, who it serves. We don't write on their behalf or see the badge as ours.</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+                        <h2 class="font-bold text-gray-900 mb-2">Your data stays theirs</h2>
+                        <p class="text-gray-500 text-sm leading-relaxed">Anything you share with that business belongs to that business. Read how we handle data in our <a href="/privacy.html" class="text-emerald-600 hover:underline font-medium">privacy policy</a>.</p>
+                    </div>
+                </div>
+
+                <div class="text-center">
+                    <p class="text-lg text-gray-600 mb-6">Want the same thing working in the background of your own business?</p>
+                    <div class="flex flex-col sm:flex-row gap-4 justify-center">
+                        <a href="/assistants.html" class="inline-block bg-emerald-700 text-white font-bold px-8 py-4 rounded-xl text-lg shadow-lg hover:bg-emerald-800 transition">Browse the assistants</a>
+                        <a href="/pricing.html" class="inline-block bg-white text-gray-700 font-bold px-8 py-4 rounded-xl text-lg border border-gray-200 hover:bg-gray-50 transition">See plans &amp; pricing</a>
+                    </div>
+                    <p class="text-sm text-gray-400 mt-4">Rolling monthly plans &mdash; cancel any time.</p>
+                </div>
+            </div>
+        </section>
     </div>
 
     <!-- US-AUD-5.3.1 SC3: Co-branded landing page content -->
@@ -102,9 +165,15 @@
             <div class="max-w-3xl mx-auto px-4 text-center">
                 <h2 class="text-3xl font-extrabold text-white mb-4">Discover how your team can work this way too.</h2>
                 <p class="text-emerald-100 mb-8 text-lg">Join thousands of teams using Be More Swan to automate the work nobody wants to do.</p>
-                <a href="/checkout.html" class="inline-block bg-white text-emerald-700 font-bold px-10 py-4 rounded-xl text-lg shadow-lg hover:bg-gray-50 transition">
-                    Start Free — No Card Required
+                <!-- Same fix as the hero CTA above: this pointed at /checkout.html and promised a
+                     free trial that no longer exists. /checkout.html is behind auth-check.js, so an
+                     anonymous visitor — which is everyone landing on this page — was bounced to the
+                     LOGIN wall without ever having an account. Goes to pricing like the hero, and
+                     carries the referring agency's slug the same way. -->
+                <a href="/pricing.html" id="pb-bottom-cta" class="inline-block bg-white text-emerald-700 font-bold px-10 py-4 rounded-xl text-lg shadow-lg hover:bg-gray-50 transition">
+                    Choose Your Plan
                 </a>
+                <p class="text-emerald-100/80 text-sm mt-4">Rolling monthly plans — cancel any time.</p>
             </div>
         </section>
 
@@ -123,10 +192,31 @@
     const loadingEl = document.getElementById('pb-loading');
     const errorEl   = document.getElementById('pb-error');
     const contentEl = document.getElementById('pb-content');
+    const defaultEl = document.getElementById('pb-default');
 
-    if (!slug || slug === 'powered-by') {
-        loadingEl.classList.add('hidden');
-        errorEl.classList.remove('hidden');
+    const show = (el) => { loadingEl.classList.add('hidden'); el.classList.remove('hidden'); };
+
+    // Load shared nav/footer FIRST, and unconditionally.
+    //
+    // This used to sit at the very bottom of the function, after an early `return` in the
+    // no-slug branch — so the one state that needed a way out of the page was the one state
+    // rendered with no nav and no footer. A "Page Not Found" card with no navigation is a
+    // dead end. Hoisted above every branch so the chrome cannot depend on which state wins.
+    ['nav-placeholder', 'footer-placeholder'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const src = id.includes('nav') ? 'components/nav.html' : 'components/footer.html';
+        fetch(src).then(r => r.text()).then(html => { el.innerHTML = html; }).catch(() => {});
+    });
+
+    // The slug is the last PATH segment (/powered-by/<slug>), so the page's own two URL forms
+    // both land here as a "slug". Netlify serves this file at /powered-by AND /powered-by.html:
+    // the old guard tested only the extensionless spelling, so /powered-by.html fell through and
+    // looked up an agency literally named "powered-by.html" — same error card, longer route, one
+    // pointless function call. Both bare forms mean "no agency was named".
+    const BARE = ['', 'powered-by', 'powered-by.html'];
+    if (!slug || BARE.includes(slug)) {
+        show(defaultEl);
         return;
     }
 
@@ -142,25 +232,17 @@
         // Append referral slug to CTA links for attribution tracking (SC5). Points at pricing,
         // not checkout — a cold visitor arriving from a delivered asset has not chosen a plan yet.
         document.getElementById('pb-trial-cta').href = `/pricing.html?ref=${encodeURIComponent(slug)}`;
+        document.getElementById('pb-bottom-cta').href = `/pricing.html?ref=${encodeURIComponent(slug)}`;
 
-        loadingEl.classList.add('hidden');
-        contentEl.classList.remove('hidden');
+        show(contentEl);
 
         // Store the referrer slug in sessionStorage — register.ts can read this on signup
         sessionStorage.setItem('attribution_ref', slug);
 
     } catch {
-        loadingEl.classList.add('hidden');
-        errorEl.classList.remove('hidden');
+        // A slug WAS named and did not resolve — that is the error card's actual job.
+        show(errorEl);
     }
-
-    // Load shared nav/footer fragments
-    ['nav-placeholder', 'footer-placeholder'].forEach(id => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        const src = id.includes('nav') ? 'components/nav.html' : 'components/footer.html';
-        fetch(src).then(r => r.text()).then(html => { el.innerHTML = html; }).catch(() => {});
-    });
 })();
 </script>
 </body>

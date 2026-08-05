@@ -316,10 +316,18 @@
     } catch {
       _catAll = [];
     }
-    // If workspace.html has an intended_role pre-filter from public library
-    const intended = sessionStorage.getItem('intended_role');
+    // If workspace.html has an intended_role pre-filter from public library.
+    // Two sources, same meaning: `intended_role` (sessionStorage) is set by an already-logged-in
+    // user clicking Hire on assistants.html — one same-tab hop, so sessionStorage is enough.
+    // `bms_intended_role` (localStorage) is set by a LOGGED-OUT visitor and has to survive
+    // pricing → register → email → verify, which often lands in a new tab. Both are cleared on read.
+    let intended = null;
+    try { intended = sessionStorage.getItem('intended_role') || localStorage.getItem('bms_intended_role'); } catch (e) {}
     if (intended) {
-      sessionStorage.removeItem('intended_role');
+      try {
+        sessionStorage.removeItem('intended_role');
+        localStorage.removeItem('bms_intended_role');
+      } catch (e) {}
       // Auto-scroll to the matching card after render
       _catAll = [..._catAll.filter(a => a.roleKey === intended), ..._catAll.filter(a => a.roleKey !== intended)];
     }
