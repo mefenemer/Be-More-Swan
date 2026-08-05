@@ -499,7 +499,12 @@ async function publishSignals(db: Db, job: JobRow): Promise<void> {
             userId: campaign.createdBy,
             context: {
                 assistant: { name: assistant?.name ?? 'Your assistant' },
-                search: { name: savedSearchLabel(campaign.name, campaign.idea), count: String(found) },
+                search: {
+                    name: savedSearchLabel(campaign.name, campaign.idea),
+                    // Pluralisation lives at the call site by convention — the merge engine has no
+                    // plural rules (see notification-templates-catalog.ts).
+                    companies: found === 1 ? '1 company' : `${found} companies`,
+                },
             },
             metadata: { assistantId: campaign.aiAssistantId, campaignId: job.campaign_id, jobId: job.id },
         });

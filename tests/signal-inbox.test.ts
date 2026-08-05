@@ -182,9 +182,19 @@ check('one notification per RUN, claimed conditionally so a retry cannot double-
 check('the notification template exists with the variables the call site supplies', () => {
     const cat = readFileSync(join(root, 'src/utils/notification-templates-catalog.ts'), 'utf8');
     assert.ok(cat.includes("templateKey: 'search_signals_published'"), 'template registered');
-    for (const v of ['search.name', 'search.count', 'assistant.name']) {
+    for (const v of ['search.name', 'search.companies', 'assistant.name']) {
         assert.ok(cat.includes(v), `template must declare ${v}`);
     }
+    // The copy must not leak "signal" — our internal word for a row in this tab. A notification
+    // arrives with none of the tab's explanatory copy around it, so it has to name the thing the
+    // user recognises (a company) and the tab they can find (Searches).
+    // Only the title/message lines — templateKey and type legitimately keep the internal name.
+    const tpl = cat.slice(cat.indexOf("templateKey: 'search_signals_published'"));
+    const body = tpl.slice(0, tpl.indexOf('variables:'));
+    const copy = body.split('\n').filter((l) => /^\s*(title|message):/.test(l)).join('\n');
+    assert.ok(copy.includes('title:') && copy.includes('message:'), 'found both copy lines');
+    assert.ok(!/signal/i.test(copy), 'user-facing copy must not use the word "signal"');
+    assert.ok(copy.includes('Searches'), 'copy must name the tab by its user-facing label');
 });
 
 // ── 7. Wire contract ─────────────────────────────────────────────────────────

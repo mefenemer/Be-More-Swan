@@ -160,16 +160,25 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         // Signal Inbox (Phase 1a). Raised ONCE per completed discovery run, never once per lead —
         // a run can find 50, and 50 notifications for one action is how a notification centre
         // becomes something users mute. Idempotency comes from discovery_jobs.signals_published_at.
+        //
+        // ⚠️ Says "companies", not "signals". "Signal" is our internal word for a row in this tab
+        // and it reads as jargon in a notification, which arrives with none of the tab's
+        // explanatory copy around it. A user who has never opened the tab cannot tell whether a
+        // signal is a lead, an alert or a metric. The tab itself already explains itself in plain
+        // words ("approved companies become leads") — this matches it, and names the destination
+        // by its user-facing label ("Searches", assistant-dashboard-registry.js `signalInbox`).
         templateKey: 'search_signals_published',
-        name: 'Saved search found new signals',
+        name: 'Saved search found new companies',
         category: 'Assistants',
         type: 'search_signals_published',
-        title: '{{assistant.name}} found {{search.count}} new signals',
-        message: '"{{search.name}}" finished running and added {{search.count}} new signals to your inbox for review.',
+        title: '{{assistant.name}} found {{search.companies}} to review',
+        message: 'Your saved search "{{search.name}}" finished running and found {{search.companies}} matching your criteria. Approve the ones worth pursuing on the Searches tab and they become leads.',
         variables: [
             ASSISTANT_NAME,
             v('search.name', 'Saved search name', 'UK retreat venues'),
-            v('search.count', 'Signals found', '14'),
+            // Resolved noun phrase, not a bare number — the merge engine has no plural rules, and
+            // the old copy said "found 1 new signals" on a single-hit run.
+            v('search.companies', 'Companies found (noun phrase)', '14 companies'),
         ],
     },
     {
