@@ -27,6 +27,7 @@ import { consumeTaskCredit } from '../../src/utils/task-credit';
 import { embedTexts } from '../../src/utils/kb-embeddings';
 import { computeScheduleSlots, resolvePostingSchedule } from '../../src/config/posting-cadence';
 import { normalizePlatform, type SocialPlatform } from '../../src/config/platform-formats';
+import { replyClaimsPostSaved, honestDraftReply, type DraftClaimFailure } from '../../src/utils/chat-draft-claims';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -978,7 +979,13 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
     // by the client from the hubLink the handler stamps on the reply.
     social_media_manager: {
         model: DEFAULT_MODEL,
-        maxTokens: 1024,
+        // 1024 was not enough headroom for a finished caption plus hashtags plus the reply, and
+        // the failure mode is the worst one available: the envelope truncates mid-string, the
+        // JSON never parses, and parseStructuredReply degrades to STRUCTURED_REPLY_FALLBACK —
+        // so the post the model had already written is discarded and the user is told "something
+        // went wrong formatting that". Seen twice in one live session on 2026-08-05. max_tokens
+        // is a ceiling, not a spend: raising it costs nothing on turns that don't need it.
+        maxTokens: 2048,
         buildRolePrompt: (rc) => {
             const platforms = configuredPlatforms(rc.onboardingContext);
             const platformLine = platforms.length
@@ -990,7 +997,11 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
 
 Every post you draft here is saved for real the moment you include the post draft below, with a suggested posting slot already picked from this business's posting schedule — this chat cannot publish or schedule it further than that. Because of this: NEVER tell the user to go set it up, schedule it, or add it to their Review Queue themselves, and never describe dashboard steps, tools, or sections to visit. Once you include the post draft, your reply should just briefly confirm you've drafted the post and suggested a schedule for it — a link to review and approve it is added automatically straight after your reply, so don't mention where that link is or how to find it.
 
-Only include the post draft once you have enough to write real, finished copy — a topic or brief is enough. Ask a short clarifying question (uiElement: null) only when you don't have a topic to write about yet.`,
+Only include the post draft once you have enough to write real, finished copy — a topic or brief is enough. Ask a short clarifying question (uiElement: null) only when you don't have a topic to write about yet.
+
+ONE POST PER REPLY. The draft object below holds exactly one post, so one reply can only ever save one. If the user asks for several at once — three days' worth, a week's worth, one per platform-day — draft the FIRST one properly and end by offering to write the next ("That's Tuesday's saved — want Wednesday next?"). Never describe, summarise or promise posts you have not included here; if they want a whole week filled without asking each time, that is what their posting schedule already does automatically.
+
+NEVER say a post has been drafted, written, saved, scheduled or queued for review unless THIS reply includes the post draft object. If uiElement is null then nothing has been saved, and a reply claiming otherwise sends the user to an empty Review Queue. When you have nothing to include, say plainly what you need in order to write it.`,
                 platformLine,
                 `Return STRICT JSON and NOTHING else — no markdown, no code fences, no prose before or after the object, and never repeat the conversation back. Keep "reply" to one or two short sentences. Every string must be valid JSON (escape any quotes or newlines inside caption/hashtags):
 {
@@ -1404,7 +1415,11 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         });
 
         const raw = response.content[0]?.type === 'text' ? response.content[0].text : '';
-        const { content, uiElement } = route.parseResponse(raw);
+        // `content` is not final: the reconciliation guard below replaces it when the model
+        // claims a post was saved and no row was actually written.
+        const parsed = route.parseResponse(raw);
+        const uiElement = parsed.uiElement;
+        let content = parsed.content;
 
         // Golden Rule 2: structured output flows into the Data Hub automatically. Computed
         // up front (rather than inside persistHubRecords) so the same records list can also
@@ -1417,6 +1432,9 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // their own persistence path — but the same "tell the transcript where it went"
         // treatment, pointing straight at the drafted post rather than just the tab.
         const socialDraft = socialPostDraftFromUiElement(uiElement, draftTarget?.platform ?? null);
+        // What this turn actually wrote. Stays null on every path that persists nothing, which
+        // is what the reconciliation guard below tests the reply against.
+        let persistedPosts: { id: number; platform: string }[] | null = null;
         if (socialDraft && draftTarget) {
             // Drafting INTO an open post: persist nothing and link nowhere. The id rides on the
             // uiElement so the card knows which post the offer belongs to — and still knows after
@@ -1426,12 +1444,37 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             const createdPosts = await persistSocialPostDraft(
                 db, orgId, userId, session.aiAssistantId, assistantRow.name, assistantRow.onboardingContext, socialDraft,
             );
+            persistedPosts = createdPosts;
             if (createdPosts.length > 0) {
                 hubLink = {
                     tab: 'review-queue',
                     label: createdPosts.length > 1 ? `Drafted ${createdPosts.length} posts — review & approve` : 'Drafted this post — review & approve',
                     postId: createdPosts[0].id,
                 };
+            }
+        }
+
+        // ── Reply ↔ persistence reconciliation ────────────────────────────────────
+        // The reply text and the scheduled_posts row come from the same model response but by
+        // independent paths, and nothing used to compare them — so "all three posts are drafted
+        // and ready for your review" shipped alongside a null uiElement, and the user opened an
+        // empty Review Queue. (Observed live on 2026-08-05: six such claims in 22 minutes, every
+        // one with ui_element_json NULL.) A success claim now has to be backed by a row.
+        //
+        // Only asked on the social route, and only when this turn wrote nothing: an honest turn —
+        // a clarifying question, an offer to draft, a plain chat answer — never reaches the
+        // detector, and a turn that really did save is left exactly as the model wrote it.
+        if (route === ROUTES.social_media_manager && replyClaimsPostSaved(content)) {
+            let breach: DraftClaimFailure | null = null;
+            if (draftTarget) breach = 'not_saved_here';                      // saving here is wrong by design
+            else if (persistedPosts?.length === 0) breach = 'persist_failed'; // valid draft, the write threw
+            else if (!persistedPosts) breach = 'no_draft';                   // claimed a post, produced none
+
+            if (breach) {
+                console.warn(
+                    `[chat-orchestrator] suppressed unbacked draft claim (${breach}) — assistant ${session.aiAssistantId}, session ${session.id}`,
+                );
+                content = honestDraftReply(breach);
             }
         }
 
