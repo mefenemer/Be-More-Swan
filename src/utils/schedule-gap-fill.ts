@@ -54,8 +54,19 @@ export interface GapFillResult {
         | 'blocking_gaps' | 'fully_covered' | 'empty_library_skipped' | 'ok';
 }
 
-/** The reasons that mean a human has to change something before this assistant will ever draft. */
-export const GAP_FILL_ATTENTION_REASONS: ReadonlySet<string> = new Set(['unrecognised_cadence']);
+/**
+ * The reasons that mean a human has to change something before this assistant will ever draft.
+ * Each is permanent until acted on — re-running the cron changes nothing — which is exactly what
+ * made them invisible while they were only ever counted and discarded.
+ *
+ * `fully_covered` and `no_slot_in_horizon` are deliberately absent: both are healthy states that
+ * resolve on their own as the horizon moves.
+ */
+export const GAP_FILL_ATTENTION_REASONS: ReadonlySet<string> = new Set([
+    'unrecognised_cadence',  // stored posting_frequency cannot be parsed → user fixes the value
+    'blocking_gaps',         // blueprint refuses to generate  → user (or we) clear the blockers
+    'no_blueprint',          // the auto-compile threw          → ours; no user-facing notification
+]);
 
 const UTC_DAY = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -107,8 +118,11 @@ export async function enqueueScheduleGapFill(
             return { enqueued: 0, reason: 'no_blueprint' };
         }
     }
-    const blockingGaps = ((bp.missingFields as Array<{ severity: string }>) || []).filter(f => f.severity === 'blocking');
-    if (blockingGaps.length > 0) return { enqueued: 0, reason: 'blocking_gaps' };
+    const blockingGaps = (bp.missingFields as BlueprintGap[] | null || []).filter(f => f.severity === 'blocking');
+    if (blockingGaps.length > 0) {
+        await notifyBlockedSetup(db, assistant, blockingGaps);
+        return { enqueued: 0, reason: 'blocking_gaps' };
+    }
 
     const windowEnd = slots[slots.length - 1];
 
@@ -376,6 +390,66 @@ async function orgHasAvailableManualAsset(db: Db, orgId: number): Promise<boolea
         ))
         .limit(1);
     return !!row;
+}
+
+/** The shape of a blueprint missingFields entry that this module needs (see MissingField). */
+type BlueprintGap = {
+    severity: string;
+    /** 'customer' — they can fix it themselves. 'internal' — ours; telling them helps nobody. */
+    owner?: string;
+    remedy?: { label?: string };
+};
+
+/**
+ * Tell the user their assistant is not drafting, when the reason is that their setup blocks
+ * generation outright.
+ *
+ * Same silence as the cadence bug, a different cause: a blueprint with blocking gaps refuses to
+ * generate on every hourly tick and says so only in a counter. The blocking gaps are things like
+ * "Accept the Data Processing Agreement" and "Choose a plan — no active subscription" — entirely
+ * fixable, in seconds, by someone who has no idea they are the reason nothing is being drafted.
+ *
+ * Internal-owned gaps are excluded: 'Re-provision the assistant — hire-time brief never compiled'
+ * is our bug, and a notification the user cannot act on is worse than none. When every blocking gap
+ * is internal, this stays quiet and the cron's needsAttention entry is the only signal — which is
+ * the correct audience for it.
+ *
+ * Deduped once per 3 days per assistant, for the same reason as the others: hourly cron.
+ */
+async function notifyBlockedSetup(db: Db, assistant: GapFillAssistant, gaps: BlueprintGap[]): Promise<void> {
+    try {
+        // Pluralisation and list-joining happen at the call site by convention — the merge engine
+        // has no plural rules (see notification-templates-catalog.ts).
+        const actionable = gaps
+            .filter(g => g.owner !== 'internal')
+            .map(g => g.remedy?.label?.trim())
+            .filter((l): l is string => !!l);
+        if (!actionable.length) return;
+        const blockers = actionable.length === 1
+            ? actionable[0]
+            : `${actionable.slice(0, -1).join(', ')} and ${actionable[actionable.length - 1]}`;
+
+        const [recent] = await db
+            .select({ id: notifications.id })
+            .from(notifications)
+            .where(and(
+                eq(notifications.userId, assistant.userId),
+                eq(notifications.type, 'autopilot_setup_blocked'),
+                sql`${notifications.metadata}->>'assistantId' = ${String(assistant.id)}`,
+                sql`${notifications.createdAt} > now() - interval '3 days'`,
+            ))
+            .limit(1);
+        if (recent) return;
+
+        await createNotification(db, 'autopilot_setup_blocked', {
+            userId: assistant.userId,
+            context: { assistant: { name: assistant.name }, setup: { blockers } },
+            metadata: { assistantId: assistant.id, reason: 'blocking_gaps', blockers: actionable },
+            assistantId: assistant.id,
+        });
+    } catch (err) {
+        console.error(`notifyBlockedSetup: assistant ${assistant.id} failed`, err);
+    }
 }
 
 /**

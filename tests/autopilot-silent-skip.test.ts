@@ -107,12 +107,73 @@ check('the cron surfaces which assistants are stuck', () => {
 });
 
 // ── The notification is routed as an action, not an update ───────────────────
-check('the alert lands in "Action required"', () => {
+check('both alerts land in "Action required"', () => {
+    for (const type of ['autopilot_schedule_unreadable', 'autopilot_setup_blocked']) {
+        assert.ok(
+            new RegExp(`${type}:\\s*'suggested_action'`).test(actions),
+            `${type} is uncategorised, so netlify/functions/notifications.ts computes categoryOf() ` +
+            "= 'informational' and files a do-something alert under Updates.",
+        );
+        assert.ok(
+            catalog.includes(`templateKey: '${type}'`),
+            `${type} has no catalog entry — createNotification would render nothing.`,
+        );
+    }
+});
+
+// ── The other two ways an assistant silently stops ───────────────────────────
+// Same failure shape, different cause: a blueprint with blocking gaps refuses to generate on every
+// tick, and a failed auto-compile leaves no blueprint at all. Both were counted and discarded.
+
+check('every permanent stop is an attention reason', () => {
+    const set = gapFill.slice(gapFill.indexOf('GAP_FILL_ATTENTION_REASONS'));
+    const block = set.slice(0, set.indexOf(']'));
+    for (const r of ['unrecognised_cadence', 'blocking_gaps', 'no_blueprint']) {
+        assert.ok(block.includes(`'${r}'`), `${r} is not flagged for attention — it stops the ` +
+            'assistant permanently and re-running the cron changes nothing.');
+    }
+    // Healthy states must NOT be in there, or every tick reports a false alarm.
+    for (const ok of ['fully_covered', 'no_slot_in_horizon']) {
+        assert.ok(!block.includes(`'${ok}'`), `${ok} is a healthy state and must not raise attention`);
+    }
+});
+
+check('blocking gaps notify the user', () => {
+    const i = gapFill.indexOf('const blockingGaps');
+    const block = gapFill.slice(i, i + 400);
     assert.ok(
-        /autopilot_schedule_unreadable:\s*'suggested_action'/.test(actions),
-        "the type is uncategorised, so netlify/functions/notifications.ts computes categoryOf() = " +
-        "'informational' and files a do-something alert under Updates.",
+        /notifyBlockedSetup\(/.test(block),
+        'a blueprint with blocking gaps refuses to generate hourly and tells the user nothing.',
     );
+});
+
+check('internal-owned gaps do not nag the user', () => {
+    // 'Re-provision the assistant — hire-time brief never compiled' is ours. A notification the
+    // user cannot act on is worse than none, so the notifier must bail when nothing is theirs.
+    const fn = gapFill.slice(gapFill.indexOf('async function notifyBlockedSetup'));
+    const body = fn.slice(0, fn.indexOf('\n}\n'));
+    assert.ok(
+        /owner !== 'internal'/.test(body),
+        'notifyBlockedSetup no longer filters out internal-owned gaps.',
+    );
+    assert.ok(
+        /if \(!actionable\.length\) return;/.test(body),
+        'with every blocking gap internal, the user is still notified about something only we can fix.',
+    );
+    assert.ok(/interval '3 days'/.test(body), 'the dedup window is gone and the cron is hourly.');
+});
+
+check('a failed compile stays operator-only', () => {
+    // no_blueprint means the auto-compile threw — ours, not theirs. It must be visible in the log
+    // and in needsAttention, but must NOT produce a user notification.
+    assert.ok(/no_blueprint:/.test(cron), 'no_blueprint has no operator hint, so it has no signal at all');
+    const i = gapFill.indexOf("return { enqueued: 0, reason: 'no_blueprint' }");
+    const before = gapFill.slice(Math.max(0, i - 400), i);
+    assert.ok(
+        !/createNotification|notify[A-Z]/.test(before),
+        'a failed blueprint compile now notifies the user about a problem only we can fix.',
+    );
+    assert.ok(/console\.error\(/.test(before), 'the compile failure is no longer logged');
 });
 
 check('the copy exists and names the offending value', () => {

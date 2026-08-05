@@ -218,8 +218,17 @@ export default withLambda(async (event) => {
         // Replace rather than append: a card IS the post's picture, so leaving the previous media in
         // the array would publish that instead — the array's first entry is what resolvePostImage
         // hands to the publisher.
+        //
+        // mediaMissing comes off for the same reason it does in attach-draft-media, regenerate-post-
+        // media and set-post-slides: the flag means "this post cannot publish until you add a
+        // picture", and it now has one. This endpoint was the only attach path that left it set, so
+        // making a card on an Instagram draft cleared the problem and kept the warning.
         await db.update(scheduledPosts)
-            .set({ contentAssetIds: [made.id], postFormat: 'image', updatedAt: new Date() })
+            .set({
+                contentAssetIds: [made.id], postFormat: 'image',
+                mediaMissing: false, mediaMissingNote: null,
+                updatedAt: new Date(),
+            })
             .where(eq(scheduledPosts.id, postId));
 
         return json(200, { assetId: made.id, renderParams, storageKey: stored2.storageKey, created: true });

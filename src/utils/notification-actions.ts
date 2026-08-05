@@ -81,6 +81,9 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     // human can fix the stored value, and until they do the assistant drafts nothing at all — this
     // belongs in "Action required", not Updates.
     autopilot_schedule_unreadable: 'suggested_action',
+    // The blueprint has blocking gaps (unaccepted DPA, no active plan, prohibited-use terms not
+    // acknowledged), so generation is refused every hour. Fixable in seconds once they know.
+    autopilot_setup_blocked: 'suggested_action',
     // US 5.1 — a published post is losing search traffic and the user is asked to refresh it.
     // Was uncategorised (→ 'informational'), which filed a do-something alert under Updates.
     blog_content_decay: 'suggested_action',

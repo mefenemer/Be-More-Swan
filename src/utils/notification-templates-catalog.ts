@@ -516,6 +516,17 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [v('batch.post_count', 'Post count phrase', '3 planned posts')],
     },
     {
+        templateKey: 'autopilot_setup_blocked',
+        name: 'Autopilot blocked by setup',
+        category: 'Content',
+        type: 'autopilot_setup_blocked',
+        title: '{{assistant.name}} is not drafting — one step left',
+        // Number-neutral on purpose — the blocker list is 1-3 items and the merge engine has no
+        // plural rules, so the sentence around it must read correctly at any count.
+        message: '{{assistant.name}} has not drafted anything because its setup is incomplete: {{setup.blockers}}. Nothing will reach your Review Queue until that is sorted.',
+        variables: [ASSISTANT_NAME, v('setup.blockers', 'Outstanding setup steps', 'Accept the Data Processing Agreement and Choose a plan — no active subscription')],
+    },
+    {
         templateKey: 'autopilot_schedule_unreadable',
         name: 'Autopilot schedule unreadable',
         category: 'Content',

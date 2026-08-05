@@ -18,7 +18,7 @@ import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, assistantRecords, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts } from '../../db/schema';
+import { aiAssistants, assistantRecords, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { appendFooter } from '../../src/utils/disclosure-footer';
 import { resolvePostFooter } from '../../src/utils/post-disclosure';
@@ -26,7 +26,8 @@ import { logAiUsage } from '../../src/utils/ai-usage';
 import { consumeTaskCredit } from '../../src/utils/task-credit';
 import { embedTexts } from '../../src/utils/kb-embeddings';
 import { computeScheduleSlots, resolvePostingSchedule } from '../../src/config/posting-cadence';
-import { normalizePlatform, type SocialPlatform } from '../../src/config/platform-formats';
+import { normalizePlatform, platformFormat, type SocialPlatform } from '../../src/config/platform-formats';
+import { normalizeMediaSources } from '../../src/utils/media-sources';
 import { replyClaimsPostSaved, honestDraftReply, type DraftClaimFailure } from '../../src/utils/chat-draft-claims';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -106,6 +107,9 @@ interface RouteContext {
     /** KB retrieval for this turn — only populated for routes with usesKnowledgeBase.
      *  null/undefined (e.g. shadow handoff calls) renders the "no KB yet" prompt path. */
     knowledgeBase?: KnowledgeBaseContext | null;
+    /** aiAssistants.mediaSources — the ordered Media Source Selection list. The social route
+     *  needs it to tell the model, truthfully, which visuals this assistant can produce. */
+    mediaSources?: unknown;
 }
 
 interface AssistantRoute {
@@ -411,7 +415,13 @@ function configuredPlatforms(onboardingContext: unknown): string[] {
     )];
 }
 
-type SocialPostDraft = { platforms: string[]; caption: string; hashtags: string | null };
+type SocialPostDraft = {
+    platforms: string[];
+    caption: string;
+    hashtags: string | null;
+    /** Wording for a branded text card, when this assistant can produce one. See BRAND CARDS below. */
+    cardHeadline: string | null;
+};
 
 /**
  * `forcePlatform` — the platform of the post the user is EDITING (see draftTarget). When set, the
@@ -432,7 +442,13 @@ function socialPostDraftFromUiElement(uiElement: unknown, forcePlatform: string 
         : []);
     if (platforms.length === 0) return null;
     const hashtags = typeof ui.hashtags === 'string' && ui.hashtags.trim() ? ui.hashtags.trim() : null;
-    return { platforms, caption, hashtags };
+    // Bounded here only as untrusted-input hygiene — the real ceiling is MAX_HEADLINE_CHARS, applied
+    // by the renderer, which is where it belongs (this module deliberately does not import
+    // brand-card; see attachBrandCardToDrafts). An absent or blank field is not an error: the card
+    // path falls back to headlineFromCaption(), exactly as the scheduled drafter does.
+    const rawHeadline = typeof ui.cardHeadline === 'string' ? ui.cardHeadline.trim() : '';
+    const cardHeadline = rawHeadline ? rawHeadline.slice(0, 300) : null;
+    return { platforms, caption, hashtags, cardHeadline };
 }
 
 // ── Drafting INTO a post the user already has open ────────────────────────────
@@ -450,19 +466,131 @@ const EDITABLE_POST_STATUSES = ['draft', 'pending_approval', 'in_review', 'appro
 function draftTargetPromptBlock(platform: string | null): string {
     return [
         `IMPORTANT — this conversation is about a ${platform ? `${platform} post` : 'post'} the user already has open in the post editor. This OVERRIDES anything above about drafted posts being saved automatically.`,
-        `Nothing you draft in this conversation is saved anywhere. Under your reply the user is shown a button that puts your caption into the post they are editing, and only they can press it.`,
+        `Nothing you draft in this conversation is saved anywhere. Under your reply the user is shown a button that puts your caption into the post they are editing, and only they can press it. That button carries the CAPTION only, so no branded card is made here however the instructions above read — the post already has its own picture controls in the editor the user is sitting in.`,
         `So: still return the post draft object exactly as specified whenever you have enough to write finished copy${platform ? `, with "platforms": ["${platform}"] — that is this post's platform, so never draft for another one` : ''}. But do NOT say you have saved, drafted or scheduled it, do NOT suggest a posting time, and do NOT mention a link to review or approve it — none of that happens here. Keep "reply" to one short sentence offering the caption.`,
     ].join('\n\n');
+}
+
+// ── Branded text cards on a chat draft ────────────────────────────────────────
+//
+// A card is the one media source a chat turn can actually produce. Reported from prod: a user asked
+// their social assistant for the wording of a colour-block image, and it replied that it does not
+// generate visuals and that the brand colours it had asked for during setup were of no use to it —
+// while offering that "a visual asset tool or designer" might exist elsewhere in the workspace.
+// Every part of that was wrong. Branded text cards ARE this platform's colour-block image: rendered
+// by src/lib/brand-card.ts in the org's own brand kit, chosen in onboarding's Visual Strategy step
+// and stored on aiAssistants.mediaSources, and drawn on every post the SCHEDULED drafter makes
+// (process-content-jobs asks the model for a `cardHeadline` for exactly this).
+//
+// Chat was the only drafting path that skipped media entirely — contentAssetIds: [] with a
+// mediaMissing flag for Instagram — so the assistant's own words were the closest thing to true it
+// could say. This closes that gap: the same renderer, the same kit, the same headline field.
+//
+// Scope, deliberately: brand_card ONLY, never stock or AI. A card is free, deterministic, needs no
+// external service and no AI credits, so it can be made inside an interactive turn without spending
+// the user's money or betting the reply on someone else's API. A draft whose assistant prefers
+// stock or AI imagery still arrives with no picture and is sourced in the Review Queue's picker,
+// exactly as before.
+async function attachBrandCardToDrafts(
+    db: ReturnType<typeof getDb>,
+    args: {
+        orgId: number;
+        userId: number;
+        /** The rows just written — a cross-post group shares ONE image (see crosspost-media.ts). */
+        posts: { id: number; platform: string }[];
+        headline: string | null;
+        /**
+         * Fallback source for the headline when the model returned none. The RAW caption, not the
+         * one written to the post: the disclosure footer belongs on the post, never set as display
+         * type on the card. Named apart from the post's own caption field so the disclosure guard in
+         * tests/post-disclosure-persistence.test.ts stays strict about `caption: draft.caption`.
+         */
+        captionForHeadline: string;
+    },
+): Promise<boolean> {
+    const { orgId, userId, posts, captionForHeadline } = args;
+    if (posts.length === 0) return false;
+    const postIds = posts.map(p => p.id);
+
+    // One card, one shape, several platforms — so the shape belongs to the platform that will be
+    // judged on it. Instagram cannot publish without an image and crops to 4:5; the others take a
+    // portrait image happily, while a 16:9 card (X's ratio, and first in the list often enough)
+    // lands on Instagram as a letterboxed strip. So: the ratio of the first platform that REQUIRES
+    // media, else the primary platform's own.
+    const ratioPlatform = posts.find(p => platformFormat(p.platform).mediaMandatory)?.platform
+        ?? posts[0].platform;
+
+    // Loaded on demand, not at module scope. brand-card pulls in satori, the resvg native binding
+    // and ~250KB of base64-decoded font data at import time; chat is the app's most latency-
+    // sensitive endpoint and most turns never make a card, so that cost belongs on the turns that do.
+    const [{ headlineFromCaption, MAX_HEADLINE_CHARS }, { renderAndPersistBrandCard }] = await Promise.all([
+        import('../../src/lib/brand-card'),
+        import('../../src/lib/media-persist'),
+    ]);
+
+    const headline = (args.headline || '').trim().slice(0, MAX_HEADLINE_CHARS)
+        || headlineFromCaption(captionForHeadline)
+        || '';
+    if (!headline) return false;
+
+    // The STORED kit, normalised — deliberately NOT the resolve-or-extract helper the scheduled
+    // drafter uses. That one derives a kit from the org's website when none has been stored, which
+    // means an 8s page fetch, a 5s stylesheet fetch and an LLM call to pick the accent. That is
+    // correct in the background drafter and unacceptable in a turn the user is waiting on: it could
+    // spend the whole function budget and lose the reply along with it. So chat renders in whatever
+    // is already stored — the colours the user picked, if they picked any — and the daily drafter
+    // remains the thing that fills an empty kit in. Worst case here is one neutral-monochrome card
+    // for an org that has never had one, which is a publishable card and self-corrects.
+    const [{ normalizeBrandKit }, [org]] = await Promise.all([
+        import('../../src/utils/brand-kit'),
+        db.select({ name: organisations.name, brandKit: organisations.brandKit })
+            .from(organisations).where(eq(organisations.id, orgId)).limit(1),
+    ]);
+    const kit = normalizeBrandKit(org?.brandKit);
+
+    const assetId = await renderAndPersistBrandCard(db, {
+        orgId, userId, headline, kit,
+        aspectRatio: platformFormat(ratioPlatform).aspectRatio,
+        // Same seed rule as the scheduled drafter: the post id picks the light/bold polarity, so
+        // consecutive cards alternate and re-rendering this post reproduces this card.
+        seed: postIds[0],
+        orgName: org?.name ?? null,
+    });
+
+    for (const postId of postIds) {
+        await db.insert(scheduledPostAssets)
+            .values({ scheduledPostId: postId, contentAssetId: assetId, position: 0 })
+            .onConflictDoNothing();
+    }
+    // contentAssetIds is the deprecated mirror of the junction table, kept in step because the
+    // editor and the publishers still read it. postFormat moves off 'text' for the same reason a
+    // post with a picture is not a text post — and mediaMissing comes off, because it no longer is.
+    await db.update(scheduledPosts)
+        .set({
+            contentAssetIds: [assetId],
+            postFormat: 'image',
+            mediaMissing: false,
+            mediaMissingNote: null,
+            updatedAt: new Date(),
+        })
+        .where(inArray(scheduledPosts.id, postIds));
+
+    return true;
 }
 
 /**
  * Persist a chat-drafted post as one pending_approval scheduled_posts row per platform,
  * pre-filled with the next slot from the assistant's own posting schedule (posting_days /
  * posting_times / posting_timezone in onboardingContext — the same config the Calendar
- * and autonomous drafts use). Instagram can't go live without an image and chat has none
- * to attach, so its row is still created but flagged mediaMissing — the Review Queue
- * already prompts to source one before approving (issue #55) — rather than silently
- * dropping the platform. Best-effort: a persistence failure never fails the turn.
+ * and autonomous drafts use).
+ *
+ * Media: when this assistant's media sources include brand_card, a branded text card is rendered
+ * and attached to every row (see attachBrandCardToDrafts). Otherwise there is still nothing to
+ * attach here, so Instagram's row is created but flagged mediaMissing — the Review Queue already
+ * prompts to source one before approving (issue #55) — rather than silently dropping the platform.
+ *
+ * Best-effort throughout: a persistence failure never fails the turn, and a card that cannot be
+ * rendered (no R2, no usable headline) leaves the drafts exactly as they were without one.
  */
 async function persistSocialPostDraft(
     db: ReturnType<typeof getDb>,
@@ -471,6 +599,7 @@ async function persistSocialPostDraft(
     aiAssistantId: number,
     assistantName: string,
     onboardingContext: unknown,
+    mediaSources: unknown,
     draft: SocialPostDraft,
 ): Promise<{ id: number; platform: string }[]> {
     try {
@@ -517,6 +646,23 @@ async function persistSocialPostDraft(
             }).returning({ id: scheduledPosts.id });
             created.push({ id: post.id, platform });
         }
+
+        // The card is attached AFTER the rows exist and inside its own guard: the draft is already
+        // saved and linked at this point, so a failed render must cost the picture and nothing else.
+        // Cards are for stills only — a video post's media is a different problem entirely.
+        if (created.length && normalizeMediaSources(mediaSources).includes('brand_card')) {
+            try {
+                await attachBrandCardToDrafts(db, {
+                    orgId, userId,
+                    posts: created,
+                    headline: draft.cardHeadline,
+                    captionForHeadline: draft.caption,
+                });
+            } catch (cardErr) {
+                console.warn('[chat-orchestrator] brand card for chat draft failed:', cardErr instanceof Error ? cardErr.message : cardErr);
+            }
+        }
+
         return created;
     } catch (err) {
         console.error('[chat-orchestrator] social post draft persistence failed:', err);
@@ -986,6 +1132,20 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
         // is a ceiling, not a spend: raising it costs nothing on turns that don't need it.
         maxTokens: 2048,
         buildRolePrompt: (rc) => {
+            const canCard = normalizeMediaSources(rc.mediaSources).includes('brand_card');
+            // What this assistant can honestly say about pictures.
+            //
+            // The prompt used to say nothing at all about media, so when a user asked for the
+            // wording of a colour-block image the model improvised a denial: it does not make
+            // visuals, the brand colours picked during setup were misleading to ask for, and some
+            // other "visual asset tool or designer" might handle it. Three false statements about
+            // the user's own product, from silence. State the truth instead — and, when cards are
+            // off, say the one true thing about that case rather than leaving the gap open again.
+            const mediaLine = canCard
+                ? `BRAND CARDS — you CAN give this business a picture, and it is the thing they configured you for. A branded text card is a colour-block image: one short line of your wording set as large type in ${rc.business.name}'s own brand colours. It is drawn automatically from the "cardHeadline" you return with the draft, so the card is made and attached to the post in the same moment the draft is saved.
+
+So when the user asks for wording for a colour block, a quote card, a text graphic or "something to attach", that is this — write the line and return it as cardHeadline. Never say you cannot make visuals, never call the brand colours unused or pointless (they are what the card is drawn in), and never suggest that some other tool, designer or assistant handles it. Always include cardHeadline alongside a post draft, whether or not a picture was asked for: one sharp standalone line, no hashtags, no emoji, no link, no quotation marks, no trailing full stop. The user can change the words and the design when they review the post.`
+                : `PICTURES — you write words, not images: this assistant is set up to take its media from its picture sources rather than to draw it. Say that plainly if asked, and never invent another tool, designer or assistant that would do it instead. What you should say is that the post's picture is chosen when they review it, and that Branded Text Cards — a line of your wording set in ${rc.business.name}'s own brand colours — can be switched on for you in this assistant's media sources.`;
             const platforms = configuredPlatforms(rc.onboardingContext);
             const platformLine = platforms.length
                 ? `This business has ALREADY configured its social platforms: ${platforms.join(', ')}. These are the default target for every post — put exactly these values in the draft's "platforms" array unless the user's message explicitly asks for a different or narrower set. You already know their platforms, so NEVER ask which platform(s) to use; asking wastes the user's time.`
@@ -1002,6 +1162,7 @@ ONE POST PER REPLY. The draft object below holds exactly one post, so one reply 
 
 NEVER say a post has been drafted, written, saved, scheduled or queued for review unless THIS reply includes the post draft object. If uiElement is null then nothing has been saved, and a reply claiming otherwise sends the user to an empty Review Queue. When you have nothing to include, say plainly what you need in order to write it.`,
                 platformLine,
+                mediaLine,
                 `Return STRICT JSON and NOTHING else — no markdown, no code fences, no prose before or after the object, and never repeat the conversation back. Keep "reply" to one or two short sentences. Every string must be valid JSON (escape any quotes or newlines inside caption/hashtags):
 {
   "reply": "your conversational message to the user",
@@ -1009,7 +1170,8 @@ NEVER say a post has been drafted, written, saved, scheduled or queued for revie
     "type": "social_post_draft",
     "platforms": ["facebook" | "instagram" | "linkedin" | "x", ...],
     "caption": "<the finished, ready-to-post caption>",
-    "hashtags": "<space-separated hashtags>" | null
+    "hashtags": "<space-separated hashtags>" | null${canCard ? `,
+    "cardHeadline": "<the branded card's single line of type — see BRAND CARDS above>"` : ''}
   }
 }`,
             ].join('\n\n');
@@ -1183,6 +1345,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 jobRole: aiAssistants.aiAssistantJobRole,
                 systemPrompt: aiAssistants.systemPrompt,
                 onboardingContext: aiAssistants.onboardingContext,
+                mediaSources: aiAssistants.mediaSources,
                 roleKey: masterAssistants.roleKey,
             })
             .from(aiAssistants)
@@ -1260,6 +1423,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         onboardingContext: assistantRow.onboardingContext,
         business,
         knowledgeBase,
+        mediaSources: assistantRow.mediaSources,
     });
     const system = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
@@ -1441,7 +1605,8 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             (uiElement as Record<string, unknown>).forPostId = draftTarget.id;
         } else if (socialDraft) {
             const createdPosts = await persistSocialPostDraft(
-                db, orgId, userId, session.aiAssistantId, assistantRow.name, assistantRow.onboardingContext, socialDraft,
+                db, orgId, userId, session.aiAssistantId, assistantRow.name, assistantRow.onboardingContext,
+                assistantRow.mediaSources, socialDraft,
             );
             persistedPosts = createdPosts;
             if (createdPosts.length > 0) {

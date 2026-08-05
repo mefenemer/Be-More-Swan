@@ -1143,6 +1143,11 @@
     if (!caption) return null;                     // nothing drafted — fall back to text-only
     const hashtags = typeof ui.hashtags === 'string' ? ui.hashtags.trim() : '';
     const labels = (Array.isArray(ui.platforms) ? ui.platforms : []).map(socialPlatformLabel).filter(Boolean);
+    // The wording of the branded text card the orchestrator drew for this post. Shown because it is
+    // frequently the thing that was ASKED for ("give me words for a colour block") and it is
+    // otherwise invisible until the post is opened. Only on a saved draft: with forPostId nothing was
+    // persisted, so no card was made and showing a line of card copy would promise one.
+    const cardHeadline = ui.forPostId == null && typeof ui.cardHeadline === 'string' ? ui.cardHeadline.trim() : '';
 
     // The offer stands only while the editor that opened this chat is still pointed at this post.
     // A reloaded transcript has the forPostId but no live target, so it shows the copy alone.
@@ -1159,6 +1164,11 @@
       </div>
       <p class="text-sm text-gray-800 whitespace-pre-line">${esc(caption)}</p>
       ${hashtags ? `<p class="text-xs font-semibold text-emerald-700">${esc(hashtags)}</p>` : ''}
+      ${cardHeadline ? `
+      <div class="pt-2 mt-1 border-t border-gray-100">
+        <p class="text-[11px] font-bold text-gray-400 tracking-wider uppercase">On the branded card</p>
+        <p class="text-sm font-bold text-gray-800">${esc(cardHeadline)}</p>
+      </div>` : ''}
       ${canApply ? `
       <div class="pt-2.5 mt-1 border-t border-gray-100 space-y-2" data-offer>
         <p class="text-xs text-gray-500" data-offer-status>Want me to put this in the post you're editing?</p>

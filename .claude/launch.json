@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-brand-card-chat",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4251",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/f9e1a09f-fad9-45f5-baa5-94ae0f606293/scratchpad/cardharness"
+      ],
+      "port": 4251,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-spend-sweep",
       "runtimeExecutable": "node",
       "runtimeArgs": [

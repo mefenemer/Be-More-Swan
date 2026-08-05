@@ -5683,29 +5683,12 @@ async function sdApprove(postId, action) {
     } catch { alert('Network error — please try again.'); return false; }
 }
 
-function sdToggleReject(id) {
-    const form = document.querySelector(`.sdraft-reject-form-${id}`);
-    const btn  = document.getElementById(`sdraft-reject-btn-${id}`);
-    if (!form) return;
-    const hidden = form.classList.toggle('hidden');
-    if (!hidden) { btn.textContent = 'Submit'; btn.onclick = () => sdSubmitReject(id); }
-    else { btn.textContent = 'Reject'; btn.onclick = () => sdToggleReject(id); }
-}
-
-async function sdSubmitReject(postId) {
-    const reason = (document.getElementById(`sdraft-reason-${postId}`) || {}).value?.trim();
-    if (!reason) { alert('Please enter a rejection reason.'); return; }
-    try {
-        const res = await fetch('/.netlify/functions/approve-post', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ postId, action: 'reject', rejectionReason: reason }),
-        });
-        const d = await res.json().catch(() => ({}));
-        if (!res.ok) { alert(d.error || 'Failed to reject post.'); return; }
-        rqLoadItems();
-    } catch { alert('Network error — please try again.'); }
-}
+// sdToggleReject / sdSubmitReject were removed here on 2026-08-05. They were unreachable — no
+// element with `sdraft-reject-btn-*`, `sdraft-reason-*` or `.sdraft-reject-form-*` has ever
+// existed in the repo, and nothing called sdToggleReject but itself. They still posted to
+// approve-post action:'reject', the path that enqueues no regeneration, so after every live reject
+// button moved to reject-post they read as an unfinished migration rather than as dead code.
+// (sdApprove above them IS live — it backs the Generate Post sheet's approve/publish-now.)
 
 function rqRenderCard(item) {
     const ago = rqTimeAgo(item.createdAt);

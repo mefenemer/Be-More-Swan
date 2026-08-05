@@ -18,6 +18,18 @@ import { enqueueScheduleGapFill, GAP_FILL_ATTENTION_REASONS } from '../../src/ut
 import { SMM_ROLE_KEYS } from '../../src/constants/roles';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
+/**
+ * What an operator reading the invocation log should do about each stuck assistant. The user gets
+ * their own in-app notification for the two they can act on (see schedule-gap-fill); this is the
+ * half nobody else can see — and `no_blueprint` has no user-facing notification at all, because a
+ * failed auto-compile is ours to fix, so this line is its ONLY signal.
+ */
+const ATTENTION_HINT: Record<string, string> = {
+    unrecognised_cadence: "Its stored posting_frequency cannot be parsed; the user has been notified to pick one from the list.",
+    blocking_gaps: 'Its blueprint has blocking gaps; the user has been notified of the ones they own.',
+    no_blueprint: 'The blueprint auto-compile threw — see the error logged above. No user notification is sent for this.',
+};
+
 export default withLambda(async (event) => {
     // Allow both scheduled invocations and manual POST for testing
     if (event.httpMethod !== 'POST' && !(event as any).schedule) {
@@ -74,8 +86,8 @@ export default withLambda(async (event) => {
                 });
                 console.warn(
                     `draft-horizon-fill: assistant ${assistant.id} (org ${assistant.organisationId}) ` +
-                    `enqueued nothing — ${result.reason}. It has drafted no scheduled posts and will not ` +
-                    `until its posting_frequency is set to a value the cadence parser understands.`,
+                    `enqueued nothing — ${result.reason}. ${ATTENTION_HINT[result.reason] ?? ''} ` +
+                    `This will repeat every tick until it is acted on.`,
                 );
             }
         } catch (err) {
