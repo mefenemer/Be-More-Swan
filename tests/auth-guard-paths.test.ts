@@ -171,6 +171,56 @@ check('admin is protected — it has no client-side fallback', () => {
     }
 });
 
+// ── The registration lock ──────────────────────────────────────────────────────
+// This switch was dead code from the day it was written: '/register' sat in ALWAYS_ALLOWED and
+// returned early, so the check it drives was never reached and the admin control blocked nothing.
+// The repair is a one-line exception, and a future tidy-up that "simplifies" the short-circuit
+// back to a plain `ALWAYS_ALLOWED.includes(path)` silently kills the switch again — with no test
+// failure and no symptom, because a lock that never engages looks exactly like one nobody used.
+
+check('the ALWAYS_ALLOWED short-circuit still excludes /register', () => {
+    assert.ok(
+        /isAlwaysAllowed\s*&&\s*path\s*!==\s*['"]\/register['"]/.test(GUARD_SRC),
+        "auth-guard.ts short-circuits every ALWAYS_ALLOWED path again. /register must fall " +
+        "through to the platform-config fetch, or new_registration_lock goes back to being dead " +
+        "code — the admin 'lock registrations' control silently stops blocking signups.",
+    );
+});
+
+check('/register is still publicly reachable (it is in ALWAYS_ALLOWED)', () => {
+    // The fix must not accidentally turn the signup page into a protected route.
+    assert.ok(
+        /ALWAYS_ALLOWED\s*=\s*\[[^\]]*['"]\/register['"]/.test(GUARD_SRC),
+        '/register was removed from ALWAYS_ALLOWED. It requires no session — the registration ' +
+        'LOCK is a config switch, not an auth requirement.',
+    );
+    assert.ok(
+        !PROTECTED.includes('/register'),
+        '/register is in PROTECTED_PATHS. Signup would demand a session, which nobody signing ' +
+        'up can have.',
+    );
+});
+
+check('maintenance mode still exempts the ALWAYS_ALLOWED pages', () => {
+    // /register only reaches the maintenance check because of the fix above. Without this guard
+    // it would start redirecting to /maintenance.html — a behaviour change riding in unannounced
+    // on the registration-lock repair. /login and /logout must stay reachable too, or an admin
+    // cannot sign in to lift maintenance.
+    assert.ok(
+        /cfg\.maintenanceMode\s*&&\s*!isAlwaysAllowed/.test(GUARD_SRC),
+        'The maintenance-mode redirect is no longer guarded by !isAlwaysAllowed. /register, ' +
+        '/login, /logout and /check-email must stay reachable during maintenance.',
+    );
+});
+
+check('the registration lock compares the normalised path', () => {
+    assert.ok(
+        /registrationLocked\s*&&\s*path\s*===\s*['"]\/register['"]/.test(GUARD_SRC),
+        'The registration lock compares something other than the normalised `path === "/register"`. ' +
+        'Against a raw pathname it would miss one of the two URL spellings Netlify serves.',
+    );
+});
+
 if (process.exitCode) {
     console.error(`\nauth-guard path bindings: FAILED`);
 } else {

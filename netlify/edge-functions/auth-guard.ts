@@ -41,7 +41,16 @@ export default async (request: Request, context: Context) => {
         return context.next();
     }
 
-    if (ALWAYS_ALLOWED.includes(path)) {
+    // ⚠️ '/register' is deliberately NOT short-circuited here, and that exception is the whole
+    // point of this block. It needs no session — but it IS subject to the new_registration_lock
+    // switch, and that lives behind the platform-config fetch further down. Returning early for
+    // every ALWAYS_ALLOWED path is exactly what made the admin "lock registrations" control dead
+    // code: it had never blocked a signup, because the check it drives was unreachable.
+    //
+    // Everything else in ALWAYS_ALLOWED still exits immediately. /register pays one config fetch
+    // per page load, which is the price of the switch working at all.
+    const isAlwaysAllowed = ALWAYS_ALLOWED.includes(path);
+    if (isAlwaysAllowed && path !== '/register') {
         return context.next();
     }
 
@@ -72,7 +81,13 @@ export default async (request: Request, context: Context) => {
                 globalAiDisabled: boolean;
             };
 
-            if (cfg.maintenanceMode) {
+            // `!isAlwaysAllowed` preserves the pre-existing exemption. /register now reaches this
+            // block (it has to, to be checked against the registration lock below), but it used to
+            // exit before maintenance mode was ever evaluated — along with /login, /logout and
+            // /check-email, which must stay reachable during maintenance or an admin cannot sign in
+            // to lift it. Letting /register fall into the maintenance redirect would be a silent
+            // behaviour change smuggled in on the back of the registration-lock fix.
+            if (cfg.maintenanceMode && !isAlwaysAllowed) {
                 // Admin users bypass maintenance — verify JWT signature before trusting adminRole
                 const sessionCookie = context.cookies.get('aura_session');
                 let isAdmin = false;
@@ -99,13 +114,16 @@ export default async (request: Request, context: Context) => {
 
             // Block registration if new_registration_lock is active.
             //
-            // ⚠️ THIS BRANCH IS UNREACHABLE, and was before this file was touched. '/register' is
-            // in ALWAYS_ALLOWED above, which returns context.next() long before the config is
-            // ever fetched — so the admin "lock registrations" switch has never blocked anything.
-            // Left exactly as-is on purpose: making it work is a behaviour change, not a fix, and
-            // if the flag is already set in either database, repairing the code silently shuts
-            // off signups the moment it deploys. Check the live value of new_registration_lock
-            // first, then move this test above ALWAYS_ALLOWED.
+            // This branch was UNREACHABLE until 2026-08-05: '/register' sat in ALWAYS_ALLOWED and
+            // returned context.next() long before the config was fetched, so the admin "lock
+            // registrations" switch had never blocked a single signup. It is reachable now because
+            // the ALWAYS_ALLOWED short-circuit above deliberately excludes /register.
+            //
+            // Turning a dead switch back on is only safe once you know what it is set to — a
+            // lurking `true` would have shut off signups the instant this deployed. Checked against
+            // production before enabling: the new_registration_lock row does not exist, and
+            // platform-config-public.ts coerces with `=== true`, so absent reads as false and its
+            // error fallback also returns false. There was no hidden `true` to enforce.
             if (cfg.registrationLocked && path === '/register') {
                 return Response.redirect(new URL('/login.html?locked=1', request.url), 302);
             }
