@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-works-with",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/f8163a31-3d52-4c9f-9501-e0c814b7879e/scratchpad/wwharness/server.mjs"
+      ],
+      "port": 4275,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-campaigns",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

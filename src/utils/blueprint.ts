@@ -12,7 +12,7 @@
 // real steering weight but an assistant without them is fully configured, so none counts toward
 // completeness.
 
-import { eq, and, desc, isNull, inArray } from 'drizzle-orm';
+import { eq, and, desc, isNull, inArray, sql } from 'drizzle-orm';
 import * as crypto from 'crypto';
 import { getDb } from '../../db/client';
 import {
@@ -612,7 +612,18 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
             eq(campaignOrders.targetAssistantId, assistantId),
             inArray(campaigns.status, ['active', 'throttled']),
         ))
-        .orderBy(desc(campaigns.startsAt), desc(campaigns.id))
+        // Campaign first (the live one), then the BEST order within it. The extra two keys are
+        // load-bearing: an assistant serving a campaign usually has several orders, and only
+        // `adjust_messaging` carries an angle. Ordering by campaign alone made the winner
+        // arbitrary, so a fresh "change the angle" order could lose to an older `draft_social_posts`
+        // whose brief has no angle at all — which would leave the one order whose entire purpose is
+        // changing the messaging unable to change the messaging.
+        .orderBy(
+            desc(campaigns.startsAt),
+            desc(campaigns.id),
+            sql`((${campaignOrders.brief} ->> 'angle') IS NOT NULL) DESC`,
+            desc(campaignOrders.id),
+        )
         .limit(1);
 
     if (liveCampaign) hashParts.push({ id: `campaign:${liveCampaign.id}`, updatedAt: liveCampaign.updatedAt });

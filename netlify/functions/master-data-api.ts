@@ -379,7 +379,7 @@ async function handlePlanPriceHistory(event: any) {
 // columns below (tagline/keyFeatures/integrations/video) replaced it. See db/assistant-content.sql.
 
 /**
- * Normalise a list field (keyFeatures / integrations) from the admin form.
+ * Normalise a list field (keyFeatures / integrations / worksWith) from the admin form.
  * The textarea posts one item per line; the API also accepts a JSON array. Blank lines are dropped.
  */
 function normaliseStringList(raw: unknown): string[] | null {
@@ -423,6 +423,7 @@ async function handleMasterAssistants(event: any, adminId: number, ip?: string, 
             tagline: tagline || null,
             keyFeatures: normaliseStringList(body.keyFeatures) ?? [],
             integrations: normaliseStringList(body.integrations) ?? [],
+            worksWith: normaliseStringList(body.worksWith) ?? [],
             video: normaliseVideo(body.video),
         }).returning();
 
@@ -456,7 +457,11 @@ async function handleMasterAssistants(event: any, adminId: number, ip?: string, 
         }
 
         // List/object copy fields need normalising rather than a straight copy.
-        for (const key of ['keyFeatures', 'integrations']) {
+        // worksWith entries are 'standalone' or another role_key — deliberately NOT validated
+        // against master_assistants here: an unknown entry renders verbatim (see
+        // AssistantContent.resolveWorksWith), so a typo degrades to a plain pill instead of
+        // rejecting the whole save. See db/assistant-works-with.sql for the vocabulary.
+        for (const key of ['keyFeatures', 'integrations', 'worksWith']) {
             if (otherFields[key] === undefined) continue;
             const list = normaliseStringList(otherFields[key]);
             if (!list) return badRequest(`${key} must be an array of strings or a newline-separated string.`);

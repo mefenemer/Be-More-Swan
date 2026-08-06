@@ -267,10 +267,10 @@ const ICONS = {
 
 // ── Role metadata: core outcomes rendered on each card ───────────────────────
 // Keyed by roleKey (see db/seed-catalog.ts). Roles without an entry simply
-// render without the outcomes list. NOTE: the "Works with" chips are NOT here —
-// they come from the DB (master_assistants.integrations, served by
-// master-assistants.ts) so the card matches the detail view. Only these benefit
-// bullets remain hardcoded.
+// render without the outcomes list. NOTE: the "Connects with" / "Works with"
+// chips are NOT here — they come from the DB (master_assistants.integrations
+// and .works_with, served by master-assistants.ts) so the card matches the
+// detail view. Only these benefit bullets remain hardcoded.
 const ROLE_META = {
   inbox_manager:             { outcomes: ['Drafts replies to routine email', 'Flags urgent messages instantly', 'Keeps your inbox at zero'] },
   calendar_coordinator:      { outcomes: ['Negotiates times across time zones', 'Prepares daily schedule briefings', 'Ends booking ping-pong for good'] },
@@ -302,19 +302,40 @@ function metaBlocks(a) {
       <svg class="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
       <span>${escHtml(o)}</span>
     </li>`).join('');
-  // "Works with" chips come from the DB (master_assistants.integrations, served by
+  // "Connects with" chips come from the DB (master_assistants.integrations, served by
   // master-assistants.ts) so the card matches the detail view exactly — they used to be hardcoded
-  // in ROLE_META.apps and had drifted from the real integrations.
+  // in ROLE_META.apps and had drifted from the real integrations. Labelled "Connects with" because
+  // these are EXTERNAL TOOLS; assistant-to-assistant fit is the separate "Works with" row below.
   const apps = (Array.isArray(a.integrations) ? a.integrations : []).map(app => `
     <span class="inline-flex items-center gap-1.5 bg-white border border-gray-200 rounded-full px-2.5 py-1 text-[11px] font-semibold text-gray-600">
       <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>${escHtml(app)}
     </span>`).join('');
-  if (!outcomes && !apps) return '';
+  const peers = worksWithPills(a.worksWith);
+  if (!outcomes && !apps && !peers) return '';
   return `
     ${outcomes ? `<ul class="space-y-1.5 mb-4">${outcomes}</ul>` : ''}
     ${apps ? `<div class="flex flex-wrap gap-1.5 items-center mb-1">
-      <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mr-0.5">Works with</span>${apps}
+      <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mr-0.5">Connects with</span>${apps}
+    </div>` : ''}
+    ${peers ? `<div class="flex flex-wrap gap-1.5 items-center mb-1 mt-1.5">
+      <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mr-0.5">Works with</span>${peers}
     </div>` : ''}`;
+}
+
+// "Works with" pills — whether the role stands alone and which OTHER assistants it was built to
+// run alongside (master_assistants.works_with). Distinct from the integration chips above: those
+// are external tools. Role keys are resolved to the assistant's current name by AssistantContent,
+// which the page primes with the same list it already fetched — so a rename in Master Data flows
+// through here without a deploy. Returns '' when the role has none.
+function worksWithPills(worksWith) {
+  const pills = (window.AssistantContent && window.AssistantContent.resolveWorksWith(worksWith)) || [];
+  return pills.map(p => p.standalone
+    ? `<span class="inline-flex items-center gap-1.5 bg-gray-100 border border-gray-200 rounded-full px-2.5 py-1 text-[11px] font-semibold text-gray-600">
+        <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>${escHtml(p.label)}
+      </span>`
+    : `<span class="inline-flex items-center gap-1.5 bg-emerald-50 border border-emerald-100 rounded-full px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>${escHtml(p.label)}
+      </span>`).join('');
 }
 
 // ── State ────────────────────────────────────────────────────────────────────

@@ -63,5 +63,37 @@
     return _byRoleKey || {};
   }
 
-  window.AssistantContent = { prime: prime, load: load, get: get, all: all };
+  /**
+   * Resolve a master_assistants.works_with array into renderable pills.
+   *
+   * "Works with" is assistant-to-assistant fit and is deliberately separate from `integrations`,
+   * which is external tools and is labelled "Connects with" on every surface.
+   *
+   * Each entry is either the reserved key 'standalone' or another assistant's roleKey. Role keys
+   * resolve to that assistant's CURRENT name, so renaming a role in Master Data flows through to
+   * every card instead of stranding a hardcoded label. An entry that matches neither is rendered
+   * verbatim — an admin typo degrades to a plain pill rather than blanking the section.
+   *
+   * Returns [{ label, roleKey, standalone }] — roleKey is null for the standalone pill and for
+   * unresolved entries, so callers can decide whether to link.
+   */
+  function resolveWorksWith(worksWith) {
+    var map = _byRoleKey || {};
+    return (Array.isArray(worksWith) ? worksWith : [])
+      .map(function (raw) { return String(raw || '').trim(); })
+      .filter(Boolean)
+      .map(function (entry) {
+        if (entry.toLowerCase() === 'standalone') {
+          return { label: 'Standalone', roleKey: null, standalone: true };
+        }
+        var target = map[entry];
+        return target
+          ? { label: target.name, roleKey: entry, standalone: false }
+          : { label: entry, roleKey: null, standalone: false };
+      });
+  }
+
+  window.AssistantContent = {
+    prime: prime, load: load, get: get, all: all, resolveWorksWith: resolveWorksWith,
+  };
 })();

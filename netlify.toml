@@ -727,3 +727,21 @@ node_bundler = "esbuild"
 # instead, which dispatches the same worker. The two must stay in step.
 [functions.autonomous-strategy-agent]
   schedule = "0 5 * * 1"
+
+# Campaign Assistant autonomous run — scenarios 1 and 2 of docs/campaign-orchestrator-plan.md §4.
+# Proposes 'escalation' (a post well ahead of the account average) and 'halt' (a saved search whose
+# results have gone cold), and expires decisions whose evidence has aged out.
+#
+# ⚠️ NOT a dispatcher, unlike autonomous-strategy-agent above, and it does not need to be. Every
+# number is a COUNT or an AVG with no model call, so a run finishes inline in well under the default
+# budget. Do not add a background hop for symmetry — an un-awaited handoff is how jobs strand.
+#
+# DAILY rather than weekly: the halt trigger reads a 24-hour window, so a weekly run would miss six
+# days out of seven of exactly the signal it exists to catch. 04:00 UTC keeps it clear of the 05:00
+# strategy run and the 06:00 content crons.
+#
+# ⚠️ Netlify fires scheduled functions ONLY on the production deploy. Staging is a branch deploy, so
+# this never runs there — .github/workflows/staging-campaign-cron.yml pokes run-campaign-agent
+# instead, which calls the same function. The two must stay in step.
+[functions.autonomous-campaign-agent]
+  schedule = "0 4 * * *"

@@ -7716,7 +7716,11 @@ const MD_FIELDS = {
     { key: 'iconKey',           label: 'Icon Key',          type: 'text',   placeholder: 'megaphone' },
     { key: 'iconColor',         label: 'Icon Colour',       type: 'text',   placeholder: 'pink' },
     { key: 'keyFeatures',       label: 'Key Features',      type: 'list',   help: 'One per line. Shown as the bullet list on the detail page.' },
-    { key: 'integrations',      label: 'Integrations',      type: 'list',   help: 'One per line. Shown as the integration chips.' },
+    { key: 'integrations',      label: 'Integrations',      type: 'list',   help: 'One per line. External tools only — shown as the "Connects with" chips.' },
+    // Assistant-to-assistant fit, NOT external tools. Kept separate from integrations because the
+    // public card renders them as two different sections with two different meanings.
+    { key: 'worksWith',         label: 'Works With',        type: 'list',
+      help: 'One per line. Use "standalone" for a role that needs no other assistant, and/or the role key of another assistant (e.g. blog_writer) — role keys render as that assistant\'s current name. Both can be listed together.' },
     { key: 'video.url',         label: 'Video URL',         type: 'text',   placeholder: 'https://www.youtube.com/embed/ID  or  /videos/smm.mp4',
       help: 'Leave blank to show the branded placeholder slot.' },
     { key: 'video.title',       label: 'Video Caption',     type: 'text',   placeholder: 'Watch the Social Media Manager in action' },

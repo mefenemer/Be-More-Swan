@@ -994,7 +994,11 @@ export const masterAssistants = pgTable("master_assistants", {
   // via Master Data → Assistants; served publicly by netlify/functions/master-assistants.ts.
   tagline: text("tagline"),                                        // one-line hook under the name
   keyFeatures: jsonb("key_features").notNull().default([]),        // string[] — the bullet list
-  integrations: jsonb("integrations").notNull().default([]),       // string[] — the integration chips
+  integrations: jsonb("integrations").notNull().default([]),       // string[] — the external tools this role connects to ("Connects with")
+  // string[] — assistant-to-assistant fit ("Works with"). Elements are the reserved key 'standalone'
+  // or another master_assistants.role_key, which renders as that assistant's current name. Editorial
+  // and admin-owned, not derived from code. SQL: db/assistant-works-with.sql.
+  worksWith: jsonb("works_with").notNull().default([]),
   video: jsonb("video"),                                           // {url, title, poster} | null; null url = placeholder slot
   comingSoon: boolean("coming_soon").notNull().default(false),
   // US-AUD-2.3.1 SC2: task completions required to unlock early access (null = no milestone gate)

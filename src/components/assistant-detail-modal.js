@@ -186,10 +186,21 @@
         <span>${escHtml(f)}</span>
       </li>`).join('');
 
+    // integrations = EXTERNAL tools, labelled "Connects with". Assistant-to-assistant fit is the
+    // separate worksWith field below — the two used to share the "Works with" label, which read
+    // wrong for a list of third-party apps.
     const apps = (c.integrations || []).map(app => `
       <span class="inline-flex items-center gap-1.5 bg-white border border-gray-200 rounded-full px-2.5 py-1 text-[11px] font-semibold text-gray-600">
         <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>${escHtml(app)}
       </span>`).join('');
+
+    const peers = window.AssistantContent.resolveWorksWith(c.worksWith).map(p => p.standalone
+      ? `<span class="inline-flex items-center gap-1.5 bg-gray-100 border border-gray-200 rounded-full px-2.5 py-1 text-[11px] font-semibold text-gray-600">
+          <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>${escHtml(p.label)}
+        </span>`
+      : `<span class="inline-flex items-center gap-1.5 bg-emerald-50 border border-emerald-100 rounded-full px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>${escHtml(p.label)}
+        </span>`).join('');
 
     const ctaLabel = escHtml(opts.ctaLabel || 'Hire Role');
     const cta = opts.ctaHref
@@ -216,8 +227,11 @@
 
         ${apps ? `<h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Integrations</h3>
         <div class="flex flex-wrap gap-1.5 items-center">
-          <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mr-0.5">Works with</span>${apps}
+          <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mr-0.5">Connects with</span>${apps}
         </div>` : ''}
+
+        ${peers ? `<h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 ${apps ? 'mt-6' : ''}">Works With</h3>
+        <div class="flex flex-wrap gap-1.5 items-center">${peers}</div>` : ''}
       </div>
       <div class="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center gap-3 rounded-b-2xl">
         <span class="text-xs font-bold text-gray-500 uppercase tracking-wider">Included in Plan</span>

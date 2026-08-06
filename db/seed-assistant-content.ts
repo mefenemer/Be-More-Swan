@@ -2,7 +2,7 @@
  * db/seed-assistant-content.ts
  *
  * Seeds DB-driven assistant content into:
- *   1. master_assistants copy columns (tagline, key_features, integrations, video) — for the 7
+ *   1. master_assistants copy columns (tagline, key_features, integrations, works_with, video) — for the 7
  *      MIGRATED roles this is a value-preserving transcription of the hard-coded
  *      src/config/assistant-role-content.js, so the detail page renders identically to the old
  *      static one; the other 12 are AUTHORED copy for roles that never had any (see that array).
@@ -49,7 +49,18 @@ interface RoleContent {
     // (already the live card copy) alone.
     description?: string;
     keyFeatures: string[];
+    /** EXTERNAL tools only — rendered as the "Connects with" chips. */
     integrations: string[];
+    /**
+     * Assistant-to-assistant fit — rendered as the "Works with" pills. Entries are the reserved
+     * key 'standalone' or another role key (which renders as that assistant's current name).
+     * Omitted = ['standalone'], which is true of every role in this file except the Campaign
+     * Assistant. See db/assistant-works-with.sql.
+     *
+     * Unlike `integrations` above, this list is NOT forward-looking: only claim a pairing the
+     * product actually implements, because "works with X" reads as a capability, not a roadmap.
+     */
+    worksWith?: string[];
     video?: { url: string | null; title: string; poster?: string };
 }
 
@@ -237,11 +248,12 @@ const AUTHORED: RoleContent[] = [
     // would put the promise back on the marketing page that the product was deliberately built not
     // to make — public-copy-claims-vs-system is the receipt for that class of drift.
     //
-    // `integrations` therefore names the ASSISTANTS it commissions, not external tools. That is
-    // literally what it integrates with: connection-map.ts gives this role an EMPTY connector policy
-    // because it reaches every channel through another assistant and holds no credential of its own.
-    // It is also the actual product claim worth making — nothing else in the catalogue coordinates
-    // other assistants.
+    // `integrations` used to name the ASSISTANTS it commissions, because there was no other field
+    // for it — but that field is now labelled "Connects with" and means external tools only. The
+    // assistants moved to `worksWith`, which is what they always were. connection-map.ts gives this
+    // role an EMPTY connector policy: it reaches every channel through another assistant and holds
+    // no credential of its own, so it genuinely connects to nothing and is the one role in the
+    // catalogue that is NOT standalone.
     {
         roleKey: 'campaign_orchestrator',
         tagline: 'One objective. Every assistant pulling the same way.',
@@ -250,7 +262,8 @@ const AUTHORED: RoleContent[] = [
             'Budgets Measured in Work, Not Guesswork',
             'Reallocates Effort When Something Is Not Landing',
         ],
-        integrations: ['Social Media Assistant', 'Blog Writing Assistant', 'Lead Generation Assistant'],
+        integrations: [],
+        worksWith: ['social_media_manager', 'blog_writer', 'lead_qualifier'],
     },
 ];
 
@@ -317,10 +330,13 @@ async function main() {
             ...(c.description !== undefined ? { description: c.description } : {}),
             keyFeatures: c.keyFeatures,
             integrations: c.integrations,
+            // Omitted = standalone. Every role here stands on its own except the Campaign Assistant.
+            worksWith: c.worksWith ?? ['standalone'],
             video: c.video ?? null,
             updatedAt: new Date(),
         }).where(eq(masterAssistants.id, ma.id));
-        console.log(`✓ ${c.roleKey}: ${c.keyFeatures.length} features, ${c.integrations.length} integrations${c.video ? ', video slot' : ''}.`);
+        const worksWith = c.worksWith ?? ['standalone'];
+        console.log(`✓ ${c.roleKey}: ${c.keyFeatures.length} features, ${c.integrations.length} integrations, works with ${worksWith.join(' + ')}${c.video ? ', video slot' : ''}.`);
     }
 
     // 3. Report — which roles got no copy, and where the two descriptions had drifted.

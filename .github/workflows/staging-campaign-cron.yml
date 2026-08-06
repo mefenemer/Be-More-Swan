@@ -1,0 +1,75 @@
+# Drives the staging Campaign Assistant autonomous run (Phase 1, scenarios 1 & 2).
+#
+# Why this exists: Netlify runs scheduled functions ONLY on the production deploy —
+# never on branch/preview deploys. Staging (https://staging--bemoreswan.netlify.app)
+# is a branch deploy of the `staging` branch, so its `autonomous-campaign-agent` cron
+# never fires there. This workflow pokes the SAME run logic over HTTP via
+# run-campaign-agent so decisions actually appear on staging.
+# Design: docs/campaign-orchestrator-plan.md §4.
+#
+# This does NOT send email, does NOT place any order, and does NOT spend a task. The run stops at
+# persisting a PENDING decision — an inert row that a human approves from the Decisions tab. Only
+# that approval calls placeOrder. It also makes NO model call: every number in the evidence comes
+# out of a COUNT or an AVG, so unlike the strategy agent this costs no model budget at all.
+#
+# ⚠️ UNLIKE staging-strategy-cron.yml, THE RESPONSE IS THE RESULT, NOT AN ACK. There is no
+# background worker — the run is deterministic SQL and finishes inline — so `proposed` in the body
+# is the real count for this run.
+#
+# NOTES / LIMITATIONS (identical to the other staging drainers):
+#  * GitHub Actions `schedule` only runs from the DEFAULT branch (main), ~5-min granularity.
+#  * Scheduled workflows only start firing once this file is on `main`.
+#  * Production is unaffected — this only talks to the staging URL.
+#
+# REQUIRED SETUP (reuses the SAME secret as the other drainers):
+#  1. GitHub  → repo Settings → Secrets and variables → Actions → CRON_TRIGGER_SECRET
+#  2. Netlify → site → Environment variables → CRON_TRIGGER_SECRET (staging/branch-deploy scope)
+#  3. db/campaigns.sql applied to the staging database (it is, as of 2026-08-06).
+#
+# ⚠️ It will report proposed:0 until a campaign is actually RUNNING (status active/throttled) and
+# the org has the assistants each scenario needs hired — an escalation needs a Social Media AND a
+# Blog Writing Assistant, a halt needs a Lead Generation AND a Social Media Assistant. It also
+# stays silent below the sample floors (8 posts with insights; 10 leads in the window), because an
+# "average" built on four data points is noise. Zero is the correct answer in all of those cases,
+# not a failure.
+
+name: Staging campaign agent
+
+on:
+  schedule:
+    - cron: "30 4 * * *"   # daily, offset from the production 04:00 UTC run
+  workflow_dispatch: {}       # allow manual "Run workflow" from the Actions tab
+
+# The pending-decision check and the expiry sweep are both read-then-write, so two concurrent runs
+# could each decide a campaign's slot is free and file the same card twice.
+concurrency:
+  group: staging-campaign-cron
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST to staging run-campaign-agent
+        env:
+          ENDPOINT: "https://staging--bemoreswan.netlify.app/.netlify/functions/run-campaign-agent"
+          CRON_SECRET: ${{ secrets.CRON_TRIGGER_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::Repo secret CRON_TRIGGER_SECRET is not set — the endpoint will reject the call (401/503)."
+            exit 1
+          fi
+          echo "POST $ENDPOINT"
+          HTTP_CODE=$(curl -sS -o /tmp/body.txt -w "%{http_code}" \
+            --max-time 300 --retry 2 --retry-delay 5 \
+            -X POST -H "Authorization: Bearer ${CRON_SECRET}" "$ENDPOINT")
+          echo "HTTP $HTTP_CODE"
+          echo "----- response body -----"
+          cat /tmp/body.txt || true
+          echo
+          echo "-------------------------"
+          case "$HTTP_CODE" in
+            2*) echo "OK" ;;
+            *)  echo "::error::Worker returned HTTP $HTTP_CODE"; exit 1 ;;
+          esac

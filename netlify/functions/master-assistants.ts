@@ -279,7 +279,10 @@ export default withLambda(async (event) => {
             // Serving it here makes the card and the detail page read the same row.
             tagline: r.tagline,
             keyFeatures: r.keyFeatures ?? [],
+            // "Connects with" — external tools. Distinct from worksWith below, which is the
+            // assistant-to-assistant fit ('standalone' and/or other role keys).
             integrations: r.integrations ?? [],
+            worksWith: r.worksWith ?? [],
             video: r.video ?? null,
             beta: r.lifecycleState === 'beta', // UI can badge these as Beta Program early access
             waitlistCount: countMap[r.id] || 0,
