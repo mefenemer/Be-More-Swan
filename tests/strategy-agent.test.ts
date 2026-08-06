@@ -391,6 +391,24 @@ check('the rejection cluster demands spread, not just a count', () => {
     assert.ok(/applied_to_target = false/.test(query), 'spent evidence would fund the same proposal forever');
 });
 
+check('the rejection query never hands a bare JS array to = ANY()', () => {
+    // Shipped broken 2026-08-06 and threw on EVERY run. Interpolating a JS array into a drizzle
+    // sql template expands it to a parenthesised PARAMETER LIST, ($1, $2, ...) — a row constructor,
+    // not an array — and = ANY(row) is rejected by Postgres with 42809. Typecheck passes, every
+    // unit check passes, and the only symptom is that the run dies before recordLastRun, leaving
+    // strategy_agent.last_run frozen at the previous week: identical, in the UI, to a cron that
+    // never fired. An explicit ARRAY[...]::text[] built with sql.join is the only correct form.
+    const src = sourceOf('netlify/functions/autonomous-strategy-agent.ts');
+    const fn = src.slice(src.indexOf('async function loadRejectionClusters'));
+    const query = fn.slice(0, fn.indexOf('return rows'));
+    assert.ok(
+        !/=\s*ANY\(\$\{(?!\s*sql)/.test(query),
+        '= ANY() must not receive an interpolated JS array — use ARRAY[...]::text[] via sql.join',
+    );
+    assert.ok(/ANY\(ARRAY\[/.test(query), 'the reason list must be an explicit ARRAY[...] literal');
+    assert.ok(/::text\[\]/.test(query), 'the ARRAY literal must be cast to text[]');
+});
+
 check('the rejection proposer never targets the field nothing reads', () => {
     // discovery_query_themes is the intuitive home for "the queries keep finding directories", and
     // it is a trap: no reader exists, so a proposal there applies cleanly and changes nothing while

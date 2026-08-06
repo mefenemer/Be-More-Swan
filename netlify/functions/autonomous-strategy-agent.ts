@@ -200,6 +200,16 @@ async function loadClusters(db: ReturnType<typeof getDb>): Promise<Cluster[]> {
  * than prospect-authored prose, which is why they may go in the prompt at all — the same line the
  * edit proposer draws when it sends diff summaries and never message bodies.
  */
+/*
+ * ⚠️ The reason list is built with sql.join into an explicit ARRAY[...]::text[] — do NOT "simplify"
+ * it back to = ANY(<array>). Interpolating a JS array into a drizzle sql template expands it into a
+ * parenthesised PARAMETER LIST, ($1, $2, ...), which is a row constructor rather than an array;
+ * = ANY(row) is invalid and Postgres rejects it with 42809 (make_scalar_array_op). It threw on
+ * EVERY run, and because this loader sits before recordLastRun the exception killed the whole run
+ * and left strategy_agent.last_run frozen at the previous week — indistinguishable, from the UI,
+ * from a cron that never fired. Typecheck and the unit tests both pass either way; only a real
+ * Postgres round trip catches it.
+ */
 async function loadRejectionClusters(db: ReturnType<typeof getDb>): Promise<RejectionCluster[]> {
     const rows = await db.execute<{
         organisation_id: number; ai_assistant_id: number; reason: string; n: number;
@@ -216,7 +226,9 @@ async function loadRejectionClusters(db: ReturnType<typeof getDb>): Promise<Reje
           FROM lead_reject_feedback lrf
           LEFT JOIN assistant_records ar ON ar.id = lrf.assistant_record_id
          WHERE lrf.applied_to_target = false
-           AND lrf.reason = ANY(${[...LEAD_REJECT_REASONS_FOR_TARGETING]})
+           AND lrf.reason = ANY(ARRAY[${sql.join(
+               LEAD_REJECT_REASONS_FOR_TARGETING.map((r) => sql`${r}`), sql`, `,
+           )}]::text[])
            AND lrf.created_at > now() - (${WINDOW_DAYS} * interval '1 day')
          GROUP BY 1, 2, 3
         HAVING count(*) >= ${MIN_REJECT_SAMPLE}
