@@ -228,6 +228,30 @@ const AUTHORED: RoleContent[] = [
         keyFeatures: ['Automatic Data Pull from Your Boards', 'Executive-Ready Summaries', 'Risk & Slippage Flagging'],
         integrations: ['Jira', 'Asana', 'Monday.com', 'Slack'],           // Monday.com not built
     },
+    // Campaign Assistant (added 2026-08-06 with the Phase 1 build). The one role whose copy must NOT
+    // follow the forward-looking-integrations convention above.
+    //
+    // ⚠️ NO AD PLATFORM IS NAMED, and that is the whole point. Meta/LinkedIn/Google Ads are blocked
+    // on approvals we do not control (docs/campaign-orchestrator-plan.md §1.1), and this role's
+    // entire design is an honest locked state rather than a button that fails. Naming them here
+    // would put the promise back on the marketing page that the product was deliberately built not
+    // to make — public-copy-claims-vs-system is the receipt for that class of drift.
+    //
+    // `integrations` therefore names the ASSISTANTS it commissions, not external tools. That is
+    // literally what it integrates with: connection-map.ts gives this role an EMPTY connector policy
+    // because it reaches every channel through another assistant and holds no credential of its own.
+    // It is also the actual product claim worth making — nothing else in the catalogue coordinates
+    // other assistants.
+    {
+        roleKey: 'campaign_orchestrator',
+        tagline: 'One objective. Every assistant pulling the same way.',
+        keyFeatures: [
+            'One Objective, Briefed to Every Assistant',
+            'Budgets Measured in Work, Not Guesswork',
+            'Reallocates Effort When Something Is Not Landing',
+        ],
+        integrations: ['Social Media Assistant', 'Blog Writing Assistant', 'Lead Generation Assistant'],
+    },
 ];
 
 const CONTENT: RoleContent[] = [...MIGRATED, ...AUTHORED];
