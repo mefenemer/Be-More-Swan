@@ -445,6 +445,54 @@
         });
     }
 
+    // Campaign Assistant's twin of the above, and it carries the same invariant one step further.
+    // `asDraft: true` is not a parameter the card chooses — a chat turn may never start a campaign,
+    // raise a ceiling or resume a paused one, because a running campaign puts work into three other
+    // assistants and burns the org's monthly allowance. Starting is a click on the Campaigns tab
+    // with the numbers visible (docs/campaign-orchestrator-plan.md §1.3).
+    //
+    // Note there is no spend field of any kind in this body. Phase 1 campaigns are organic and
+    // budgeted in tasks; campaigns.ts rejects a maxSpendGbp > 0 at the boundary regardless.
+    function onCampaignCreate(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      if (!assistantId) {
+        respond({ ok: false, error: 'This chat is not attached to an assistant, so the campaign cannot be saved.' });
+        return;
+      }
+      fetch('/.netlify/functions/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          action: 'create',
+          assistantId,
+          asDraft: true,
+          objective: d.objective,
+          outcomeMetric: d.outcomeMetric,
+          targetValue: d.targetValue,
+          maxWorkItems: d.maxWorkItems,
+          endsAt: d.endsAt,
+        }),
+      })
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `Save failed (HTTP ${res.status}).`);
+          respond({ ok: true, deduped: data.deduped === true });
+          // Same reason as discovery:created above — the Campaigns tab is sitting behind this
+          // modal, already loaded, with no other way to learn about a write made from in here.
+          // Without this the user closes the chat onto "No campaigns yet" and concludes the
+          // assistant did nothing (chat-creates-draft-campaigns).
+          document.dispatchEvent(new CustomEvent('campaign:created', {
+            detail: { assistantId, campaignId: data.campaignId ?? null, deduped: data.deduped === true },
+          }));
+        })
+        .catch((err) => {
+          console.error('[ChatSession] campaign create failed:', err);
+          respond({ ok: false, error: err.message });
+        });
+    }
+
     // The composer does not exist in read-only mode, so its listeners are conditional. The
     // container-level ones stay: a hydrated transcript can still contain Disruptive UI cards.
     if (!readOnly) {
@@ -454,6 +502,7 @@
     }
     container.addEventListener('handoff:response', onHandoffResponse);
     container.addEventListener('discovery:create', onDiscoveryCreate);
+    container.addEventListener('campaign:create', onCampaignCreate);
 
     // Starter pills send their prompt verbatim; the first appendMessage removes the
     // zero-state (and the pills with it), so no explicit teardown is needed.
@@ -480,6 +529,7 @@
         }
         container.removeEventListener('handoff:response', onHandoffResponse);
         container.removeEventListener('discovery:create', onDiscoveryCreate);
+        container.removeEventListener('campaign:create', onCampaignCreate);
         container.innerHTML = '';
       },
     };

@@ -36,7 +36,7 @@
 
 import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, strategyProposals } from '../../db/schema';
+import { aiAssistants, discoveryCampaigns, strategyProposals } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import { CONFIG_KEYS, isGlobalAiDisabled, setPlatformConfig } from '../../src/utils/platform-config';
@@ -45,6 +45,10 @@ import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { parseModelJson } from '../../src/utils/model-json';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { EDIT_REASON_LABELS, MIN_EDIT_SAMPLE, isEditReason } from '../../src/config/template-feedback';
+import {
+    LEAD_REJECT_REASONS_FOR_TARGETING, LEAD_REJECT_REASON_LABELS, MIN_REJECT_CAMPAIGNS,
+    MIN_REJECT_SAMPLE, MIN_REJECT_SPREAD_DAYS, isLeadRejectReason, type LeadRejectReason,
+} from '../../src/config/lead-reject-reasons';
 import {
     REJECT_REASONS_FED_TO_MODEL, STRATEGY_AGENT_FEATURE, isValidValueFor, tunableField,
 } from '../../src/config/strategy-proposals';
@@ -111,6 +115,28 @@ interface Cluster {
 }
 
 /**
+ * A run of rejections sharing one reason — the targeting counterpart of `Cluster`.
+ *
+ * Kept as its own type rather than widened into `Cluster` with nullable members: the two carry
+ * genuinely different evidence (diff summaries vs rejected company names), fund different fields,
+ * and bank into different tables. A union with six optional properties would make every use site
+ * re-derive which half it is holding.
+ */
+interface RejectionCluster {
+    organisationId: number;
+    aiAssistantId: number;
+    reason: LeadRejectReason;
+    n: number;
+    rejectionIds: number[];
+    /** Distinct campaigns the rejections came from — half of the burst guard. */
+    campaigns: number;
+    /** Days between the first and last rejection in the cluster — the other half. */
+    spreadDays: number;
+    /** Company names, for the model to see what it kept surfacing. */
+    examples: string[];
+}
+
+/**
  * Edits grouped by (org, assistant, reason), strongest cluster first.
  *
  * One query across every org rather than a query per org: the run is weekly and the whole table is
@@ -156,6 +182,76 @@ async function loadClusters(db: ReturnType<typeof getDb>): Promise<Cluster[]> {
         feedbackIds: (r.feedback_ids ?? []).filter((x): x is number => Number.isInteger(x)),
         diffs: (r.diffs ?? []).filter((d): d is string => typeof d === 'string' && d.trim().length > 0),
     }));
+}
+
+/**
+ * Rejection runs, strongest first — the evidence behind a `lead_rejection` proposal.
+ *
+ * ⚠️ THREE GATES, NOT ONE. `count(*) >= MIN_REJECT_SAMPLE` alone is nearly worthless here: a
+ * reviewer clearing one bad run rejects twenty leads in an afternoon and clears any threshold from
+ * a single misconfigured search. So the HAVING also demands spread — more than one campaign, or
+ * more than one day — because "the same complaint twice, independently" is the actual signal.
+ *
+ * `applied_to_target = false` stops spent evidence funding a second retarget, and the reason filter
+ * drops `other` plus the three reasons that are facts about a lead rather than faults in the
+ * targeting (see LEAD_REJECT_REASONS_FOR_TARGETING).
+ *
+ * The company names are joined in for context only. They are the org's OWN discovery output rather
+ * than prospect-authored prose, which is why they may go in the prompt at all — the same line the
+ * edit proposer draws when it sends diff summaries and never message bodies.
+ */
+async function loadRejectionClusters(db: ReturnType<typeof getDb>): Promise<RejectionCluster[]> {
+    const rows = await db.execute<{
+        organisation_id: number; ai_assistant_id: number; reason: string; n: number;
+        rejection_ids: number[]; campaigns: number; spread_days: number; examples: (string | null)[];
+    }>(sql`
+        SELECT lrf.organisation_id,
+               lrf.ai_assistant_id,
+               lrf.reason,
+               count(*)::int                                    AS n,
+               array_agg(lrf.id)                                AS rejection_ids,
+               count(DISTINCT lrf.campaign_id)::int             AS campaigns,
+               EXTRACT(DAY FROM (max(lrf.created_at) - min(lrf.created_at)))::int AS spread_days,
+               array_agg(DISTINCT ar.title)                     AS examples
+          FROM lead_reject_feedback lrf
+          LEFT JOIN assistant_records ar ON ar.id = lrf.assistant_record_id
+         WHERE lrf.applied_to_target = false
+           AND lrf.reason = ANY(${[...LEAD_REJECT_REASONS_FOR_TARGETING]})
+           AND lrf.created_at > now() - (${WINDOW_DAYS} * interval '1 day')
+         GROUP BY 1, 2, 3
+        HAVING count(*) >= ${MIN_REJECT_SAMPLE}
+           AND (count(DISTINCT lrf.campaign_id) >= ${MIN_REJECT_CAMPAIGNS}
+                OR EXTRACT(DAY FROM (max(lrf.created_at) - min(lrf.created_at))) >= ${MIN_REJECT_SPREAD_DAYS})
+         ORDER BY 1, 2, count(*) DESC`);
+
+    return rows.flatMap((r) => {
+        // A value the vocabulary no longer contains — the row survives in the table, but it can no
+        // longer be reasoned about, so it must not reach the prompt as a bare string.
+        if (!isLeadRejectReason(r.reason)) return [];
+        return [{
+            organisationId: r.organisation_id,
+            aiAssistantId: r.ai_assistant_id,
+            reason: r.reason,
+            n: r.n,
+            rejectionIds: (r.rejection_ids ?? []).filter((x): x is number => Number.isInteger(x)),
+            campaigns: r.campaigns ?? 0,
+            spreadDays: r.spread_days ?? 0,
+            examples: (r.examples ?? []).filter((x): x is string => typeof x === 'string' && !!x.trim()).slice(0, 15),
+        }];
+    });
+}
+
+/** One rejection cluster per assistant — the modal reason, same rule as the edit proposer. */
+function modalRejectionPerAssistant(clusters: RejectionCluster[]): RejectionCluster[] {
+    const seen = new Set<string>();
+    const out: RejectionCluster[] = [];
+    for (const c of clusters) {
+        const key = `${c.organisationId}:${c.aiAssistantId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(c);
+    }
+    return out;
 }
 
 /**
@@ -436,6 +532,188 @@ export async function runStrategyAgent(): Promise<StrategyAgentResult> {
         proposedByOrg.set(c.organisationId, {
             count: (prev?.count ?? 0) + 1,
             summary: prev?.summary ?? `a new ${field.label} based on ${c.n} of your edits`,
+            assistantName: prev?.assistantName ?? (assistant.name || 'Your assistant'),
+        });
+    }
+
+    // ── Pass 2: rejection clusters → the target persona ──────────────────────
+    // Deliberately a SECOND pass over its own clusters rather than a widened first pass. The two
+    // proposers share an envelope, a budget and a notification, and nothing else: different
+    // evidence, a different field, a different value type (json, not text). Interleaving them would
+    // mean every line in the loop above testing which kind it was holding.
+    //
+    // An assistant can legitimately receive one of each in a run — they target different fields, so
+    // the partial unique index does not collide, and the notification already speaks in counts.
+    const rejectionClusters = modalRejectionPerAssistant(await loadRejectionClusters(db));
+    result.clusters += rejectionClusters.length;
+
+    for (const c of rejectionClusters.slice(0, BATCH)) {
+        if (Date.now() - startedAt > RUN_BUDGET_MS - PER_CLUSTER_RESERVE_MS) {
+            result.truncated = true;
+            console.warn('[strategy-agent] run budget reached during rejection pass; the rest wait', {
+                done: result.proposed + result.skipped, total: rejectionClusters.length,
+            });
+            break;
+        }
+
+        const where = { org: c.organisationId, assistant: c.aiAssistantId, reason: c.reason };
+
+        let enabled = featureByOrg.get(c.organisationId);
+        if (enabled === undefined) {
+            enabled = await hasFeatureByOrg(db, c.organisationId, STRATEGY_AGENT_FEATURE);
+            featureByOrg.set(c.organisationId, enabled);
+        }
+        if (!enabled) { skip('feature not enabled for this org', where); continue; }
+
+        // ⚠️ ALWAYS target_persona. `discovery_query_themes` is the intuitive home for "your queries
+        // keep surfacing directories", and it is a trap: nothing reads that field, so the proposal
+        // would be reviewed, applied and change nothing while telling the user they had retargeted.
+        // targetPersona is JSON-stringified straight into generateQueries' prompt, so it is live.
+        const targetField = 'target_persona';
+        const field = tunableField(targetField);
+        if (!field) { skip('target_persona is no longer tunable', { ...where, targetField }); continue; }
+
+        const [existing] = await db
+            .select({ id: strategyProposals.id })
+            .from(strategyProposals)
+            .where(and(
+                eq(strategyProposals.organisationId, c.organisationId),
+                eq(strategyProposals.targetField, targetField),
+                eq(strategyProposals.status, 'pending'),
+            ))
+            .limit(1);
+        if (existing) { skip('a pending proposal already holds this field', { ...where, targetField }); continue; }
+
+        const [assistant] = await db
+            .select({ id: aiAssistants.id, name: aiAssistants.name })
+            .from(aiAssistants)
+            .where(and(eq(aiAssistants.id, c.aiAssistantId), eq(aiAssistants.organisationId, c.organisationId)))
+            .limit(1);
+        if (!assistant) { skip('assistant not found in this org', where); continue; }
+
+        // The personas the rejections were actually produced under. An apply writes ONE persona to
+        // every active campaign (that blast radius is documented on writeFieldValue), so the model
+        // is shown all of them and asked for a single replacement rather than a per-campaign patch.
+        const campaigns = await db
+            .select({ id: discoveryCampaigns.id, idea: discoveryCampaigns.idea, targetPersona: discoveryCampaigns.targetPersona })
+            .from(discoveryCampaigns)
+            .where(and(
+                eq(discoveryCampaigns.aiAssistantId, c.aiAssistantId),
+                eq(discoveryCampaigns.status, 'active'),
+            ));
+        // No active campaign means nothing to write to, and proposeChange would refuse anyway
+        // (readFieldValue returns undefined). Skip before paying for a model call.
+        if (campaigns.length === 0) { skip('assistant has no active campaign to retarget', where); continue; }
+
+        const rejections = await priorRejections(db, c.organisationId, targetField);
+        const reasonLabel = LEAD_REJECT_REASON_LABELS[c.reason];
+
+        let proposedValue: unknown = null;
+        let claimedField = '';
+        try {
+            const { text, stopReason } = await gatewayGenerate({
+                system:
+                    `You refine the target persona a B2B lead-discovery engine searches with. The persona is `
+                    + `JSON, and it is fed verbatim into the prompt that writes the search queries.\n\n`
+                    + `A human reviewer rejected ${c.n} of the leads this persona found, giving the SAME reason `
+                    + `every time: "${reasonLabel}". Rewrite the persona so the next run stops surfacing them.\n\n`
+                    + `Rules:\n`
+                    + `- Keep every criterion that is working. You are correcting one recurring fault.\n`
+                    + `- Describe WHO to find and who to avoid — never name specific companies.\n`
+                    + `- Be concrete enough that a query writer reading it would exclude the rejected kind.\n`
+                    + `- The value must be a JSON OBJECT, not a string and not an array.\n`
+                    + (rejections.length
+                        ? `- These earlier suggestions for this same field were DECLINED. Do not repeat them:\n${rejections.join('\n')}\n`
+                        : '')
+                    + `\nRespond ONLY with JSON: {"targetField":"${targetField}","proposedValue":{ ...the rewritten persona... }}`,
+                messages: [{
+                    role: 'user',
+                    content:
+                        `Current persona${campaigns.length > 1 ? 's' : ''} in use:\n`
+                        + campaigns.map((cam) => `- ${cam.idea}\n  ${JSON.stringify(cam.targetPersona ?? {})}`).join('\n')
+                        + `\n\nRejected as "${reasonLabel}" (${c.n} leads across ${c.campaigns} search${c.campaigns === 1 ? '' : 'es'}):\n`
+                        + (c.examples.length ? c.examples.map((e) => `- ${e}`).join('\n') : '- (names not recorded)'),
+                }],
+                maxTokens: 2000,
+            });
+            if (stopReason === 'max_tokens') {
+                console.error('[strategy-agent] rejection response hit the token ceiling and cannot be parsed', {
+                    org: c.organisationId, assistant: c.aiAssistantId, targetField,
+                });
+            }
+            const parsed = parseModelJson<{ targetField?: string; proposedValue?: unknown }>(text);
+            if (!parsed) {
+                console.error('[strategy-agent] rejection model output was not parseable JSON', {
+                    org: c.organisationId, assistant: c.aiAssistantId, stopReason,
+                    sample: String(text).slice(0, 300),
+                });
+            }
+            if (parsed) {
+                claimedField = String(parsed.targetField ?? '');
+                proposedValue = parsed.proposedValue ?? null;
+            }
+        } catch (err) {
+            console.error('[strategy-agent] rejection generation failed', { org: c.organisationId, assistant: c.aiAssistantId }, err);
+            skip('generation threw', { ...where, error: err instanceof Error ? err.message.slice(0, 200) : 'unknown' });
+            continue;
+        }
+
+        const reject = (why: string, extra?: Record<string, unknown>) => {
+            console.error(`[strategy-agent] rejection proposal rejected: ${why}`, {
+                org: c.organisationId, assistant: c.aiAssistantId, targetField, ...extra,
+            });
+            skip(why, extra);
+        };
+
+        // The same envelope as the edit proposer, and for the same reason: this prompt sits next to
+        // the org's own discovery output, and the guarantee comes from the SHAPE of what can be
+        // written, never from the prompt.
+        if (claimedField !== targetField) {
+            reject('model answered about a different field', { claimedField });
+            continue;
+        }
+        // A json field rejects a string or an array — an array of personas written to every campaign
+        // would be read back as one persona object by generateQueries and silently mean nothing.
+        if (!isValidValueFor(field, proposedValue) || Array.isArray(proposedValue)) {
+            reject('value does not match the field shape', {
+                valueType: field.valueType, got: Array.isArray(proposedValue) ? 'array' : typeof proposedValue,
+            });
+            continue;
+        }
+
+        const id = await proposeChange(db, {
+            organisationId: c.organisationId,
+            aiAssistantId: c.aiAssistantId,
+            source: 'lead_rejection',
+            targetField,
+            proposedValue,
+            // Computed from the SQL aggregate. `rejectionIds`, NOT `feedbackIds` — the two bank into
+            // different tables and both are bare integer arrays, so the wrong key would silently
+            // mark unrelated template_feedback rows as spent.
+            evidence: {
+                sampleSize: c.n,
+                rejectReason: c.reason,
+                rejectionIds: c.rejectionIds,
+                windowDays: WINDOW_DAYS,
+                metrics: {
+                    rejections: c.n,
+                    reason: reasonLabel,
+                    campaigns: c.campaigns,
+                    spreadDays: c.spreadDays,
+                },
+            },
+        });
+
+        if (!id) {
+            reject('the writer refused the proposal (see its log line above)');
+            continue;
+        }
+        result.proposed++;
+
+        const prev = proposedByOrg.get(c.organisationId);
+        proposedByOrg.set(c.organisationId, {
+            count: (prev?.count ?? 0) + 1,
+            summary: prev?.summary ?? `a new ${field.label} based on ${c.n} leads you rejected`,
             assistantName: prev?.assistantName ?? (assistant.name || 'Your assistant'),
         });
     }

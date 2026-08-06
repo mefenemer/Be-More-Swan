@@ -5116,6 +5116,10 @@ function formatCurrency(amount, currency) {
 <script src="/src/components/assistant-lead-ideas.js"></script>
 <!-- Lead Generator "Find New Leads" — outbound discovery campaigns (discovery-campaigns.ts). -->
 <script src="/src/components/assistant-discovery-campaigns.js"></script>
+<!-- Campaigns tab (campaign_orchestrator) — one row per campaign, plus the Budget & Control strip
+     that sits above the tab bar and is therefore visible from every tab (campaigns.ts). Starting a
+     campaign is the only spend-committing click in the product that a chat turn cannot make. -->
+<script src="/src/components/assistant-campaigns.js"></script>
 <!-- Signal Inbox tab (lead_qualifier) — everything that came IN before it became a lead;
      saved-search hits now, social signals in Phase 1b (signal-inbox.ts). -->
 <script src="/src/components/assistant-signal-inbox.js"></script>

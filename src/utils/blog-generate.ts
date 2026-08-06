@@ -106,6 +106,20 @@ export async function buildBlueprintGuardrailsBlock(
             parts.push(goalDirective.trim());
         }
 
+        // Section 13 — the live campaign this assistant is working for. Injected here for the same
+        // reason section 12 is: this function IS the blog prompt, and anything added to
+        // renderBlueprintPrompt() reaches the social drafter only. A campaign that steers posts but
+        // not articles is a campaign the Blog Writer is not in, which is not what the user was
+        // shown when they approved the strategy.
+        //
+        // Emitted AFTER the goal directive deliberately. Both are "what this work is for", and the
+        // campaign is the narrower, more current statement — later text wins on ties, and a
+        // campaign is chosen for a season while a goal runs for a quarter.
+        const campaignDirective = sections['13-campaign']?.content?.directive;
+        if (typeof campaignDirective === 'string' && campaignDirective.trim()) {
+            parts.push(campaignDirective.trim());
+        }
+
         return parts.length ? parts.join('\n\n') : null;
     } catch (err) {
         console.error(`buildBlueprintGuardrailsBlock: assistant ${opts.assistantId} failed`, err);

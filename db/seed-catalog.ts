@@ -79,6 +79,24 @@ const CATALOG = [
 
     // ── 2. Marketing & Sales ─────────────────────────────────────────────────
     {
+        // The only assistant whose output is other assistants' work. It writes nothing itself —
+        // it turns one objective into orders for the Social Media, Blog Writing and Lead
+        // Generation assistants, and allocates a budget across them.
+        //
+        // Phase 1 is ORGANIC ONLY and the budget it allocates is CAPACITY (the plan's monthly
+        // task allowance, usage_counters.task_count), not money. Paid ad channels are Phase 3 and
+        // are blocked on platform approvals we do not control — see docs/campaign-orchestrator-plan.md
+        // §1.1. The description below must not promise ad buying.
+        roleKey: 'campaign_orchestrator',
+        name: 'Campaign Assistant',
+        description: 'Turns one business objective into a campaign — then briefs your other assistants, allocates their time across the work, and reallocates it when something is not landing. You approve the plan; it runs the campaign.',
+        category: 'Marketing & Sales',
+        iconKey: 'megaphone',
+        iconColor: 'purple',
+        comingSoon: true,    // ← flip to false in the go-live commit (Phase 10 of the checklist)
+        isActive: true,
+    },
+    {
         roleKey: 'social_media_manager',
         name: 'Social Media Assistant',
         description: 'Plans, writes, and schedules branded content across all your social channels — consistent pipeline generation without the daily grind.',

@@ -215,6 +215,108 @@
       myContentTab: { label: 'My Content' },
     },
 
+    // Campaign Assistant. The only role whose output is other assistants' work, so nearly every
+    // social module is off and the Data Hub lists ORDERS it issued rather than artefacts it made.
+    //
+    // ⚠️ This entry is load-bearing purely by existing. A missing roleKey falls back to
+    // social_media_manager, and for this role that fallback is wrong in every cell — it would show
+    // "Engagement Rate by Reach" for an assistant that has never published anything.
+    campaign_orchestrator: {
+      // Campaign-LIFETIME window, not "last 30 days". A 30-day window across a 6-week flight is
+      // arithmetic that cliff-drops at rollover; roi-hero-defaults-all-time already cost us this
+      // once. Card 2 swaps its unit by campaign mode — an organic campaign showing
+      // "Cost per Outcome: £0" is a lie about a real cost, so it reports tasks instead.
+      kpis: [
+        {
+          label: 'Outcomes Delivered',
+          title: 'What It Actually Produced',
+          desc: 'Leads, replies and published work this campaign caused — not clicks, not impressions.',
+        },
+        {
+          label: 'Effort per Outcome',
+          title: 'The Real Price',
+          desc: 'Every task your assistants spent, divided by the outcomes those tasks produced.',
+        },
+        {
+          label: 'Decisions Taken For You',
+          title: 'Reallocations',
+          desc: 'Work it moved between your assistants without waking you, each with its evidence.',
+        },
+        {
+          label: 'Needs You',
+          title: 'Awaiting Approval',
+          desc: 'Decisions parked above your threshold, and campaigns blocked on something only you can fix.',
+        },
+      ],
+      // Publishes nothing, sells nothing, writes no content of its own. hasPostingSchedule:false
+      // also strips the platform filter and posted/overdue legend from the Calendar tab.
+      modules: {
+        hasPostingSchedule: false, hasSocialStrategy: false,
+        hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
+        hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+        hasContentPublishing: false,
+      },
+      // Chat is where an objective becomes a strategy proposal. `kind: 'chat'` only redirects to
+      // the chat page, which is honest here — unlike the Lead Generator's retired "Score New
+      // Leads", setting an objective genuinely IS a conversation and has no one-click form.
+      //
+      // ⚠️ It cannot start anything. Approving in chat SAVES a draft campaign; starting it is a
+      // separate human click on the Campaigns tab, with the numbers visible. See
+      // chat-creates-draft-campaigns and plan §1.3.
+      primaryAction: { label: 'Set an Objective', kind: 'chat' },
+      // Decisions the assistant wants to take, above the user's autonomy threshold. Records-kind,
+      // so the existing approve/reject gate renders it with no new client code.
+      //
+      // Reject captures a reason chip AND has a built consumer: the reason is written to the
+      // campaign's constraint set and restated in the prompt that generates the next proposal
+      // (src/config/campaign-reject-reasons.ts → renderCampaignConstraints, reaching generation
+      // via campaign-directive.ts). lead-rejection-teaches-nothing was the alternative.
+      reviewQueue: {
+        kind: 'records',
+        recordType: 'campaign_decision',
+        label: 'Decisions',
+        // Explicitly not the generic "approve, schedule or reject" line: approving a decision
+        // issues ORDERS to other assistants, whose output then comes back for review separately.
+        // Approving here is never the last gate before something reaches the outside world.
+        subtitle: 'Decisions your Campaign Assistant wants to make — each with the evidence behind it and what happens if you do nothing. Approving briefs your other assistants; their work still comes back to you for approval.',
+      },
+      // Data Hub = ORDERS, not artefacts. This is the role's defining difference: its workspace is
+      // a ledger of instructions it issued to other assistants. The Result column carries the chain
+      // objective → order → artefact, which nothing else in the product can show.
+      hubTab: {
+        id: 'datahub',
+        label: 'Orders',
+        recordType: 'campaign_order',
+        description: 'Every instruction this assistant has issued to your other assistants — what it asked for, what it cost, and what came back.',
+        columns: [
+          { key: 'title', label: 'Order' },
+          { key: 'campaign', label: 'Campaign' },
+          { key: 'assignedTo', label: 'Assigned to' },
+          { key: 'taskCost', label: 'Tasks' },
+          { key: 'status', label: 'Status' },
+          { key: 'result', label: 'Result' },
+        ],
+        // Golden Rule 1 — never require an external system. A founder can bring last quarter's
+        // numbers in from a spreadsheet and get a real baseline on day one instead of an empty
+        // dashboard they have to wait a month to fill.
+        importHint: 'Upload a CSV of past campaign activity — one row per channel per period. This gives your Campaign Assistant a baseline to compare new campaigns against.',
+        importColumns: ['campaign', 'channel', 'spend', 'outcomes', 'date'],
+      },
+      // ⊕ Campaigns tab (assistant-campaigns.js → campaigns.ts). One row per campaign, each row
+      // stating what it is doing right now. Modelled on the Searches tab, whose lesson was learned
+      // expensively: a list that does not say what is happening reads as broken.
+      //
+      // ⚠️ If you rename this tab, grep the chat-orchestrator system prompt too — it names the tab
+      // to the assistant, and tests/campaign-prompt-surfaces.test.ts fails until both agree.
+      campaignsTab: {
+        label: 'Campaigns',
+      },
+      // The Campaigns tab is the landing tab: it is the thing the role is FOR. Stated explicitly
+      // rather than relying on _activateDefaultMainTab's "first visible tab" fallback, which gives
+      // the right answer only by accident of tab order.
+      defaultMainTab: 'campaigns',
+    },
+
     lead_qualifier: {
       kpis: [
         {

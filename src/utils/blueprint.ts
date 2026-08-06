@@ -8,8 +8,9 @@
 // `assembleBlueprint(assistantId, compiledBy, triggerType)` builds the 12-section brief
 // from the assistant's current data, persists a new ai_blueprints row, and returns it.
 //
-// Sections 11 (business knowledge) and 12 (goals) are OPTIONAL context — they carry real steering
-// weight but an assistant without them is fully configured, so neither counts toward completeness.
+// Sections 11 (business knowledge), 12 (goals) and 13 (campaign) are OPTIONAL context — they carry
+// real steering weight but an assistant without them is fully configured, so none counts toward
+// completeness.
 
 import { eq, and, desc, isNull, inArray } from 'drizzle-orm';
 import * as crypto from 'crypto';
@@ -33,11 +34,16 @@ import {
     workspaceIntegrations,
     platformConfig,
     goals,
+    campaigns,
+    campaignOrders,
 } from '../../db/schema';
 import { checkProhibitedUsePatterns } from './tos-gate';
 import { OPERATIONAL_TRIGGERS, OPERATIONAL_SOURCES } from './operational-setup';
 import { BUDGET_CONFIG_KEY, resolveBudget } from '../config/execution-budgets';
 import { buildGoalDirective, renderGoalDirective } from './goal-directive';
+import { buildCampaignDirective } from './campaign-directive';
+import type { CampaignOutcomeMetric } from '../config/campaign-vocab';
+import type { CampaignConstraints } from '../config/campaign-reject-reasons';
 import type { GoalStatus } from '../config/goal-metrics';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -574,13 +580,79 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
         sources: activeGoals.map(g => src('goals', 'target_value', g.id, g.updatedAt)),
     };
 
+    // ── Section 13 — CAMPAIGN ─────────────────────────────────────────────────
+    // The live campaign this assistant is currently working for, if any. Same job as section 12
+    // and the same reason it exists: without this section a campaign would change no generated
+    // word, and "campaign" would mean a list of rows on a screen.
+    //
+    // Resolved from the ORDERS pointed at this assistant — the campaign belongs to the Campaign
+    // Assistant, not to the one drafting. Only live campaigns (active/throttled) count: a paused
+    // campaign must stop steering the moment it is paused, exactly as an archived goal does.
+    //
+    // ONE campaign, not a list. Two competing objectives in the same prompt satisfy neither, so
+    // the most recently started live campaign wins and the choice is stated rather than emergent.
+    //
+    // ⚠️ Everything carried here is slow-moving by construction. Blueprint rows de-dupe on section
+    // CONTENT, so a live outcome count in here would emit a fresh blueprint row on every unrelated
+    // recompile — the profile autosave alone fires on a 1.2s debounce. `pace` is a bucket and
+    // `weeksRemaining` is rounded to whole weeks for exactly that reason.
+    const [liveCampaign] = await db
+        .select({
+            id: campaigns.id,
+            objective: campaigns.objective,
+            outcomeMetric: campaigns.outcomeMetric,
+            endsAt: campaigns.endsAt,
+            constraints: campaigns.constraints,
+            updatedAt: campaigns.updatedAt,
+            brief: campaignOrders.brief,
+        })
+        .from(campaigns)
+        .innerJoin(campaignOrders, eq(campaignOrders.campaignId, campaigns.id))
+        .where(and(
+            eq(campaignOrders.targetAssistantId, assistantId),
+            inArray(campaigns.status, ['active', 'throttled']),
+        ))
+        .orderBy(desc(campaigns.startsAt), desc(campaigns.id))
+        .limit(1);
+
+    if (liveCampaign) hashParts.push({ id: `campaign:${liveCampaign.id}`, updatedAt: liveCampaign.updatedAt });
+
+    const campaignBrief = (liveCampaign?.brief ?? {}) as Record<string, unknown>;
+    const weeksRemaining = liveCampaign?.endsAt
+        ? Math.max(0, Math.round((liveCampaign.endsAt.getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000)))
+        : null;
+
+    const campaignDirective = buildCampaignDirective(liveCampaign ? {
+        id: liveCampaign.id,
+        objective: liveCampaign.objective,
+        outcomeMetric: liveCampaign.outcomeMetric as CampaignOutcomeMetric,
+        angle: typeof campaignBrief.angle === 'string' ? campaignBrief.angle : null,
+        audience: typeof campaignBrief.audience === 'string' ? campaignBrief.audience : null,
+        // Pace is not computed here on purpose: it needs live outcome counts, and this section
+        // must stay slow-moving. It is 'unknown' until the Phase 2 outcome attribution lands,
+        // and the directive omits the pace line entirely rather than guessing.
+        pace: 'unknown',
+        weeksRemaining,
+        constraints: liveCampaign.constraints as CampaignConstraints | null,
+    } : null);
+
+    // No live campaign ⇒ empty content, so the section serialises to nothing at all rather than an
+    // empty header that reads as "a campaign exists but is unknown".
+    sections['13-campaign'] = {
+        status: campaignDirective ? 'complete' : 'missing',
+        content: campaignDirective ? { ...campaignDirective } : {},
+        sources: liveCampaign ? [src('campaigns', 'objective', liveCampaign.id, liveCampaign.updatedAt)] : [],
+    };
+
     // ── Compute completeness ──────────────────────────────────────────────────
     // Business knowledge is optional context, so it does not count toward the required-section total
     // (numerator or denominator) — exclude it so completeness can't exceed 100%. Goals are optional
     // in exactly the same way: an assistant with no goals is fully configured, so excluding section
-    // 12 keeps a goal-less assistant at 100% instead of capping it at 91%.
+    // 12 keeps a goal-less assistant at 100% instead of capping it at 91%. Section 13 (campaign)
+    // is optional for the same reason: an assistant not currently working for a campaign is fully
+    // configured, and counting it would cap every ordinary assistant below 100%.
     const totalSections = 10;
-    const OPTIONAL_SECTIONS = new Set(['11-business-knowledge', '12-goals']);
+    const OPTIONAL_SECTIONS = new Set(['11-business-knowledge', '12-goals', '13-campaign']);
     const requiredSections = Object.entries(sections)
         .filter(([key]) => !OPTIONAL_SECTIONS.has(key))
         .map(([, s]) => s);

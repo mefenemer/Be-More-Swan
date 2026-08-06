@@ -690,6 +690,9 @@ window._activateMainTab = function(name) {
     // Signal Inbox renders lazily — init() already fetched (its counts feed the tab badge), so
     // this only paints. Cheap and idempotent.
     if (name === 'signals') window.AssistantSignalInbox?.activate();
+    // Campaigns renders lazily for the same reason — init() already fetched, because the count
+    // feeds both the tab badge and the control strip above the tab bar.
+    if (name === 'campaigns') window.AssistantCampaigns?.activate();
     // Conversations fetches on first activation only — nothing on this tab feeds a badge, so a
     // user who never opens it never pays for the query.
     if (name === 'conversations') window.AssistantLeadThreads?.activate();
@@ -1212,6 +1215,150 @@ function _rqShowEditReasonStrip() {
 // claiming it saved a draft it never wrote.
 let _rqPendingReject = null;
 
+/** The decision id a campaign_decision mirror row points at, or null if the link is broken. */
+function _rqDecisionId(record) {
+    const raw = record?.data?.decisionId ?? record?.data?.decision_id;
+    const id = Number(raw);
+    return Number.isFinite(id) && id > 0 ? id : null;
+}
+
+/**
+ * Approving a campaign decision — which BRIEFS OTHER ASSISTANTS and commits part of the month's
+ * task allowance, so it routes to campaigns.ts rather than the generic records PATCH.
+ *
+ * Confirmed first, because this is the one click on the Review Queue whose effect lands somewhere
+ * the user is not looking: the orders go into other assistants' queues. The confirmation states
+ * that plainly rather than asking a bare "are you sure".
+ */
+async function _rqApproveCampaignDecision(card, record) {
+    const decisionId = _rqDecisionId(record);
+    if (!decisionId) {
+        window.showToast?.('This card has lost its link to the decision — refresh and try again.', 'error');
+        return;
+    }
+    const ok = window.confirm(
+        'Approve this decision?\n\n'
+        + 'Your other assistants will be briefed straight away and this campaign\'s task budget is '
+        + 'committed to the work. Everything they produce still comes back to you for approval '
+        + 'before anything is published or sent.',
+    );
+    if (!ok) return;
+
+    const buttons = card.querySelectorAll('button');
+    buttons.forEach((b) => { b.disabled = true; });
+    try {
+        const res = await fetch('/.netlify/functions/campaigns', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ action: 'decide', decisionId, verdict: 'approve' }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not approve that.');
+
+        // Built from the SERVER's answer, never from the click. placeOrder can refuse an individual
+        // order (the campaign's budget, the plan cap, a missing assistant) and still return 200 for
+        // the decision, so "approved" and "briefed" are not the same fact and must not be reported
+        // as one. chat-claims-drafts-it-never-saved is the receipt for reporting intent as outcome.
+        const placed = Array.isArray(data.orders) ? data.orders : [];
+        const issued = placed.filter((p) => p && p.orderId).length;
+        const refused = placed.length - issued;
+        window.showToast?.(
+            !placed.length ? 'Approved. No briefs were issued.'
+                : refused ? `Approved — ${issued} of ${placed.length} briefs issued. See the Orders tab for the rest.`
+                    : `Approved — ${issued} ${issued === 1 ? 'brief' : 'briefs'} issued. Track them in the Orders tab.`,
+        );
+        await _detailRqRenderGroups(_detailRqCurrentStatus);
+    } catch (e) {
+        buttons.forEach((b) => { b.disabled = false; });
+        window.showToast?.(e.message || 'Could not approve that.', 'error');
+    }
+}
+
+/**
+ * Rejecting a campaign decision. The reason is REQUIRED, and unlike the lead strip below there is
+ * no Skip.
+ *
+ * The difference is that this one has a consumer and the lead one does not. campaigns.ts writes the
+ * reason into the campaign's constraint set, renderCampaignConstraints() turns that set into prose,
+ * and campaign-directive.ts puts the prose in the prompt that generates the next proposal — so the
+ * answer genuinely does change what the assistant proposes next. That is the whole bargain of
+ * lead-rejection-teaches-nothing: capture a reason only where something reads it, and where
+ * something does read it, do not let the user skip past.
+ *
+ * Shown BEFORE the rejection commits, not after. The lead strip appears post-hoc because the lead
+ * is already rejected either way; here the reason is part of the write, so cancelling must leave
+ * the decision pending rather than rejected-without-a-reason.
+ */
+function _rqRejectCampaignDecision(card, record) {
+    const C = window.CampaignConstants;
+    if (!C || !Array.isArray(C.rejectReasons)) {
+        // The server would refuse a reasonless reject with a 400 anyway. Failing loudly here beats
+        // sending the user into an error they cannot act on.
+        window.showToast?.('Could not load the rejection reasons — refresh and try again.', 'error');
+        return;
+    }
+    if (card.querySelector('[data-cd-reject]')) return;   // already open
+
+    const strip = document.createElement('div');
+    strip.className = 'mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2';
+    strip.setAttribute('data-cd-reject', String(record.id));
+    const chip = 'px-2 py-1 text-[11px] font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 transition cursor-pointer';
+    strip.innerHTML = `
+      <p class="text-[11px] font-bold text-gray-700">Why are you turning this down?</p>
+      <p class="text-[11px] text-gray-500 mb-2">This is what stops it proposing the same thing again, so it is not optional.</p>
+      <div class="flex flex-wrap gap-1.5">
+        ${C.rejectReasons.map((r) => `<button type="button" class="${chip}" data-cd-reason="${_rqEsc(r)}">${_rqEsc(C.rejectReasonLabel(r))}</button>`).join('')}
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-400 hover:text-gray-600 transition cursor-pointer" data-cd-cancel>Cancel</button>
+      </div>
+      <p class="hidden text-[11px] font-semibold mt-1.5" data-cd-status></p>`;
+
+    const status = strip.querySelector('[data-cd-status]');
+    strip.querySelector('[data-cd-cancel]').addEventListener('click', () => strip.remove());
+    strip.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-cd-reason]');
+        if (!btn) return;
+        strip.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+        status.classList.remove('hidden');
+        status.textContent = 'Saving…';
+        status.className = 'text-[11px] font-semibold text-gray-500 mt-1.5';
+        try {
+            // decisionId, not the record id: the mirror row and the decision are different tables.
+            // The mirror stashes the decision id in its data payload at write time.
+            const decisionId = _rqDecisionId(record);
+            if (!decisionId) throw new Error('This card has lost its link to the decision.');
+            const res = await fetch('/.netlify/functions/campaigns', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    action: 'decide',
+                    decisionId: Number(decisionId),
+                    verdict: 'reject',
+                    reason: btn.getAttribute('data-cd-reason'),
+                }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Could not record that.');
+            window.showToast?.('Turned down — it will take this into account next time.');
+            // The server settled the mirror row too, so the card on screen is stale. Re-render the
+            // whole column rather than patching this one: a card still reading "pending" beside a
+            // rejected decision is the same lie in the other direction.
+            //
+            // Awaited for the same reason the generic handler awaits it — _detailRqRenderGroups
+            // rebuilds every card, and anything touched before it settles is attached to a node
+            // that is about to be replaced.
+            await _detailRqRenderGroups(_detailRqCurrentStatus);
+        } catch (err) {
+            strip.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+            status.textContent = err.message || 'Could not record that.';
+            status.className = 'text-[11px] font-semibold text-red-600 mt-1.5';
+        }
+    });
+
+    card.appendChild(strip);
+}
+
 function _rqShowRejectReasonStrip() {
     const pending = _rqPendingReject;
     _rqPendingReject = null;
@@ -1633,7 +1780,19 @@ window._detailRqRecordAct = async function (btn, action) {
 
     let chaseWhen = null;
     if (action === 'saveEmail' || action === 'saveAttendees') { /* patch.data set above — no lifecycle change */ }
-    else if (action === 'approve') patch.approvalStatus = 'approved';
+    else if (action === 'approve') {
+        // Same split as reject below, and the consequence of getting it wrong is larger. The
+        // generic PATCH only flips the mirror row's approval_status; it is campaigns.ts `decide`
+        // that actually PLACES THE ORDERS. Approving through the generic path would show the user
+        // a card marked approved while no assistant was ever briefed and no work was ever done —
+        // the failure mode chat-claims-drafts-it-never-saved is named after, on a bigger surface.
+        const decisionRec = _rqRecordsById.get(patch.id);
+        if (decisionRec?.recordType === 'campaign_decision') {
+            _rqApproveCampaignDecision(card, decisionRec);
+            return;
+        }
+        patch.approvalStatus = 'approved';
+    }
     else if (action === 'outreachSent') {
         // First outreach has gone out → move the approved lead to a chase reminder (default 3
         // days out, 09:00) that lands on the Calendar.
@@ -1642,6 +1801,20 @@ window._detailRqRecordAct = async function (btn, action) {
         patch.scheduledFor = chaseWhen.toISOString();
     }
     else if (action === 'reject') {
+        // Campaign decisions do NOT go through the generic records PATCH. Their authoritative row
+        // is campaign_decisions; assistant_records only mirrors it so the Review Queue can draw a
+        // card. PATCHing the mirror would flip the card to rejected while the real decision stayed
+        // 'pending' — it would still be approvable by anything reading the source of truth, and the
+        // reason (which is what makes rejection a feedback loop rather than a status flip) would
+        // never be captured at all.
+        //
+        // campaigns.ts `decide` REQUIRES a reason and updates the mirror itself via
+        // settleDecisionMirror, so this branch takes over completely and returns.
+        const decisionRec = _rqRecordsById.get(patch.id);
+        if (decisionRec?.recordType === 'campaign_decision') {
+            _rqRejectCampaignDecision(card, decisionRec);
+            return;
+        }
         patch.approvalStatus = 'rejected';
         // Queued, not shown: the strip goes up only once the rejection has actually committed, and
         // the card is rebuilt in between. Cleared in the catch below for the same reason the edit
@@ -3188,6 +3361,22 @@ function _applyDashboardRegistry(data) {
     if (kb) {
         setText('kb-tab-label', kb.label);
         window.AssistantKnowledgeBase?.init({ kb, assistantId: data.id });
+    }
+
+    // Campaigns tab — Campaign Assistant only (campaignsTab: campaign_orchestrator): one row per
+    // campaign, and the only place a campaign can be started. init() loads eagerly because its
+    // counts drive both the tab badge AND the Budget & Control strip, which sits above the tab bar
+    // and is therefore visible from tabs that never activate this one. The panel itself renders
+    // lazily on first _activateMainTab('campaigns').
+    const campaignsTab = cfg.campaignsTab;
+    toggle('maintab-btn-campaigns', !!campaignsTab);
+    if (campaignsTab) {
+        setText('campaigns-tab-label', campaignsTab.label || 'Campaigns');
+        window.AssistantCampaigns?.init({ assistantId: data.id, cfg: campaignsTab });
+    } else {
+        // The strip lives outside the tab, so hiding the tab button is not enough to hide it. Every
+        // other role must never see a capacity meter for a feature it does not have.
+        document.getElementById('campaign-control-strip')?.classList.add('hidden');
     }
 
     // Signal Inbox tab — lead roles only (signalInbox: lead_qualifier): everything that came IN

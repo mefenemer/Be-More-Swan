@@ -85,6 +85,27 @@ export const LEAD_REJECT_REASONS_FOR_TARGETING: readonly LeadRejectReason[] = [
     'competitor', 'not_a_business', 'wrong_industry', 'too_small', 'too_large', 'wrong_geography',
 ];
 
+/**
+ * How many rejections sharing one reason before the Strategy Agent may propose a retarget.
+ *
+ * Eight, not the edit proposer's five. A rejection is ONE CLICK; an edit is a rewrite someone
+ * actually performed. The same number would treat a much weaker signal as equally decisive.
+ */
+export const MIN_REJECT_SAMPLE = 8;
+
+/**
+ * ⚠️ THE BURST GUARD, and the reason a raw threshold is not enough.
+ *
+ * A reviewer working through one bad run rejects twenty leads in a sitting. Every threshold clears
+ * instantly, from a single search that was misconfigured once — and the proposer would rewrite the
+ * persona for ALL of that assistant's campaigns on the strength of it. So a cluster must also be
+ * spread: either it spans more than one campaign, or it accumulated over more than one day.
+ *
+ * "The same complaint, twice, independently" is the actual signal. One afternoon of clicking is not.
+ */
+export const MIN_REJECT_CAMPAIGNS = 2;
+export const MIN_REJECT_SPREAD_DAYS = 2;
+
 const REASON_SET: ReadonlySet<string> = new Set(LEAD_REJECT_REASONS);
 
 /** Narrow an untyped value (a JSON body, a DB row) to the union. */

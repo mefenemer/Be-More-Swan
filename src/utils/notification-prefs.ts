@@ -184,12 +184,16 @@ export function categoryForType(type: string): PrefCategory {
 // ── Role-aware applicability of scope:'assistant' categories ──────────────────
 // Some assistant-scope categories only make sense for roles that publish content.
 // Non-publishing roles (Lead Generator, AR Clerk, Tier-1 Support, CRM Enricher,
-// Meeting Note-Taker) never draft or publish posts, so those categories are hidden
+// Meeting Note-Taker, Campaign Assistant) never draft or publish posts, so those categories are hidden
 // in the UI and rejected on write. This is the single source of truth; the frontend
 // registry mirrors it via the `hasContentPublishing` module flag
 // (src/components/assistant-dashboard-registry.js). Keep the two in sync.
 // blog_writer joined 2026-07-18 with Blog Autopilot: it now drafts on a cadence and publishes via
 // publish-blog-posts, so it produces exactly the draft/publish notifications this category covers.
+// ⚠️ campaign_orchestrator is absent DELIBERATELY, and it is the one role where that looks wrong.
+// It causes posts and articles to exist, so "it should get content notifications" is a reasonable
+// first instinct — but the drafts are produced BY the Social Media and Blog Writing assistants and
+// already notify against those. Adding it here would send every user two alerts for one draft.
 export const PUBLISHING_ROLE_KEYS: ReadonlySet<string> = new Set(['social_media_manager', 'blog_writer']);
 
 // Assistant-scope categories that only apply to publishing roles, keyed by category key.

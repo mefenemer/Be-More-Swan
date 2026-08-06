@@ -552,6 +552,18 @@
   </div>
   <!-- ── end overview stack ── -->
 
+  <!-- ── Budget & Control strip — Campaign Assistant only ────────────────────────
+       Sits BELOW the KPI grid and ABOVE the tab bar, so it is visible on every tab. This is the
+       only assistant that commits the workspace's monthly allowance across other assistants, so
+       the two things a user must always be able to see — how much capacity is committed, and how
+       to stop everything — must not be inside a tab they might not be on.
+
+       Empty and hidden until assistant-campaigns.js fills it. There is deliberately no MONEY
+       block: Phase 1 campaigns are organic and budgeted in tasks, and rendering "£0" would put a
+       price on a screen where no money moves (discovery-spend-cap-is-operator-only). The money
+       block arrives with the paid rails in Phase 3, not before. -->
+  <div id="campaign-control-strip" class="hidden mb-8"></div>
+
   <!-- ── Main tab bar ───────────────────────────────────────────────
        Top-level sections. Configuration nests the existing child tab control. -->
   <!-- overflow-y-hidden is load-bearing: `overflow-x: auto` alone makes the computed overflow-y
@@ -570,6 +582,18 @@
            social signals once a Social Media Assistant is also hired (Phase 1b). Sits FIRST because
            it is the top of the funnel. Hidden by default, shown by _applyDashboardRegistry.
            assistant-signal-inbox.js → signal-inbox.ts. Design: docs/lead-generator-revenue-engine-plan.md -->
+      <!-- Campaigns — Campaign Assistant only (campaignsTab: campaign_orchestrator). One row per
+           campaign, each stating what it is doing right now. Sits FIRST for the same reason the
+           Signal Inbox does on the Lead Generator: it is the top of this role's funnel and the only
+           place a campaign can be started. Hidden by default, shown by _applyDashboardRegistry.
+           assistant-campaigns.js → campaigns.ts. Design: docs/campaign-orchestrator-plan.md §3.3 -->
+      <button type="button" id="maintab-btn-campaigns" data-maintab="campaigns" class="main-tab-btn hidden">
+        <span id="campaigns-tab-label">Campaigns</span>
+        <!-- Same trap as the signals badge below: `hidden` loses to `inline-flex` (equal
+             specificity, emitted later in style.css), so the starting state is pinned inline too.
+             Without it an empty amber pill shows until the first count lands. -->
+        <span id="campaigns-live-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
+      </button>
       <button type="button" id="maintab-btn-signals" data-maintab="signals" class="main-tab-btn hidden">
         <span id="signals-tab-label">Searches</span>
         <!-- `hidden` loses to `inline-flex` (equal specificity, emitted later in style.css), so the
@@ -816,6 +840,14 @@
 
   <!-- Signal Inbox — lead roles only. Rendered lazily by assistant-signal-inbox.js on first
        activation (the list is a real query; there is no point paying for it on every page load). -->
+  <!-- Campaigns — Campaign Assistant only. Rendered lazily by assistant-campaigns.js on first
+       activation; the list is a real query and there is no point paying for it on every page load.
+       (init() does fetch eagerly, but only the light summary that drives the tab badge and the
+       control strip above.) -->
+  <div id="maintab-campaigns" class="main-tab-content hidden">
+    <div id="campaigns-host"></div>
+  </div><!-- /maintab-campaigns -->
+
   <div id="maintab-signals" class="main-tab-content hidden">
     <div id="signal-inbox-host"></div>
   </div><!-- /maintab-signals -->

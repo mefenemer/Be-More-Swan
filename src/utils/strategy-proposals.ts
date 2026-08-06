@@ -25,7 +25,7 @@
 import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
-    aiAssistants, auditLogs, discoveryCampaigns, strategyProposals, templateFeedback,
+    aiAssistants, auditLogs, discoveryCampaigns, leadRejectFeedback, strategyProposals, templateFeedback,
 } from '../../db/schema';
 import {
     PROPOSAL_EXPIRY_DAYS, isProposalSource, isRejectReason, isValidValueFor, tunableField,
@@ -225,7 +225,13 @@ async function recompileFor(assistantId: number, userId: number | null): Promise
 // ── Banking the evidence ─────────────────────────────────────────────────────
 
 /**
- * Mark the `template_feedback` rows that funded an edit-pattern proposal as spent.
+ * Mark the evidence rows that funded a proposal as spent.
+ *
+ * ⚠️ TWO EVIDENCE TABLES, TWO KEYS. `feedbackIds` are template_feedback rows (edit_pattern);
+ * `rejectionIds` are lead_reject_feedback rows (lead_rejection). They are deliberately different
+ * keys rather than one `ids` field discriminated by source: both are bare integer arrays, so a
+ * mix-up would not throw — it would silently mark eight UNRELATED rows in the other tenant-shared
+ * table as spent, permanently, and the only symptom would be a proposal that never comes back.
  *
  * ⚠️ Without this the SAME edits fund a proposal every week forever. The partial unique index only
  * prevents a second PENDING proposal for the field, so the moment one is applied or declined the
@@ -239,18 +245,30 @@ async function recompileFor(assistantId: number, userId: number | null): Promise
  * suggestion later, not a wrong strategy now.
  */
 async function bankEvidence(db: Db, evidence: unknown): Promise<void> {
-    const ids = (evidence && typeof evidence === 'object'
-        ? (evidence as Record<string, unknown>).feedbackIds
-        : null);
-    if (!Array.isArray(ids) || ids.length === 0) return;
-    const clean = ids.filter((n): n is number => Number.isInteger(n));
-    if (!clean.length) return;
-    try {
-        await db.update(templateFeedback)
-            .set({ appliedToTemplate: true })
-            .where(inArray(templateFeedback.id, clean));
-    } catch (err) {
-        console.error('[strategy-proposals] could not bank the feedback rows; they may fund a duplicate proposal', err);
+    const blob = (evidence && typeof evidence === 'object' ? evidence as Record<string, unknown> : {});
+    const intsOf = (v: unknown): number[] =>
+        Array.isArray(v) ? v.filter((n): n is number => Number.isInteger(n)) : [];
+
+    const feedbackIds = intsOf(blob.feedbackIds);
+    if (feedbackIds.length) {
+        try {
+            await db.update(templateFeedback)
+                .set({ appliedToTemplate: true })
+                .where(inArray(templateFeedback.id, feedbackIds));
+        } catch (err) {
+            console.error('[strategy-proposals] could not bank the feedback rows; they may fund a duplicate proposal', err);
+        }
+    }
+
+    const rejectionIds = intsOf(blob.rejectionIds);
+    if (rejectionIds.length) {
+        try {
+            await db.update(leadRejectFeedback)
+                .set({ appliedToTarget: true })
+                .where(inArray(leadRejectFeedback.id, rejectionIds));
+        } catch (err) {
+            console.error('[strategy-proposals] could not bank the rejection rows; they may fund a duplicate proposal', err);
+        }
     }
 }
 

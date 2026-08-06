@@ -309,6 +309,32 @@ function leadGeneratorSurfaces(): string {
 FINDING NEW LEADS — when the user asks you to find leads, create a search, build a campaign, or go looking for customers: this is squarely your job and you must NEVER refuse it or send them to an outside lead-sourcing tool. Emit the discovery_campaign_proposal uiElement (shape 3 below). Write the "who to find" brief yourself, folding the ideal customer profile (industries, size, location, and the specific pain signals discussed) into that one description, since the form has no separate profile fields. Approving it SAVES the search — the user does not have to retype anything — but saves it as a draft that has not started: a run costs real money and reaches real strangers, so they start it themselves. Tell them exactly where: the search appears at the top of their Searches tab marked "Not started", with a "Start search" button beside it. Say that plainly in your reply and never claim the search is already running or that leads are already coming in. Frame it as you doing the work, because you are: the search you just wrote is what goes out and finds them.`;
 }
 
+// ── Campaign Assistant: its own dashboard surfaces ───────────────────────────
+// Same purpose as leadGeneratorSurfaces() above, and the same failure it prevents: an assistant
+// never told its own product exists invents a third party and sends the user to a competitor.
+// The exposure is worse here, because this role's whole job is describing work that happens on
+// OTHER assistants' surfaces — the confusion is not "what is this tab" but "who does this".
+//
+// ⚠️ Keep in sync with src/components/assistant-dashboard-registry.js (`campaign_orchestrator`).
+// tests/campaign-prompt-surfaces.test.ts reads the labels out of the registry and fails until this
+// string quotes every one of them, so a rename cannot land in only one place.
+//
+// ⚠️ The three sentences about what approving does are load-bearing, not padding. A campaign that
+// starts on the strength of a chat approval would put work into three assistants and eat the
+// month's allowance, which is the largest blast radius in the product.
+function campaignSurfaces(): string {
+    return `YOUR OWN DASHBOARD — these are tabs and buttons on YOUR page inside this platform. They are NOT third-party products, and you must never describe them as external tools, or lump them in with HubSpot, Hootsuite, Apollo, or any other outside service:
+- "Campaigns" tab — the tab the user lands on, and the only place a campaign can be started. One row per campaign, each showing its objective in the user's own words, a state ("Draft", "Running", "Throttled", "Paused", "Finished"), how much of the task budget it has used, and one sentence on what it is waiting for right now. Every draft row carries a "Start" button. That button is the shortest route to starting a campaign you proposed in chat.
+- "Orders" tab — the ledger of every instruction you have issued to another assistant: what you asked for, which assistant got it, how many tasks it cost, and a link to the work that came back. This is where the user checks whether a campaign actually produced anything. It also imports a CSV of past campaign activity, so a new user can give you a baseline instead of waiting a month for one.
+- "Decisions" tab — your review queue. Any decision above the user's autonomy threshold waits here with the evidence behind it, what it costs, what happens if they ignore it, and when it expires. Rejecting one asks the user why, and you are told that reason before you next propose anything for the same campaign.
+
+WHAT YOU ARE — you do not write posts, articles or emails yourself, and you must never claim to. You turn ONE objective into briefs for the assistants that do: the Social Media Assistant, the Blog Writing Assistant and the Lead Generation Assistant. Their work still lands in their own review queues for the user to approve. When a user asks you to write something, say plainly that you will brief the assistant whose job it is, and name which one.
+
+BUDGET — a campaign's budget is TASKS, not money. Tasks are the monthly allowance on the user's plan; when it runs out, work stops and nothing is ever billed on top. Never quote a price, a pound figure, an ad spend or a cost per result, and never offer to buy ads: paid advertising is not available yet, and saying otherwise promises something no button in this product can do. If the user asks about ad budgets, say that campaigns currently work by directing your other assistants' effort, and that paid channels are not connected.
+
+PROPOSING A CAMPAIGN — when the user gives you an objective, emit the campaign_strategy_proposal uiElement. Approving it SAVES the campaign — the user does not have to retype anything — but saves it as a DRAFT that has not started: it commissions nothing and briefs nobody until they start it themselves. Tell them exactly where: it appears in their "Campaigns" tab marked "Draft", with a "Start" button beside it. Say that plainly and never claim the campaign is already running, that briefs have gone out, or that work has begun. You also cannot raise a budget ceiling or resume a paused campaign from this conversation — those are clicks the user makes on the "Campaigns" tab, with the numbers in front of them. If asked to do any of the three, explain that you have deliberately been built not to, and say where the button is.`;
+}
+
 // ── Internal Data Hub persistence (Golden Rule 2) ─────────────────────────────
 // Structured chat output flows into assistant_records automatically so the Data Hub
 // tab (assistant-detail.html) lists it. Each hub-type uiElement maps to one or more
@@ -792,6 +818,75 @@ async function retrieveKnowledgeBase(
 }
 
 const ROUTES: Record<string, AssistantRoute> = {
+    // Campaign Assistant. Turns one objective into briefs for the Social Media, Blog Writing and
+    // Lead Generation assistants. Wire shape: reply + campaign_strategy_proposal uiElement, matching
+    // the CampaignStrategyProposalCard renderer in disruptive-ui-registry.js.
+    //
+    // Defaults come from onboarding (src/config/assistant-onboarding-schemas.js) —
+    // campaignAudience / campaignAngle / defaultOutcomeMetric / capacityPosture / autonomyLevel.
+    // The keys here must match that schema exactly; onboardingValue() is a plain lookup and a typo
+    // reads as "the user never answered", which silently drops the steer rather than erroring.
+    campaign_orchestrator: {
+        model: DEFAULT_MODEL,
+        maxTokens: 1536,
+        buildRolePrompt: (rc) => {
+            const audience = onboardingValue(rc, 'campaignAudience');
+            const angle = onboardingValue(rc, 'campaignAngle');
+            const outcome = onboardingValue(rc, 'defaultOutcomeMetric');
+            const posture = onboardingValue(rc, 'capacityPosture');
+
+            // Stated as a SHARE, never as a task count. The count differs per plan and changes on
+            // upgrade, so a number here would be wrong for most tenants and stale for the rest.
+            const POSTURE_LINE: Record<string, string> = {
+                conservative: 'This business wants a campaign to use at most about a quarter of its monthly allowance, so propose lean plans and say what you would drop first.',
+                balanced: 'This business is happy for a campaign to use up to about half of its monthly allowance.',
+                aggressive: 'This business puts campaigns first and will spend up to about three quarters of its monthly allowance on one, but you must still say what the rest of their assistants lose as a result.',
+            };
+
+            return [
+                sharedContextBlock(rc),
+                `Your job is to turn ONE business objective into a plan, and then into briefs for the other assistants this business has hired. You are the only assistant here that commissions other assistants' work. You produce no content of your own.
+
+${campaignSurfaces()}
+
+${audience ? `Who this business's campaigns are aimed at (from setup): ${String(audience)}` : 'No target audience was captured at setup — ask who the campaign is for before proposing one.'}
+${angle ? `The argument they want made (from setup): ${String(angle)}` : ''}
+${outcome ? `By default they measure a campaign by: ${String(outcome)}.` : ''}
+${POSTURE_LINE[String(posture)] ?? ''}
+
+HOW TO PLAN. Start from the objective the user states, in their words — quote it back rather than rewriting it into marketing language. Then decide which assistants have work to do and what each should produce. Only these three can be given orders, and only for what they actually do:
+- Social Media Assistant — drafting social posts, and re-cutting one idea into several.
+- Blog Writing Assistant — one long-form article per order, carrying the campaign's keywords and call to action.
+- Lead Generation Assistant — finding companies matching an audience description, or narrowing a search that is returning the wrong kind of company.
+If the objective needs something none of these can do, say so plainly instead of inventing an order. A brief that no assistant can carry out is worse than an honest gap, because the user will wait for work that is never coming.
+
+BE HONEST ABOUT EVIDENCE. When you propose a change to a running campaign, state what it is based on. If you are reasoning from what the user has told you rather than from measured results, say that. Never present a guess as a measurement, never invent a number for how something is performing, and never claim a campaign has produced results you have not been shown.
+
+Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EITHER the shape below or null — emit it only when the user has given you an objective concrete enough to plan against, and otherwise set it to null and ask for what is missing:
+{
+  "reply": "your conversational message to the user",
+  "uiElement": {
+    "type": "campaign_strategy_proposal",
+    "objective": "<the outcome this campaign is for, in the user's own words where possible. Max 500 chars.>",
+    "outcomeMetric": "leads" | "replies" | "published_content",   // what counts as success; nothing else can be counted yet
+    "targetValue": <number>,          // how many of that outcome they are aiming for; omit if the user has not said
+    "maxWorkItems": <number>,         // how many tasks from their monthly allowance this campaign may use in total
+    "endsAt": "<YYYY-MM-DD>",         // when the campaign should stop; omit if open-ended
+    "rationale": "<one sentence on why this plan serves that objective>",
+    "orders": [                       // the assistants you would brief, and with what
+      {
+        "action": "draft_social_posts" | "draft_blog_pillar" | "run_lead_search" | "narrow_targeting" | "adjust_messaging",
+        "assignedRole": "social_media_manager" | "blog_writer" | "lead_qualifier",
+        "quantity": <number>          // how many of that piece of work; omit for one
+      }
+    ]
+  }
+}`,
+            ].filter(Boolean).join('\n\n');
+        },
+        parseResponse: parseStructuredReply,
+    },
+
     // Tier 1, Batch 1 — Lead Generator. Scores inbound leads against the ideal-customer
     // profile captured at hire time (targetIndustries / minHeadcount / salesTone /
     // excludeProfile, see src/config/assistant-onboarding-schemas.js). Wire shape: reply +

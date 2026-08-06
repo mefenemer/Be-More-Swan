@@ -41,6 +41,16 @@
       { title: 'The Publishing Faff', text: 'Even once a post is written, formatting it, adding images and getting it live on our site is a fiddly manual job I keep putting off.' },
     ],
 
+    // Every one of these is about COORDINATION, not production — the pain of running several
+    // assistants toward one goal. A suggestion here about writing posts or finding leads would
+    // describe the Social Media or Lead Generation assistant, and the user would hire the wrong one.
+    campaign_orchestrator: [
+      { title: 'The Uncoordinated Push', text: 'When we launch something, the posts, the blog and the outreach all say slightly different things, because I brief each one separately and nothing joins them up.' },
+      { title: 'The Objective That Never Lands', text: 'I set a target for the quarter, and then everything my assistants produce is exactly what they would have made anyway — the goal never actually changes the work.' },
+      { title: 'The Blind Allocation', text: 'I have no idea whether the effort is going to the thing that is working. By the time I can tell, the month is over and the allowance is spent.' },
+      { title: 'The Never-Ending Adjustment', text: 'Something is clearly not landing, but working out which part to change — the message, the audience, the channel — and then re-briefing everyone takes longer than the campaign.' },
+    ],
+
     lead_qualifier: [
       { title: 'The Cold-Lead Time Sink', text: 'I spend hours every week researching inbound leads and manually deciding which ones are actually worth my sales team’s time.' },
       { title: 'The Inconsistent Scoring Problem', text: 'Every lead gets qualified differently depending on who picks it up, so good prospects slip through and weak ones eat up our calendar.' },

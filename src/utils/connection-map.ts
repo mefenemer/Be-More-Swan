@@ -43,6 +43,15 @@ export const ROLE_CONNECTIONS: Record<string, string[]> = {
     // Legacy-only role with no catalog twin (kept canonical; hidden from the catalog)
     paid_ads:                  ['social'],
     // Catalog roleKeys (seed-catalog.ts)
+    //
+    // The Campaign Assistant reaches every channel THROUGH another assistant — it publishes
+    // nothing and reads no external account directly, so it needs no connector of its own.
+    // The empty array is the point: an EMPTY policy is enforced (nothing is allowed), whereas a
+    // MISSING roleKey falls through to the display-name keyword fallback and, if that returns
+    // nothing, is treated as unrestricted. "Orchestrator" would keyword-match nothing, so
+    // omitting this line would fail OPEN and hand the one assistant that commands the others a
+    // connection policy of "anything". Do not delete it because it looks empty.
+    campaign_orchestrator:     [],
     social_media_manager:      ['social', 'design'],
     review_reputation_manager: ['reviews', 'social'],
     inbox_manager:             ['email'],

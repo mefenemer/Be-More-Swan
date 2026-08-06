@@ -93,6 +93,89 @@
         ],
       },
     ],
+    // Campaign Assistant — the only role whose output is other assistants' work. Its onboarding
+    // captures the DEFAULTS every new campaign inherits, not one campaign's brief: a campaign is
+    // created on the Campaigns tab and carries its own objective.
+    //
+    // ⚠️ No money is asked for anywhere in here, and that is deliberate rather than an omission.
+    // Phase 1 campaigns are organic-only and the budget they allocate is CAPACITY — the plan's
+    // monthly task allowance, already hard-capped server-side by atomicCapCheck. A £ field would be
+    // a control that renders, promises and can never return a value, which is the exact bug the
+    // paid rails are being held back to avoid (docs/campaign-orchestrator-plan.md §1.1).
+    campaign_orchestrator: [
+      {
+        title: 'What are your campaigns for?',
+        description: 'Your Campaign Assistant turns one objective into briefs for your other assistants. These answers become the starting point for every campaign you create — you can change them per campaign.',
+        fields: [
+          {
+            key: 'campaignAudience',
+            label: 'Who are your campaigns aimed at?',
+            type: 'text',
+            required: true,
+            placeholder: 'e.g. Operations managers at UK construction firms, 20–200 staff',
+            helpText: 'Carried into every brief this assistant writes, so the work your other assistants produce is aimed at the same people.',
+          },
+          {
+            key: 'campaignAngle',
+            label: 'What should campaigns lead with?',
+            type: 'textarea',
+            required: false,
+            placeholder: 'e.g. We save site managers a day a week on compliance paperwork.',
+            helpText: 'Optional. The argument you want made. Leave blank and each campaign sets its own — this is only the default.',
+          },
+        ],
+      },
+      {
+        title: 'Operational set-up',
+        description: 'How your Campaign Assistant runs day to day — what it measures, how much of your monthly allowance one campaign may use, and when it has to ask you first.',
+        operational: true,
+        fields: [
+          {
+            // Must stay in step with CAMPAIGN_OUTCOME_METRICS in src/config/campaign-vocab.ts,
+            // minus UNAVAILABLE_OUTCOME_METRICS. `signups` is deliberately absent: nothing counts
+            // it until the Phase 2 capture page exists, and an outcome that always reads zero is
+            // worse than one the user did not pick.
+            key: 'defaultOutcomeMetric',
+            label: 'How should a campaign measure success?',
+            type: 'dropdown',
+            required: true,
+            placeholder: 'Choose what to count…',
+            options: [
+              { value: 'leads', label: 'New leads found' },
+              { value: 'replies', label: 'Replies from prospects' },
+              { value: 'published_content', label: 'Pieces published' },
+            ],
+          },
+          {
+            // The capacity budget, expressed as a share of the monthly allowance rather than a
+            // raw number — the number differs per plan and changes when a plan changes, so a
+            // stored integer would silently mean something different after an upgrade.
+            key: 'capacityPosture',
+            label: 'How much of your monthly allowance may one campaign use?',
+            type: 'radio',
+            required: true,
+            options: [
+              { value: 'conservative', label: 'Up to a quarter', description: 'Leaves most of your allowance for everyday work outside campaigns.' },
+              { value: 'balanced', label: 'Up to a half', description: 'A campaign and your routine work share the month evenly.' },
+              { value: 'aggressive', label: 'Up to three quarters', description: 'Campaigns come first. Your other assistants will have less room in the same month.' },
+            ],
+          },
+          {
+            // The autonomy gate. Note that NONE of these settings can authorise starting a spend,
+            // raising a ceiling or resuming a paused campaign — those three always need a human
+            // click on the campaign surface, whatever is chosen here.
+            key: 'autonomyLevel',
+            label: 'When should it act without asking?',
+            type: 'radio',
+            required: true,
+            options: [
+              { value: 'propose_only', label: 'Ask me about everything', description: 'Every brief waits in your Decisions queue until you approve it.' },
+              { value: 'reallocate_freely', label: 'Let it move work between assistants', description: 'It can shift the remaining allowance between your assistants on its own. Starting a campaign, raising a limit and resuming a paused campaign still need you.' },
+            ],
+          },
+        ],
+      },
+    ],
     // Tier 1, Batch 1 — Lead Generator. Captures the ideal customer profile the
     // orchestrator scores every inbound lead against, then how it runs operationally.
     lead_qualifier: [

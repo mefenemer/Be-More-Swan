@@ -3072,6 +3072,7 @@ export const assistantRecords = pgTable("assistant_records", {
   // The per-org assistant INSTANCE that produced/owns this record.
   aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
   // 'lead' | 'enrichment' | 'meeting' | 'invoice' | 'ticket' | 'lead_idea'
+  // | 'campaign_order' | 'campaign_decision'  (Campaign Assistant — db/campaign-records.sql)
   recordType: text("record_type").notNull(),
   // Display name + dedupe key within (assistant, recordType): lead/company name,
   // enriched record name, meeting title, invoice client, ticket subject.
@@ -3099,7 +3100,7 @@ export const assistantRecords = pgTable("assistant_records", {
   index("assistant_records_org_assistant_type_idx").on(t.organisationId, t.aiAssistantId, t.recordType),
   // Hot path for the Review Queue tab: one assistant's records of one type filtered by approval gate.
   index("assistant_records_approval_idx").on(t.organisationId, t.aiAssistantId, t.recordType, t.approvalStatus),
-  check("assistant_records_type_check", sql`${t.recordType} IN ('lead', 'enrichment', 'meeting', 'invoice', 'ticket', 'lead_idea')`),
+  check("assistant_records_type_check", sql`${t.recordType} IN ('lead', 'enrichment', 'meeting', 'invoice', 'ticket', 'lead_idea', 'campaign_order', 'campaign_decision')`),
   check("assistant_records_source_check", sql`${t.source} IN ('chat', 'csv_import', 'integration', 'manual', 'agent')`),
   check("assistant_records_approval_check", sql`${t.approvalStatus} IN ('pending_approval', 'approved', 'scheduled', 'rejected')`),
 ]);
@@ -3785,7 +3786,7 @@ export const strategyProposals = pgTable("strategy_proposals", {
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
   aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "cascade" }),
 
-  // 'win_loss' | 'edit_pattern' | 'human'. MIN_SAMPLE means a different thing per source and the
+  // 'win_loss' | 'edit_pattern' | 'lead_rejection' | 'human'. MIN_SAMPLE means a different thing per source and the
   // evidence blob has a different shape, so the UI cannot honestly label a sample size without it.
   // 'human' is the synthetic source for §2.6's "Save as the new default", which routes a human's
   // own edit through the SAME apply path rather than building a second mechanism (§5.4).
@@ -3828,6 +3829,180 @@ export const strategyProposals = pgTable("strategy_proposals", {
   check("strategy_proposals_reject_reason_check", sql`${t.rejectReason} IS NULL OR ${t.rejectReason} IN ('sample_unrepresentative','already_tried','wrong_causation','off_brand','bad_timing','too_narrow','too_broad','other')`),
   check("strategy_proposals_rejected_has_reason_check", sql`${t.status} <> 'rejected' OR ${t.rejectReason} IS NOT NULL`),
   check("strategy_proposals_rollback_requires_apply_check", sql`${t.rolledBackAt} IS NULL OR ${t.appliedAt} IS NOT NULL`),
+]);
+
+// ── Campaign Assistant (roleKey `campaign_orchestrator`) ─────────────────────────────────────
+// SQL: db/campaigns.sql + db/campaign-records.sql (apply manually — no drizzle-kit push).
+// Design: docs/campaign-orchestrator-plan.md.
+//
+// A campaign allocates TWO budgets against one objective: `work` (pieces of work commissioned from
+// other assistants — posts, articles, searches; one work item == one artefact) and `money` (the
+// customer's own ad account — Phase 3, blocked on platform approvals; pinned to zero for organic).
+//
+// ⚠️ A work item is NOT a billing task. usage_counters.task_count is moved by chat turns and a few
+// on-demand buttons only — process-content-jobs.ts / generate-post.ts / process-discovery-jobs.ts
+// never call consumeTaskCredit. Denominating this budget in "tasks" would show the user a number
+// that measures nothing. The plan cap is read separately, as a gate. See db/campaigns.sql.
+//
+// The orchestrator produces nothing itself: its artefacts are ORDERS to other assistants and
+// DECISIONS a human approves. Both mirror into assistantRecords so the existing Data Hub and
+// Review Queue render them unchanged — the tables here stay the source of truth.
+export const campaigns = pgTable("campaigns", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  // The objective in the founder's own words — quoted verbatim into the generation directive.
+  objective: text().notNull(),
+  outcomeMetric: text("outcome_metric").notNull().default("leads"),
+  targetValue: integer("target_value"),
+  // 'organic' | 'paid' | 'blended'. Phase 1 creates only 'organic'; the others are refused at the
+  // HTTP boundary until the ad rails exist.
+  mode: text().notNull().default("organic"),
+  // 'draft' | 'active' | 'throttled' | 'paused' | 'finished' | 'archived'.
+  // 'throttled' (agent optimising, still running) and 'paused' (stopped) are deliberately
+  // distinct — a shared label hides which one happened.
+  status: text().notNull().default("draft"),
+  startsAt: timestamp("starts_at"),
+  endsAt: timestamp("ends_at"),
+  // What the human has already turned down, as counts per reason (CampaignConstraints).
+  // Written by the reject flow, read by the next proposal — src/config/campaign-reject-reasons.ts.
+  // This column is the reason the Reject button is a feedback loop and not a status flip.
+  constraints: jsonb().notNull().default({ rejections: {}, notes: [] }),
+  // A stopped campaign must say why (CHECK below). A pause with no recorded reason is a pause
+  // nobody can safely undo.
+  haltReason: text("halt_reason"),
+  haltedAt: timestamp("halted_at"),
+  haltedBy: integer("halted_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("campaigns_assistant_idx").on(t.organisationId, t.aiAssistantId, t.status),
+  index("campaigns_active_idx").on(t.status, t.endsAt).where(sql`status IN ('active','throttled')`),
+  check("campaigns_mode_check", sql`${t.mode} IN ('organic','paid','blended')`),
+  check("campaigns_status_check", sql`${t.status} IN ('draft','active','throttled','paused','finished','archived')`),
+  check("campaigns_halt_reason_check", sql`${t.status} <> 'paused' OR ${t.haltReason} IS NOT NULL`),
+]);
+
+// The two ceilings + the autonomy dial, one row per campaign.
+export const campaignBudgets = pgTable("campaign_budgets", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  campaignId: integer("campaign_id").notNull().references(() => campaigns.id, { onDelete: "cascade" }),
+  maxWorkItems: integer("max_work_items").notNull().default(100),
+  // ⚠️ Also guarded by a BEFORE trigger in db/campaigns.sql: an organic campaign cannot carry a
+  // non-zero money ceiling. The trigger is invisible to Drizzle — do not "clean it up".
+  maxSpendGbp: numeric("max_spend_gbp", { precision: 10, scale: 2 }).notNull().default("0.00"),
+  // A reallocation at or below this many work items happens on its own; larger ones become a
+  // decision. 0 (the default) means nothing is automatic.
+  autonomyThresholdWork: integer("autonomy_threshold_work").notNull().default(0),
+  // Runaway guards. Optimisation is divergent: a loop that reallocates every tick burns the whole
+  // allowance on churn. Enforced in the reallocation path, not by the database.
+  maxReallocationsPerDay: integer("max_reallocations_per_day").notNull().default(3),
+  minReallocationWork: integer("min_reallocation_work").notNull().default(3),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("campaign_budgets_campaign_uidx").on(t.campaignId),
+  check("campaign_budgets_max_work_check", sql`${t.maxWorkItems} > 0`),
+  check("campaign_budgets_spend_nonneg_check", sql`${t.maxSpendGbp} >= 0`),
+  check("campaign_budgets_autonomy_check", sql`${t.autonomyThresholdWork} >= 0`),
+]);
+
+// One instruction to one colleague. The orchestrator's only output.
+export const campaignOrders = pgTable("campaign_orders", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  campaignId: integer("campaign_id").notNull().references(() => campaigns.id, { onDelete: "cascade" }),
+  // Nullable instance id (it can be deleted) but the role key is kept, so a delivered order still
+  // reads correctly after the assistant is gone.
+  targetAssistantId: integer("target_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  targetRoleKey: text("target_role_key").notNull(),
+  // Closed vocabulary — src/config/campaign-vocab.ts, asserted by tests/campaign-vocab.test.ts.
+  action: text().notNull(),
+  brief: jsonb().notNull().default({}),
+  costWorkItems: integer("cost_work_items").notNull().default(0),
+  costGbp: numeric("cost_gbp", { precision: 10, scale: 2 }).notNull().default("0.00"),
+  status: text().notNull().default("queued"),
+  blockedOnOrderId: integer("blocked_on_order_id"),
+  // artefactKind names the table so the client builds the right link without a polymorphic guess.
+  artefactKind: text("artefact_kind"),
+  artefactId: integer("artefact_id"),
+  resultSummary: text("result_summary"),
+  // Best-effort Data Hub mirror. Nullable: a failed mirror must never fail the order.
+  assistantRecordId: integer("assistant_record_id").references(() => assistantRecords.id, { onDelete: "set null" }),
+  issuedAt: timestamp("issued_at"),
+  deliveredAt: timestamp("delivered_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("campaign_orders_campaign_idx").on(t.campaignId, t.status),
+  index("campaign_orders_org_idx").on(t.organisationId, t.createdAt),
+  index("campaign_orders_target_idx").on(t.targetAssistantId, t.status),
+  check("campaign_orders_status_check", sql`${t.status} IN ('queued','issued','in_review','delivered','blocked','cancelled','rejected')`),
+  check("campaign_orders_cost_check", sql`${t.costWorkItems} >= 0 AND ${t.costGbp} >= 0`),
+  check("campaign_orders_artefact_check", sql`${t.artefactKind} IS NULL OR ${t.artefactKind} IN ('scheduled_post','blog_post','discovery_campaign','assistant_record')`),
+  check("campaign_orders_no_self_block_check", sql`${t.blockedOnOrderId} IS NULL OR ${t.blockedOnOrderId} <> ${t.id}`),
+]);
+
+// APPEND-ONLY ledger of budget actually consumed. A correction is a new compensating row with a
+// negative amount, never an edit — history that can be rewritten cannot be audited.
+export const campaignSpendEvents = pgTable("campaign_spend_events", {
+  id: bigint({ mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  campaignId: integer("campaign_id").notNull().references(() => campaigns.id, { onDelete: "cascade" }),
+  orderId: integer("order_id").references(() => campaignOrders.id, { onDelete: "set null" }),
+  // 'work' | 'money'. Separate rows rather than two columns, so no query has to decide which of
+  // two amounts is the meaningful one.
+  currency: text().notNull(),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  reason: text().notNull(),
+  occurredAt: timestamp("occurred_at").defaultNow().notNull(),
+}, (t) => [
+  index("campaign_spend_campaign_idx").on(t.campaignId, t.currency, t.occurredAt),
+  check("campaign_spend_currency_check", sql`${t.currency} IN ('work','money')`),
+]);
+
+// What the human is asked to approve. Anything above the campaign's autonomy threshold lands
+// here INSTEAD of happening.
+export const campaignDecisions = pgTable("campaign_decisions", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  campaignId: integer("campaign_id").notNull().references(() => campaigns.id, { onDelete: "cascade" }),
+  // 'strategy' | 'reallocation' | 'escalation' | 'halt'
+  kind: text().notNull(),
+  title: text().notNull(),
+  // Structured so the numbers stay checkable instead of being prose a model can drift.
+  evidence: jsonb().notNull().default([]),
+  // The orders it would place. Applied verbatim — the model gets no second turn between the
+  // human's approval and execution.
+  proposed: jsonb().notNull().default({}),
+  // What happens if the user does nothing. A card without this is a demand, not a choice.
+  costOfInaction: text("cost_of_inaction"),
+  costWorkItems: integer("cost_work_items").notNull().default(0),
+  costGbp: numeric("cost_gbp", { precision: 10, scale: 2 }).notNull().default("0.00"),
+  status: text().notNull().default("pending"),
+  // Closed vocabulary — src/config/campaign-reject-reasons.ts. This column is a GROUP BY key, so
+  // free text is not allowed: "four people rejected this for the same reason" has to survive as a
+  // count, not as prose for a model to re-summarise.
+  rejectReason: text("reject_reason"),
+  rejectNote: text("reject_note"),
+  // Every decision expires. An eight-week-old proposal built on eight-week-old evidence is not
+  // something a user should be able to approve by scrolling far enough down.
+  expiresAt: timestamp("expires_at").notNull(),
+  decidedAt: timestamp("decided_at"),
+  decidedBy: integer("decided_by").references(() => users.id, { onDelete: "set null" }),
+  assistantRecordId: integer("assistant_record_id").references(() => assistantRecords.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("campaign_decisions_campaign_idx").on(t.campaignId, t.status),
+  index("campaign_decisions_pending_idx").on(t.organisationId, t.status, t.expiresAt).where(sql`status = 'pending'`),
+  check("campaign_decisions_kind_check", sql`${t.kind} IN ('strategy','reallocation','escalation','halt')`),
+  check("campaign_decisions_status_check", sql`${t.status} IN ('pending','approved','rejected','expired','superseded')`),
+  // The constraint that makes the feedback loop real rather than optional. Without it "reject"
+  // degrades into a status flip that teaches nothing — exactly what happened to lead rejection.
+  check("campaign_decisions_reject_reason_check", sql`${t.status} <> 'rejected' OR ${t.rejectReason} IS NOT NULL`),
 ]);
 
 // Relational-query definitions for the chat tables live in db/relations.ts

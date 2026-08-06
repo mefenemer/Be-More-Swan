@@ -199,6 +199,75 @@
     },
   };
 
+  // ── Campaign vocabulary ───────────────────────────────────────────────────
+  // From src/config/campaign-vocab.ts and src/config/campaign-reject-reasons.ts. Generated for
+  // the usual reason — the Campaigns tab, the Orders Data Hub, the Decisions Review Queue and the
+  // chat proposal card all render these labels, which is four hand copies waiting to drift.
+  //
+  // The state chips especially: "Throttled" (the agent optimising) and "Paused" (the agent
+  // stopping) are distinct facts, and connection-status-vocabulary-drift is what happens when two
+  // surfaces quietly disagree about which one a row is in.
+  // (Double quotes, not backticks — this comment lives inside the generator's template literal,
+  // where a backtick ends the string and the error points at the wrong line entirely.)
+  var CAMPAIGN_STATUS_LABELS = {"draft":"Draft","active":"Running","throttled":"Throttled","paused":"Paused","finished":"Finished","archived":"Archived"};
+  var CAMPAIGN_ORDER_STATUS_LABELS = {"queued":"Queued","issued":"With the assistant","in_review":"In your review","delivered":"Delivered","blocked":"Blocked","cancelled":"Cancelled","rejected":"Rejected"};
+  var CAMPAIGN_DECISION_LABELS = {"strategy":"Strategy","reallocation":"Reallocation","escalation":"Escalation","halt":"Halt"};
+  var CAMPAIGN_OUTCOME_LABELS = {"leads":"New leads found","replies":"Replies from prospects","signups":"Signups captured","published_content":"Pieces published"};
+  var CAMPAIGN_REJECT_REASONS = ["wrong_channel","too_expensive","bad_timing","evidence_unconvincing","off_brand","doing_it_myself","other"];
+  var CAMPAIGN_REJECT_REASON_LABELS = {"wrong_channel":"Wrong channel","too_expensive":"Too much work for the return","bad_timing":"Bad timing","evidence_unconvincing":"I disagree with the evidence","off_brand":"Off brand","doing_it_myself":"I’m doing this myself","other":"Something else"};
+  var UNAVAILABLE_OUTCOME_METRICS = ["signups"];
+  // Only the fields the browser renders. artefactKind/assignedRole stay server-side — the client
+  // has no business routing an order, and shipping the routing table would invite it to try.
+  var ORDER_ACTIONS = [{"key":"draft_social_posts","label":"Draft social posts","description":"Queues extra posts for the Social Media Assistant to draft, on this campaign’s message. They land in its Posts queue for your approval like any other draft."},{"key":"draft_blog_pillar","label":"Write a pillar article","description":"Briefs the Blog Writing Assistant to write one long-form article for this campaign, carrying its keywords and call to action."},{"key":"run_lead_search","label":"Run a lead search","description":"Creates a saved search for the Lead Generation Assistant aimed at this campaign’s audience. Created as a draft — starting it is a separate, human click, because a run costs money and reaches real strangers."},{"key":"narrow_targeting","label":"Narrow the targeting","description":"Edits an existing saved search — tightens the ideal-customer description and adds negative keywords — so it stops finding the wrong kind of company."},{"key":"adjust_messaging","label":"Adjust the messaging","description":"Changes the angle this campaign asks for. Applies to work drafted from now on; it does not rewrite drafts that already exist."}];
+
+  window.CampaignConstants = {
+    /** Display label for a campaign status ('active' → 'Running'). */
+    statusLabel: function (s) {
+      return CAMPAIGN_STATUS_LABELS[String(s == null ? '' : s)] || String(s == null ? '' : s);
+    },
+
+    /** Display label for an order status ('issued' → 'With the assistant'). */
+    orderStatusLabel: function (s) {
+      return CAMPAIGN_ORDER_STATUS_LABELS[String(s == null ? '' : s)] || String(s == null ? '' : s);
+    },
+
+    /** Display label for a decision kind ('halt' → 'Halt'). */
+    decisionLabel: function (k) {
+      return CAMPAIGN_DECISION_LABELS[String(k == null ? '' : k)] || String(k == null ? '' : k);
+    },
+
+    /** Display label for what a campaign counts ('leads' → 'New leads found'). */
+    outcomeLabel: function (m) {
+      return CAMPAIGN_OUTCOME_LABELS[String(m == null ? '' : m)] || String(m == null ? '' : m);
+    },
+
+    /**
+     * Outcome metrics a user may actually choose. Excludes the ones nothing counts yet — an
+     * outcome that always reads zero looks like a broken campaign, not an unbuilt feature.
+     */
+    selectableOutcomes: Object.keys(CAMPAIGN_OUTCOME_LABELS).filter(function (m) {
+      return UNAVAILABLE_OUTCOME_METRICS.indexOf(m) === -1;
+    }),
+
+    /** Why a founder rejected a decision. Closed vocabulary — it is a GROUP BY key. */
+    rejectReasons: CAMPAIGN_REJECT_REASONS,
+
+    /** Display label for a reject reason. */
+    rejectReasonLabel: function (r) {
+      return CAMPAIGN_REJECT_REASON_LABELS[String(r == null ? '' : r)] || String(r == null ? '' : r);
+    },
+
+    /** The orders an assistant can be given: [{ key, label, description }]. */
+    orderActions: ORDER_ACTIONS,
+
+    /** Display label for an order action, falling back to the raw key. */
+    orderActionLabel: function (a) {
+      var k = String(a == null ? '' : a);
+      for (var i = 0; i < ORDER_ACTIONS.length; i++) if (ORDER_ACTIONS[i].key === k) return ORDER_ACTIONS[i].label;
+      return k;
+    },
+  };
+
   // ── Posting cadence ───────────────────────────────────────────────────────
   // From src/config/posting-cadence.ts. postsPerWeekFor and readCadence below are the REAL
   // functions, stringified at generation time — not reimplementations. That matters more here

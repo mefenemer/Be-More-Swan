@@ -18,19 +18,22 @@
 /**
  * Which producer created a proposal.
  *
- * `MIN_SAMPLE` means something different per source (20 closed deals vs 5 human edits), the evidence
- * blob has a different shape, and the review screen must label which is which — a user should never
- * be shown "34 outcomes" when the number is edits.
+ * `MIN_SAMPLE` means something different per source (20 closed deals vs 5 human edits vs
+ * MIN_REJECT_SAMPLE rejections), the evidence blob has a different shape, and the review screen must
+ * label which is which — a user should never be shown "34 outcomes" when the number is edits.
+ *
+ * `lead_rejection` is the targeting counterpart of `edit_pattern`: that one asks what was wrong with
+ * the MESSAGE, this one what was wrong with the targeting that surfaced the lead at all.
  *
  * `human` is not a proposer. It is the synthetic source used when §2.6's "Save as the new default"
  * routes a human's own edit through applyStrategyChange(), so a human save and an agent pivot share
  * one apply path, one audit row and one rollback (§5.4).
  */
-export const PROPOSAL_SOURCES = ['win_loss', 'edit_pattern', 'human'] as const;
+export const PROPOSAL_SOURCES = ['win_loss', 'edit_pattern', 'lead_rejection', 'human'] as const;
 export type ProposalSource = typeof PROPOSAL_SOURCES[number];
 
 /** Sources produced by the weekly cron. `human` is excluded — it is created on a user's click. */
-export const AGENT_SOURCES: readonly ProposalSource[] = ['win_loss', 'edit_pattern'];
+export const AGENT_SOURCES: readonly ProposalSource[] = ['win_loss', 'edit_pattern', 'lead_rejection'];
 
 export const PROPOSAL_STATUSES = ['pending', 'applied', 'rejected', 'expired'] as const;
 export type ProposalStatus = typeof PROPOSAL_STATUSES[number];
@@ -125,6 +128,13 @@ export const STRATEGY_TUNABLE_FIELDS: Record<string, TunableField> = {
         key: 'targetPersona',
         valueType: 'json',
     },
+    // ⚠️ NOTHING READS THIS FIELD. Confirmed 2026-08-06: `discoveryQueryThemes` appears in this
+    // declaration and nowhere else in the codebase — generateQueries() takes `idea`, `targetPersona`,
+    // `icpSnapshot` and `negativeKeywords`, and never the themes. A proposal targeting it would be
+    // reviewed, applied, audited and change absolutely nothing, which is worse than not offering it:
+    // the user believes they have retargeted. Left on the allow-list rather than removed because a
+    // pending proposal may already reference it, but do NOT route a new proposer here until
+    // discovery-query-gen.ts actually reads it.
     discovery_query_themes: {
         label: 'Discovery Query Themes',
         description: 'The themes the search queries are built from, before they are turned into individual searches.',

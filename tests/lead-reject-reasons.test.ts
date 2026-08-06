@@ -157,7 +157,7 @@ check('the reject strip does not claim the rejection teaches the assistant', () 
 });
 
 check('the strip appears after the reject, never as a gate in front of it', () => {
-    const src = read('assistants.js');
+    const src = handlerBody();
     // The pending marker is set inside the reject branch and only rendered once the PATCH has
     // resolved and the queue re-rendered. If the strip were awaited before the PATCH, a reviewer
     // could not clear a lead without categorising it.
@@ -167,8 +167,28 @@ check('the strip appears after the reject, never as a gate in front of it', () =
     assert.ok(after > render && render !== -1, 'the strip must be shown after the queue re-renders');
 });
 
-check('a failed reject clears the pending strip', () => {
+/**
+ * The body of `_detailRqRecordAct` — the GENERIC record-action handler these two checks are about.
+ *
+ * Both used to scan the whole file with indexOf, which silently means "the first occurrence
+ * anywhere". That held until the Campaign Assistant added its own approve/reject handlers, which
+ * legitimately contain the same `buttons.forEach(… disabled = false …)` and
+ * `await _detailRqRenderGroups(…)` lines — the anchors then resolved into a DIFFERENT function and
+ * the checks stopped describing the handler they exist to protect. Scoped explicitly so a third
+ * handler cannot quietly re-point them again.
+ */
+function handlerBody(): string {
     const src = read('assistants.js');
+    const start = src.indexOf('window._detailRqRecordAct = async function');
+    assert.notStrictEqual(start, -1, 'The generic record-action handler was renamed — update this anchor.');
+    // Ends at the next top-level `window.` assignment, which is the following section's entry point.
+    const end = src.indexOf('\nconst _RQ_BLOG_STATUS', start);
+    assert.notStrictEqual(end, -1, 'The marker after the record-action handler moved — update this anchor.');
+    return src.slice(start, end);
+}
+
+check('a failed reject clears the pending strip', () => {
+    const src = handlerBody();
     const catchBlock = src.slice(src.indexOf('buttons.forEach((b) => { b.disabled = false; });'));
     assert.ok(/_rqPendingReject = null/.test(catchBlock.slice(0, 800)),
         'left set, the strip would surface on whatever the user did NEXT');

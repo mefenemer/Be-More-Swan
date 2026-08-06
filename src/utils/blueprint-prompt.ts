@@ -57,7 +57,7 @@ export interface BlueprintSection { content?: Record<string, unknown> | null }
  * would read the same targets twice in two formats, one of them raw JSON. Emitting the directive
  * alone keeps exactly one authoritative statement of the goal in the prompt.
  */
-const VERBATIM_DIRECTIVE_SECTIONS = new Set(['12-goals']);
+const VERBATIM_DIRECTIVE_SECTIONS = new Set(['12-goals', '13-campaign']);
 
 /**
  * Render sections as `--- KEY ---` blocks of `field: value` lines.

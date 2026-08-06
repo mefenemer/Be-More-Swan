@@ -17,6 +17,15 @@
   'use strict';
 
   const PROMPTS = {
+    // Phrased so the first turn produces an OBJECTIVE, which is the only input this assistant
+    // needs. Nothing here asks it to start, spend or launch — those are clicks on the Campaigns
+    // tab, and a starter prompt that implied otherwise would set up the exact expectation
+    // chat-creates-draft-campaigns says we must not create.
+    campaign_orchestrator: [
+      'I want to plan a campaign — here is what I am trying to achieve this quarter.',
+      'Which of my assistants should work on my next launch, and on what?',
+      'How is my current campaign doing, and what would you change about it?',
+    ],
     lead_qualifier: [
       'Score these leads for me — I’ll paste in a list of company URLs.',
       'What information do you need from me to qualify a new lead?',

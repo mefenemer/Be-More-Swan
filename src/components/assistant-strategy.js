@@ -131,13 +131,22 @@
   function evidenceBlock(p) {
     const e = (p.evidence && typeof p.evidence === 'object') ? p.evidence : {};
     const n = Number(e.sampleSize);
-    const unit = p.source === 'edit_pattern'
-      ? (n === 1 ? 'human edit' : 'human edits')
-      : (n === 1 ? 'closed deal' : 'closed deals');
+    // ⚠️ Keyed on the source, with no generic fallback for the unit. This used to be a two-way
+    // ternary whose `else` said "closed deals" — so a lead_rejection proposal (8 clicks) presented
+    // itself as 8 CLOSED DEALS, the single most confidence-inflating thing this card could say.
+    // A new source must name its own unit here, and an unknown one stays deliberately vague.
+    const UNITS = {
+      edit_pattern: ['human edit', 'human edits'],
+      lead_rejection: ['rejected lead', 'rejected leads'],
+      win_loss: ['closed deal', 'closed deals'],
+      human: ['saved default', 'saved defaults'],
+    };
+    const unit = (UNITS[p.source] || ['data point', 'data points'])[n === 1 ? 0 : 1];
 
     const bits = [];
     if (Number.isFinite(n)) bits.push(`<span class="font-bold text-gray-900">${n}</span> ${esc(unit)}`);
     if (e.editReason) bits.push(`all reasoned &ldquo;${esc(String(e.editReason))}&rdquo;`);
+    if (e.rejectReason) bits.push(`all rejected as &ldquo;${esc(String(e.rejectReason))}&rdquo;`);
     if (Array.isArray(e.segments) && e.segments.length) {
       bits.push(`segments: ${e.segments.map((s) => esc(String(s))).join(', ')}`);
     }

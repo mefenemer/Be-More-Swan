@@ -452,6 +452,11 @@ async function fetchMetric(
             return countRecords(db, goal, 'invoice');
         case 'tickets_resolved':
             return countRecords(db, goal, 'ticket', sql`status ILIKE '%resolv%'`);
+        // Campaign Assistant. Loose ILIKE for the same reason as tickets above — `status` here
+        // mirrors campaign_orders.status ('delivered'), which is a lifecycle label on the record,
+        // not a CHECK-constrained column on assistant_records.
+        case 'orders_delivered':
+            return countRecords(db, goal, 'campaign_order', sql`status ILIKE '%deliver%'`);
         case 'cash_recovered': {
             // Sum the numeric amount stashed in data (invoices.0.amount or a top-level amount) for
             // invoices that have reached a settled/paid/recovered stage. Coerced defensively so a

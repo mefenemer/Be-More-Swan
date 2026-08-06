@@ -39,7 +39,20 @@ function check(name: string, fn: () => void): void {
 }
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const sqlText = readFileSync(join(root, 'db/strategy-proposals.sql'), 'utf8');
+/**
+ * The SQL that defines this table's constraints — the original file plus every later migration that
+ * widens one of them, in apply order.
+ *
+ * ⚠️ A superseding migration is a SEPARATE FILE on purpose. db-migrate.mjs tracks each db/*.sql by
+ * content hash, so editing an already-applied file reports DRIFTED against both live databases
+ * rather than being a tidy-up. Constraint history therefore accumulates across files, and anything
+ * reading "the constraint" has to read the last definition, not the first.
+ */
+const SQL_FILES = [
+    'db/strategy-proposals.sql',
+    'db/strategy-proposal-source-lead-rejection.sql',
+] as const;
+const sqlText = SQL_FILES.map((f) => readFileSync(join(root, f), 'utf8')).join('\n');
 const schemaText = readFileSync(join(root, 'db/schema.ts'), 'utf8');
 
 /**
@@ -134,8 +147,11 @@ check('every PROPOSAL_STATUS appears in the SQL CHECK and in schema.ts', () => {
 check('the SQL CHECKs contain nothing the config does not', () => {
     // The reverse direction. A value in the constraint but not the config is a value the writer can
     // never produce and no reader knows how to label — dead, and misleading to the next reader.
+    // The LAST definition wins: a widening migration supersedes the original, and asserting against
+    // the first would test a constraint no live database still has.
     const constraintValues = (constraint: string): string[] => {
-        const m = sqlText.match(new RegExp(`${constraint}[\\s\\S]*?CHECK\\s*\\(([\\s\\S]*?)\\);`));
+        const all = [...sqlText.matchAll(new RegExp(`${constraint}[\\s\\S]*?CHECK\\s*\\(([\\s\\S]*?)\\);`, 'g'))];
+        const m = all[all.length - 1];
         if (!m) return [];
         return [...m[1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]);
     };
@@ -319,9 +335,13 @@ check('the writer never sends anything', () => {
 check('the writer only ever writes tables the envelope names', () => {
     const writerText = sourceOf('src/utils/strategy-proposals.ts');
     const written = new Set([...writerText.matchAll(/db\s*\.\s*(?:update|insert|delete)\s*\(\s*(\w+)/g)].map((m) => m[1]));
-    // templateFeedback: only ever `applied_to_template = true`, marking the evidence that funded an
-    // applied proposal as spent so the same edits cannot fund the identical suggestion next week.
-    const allowed = new Set(['strategyProposals', 'aiAssistants', 'discoveryCampaigns', 'auditLogs', 'templateFeedback']);
+    // templateFeedback / leadRejectFeedback: only ever the `applied_*` flag, marking the evidence
+    // that funded an applied proposal as spent so the same edits (or the same rejections) cannot
+    // fund the identical suggestion next week.
+    const allowed = new Set([
+        'strategyProposals', 'aiAssistants', 'discoveryCampaigns', 'auditLogs',
+        'templateFeedback', 'leadRejectFeedback',
+    ]);
     for (const t of written) {
         assert.ok(allowed.has(t), `the writer touches ${t}, which is outside the change envelope`);
     }

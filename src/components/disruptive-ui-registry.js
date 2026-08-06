@@ -821,6 +821,152 @@
   register('discovery_campaign_proposal', renderDiscoveryCampaignProposalCard);
   register('DiscoveryCampaignProposalCard', renderDiscoveryCampaignProposalCard);
 
+  // ── Built-in: Campaign Strategy Proposal Card ───────────────────────────────
+  // Renderer for the campaign_orchestrator route's wire shape (chat-orchestrator.ts):
+  //   { type: 'campaign_strategy_proposal', objective, outcomeMetric, targetValue?,
+  //     maxWorkItems?, endsAt?, rationale?,
+  //     orders?: [{ action, assignedRole, quantity? }] }
+  //
+  // Same indigo "awaiting your approval" language as the discovery card above, and for the same
+  // reason: approving here SAVES A DRAFT. It commissions nothing, spends nothing and briefs
+  // nobody until the user presses Start on the Campaigns tab, with the numbers in front of them.
+  // A campaign is the largest blast radius in the product — it can put work into three other
+  // assistants at once — so a model's judgement plus one click in a chat window is not enough.
+  //
+  // ⚠️ NO £ FIGURE APPEARS ON THIS CARD, EVER. Not "£0", not "no cost". Phase 1 campaigns spend
+  // capacity, not money, and discovery-spend-cap-is-operator-only is the receipt: a pound sign on
+  // a card IS a price to whoever reads it, whatever we meant by it. Work is counted in tasks.
+  function renderCampaignStrategyProposalCard(ui, esc) {
+    const C = window.CampaignConstants;
+    // Named for the user, not for the schema. "lead_qualifier" on a card is an internal identifier
+    // leaking into a founder's inbox; these match the catalog names in db/seed-catalog.ts.
+    const ROLE_LABEL = {
+      social_media_manager: 'Social Media Assistant',
+      blog_writer: 'Blog Writing Assistant',
+      lead_qualifier: 'Lead Generation Assistant',
+    };
+
+    const objective = typeof ui.objective === 'string' ? ui.objective.trim() : '';
+    const rationale = typeof ui.rationale === 'string' ? ui.rationale.trim() : '';
+    const outcomeMetric = typeof ui.outcomeMetric === 'string' ? ui.outcomeMetric : 'leads';
+    const outcomeLabel = C ? C.outcomeLabel(outcomeMetric) : outcomeMetric;
+    const targetValue = Number.isFinite(Number(ui.targetValue)) ? Number(ui.targetValue) : null;
+    const maxWorkItems = Number.isFinite(Number(ui.maxWorkItems)) ? Number(ui.maxWorkItems) : null;
+
+    // Only render orders the client can name. An unknown action or role means the model invented
+    // one, and listing it would promise the user work no assistant will ever be asked to do.
+    const orders = (Array.isArray(ui.orders) ? ui.orders : [])
+      .filter((o) => o && typeof o === 'object' && ROLE_LABEL[o.assignedRole])
+      .map((o) => ({
+        label: C ? C.orderActionLabel(o.action) : String(o.action || ''),
+        role: ROLE_LABEL[o.assignedRole],
+        qty: Number.isFinite(Number(o.quantity)) && Number(o.quantity) > 1 ? Number(o.quantity) : null,
+      }))
+      .filter((o) => o.label);
+
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <div class="flex items-start gap-3 mb-3">
+        <div class="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-xl shrink-0">🎯</div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Campaign plan · Approval needed</p>
+          <p class="font-bold text-gray-900 break-words">${esc(objective || 'Untitled campaign')}</p>
+        </div>
+      </div>
+
+      ${rationale ? `
+        <p class="text-sm text-gray-700 mb-3"><span class="font-bold text-indigo-900">Why:</span> ${esc(rationale)}</p>` : ''}
+
+      ${orders.length ? `
+        <p class="text-xs font-bold text-indigo-700 uppercase tracking-wide mb-1">Who I'd brief</p>
+        <ul class="mb-3 space-y-1">
+          ${orders.map((o) => `
+            <li class="text-xs text-gray-600">• ${esc(o.label)}${o.qty ? ` ×${esc(String(o.qty))}` : ''} — ${esc(o.role)}</li>
+          `).join('')}
+        </ul>` : ''}
+
+      <ul class="mb-4 space-y-1">
+        <li class="text-xs text-gray-600">• Counts ${esc(String(outcomeLabel).toLowerCase())}${targetValue ? `, aiming for ${esc(String(targetValue))}` : ''}</li>
+        ${maxWorkItems ? `<li class="text-xs text-gray-600">• Uses at most ${esc(String(maxWorkItems))} tasks from your monthly allowance</li>` : ''}
+        <li class="text-xs text-gray-600">• You approve every piece of work before it goes out</li>
+      </ul>
+
+      <div class="flex items-center gap-2" data-csp-actions>
+        <button type="button" data-csp-approve
+          class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          Save this campaign
+        </button>
+        <button type="button" data-csp-decline
+          class="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          Not this one
+        </button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-csp-status></p>
+    `;
+
+    const status = el.querySelector('[data-csp-status]');
+    function say(text, tone) {
+      status.textContent = text;
+      status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`;
+    }
+    function setBusy(busy) {
+      el.querySelectorAll('[data-csp-approve], [data-csp-decline]').forEach((b) => { b.disabled = busy; });
+    }
+
+    el.addEventListener('click', (e) => {
+      const approve = e.target.closest('[data-csp-approve]');
+      const decline = e.target.closest('[data-csp-decline]');
+      if (!approve && !decline) return;
+
+      if (decline) {
+        setBusy(true);
+        say('Plan declined.');
+        return;
+      }
+      if (!objective) {
+        setBusy(true);
+        say('This plan has no objective, so it cannot be saved.', 'error');
+        return;
+      }
+
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('campaign:create', {
+        bubbles: true,
+        detail: {
+          objective,
+          outcomeMetric,
+          targetValue,
+          maxWorkItems,
+          endsAt: typeof ui.endsAt === 'string' ? ui.endsAt : null,
+          // The success line is built from the SERVER's answer, never from the model's intent —
+          // chat-claims-drafts-it-never-saved is a reply that announced drafts which were never
+          // written. Re-enabling on failure lets a transient error be retried instead of
+          // stranding an approved plan behind two dead buttons.
+          respond({ ok, deduped, error }) {
+            if (ok) {
+              // Tab name must match assistant-dashboard-registry.js `campaignsTab.label` and the
+              // chat-orchestrator system prompt. Pinned by tests/campaign-prompt-surfaces.test.ts
+              // so this copy cannot drift off the tab silently.
+              say(deduped
+                ? 'Already saved — it is in your Campaigns tab.'
+                : 'Saved as a draft — press "Start" on it in your Campaigns tab to begin.');
+              return;
+            }
+            setBusy(false);
+            say(error || 'Could not save that campaign — please try again.', 'error');
+          },
+        },
+      }));
+    });
+
+    return el;
+  }
+
+  register('campaign_strategy_proposal', renderCampaignStrategyProposalCard);
+  register('CampaignStrategyProposalCard', renderCampaignStrategyProposalCard);
+
   // ── Built-in: Action Item Assignment Card ───────────────────────────────────
   // Renderer for the meeting-note-taker route's wire shape (chat-orchestrator.ts):
   // { type: 'action_item_assignment', meetingSummary, decisionsMade?: string[],

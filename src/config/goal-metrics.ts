@@ -382,6 +382,23 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         available: true,
         realism: { maxDailyDelta: 2000, maxDailyGrowthPct: 1 },
     },
+    // The Campaign Assistant's only honest internal outcome. It measures WORK COMMISSIONED AND
+    // RETURNED, not leads or sales — the leads a campaign causes are already counted by the Lead
+    // Generation Assistant's own metrics, and claiming them here would double-count the same rows
+    // against two goals. `delivered` (not merely issued) because an order nobody acted on is not
+    // an outcome; that is the distinction the whole Orders ledger exists to make visible.
+    {
+        key: 'orders_delivered',
+        label: 'Briefs Delivered',
+        unit: 'orders',
+        source: 'internal',
+        direction: 'increase',
+        objective: 'outcome',
+        roles: ['campaign_orchestrator'],
+        description: 'Instructions this assistant issued to your other assistants that came back with finished work.',
+        available: true,
+        realism: { maxDailyDelta: 500, maxDailyGrowthPct: 1 },
+    },
     {
         key: 'records_enriched',
         label: 'Records Enriched',

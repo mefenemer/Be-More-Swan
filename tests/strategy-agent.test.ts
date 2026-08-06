@@ -364,4 +364,82 @@ check("'human' is a permitted source in the constraint, so no migration is neede
     assert.ok(raw('db/strategy-proposals.sql').includes("'human'"), 'the SQL CHECK would reject a human save');
 });
 
+// ── 6. The rejection proposer (lead_rejection) ───────────────────────────────
+
+check("'lead_rejection' is permitted by a migration, not only by the config", () => {
+    assert.ok((PROPOSAL_SOURCES as readonly string[]).includes('lead_rejection'));
+    // proposeChange() validates the source against the config and would hand a value the OLD CHECK
+    // rejects straight to an INSERT. That failure is swallowed, so the only symptom would be a
+    // weekly "the writer refused the proposal" with no other trace.
+    assert.ok(
+        raw('db/strategy-proposal-source-lead-rejection.sql').includes("'lead_rejection'"),
+        'no migration widens the CHECK — every rejection proposal would fail silently',
+    );
+});
+
+check('the rejection cluster demands spread, not just a count', () => {
+    // ⚠️ The whole point. One reviewer clearing one bad run rejects twenty leads in an afternoon and
+    // clears any raw threshold — from a single misconfigured search. Without this the proposer would
+    // rewrite the persona for every campaign the assistant has on the strength of one sitting.
+    // The loader is a module-level function, so this reads the whole file rather than runBody.
+    const src = sourceOf('netlify/functions/autonomous-strategy-agent.ts');
+    const fn = src.slice(src.indexOf('async function loadRejectionClusters'));
+    const query = fn.slice(0, fn.indexOf('return rows'));
+    assert.ok(/MIN_REJECT_SAMPLE/.test(query), 'no sample threshold');
+    assert.ok(/MIN_REJECT_CAMPAIGNS/.test(query), 'a burst inside ONE campaign must not qualify');
+    assert.ok(/MIN_REJECT_SPREAD_DAYS/.test(query), 'a burst inside ONE day must not qualify');
+    assert.ok(/applied_to_target = false/.test(query), 'spent evidence would fund the same proposal forever');
+});
+
+check('the rejection proposer never targets the field nothing reads', () => {
+    // discovery_query_themes is the intuitive home for "the queries keep finding directories", and
+    // it is a trap: no reader exists, so a proposal there applies cleanly and changes nothing while
+    // telling the user they have retargeted.
+    const pass = runBody.slice(runBody.indexOf('const rejectionClusters'));
+    assert.ok(!/discovery_query_themes/.test(pass), 'the rejection pass routes at a field nothing reads');
+    assert.ok(/const targetField = 'target_persona'/.test(pass), 'it must target the live field');
+});
+
+check('rejection evidence banks under its own key, never feedbackIds', () => {
+    // Both are bare integer arrays into different tenant-shared tables. The wrong key would not
+    // throw — it would permanently mark unrelated template_feedback rows as spent.
+    const pass = runBody.slice(runBody.indexOf('const rejectionClusters'));
+    const evidence = pass.slice(pass.indexOf('evidence: {'), pass.indexOf('});', pass.indexOf('evidence: {')));
+    assert.ok(/rejectionIds/.test(evidence), 'the rejection evidence must carry rejectionIds');
+    assert.ok(!/feedbackIds/.test(evidence), 'rejection ids must never be written as feedbackIds');
+
+    const writer = sourceOf('src/utils/strategy-proposals.ts');
+    assert.ok(/leadRejectFeedback[\s\S]*appliedToTarget/.test(writer), 'rejections are never banked on apply');
+});
+
+check('the rejection pass enforces the same envelope as the edit pass', () => {
+    const pass = runBody.slice(runBody.indexOf('const rejectionClusters'));
+    assert.ok(/claimedField !== targetField/.test(pass), 'the model may answer about another field');
+    assert.ok(/isValidValueFor/.test(pass), 'the value shape is unchecked');
+    assert.ok(/Array\.isArray\(proposedValue\)/.test(pass),
+        'an array persona would be read back as one object and silently mean nothing');
+    assert.ok(/hasFeatureByOrg/.test(pass), 'the feature gate is not re-checked in this pass');
+});
+
+check('every agent source names its own evidence unit in the review card', () => {
+    // ⚠️ The unit used to be a two-way ternary defaulting to "closed deals", so a lead_rejection
+    // proposal (8 clicks) announced itself as 8 CLOSED DEALS. Overstating the evidence is the one
+    // thing this card must never do — a human applies a real outreach change from it.
+    const ui = sourceOf('src/components/assistant-strategy.js');
+    const block = ui.slice(ui.indexOf('const UNITS'), ui.indexOf('const bits'));
+    assert.ok(block.length > 0, 'the UNITS map is gone — the unit fell back to a generic default again');
+    for (const s of PROPOSAL_SOURCES) {
+        assert.ok(block.includes(`${s}:`), `${s} has no evidence unit and would borrow another source's`);
+    }
+    assert.ok(!/closed deals'\s*\)/.test(block), 'no source may fall back to "closed deals"');
+});
+
+check('the rejection pass skips before paying for a model call', () => {
+    const pass = runBody.slice(runBody.indexOf('const rejectionClusters'));
+    const beforeModel = pass.slice(0, pass.indexOf('gatewayGenerate'));
+    assert.ok(/no active campaign to retarget/.test(beforeModel),
+        'with no campaign there is nothing to write to — proposeChange would refuse anyway');
+    assert.ok(/a pending proposal already holds this field/.test(beforeModel), 'the pending check is too late');
+});
+
 console.log(`\n${passed} checks passed.`);
