@@ -5587,7 +5587,7 @@ async function submitReply(tid) {
 let _catalogRows    = [];
 let _catalogSortKey  = 'name';   // name | category | lifecycleState | waitlistCount
 let _catalogSortDir  = 'asc';
-let _catalogGroupBy  = 'none';   // none | category | status
+let _catalogGroupBy  = 'status'; // none | category | status
 
 async function loadCatalog() {
   const el = document.getElementById('catalog-grid');
