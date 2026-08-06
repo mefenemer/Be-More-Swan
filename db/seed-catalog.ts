@@ -93,7 +93,11 @@ const CATALOG = [
         category: 'Marketing & Sales',
         iconKey: 'megaphone',
         iconColor: 'purple',
-        comingSoon: true,    // ← flip to false in the go-live commit (Phase 10 of the checklist)
+        // ⚠️ Go-live is an ADMIN action, not a code change. This seed is INSERT-ONLY
+        // (onConflictDoNothing on role_key), so once the row exists, editing this line and
+        // re-running the seed does absolutely nothing — the value below only ever applies to the
+        // role's FIRST insert. Flip it in Admin → Master Data → Assistants instead.
+        comingSoon: true,
         isActive: true,
     },
     {
