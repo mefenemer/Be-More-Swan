@@ -13,3 +13,6 @@ node_modules/
 # Scratch scripts run from the repo root for node_modules resolution (one-off introspection,
 # debugging). The auto-commit hook sweeps anything untracked, so these need an explicit rule.
 .tmp-*
+# Scratch scripts written into the repo root (node_modules resolution); never commit.
+.*.tmp.mjs
+.*.tmp.ts
