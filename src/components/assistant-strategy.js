@@ -308,6 +308,15 @@
     const stamp = isNaN(when.getTime()) ? '' : when.toLocaleString(undefined, {
       weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
     });
+    // A halted run must NEVER borrow the wording of a run that finished and found nothing. Both
+    // arrive here as zeroes, and reporting "found no repeated edits to learn from" for a run that
+    // died would be the strip actively asserting the thing it exists to disprove.
+    if (lr.halted) {
+      return `
+        <p class="text-[11px] text-amber-600 mt-4">
+          Last attempted ${esc(stamp)} &middot; the check did not complete &mdash; nothing was reviewed.
+        </p>`;
+    }
     const outcome = lr.proposed > 0
       ? `suggested ${lr.proposed} change${lr.proposed === 1 ? '' : 's'}`
       : lr.clusters > 0

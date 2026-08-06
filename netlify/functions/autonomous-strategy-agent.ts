@@ -340,18 +340,50 @@ export interface StrategyAgentResult {
     skipReasons: string[];
     /** True when the run stopped on its own budget with clusters left. They wait for next week. */
     truncated: boolean;
+    /**
+     * Set when the run ended for a reason other than "it finished the work" — the kill-switch, or a
+     * thrown error. Absent on a normal run.
+     *
+     * ⚠️ Without this a halted run is recorded as a run that legitimately found nothing: same zeroes,
+     * same empty skipReasons. The zeroes are the ambiguity, not the fix for it.
+     */
+    haltReason?: string;
 }
 
 /**
  * One full run. Exported so run-strategy-agent.ts can drive it over HTTP on staging, where Netlify
  * never fires scheduled functions on a branch deploy.
+ *
+ * ⚠️ This wrapper exists so the summary is written on EVERY exit — normal, kill-switch, or throw.
+ * recordLastRun used to sit at the end of the body, which meant the two paths that never reached it
+ * left `strategy_agent.last_run` holding the PREVIOUS week's record. In the Strategy tab that is
+ * indistinguishable from a cron that never fired, so the one artefact meant to answer "is this
+ * thing even running?" went quiet exactly when the answer mattered. A real instance of that shipped
+ * on 2026-08-06 (a 42809 from loadRejectionClusters) and cost a diagnosis from Netlify logs.
+ *
+ * The error is re-thrown after recording: the caller still logs it and still answers 500.
  */
 export async function runStrategyAgent(): Promise<StrategyAgentResult> {
-    const db = getDb();
     const startedAt = Date.now();
     const result: StrategyAgentResult = {
         clusters: 0, proposed: 0, skipped: 0, expired: 0, notified: 0, skipReasons: [], truncated: false,
     };
+    try {
+        await executeRun(result, startedAt);
+        return result;
+    } catch (err) {
+        result.haltReason = `run failed: ${err instanceof Error ? err.message : String(err)}`;
+        throw err;
+    } finally {
+        // Best-effort by contract — recordLastRun swallows its own failure, so a summary that cannot
+        // be written never masks the original error on its way out of the catch above.
+        await recordLastRun(result, startedAt);
+    }
+}
+
+/** The run itself. Mutates `result` in place so the wrapper's finally can record a partial run. */
+async function executeRun(result: StrategyAgentResult, startedAt: number): Promise<void> {
+    const db = getDb();
 
     // The expiry sweep runs FIRST and unconditionally — it is one statement, it costs nothing, and
     // it must not be skippable by an early return further down. Global (no org filter): this run is
@@ -360,8 +392,13 @@ export async function runStrategyAgent(): Promise<StrategyAgentResult> {
     // the same predicate in the UI, the notification and the aggregate — and one would forget it.
     result.expired = await expirePendingProposals(db);
 
-    // A global AI kill-switch must stop the model call, not the housekeeping above.
-    if (await isGlobalAiDisabled()) return result;
+    // A global AI kill-switch must stop the model call, not the housekeeping above. It names itself
+    // in haltReason: a silent zeroed summary here reads as "nothing to learn from", which is the
+    // opposite of "we deliberately stopped".
+    if (await isGlobalAiDisabled()) {
+        result.haltReason = 'global AI kill-switch is on';
+        return;
+    }
 
     const clusters = modalPerAssistant(await loadClusters(db));
     result.clusters = clusters.length;
@@ -751,9 +788,7 @@ export async function runStrategyAgent(): Promise<StrategyAgentResult> {
         });
         if (ok) result.notified++;
     }
-
-    await recordLastRun(result, startedAt);
-    return result;
+    // No recordLastRun here — runStrategyAgent's finally owns it, so every exit path records.
 }
 
 /**
@@ -779,6 +814,9 @@ async function recordLastRun(result: StrategyAgentResult, startedAt: number): Pr
             truncated: result.truncated,
             // Capped: this is a diagnostic line in a UI, not an audit log.
             skipReasons: result.skipReasons.slice(0, 10),
+            // Only present on a halted run, so a normal summary keeps the shape it has always had
+            // and the UI can treat presence alone as "this run did not finish its work".
+            ...(result.haltReason ? { haltReason: result.haltReason } : {}),
         });
     } catch (err) {
         console.error('[strategy-agent] could not record the run summary', err);

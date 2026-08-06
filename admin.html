@@ -241,6 +241,26 @@
       <!-- ── Catalog ────────────────────────────────────────────────── -->
       <section id="view-catalog" class="admin-view hidden">
         <p class="text-sm text-gray-500 mb-5">Toggle &#34;Coming Soon&#34; / &#34;Live&#34; status. Switching to Live triggers the waitlist notification loop.</p>
+        <div class="flex flex-wrap items-center gap-3 mb-4 bg-white rounded-2xl border border-gray-200 p-4">
+          <label class="text-xs text-gray-600 font-semibold">Sort by
+            <select id="catalog-sort" onchange="setCatalogSort(this.value)" class="ml-1 border border-gray-200 rounded px-2 py-1 text-xs font-normal">
+              <option value="name">Role</option>
+              <option value="category">Category</option>
+              <option value="lifecycleState">Lifecycle</option>
+              <option value="waitlistCount">Waitlist</option>
+            </select>
+          </label>
+          <button id="catalog-sort-dir" onclick="toggleCatalogSortDir()" title="Toggle sort direction"
+            class="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg hover:bg-gray-50 transition">↑ Ascending</button>
+          <label class="text-xs text-gray-600 font-semibold">Group by
+            <select id="catalog-group" onchange="setCatalogGroup(this.value)" class="ml-1 border border-gray-200 rounded px-2 py-1 text-xs font-normal">
+              <option value="none">None</option>
+              <option value="category">Category</option>
+              <option value="status">Launched / Coming Soon</option>
+            </select>
+          </label>
+          <span id="catalog-count" class="text-xs text-gray-400 ml-auto"></span>
+        </div>
         <div id="catalog-grid" class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
           <div class="px-5 py-8 text-center text-gray-400">Loading…</div>
         </div>
@@ -5563,57 +5583,135 @@ async function submitReply(tid) {
 }
 
 // ── Catalog ───────────────────────────────────────────────────────────────────
+// Rows are fetched once and kept here so sorting / grouping re-render without a refetch.
+let _catalogRows    = [];
+let _catalogSortKey  = 'name';   // name | category | lifecycleState | waitlistCount
+let _catalogSortDir  = 'asc';
+let _catalogGroupBy  = 'none';   // none | category | status
+
 async function loadCatalog() {
   const el = document.getElementById('catalog-grid');
   el.innerHTML = '<div class="px-5 py-8 text-center text-gray-400 animate-pulse">Loading…</div>';
   try {
     const d = await api('/.netlify/functions/admin-api?resource=catalog');
-    // Bulk publish controls for beta assistants
-    const betaAssistants = (d.catalog||[]).filter(a => a.lifecycleState === 'beta');
-    const bulkPublishBar = betaAssistants.length
-      ? `<div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between">
-           <span class="text-sm text-blue-700 font-semibold">${betaAssistants.length} assistant${betaAssistants.length > 1 ? 's' : ''} in beta — ready to bulk publish</span>
-           <button onclick="openBulkPublish()" class="px-4 py-1.5 text-sm font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700">🚀 Bulk Publish to Live</button>
-         </div>`
-      : '';
-
-    el.innerHTML = bulkPublishBar + `<table class="w-full text-sm">
-      <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase">
-        <tr>
-          <th class="px-5 py-3 text-left">Role</th>
-          <th class="px-5 py-3 text-left">Category</th>
-          <th class="px-5 py-3 text-left">Lifecycle</th>
-          <th class="px-5 py-3 text-left">Waitlist</th>
-          <th class="px-5 py-3 text-left">Actions</th>
-        </tr>
-      </thead>
-      <tbody>${(d.catalog||[]).map(a => {
-        const lcColors = {draft:'bg-gray-100 text-gray-600', review:'bg-yellow-100 text-yellow-700', beta:'bg-blue-100 text-blue-700', live:'bg-emerald-100 text-emerald-700', deprecated:'bg-orange-100 text-orange-700', archived:'bg-red-100 text-red-600'};
-        const lcBadge = `<span class="text-xs font-bold px-2 py-0.5 rounded-full ${lcColors[a.lifecycleState]||'bg-gray-100 text-gray-500'}">${a.lifecycleState||'draft'}</span>`;
-        return `<tr class="border-t border-gray-50 hover:bg-gray-50 transition">
-          <td class="px-5 py-3 font-medium">${a.name}</td>
-          <td class="px-5 py-3 text-xs text-gray-500">${a.category}</td>
-          <td class="px-5 py-3">${lcBadge}</td>
-          <td class="px-5 py-3 text-xs">${a.waitlistCount || 0} entries</td>
-          <td class="px-5 py-3 flex gap-2 flex-wrap">
-            <button onclick="toggleCatalogStatus(${a.id}, ${a.comingSoon})"
-              class="px-2.5 py-1 text-xs font-bold ${a.comingSoon?'bg-emerald-600 text-white hover:bg-emerald-700':'bg-amber-100 text-amber-700 hover:opacity-80'} rounded-lg transition">
-              ${a.comingSoon ? '🚀 Launch' : '⏸ Coming Soon'}
-            </button>
-            <button onclick="openLifecycleTransition(${a.id},'${a.name}','${a.lifecycleState||'draft'}')" class="px-2.5 py-1 text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg hover:opacity-80">
-              🔄 State
-            </button>
-            <button onclick="openVersionHistory(${a.id},'${a.name}')" class="px-2.5 py-1 text-xs font-bold bg-gray-50 text-gray-700 border border-gray-200 rounded-lg hover:opacity-80">
-              📜 Versions
-            </button>
-          </td>
-        </tr>`;
-      }).join('')}
-      </tbody>
-    </table>`;
+    _catalogRows = d.catalog || [];
+    renderCatalog();
   } catch(e) {
+    _catalogRows = [];
     el.innerHTML = `<div class="px-5 py-5 text-red-500 text-sm">${e.message}</div>`;
   }
+}
+
+function setCatalogSort(key)      { _catalogSortKey = key; renderCatalog(); }
+function setCatalogGroup(group)   { _catalogGroupBy = group; renderCatalog(); }
+function toggleCatalogSortDir()   { _catalogSortDir = _catalogSortDir === 'asc' ? 'desc' : 'asc'; renderCatalog(); }
+
+// Lifecycle is ordered by pipeline position, not alphabetically — draft → archived reads as progress.
+const CATALOG_LIFECYCLE_ORDER = ['draft','review','beta','live','deprecated','archived'];
+
+function _catalogCompare(a, b) {
+  const dir = _catalogSortDir === 'asc' ? 1 : -1;
+  let cmp;
+  if (_catalogSortKey === 'waitlistCount') {
+    cmp = (a.waitlistCount || 0) - (b.waitlistCount || 0);
+  } else if (_catalogSortKey === 'lifecycleState') {
+    cmp = CATALOG_LIFECYCLE_ORDER.indexOf(a.lifecycleState || 'draft')
+        - CATALOG_LIFECYCLE_ORDER.indexOf(b.lifecycleState || 'draft');
+  } else {
+    cmp = String(a[_catalogSortKey] || '').localeCompare(String(b[_catalogSortKey] || ''), undefined, { sensitivity:'base' });
+  }
+  // Role name is the tie-breaker, and always A→Z — flipping it with the primary
+  // sort would shuffle equal rows for no reason the reader can see.
+  if (cmp === 0 && _catalogSortKey !== 'name') return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity:'base' });
+  return cmp * dir;
+}
+
+function renderCatalog() {
+  const el = document.getElementById('catalog-grid');
+  if (!el) return;
+
+  const dirBtn = document.getElementById('catalog-sort-dir');
+  if (dirBtn) dirBtn.textContent = _catalogSortDir === 'asc' ? '↑ Ascending' : '↓ Descending';
+  const sortSel = document.getElementById('catalog-sort');
+  if (sortSel) sortSel.value = _catalogSortKey;
+  const groupSel = document.getElementById('catalog-group');
+  if (groupSel) groupSel.value = _catalogGroupBy;
+  const countEl = document.getElementById('catalog-count');
+  if (countEl) countEl.textContent = `${_catalogRows.length} assistant role${_catalogRows.length === 1 ? '' : 's'}`;
+
+  // Bulk publish controls for beta assistants
+  const betaAssistants = _catalogRows.filter(a => a.lifecycleState === 'beta');
+  const bulkPublishBar = betaAssistants.length
+    ? `<div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between">
+         <span class="text-sm text-blue-700 font-semibold">${betaAssistants.length} assistant${betaAssistants.length > 1 ? 's' : ''} in beta — ready to bulk publish</span>
+         <button onclick="openBulkPublish()" class="px-4 py-1.5 text-sm font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700">🚀 Bulk Publish to Live</button>
+       </div>`
+    : '';
+
+  const sorted = _catalogRows.slice().sort(_catalogCompare);
+
+  // Build [groupLabel, rows] pairs — a single unlabelled group when grouping is off.
+  let groups;
+  if (_catalogGroupBy === 'category') {
+    const buckets = new Map();
+    sorted.forEach(a => {
+      const k = a.category || 'Uncategorised';
+      if (!buckets.has(k)) buckets.set(k, []);
+      buckets.get(k).push(a);
+    });
+    groups = [...buckets.entries()].sort((x, y) => x[0].localeCompare(y[0], undefined, { sensitivity:'base' }));
+  } else if (_catalogGroupBy === 'status') {
+    const launched = sorted.filter(a => !a.comingSoon);
+    const soon     = sorted.filter(a => a.comingSoon);
+    groups = [['🚀 Launched', launched], ['⏸ Coming Soon', soon]].filter(g => g[1].length);
+  } else {
+    groups = [[null, sorted]];
+  }
+
+  const body = groups.map(([label, rows]) => {
+    const header = label
+      ? `<tr class="bg-gray-100/70 border-t border-gray-200">
+           <td colspan="5" class="px-5 py-2 text-xs font-bold text-gray-600 uppercase tracking-wide">${label} <span class="text-gray-400 font-semibold normal-case">· ${rows.length}</span></td>
+         </tr>`
+      : '';
+    return header + rows.map(_catalogRowHtml).join('');
+  }).join('');
+
+  el.innerHTML = bulkPublishBar + `<table class="w-full text-sm">
+    <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase">
+      <tr>
+        <th class="px-5 py-3 text-left">Role</th>
+        <th class="px-5 py-3 text-left">Category</th>
+        <th class="px-5 py-3 text-left">Lifecycle</th>
+        <th class="px-5 py-3 text-left">Waitlist</th>
+        <th class="px-5 py-3 text-left">Actions</th>
+      </tr>
+    </thead>
+    <tbody>${body || '<tr><td colspan="5" class="px-5 py-8 text-center text-gray-400">No assistant roles.</td></tr>'}</tbody>
+  </table>`;
+}
+
+function _catalogRowHtml(a) {
+  const lcColors = {draft:'bg-gray-100 text-gray-600', review:'bg-yellow-100 text-yellow-700', beta:'bg-blue-100 text-blue-700', live:'bg-emerald-100 text-emerald-700', deprecated:'bg-orange-100 text-orange-700', archived:'bg-red-100 text-red-600'};
+  const lcBadge = `<span class="text-xs font-bold px-2 py-0.5 rounded-full ${lcColors[a.lifecycleState]||'bg-gray-100 text-gray-500'}">${a.lifecycleState||'draft'}</span>`;
+  return `<tr class="border-t border-gray-50 hover:bg-gray-50 transition">
+    <td class="px-5 py-3 font-medium">${a.name}</td>
+    <td class="px-5 py-3 text-xs text-gray-500">${a.category}</td>
+    <td class="px-5 py-3">${lcBadge}</td>
+    <td class="px-5 py-3 text-xs">${a.waitlistCount || 0} entries</td>
+    <td class="px-5 py-3 flex gap-2 flex-wrap">
+      <button onclick="toggleCatalogStatus(${a.id}, ${a.comingSoon})"
+        class="px-2.5 py-1 text-xs font-bold ${a.comingSoon?'bg-emerald-600 text-white hover:bg-emerald-700':'bg-amber-100 text-amber-700 hover:opacity-80'} rounded-lg transition">
+        ${a.comingSoon ? '🚀 Launch' : '⏸ Coming Soon'}
+      </button>
+      <button onclick="openLifecycleTransition(${a.id},'${a.name}','${a.lifecycleState||'draft'}')" class="px-2.5 py-1 text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg hover:opacity-80">
+        🔄 State
+      </button>
+      <button onclick="openVersionHistory(${a.id},'${a.name}')" class="px-2.5 py-1 text-xs font-bold bg-gray-50 text-gray-700 border border-gray-200 rounded-lg hover:opacity-80">
+        📜 Versions
+      </button>
+    </td>
+  </tr>`;
 }
 
 async function toggleCatalogStatus(id, currentlyComingSoon) {

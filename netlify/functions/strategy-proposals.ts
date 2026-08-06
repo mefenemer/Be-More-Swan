@@ -258,6 +258,10 @@ async function lastStrategyRun() {
             proposed: Number(r.proposed ?? 0),
             clusters: Number(r.clusters ?? 0),
             truncated: r.truncated === true,
+            // A BOOLEAN, never the reason itself. haltReason carries a thrown error's message,
+            // which can quote SQL and table names; the tenant needs to know the check did not
+            // complete, not what broke. Operators read the full string in platform_config.
+            halted: typeof r.haltReason === 'string' && r.haltReason.length > 0,
             // One line is enough for a diagnostic strip; the rest is in the logs.
             skipReason: Array.isArray(r.skipReasons) && r.skipReasons.length
                 ? String(r.skipReasons[0])

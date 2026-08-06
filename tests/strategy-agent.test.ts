@@ -391,6 +391,49 @@ check('the rejection cluster demands spread, not just a count', () => {
     assert.ok(/applied_to_target = false/.test(query), 'spent evidence would fund the same proposal forever');
 });
 
+check('every exit path records the run summary', () => {
+    // The summary is the ONLY artefact that answers "is this thing even running?" — the run is a
+    // background job whose HTTP response is just an ack. It used to be written at the end of the
+    // body, so the kill-switch return and any throw left last_run holding the PREVIOUS week's
+    // record: identical, in the UI, to a cron that never fired. That is how a 42809 went unnoticed
+    // on 2026-08-06. recordLastRun must live in the wrapper's finally, and nowhere else.
+    const src = sourceOf('netlify/functions/autonomous-strategy-agent.ts');
+    const wrapper = src.slice(
+        src.indexOf('export async function runStrategyAgent'),
+        src.indexOf('async function executeRun'),
+    );
+    assert.ok(/finally\s*\{[^}]*recordLastRun/.test(wrapper),
+        'recordLastRun must be in a finally so a throw still records');
+    assert.ok(/catch[\s\S]*haltReason[\s\S]*throw/.test(wrapper),
+        'a thrown error must be named in haltReason AND re-thrown, not swallowed');
+
+    const body = src.slice(src.indexOf('async function executeRun'), src.indexOf('async function recordLastRun'));
+    assert.ok(!/recordLastRun\(/.test(body),
+        'the body must not record its own summary — the finally owns it, or exits diverge again');
+    assert.ok(/isGlobalAiDisabled\(\)\)\s*\{[\s\S]{0,200}?haltReason/.test(body),
+        'the kill-switch must name itself, or a deliberate stop reads as "nothing to learn from"');
+});
+
+check('a halted run is never dressed up as a run that found nothing', () => {
+    // Both are zeroes. If the strip renders them identically, it asserts the very thing it exists
+    // to disprove. And the reason string must NOT cross the API: it carries a thrown error message.
+    const api = sourceOf('netlify/functions/strategy-proposals.ts');
+    const projection = api.slice(api.indexOf('async function lastStrategyRun'));
+    assert.ok(/halted:\s*typeof r\.haltReason === 'string'/.test(projection),
+        'the API must expose halted as a derived BOOLEAN');
+    assert.ok(!/haltReason:\s*(String\(|r\.haltReason)/.test(projection),
+        'the raw haltReason must never be sent to a tenant — it can quote SQL and table names');
+
+    const ui = readFileSync(join(root, 'src/components/assistant-strategy.js'), 'utf8');
+    const line = ui.slice(ui.indexOf('function lastRunLine'), ui.indexOf('function emptyState'));
+    assert.ok(/if \(lr\.halted\)/.test(line), 'the strip must branch on halted');
+    // ⚠️ Anchor on code-only text. The prose above the branch quotes the found-nothing wording, so
+    // an indexOf for that phrase matches the COMMENT and measures nothing — the same positional
+    // -anchor trap that silently re-pointed two checks in tests/lead-reject-reasons.test.ts.
+    assert.ok(line.indexOf('if (lr.halted)') < line.indexOf('const outcome'),
+        'the halted branch must return before the outcome wording is computed');
+});
+
 check('the rejection query never hands a bare JS array to = ANY()', () => {
     // Shipped broken 2026-08-06 and threw on EVERY run. Interpolating a JS array into a drizzle
     // sql template expands it to a parenthesised PARAMETER LIST, ($1, $2, ...) — a row constructor,
