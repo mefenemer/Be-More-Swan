@@ -98,6 +98,33 @@ const SCOPES: Record<IntegrationProvider, string> = {
 };
 
 /**
+ * What the provider says it actually GRANTED — or null when it does not say.
+ *
+ * ⚠️ Never pass a `SCOPES.*` constant to this column. `workspace_integrations.scopes` reads as a
+ * record of what the token can DO, and every consumer treats it that way; writing the REQUESTED
+ * list there turns a guess into an apparent fact. It also adds no information, since the requested
+ * list is a compile-time constant sitting a few lines above.
+ *
+ * This is not hypothetical. Prod Threads publishing failed for weeks with a 400 whose message named
+ * no cause, while the row read `threads_basic,threads_content_publish` — because that string was a
+ * constant we wrote ourselves, not a grant. Meta silently drops a scope that is not configured on
+ * the app's use case rather than refusing the authorization, so `threads_content_publish` was never
+ * granted, `/me` kept working (making the connection look healthy), and every write failed. A null
+ * here would have said "we don't know", which is the truth and would have been the first thing to
+ * check.
+ *
+ * Accepts the string form (`scope`, space- or comma-delimited) and the array form (`permissions`).
+ */
+function grantedScopes(reported: unknown): string | null {
+    if (Array.isArray(reported)) {
+        const list = reported.map(s => String(s ?? '').trim()).filter(Boolean);
+        return list.length ? list.join(',') : null;
+    }
+    if (typeof reported === 'string' && reported.trim()) return reported.trim();
+    return null;
+}
+
+/**
  * Normalise the Zendesk subdomain input: accepts a bare subdomain ("acme"), a host
  * ("acme.zendesk.com") or a full URL, and returns the bare subdomain or null when the
  * result isn't a valid Zendesk subdomain shape.
@@ -361,7 +388,7 @@ export default withLambda(async (event) => {
                     expiresInSec: tokenData.expires_in ?? null,
                     tenantId: info.hub_id ? String(info.hub_id) : null,
                     externalAccountName: info.hub_domain ?? null,
-                    scopes: SCOPES.hubspot,
+                    scopes: grantedScopes(null),   // hubspot does not report granted scopes
                 });
             } else if (provider === 'xero') {
                 const credentials = Buffer.from(`${process.env.XERO_CLIENT_ID ?? ''}:${process.env.XERO_CLIENT_SECRET ?? ''}`).toString('base64');
@@ -389,7 +416,7 @@ export default withLambda(async (event) => {
                     expiresInSec: tokenData.expires_in ?? null,
                     tenantId: org.tenantId,
                     externalAccountName: org.tenantName ?? null,
-                    scopes: SCOPES.xero,
+                    scopes: grantedScopes(null),   // xero does not report granted scopes
                 });
             } else if (provider === 'salesforce') {
                 const tokenRes = await fetch('https://login.salesforce.com/services/oauth2/token', {
@@ -426,7 +453,7 @@ export default withLambda(async (event) => {
                     // Every Salesforce REST call is rooted at the org's instance URL.
                     tenantId: tokenData.instance_url,
                     externalAccountName: accountName,
-                    scopes: SCOPES.salesforce,
+                    scopes: grantedScopes(null),   // salesforce does not report granted scopes
                 });
             } else if (provider === 'zendesk') {
                 // The subdomain captured at connect time rode in the CSRF vault entry.
@@ -458,7 +485,7 @@ export default withLambda(async (event) => {
                     // The subdomain roots every Zendesk API call — this IS the tenant mapping.
                     tenantId: subdomain,
                     externalAccountName: `${subdomain}.zendesk.com`,
-                    scopes: SCOPES.zendesk,
+                    scopes: grantedScopes(null),   // zendesk does not report granted scopes
                 });
             } else if (provider === 'notion') {
                 const credentials = Buffer.from(`${process.env.NOTION_CLIENT_ID ?? ''}:${process.env.NOTION_CLIENT_SECRET ?? ''}`).toString('base64');
@@ -514,7 +541,7 @@ export default withLambda(async (event) => {
                     expiresInSec: tokenData.expires_in ?? null,
                     tenantId: realmId,
                     externalAccountName: companyName,
-                    scopes: SCOPES.quickbooks,
+                    scopes: grantedScopes(null),   // quickbooks does not report granted scopes
                 });
             } else if (provider === 'intercom') {
                 const tokenRes = await fetch('https://api.intercom.io/auth/eagle/token', {
@@ -585,7 +612,7 @@ export default withLambda(async (event) => {
                     expiresInSec: tokenData.expires_in ?? null,
                     tenantId: emailAddress,
                     externalAccountName: emailAddress,
-                    scopes: tokenData.scope ?? SCOPES.gmail,
+                    scopes: grantedScopes(tokenData.scope),
                 });
             } else if (provider === 'outlook') {
                 const tokenRes = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
@@ -621,7 +648,7 @@ export default withLambda(async (event) => {
                     expiresInSec: tokenData.expires_in ?? null,
                     tenantId: emailAddress,
                     externalAccountName: emailAddress,
-                    scopes: tokenData.scope ?? SCOPES.outlook,
+                    scopes: grantedScopes(tokenData.scope),
                 });
             } else if (provider === 'threads') {
                 // Step 1: code → short-lived (1h) token.
@@ -636,7 +663,11 @@ export default withLambda(async (event) => {
                         code,
                     }),
                 });
-                const tokenData: { access_token?: string; user_id?: string | number } = await tokenRes.json().catch(() => ({}));
+                // `permissions` is Threads' report of what was actually granted. It is the ONLY
+                // signal we get: Meta drops a scope that is not configured on the app's Threads use
+                // case rather than failing the authorization, so a token with threads_basic alone
+                // comes back here looking identical to a fully-granted one. See grantedScopes.
+                const tokenData: { access_token?: string; user_id?: string | number; permissions?: string[] | string } = await tokenRes.json().catch(() => ({}));
                 if (!tokenData.access_token) return redirect(`/integrations.html?oauth_error=token_exchange&provider=threads`);
 
                 // Step 2: swap for the long-lived (~60 day) token — the only kind worth
@@ -668,7 +699,9 @@ export default withLambda(async (event) => {
                     // The Threads user id roots the publish endpoints (/{id}/threads).
                     tenantId: threadsUserId,
                     externalAccountName: username ? `@${username}` : null,
-                    scopes: SCOPES.threads,
+                    // What Threads GRANTED, never SCOPES.threads. Null when it says nothing — an
+                    // honest "unknown" beats a constant that reads as proof the token can publish.
+                    scopes: grantedScopes(tokenData.permissions),
                 });
             } else if (provider === 'tiktok') {
                 const tokenRes = await fetch('https://open.tiktokapis.com/v2/oauth/token/', {
@@ -703,7 +736,7 @@ export default withLambda(async (event) => {
                     // open_id identifies the authorised TikTok account on every API call.
                     tenantId: tokenData.open_id ?? null,
                     externalAccountName: displayName,
-                    scopes: tokenData.scope ?? SCOPES.tiktok,
+                    scopes: grantedScopes(tokenData.scope),
                 });
             } else if (provider === 'youtube') {
                 const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -739,7 +772,7 @@ export default withLambda(async (event) => {
                     expiresInSec: tokenData.expires_in ?? null,
                     tenantId: channelId,
                     externalAccountName: channelTitle,
-                    scopes: tokenData.scope ?? SCOPES.youtube,
+                    scopes: grantedScopes(tokenData.scope),
                 });
             } else if (provider === 'wordpresscom') {
                 const tokenRes = await fetch('https://public-api.wordpress.com/oauth2/token', {
@@ -801,7 +834,7 @@ export default withLambda(async (event) => {
                     expiresInSec: tokenData.expires_in ?? null,
                     tenantId: null,
                     externalAccountName: siteLabel,
-                    scopes: tokenData.scope ?? SCOPES.searchconsole,
+                    scopes: grantedScopes(tokenData.scope),
                 });
             } else if (provider === 'jira') {
                 const tokenRes = await fetch('https://auth.atlassian.com/oauth/token', {
@@ -840,7 +873,7 @@ export default withLambda(async (event) => {
                     expiresInSec: tokenData.expires_in ?? null,
                     tenantId: cloudId,
                     externalAccountName: siteUrl,
-                    scopes: tokenData.scope ?? SCOPES.jira,
+                    scopes: grantedScopes(tokenData.scope),
                 });
             } else if (provider === 'asana') {
                 const tokenRes = await fetch('https://app.asana.com/-/oauth_token', {
@@ -906,7 +939,7 @@ export default withLambda(async (event) => {
                     expiresInSec: tokenData.expires_in ?? null,
                     tenantId: tokenData.team?.id ?? null,
                     externalAccountName: tokenData.team?.name ?? null,
-                    scopes: tokenData.scope ?? SCOPES.slack,
+                    scopes: grantedScopes(tokenData.scope),
                 });
             } else if (provider === 'canva') {
                 // PKCE: replay the verifier stashed in the vault at connect. Without it Canva
@@ -945,7 +978,7 @@ export default withLambda(async (event) => {
                     expiresInSec: tokenData.expires_in ?? null,
                     tenantId: null,
                     externalAccountName: accountName,
-                    scopes: tokenData.scope ?? SCOPES.canva,
+                    scopes: grantedScopes(tokenData.scope),
                 });
             } else {
                 // Provider is in the union but its callback isn't wired yet (e.g. asana → step 4).

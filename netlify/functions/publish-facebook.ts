@@ -31,7 +31,15 @@ const MAX_ATTEMPTS = 3;
 // A row left in 'publishing' longer than this was orphaned by a timed-out tick — reclaim it.
 const STALE_PUBLISHING_MINS = 10;
 
-type FailureReason = { httpStatus: number | null; errorMessage: string; isRetryable: boolean };
+// errorCode/errorSubcode are Meta's own numbers, not the HTTP status — post-failure-diagnosis.ts
+// branches on them to tell a lost permission apart from a genuinely missing object.
+type FailureReason = {
+    httpStatus: number | null;
+    errorCode?: number | null;
+    errorSubcode?: number | null;
+    errorMessage: string;
+    isRetryable: boolean;
+};
 type PostRow = {
     id: number; user_id: number; organisation_id: number; caption: string | null;
     hashtags: string | null; connection_id: number | null; attempt_count: number;
@@ -113,7 +121,20 @@ export default withLambda(async () => {
             const result = await publishFacebook(pageId, pageToken, text, image);
 
             if (!result.ok) {
-                await handleFailure(db, post, { httpStatus: result.status, errorMessage: result.error, isRetryable: isRetryable(result.status) }, now);
+                // A platform rejection is the ordinary failure path and used to log nothing at all —
+                // only a thrown exception reached the catch below. Without this line the function
+                // logs look healthy while posts die.
+                console.error(
+                    `[publish-facebook] post ${post.id} rejected by platform:`,
+                    JSON.stringify({ status: result.status, code: result.errorCode ?? null, subcode: result.errorSubcode ?? null, error: result.error }),
+                );
+                await handleFailure(db, post, {
+                    httpStatus: result.status,
+                    errorCode: result.errorCode ?? null,
+                    errorSubcode: result.errorSubcode ?? null,
+                    errorMessage: result.error,
+                    isRetryable: isRetryable(result.status),
+                }, now);
                 if (!isRetryable(result.status)) failed++;
                 return;
             }

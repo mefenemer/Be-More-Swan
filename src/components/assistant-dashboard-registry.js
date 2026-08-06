@@ -372,8 +372,20 @@
         // Manual entry: the Data Hub shows an "Add Lead" button (assistant-data-hub.js) that
         // scores a single hand-typed lead via netlify/functions/lead-generation.ts (score_lead).
         manualAdd: true,
+        // `approvalStatus` sits second, right after the name: this tab holds every lead in every
+        // state, so "where is it in the gate" is the first thing you need after "which one is it".
+        // Without it a pending, an approved and a rejected lead were pixel-identical here — which
+        // is exactly why the Review tab (the same rows, filtered to pending_approval) read as a
+        // pointless duplicate of this one. Resolved off the record ENVELOPE, not record.data —
+        // assistant-data-hub.js cellValue special-cases it alongside title/status/updatedAt.
+        // `contact` is SYNTHETIC — there is no such field on the record. assistant-data-hub.js
+        // `contactState()` derives it from contactEmail + emailKind + the rating, because outreach
+        // is email-only and a lead with no address cannot be worked at all. It sits beside Approval
+        // so the two "can I act on this?" questions read together.
         columns: [
           { key: 'title', label: 'Lead' },
+          { key: 'approvalStatus', label: 'Approval' },
+          { key: 'contact', label: 'Contact' },
           { key: 'score', label: 'Score' },
           { key: 'status', label: 'Rating' },
           { key: 'suggestedNextStep', label: 'Next step' },

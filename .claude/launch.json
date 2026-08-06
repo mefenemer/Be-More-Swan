@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-datahub-toolbar",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4277",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/3716e012-41b9-4135-879b-844a363b7737/scratchpad/dhharness"
+      ],
+      "port": 4277,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-leadgen-tabs",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

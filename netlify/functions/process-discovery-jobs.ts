@@ -515,8 +515,9 @@ async function publishSignals(db: Db, job: JobRow): Promise<void> {
 
 /**
  * Persist one enrichment outcome. Always stamps `enrichAttemptedAt` (so a miss isn't
- * retried forever) and, on a hit, mirrors the address onto the linked assistant_record
- * so lead-generation.ts `send_outreach` resolves `data.contactEmail` with no change there.
+ * retried forever) and mirrors that stamp — plus, on a hit, the address — onto the linked
+ * assistant_record, so lead-generation.ts `send_outreach` resolves `data.contactEmail` with no
+ * change there and the Leads tab can say which leads have actually been looked at.
  */
 async function recordEnrichment(
     db: Db, leadId: number, assistantRecordId: number | null,
@@ -556,14 +557,26 @@ async function recordEnrichment(
         });
     }
 
-    if (!hit || !assistantRecordId) return;
+    if (!assistantRecordId) return;
 
     // Same merge on the mirrored record's scoring card, so the Review Queue and the
     // outreach send both see the address.
+    //
+    // ⚠️ The ATTEMPT stamp crosses over on a MISS too — `stamp` already carries
+    // `enrichAttemptedAt` either way. Without it the Leads tab could not tell "we looked and this
+    // company publishes no address" from "nobody has looked yet", and those are different facts
+    // with different remedies: the first sends the user off to find an address by hand, the second
+    // says the lead scored cold and it is the TARGETING that needs fixing. The Contact column
+    // (assistant-data-hub.js `contactState`) reads exactly this key.
+    //
+    // Deliberately unlike the revenue ledger above, which stays hit-only. That measures our
+    // scraper's hit RATE; counting misses there would report every attempt as a success. Mirroring
+    // state onto the record the UI reads is a different job from emitting a fact to aggregate.
     await db.update(assistantRecords)
         .set({
             data: sql`COALESCE(${assistantRecords.data}, '{}'::jsonb) || ${JSON.stringify({
-                contactEmail: hit.email, emailKind: hit.kind, emailSource: hit.source, emailFoundOn: hit.foundOn,
+                ...stamp,
+                ...(hit ? { contactEmail: hit.email } : {}),
             })}::jsonb`,
             updatedAt: new Date(),
         })

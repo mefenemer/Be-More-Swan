@@ -105,7 +105,7 @@ export default withLambda(async (event) => {
                 return json(200, { preflight: 'fail', detail: e instanceof Error ? e.message : 'No connected YouTube channel for this organisation.' });
             }
             const idCheck = await fetchYouTubeIdentity(token);
-            if (!idCheck.ok) return json(200, { preflight: 'fail', detail: idCheck.error, status: idCheck.status });
+            if (!idCheck.ok) return json(200, { preflight: 'fail', detail: idCheck.error, status: idCheck.status, code: idCheck.errorCode ?? null, subcode: idCheck.errorSubcode ?? null });
             if (!wantTestPost) return json(200, { preflight: 'ok', detail: `Authenticated as ${idCheck.id}.` });
 
             const videoUrl = String(body.videoUrl || '');
@@ -124,7 +124,7 @@ export default withLambda(async (event) => {
             );
             return result.ok
                 ? json(200, { preflight: 'ok', testPost: 'ok', postId: result.id, deleteHint: deleteHint(platform, result.id) })
-                : json(200, { preflight: 'ok', testPost: 'fail', detail: result.error, status: result.status });
+                : json(200, { preflight: 'ok', testPost: 'fail', detail: result.error, status: result.status, code: result.errorCode ?? null, subcode: result.errorSubcode ?? null });
         }
 
         // ── Threads: verify the profile, then optionally publish ONE text-only test post. ──
@@ -144,13 +144,13 @@ export default withLambda(async (event) => {
                 return json(200, { preflight: 'fail', detail: e instanceof Error ? e.message : 'No connected Threads profile for this organisation.' });
             }
             const idCheck = await fetchThreadsIdentity(token);
-            if (!idCheck.ok) return json(200, { preflight: 'fail', detail: idCheck.error, status: idCheck.status });
+            if (!idCheck.ok) return json(200, { preflight: 'fail', detail: idCheck.error, status: idCheck.status, code: idCheck.errorCode ?? null, subcode: idCheck.errorSubcode ?? null });
             if (!wantTestPost) return json(200, { preflight: 'ok', detail: `Authenticated as ${idCheck.id}.` });
 
             const result: DriverResult = await publishThreads(testMessage(), token, threadsUserId, null);
             return result.ok
                 ? json(200, { preflight: 'ok', testPost: 'ok', postId: result.id, deleteHint: deleteHint(platform, result.id) })
-                : json(200, { preflight: 'ok', testPost: 'fail', detail: result.error, status: result.status });
+                : json(200, { preflight: 'ok', testPost: 'fail', detail: result.error, status: result.status, code: result.errorCode ?? null, subcode: result.errorSubcode ?? null });
         }
 
         // ── Facebook: resolve the Page id + Page token (read-only Graph GET), then optionally post. ──
@@ -165,7 +165,7 @@ export default withLambda(async (event) => {
             const result: DriverResult = await publishFacebook(pageId, pageToken, testMessage(), null);
             return result.ok
                 ? json(200, { preflight: 'ok', testPost: 'ok', postId: result.id, deleteHint: deleteHint(platform, result.id) })
-                : json(200, { preflight: 'ok', testPost: 'fail', detail: result.error, status: result.status });
+                : json(200, { preflight: 'ok', testPost: 'fail', detail: result.error, status: result.status, code: result.errorCode ?? null, subcode: result.errorSubcode ?? null });
         }
 
         // ── X / LinkedIn: resolve the connection + token, run a read-only identity check, then post. ──
@@ -182,12 +182,12 @@ export default withLambda(async (event) => {
                 const fresh = await refreshXToken(db, conn.vaultRefKey);
                 if (fresh) { token = fresh; idCheck = await fetchXIdentity(token); }
             }
-            if (!idCheck.ok) return json(200, { preflight: 'fail', detail: idCheck.error, status: idCheck.status });
+            if (!idCheck.ok) return json(200, { preflight: 'fail', detail: idCheck.error, status: idCheck.status, code: idCheck.errorCode ?? null, subcode: idCheck.errorSubcode ?? null });
             if (!wantTestPost) return json(200, { preflight: 'ok', detail: `Authenticated as ${idCheck.id}.` });
             const result = await publishX(testMessage(), token, null);
             return result.ok
                 ? json(200, { preflight: 'ok', testPost: 'ok', postId: result.id, deleteHint: deleteHint(platform, result.id) })
-                : json(200, { preflight: 'ok', testPost: 'fail', detail: result.error, status: result.status });
+                : json(200, { preflight: 'ok', testPost: 'fail', detail: result.error, status: result.status, code: result.errorCode ?? null, subcode: result.errorSubcode ?? null });
         }
 
         // linkedin
@@ -197,7 +197,7 @@ export default withLambda(async (event) => {
         const result = await publishLinkedIn(testMessage(), token, conn.externalUserId || author.urn, null);
         return result.ok
             ? json(200, { preflight: 'ok', testPost: 'ok', postId: result.id, deleteHint: deleteHint(platform, result.id) })
-            : json(200, { preflight: 'ok', testPost: 'fail', detail: result.error, status: result.status });
+            : json(200, { preflight: 'ok', testPost: 'fail', detail: result.error, status: result.status, code: result.errorCode ?? null, subcode: result.errorSubcode ?? null });
     } catch (err) {
         return json(500, { preflight: 'error', detail: err instanceof Error ? err.message : 'Self-test failed unexpectedly.' });
     }

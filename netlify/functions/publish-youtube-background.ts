@@ -163,6 +163,14 @@ async function settleFailure(
     const attempt = (post.attemptCount ?? 0) + 1;
     const giveUp = !retryable || attempt >= MAX_ATTEMPTS;
 
+    // Logged HERE rather than at each call site so no future caller can settle a failure silently.
+    // Only the catch block used to write anything, which meant an upload rejected by YouTube was
+    // recorded to the database and notified while leaving the function logs clean.
+    console.error(
+        `[publish-youtube-background] post ${post.id} failed (attempt ${attempt}${giveUp ? ', giving up' : ', will retry'}):`,
+        JSON.stringify({ httpStatus, retryable, error }),
+    );
+
     await db.update(scheduledPosts).set({
         status: giveUp ? 'failed' : 'scheduled',
         // Retryable failures come back through the cron's normal sweep rather than re-triggering

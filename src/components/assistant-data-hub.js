@@ -43,11 +43,82 @@
     return d && !isNaN(d) ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
   }
 
+  // ── Where a record stands in the approval gate ──────────────────────────────
+  // `label` is the banner above an open record; `short` is the table cell, where the full sentence
+  // would push every other column off a laptop screen. Both name the same state — a cell that says
+  // "Awaiting you" and a banner that says "Awaiting your approval" must never be able to disagree
+  // about WHICH state, which is why they share one table.
+  //
+  // ⚠️ The copy is lead-flavoured ("Chase set" is the chase reminder a lead gets after its outreach
+  // goes out). Only the Leads hub lists this column today; a role adding it would want its own
+  // wording for `scheduled`, which means something different everywhere else.
+  const APPROVAL_CHIP = {
+    pending_approval: { label: 'Awaiting your approval', short: 'Awaiting you', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+    approved: { label: 'Approved', short: 'Approved', cls: 'bg-green-50 text-green-700 border-green-100' },
+    scheduled: { label: 'Approved · chase reminder set', short: 'Chase set', cls: 'bg-green-50 text-green-700 border-green-100' },
+    rejected: { label: 'Rejected', short: 'Rejected', cls: 'bg-gray-100 text-gray-500 border-gray-200' },
+  };
+
+  // ── Can this lead actually be reached? ──────────────────────────────────────
+  // Outreach is email-only, so a lead with no address cannot be worked at all — and until now it
+  // sat in the list looking exactly like one that could. Measured reality: tier-1 enrichment hits
+  // roughly 3 in 10 UK SMB sites, and most rows are never attempted, so this is the majority state
+  // of the table rather than an edge case.
+  //
+  // ⚠️ Deliberately NOT a yes/no. "We looked and the site publishes nothing" and "nobody has
+  // looked" are different facts with different remedies — the first sends you off to find an
+  // address by hand, the second says the lead scored cold and the problem is TARGETING, not
+  // scraping. Collapsing them to "No" would hide the more useful of the two.
+  const CONTACT_CHIP = {
+    role: { short: 'Role inbox', cls: 'bg-green-50 text-green-700 border-green-100' },
+    personal: { short: 'Named person', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+    none: { short: 'None found', cls: 'bg-red-50 text-red-700 border-red-200' },
+    checking: { short: 'Checking…', cls: 'bg-blue-50 text-blue-800 border-blue-200' },
+    unchecked: { short: 'Not checked', cls: 'bg-gray-100 text-gray-500 border-gray-200' },
+  };
+
+  /** The address on a lead, or null. Same precedence the Review Queue's recipient line uses. */
+  function contactEmailOf(record) {
+    const v = record.data && record.data.contactEmail;
+    return typeof v === 'string' && v.trim() ? v.trim() : null;
+  }
+
+  /**
+   * Which of the five states a lead is in, derived entirely from what the record already carries.
+   *
+   * `enrichAttemptedAt` is the load-bearing key: `recordEnrichment` (process-discovery-jobs.ts)
+   * mirrors it across on a MISS as well as a hit, so a blank address plus a stamp means the site
+   * was read and publishes nothing — "go and find one by hand" — while a blank address with no
+   * stamp means nobody has looked.
+   *
+   * Which of the two no-stamp readings applies comes from the RATING, because that is exactly the
+   * rule the pipeline runs: `enrichBatch` scrapes `rating IN ('hot','warm')` only. A cold lead is
+   * therefore never going to be attempted (the fix is TARGETING, not scraping); a hot/warm one is
+   * queued for it.
+   *
+   * ⚠️ `enrichAttemptedAt` reaches older records only via db/backfill-enrich-attempted.sql. Until
+   * that has run, an already-enriched lead that came back empty reads "Checking…" instead of
+   * "None found" — which is why the SQL applies BEFORE this ships.
+   *
+   * ⚠️ "Checking…" also covers a run that DIED before its enrichment stage, where nothing is
+   * actually in progress. Accepted: the Searches tab is the surface that owns run health and says
+   * "Last run failed" with a Run again button, so the truth is one tab away rather than absent.
+   */
+  function contactState(record) {
+    const d = record.data || {};
+    if (contactEmailOf(record)) return d.emailKind === 'personal' ? 'personal' : 'role';
+    if (d.enrichAttemptedAt) return 'none';
+    return record.status === 'cold' ? 'unchecked' : 'checking';
+  }
+
   // Resolve a hubTab column key against a record: envelope fields first, then a
   // dot-path into record.data. Arrays read as counts.
   function cellValue(record, key) {
     if (key === 'title') return record.title;
     if (key === 'status') return record.status ?? '—';
+    // Records predating the approval gate carry no status at all — an em-dash, never a guess.
+    if (key === 'approvalStatus') return APPROVAL_CHIP[record.approvalStatus]?.short ?? '—';
+    if (key === 'contact') return CONTACT_CHIP[contactState(record)].short;
     if (key === 'updatedAt') return fmtDate(record.updatedAt);
     let v = record.data;
     for (const part of String(key).split('.')) {
@@ -195,18 +266,13 @@
   // by scripts/gen-client-constants.ts) rather than being retyped here: they are CHECK-constrained
   // server-side, and recordEvent() swallows its errors, so a drifted copy would fail invisibly.
 
-  // ── Where a lead stands in the approval gate ────────────────────────────────
-  // The Leads table has no approval column — its columns are Lead / Score / Rating / Next step /
-  // Updated — so a pending lead, an approved one and a rejected one are visually identical in the
-  // list. That is why the Review tab looks like it duplicates this one: it is showing the SAME
-  // rows, filtered to the only state the list can't express. Stating it on the open record is the
-  // cheap half of the fix, and it is what makes the Reject button below have a visible effect.
-  const APPROVAL_CHIP = {
-    pending_approval: { label: 'Awaiting your approval', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
-    approved: { label: 'Approved', cls: 'bg-green-50 text-green-700 border-green-100' },
-    scheduled: { label: 'Approved · chase reminder set', cls: 'bg-green-50 text-green-700 border-green-100' },
-    rejected: { label: 'Rejected', cls: 'bg-gray-100 text-gray-500 border-gray-200' },
-  };
+  // Why the approval state is stated twice — in the list AND on the open record. Until 2026-08-06
+  // the Leads table showed Lead / Score / Rating / Next step / Updated, so a pending lead, an
+  // approved one and a rejected one were pixel-identical in the list. That is what made the Review
+  // tab look like a duplicate of this one: it shows the SAME rows, filtered to the one state the
+  // list could not express. The column answers "which of these still need me?" at a glance; the
+  // banner answers "what am I looking at?" once a record is open, and is what gives the Reject
+  // button below a visible effect without a full re-render.
 
   /** The approval chip for a lead. `data-hub-approval` so a reject can swap it without a re-render. */
   function approvalBanner(record) {
@@ -656,8 +722,10 @@
           if (!res.ok) throw new Error(data.error || 'Could not reject that lead.');
           record.approvalStatus = 'rejected';
           btn.textContent = 'Rejected';
-          // The chip above the record, so the state change is visible without a re-render — the
-          // table's columns (Lead / Score / Rating / Next step / Updated) can't show it.
+          // Both places the state is stated: the row's Approval cell, and the banner above the
+          // open record. refreshRow rewrites the cells in place rather than re-rendering the
+          // table, which would collapse the panel the user is still reading.
+          refreshRow(record);
           const chip = btn.closest('[data-hub-detail]')?.querySelector('[data-hub-approval]');
           if (chip) chip.innerHTML = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${APPROVAL_CHIP.rejected.cls}">${esc(APPROVAL_CHIP.rejected.label)}</span>`;
           // Asked AFTER the rejection commits, never as a gate on it: the reason is an annotation
@@ -854,12 +922,30 @@
   // ── Table ───────────────────────────────────────────────────────────────────
 
   function rowHtml(record) {
-    const cols = state.hub.columns.map((c, i) => `
-      <td class="px-4 py-3 ${i === 0 ? 'font-semibold text-gray-900' : 'text-gray-700'}">${
-        c.key === 'status'
-          ? `<span class="text-xs font-bold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200 whitespace-nowrap">${esc(cellValue(record, c.key))}</span>`
-          : esc(cellValue(record, c.key))
-      }</td>`).join('');
+    const cols = state.hub.columns.map((c, i) => {
+      let cell;
+      if (c.key === 'status') {
+        cell = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200 whitespace-nowrap">${esc(cellValue(record, c.key))}</span>`;
+      } else if (c.key === 'approvalStatus') {
+        // Coloured, unlike the neutral Rating chip beside it: this column exists to be SCANNED for
+        // the amber ones. A record with no approval status renders the bare em-dash — a grey chip
+        // reading "—" would look like a fourth state.
+        const s = APPROVAL_CHIP[record.approvalStatus];
+        cell = s
+          ? `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${s.cls} whitespace-nowrap">${esc(s.short)}</span>`
+          : '<span class="text-gray-400">—</span>';
+      } else if (c.key === 'contact') {
+        // The chip carries the STATE; the address itself rides in the tooltip. A column of raw
+        // addresses would be unscannable, and would put a hundred people's contact details on
+        // screen to answer a question that is really just "can I send to this one?".
+        const s = CONTACT_CHIP[contactState(record)];
+        const email = contactEmailOf(record);
+        cell = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${s.cls} whitespace-nowrap"${email ? ` title="${esc(email)}"` : ''}>${esc(s.short)}</span>`;
+      } else {
+        cell = esc(cellValue(record, c.key));
+      }
+      return `<td class="px-4 py-3 ${i === 0 ? 'font-semibold text-gray-900' : 'text-gray-700'}">${cell}</td>`;
+    }).join('');
     return `${cols}
       <td class="px-4 py-3 text-right">
         <svg class="w-4 h-4 text-gray-400 inline transition-transform" data-row-chevron fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
@@ -1015,7 +1101,15 @@
           <h3 class="text-lg font-bold text-gray-900">${esc(hub.label)}</h3>
           <p class="text-sm text-gray-500 mt-1 max-w-2xl">${esc(hub.description)}</p>
         </div>
-        <div class="flex items-center gap-2 shrink-0">
+        <!-- flex-wrap, not nowrap: every button is whitespace-nowrap, so without it the row's
+             min-content width is the SUM of all three (~425px on a 375px phone) and, since a flex
+             item can't shrink below that, the whole PAGE scrolled sideways with Export CSV clipped
+             off-screen. Wrapping lets the buttons stack on a narrow viewport. shrink-0 stays: it
+             only bites at sm+, where the row is a flex-row item beside the heading and must keep
+             all three on one line (on mobile the parent is flex-col, so shrink is the vertical
+             axis and this does nothing). No backticks in here — this comment is inside a template
+             literal. -->
+        <div class="flex flex-wrap items-center gap-2 shrink-0">
           ${hub.manualAdd ? `
           <button type="button" data-hub-add
             class="inline-flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap">

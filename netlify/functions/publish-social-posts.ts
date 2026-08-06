@@ -32,7 +32,15 @@ const STALE_PUBLISHING_MINS = 10;
 // YouTube's upload lives in a background function that holds the row far longer — see the sweep below.
 const STALE_YOUTUBE_MINS = 30;
 
-type FailureReason = { httpStatus: number | null; errorMessage: string; isRetryable: boolean };
+// errorCode/errorSubcode are the PLATFORM's own numbers, not the HTTP status, and they are what
+// post-failure-diagnosis.ts branches on. Optional: only the Meta family reports them.
+type FailureReason = {
+    httpStatus: number | null;
+    errorCode?: number | null;
+    errorSubcode?: number | null;
+    errorMessage: string;
+    isRetryable: boolean;
+};
 type PostRow = {
     id: number; user_id: number; organisation_id: number; caption: string | null;
     hashtags: string | null; connection_id: number | null; attempt_count: number;
@@ -233,7 +241,22 @@ export default withLambda(async () => {
             }
 
             if (!result.ok) {
-                await handleFailure(db, post, { httpStatus: result.status, errorMessage: result.error, isRetryable: isRetryable(result.status) }, now);
+                // LOG IT. Only the catch block below used to write anything, so a driver that
+                // returned {ok:false} — the ordinary way a platform rejects a post — recorded the
+                // failure to the database and notified the user while leaving the function logs
+                // completely clean. That is precisely backwards for debugging: a prod Threads
+                // outage sat behind seven days of healthy-looking ticks.
+                console.error(
+                    `[publish-social-posts] post ${post.id} (${post.platform}) rejected by platform:`,
+                    JSON.stringify({ status: result.status, code: result.errorCode ?? null, subcode: result.errorSubcode ?? null, error: result.error }),
+                );
+                await handleFailure(db, post, {
+                    httpStatus: result.status,
+                    errorCode: result.errorCode ?? null,
+                    errorSubcode: result.errorSubcode ?? null,
+                    errorMessage: result.error,
+                    isRetryable: isRetryable(result.status),
+                }, now);
                 if (!isRetryable(result.status)) failed++;
                 return;
             }

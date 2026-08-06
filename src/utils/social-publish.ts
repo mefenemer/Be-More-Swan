@@ -370,7 +370,39 @@ export async function fetchImageBytes(url: string): Promise<ArrayBuffer> {
 // confirmed without a live connected account is flagged and is exactly what the harness exercises.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
-export type DriverResult = { ok: true; id: string } | { ok: false; status: number | null; error: string };
+/**
+ * What a publish driver hands back.
+ *
+ * `errorCode`/`errorSubcode` carry the PLATFORM's own numeric code, not the HTTP status. On the
+ * Meta family (Facebook, Threads) that code is the only thing that distinguishes causes the message
+ * text deliberately blurs together: Graph answers a lost permission and a genuinely missing object
+ * with the same "...does not exist, cannot be loaded due to missing permissions, or does not support
+ * this operation". src/utils/post-failure-diagnosis.ts branches on exactly these numbers
+ * (AUTH_CODES, THROTTLE_CODES), so dropping them forces every Graph failure into the 'unknown' kind
+ * and leaves the reviewer with a sentence that names no cause.
+ *
+ * Optional because not every platform has one — X and LinkedIn do not report a comparable code, and
+ * an absent code must stay absent rather than be invented as 0.
+ */
+export type DriverResult =
+    | { ok: true; id: string }
+    | { ok: false; status: number | null; error: string; errorCode?: number | null; errorSubcode?: number | null };
+
+/**
+ * Pull the message + numeric codes out of a Meta Graph error body.
+ *
+ * Every Graph endpoint we touch answers a failure with `{ error: { message, code, error_subcode } }`.
+ * `fallback` is used when the body is empty or unparseable (a gateway error page, a truncated
+ * response), so the caller always gets a sentence.
+ */
+export function metaError(data: any, fallback: string): { error: string; errorCode: number | null; errorSubcode: number | null } {
+    const err = data?.error;
+    return {
+        error: typeof err?.message === 'string' && err.message.trim() ? err.message : fallback,
+        errorCode: typeof err?.code === 'number' ? err.code : null,
+        errorSubcode: typeof err?.error_subcode === 'number' ? err.error_subcode : null,
+    };
+}
 
 export const X_MAX = 280;
 export const FB_GRAPH_VERSION = 'v21.0';   // was v19.0 — bumped to a current stable Graph version.
@@ -798,7 +830,7 @@ export async function publishThreads(
             const res = await fetch(`https://graph.threads.net/v1.0/${uid}/threads`, { method: 'POST', headers: authHeaders, body: params });
             const data: any = await res.json().catch(() => ({}));
             if (!res.ok || !data?.id) {
-                return { ok: false, status: res.status, error: data?.error?.message || `Threads carousel item failed (${res.status})` };
+                return { ok: false, status: res.status, ...metaError(data, `Threads carousel item failed (${res.status})`) };
             }
             if (isVid) {
                 const ready = await awaitThreadsContainer(String(data.id), token);
@@ -815,14 +847,14 @@ export async function publishThreads(
         const parentRes = await fetch(`https://graph.threads.net/v1.0/${uid}/threads`, { method: 'POST', headers: authHeaders, body: parentParams });
         const parentData: any = await parentRes.json().catch(() => ({}));
         if (!parentRes.ok || !parentData?.id) {
-            return { ok: false, status: parentRes.status, error: parentData?.error?.message || `Threads carousel container failed (${parentRes.status})` };
+            return { ok: false, status: parentRes.status, ...metaError(parentData, `Threads carousel container failed (${parentRes.status})`) };
         }
         const pubRes = await fetch(`https://graph.threads.net/v1.0/${uid}/threads_publish`, {
             method: 'POST', headers: authHeaders, body: new URLSearchParams({ creation_id: String(parentData.id) }),
         });
         const pubData: any = await pubRes.json().catch(() => ({}));
         if (!pubRes.ok || !pubData?.id) {
-            return { ok: false, status: pubRes.status, error: pubData?.error?.message || `Threads publish error (${pubRes.status})` };
+            return { ok: false, status: pubRes.status, ...metaError(pubData, `Threads publish error (${pubRes.status})`) };
         }
         return { ok: true, id: String(pubData.id) };
     }
@@ -846,7 +878,7 @@ export async function publishThreads(
     });
     const containerData: any = await containerRes.json().catch(() => ({}));
     if (!containerRes.ok || !containerData?.id) {
-        return { ok: false, status: containerRes.status, error: containerData?.error?.message || `Threads container error (${containerRes.status})` };
+        return { ok: false, status: containerRes.status, ...metaError(containerData, `Threads container error (${containerRes.status})`) };
     }
 
     // 1a. A VIDEO container is not ready the instant it is created — Threads transcodes first, and
@@ -863,7 +895,7 @@ export async function publishThreads(
     });
     const publishData: any = await publishRes.json().catch(() => ({}));
     if (!publishRes.ok || !publishData?.id) {
-        return { ok: false, status: publishRes.status, error: publishData?.error?.message || `Threads publish error (${publishRes.status})` };
+        return { ok: false, status: publishRes.status, ...metaError(publishData, `Threads publish error (${publishRes.status})`) };
     }
     return { ok: true, id: String(publishData.id) };
 }
@@ -943,7 +975,7 @@ export async function fetchThreadsIdentity(token: string): Promise<DriverResult>
     });
     const data: any = await res.json().catch(() => ({}));
     if (res.ok && data?.id) return { ok: true, id: `${data.username ? `@${data.username} ` : ''}(${data.id})` };
-    return { ok: false, status: res.status, error: data?.error?.message || `Threads API error (${res.status})` };
+    return { ok: false, status: res.status, ...metaError(data, `Threads API error (${res.status})`) };
 }
 
 export async function fetchYouTubeIdentity(token: string): Promise<DriverResult> {
@@ -1293,7 +1325,7 @@ export async function publishFacebook(pageId: string, pageToken: string, text: s
             });
             const data: any = await res.json().catch(() => ({}));
             if (!res.ok || !data?.id) {
-                return { ok: false, status: res.status, error: data?.error?.message || `Facebook photo upload failed (${res.status})` };
+                return { ok: false, status: res.status, ...metaError(data, `Facebook photo upload failed (${res.status})`) };
             }
             attached.push({ media_fbid: String(data.id) });
         }
@@ -1304,7 +1336,7 @@ export async function publishFacebook(pageId: string, pageToken: string, text: s
         const feedData: any = await feedRes.json().catch(() => ({}));
         const feedId = feedData?.post_id || feedData?.id;
         if (feedRes.ok && feedId) return { ok: true, id: String(feedId) };
-        return { ok: false, status: feedRes.status, error: feedData?.error?.message || `Facebook API error (${feedRes.status})` };
+        return { ok: false, status: feedRes.status, ...metaError(feedData, `Facebook API error (${feedRes.status})`) };
     }
 
     const image = items[0] ?? null;
@@ -1330,7 +1362,7 @@ export async function publishFacebook(pageId: string, pageToken: string, text: s
     const data: any = await res.json().catch(() => ({}));
     const id = data?.post_id || data?.id;
     if (res.ok && id) return { ok: true, id: String(id) };
-    return { ok: false, status: res.status, error: data?.error?.message || `Facebook API error (${res.status})` };
+    return { ok: false, status: res.status, ...metaError(data, `Facebook API error (${res.status})`) };
 }
 
 // GET /{pageId}?fields=access_token → the Page access token (requires pages_manage_posts).
