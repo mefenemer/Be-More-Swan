@@ -23,6 +23,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getIcpSnapshot, makeIcpSnapshotCache, icpFromOnboarding } from '../src/utils/icp-snapshot';
+import { icpBlock } from '../src/config/icp-profile';
 import { discoveredLeads, aiAssistants } from '../db/schema';
 
 let passed = 0;
@@ -178,10 +179,13 @@ check('the ICP snapshot shape is defined once, not re-inlined at a call site', (
 
 check('icpFromOnboarding always returns every key, so snapshots GROUP BY together', () => {
     const empty = icpFromOnboarding(undefined);
-    assert.deepEqual(Object.keys(empty).sort(), ['minHeadcount', 'salesTone', 'targetIndustries']);
+    assert.deepEqual(Object.keys(empty).sort(), ['excludeProfile', 'minHeadcount', 'salesTone', 'targetIndustries']);
     assert.equal(empty.targetIndustries, null);
     assert.equal(empty.minHeadcount, null);
     assert.equal(empty.salesTone, 'professional', 'the tone default must be stable, not absent');
+    // Null, not ''. An unanswered exclusion list and an explicitly emptied one are different facts,
+    // and only the first should read as "never asked" when this snapshot is looked at later.
+    assert.equal(empty.excludeProfile, null);
 });
 
 check('icpFromOnboarding tolerates junk rather than throwing', () => {
@@ -193,8 +197,56 @@ check('icpFromOnboarding tolerates junk rather than throwing', () => {
 });
 
 check('icpFromOnboarding reads real answers through', () => {
-    const r = icpFromOnboarding({ targetIndustries: ['manufacturing'], minHeadcount: 50, salesTone: 'direct' });
-    assert.deepEqual(r, { targetIndustries: ['manufacturing'], minHeadcount: 50, salesTone: 'direct' });
+    const r = icpFromOnboarding({
+        targetIndustries: ['manufacturing'], minHeadcount: 50, salesTone: 'direct',
+        excludeProfile: 'other manufacturers, industrial recruiters',
+    });
+    assert.deepEqual(r, {
+        targetIndustries: ['manufacturing'], minHeadcount: 50, salesTone: 'direct',
+        excludeProfile: 'other manufacturers, industrial recruiters',
+    });
+});
+
+// ── 2b. icpBlock — the rendered profile ──────────────────────────────────────
+// The shape (above) is an attribution key; this is the prompt text built from it. They were
+// separate concerns living in four files, which is how the wording drifted.
+
+check('icpBlock states every criterion, so an unanswered one reads as neutral not absent', () => {
+    const block = icpBlock(icpFromOnboarding(undefined));
+    assert.match(block, /Target industries: not specified/);
+    assert.match(block, /Minimum company headcount: not specified/);
+    assert.match(block, /Sales tone: professional/);
+});
+
+check('icpBlock omits the exclusion line entirely when nothing is excluded', () => {
+    // Not "- NOT customers: none". An empty list stated as a criterion invites the model to fill it,
+    // and every assistant hired before the field existed would get that line.
+    for (const blank of [undefined, null, '', '   ']) {
+        const block = icpBlock({ excludeProfile: blank });
+        assert.ok(!/NOT customers/.test(block), `rendered an empty exclusion line for ${JSON.stringify(blank)}`);
+    }
+});
+
+check('icpBlock renders the exclusion list when it is answered', () => {
+    const block = icpBlock(icpFromOnboarding({ excludeProfile: 'marketing agencies, recruiters' }));
+    assert.match(block, /NOT customers .* marketing agencies, recruiters/);
+});
+
+check('the ICP prompt block is defined once, not re-inlined at a call site', () => {
+    // The guard that would have caught the original drift: discovery-scoring.ts said "treat as
+    // neutral", lead-generation.ts said "treat industry as neutral", and chat-orchestrator.ts had a
+    // third copy inline in a template literal. Three surfaces scoring the same company from three
+    // different prompts is not a difference any user could attribute to its real cause.
+    const offenders: string[] = [];
+    for (const file of sourceFiles(['netlify', 'src'])) {
+        const rel = relative(root, file);
+        if (rel === 'src/config/icp-profile.ts') continue;
+        const text = stripComments(readFileSync(file, 'utf8'));
+        if (/-\s*Target industries:/.test(text) || /Scoring bands: 70-100/.test(text)) {
+            offenders.push(rel);
+        }
+    }
+    assert.deepEqual(offenders, [], `import icpBlock()/SCORING_BANDS from src/config/icp-profile.ts instead:\n    ${offenders.join('\n    ')}`);
 });
 
 // ── 3. The resolver ──────────────────────────────────────────────────────────
@@ -243,7 +295,7 @@ await check('a mirrored record resolves via record → lead → campaign', async
 await check('a manually added lead falls back to onboarding rather than returning null', async () => {
     const db = fakeDb({ leads: [], assistants: [{ onboardingContext: { targetIndustries: ['retail'], minHeadcount: 5 } }] });
     const got = await getIcpSnapshot(db, { assistantRecordId: 42, aiAssistantId: 3 });
-    assert.deepEqual(got, { targetIndustries: ['retail'], minHeadcount: 5, salesTone: 'professional' },
+    assert.deepEqual(got, { targetIndustries: ['retail'], minHeadcount: 5, salesTone: 'professional', excludeProfile: null },
         'a weaker attribution is still an attribution');
 });
 

@@ -152,6 +152,11 @@
   var EDIT_REASONS = ["too_formal","too_casual","wrong_value_prop","wrong_pain_point","too_long","factually_wrong","bad_subject","personalisation_missing","other"];
   var EDIT_REASON_LABELS = {"too_formal":"Too formal","too_casual":"Too casual","wrong_value_prop":"Wrong benefit","wrong_pain_point":"Wrong problem","too_long":"Too long","factually_wrong":"Got something wrong","bad_subject":"Weak subject line","personalisation_missing":"Not specific enough","other":"Something else"};
 
+  // Why a reviewer rejected a discovered lead, from src/config/lead-reject-reasons.ts. Also
+  // CHECK-constrained server-side.
+  var LEAD_REJECT_REASONS = ["competitor","not_a_business","wrong_industry","too_small","too_large","wrong_geography","existing_customer","no_buying_signal","bad_contact","other"];
+  var LEAD_REJECT_REASON_LABELS = {"competitor":"Competitor or peer","not_a_business":"Not a real business","wrong_industry":"Wrong industry","too_small":"Too small","too_large":"Too big","wrong_geography":"Wrong location","existing_customer":"Already a customer","no_buying_signal":"No sign they need us","bad_contact":"No usable contact","other":"Something else"};
+
   window.RevenueConstants = {
     /** 'won' | 'lost' | 'disqualified', in canonical order. */
     outcomes: OUTCOMES,
@@ -183,6 +188,14 @@
     /** Display label for an edit reason. */
     editReasonLabel: function (r) {
       return EDIT_REASON_LABELS[String(r == null ? '' : r)] || String(r == null ? '' : r);
+    },
+
+    /** Why a reviewer rejected a lead, from src/config/lead-reject-reasons.ts. */
+    leadRejectReasons: LEAD_REJECT_REASONS,
+
+    /** Display label for a lead reject reason. */
+    leadRejectReasonLabel: function (r) {
+      return LEAD_REJECT_REASON_LABELS[String(r == null ? '' : r)] || String(r == null ? '' : r);
     },
   };
 

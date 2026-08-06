@@ -69,6 +69,16 @@ export function icpFromOnboarding(onboarding: unknown): Record<string, unknown> 
         targetIndustries: o.targetIndustries ?? null,
         minHeadcount: o.minHeadcount ?? null,
         salesTone: o.salesTone ?? 'professional',
+        // Who is NOT a customer — peers, competitors, suppliers to the same market. Added after a
+        // discovery run returned 20 leads of which the majority were agencies serving the target
+        // industries: with only the three lines above, a peer matches the profile perfectly and
+        // there is nothing in the snapshot that could say otherwise.
+        //
+        // ⚠️ Keyed unconditionally, like every line here. A key present on new snapshots and absent
+        // on old ones would split one org's events into two segments that do not GROUP BY together
+        // — the drift this function was extracted to end. Old campaigns therefore read `null`,
+        // which is honestly "never asked", not "nothing excluded".
+        excludeProfile: o.excludeProfile ?? null,
     };
 }
 

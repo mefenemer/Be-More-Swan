@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-reject-strip",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/692af53e-1609-40c5-a48b-1c62b5af2ca8/scratchpad/rejharness/server.mjs"
+      ],
+      "port": 4271,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-signal-inbox",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

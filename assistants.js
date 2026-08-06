@@ -1200,6 +1200,125 @@ function _rqShowEditReasonStrip() {
     else card.appendChild(strip);
 }
 
+// ── Why was this lead rejected? ──────────────────────────────────────────────
+// The mirror of the edit-reason strip above, and it follows the same rule: it appears AFTER the
+// rejection commits, never as a gate in front of it. A reviewer working through twenty leads must
+// never be blocked from clearing one because they could not be bothered to categorise it.
+//
+// ⚠️ THE COPY MUST NOT PROMISE LEARNING. Nothing reads these rows to change targeting yet — the
+// rejection-cluster proposer is not built. The one thing that acts on a rejection today is the
+// domain exclusion offered below, and that is the only outcome this strip claims. Telling a user
+// their click "teaches the assistant" when no code reads it is the same failure as a chat reply
+// claiming it saved a draft it never wrote.
+let _rqPendingReject = null;
+
+function _rqShowRejectReasonStrip() {
+    const pending = _rqPendingReject;
+    _rqPendingReject = null;
+    if (!pending || pending.recordType !== 'lead') return;
+    const RC = window.RevenueConstants;
+    if (!RC || !Array.isArray(RC.leadRejectReasons)) return;   // constants failed to load — stay silent
+
+    // The card for a rejected lead has moved to the Archived column, so it is usually gone from the
+    // current view. Anchor to the column header instead of giving up: the reviewer is still looking
+    // at the same list, and the question is about the lead they just cleared either way.
+    const card = document.querySelector(`[data-rq-record="${pending.recordId}"]`);
+    const host = card || document.getElementById('detail-rq-groups');
+    if (!host) return;
+
+    const strip = document.createElement('div');
+    strip.className = 'mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2';
+    strip.setAttribute('data-rq-reject-reason', String(pending.recordId));
+    const chip = 'px-2 py-1 text-[11px] font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 transition cursor-pointer';
+    strip.innerHTML = `
+      <p class="text-[11px] font-bold text-gray-700">Why wasn’t ${_rqEsc(pending.title || 'this lead')} a fit?</p>
+      <p class="text-[11px] text-gray-500 mb-2">Optional. It’s already rejected — this records what the search got wrong.</p>
+      <div class="flex flex-wrap gap-1.5">
+        ${RC.leadRejectReasons.map((r) => `<button type="button" class="${chip}" data-reject-reason="${_rqEsc(r)}">${_rqEsc(RC.leadRejectReasonLabel(r))}</button>`).join('')}
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-400 hover:text-gray-600 transition cursor-pointer" data-reject-reason-skip>Skip</button>
+      </div>
+      <p class="hidden text-[11px] font-semibold mt-1.5" data-reject-reason-status></p>`;
+
+    const status = strip.querySelector('[data-reject-reason-status]');
+    strip.querySelector('[data-reject-reason-skip]').addEventListener('click', () => strip.remove());
+    strip.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-reject-reason]');
+        if (!btn) return;
+        strip.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+        status.textContent = 'Saving…';
+        status.className = 'text-[11px] font-semibold text-gray-500 mt-1.5';
+        try {
+            const res = await fetch('/.netlify/functions/lead-generation', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'record_reject_feedback',
+                    assistantId: window._currentAssistantId,
+                    recordId: pending.recordId,
+                    reason: btn.getAttribute('data-reject-reason'),
+                }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Could not save that.');
+            // canExcludeDomain is the SERVER's verdict: it needs both the reason vocabulary and the
+            // discovery provenance, and the browser has neither. A manually added lead has no
+            // domain to block, which is why this is not simply "was the reason 'competitor'".
+            if (data.canExcludeDomain) _rqOfferDomainExclusion(strip, data.domain, data.campaignId);
+            else strip.innerHTML = data.recorded
+                ? '<p class="text-[11px] font-semibold text-gray-600">Noted — thanks.</p>'
+                : '<p class="text-[11px] font-semibold text-gray-500">The lead is rejected. The note couldn’t be recorded.</p>';
+        } catch (err) {
+            strip.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+            status.textContent = err.message || 'Could not save that.';
+            status.className = 'text-[11px] font-semibold text-red-600 mt-1.5';
+        }
+    });
+
+    if (card) card.appendChild(strip);
+    else host.insertBefore(strip, host.firstChild);
+}
+
+/**
+ * The one action that changes what the next run finds: block this company's domain.
+ *
+ * A DOMAIN rather than a keyword on purpose. Negative keywords are a substring match over the
+ * title and snippet, so a well-meant "agency" would also delete every prospect whose page happens
+ * to mention one. A domain match is exact and blocks precisely the company in front of the user.
+ */
+function _rqOfferDomainExclusion(strip, domain, campaignId) {
+    strip.innerHTML = `
+      <p class="text-[11px] font-bold text-gray-700">Noted. Stop this search finding <span class="font-mono">${_rqEsc(domain)}</span>?</p>
+      <p class="text-[11px] text-gray-500 mb-2">Adds the domain to this search’s exclusions. You can remove it later by editing the search.</p>
+      <div class="flex flex-wrap gap-1.5">
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white transition cursor-pointer" data-exclude-domain>Yes, exclude it</button>
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-400 hover:text-gray-600 transition cursor-pointer" data-exclude-skip>No thanks</button>
+      </div>
+      <p class="hidden text-[11px] font-semibold mt-1.5" data-exclude-status></p>`;
+
+    const status = strip.querySelector('[data-exclude-status]');
+    strip.querySelector('[data-exclude-skip]').addEventListener('click', () => strip.remove());
+    strip.querySelector('[data-exclude-domain]').addEventListener('click', async () => {
+        strip.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+        status.classList.remove('hidden');
+        status.textContent = 'Excluding…';
+        status.className = 'text-[11px] font-semibold text-gray-500 mt-1.5';
+        try {
+            const res = await fetch('/.netlify/functions/discovery-campaigns', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'exclude_domain', campaignId, domain }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Could not exclude that domain.');
+            strip.innerHTML = `<p class="text-[11px] font-semibold text-gray-600">${_rqEsc(domain)} won’t come back in this search.</p>`;
+        } catch (err) {
+            strip.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+            status.textContent = err.message || 'Could not exclude that domain.';
+            status.className = 'text-[11px] font-semibold text-red-600 mt-1.5';
+        }
+    });
+}
+
 function _rqRecordActions(r, statusKey) {
     const secondary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 transition cursor-pointer';
     const primary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white transition cursor-pointer';
@@ -1522,7 +1641,14 @@ window._detailRqRecordAct = async function (btn, action) {
         patch.approvalStatus = 'scheduled';
         patch.scheduledFor = chaseWhen.toISOString();
     }
-    else if (action === 'reject') patch.approvalStatus = 'rejected';
+    else if (action === 'reject') {
+        patch.approvalStatus = 'rejected';
+        // Queued, not shown: the strip goes up only once the rejection has actually committed, and
+        // the card is rebuilt in between. Cleared in the catch below for the same reason the edit
+        // strip is — a failed reject has nothing to explain.
+        const rec = _rqRecordsById.get(patch.id);
+        _rqPendingReject = { recordId: patch.id, recordType: rec?.recordType, title: rec?.title };
+    }
     else if (action === 'review') patch.approvalStatus = 'pending_approval';
     else if (action === 'unschedule') patch.approvalStatus = 'approved';
     else if (action === 'schedule') {
@@ -1648,6 +1774,7 @@ window._detailRqRecordAct = async function (btn, action) {
         // replaced — it renders and vanishes with no error anywhere.
         await _detailRqRenderGroups(_detailRqCurrentStatus);
         _rqShowEditReasonStrip();
+        _rqShowRejectReasonStrip();
         // A newly scheduled/approved record changes the Calendar + Data Hub — force them to reload
         // next time they're opened (both are cached once per detail mount).
         const calHost = document.getElementById('assistant-calendar-host');
@@ -1657,6 +1784,7 @@ window._detailRqRecordAct = async function (btn, action) {
         // The edit never landed, so there is nothing to explain. Left set, this would surface the
         // reason strip on whatever the user did NEXT — asking why they changed a draft they didn't.
         _rqPendingEdit = null;
+        _rqPendingReject = null;
         showErr(e.message || 'Something went wrong.');
     }
 };

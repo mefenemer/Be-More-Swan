@@ -3557,6 +3557,35 @@ export const templateFeedback = pgTable("template_feedback", {
     'too_long','factually_wrong','bad_subject','personalisation_missing','other')`),
 ]);
 
+// Human REJECTIONS as evidence — db/lead-reject-feedback.sql. The mirror of templateFeedback above:
+// that one captures what was wrong with the message, this one what was wrong with the TARGETING
+// that surfaced the lead at all. Rejecting used to write only approval_status plus a lead_rejected
+// ledger event nothing reads, so a reviewer could reject twenty leads for one reason and the next
+// discovery run was built from identical inputs.
+export const leadRejectFeedback = pgTable("lead_reject_feedback", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  // SET NULL, not CASCADE — the evidence outlives the lead. Clearing out old records must not
+  // delete the reasons the searches exist to learn from.
+  assistantRecordId: integer("assistant_record_id").references(() => assistantRecords.id, { onDelete: "set null" }),
+  discoveredLeadId: integer("discovered_lead_id").references(() => discoveredLeads.id, { onDelete: "set null" }),
+  // Denormalised so a cluster can be required to span more than one campaign — a question that
+  // cannot be asked through a SET NULL link that may already be gone.
+  campaignId: integer("campaign_id").references(() => discoveryCampaigns.id, { onDelete: "set null" }),
+  // CLOSED vocabulary — src/config/lead-reject-reasons.ts LEAD_REJECT_REASONS.
+  reason: text("reason").notNull(),
+  appliedToTarget: boolean("applied_to_target").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("lead_reject_feedback_assistant_reason_idx").on(t.aiAssistantId, t.reason, t.createdAt)
+    .where(sql`applied_to_target = false`),
+  index("lead_reject_feedback_org_idx").on(t.organisationId, t.createdAt),
+  check("lead_reject_feedback_reason_check", sql`${t.reason} IN (
+    'competitor','not_a_business','wrong_industry','too_small','too_large',
+    'wrong_geography','existing_customer','no_buying_signal','bad_contact','other')`),
+]);
+
 // ────────────────────────────────────────────────────────────────────────────
 // OUTREACH SEQUENCES — Phase 2b of docs/lead-generator-revenue-engine-plan.md
 // ────────────────────────────────────────────────────────────────────────────

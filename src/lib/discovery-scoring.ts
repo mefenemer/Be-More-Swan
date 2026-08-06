@@ -6,12 +6,10 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { OUTREACH_SUBJECT_RULES } from '../constants/outreach-subject';
+import { EXCLUDE_PROFILE_DNC_RULE, EXCLUDE_PROFILE_RULE, SCORING_BANDS, icpBlock } from '../config/icp-profile';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 export const SCORING_MODEL = 'claude-haiku-4-5-20251001';
-
-const SCORING_BANDS =
-    'Scoring bands: 70-100 = "hot" (strong profile fit + buying intent), 40-69 = "warm" (partial fit or unclear intent), 0-39 = "cold" (poor fit or no intent).';
 
 export interface ScoreCandidate {
     companyName: string;
@@ -81,14 +79,6 @@ export function normaliseLeadCard(raw: unknown, fallbackName: string): LeadScori
     };
 }
 
-/** Render the ICP block from the campaign's snapshot (same fields the chat route uses). */
-export function icpBlock(icp: Record<string, unknown>): string {
-    return [
-        `- Target industries: ${icp.targetIndustries ? JSON.stringify(icp.targetIndustries) : 'not specified — treat as neutral'}`,
-        `- Minimum company headcount: ${icp.minHeadcount ?? 'not specified — treat as neutral'}`,
-        `- Sales tone: ${icp.salesTone ?? 'professional'} — write outreach and next steps in this tone.`,
-    ].join('\n');
-}
 
 /**
  * Score a batch of discovered candidates in one call. Returns cards aligned by index;
@@ -115,6 +105,8 @@ Topical relevance is NOT fit. "An article listing the best wedding venues" is no
 
 Ideal customer profile (from setup):
 ${icpBlock(icp)}
+
+${EXCLUDE_PROFILE_RULE} ${EXCLUDE_PROFILE_DNC_RULE}
 
 ${SCORING_BANDS}
 

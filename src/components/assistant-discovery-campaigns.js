@@ -132,6 +132,7 @@
            data-dc-name-val="${esc(c.name || '')}"
            data-dc-maxleads-val="${esc(c.maxLeadsPerRun ?? 50)}"
            data-dc-negatives-val="${esc(Array.isArray(c.negativeKeywords) ? c.negativeKeywords.join(', ') : '')}"
+           data-dc-domains-val="${esc(Array.isArray(c.excludedDomains) ? c.excludedDomains.join(', ') : '')}"
            data-dc-approval-val="${c.requireHumanApproval === false ? '0' : '1'}">
         <div class="flex items-start justify-between gap-3">
           <p class="font-semibold text-gray-900 text-sm min-w-0">${esc(c.name || c.idea)}</p>
@@ -315,8 +316,14 @@
             <input data-edit-maxleads type="number" min="1" value="${esc(g('data-dc-maxleads-val', '50'))}" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
           </div>
           <div>
-            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Exclude (comma-sep)</label>
-            <input data-edit-negatives type="text" value="${esc(g('data-dc-negatives-val', ''))}" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm" placeholder="competitor.com, acme">
+            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Exclude words (comma-sep)</label>
+            <input data-edit-negatives type="text" value="${esc(g('data-dc-negatives-val', ''))}" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm" placeholder="marketing agency, franchise">
+            <p class="text-[11px] text-gray-500 mt-1">Matched against each result's title and description. Keep them specific — a broad word here also drops good results that merely mention it.</p>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Blocked domains (comma-sep)</label>
+            <input data-edit-domains type="text" value="${esc(g('data-dc-domains-val', ''))}" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm" placeholder="competitor.com, acme.co.uk">
+            <p class="text-[11px] text-gray-500 mt-1">Exact company websites this search must skip. Domains you block from the review queue appear here — delete one to allow it back.</p>
           </div>
           <label class="flex items-center gap-2 text-sm text-gray-700">
             <input data-edit-approval type="checkbox" ${g('data-dc-approval-val', '1') === '0' ? '' : 'checked'} class="rounded border-gray-300 text-emerald-700 focus:ring-emerald-700">
@@ -339,6 +346,10 @@
       if (!idea) { errEl.textContent = 'Describe who you want to find.'; errEl.classList.remove('hidden'); return; }
       errEl.classList.add('hidden');
       const negatives = (overlay.querySelector('[data-edit-negatives]').value || '').split(',').map((s) => s.trim()).filter(Boolean);
+      // Always sent, like `name` above — an emptied field must be able to CLEAR the list, which is
+      // the only way to unblock a domain excluded by one click from the review queue. The server
+      // normalises each entry, so a pasted "https://Foo.com/" still matches at run time.
+      const domains = (overlay.querySelector('[data-edit-domains]').value || '').split(',').map((s) => s.trim()).filter(Boolean);
       saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
       try {
         await call('edit', {
@@ -350,6 +361,7 @@
           guardrails: {
             maxLeadsPerRun: Number(overlay.querySelector('[data-edit-maxleads]').value) || undefined,
             negativeKeywords: negatives,
+            excludedDomains: domains,
             requireHumanApproval: !!overlay.querySelector('[data-edit-approval]').checked,
           },
         });

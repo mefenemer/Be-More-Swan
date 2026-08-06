@@ -1,0 +1,770 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Campaign Orchestrator — screen mockups</title>
+<style>
+  /* Standalone mockup. Tokens copied from input.css so it reads as the real product,
+     but NOT dependent on style.css — nothing here can trigger a Tailwind rebuild.
+     Status colours are spelled out as green, red and amber literals: `emerald` is remapped
+     to neon pink in input.css, so an emerald "good" and the pink accent look identical.
+     NOTE: never write a Tailwind wildcard like green-<star> next to a slash in a CSS comment —
+     the star-slash pair closes the comment early and silently eats the next rule. That is
+     exactly what was wrong with this file's :root block on first render. */
+  :root{
+    --accent:#ff007f; --accent-hover:#d6006b; --accent-wash:#fff0f5; --accent-border:#ffd6e8;
+    --g50:#f9fafb; --g100:#f3f4f6; --g200:#e5e7eb; --g300:#d1d5db; --g400:#9ca3af;
+    --g500:#6b7280; --g600:#4b5563; --g700:#374151; --g900:#111827;
+    --amber-wash:#fffbeb; --amber-border:#fde68a; --amber-text:#92400e;
+    --green-wash:#f0fdf4; --green-border:#bbf7d0; --green-text:#166534;
+    --blue-wash:#eff6ff; --blue-border:#bfdbfe; --blue-text:#1e40af;
+    --red-wash:#fef2f2; --red-border:#fecaca; --red-text:#991b1b;
+    --violet-wash:#f5f3ff; --violet-border:#ddd6fe; --violet-text:#5b21b6;
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none !important}
+  body{margin:0;background:var(--g50);color:var(--g900);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:74rem;margin:0 auto;padding:2rem 1.5rem 5rem}
+  .muted{color:var(--g500)}
+  .small{font-size:12px}
+  .tiny{font-size:11px}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+  .between{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+  h2,h3{margin:0}
+
+  /* ── mockup chrome ─────────────────────────────────────────── */
+  .mockbar{background:var(--g900);color:#fff;padding:.6rem 1.5rem;font-size:12px;
+    display:flex;gap:.75rem;align-items:center;flex-wrap:wrap}
+  .mockbar strong{font-weight:600}
+  .mockbar .pill{background:rgba(255,255,255,.12);border-radius:999px;padding:.15rem .55rem;font-size:11px}
+
+  /* ── page header ───────────────────────────────────────────── */
+  .crumb{display:flex;align-items:center;gap:.35rem;color:var(--g500);font-weight:500;margin-bottom:1.25rem}
+  .idcard{background:#fff;border:1px solid var(--g200);border-radius:1rem;box-shadow:0 1px 2px rgba(0,0,0,.05);
+    padding:1rem 1.25rem;margin-bottom:1.5rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
+  .avatar{width:2.75rem;height:2.75rem;border-radius:.75rem;background:var(--accent-wash);
+    border:1px solid var(--accent-border);display:grid;place-items:center;font-size:1.15rem;flex-shrink:0}
+  .idcard h1{font-size:1rem;font-weight:600;margin:0}
+
+  /* ── tabs ──────────────────────────────────────────────────── */
+  nav.tabs{border-bottom:1px solid var(--g200);display:flex;gap:2rem;margin-bottom:1.5rem;overflow-x:auto}
+  nav.tabs button{background:none;border:none;border-bottom:2px solid transparent;padding:0 0 .75rem;
+    font:inherit;font-weight:600;color:var(--g500);cursor:pointer;white-space:nowrap}
+  nav.tabs button:hover{color:var(--g900);border-bottom-color:var(--g300)}
+  nav.tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+  .tabbadge{display:inline-grid;place-items:center;min-width:1.15rem;height:1.15rem;padding:0 .3rem;
+    border-radius:999px;background:var(--amber-border);color:var(--amber-text);font-size:10px;font-weight:700;
+    margin-left:.35rem;vertical-align:1px}
+
+  /* ── primitives ────────────────────────────────────────────── */
+  .card{background:#fff;border:1px solid var(--g200);border-radius:1rem;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+  .card-pad{padding:1.25rem}
+  .card-head{padding:1rem 1.25rem;border-bottom:1px solid var(--g200);display:flex;
+    align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+  .card-head h2{font-size:.9rem;font-weight:700}
+  .grid{display:grid;gap:1rem}
+  .chip{display:inline-flex;align-items:center;gap:.3rem;border-radius:999px;padding:.15rem .6rem;
+    font-size:11px;font-weight:700;border:1px solid transparent;white-space:nowrap}
+  .c-ok{background:var(--green-wash);border-color:var(--green-border);color:var(--green-text)}
+  .c-warn{background:var(--amber-wash);border-color:var(--amber-border);color:var(--amber-text)}
+  .c-bad{background:var(--red-wash);border-color:var(--red-border);color:var(--red-text)}
+  .c-info{background:var(--blue-wash);border-color:var(--blue-border);color:var(--blue-text)}
+  .c-idle{background:var(--g100);border-color:var(--g200);color:var(--g600)}
+  .c-agent{background:var(--violet-wash);border-color:var(--violet-border);color:var(--violet-text)}
+  .btn{border:1px solid var(--g300);background:#fff;border-radius:.6rem;padding:.4rem .8rem;
+    font:inherit;font-size:13px;font-weight:600;color:var(--g700);cursor:pointer;white-space:nowrap}
+  .btn:hover{background:var(--g50)}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn-primary:hover{background:var(--accent-hover)}
+  .btn-danger{background:#fff;border-color:var(--red-border);color:var(--red-text)}
+  .btn-danger:hover{background:var(--red-wash)}
+  .btn-sm{padding:.25rem .6rem;font-size:12px}
+  .btn[disabled]{opacity:.45;cursor:not-allowed}
+  .note{background:var(--g100);border:1px solid var(--g200);border-radius:.75rem;padding:.75rem 1rem;font-size:12px;color:var(--g600)}
+  .note-amber{background:var(--amber-wash);border-color:var(--amber-border);color:var(--amber-text)}
+  .note-red{background:var(--red-wash);border-color:var(--red-border);color:var(--red-text)}
+  .seg{display:inline-flex;flex-wrap:wrap;gap:.25rem;background:var(--g200);padding:.2rem;border-radius:.6rem}
+  .seg button{border:none;background:none;border-radius:.45rem;padding:.3rem .65rem;font:inherit;
+    font-size:12px;font-weight:600;color:var(--g600);cursor:pointer}
+  .seg button.on{background:#fff;color:var(--g900);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+  .bar{height:.4rem;border-radius:999px;background:var(--g200);overflow:hidden}
+  .bar > i{display:block;height:100%;border-radius:999px;background:var(--accent)}
+  .bar.b-task > i{background:#6366f1}
+  .bar.b-ok > i{background:#16a34a}
+  .bar.b-warn > i{background:#d97706}
+  .kv{display:flex;gap:.4rem;align-items:baseline}
+  .kv b{font-weight:700}
+  .state{display:none}
+  .state.on{display:block}
+  .stack{display:flex;flex-direction:column;gap:1rem}
+  .row-sep{border-top:1px solid var(--g200)}
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--g400);
+    font-weight:700;padding:.6rem 1.25rem;border-bottom:1px solid var(--g200)}
+  td{padding:.75rem 1.25rem;border-bottom:1px solid var(--g100);vertical-align:top;font-size:13px}
+  tr:last-child td{border-bottom:none}
+  .lock{background:repeating-linear-gradient(45deg,var(--g50),var(--g50) 8px,#fff 8px,#fff 16px)}
+</style>
+</head>
+<body>
+
+<div class="mockbar">
+  <strong>MOCKUP</strong>
+  <span class="pill">Campaign Orchestrator</span>
+  <span class="pill">docs/campaign-orchestrator-plan.md</span>
+  <span class="pill">not built</span>
+  <span style="opacity:.6">Static. The switcher changes states; nothing is wired.</span>
+</div>
+
+<div class="wrap">
+
+  <div class="crumb small">Assistants <span>›</span> <strong style="color:var(--g900)">Campaign Orchestrator</strong></div>
+
+  <div class="idcard">
+    <div class="avatar">🎛️</div>
+    <div style="flex:1;min-width:14rem">
+      <h1>Campaign Orchestrator</h1>
+      <div class="small muted">One objective in. Orders out to every other assistant. Spend and capacity managed inside your limits.</div>
+    </div>
+    <span class="chip c-ok">Active</span>
+    <button class="btn">Chat</button>
+    <button class="btn btn-primary">Set an Objective</button>
+  </div>
+
+  <!-- ══════════ PERFORMANCE METRICS — mode-aware, campaign-lifetime ══════════ -->
+  <div class="between" style="margin-bottom:.75rem;align-items:center">
+    <h3 class="small" style="text-transform:uppercase;letter-spacing:.04em;color:var(--g700)">Performance Metrics</h3>
+    <span class="tiny muted" id="metrics-window">This campaign, since launch · 12 days</span>
+  </div>
+  <div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:1.25rem" id="kpis">
+    <div class="card card-pad">
+      <div class="tiny" style="font-weight:700;color:var(--g400);text-transform:uppercase;letter-spacing:.03em">Outcomes Delivered</div>
+      <div style="font-size:1.6rem;font-weight:800;margin-top:.5rem">31</div>
+      <div style="font-weight:700;color:var(--g700)">What It Actually Produced</div>
+      <div class="tiny muted" style="margin-top:.2rem">Leads, signups and replies this campaign caused — not clicks, not impressions.</div>
+      <div class="tiny muted row-sep" style="margin-top:.75rem;padding-top:.6rem">Trending: <b style="color:var(--green-text)">+9 this week</b></div>
+    </div>
+    <div class="card card-pad">
+      <div class="tiny" style="font-weight:700;color:var(--g400);text-transform:uppercase;letter-spacing:.03em" id="kpi2-label">Effort per Outcome</div>
+      <div style="font-size:1.6rem;font-weight:800;margin-top:.5rem" id="kpi2-value">4.2 tasks</div>
+      <div style="font-weight:700;color:var(--g700)">The Real Price</div>
+      <div class="tiny muted" style="margin-top:.2rem" id="kpi2-desc">Every task spent, divided by the outcomes it produced. This campaign has no ad budget, so its cost is capacity.</div>
+      <div class="tiny muted row-sep" style="margin-top:.75rem;padding-top:.6rem">Trending: <b style="color:var(--green-text)">down from 6.8</b></div>
+    </div>
+    <div class="card card-pad">
+      <div class="tiny" style="font-weight:700;color:var(--g400);text-transform:uppercase;letter-spacing:.03em">Decisions Taken For You</div>
+      <div style="font-size:1.6rem;font-weight:800;margin-top:.5rem">7</div>
+      <div style="font-weight:700;color:var(--g700)">Reallocations</div>
+      <div class="tiny muted" style="margin-top:.2rem">Channel switches and halts it made without waking you — each one with its evidence.</div>
+      <div class="tiny muted row-sep" style="margin-top:.75rem;padding-top:.6rem">Trending: <b>2 in the last 24h</b></div>
+    </div>
+    <div class="card card-pad">
+      <div class="tiny" style="font-weight:700;color:var(--g400);text-transform:uppercase;letter-spacing:.03em">Needs You</div>
+      <div style="font-size:1.6rem;font-weight:800;margin-top:.5rem">2</div>
+      <div style="font-weight:700;color:var(--g700)">Awaiting Approval</div>
+      <div class="tiny muted" style="margin-top:.2rem">Decisions parked above your threshold, and campaigns blocked on something only you can fix.</div>
+      <div class="tiny muted row-sep" style="margin-top:.75rem;padding-top:.6rem">Oldest: <b style="color:var(--amber-text)">2 days</b></div>
+    </div>
+  </div>
+
+  <!-- ══════════ BUDGET & CONTROL STRIP — persistent on every tab ══════════ -->
+  <div class="card" style="margin-bottom:1.5rem">
+    <div class="card-head">
+      <h2>Budget &amp; Control</h2>
+      <span class="tiny muted">Shown on every tab. This is the only assistant that spends, so this never scrolls out of reach.</span>
+    </div>
+    <div class="card-pad grid" style="grid-template-columns:1fr 1fr auto;align-items:start;gap:1.5rem">
+
+      <!-- Money block — hidden entirely in an organic-only workspace, never shown as "£0" -->
+      <div id="money-block">
+        <div class="between" style="align-items:baseline">
+          <div class="small" style="font-weight:700">Money — your ad account</div>
+          <div class="small"><b>£0.00</b> <span class="muted">of £0.00</span></div>
+        </div>
+        <div class="bar" style="margin:.5rem 0"><i style="width:0%"></i></div>
+        <div class="tiny muted">
+          No paid channel is connected. When one is, spend is charged
+          <b>by the platform to your own ad account</b> — never by Be More Swan.
+        </div>
+      </div>
+
+      <!-- Capacity block — the budget that is real today -->
+      <div>
+        <div class="between" style="align-items:baseline">
+          <div class="small" style="font-weight:700">Capacity — your plan</div>
+          <div class="small"><b>131</b> <span class="muted">of 400 tasks committed</span></div>
+        </div>
+        <div class="bar b-task" style="margin:.5rem 0"><i style="width:33%"></i></div>
+        <div class="tiny muted">
+          269 tasks left this month, resetting 1 September.
+          <b>At the cap it stops. It never bills you extra.</b>
+        </div>
+      </div>
+
+      <div style="text-align:right">
+        <button class="btn btn-danger">Stop everything</button>
+        <div class="tiny muted" style="margin-top:.4rem;max-width:11rem">
+          Halts every campaign and cancels queued orders. Published work is left alone.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ TABS ══════════ -->
+  <nav class="tabs">
+    <button class="active">Campaigns</button>
+    <button>Data Hub <span class="muted small" style="font-weight:500">· Orders</span></button>
+    <button>Review Queue <span class="tabbadge">2</span></button>
+    <button>Calendar</button>
+    <button>Goals</button>
+    <button>Workflow</button>
+    <button>Activity</button>
+  </nav>
+
+  <!-- State switcher — mockup chrome, not part of the design. -->
+  <div class="card card-pad" style="margin-bottom:1.5rem;background:var(--g100);box-shadow:none">
+    <div class="between" style="align-items:center">
+      <div class="small" style="font-weight:700">Screen state</div>
+      <div class="seg" id="switcher">
+        <button class="on" data-s="empty">1 · Day one</button>
+        <button data-s="live">2 · Campaigns running</button>
+        <button data-s="decision">3 · A decision to approve</button>
+        <button data-s="orders">4 · Orders ledger</button>
+        <button data-s="paid">5 · Paid, locked</button>
+        <button data-s="lost">6 · Control lost</button>
+      </div>
+    </div>
+    <div class="tiny muted" style="margin-top:.5rem" id="switch-hint">
+      Day one is a designed screen, not a fallback — every empty state here names the missing input and what unblocks it.
+    </div>
+  </div>
+
+  <!-- ═══════════════════ 1 · DAY ONE ═══════════════════ -->
+  <section class="state on" id="s-empty">
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-pad" style="text-align:center;padding:2.5rem 1.5rem">
+        <div style="font-size:2rem">🎯</div>
+        <h2 style="font-size:1.05rem;margin-top:.5rem">No campaigns yet</h2>
+        <p class="muted" style="max-width:34rem;margin:.5rem auto 0">
+          Tell it what you want to happen and by when. It works out the channels, writes the orders
+          for your other assistants, and shows you the plan before anything runs.
+        </p>
+        <div style="margin-top:1.25rem;display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap">
+          <button class="btn btn-primary">Set an Objective</button>
+          <button class="btn">Import past results (CSV)</button>
+        </div>
+        <p class="tiny muted" style="margin-top:.85rem">
+          Importing last quarter's numbers gives it a baseline on day one instead of an empty dashboard.
+        </p>
+      </div>
+    </div>
+
+    <div class="grid" style="grid-template-columns:1fr 1fr">
+      <div class="card card-pad">
+        <div class="small" style="font-weight:700;margin-bottom:.5rem">What it can spend today</div>
+        <div class="stack" style="gap:.6rem">
+          <div class="between" style="align-items:center">
+            <span class="chip c-agent">Capacity</span>
+            <span class="small"><b>269</b> tasks left this month</span>
+          </div>
+          <div class="between" style="align-items:center">
+            <span class="chip c-idle">Money</span>
+            <span class="small muted">No ad account connected</span>
+          </div>
+        </div>
+        <p class="tiny muted" style="margin-top:.75rem">
+          A campaign with no ad budget is not a degraded campaign. Capacity is a real, finite,
+          metered budget — it is just denominated in your assistants' work instead of pounds.
+        </p>
+      </div>
+
+      <div class="card card-pad">
+        <div class="small" style="font-weight:700;margin-bottom:.5rem">Who it can give orders to</div>
+        <div class="stack" style="gap:.5rem">
+          <div class="between" style="align-items:center">
+            <span class="small">Social Media Manager</span><span class="chip c-ok">Hired</span>
+          </div>
+          <div class="between" style="align-items:center">
+            <span class="small">Blog Writer</span><span class="chip c-ok">Hired</span>
+          </div>
+          <div class="between" style="align-items:center">
+            <span class="small">Lead Generator</span><span class="chip c-ok">Hired</span>
+          </div>
+          <div class="between" style="align-items:center">
+            <span class="small muted">Newsletter Editor</span><span class="chip c-idle">Not hired</span>
+          </div>
+        </div>
+        <p class="tiny muted" style="margin-top:.75rem">
+          It writes nothing itself. Every campaign runs through colleagues you already employ —
+          so the channels it can reach are exactly the assistants you have hired.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ 2 · CAMPAIGNS RUNNING ═══════════════════ -->
+  <section class="state" id="s-live">
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-head">
+        <h2>Your campaigns</h2>
+        <div style="display:flex;gap:.5rem">
+          <div class="seg"><button class="on">All</button><button>Running</button><button>Needs you</button><button>Finished</button></div>
+          <button class="btn btn-primary btn-sm">New campaign</button>
+        </div>
+      </div>
+
+      <!-- Campaign 1 — running, organic -->
+      <div class="card-pad row-sep">
+        <div class="between">
+          <div style="min-width:20rem;flex:1">
+            <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+              <span style="font-weight:700">Acquire 50 trial signups by 30 September</span>
+              <span class="chip c-ok">● Running</span>
+              <span class="chip c-idle">Organic only</span>
+            </div>
+            <div class="small muted" style="margin-top:.3rem">
+              Day 12 of 46 · <b style="color:var(--green-text)">31 outcomes</b> · pace <b style="color:var(--green-text)">ahead of target</b>
+            </div>
+          </div>
+          <div style="display:flex;gap:.4rem">
+            <button class="btn btn-sm">Edit</button>
+            <button class="btn btn-sm">Pause</button>
+          </div>
+        </div>
+
+        <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:.9rem;gap:1.25rem">
+          <div>
+            <div class="between tiny"><span class="muted">Money</span><span class="muted">not in use</span></div>
+            <div class="bar" style="margin-top:.3rem"><i style="width:0%"></i></div>
+          </div>
+          <div>
+            <div class="between tiny"><span class="muted">Capacity</span><span><b>84</b> of 150 tasks</span></div>
+            <div class="bar b-task" style="margin-top:.3rem"><i style="width:56%"></i></div>
+          </div>
+        </div>
+
+        <div class="note" style="margin-top:.9rem">
+          <b>Right now:</b> waiting on the Blog Writer — the pillar "How small teams actually pick a
+          CRM" is drafted and has been in your Review Queue since Tuesday. Two teaser posts are
+          held behind it.
+          <button class="btn btn-sm" style="margin-left:.5rem">Open it</button>
+        </div>
+      </div>
+
+      <!-- Campaign 2 — throttled -->
+      <div class="card-pad row-sep">
+        <div class="between">
+          <div style="min-width:20rem;flex:1">
+            <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+              <span style="font-weight:700">30 booked demos from hospitality venues</span>
+              <span class="chip c-warn">◐ Throttled</span>
+              <span class="chip c-idle">Organic only</span>
+            </div>
+            <div class="small muted" style="margin-top:.3rem">
+              Day 21 of 30 · <b>11 outcomes</b> · pace <b style="color:var(--amber-text)">behind target</b>
+            </div>
+          </div>
+          <div style="display:flex;gap:.4rem">
+            <button class="btn btn-sm">Edit</button>
+            <button class="btn btn-sm">Pause</button>
+          </div>
+        </div>
+
+        <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:.9rem;gap:1.25rem">
+          <div>
+            <div class="between tiny"><span class="muted">Money</span><span class="muted">not in use</span></div>
+            <div class="bar" style="margin-top:.3rem"><i style="width:0%"></i></div>
+          </div>
+          <div>
+            <div class="between tiny"><span class="muted">Capacity</span><span><b>47</b> of 60 tasks</span></div>
+            <div class="bar b-warn" style="margin-top:.3rem"><i style="width:78%"></i></div>
+          </div>
+        </div>
+
+        <div class="note note-amber" style="margin-top:.9rem">
+          <b>Throttled, not stopped.</b> The Lead Generator flagged 44% of last week's leads as
+          low-quality, so it cut this campaign's search volume by half while it narrows the ICP.
+          It proposed a fix — that is the decision sitting in your Review Queue.
+        </div>
+        <p class="tiny muted" style="margin-top:.5rem">
+          “Throttled” and “Paused (guardrail)” are deliberately different words. One is the agent
+          optimising; the other is the agent stopping. A shared label would hide which one happened.
+        </p>
+      </div>
+
+      <!-- Campaign 3 — draft from chat -->
+      <div class="card-pad">
+        <div class="between">
+          <div style="min-width:20rem;flex:1">
+            <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+              <span style="font-weight:700">Autumn feature launch</span>
+              <span class="chip c-idle">Draft</span>
+            </div>
+            <div class="small muted" style="margin-top:.3rem">
+              Created from chat, 4 minutes ago · <b>nothing has run and nothing has been spent</b>
+            </div>
+          </div>
+          <div style="display:flex;gap:.4rem">
+            <button class="btn btn-sm">Edit</button>
+            <button class="btn btn-primary btn-sm">Start campaign</button>
+          </div>
+        </div>
+        <p class="tiny muted" style="margin-top:.7rem">
+          Approving a campaign in chat <b>saves</b> it. It never <b>starts</b> it — starting commits
+          capacity, and later money, so it takes a human click on this row with the numbers visible.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ 3 · A DECISION TO APPROVE ═══════════════════ -->
+  <section class="state" id="s-decision">
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-head">
+        <h2>Decisions awaiting you</h2>
+        <span class="small muted">Anything above your autonomy threshold lands here rather than happening.</span>
+      </div>
+
+      <!-- Decision 1 — reallocation -->
+      <div class="card-pad row-sep">
+        <div class="between">
+          <div style="min-width:22rem;flex:1">
+            <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.4rem">
+              <span class="chip c-warn">Reallocation</span>
+              <span class="chip c-idle">30 booked demos from hospitality venues</span>
+            </div>
+            <div style="font-weight:700;font-size:1rem">
+              Move 20 tasks a week off cold discovery and into the Blog Writer
+            </div>
+          </div>
+          <div class="tiny muted" style="text-align:right">
+            Proposed 2 days ago<br>
+            <b style="color:var(--amber-text)">Expires in 5 days</b>
+          </div>
+        </div>
+
+        <div class="grid" style="grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem">
+          <div class="note">
+            <div class="small" style="font-weight:700;color:var(--g700);margin-bottom:.35rem">The evidence</div>
+            <ul style="margin:0;padding-left:1.1rem">
+              <li>44% of last week's 61 discovered leads were rated low-quality — above your 40% line.</li>
+              <li>Cost per outcome on discovery: <b>9.1 tasks</b>. On blog-sourced leads: <b>2.4 tasks</b>.</li>
+              <li>Three of the four converted leads this month first read a blog page.</li>
+            </ul>
+          </div>
+          <div class="note">
+            <div class="small" style="font-weight:700;color:var(--g700);margin-bottom:.35rem">What it would do</div>
+            <ul style="margin:0;padding-left:1.1rem">
+              <li>Narrow the saved search's ICP and add 6 negative keywords.</li>
+              <li>Order 2 pillar articles from the Blog Writer (<b>18 tasks</b>).</li>
+              <li>Order the Social Media Manager to re-point top-of-funnel messaging at operators, not agencies.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="note note-amber" style="margin-top:.75rem">
+          <b>If you ignore this:</b> the campaign keeps running at half search volume and finishes
+          around 19 of its 30 demos. Nothing breaks; it just misses.
+        </div>
+
+        <div class="between" style="margin-top:1rem;align-items:center">
+          <div class="tiny muted">Costs <b>0 money</b> · commits <b>18 of your 269 remaining tasks</b></div>
+          <div style="display:flex;gap:.5rem">
+            <button class="btn">Reject</button>
+            <button class="btn">Approve, but ask me again next time</button>
+            <button class="btn btn-primary">Approve</button>
+          </div>
+        </div>
+
+        <!-- Reject panel — shown expanded to make the point -->
+        <div class="card" style="margin-top:.85rem;background:var(--g50);box-shadow:none">
+          <div class="card-pad">
+            <div class="small" style="font-weight:700;margin-bottom:.5rem">Rejecting? Tell it why — one click.</div>
+            <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.6rem">
+              <button class="btn btn-sm">Wrong channel</button>
+              <button class="btn btn-sm">Too expensive</button>
+              <button class="btn btn-sm">Bad timing</button>
+              <button class="btn btn-sm">I disagree with the evidence</button>
+              <button class="btn btn-sm">Doing this myself</button>
+            </div>
+            <p class="tiny muted" style="margin:0">
+              The reason is written into this campaign's constraints and restated in the prompt that
+              writes the <i>next</i> proposal. A Reject button that captures nothing means correcting
+              the same mistake forever — which is exactly what happened on the Lead Generator, so
+              this one ships with its consumer or it does not ship at all.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Decision 2 — escalation -->
+      <div class="card-pad">
+        <div class="between">
+          <div style="min-width:22rem;flex:1">
+            <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.4rem">
+              <span class="chip c-info">Escalation</span>
+              <span class="chip c-idle">Acquire 50 trial signups by 30 September</span>
+            </div>
+            <div style="font-weight:700;font-size:1rem">
+              Build on Thursday's LinkedIn post — it is running at 3.1× your average
+            </div>
+          </div>
+          <div class="tiny muted" style="text-align:right">Proposed 6 hours ago<br>Expires in 3 days</div>
+        </div>
+        <div class="note" style="margin-top:.9rem">
+          <b>The order it wants to place:</b> Blog Writer → one pillar on the same argument, carrying
+          this campaign's CTA and tracking. Social Media Manager → re-cut the pillar into 3 posts
+          across the next 10 days. <b>Cost: 11 tasks. No money.</b>
+        </div>
+        <div class="note note-amber" style="margin-top:.5rem">
+          Boosting this post with paid spend is the obvious next move and is <b>not available</b> —
+          see the Paid state. Escalation is organic-only until the ad rails clear review.
+        </div>
+        <div class="between" style="margin-top:1rem;align-items:center">
+          <div class="tiny muted">Commits <b>11 of your 269 remaining tasks</b></div>
+          <div style="display:flex;gap:.5rem">
+            <button class="btn">Reject</button>
+            <button class="btn btn-primary">Approve</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ 4 · ORDERS LEDGER ═══════════════════ -->
+  <section class="state" id="s-orders">
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h2>Orders</h2>
+          <div class="tiny muted" style="margin-top:.2rem">
+            Every instruction it has issued to another assistant, what it cost, and what came back.
+          </div>
+        </div>
+        <div style="display:flex;gap:.5rem">
+          <button class="btn btn-sm">Import CSV</button>
+          <button class="btn btn-sm">Export</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto">
+      <table>
+        <thead>
+          <tr><th>Order</th><th>Campaign</th><th>Assigned to</th><th>Cost</th><th>Status</th><th>Result</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>Pillar: “How small teams actually pick a CRM”</b><div class="tiny muted">Keywords, persona and CTA attached</div></td>
+            <td class="small muted">50 trial signups</td>
+            <td><span class="chip c-agent">Blog Writer</span></td>
+            <td class="small">9 tasks<div class="tiny muted">£0.00</div></td>
+            <td><span class="chip c-warn">In your review</span></td>
+            <td class="small"><a href="#" style="color:var(--accent);font-weight:600">Draft →</a></td>
+          </tr>
+          <tr>
+            <td><b>Teaser calendar — 2 weeks, 6 posts</b><div class="tiny muted">Held until the pillar is approved</div></td>
+            <td class="small muted">50 trial signups</td>
+            <td><span class="chip c-agent">Social Media Manager</span></td>
+            <td class="small">12 tasks<div class="tiny muted">£0.00</div></td>
+            <td><span class="chip c-idle">Blocked</span></td>
+            <td class="small muted">—</td>
+          </tr>
+          <tr>
+            <td><b>Saved search: UK hospitality venues, 10–50 staff</b><div class="tiny muted">ICP narrowed 2 days ago</div></td>
+            <td class="small muted">30 booked demos</td>
+            <td><span class="chip c-agent">Lead Generator</span></td>
+            <td class="small">31 tasks<div class="tiny muted">£0.03 search</div></td>
+            <td><span class="chip c-ok">Delivered</span></td>
+            <td class="small"><a href="#" style="color:var(--accent);font-weight:600">61 leads →</a></td>
+          </tr>
+          <tr>
+            <td><b>Capture page: “Book a venue walkthrough”</b><div class="tiny muted">Form schema stored here, page hosted by Be More Swan</div></td>
+            <td class="small muted">30 booked demos</td>
+            <td><span class="chip c-agent">Lead Generator</span></td>
+            <td class="small">4 tasks<div class="tiny muted">£0.00</div></td>
+            <td><span class="chip c-ok">Live</span></td>
+            <td class="small"><a href="#" style="color:var(--accent);font-weight:600">11 submissions →</a></td>
+          </tr>
+          <tr>
+            <td><b>Re-point top-of-funnel messaging at operators</b><div class="tiny muted">Reverted — you rejected it, reason “wrong channel”</div></td>
+            <td class="small muted">30 booked demos</td>
+            <td><span class="chip c-agent">Social Media Manager</span></td>
+            <td class="small">0 tasks<div class="tiny muted">£0.00</div></td>
+            <td><span class="chip c-bad">Rejected</span></td>
+            <td class="small muted">—</td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="card-pad row-sep">
+        <p class="tiny muted" style="margin:0">
+          This table is the only place in Be More Swan where the chain <b>objective → order →
+          artefact → outcome</b> is visible end to end. That is the reason it exists; a list of
+          campaigns alone would not need a Data Hub at all.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ 5 · PAID, LOCKED ═══════════════════ -->
+  <section class="state" id="s-paid">
+    <div class="card lock" style="margin-bottom:1rem">
+      <div class="card-pad">
+        <div class="between" style="align-items:flex-start">
+          <div style="max-width:44rem">
+            <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">
+              <span class="chip c-idle">🔒 Not available yet</span>
+            </div>
+            <h2 style="font-size:1.05rem">Paid channels</h2>
+            <p class="muted" style="margin:.4rem 0 0">
+              Everything on this page works the same way once paid is switched on: the same campaign,
+              the same orders, one extra budget. The block is not in our code — it is three platform
+              approvals, and we tell you exactly where each one is.
+            </p>
+          </div>
+          <button class="btn" disabled>Connect an ad account</button>
+        </div>
+
+        <div class="grid" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:1.25rem">
+          <div class="card card-pad">
+            <div class="between" style="align-items:center"><b>Meta Ads</b><span class="chip c-warn">In review</span></div>
+            <p class="tiny muted" style="margin-top:.5rem">
+              Business verification is outstanding, and ad permissions sit behind it. Access
+              verification as a tech provider is a second stage after that.
+            </p>
+            <div class="tiny" style="margin-top:.5rem;color:var(--amber-text)"><b>Blocked on:</b> Meta, not us</div>
+          </div>
+          <div class="card card-pad">
+            <div class="between" style="align-items:center"><b>LinkedIn Ads</b><span class="chip c-bad">Not applied</span></div>
+            <p class="tiny muted" style="margin-top:.5rem">
+              Our LinkedIn app carries sign-in and sharing only. Advertising is a separate product
+              application, not a permission we can add.
+            </p>
+            <div class="tiny" style="margin-top:.5rem;color:var(--red-text)"><b>Blocked on:</b> an application we have not made</div>
+          </div>
+          <div class="card card-pad">
+            <div class="between" style="align-items:center"><b>Google Ads</b><span class="chip c-bad">Not applied</span></div>
+            <p class="tiny muted" style="margin-top:.5rem">
+              Needs a developer token with approved access. We hold Search Console credentials only.
+            </p>
+            <div class="tiny" style="margin-top:.5rem;color:var(--red-text)"><b>Blocked on:</b> a token application</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>Why this is a designed screen and not a “coming soon” badge.</b> A control that renders,
+      promises and can never return a value is a bug we have shipped before — a follower metric with
+      no scope behind it, a top-up button with no purchase flow. Naming the specific blocker per
+      platform is the difference between a roadmap and a lie.
+    </div>
+
+    <div class="card card-pad" style="margin-top:1rem">
+      <div class="small" style="font-weight:700;margin-bottom:.6rem">What is already designed for the day it unlocks</div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;gap:1rem">
+        <div class="note">
+          <b>The money block appears in the strip above.</b> Same layout, second bar. The £ ceiling
+          is set here, by a human, next to the name of the account it charges — never proposed by
+          the assistant in chat, because a pound sign on a chat card reads as a price whatever we meant.
+        </div>
+        <div class="note">
+          <b>Forms are ours first.</b> The capture schema already lives in our database and renders
+          on a Be More Swan page today. When native ad forms unlock, the same schema is translated
+          out per platform — the founder never sees a form builder, and never rebuilds the form
+          three times.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ 6 · CONTROL LOST ═══════════════════ -->
+  <section class="state" id="s-lost">
+    <div class="note note-red" style="margin-bottom:1rem;font-size:13px">
+      <b>Control lost — “Meta Ads” stopped responding 14 minutes ago.</b><br>
+      We can no longer stop this campaign from here. It is still running on Meta and still spending
+      your money. Reconnect below, or pause it in Meta Ads Manager directly.
+      <div style="margin-top:.7rem;display:flex;gap:.5rem;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm">Reconnect Meta Ads</button>
+        <button class="btn btn-sm">Open Meta Ads Manager</button>
+      </div>
+    </div>
+
+    <div class="card card-pad" style="margin-bottom:1rem">
+      <div class="between">
+        <div style="min-width:20rem;flex:1">
+          <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+            <span style="font-weight:700">Acquire 50 trial signups by 30 September</span>
+            <span class="chip c-bad">⚠ Control lost</span>
+          </div>
+          <div class="small muted" style="margin-top:.3rem">
+            Last confirmed spend <b>£212.40</b> at 09:41 · <b style="color:var(--red-text)">figures below are stale</b>
+          </div>
+        </div>
+        <button class="btn btn-sm">Pause the organic half</button>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:.9rem;gap:1.25rem">
+        <div>
+          <div class="between tiny"><span class="muted">Money</span><span class="muted">£212.40 of £400 — as of 09:41</span></div>
+          <div class="bar" style="margin-top:.3rem;opacity:.45"><i style="width:53%"></i></div>
+        </div>
+        <div>
+          <div class="between tiny"><span class="muted">Capacity</span><span><b>84</b> of 150 tasks — live</span></div>
+          <div class="bar b-task" style="margin-top:.3rem"><i style="width:56%"></i></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>Why this state exists at all.</b> Connections in this product have died silently before and
+      kept a green “Connected” badge while doing nothing — and a five-second database blip has
+      destroyed a rotating token outright. On every other assistant that costs you some missed
+      posts. Here it means money moving that we cannot stop, so it gets its own state, its own
+      words, and a route out that does not depend on us.
+    </div>
+
+    <div class="note" style="margin-top:1rem">
+      <b>The matching rule on the way back.</b> Every pause has a named resume. “Stop everything”
+      writes down what it stopped and why, and each stopped campaign lists its own way back on this
+      tab — the last time we shipped a pause without one, paused posts and suspended assistants sat
+      there for weeks and nobody noticed.
+    </div>
+  </section>
+
+</div>
+
+<script>
+  // Mockup chrome only: swap states, and swap the mode-aware KPI card + money block
+  // to show that "organic" is a first-class mode rather than a zeroed-out paid campaign.
+  const HINTS = {
+    empty:    'Day one is a designed screen, not a fallback — every empty state here names the missing input and what unblocks it.',
+    live:     'Each row says what it is doing right now, in one sentence. A list that does not say what is happening reads as broken.',
+    decision: 'Nothing above your autonomy threshold ever just happens. Every card carries its evidence, its cost, its expiry, and what ignoring it costs you.',
+    orders:   'The orchestrator makes nothing. Its Data Hub is the ledger of work it commissioned from your other assistants.',
+    paid:     'The paid rails are blocked on platform approvals we do not control. The screen names which one, per platform.',
+    lost:     'The one failure that is unique to this assistant: the connection dies while money is still moving.'
+  };
+  const sw = document.getElementById('switcher');
+  sw.addEventListener('click', e => {
+    const b = e.target.closest('button[data-s]'); if (!b) return;
+    sw.querySelectorAll('button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    const s = b.dataset.s;
+    document.querySelectorAll('.state').forEach(x => x.classList.toggle('on', x.id === 's-' + s));
+    document.getElementById('switch-hint').textContent = HINTS[s];
+
+    const paidish = (s === 'paid' || s === 'lost');
+    document.getElementById('kpi2-label').textContent = paidish ? 'Cost per Outcome' : 'Effort per Outcome';
+    document.getElementById('kpi2-value').textContent = paidish ? '£6.85' : '4.2 tasks';
+    document.getElementById('kpi2-desc').textContent = paidish
+      ? 'Every pound spent, divided by the outcomes it produced — not clicks.'
+      : 'Every task spent, divided by the outcomes it produced. This campaign has no ad budget, so its cost is capacity.';
+    document.getElementById('metrics-window').textContent = (s === 'empty')
+      ? 'No campaign yet' : 'This campaign, since launch · 12 days';
+  });
+</script>
+
+</body>
+</html>

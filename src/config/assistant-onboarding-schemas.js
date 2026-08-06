@@ -117,6 +117,20 @@
             helpText: 'Companies smaller than this are usually a poor fit — leads below it score lower.',
             min: 1,
           },
+          {
+            // Read by icpFromOnboarding() → every campaign's icp_snapshot, and rendered into all
+            // three scoring prompts by src/config/icp-profile.ts.
+            //
+            // ⚠️ OPTIONAL ON PURPOSE. Every assistant hired before this field existed has no answer,
+            // and icpBlock() omits the line entirely when it is blank — so their scoring is
+            // unchanged rather than silently shifted by a new prompt line about an empty list.
+            key: 'excludeProfile',
+            label: 'Who is NOT a customer?',
+            type: 'text',
+            required: false,
+            placeholder: 'e.g. marketing agencies, other consultancies, recruiters',
+            helpText: 'Businesses that match the industries above but are peers or competitors rather than buyers. Discovery treats these as a hard no — not a low score — so they never reach your review queue.',
+          },
         ],
       },
       {

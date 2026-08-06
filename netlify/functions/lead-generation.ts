@@ -44,7 +44,12 @@ import {
     isOutcome, isLossReason, type LossReason,
 } from '../../src/config/revenue-events';
 import { EDIT_REASONS, isEditReason } from '../../src/config/template-feedback';
+import { EXCLUDE_PROFILE_DNC_RULE, EXCLUDE_PROFILE_RULE, SCORING_BANDS, icpBlock } from '../../src/config/icp-profile';
 import { recordTemplateEdit } from '../../src/utils/template-feedback';
+import {
+    DOMAIN_EXCLUSION_REASONS, LEAD_REJECT_REASONS, isLeadRejectReason,
+} from '../../src/config/lead-reject-reasons';
+import { recordLeadRejection } from '../../src/utils/lead-reject-feedback';
 import { openLeadThread, recordOutboundMessage } from '../../src/utils/lead-threads';
 import { replyAddress } from '../../src/utils/reply-address';
 import { checkSuppression } from '../../src/utils/suppression';
@@ -115,20 +120,6 @@ function parseJson<T = unknown>(raw: string): T | null {
     try { return JSON.parse(text) as T; } catch { return null; }
 }
 
-/** The ideal-customer-profile block, built from the same onboarding answers the chat route uses. */
-function icpBlock(onboarding: Record<string, unknown>): string {
-    const industries = onboarding.targetIndustries;
-    const minHeadcount = onboarding.minHeadcount;
-    const salesTone = onboarding.salesTone;
-    return [
-        `- Target industries: ${industries ? JSON.stringify(industries) : 'not specified — treat industry as neutral'}`,
-        `- Minimum company headcount: ${minHeadcount ?? 'not specified — treat company size as neutral'}`,
-        `- Sales tone: ${salesTone ?? 'professional'} — write outreach and next steps in this tone.`,
-    ].join('\n');
-}
-
-const SCORING_BANDS =
-    'Scoring bands: 70-100 = "hot" (strong profile fit + buying intent), 40-69 = "warm" (partial fit or unclear intent), 0-39 = "cold" (poor fit or no intent).';
 
 /** Coerce whatever the LLM returned into a safe lead_scoring_card wire shape. */
 function normaliseLeadCard(raw: unknown, fallbackName: string): Record<string, unknown> {
@@ -282,6 +273,8 @@ export default withLambda(async (event) => {
 
 Ideal customer profile (from setup):
 ${icp}
+
+${EXCLUDE_PROFILE_RULE} ${EXCLUDE_PROFILE_DNC_RULE}
 
 ${SCORING_BANDS}
 
@@ -613,6 +606,63 @@ ${OUTREACH_SUBJECT_RULES}`;
             // rather than claiming a save — but still 200: the user's EDIT succeeded, and this
             // request was only ever about the annotation.
             return json(200, { recorded: feedbackId !== null, feedbackId, recordId });
+        }
+
+        // ── Why a lead was REJECTED (Review Queue, after the reject commits) ──────
+        // The mirror of record_edit_feedback above: that one captures what was wrong with the
+        // message, this one what was wrong with the targeting that surfaced the lead at all.
+        //
+        // Runs AFTER the rejection, never as a gate in front of it — a reviewer with nineteen more
+        // leads waiting must never be blocked from clearing one because they could not be bothered
+        // to categorise it.
+        //
+        // Returns the lead's domain and campaign when discovery found them, so the caller can offer
+        // the one thing that acts on this today: excluding that domain from the search.
+        if (action === 'record_reject_feedback') {
+            const recordId = Number(body.recordId);
+            if (!Number.isInteger(recordId)) return json(400, { error: 'recordId is required.' });
+
+            const reason = str(body.reason, 40);
+            if (!isLeadRejectReason(reason)) {
+                return json(400, { error: `reason must be one of: ${LEAD_REJECT_REASONS.join(', ')}.` });
+            }
+
+            // Tenant + assistant + type check before writing anything keyed to this record. Leads
+            // only: assistant_records is shared by six roles, and a rejected invoice says nothing
+            // about who a discovery search should look for.
+            const [rec] = await db
+                .select({ id: assistantRecords.id })
+                .from(assistantRecords)
+                .where(and(
+                    eq(assistantRecords.id, recordId),
+                    eq(assistantRecords.organisationId, orgId),
+                    eq(assistantRecords.aiAssistantId, assistant.id),
+                    eq(assistantRecords.recordType, 'lead'),
+                ))
+                .limit(1);
+            if (!rec) return json(404, { error: 'Lead not found.' });
+
+            const result = await recordLeadRejection(db, {
+                organisationId: orgId,
+                aiAssistantId: assistant.id,
+                assistantRecordId: recordId,
+                reason,
+            });
+
+            // 200 with recorded:false when the write failed — the user's REJECTION succeeded, and
+            // this request was only ever about the annotation. `canExcludeDomain` is the server's
+            // call, not the browser's: it needs the vocabulary AND the discovery provenance, and
+            // only one of those is known client-side.
+            return json(200, {
+                recorded: result.id !== null,
+                recordId,
+                domain: result.domain,
+                campaignId: result.campaignId,
+                canExcludeDomain: result.id !== null
+                    && !!result.domain
+                    && !!result.campaignId
+                    && DOMAIN_EXCLUSION_REASONS.includes(reason),
+            });
         }
 
         // ── Send the outreach email for an approved lead (auto-send on approval) ──

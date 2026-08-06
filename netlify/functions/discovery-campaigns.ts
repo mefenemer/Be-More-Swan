@@ -11,6 +11,8 @@
 //        → enqueues an on_demand run for an existing campaign (no duplicate if one is in flight).
 //   POST { action: 'list_leads', campaignId }
 //        → discovered_leads for the campaign (raw discovery output + provenance).
+//   POST { action: 'exclude_domain', campaignId, domain }
+//        → APPENDS one domain to the campaign's excluded list (the reject-flow follow-up).
 
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
@@ -19,7 +21,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants, discoveryCampaigns, discoveryGuardrails, discoverySchedules, discoveryJobs, discoveredLeads } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { createDiscoveryRun } from '../../src/utils/discovery';
-import { isSearchConfigured } from '../../src/lib/discovery-search';
+import { isSearchConfigured, normaliseDomain } from '../../src/lib/discovery-search';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 function json(statusCode: number, body: unknown) {
@@ -130,6 +132,10 @@ export default withLambda(async (event) => {
                 // Only the fields the form actually shows — maxCostGbpPerRun is operator-only.
                 maxLeadsPerRun: discoveryGuardrails.maxLeadsPerRun,
                 negativeKeywords: discoveryGuardrails.negativeKeywords,
+                // Returned so a domain blocked from the reject flow is VISIBLE and removable. A
+                // one-click permanent exclusion the user can never see again is a trap, not a
+                // shortcut.
+                excludedDomains: discoveryGuardrails.excludedDomains,
                 requireHumanApproval: discoveryGuardrails.requireHumanApproval,
             })
             .from(discoveryCampaigns)
@@ -271,12 +277,60 @@ export default withLambda(async (event) => {
             // maxCostGbpPerRun is not editable — see the create branch above.
             if (typeof g.maxLeadsPerRun === 'number') patch.maxLeadsPerRun = g.maxLeadsPerRun;
             if (Array.isArray(g.negativeKeywords)) patch.negativeKeywords = (g.negativeKeywords as unknown[]).filter((x): x is string => typeof x === 'string');
+            // Accepted here so a blocked domain can be REVIEWED and removed. The column and the
+            // run-time filter both existed already; only this branch was missing, which made
+            // exclusions from the reject flow a one-way door with no surface to undo them.
+            // Normalised on the way in — isExcluded() compares against a normalised domain, so
+            // "https://Foo.com/" stored raw would silently never match anything.
+            if (Array.isArray(g.excludedDomains)) {
+                patch.excludedDomains = (g.excludedDomains as unknown[])
+                    .filter((x): x is string => typeof x === 'string')
+                    .map((d) => normaliseDomain(d))
+                    .filter((d): d is string => !!d);
+            }
             if (typeof g.requireHumanApproval === 'boolean') patch.requireHumanApproval = g.requireHumanApproval;
             if (Object.keys(patch).length > 1) {
                 await db.update(discoveryGuardrails).set(patch).where(eq(discoveryGuardrails.campaignId, campaignId));
             }
         }
         return json(200, { ok: true });
+    }
+
+    // ── exclude one domain from a campaign ──────────────────────────────────────
+    // The follow-up to rejecting a lead as a competitor or a non-business. Deliberately NOT the
+    // `edit` branch above: that one REPLACES the array, so a caller who only knows about one
+    // domain would have to read-modify-write and would clobber a concurrent change. Appending
+    // server-side keeps the whole operation in one statement and means the browser never needs to
+    // hold the full list.
+    if (action === 'exclude_domain') {
+        const campaignId = Number(body.campaignId);
+        const domain = normaliseDomain(str(body.domain, 253) ?? '');
+        if (!domain) return json(400, { error: 'A valid domain is required.' });
+
+        const [campaign] = await db.select({ id: discoveryCampaigns.id })
+            .from(discoveryCampaigns)
+            .where(and(eq(discoveryCampaigns.id, campaignId), eq(discoveryCampaigns.organisationId, orgId)))
+            .limit(1);
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+
+        const [row] = await db.select({ excludedDomains: discoveryGuardrails.excludedDomains })
+            .from(discoveryGuardrails)
+            .where(eq(discoveryGuardrails.campaignId, campaignId))
+            .limit(1);
+        if (!row) return json(404, { error: 'This search has no guardrails row to update.' });
+
+        const current = Array.isArray(row.excludedDomains)
+            ? (row.excludedDomains as unknown[]).filter((x): x is string => typeof x === 'string')
+            : [];
+        // Already blocked: report success rather than an error. The user's intent is satisfied, and
+        // a second click on a stale card must not read as a failure.
+        if (current.includes(domain)) return json(200, { ok: true, domain, alreadyExcluded: true });
+
+        await db.update(discoveryGuardrails)
+            .set({ excludedDomains: [...current, domain], updatedAt: new Date() })
+            .where(eq(discoveryGuardrails.campaignId, campaignId));
+
+        return json(200, { ok: true, domain, alreadyExcluded: false });
     }
 
     return json(400, { error: `Unknown action "${action}".` });

@@ -28,6 +28,7 @@ import {
     OUTCOMES, OUTCOME_LABELS, LOSS_REASONS, LOSS_REASON_LABELS, OUTCOMES_REQUIRING_LOSS_REASON,
 } from '../src/config/revenue-events';
 import { EDIT_REASONS, EDIT_REASON_LABELS } from '../src/config/template-feedback';
+import { LEAD_REJECT_REASONS, LEAD_REJECT_REASON_LABELS } from '../src/config/lead-reject-reasons';
 import {
     POSTING_CADENCES, NUMBER_WORDS, DEFAULT_POSTING_FREQUENCY, postsPerWeekFor, readCadence,
 } from '../src/config/posting-cadence';
@@ -199,6 +200,11 @@ ${formatRows}
   var EDIT_REASONS = ${JSON.stringify(EDIT_REASONS)};
   var EDIT_REASON_LABELS = ${JSON.stringify(EDIT_REASON_LABELS)};
 
+  // Why a reviewer rejected a discovered lead, from src/config/lead-reject-reasons.ts. Also
+  // CHECK-constrained server-side.
+  var LEAD_REJECT_REASONS = ${JSON.stringify(LEAD_REJECT_REASONS)};
+  var LEAD_REJECT_REASON_LABELS = ${JSON.stringify(LEAD_REJECT_REASON_LABELS)};
+
   window.RevenueConstants = {
     /** 'won' | 'lost' | 'disqualified', in canonical order. */
     outcomes: OUTCOMES,
@@ -230,6 +236,14 @@ ${formatRows}
     /** Display label for an edit reason. */
     editReasonLabel: function (r) {
       return EDIT_REASON_LABELS[String(r == null ? '' : r)] || String(r == null ? '' : r);
+    },
+
+    /** Why a reviewer rejected a lead, from src/config/lead-reject-reasons.ts. */
+    leadRejectReasons: LEAD_REJECT_REASONS,
+
+    /** Display label for a lead reject reason. */
+    leadRejectReasonLabel: function (r) {
+      return LEAD_REJECT_REASON_LABELS[String(r == null ? '' : r)] || String(r == null ? '' : r);
     },
   };
 

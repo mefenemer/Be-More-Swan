@@ -26,6 +26,7 @@ import { logAiUsage } from '../../src/utils/ai-usage';
 import { consumeTaskCredit } from '../../src/utils/task-credit';
 import { embedTexts } from '../../src/utils/kb-embeddings';
 import { computeScheduleSlots, resolvePostingSchedule } from '../../src/config/posting-cadence';
+import { EXCLUDE_PROFILE_RULE, SCORING_BANDS, icpBlock } from '../../src/config/icp-profile';
 import { normalizePlatform, platformFormat, type SocialPlatform } from '../../src/config/platform-formats';
 import { normalizeMediaSources } from '../../src/utils/media-sources';
 import { replyClaimsPostSaved, honestDraftReply, type DraftClaimFailure } from '../../src/utils/chat-draft-claims';
@@ -792,16 +793,23 @@ async function retrieveKnowledgeBase(
 
 const ROUTES: Record<string, AssistantRoute> = {
     // Tier 1, Batch 1 — Lead Generator. Scores inbound leads against the ideal-customer
-    // profile captured at hire time (targetIndustries / minHeadcount / salesTone, see
-    // src/config/assistant-onboarding-schemas.js). Wire shape: reply + lead_scoring_card
-    // uiElement, matching the LeadScoringCard renderer in disruptive-ui-registry.js.
+    // profile captured at hire time (targetIndustries / minHeadcount / salesTone /
+    // excludeProfile, see src/config/assistant-onboarding-schemas.js). Wire shape: reply +
+    // lead_scoring_card uiElement, matching the LeadScoringCard renderer in
+    // disruptive-ui-registry.js.
     lead_qualifier: {
         model: DEFAULT_MODEL,
         maxTokens: 1024,
         buildRolePrompt: (rc) => {
-            const industries = onboardingValue(rc, 'targetIndustries');
-            const minHeadcount = onboardingValue(rc, 'minHeadcount');
-            const salesTone = onboardingValue(rc, 'salesTone');
+            // The block is rendered by src/config/icp-profile.ts, not written out here — the three
+            // copies of it had already drifted apart, and chat and discovery disagreeing about the
+            // same company is not a difference a user could ever attribute to its real cause.
+            const icp = icpBlock({
+                targetIndustries: onboardingValue(rc, 'targetIndustries'),
+                minHeadcount: onboardingValue(rc, 'minHeadcount'),
+                salesTone: onboardingValue(rc, 'salesTone'),
+                excludeProfile: onboardingValue(rc, 'excludeProfile'),
+            });
             return [
                 sharedContextBlock(rc),
                 `You have TWO jobs for this business: you FIND new leads (outbound discovery) and you SCORE the leads that reach you (inbound qualification). Never describe yourself as scoring-only — finding new customers is your job, not something the user has to go elsewhere for.
@@ -811,11 +819,11 @@ ${leadGeneratorSurfaces()}
 Score every lead against the ideal customer profile below — a lead that matches it well scores high; one that misses it scores low, and your reasons must say which criteria it met or missed.
 
 Ideal customer profile (from setup):
-- Target industries: ${industries ? JSON.stringify(industries) : 'not specified — treat industry as neutral'}
-- Minimum company headcount: ${minHeadcount ?? 'not specified — treat company size as neutral'}
-- Sales tone: ${salesTone ?? 'professional'} — write your reply (and the suggested next step) in this tone.
+${icp}
 
-Scoring bands: 70-100 = "hot" (strong profile fit + buying intent), 40-69 = "warm" (partial fit or unclear intent), 0-39 = "cold" (poor fit or no intent).
+${EXCLUDE_PROFILE_RULE}
+
+${SCORING_BANDS}
 
 When the conversation contains enough detail to assess a lead, include the scoring card.
 
