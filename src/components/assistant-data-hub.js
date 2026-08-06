@@ -195,6 +195,31 @@
   // by scripts/gen-client-constants.ts) rather than being retyped here: they are CHECK-constrained
   // server-side, and recordEvent() swallows its errors, so a drifted copy would fail invisibly.
 
+  // ── Where a lead stands in the approval gate ────────────────────────────────
+  // The Leads table has no approval column — its columns are Lead / Score / Rating / Next step /
+  // Updated — so a pending lead, an approved one and a rejected one are visually identical in the
+  // list. That is why the Review tab looks like it duplicates this one: it is showing the SAME
+  // rows, filtered to the only state the list can't express. Stating it on the open record is the
+  // cheap half of the fix, and it is what makes the Reject button below have a visible effect.
+  const APPROVAL_CHIP = {
+    pending_approval: { label: 'Awaiting your approval', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+    approved: { label: 'Approved', cls: 'bg-green-50 text-green-700 border-green-100' },
+    scheduled: { label: 'Approved · chase reminder set', cls: 'bg-green-50 text-green-700 border-green-100' },
+    rejected: { label: 'Rejected', cls: 'bg-gray-100 text-gray-500 border-gray-200' },
+  };
+
+  /** The approval chip for a lead. `data-hub-approval` so a reject can swap it without a re-render. */
+  function approvalBanner(record) {
+    const s = APPROVAL_CHIP[record.approvalStatus];
+    const wrap = document.createElement('div');
+    wrap.className = 'mb-3';
+    wrap.setAttribute('data-hub-approval', '');
+    if (s) {
+      wrap.innerHTML = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${s.cls}">${esc(s.label)}</span>`;
+    }
+    return wrap;
+  }
+
   /** Colour + label for a recorded outcome. Only classes already compiled into style.css. */
   function outcomeChipClass(outcome) {
     if (outcome === 'won') return 'bg-green-50 text-green-700 border-gray-200';
@@ -389,6 +414,126 @@
     document.body.appendChild(overlay);
   }
 
+  // ── Rejecting a lead, and saying why ────────────────────────────────────────
+  //
+  // ⚠️ Reject and "Record outcome → Disqualified" are NOT the same act, and offering only the
+  // latter here was the reason they got confused:
+  //
+  //   • Reject answers "this should never have been found" — a fault in the TARGETING. It clears
+  //     the approval gate (nothing is emailed) and its reason feeds lead_reject_feedback, which
+  //     the rejection-cluster proposer reads to argue the search is aimed wrong.
+  //   • Disqualified answers "we pursued this and it went nowhere" — a fault in the DEAL. It is a
+  //     revenue outcome sitting alongside won/lost, and its reason is a LOSS reason.
+  //
+  // Using Disqualified for a bad discovery hit puts a dead deal in the revenue numbers for a
+  // company nobody ever contacted, and files the complaint where no targeting change can read it.
+  //
+  // The strip below is the same capture the Review Queue offers (_rqShowRejectReasonStrip in
+  // assistants.js), deliberately duplicated rather than shared: that one lives in the Review
+  // Queue's own render cycle and anchors to an `[data-rq-record]` card that does not exist on this
+  // screen. Both post the same `record_reject_feedback` action, which is where the rule lives.
+  function rejectReasonStrip(record) {
+    const RC = window.RevenueConstants;
+    const strip = document.createElement('div');
+    strip.className = 'w-full mt-2 rounded-lg border border-gray-200 bg-white px-3 py-2';
+    if (!RC || !Array.isArray(RC.leadRejectReasons)) {
+      // Constants failed to load. The REJECTION already committed, so say what did and didn't
+      // happen rather than implying the whole action failed.
+      strip.innerHTML = '<p class="text-[11px] font-semibold text-gray-500">Rejected. The reason options couldn’t load — refresh the page to add one.</p>';
+      return strip;
+    }
+
+    const chip = 'px-2 py-1 text-[11px] font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 transition cursor-pointer';
+    strip.innerHTML = `
+      <p class="text-[11px] font-bold text-gray-700">Why wasn’t ${esc(record.title || 'this lead')} a fit?</p>
+      <p class="text-[11px] text-gray-500 mb-2">Optional. It’s already rejected — this records what the search got wrong.</p>
+      <div class="flex flex-wrap gap-1.5">
+        ${RC.leadRejectReasons.map((r) => `<button type="button" class="${chip}" data-hub-reason="${esc(r)}">${esc(RC.leadRejectReasonLabel(r))}</button>`).join('')}
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-400 hover:text-gray-600 transition cursor-pointer" data-hub-reason-skip>Skip</button>
+      </div>
+      <p class="hidden text-[11px] font-semibold mt-1.5" data-hub-reason-status></p>`;
+
+    const status = strip.querySelector('[data-hub-reason-status]');
+    strip.querySelector('[data-hub-reason-skip]').addEventListener('click', () => strip.remove());
+    strip.addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-hub-reason]');
+      if (!btn) return;
+      strip.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+      status.classList.remove('hidden');
+      status.textContent = 'Saving…';
+      status.className = 'text-[11px] font-semibold text-gray-500 mt-1.5';
+      try {
+        const res = await fetch('/.netlify/functions/lead-generation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            action: 'record_reject_feedback',
+            assistantId: state.assistantId,
+            recordId: record.id,
+            reason: btn.getAttribute('data-hub-reason'),
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not save that.');
+        // canExcludeDomain is the SERVER's verdict — it needs both the reason vocabulary and the
+        // discovery provenance, and the browser has neither. A hand-added lead has no search to
+        // exclude it from, which is why this is not simply "was the reason 'competitor'".
+        if (data.canExcludeDomain) offerDomainExclusion(strip, data.domain, data.campaignId);
+        else strip.innerHTML = data.recorded
+          ? '<p class="text-[11px] font-semibold text-gray-600">Noted — thanks.</p>'
+          : '<p class="text-[11px] font-semibold text-gray-500">The lead is rejected. The note couldn’t be recorded.</p>';
+      } catch (err) {
+        strip.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+        status.textContent = err.message || 'Could not save that.';
+        status.className = 'text-[11px] font-semibold text-red-600 mt-1.5';
+      }
+    });
+    return strip;
+  }
+
+  /**
+   * The one follow-up that changes what the next run finds: block this company's domain.
+   *
+   * A DOMAIN rather than a keyword, for the same reason the Review Queue's copy of this does it:
+   * negative keywords are a substring match over title and snippet, so a well-meant "agency" also
+   * deletes every prospect whose page happens to mention one. A domain match is exact.
+   */
+  function offerDomainExclusion(strip, domain, campaignId) {
+    strip.innerHTML = `
+      <p class="text-[11px] font-bold text-gray-700">Noted. Stop this search finding <span class="font-mono">${esc(domain)}</span>?</p>
+      <p class="text-[11px] text-gray-500 mb-2">Adds the domain to this search’s exclusions. You can remove it later by editing the search.</p>
+      <div class="flex flex-wrap gap-1.5">
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white transition cursor-pointer" data-hub-exclude>Yes, exclude it</button>
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-400 hover:text-gray-600 transition cursor-pointer" data-hub-exclude-skip>No thanks</button>
+      </div>
+      <p class="hidden text-[11px] font-semibold mt-1.5" data-hub-exclude-status></p>`;
+
+    const status = strip.querySelector('[data-hub-exclude-status]');
+    strip.querySelector('[data-hub-exclude-skip]').addEventListener('click', () => strip.remove());
+    strip.querySelector('[data-hub-exclude]').addEventListener('click', async () => {
+      strip.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+      status.classList.remove('hidden');
+      status.textContent = 'Excluding…';
+      status.className = 'text-[11px] font-semibold text-gray-500 mt-1.5';
+      try {
+        const res = await fetch('/.netlify/functions/discovery-campaigns', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ action: 'exclude_domain', campaignId, domain }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not exclude that domain.');
+        strip.innerHTML = `<p class="text-[11px] font-semibold text-gray-600">${esc(domain)} won’t come back in this search.</p>`;
+      } catch (err) {
+        strip.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+        status.textContent = err.message || 'Could not exclude that domain.';
+        status.className = 'text-[11px] font-semibold text-red-600 mt-1.5';
+      }
+    });
+  }
+
   // Meetings: summary + a check-off-able action-item list persisted via PATCH
   // (data.tasks[i].done), instead of the read-only chat card.
   function meetingDetail(record) {
@@ -491,6 +636,34 @@
         buttons.push({ label: 'Copy outreach draft', async run(btn) {
           await navigator.clipboard.writeText(`Subject: ${draft.subject || ''}\n\n${draft.body}`);
           btn.textContent = 'Copied ✓';
+        }});
+      }
+      // Reject — see the block comment above rejectReasonStrip for why this is a different act
+      // from "Record outcome → Disqualified", and why it needed to exist on this tab: users read a
+      // lead in full HERE, and had to go and find it again in Review to turn it down.
+      //
+      // Hidden once already rejected. Not hidden for approved/scheduled leads: an approved lead
+      // whose outreach has already gone out can still be the wrong kind of company to have found,
+      // and that is exactly the fact the targeting feedback wants.
+      if (record.approvalStatus !== 'rejected') {
+        buttons.push({ label: 'Reject', async run(btn, status) {
+          const res = await fetch(API, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: record.id, approvalStatus: 'rejected' }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || 'Could not reject that lead.');
+          record.approvalStatus = 'rejected';
+          btn.textContent = 'Rejected';
+          // The chip above the record, so the state change is visible without a re-render — the
+          // table's columns (Lead / Score / Rating / Next step / Updated) can't show it.
+          const chip = btn.closest('[data-hub-detail]')?.querySelector('[data-hub-approval]');
+          if (chip) chip.innerHTML = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${APPROVAL_CHIP.rejected.cls}">${esc(APPROVAL_CHIP.rejected.label)}</span>`;
+          // Asked AFTER the rejection commits, never as a gate on it: the reason is an annotation
+          // on a decision the user has already made, and blocking the reject behind it would only
+          // buy worse answers from someone with nineteen more leads to get through.
+          status.parentElement?.appendChild(rejectReasonStrip(record));
         }});
       }
     }
@@ -651,6 +824,7 @@
   function detailPanel(record) {
     const panel = document.createElement('div');
     panel.className = 'px-5 py-4 bg-gray-50/70';
+    panel.setAttribute('data-hub-detail', '');
 
     // Content Library: read-only post view, no record actions.
     if (state.hub.kind === 'content_library') {
@@ -666,8 +840,10 @@
       // with the same card the transcript used.
       body = window.DisruptiveUIRegistry.render(record.data);
     }
-    // A decided deal leads with its outcome — above the card, so it reads as a fact about the
-    // lead rather than another field buried in it.
+    // A lead leads with where it stands: first the approval gate (pending / approved / rejected),
+    // then a recorded deal outcome if there is one. Both above the card, so they read as facts
+    // about the lead rather than more fields buried inside it.
+    if (state.hub.recordType === 'lead') panel.appendChild(approvalBanner(record));
     const outcome = state.hub.recordType === 'lead' ? outcomeBanner(record) : null;
     if (outcome) panel.appendChild(outcome);
     panel.appendChild(body || keyValueFallback(record.data));
@@ -696,7 +872,25 @@
     if (tr) tr.innerHTML = rowHtml(record);
   }
 
+  /**
+   * How many records this hub holds, on the tab button itself — "Leads (48)", "Ledger (12)".
+   *
+   * Records-kind hubs only. The Content Library reads the posts endpoint, whose result is a
+   * lifecycle slice rather than a complete count, so a number there would be confidently wrong.
+   *
+   * assistants.js sets the plain label from the registry at apply time and init() runs straight
+   * after, so this always lands second and wins. `(0)` is suppressed on purpose: an empty hub
+   * already says so in the table body, and a zero on the tab reads as a broken counter.
+   */
+  function updateTabCount() {
+    const el = document.getElementById('datahub-tab-label');
+    if (!el || !state.hub || state.hub.kind === 'content_library') return;
+    const n = state.records.length;
+    el.textContent = n ? `${state.hub.label} (${n})` : state.hub.label;
+  }
+
   function renderTable() {
+    updateTabCount();
     const host = document.getElementById('datahub-table-host');
     if (!host) return;
     const hub = state.hub;

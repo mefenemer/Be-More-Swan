@@ -57,6 +57,7 @@
     rendered: false,
     pollTimer: null,
     pagedIn: false,
+    tabLabel: 'Searches',
   };
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
@@ -320,16 +321,13 @@
 
     const empty = state.signals.length === 0;
 
+    // No summary-card row. Four big numbers across the top ("Signals / Ready to approve / Need
+    // review / Filtered") restated what the list below already shows, row by row and with the
+    // company names attached — and pushed the searches panel, which is the thing the user has to
+    // act on, below the fold. The two counts worth keeping are still on screen where the decision
+    // is made: "Show filtered (N)" on its own toggle, and "N need individual review" on the batch
+    // bar. The number of SEARCHES now rides on the tab button itself (updateTab).
     return `
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-        ${[['Signals', c.total], ['Ready to approve', c.ready], ['Need review', c.needsReview], ['Filtered', c.filtered]]
-          .map(([label, n]) => `
-          <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4">
-            <p class="text-2xl font-bold text-gray-900">${n}</p>
-            <p class="text-xs text-gray-500 mt-0.5">${label}</p>
-          </div>`).join('')}
-      </div>
-
       ${searchesPanel()}
 
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm">
@@ -539,7 +537,7 @@
         : (err.message || 'Could not load your signals.');
     } finally {
       state.loading = false;
-      updateBadge();
+      updateTab();
       render();
       schedulePoll();
     }
@@ -568,8 +566,24 @@
     }
   }
 
-  /** Amber count on the tab button — the same affordance the Review Queue uses. */
-  function updateBadge() {
+  /**
+   * The tab button: how many SEARCHES exist, plus the amber "needs you" count.
+   *
+   * Two different numbers on purpose, and they answer two different questions. The parenthetical
+   * is inventory — how many searches this assistant is running, which is what the tab is FOR and
+   * the thing a user checks without opening it. The amber badge is the same "needs you" affordance
+   * every other tab uses, and it counts signals awaiting approval, not searches.
+   *
+   * `(0)` is suppressed: a bare "Searches" reads as an empty tab, where "Searches (0)" reads as a
+   * counter that failed to load.
+   */
+  function updateTab() {
+    const label = document.getElementById('signals-tab-label');
+    if (label) {
+      const searches = state.savedSearches.length;
+      label.textContent = searches ? `${state.tabLabel} (${searches})` : state.tabLabel;
+    }
+
     const el = document.getElementById('signals-ready-badge');
     if (!el) return;
     const n = state.counts.ready + state.counts.needsReview;
@@ -609,8 +623,12 @@
   });
 
   window.AssistantSignalInbox = {
-    init({ assistantId }) {
+    init({ assistantId, cfg }) {
       state.assistantId = assistantId;
+      // The base label, so updateTab can re-append "(N)" without compounding it. Taken from the
+      // registry rather than read back off the button, which would already have a count on it
+      // after the first load.
+      state.tabLabel = (cfg && cfg.label) || 'Searches';
       state.rendered = false;
       // Counts drive the tab badge, so fetch once on init even though the panel is lazy.
       load();

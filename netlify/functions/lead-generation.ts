@@ -56,6 +56,9 @@ import { checkSuppression } from '../../src/utils/suppression';
 import { enrolInSequence, haltEnrolmentsForRecord } from '../../src/utils/outreach-sequences';
 import { OUTREACH_SUBJECT_RULES } from '../../src/constants/outreach-subject';
 import { evaluateDoNotContact } from '../../src/config/do-not-contact';
+// One normaliser for the lead_scoring_card wire shape, shared with discovery scoring — the
+// do-not-contact gate reads the card this produces, so the two paths must not drift apart.
+import { normaliseLeadCard, type LeadScoringCard } from '../../src/lib/discovery-scoring';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /** Chase reminder for an approved+contacted lead: 3 days out at 09:00, nudged off weekends. */
@@ -120,37 +123,6 @@ function parseJson<T = unknown>(raw: string): T | null {
     try { return JSON.parse(text) as T; } catch { return null; }
 }
 
-
-/** Coerce whatever the LLM returned into a safe lead_scoring_card wire shape. */
-function normaliseLeadCard(raw: unknown, fallbackName: string): Record<string, unknown> {
-    const ui = (raw && typeof raw === 'object') ? raw as Record<string, unknown> : {};
-    const score = Math.max(0, Math.min(100, Math.round(Number(ui.score)) || 0));
-    const rating = ['hot', 'warm', 'cold'].includes(String(ui.rating)) ? String(ui.rating)
-        : score >= 70 ? 'hot' : score >= 40 ? 'warm' : 'cold';
-    const reasons = Array.isArray(ui.reasons)
-        ? ui.reasons.filter((r) => typeof r === 'string').slice(0, 6).map((r) => String(r).slice(0, 300))
-        : [];
-    let outreachDraft: unknown = null;
-    if (ui.outreachDraft && typeof ui.outreachDraft === 'object') {
-        const d = ui.outreachDraft as Record<string, unknown>;
-        if (str(d.body)) outreachDraft = { to: str(d.to, 200), subject: str(d.subject, 300) ?? '', body: String(d.body).slice(0, 4000) };
-    }
-    // A do-not-contact verdict must survive normalisation or the gate downstream never fires — it
-    // reads this blob, not the raw model output. Only `true` counts: an absent field means the
-    // scoring pass predates the flag, and evaluateDoNotContact() falls back to the prose instead.
-    const doNotContact = ui.doNotContact === true;
-    return {
-        type: 'lead_scoring_card',
-        leadName: str(ui.leadName, 300) ?? fallbackName,
-        score,
-        rating,
-        reasons,
-        suggestedNextStep: str(ui.suggestedNextStep, 500) ?? '',
-        outreachDraft: doNotContact ? null : outreachDraft,
-        doNotContact,
-        doNotContactReason: doNotContact ? str(ui.doNotContactReason, 300) : null,
-    };
-}
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -306,7 +278,9 @@ ${OUTREACH_SUBJECT_RULES}`;
             });
             logUsage(resp, 'score_lead');
             const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
-            const card = normaliseLeadCard(parseJson(raw), title);
+            // Widened on purpose: the card is stored as the record's `data` blob and this path
+            // stamps extra fields onto it below.
+            const card: LeadScoringCard & Record<string, unknown> = { ...normaliseLeadCard(parseJson(raw), title) };
 
             // Persist the address the user actually typed. Without this the only recipient
             // source for a manual lead is whatever the model chose to echo into

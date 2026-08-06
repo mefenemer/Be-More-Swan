@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-leadgen-tabs",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4276",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/45aa7a73-dae8-4e56-8524-8c6270242bdf/scratchpad/leadharness"
+      ],
+      "port": 4276,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-works-with",
       "runtimeExecutable": "node",
       "runtimeArgs": [

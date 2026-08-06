@@ -156,6 +156,37 @@ check('the reject strip does not claim the rejection teaches the assistant', () 
     }
 });
 
+// The Leads tab now offers Reject too (assistant-data-hub.js rejectReasonStrip), because that is
+// where a user actually reads a lead in full. It is a SECOND copy of the strip above — deliberately
+// duplicated, since the Review Queue's version anchors to a card that doesn't exist on that screen
+// — so the honesty rule has to be pinned in both places or it only holds in one.
+check('the Leads-tab reject strip makes the same limited promise', () => {
+    const src = read('src/components/assistant-data-hub.js');
+    const start = src.indexOf('function rejectReasonStrip');
+    assert.ok(start !== -1, 'the Leads-tab strip is missing');
+    const fn = src.slice(start, src.indexOf('function offerDomainExclusion'));
+    const copy = fn.replace(/\/\/.*$/gm, '');
+    for (const claim of [/teach/i, /learn/i, /next time/i, /improve/i]) {
+        assert.ok(!claim.test(copy),
+            `the Leads-tab strip claims learning the user cannot count on (${claim}) — the cluster `
+            + 'proposer is gated on the strategy_agent plan feature, which is default OFF');
+    }
+});
+
+// Same reason as the Review Queue's ordering test, checked in the other file: the reason is an
+// annotation on a decision already made. If the strip were built BEFORE the PATCH resolved, a
+// failed reject would leave the user categorising a lead that is still pending.
+check('the Leads-tab strip is built only after the PATCH resolves', () => {
+    const src = read('src/components/assistant-data-hub.js');
+    const start = src.indexOf("buttons.push({ label: 'Reject'");
+    assert.ok(start !== -1, 'the Leads-tab Reject button is missing');
+    const run = src.slice(start, src.indexOf('}});', start));
+    const throws = run.indexOf('throw new Error');
+    const strip = run.indexOf('rejectReasonStrip(record)');
+    assert.ok(throws !== -1 && strip > throws,
+        'the strip must be appended after the !res.ok guard, so a failed reject shows no strip');
+});
+
 check('the strip appears after the reject, never as a gate in front of it', () => {
     const src = handlerBody();
     // The pending marker is set inside the reject branch and only rendered once the PATCH has
