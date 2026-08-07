@@ -4497,7 +4497,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     // light up on their own the moment a platform does report back. Nothing below depends on it.
     // Its own try/catch covers the fetch; this one catches the DOM paint, which is now nobody's
     // awaited promise and would otherwise surface only as an unhandled rejection.
-    _loadAssistantMetrics(assistantId).catch(err => console.error('[performance-metrics] load failed:', err));
+    _loadAssistantMetrics(assistantId, currentData.roleKey).catch(err => console.error('[performance-metrics] load failed:', err));
     // Goal Progress — safe to skeleton for every role: the card never hides itself (it has an empty
     // state), and the goals fetch is late in this function's sequence, so without a placeholder the
     // card sits visibly blank while everything below it fills in. Cleared by _renderGoalProgressCard.
@@ -5545,9 +5545,10 @@ function _setKpiCard(key, { empty, tone = 'brand', series = null } = {}) {
 // Swaps the four KPI cards for a single panel that says why they're blank. Four cards reading "—"
 // are indistinguishable from a broken page, and the section stays on screen for every role even
 // where nothing can currently feed it. `mode` is 'cards' (real figures), 'pending' (painted before
-// the fetch, so nothing spins), 'no-data' (nothing published to measure) or 'error' (we genuinely
-// don't know) — the last two are different truths and must not share copy, or a network blip would
-// tell the user they've published nothing.
+// the fetch, so nothing spins), 'no-data' (nothing published to measure), 'campaign-no-data' (no
+// campaign has been run — the Campaign Assistant's equivalent, which needs its own copy because it
+// publishes nothing itself) or 'error' (we genuinely don't know). These are different truths and
+// must not share copy, or a network blip would tell the user they've published nothing.
 //
 // 'pending' exists so this section can render instantly. It says the same thing as 'no-data' MINUS
 // the claim about the user's own publishing, which we have not checked yet at that point — that
@@ -5577,6 +5578,13 @@ function _setMetricsEmptyState(mode) {
         if (body)  body.textContent  = 'Something went wrong fetching them. Refresh the page to try again — this doesn’t affect your posts or scheduling.';
         // The period note would imply we know what happened in that window. We don't.
         if (note) note.textContent = '';
+    } else if (mode === 'campaign-no-data') {
+        // Distinct from 'no-data' on purpose. This assistant publishes nothing itself, so "nothing
+        // has been published" would be both confusing and permanently true; what is actually
+        // missing is a campaign to measure, and that is something the user can go and fix.
+        if (title) title.textContent = 'No campaign has run yet';
+        if (body)  body.textContent  = 'Set an objective on the Campaigns tab and start a campaign. These figures fill in as your assistants deliver the work it commissions.';
+        if (note) note.textContent = '';
     } else {
         if (title) title.textContent = 'Performance metrics aren’t available yet';
         if (body)  body.textContent  = 'These fill in automatically once there’s published activity for this assistant to measure, and the platform reports back on it.'
@@ -5590,7 +5598,86 @@ function _setMetricsEmptyState(mode) {
     // that actually resolves; the review queue was never a route to performance data anyway.
 }
 
-async function _loadAssistantMetrics(assistantId) {
+// ── Campaign Assistant KPI cards ─────────────────────────────────────────────
+// The four cards share their markup with every other role, but NOT their data source. The shared
+// endpoint reads post_insights scoped to the assistant's own id, and this assistant owns no posts —
+// the Social Media and Blog Writing assistants it commissions do — so it returned hasData:false for
+// ever and these four labels sat above a permanent "nothing to report" panel. Routed here by
+// `metricsSource: 'campaign'` in the dashboard registry.
+//
+// The window is the campaign's LIFETIME, so the period note is overwritten rather than left saying
+// "Last 30 days": a 30-day window across a six-week flight cliff-drops at rollover and reports a
+// collapse that is really an artefact of the window.
+async function _loadCampaignMetrics(assistantId) {
+    const valEl   = (k) => document.getElementById(`metric-${k}-value`);
+    const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
+    const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
+
+    // The social card 4 carries an extra "low reach, high value" callout that has no campaign
+    // meaning. It is only ever un-hidden by the social path, but clear it defensively — a role
+    // switch on a cached page would otherwise strand it under a campaign figure.
+    document.getElementById('metric-value-wins')?.classList.add('hidden');
+
+    try {
+        const res = await fetch(`/.netlify/functions/get-campaign-performance?id=${assistantId}`);
+        if (!res.ok) { _setMetricsEmptyState('error'); return; }
+        const data = await res.json();
+
+        // No campaigns ever run. Four zeroes would read as a campaign that failed rather than one
+        // that was never started, so the explanatory panel is the honest answer.
+        if (!data.hasData) { _setMetricsEmptyState('campaign-no-data'); return; }
+
+        _setMetricsEmptyState('cards');
+        const note = document.getElementById('metrics-status-note');
+        if (note) {
+            const c = data.campaigns || {};
+            note.textContent = c.total === 1 ? 'This campaign, all time' : `${c.total} campaigns, all time`;
+        }
+
+        const m = data.metrics || {};
+        const t = data.trends || {};
+
+        // Card 1 — Outcomes Delivered. Published work and real leads only.
+        valEl('engagement').textContent = String(m.outcomes ?? 0);
+        _setKpiCard('engagement', { empty: !m.outcomes });
+        if (trendEl('engagement')) trendEl('engagement').textContent = t.outcomes || '—';
+        if (dotEl('engagement')) {
+            dotEl('engagement').className = 'w-2 h-2 rounded-full ' + (m.outcomes ? 'bg-emerald-400' : 'bg-gray-200');
+        }
+
+        // Card 2 — Effort per Outcome. Null until there is something to divide by; "0 tasks each"
+        // would claim the work was free.
+        // The unit belongs on the figure: "2.4" under a label reading "Effort per Outcome" leaves
+        // the reader to guess whether it is tasks, hours or pounds — and pounds is the one answer
+        // that must never be implied here (Phase 1 campaigns spend no money at all).
+        const hasRatio = m.effortPerOutcome !== null && m.effortPerOutcome !== undefined;
+        valEl('reach').textContent = hasRatio
+            ? `${m.effortPerOutcome} ${m.effortPerOutcome === 1 ? 'task' : 'tasks'}`
+            : '—';
+        _setKpiCard('reach', { empty: !hasRatio });
+        if (trendEl('reach')) trendEl('reach').textContent = t.effort || '—';
+
+        // Card 3 — Decisions Raised. What the autonomous run spotted on its own.
+        valEl('ctr').textContent = String(m.decisionsRaised ?? 0);
+        _setKpiCard('ctr', { empty: !m.decisionsRaised });
+        if (trendEl('ctr')) trendEl('ctr').textContent = t.decisions || '—';
+
+        // Card 4 — Needs You. Amber, not green: this is a number the user is meant to bring DOWN,
+        // and colouring it like an achievement would invert its meaning.
+        if (valEl('value')) {
+            valEl('value').textContent = String(m.needsYou ?? 0);
+            _setKpiCard('value', { empty: !m.needsYou });
+            if (trendEl('value')) trendEl('value').textContent = t.needsYou || '—';
+            if (dotEl('value')) {
+                dotEl('value').className = 'w-2 h-2 rounded-full ' + (m.needsYou ? 'bg-amber-400' : 'bg-gray-200');
+            }
+        }
+    } catch {
+        _setMetricsEmptyState('error');
+    }
+}
+
+async function _loadAssistantMetrics(assistantId, roleKey) {
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
@@ -5599,6 +5686,14 @@ async function _loadAssistantMetrics(assistantId) {
     // Start muted. Every path out of this function that doesn't produce a figure — fetch
     // failure, no published posts, a metric the platform doesn't report — leaves it that way.
     _KPI_KEYS.forEach(k => _setKpiCard(k, { empty: true }));
+
+    // Role-specific data source. Registry-driven rather than a roleKey compared inline here, so a
+    // second role needing its own figures is a registry entry and not another branch in this file.
+    const source = window.AssistantDashboardRegistry?.get?.(roleKey)?.metricsSource;
+    if (source === 'campaign') {
+        _setMetricsEmptyState('pending');
+        return _loadCampaignMetrics(assistantId);
+    }
 
     // Show the explanatory panel BEFORE the fetch, synchronously. The overwhelmingly likely answer
     // is "nothing to report" (see the caller), and the user should not watch a spinner to be told

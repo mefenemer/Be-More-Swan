@@ -226,6 +226,13 @@
       // arithmetic that cliff-drops at rollover; roi-hero-defaults-all-time already cost us this
       // once. Card 2 swaps its unit by campaign mode — an organic campaign showing
       // "Cost per Outcome: £0" is a lie about a real cost, so it reports tasks instead.
+      //
+      // These four cards are fed by get-campaign-performance, NOT by the shared
+      // get-assistant-performance the other roles use — that one reads post_insights scoped to the
+      // assistant's own id, and this assistant owns no posts, so it returned hasData:false for
+      // ever and the section rendered its "nothing to report" panel permanently. `metricsSource`
+      // below is what routes it. A role without the flag keeps the social endpoint.
+      metricsSource: 'campaign',
       kpis: [
         {
           label: 'Outcomes Delivered',
@@ -237,15 +244,23 @@
           title: 'The Real Price',
           desc: 'Every task your assistants spent, divided by the outcomes those tasks produced.',
         },
+        // ⚠️ This card used to read "Decisions Taken For You / Reallocations — work it moved
+        // between your assistants without waking you". Nothing in the product does that. The
+        // autonomy dial that would authorise it (campaign_budgets.autonomy_threshold_work) is
+        // written and validated by campaigns.ts and then read by NOTHING: no path auto-approves a
+        // decision, so every reallocation waits for a human and the card could only ever have
+        // reported 0. Reworded 2026-08-07 to what the autonomous run genuinely does — it spots
+        // these unprompted and files them with their evidence, which is the real product claim and
+        // is measurable today. Restore the old wording only in the commit that ships auto-approval.
         {
-          label: 'Decisions Taken For You',
-          title: 'Reallocations',
-          desc: 'Work it moved between your assistants without waking you, each with its evidence.',
+          label: 'Decisions Raised',
+          title: 'Spotted Without You Asking',
+          desc: 'Escalations and halts the assistant found in your own numbers and put to you, each with its evidence.',
         },
         {
           label: 'Needs You',
           title: 'Awaiting Approval',
-          desc: 'Decisions parked above your threshold, and campaigns blocked on something only you can fix.',
+          desc: 'Decisions waiting on your answer, and finished work sitting in another assistant’s review queue.',
         },
       ],
       // Publishes nothing, sells nothing, writes no content of its own. hasPostingSchedule:false
