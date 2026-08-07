@@ -85,9 +85,13 @@ export const REJECT_REASON_EFFECTS: Record<RejectReason, string> = {
 /**
  * Rejections fed back into the next run's prompt.
  *
- * `other` is excluded deliberately: its note is unstructured text, and one org's idiosyncratic
- * phrasing in a prompt is poison rather than signal (§7.1). The note is still stored and still
- * shown to humans — it just never reaches the model.
+ * `other` is excluded deliberately: it carries no structured claim at all, so there is nothing to
+ * anchor its note against (§7.1). It is the one place a reviewer can record a decision without
+ * steering the agent, and REJECT_REASON_EFFECTS.other promises exactly that.
+ *
+ * For every reason in this list the reject NOTE travels with the reason into the prompt — the label
+ * says a change was wrong, only the note says how. If that ever changes, the reject form's
+ * placeholder in assistant-strategy.js has to change with it, or the UI over-promises privacy.
  */
 export const REJECT_REASONS_FED_TO_MODEL: readonly RejectReason[] =
     REJECT_REASONS.filter((r) => r !== 'other');

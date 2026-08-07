@@ -213,7 +213,33 @@
   }
 
   /**
-   * Collapse (campaign status × latest job status) into one thing to show the user.
+   * How long a run may sit without advancing before the row stops claiming it is working.
+   *
+   * The on-demand drain loops for at most twelve minutes; past that a run falls back to the
+   * ten-minute cron, so gaps of a few minutes are ordinary and a gap of fifteen is not.
+   */
+  const STALL_MS = 15 * 60 * 1000;
+
+  /**
+   * What an in-flight run is doing right now, per stage.
+   *
+   * The lead count belongs in every one of these: the complaint that produced this code was a
+   * search showing a "Queued" chip while fifteen leads sat in the Leads tab, and a row that names
+   * the leads it has already filed cannot read as "nothing is happening".
+   */
+  function runningLine(s, stage, total) {
+    const i = Number(s.queryIndex || 0);
+    const n = Number(s.queryTotal || 0);
+    // Only claim a position once query_gen has produced the plan; before that there is no
+    // denominator and "query 0 of 0" is worse than saying nothing.
+    const progress = n > 0 ? ` Query ${Math.min(i + 1, n)} of ${n}.` : '';
+    if (stage === 'promoting') return `Filing what it found into your Leads tab. ${total}`;
+    if (stage === 'enriching') return `Looking up contact details for the best matches — the companies themselves are already in your Leads tab. ${total}`;
+    return `Searching the web and scoring what it finds.${progress} ${total}`;
+  }
+
+  /**
+   * Collapse (campaign status × latest job status × stage) into one thing to show the user.
    *
    * Order matters: an in-flight job outranks the campaign status, because "searching now" is the
    * more useful truth while a draft is mid-promotion. `action:'start'` is the only state where the
@@ -221,22 +247,40 @@
    */
   function searchState(s) {
     const job = s.latestJobStatus;
+    const stage = s.latestJobStage || null;
     const found = Number(s.leadsFound || 0);
     const cadence = cadenceLine(s);
     const total = found
       ? `${found} compan${found === 1 ? 'y' : 'ies'} found so far.`
       : 'No companies found yet.';
 
-    if (job === 'processing') {
+    // 'queued' is where a RUNNING search rests, not only where a new one waits. The worker takes
+    // one search query per slice (~10s), writes the row back to 'queued' and returns, so a live run
+    // reads 'queued' for almost its whole life — through searching, promoting and enriching alike.
+    // Labelling that "Queued" told a user whose search had already filed fifteen leads that nothing
+    // had started. `stage` is the discriminator: it is NULL until the first slice claims the job.
+    const started = job === 'processing' || (job === 'queued' && !!stage);
+    if (started) {
+      // …but a run only rests between slices while something is driving it. The on-demand drain
+      // gives up after twelve minutes and hands back to the ten-minute cron, so a row that has not
+      // moved in a quarter of an hour must not keep animating "Searching now" — that would trade
+      // the old lie for a more convincing one. It is still genuinely queued work, not a failure,
+      // and it needs no click, so this states the fact and offers no alarm.
+      const moved = Date.parse(s.latestJobUpdatedAt || '');
+      if (moved && Date.now() - moved > STALL_MS) {
+        return { chip: 'bg-amber-50 text-amber-800 border-amber-200', label: 'Paused between steps', running: true,
+          line: `Part-way through and waiting on the next pass of the worker, which picks it up on its own. ${total}` };
+      }
       return { chip: 'bg-blue-50 text-blue-800 border-blue-200', label: 'Searching now', running: true,
-        line: 'Searching the web and scoring what it finds. Anything it finds appears below for your approval.' };
+        line: runningLine(s, stage, total) };
     }
     if (job === 'queued') {
-      // "starts within a few minutes" was wrong in both environments before the on-demand poke:
-      // the worker ran on a ten-minute cron, and branch deploys never fire native crons at all, so
-      // a staging search sat here indefinitely. Starting a search now pokes the queue directly
-      // (discovery-campaigns.ts run_now → run-discovery-jobs-background), so it really does begin
-      // straight away — but the poke is best-effort by design, so this promises no clock time.
+      // Nothing has claimed a slice yet. "starts within a few minutes" was wrong in both
+      // environments before the on-demand poke: the worker ran on a ten-minute cron, and branch
+      // deploys never fire native crons at all, so a staging search sat here indefinitely. Starting
+      // a search now pokes the queue directly (discovery-campaigns.ts run_now →
+      // run-discovery-jobs-background), so it really does begin straight away — but the poke is
+      // best-effort by design, so this promises no clock time.
       return { chip: 'bg-amber-50 text-amber-800 border-amber-200', label: 'Queued', running: true,
         line: 'Starting now — companies appear below as they are found and scored.' };
     }

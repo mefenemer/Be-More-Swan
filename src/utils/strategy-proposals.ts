@@ -243,6 +243,11 @@ async function recompileFor(assistantId: number, userId: number | null): Promise
  *
  * Best-effort — the field change is already committed, and losing this bookkeeping is a duplicate
  * suggestion later, not a wrong strategy now.
+ *
+ * ⚠️ Called UNCONDITIONALLY for every source, and it must stay that way. Each half no-ops when its
+ * key is absent, so this function — not the call site — is where "which rows does this proposal
+ * spend" is decided. Gating the call on a source is how the rejectionIds half shipped unreachable
+ * from the day lead_rejection was added; see the note in applyStrategyChange().
  */
 async function bankEvidence(db: Db, evidence: unknown): Promise<void> {
     const blob = (evidence && typeof evidence === 'object' ? evidence as Record<string, unknown> : {});
@@ -501,8 +506,17 @@ export async function applyStrategyChange(
     await audit(db, 'STRATEGY_PROPOSAL_APPLIED', p.id, opts.userId ?? null,
         { [p.targetField]: before }, { [p.targetField]: p.proposedValue });
 
-    // Spend the evidence, so the same five edits cannot fund this suggestion again next week.
-    if (p.source === 'edit_pattern') await bankEvidence(db, p.evidence);
+    // Spend the evidence, so the same rows cannot fund this suggestion again next week.
+    //
+    // ⚠️ NEVER gate this on `p.source`. It used to read `if (p.source === 'edit_pattern')`, which
+    // made the `rejectionIds` half of bankEvidence() unreachable: only `lead_rejection` proposals
+    // carry that key, and they were the one source the guard excluded. Measured on staging
+    // 2026-08-07 — proposal #6 applied cleanly and left all 8 lead_reject_feedback rows
+    // `applied_to_target = false`, so the same rejections would have re-proposed a retarget of the
+    // persona that had just been applied. bankEvidence is already keyed by what the blob CONTAINS
+    // and `intsOf` returns [] for a missing key, so the unconditional call is correct for every
+    // source and stays correct for the next one added.
+    await bankEvidence(db, p.evidence);
 
     const recompiled = field.store === 'onboarding'
         ? await recompileFor(assistantId, opts.userId ?? null)
@@ -517,8 +531,11 @@ export async function applyStrategyChange(
  * Decline a proposal with a reason from the closed vocabulary.
  *
  * The reason is required because it is an INPUT: the next run's prompt receives prior rejections,
- * so declining teaches the loop rather than being a dead end. The free-text note is stored and
- * shown to humans but never reaches the model.
+ * so declining teaches the loop rather than being a dead end. Since 2026-08-07 the free-text NOTE
+ * travels with it for every structured reason — the label says a change was wrong, only the note
+ * says how. `other` is the exception: its note is stored and shown to humans but withheld from the
+ * model, which is what its UI copy promises. Changing that means changing the reject form's
+ * placeholder in the same commit.
  */
 export async function rejectProposal(
     db: Db,

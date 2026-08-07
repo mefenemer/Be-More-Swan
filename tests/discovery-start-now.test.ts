@@ -160,4 +160,89 @@ check('the Queued chip no longer promises a time it cannot keep', () => {
         + 'falls back to the cron, so this copy must not name a clock time.');
 });
 
+console.log('\n──── "Queued" means not started, never mid-run ────');
+
+// The second bug on this chip, reported from production: a search that had already filed fifteen
+// leads into the Leads tab still showed "Queued". Nothing was broken in the worker — the run was
+// progressing. `status` is simply not the state of a run: processJob does ONE search query per
+// slice and writes the row back to 'queued' before returning, so a live run reads 'queued' for
+// almost its entire life, through searching, promoting and enriching alike. Only `stage`
+// distinguishes "no slice has ever claimed this" (NULL) from "under way".
+
+check('the worker really does rest a running job at queued', () => {
+    // If this ever stops being true, the stage-based UI below becomes unnecessary rather than
+    // wrong — but the two must be reasoned about together, so pin the premise.
+    const s = read('netlify/functions/process-discovery-jobs.ts');
+    assert.match(s, /status: 'queued', stage: 'searching'/,
+        'a partly-searched run must be re-queued for the next slice.');
+    assert.match(s, /status: 'queued', stage: 'promoting'/,
+        'enterPromoting must re-queue: promotion is itself batched across ticks.');
+    assert.ok(/stage: remaining > 0 \? 'promoting' : 'enriching'/.test(s),
+        'promoteBatch must re-queue until nothing is left to promote.');
+});
+
+check('both list endpoints return the latest job STAGE, not just its status', () => {
+    for (const f of ['netlify/functions/signal-inbox.ts', 'netlify/functions/discovery-campaigns.ts']) {
+        const s = read(f);
+        assert.match(s, /latestJobStage: sql<string \| null>`\(\s*SELECT j\.stage/,
+            `${f} must return the latest job's stage. Without it the client sees only 'queued' and `
+            + 'cannot tell a search nothing has looked at from one that is part-way through a run.');
+    }
+});
+
+check('every "latest job" subquery picks the SAME job', () => {
+    // Four independent correlated subqueries each take "the newest job". created_at alone can tie
+    // — two rows in the same millisecond — and a tie broken differently per column would describe
+    // one job's status beside another job's stage.
+    for (const f of ['netlify/functions/signal-inbox.ts', 'netlify/functions/discovery-campaigns.ts']) {
+        const s = read(f);
+        for (const m of s.matchAll(/FROM discovery_jobs j[\s\S]{0,200}?ORDER BY ([^\n]+)/g)) {
+            assert.match(m[1], /j\.created_at DESC, j\.id DESC/,
+                `${f} orders a latest-job subquery by "${m[1].trim()}" — every one of them needs the `
+                + 'same deterministic tiebreaker or they can disagree about which run they describe.');
+        }
+    }
+});
+
+check('the Searches chip treats a staged queued job as running', () => {
+    const s = read('src/components/assistant-signal-inbox.js');
+    const fn = s.slice(s.indexOf('function searchState('));
+    const body = fn.slice(0, fn.indexOf('\n  }'));
+
+    assert.match(body, /job === 'processing' \|\| \(job === 'queued' && !!stage\)/,
+        'searchState must read stage alongside status. Reading status alone is the bug: it labels a '
+        + 'run that has already filed leads as "Queued".');
+
+    // Ordering: the running branch has to be reached BEFORE the bare `job === 'queued'` branch,
+    // which is still correct for a job no slice has claimed.
+    assert.ok(body.indexOf('!!stage') < body.indexOf("if (job === 'queued')"),
+        'the started check must come first, or the queued branch swallows every in-flight run.');
+});
+
+check('a run that has stopped advancing does not keep claiming it is searching', () => {
+    // The fix must not swap one lie for another. The on-demand drain loops for twelve minutes and
+    // then hands back to the ten-minute cron, so a job can legitimately sit mid-run with nothing
+    // driving it. An animated "Searching now" on a row that has not moved for an hour is worse
+    // than the "Queued" it replaced, because it is more convincing.
+    const s = read('src/components/assistant-signal-inbox.js');
+    assert.match(s, /latestJobUpdatedAt/,
+        'the chip needs the latest job\'s updated_at to tell "resting between slices" from "not '
+        + 'being driven at all".');
+    assert.match(read('netlify/functions/signal-inbox.ts'), /latestJobUpdatedAt: sql<string \| null>`\(\s*SELECT j\.updated_at/,
+        'signal-inbox must return it — lastFinishedAt is deliberately a different row (completed or '
+        + 'failed only) and is null for the whole of a run in progress.');
+});
+
+check('the Find New Leads card agrees with the Searches tab', () => {
+    // These two render the same campaign from two endpoints and must not disagree about whether it
+    // is running — the card printed the raw status string, so it said "queued" in the same breath
+    // the Searches tab said "Searching now".
+    const s = read('src/components/assistant-discovery-campaigns.js');
+    assert.match(s, /c\.latestJobStatus === 'processing' \|\| \(c\.latestJobStatus === 'queued' && !!c\.latestJobStage\)/,
+        'campaignCard must apply the same stage-aware test as searchState.');
+    assert.ok(!/statusLabel = draft \? 'draft — not started' : c\.latestJobStatus \? esc\(c\.latestJobStatus\)/.test(s),
+        'the card must not print the raw job status: "queued" is an internal queue state, and it is '
+        + 'the resting state of a run that is actively working.');
+});
+
 console.log(`\n${passed} checks passed.`);

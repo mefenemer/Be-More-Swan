@@ -136,15 +136,23 @@
   }
 
   function campaignCard(c) {
-    const chip = STATUS_CHIP[c.latestJobStatus] || 'bg-gray-50 text-gray-500 border-gray-200';
     const running = c.latestJobStatus === 'queued' || c.latestJobStatus === 'processing';
+    // A sliced run rests at status='queued' between slices — one search query per slice, then the
+    // row goes back to 'queued' and waits for the next pass — so printing the raw status labelled a
+    // campaign that was mid-run and already filing leads as "queued". `stage` is NULL only until the
+    // first slice claims the job, which makes it the honest "has this started" test. Kept in step
+    // with searchState() in assistant-signal-inbox.js: the two surfaces show the same search.
+    const inFlight = c.latestJobStatus === 'processing' || (c.latestJobStatus === 'queued' && !!c.latestJobStage);
+    const chip = (inFlight ? STATUS_CHIP.processing : STATUS_CHIP[c.latestJobStatus]) || 'bg-gray-50 text-gray-500 border-gray-200';
     const paused = c.status === 'paused';
     // A draft is a search the assistant proposed in chat and the user approved, which has never
     // run and is spending nothing. It reads as "no runs yet" otherwise — indistinguishable from a
     // live campaign that simply hasn't fired, which is the difference the user needs to see.
     // Reuses the amber chip classes already compiled into style.css (no Tailwind rebuild).
     const draft = c.status === 'draft' && !c.latestJobStatus;
-    const statusLabel = draft ? 'draft — not started' : c.latestJobStatus ? esc(c.latestJobStatus) : 'no runs yet';
+    const statusLabel = draft ? 'draft — not started'
+      : inFlight ? 'searching'
+        : c.latestJobStatus ? esc(c.latestJobStatus) : 'no runs yet';
     const ghost = 'px-2.5 py-1 bg-white border border-gray-200 text-gray-600 hover:border-gray-300 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed';
     // Primary action: Cancel while a run is in flight, else Run now (blocked while paused).
     // A draft says "Start search" and is emphasised, because it is the ONLY thing standing between

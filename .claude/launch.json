@@ -2,15 +2,6 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "component-harness-rules-scope",
-      "runtimeExecutable": "node",
-      "runtimeArgs": [
-        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/62d90a01-37bb-4fdb-8d8b-a219e622c284/scratchpad/rulesharness/server.mjs"
-      ],
-      "port": 4290,
-      "autoPort": false
-    },
-    {
       "name": "component-harness-lead-profile",
       "runtimeExecutable": "node",
       "runtimeArgs": [

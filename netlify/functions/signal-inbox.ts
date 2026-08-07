@@ -254,10 +254,52 @@ export default withLambda(async (event) => {
                     scheduleEnabled: discoverySchedules.isEnabled,
                     // Latest run first, matching the campaign list's subquery exactly — the two
                     // surfaces show the same search and must not disagree about its state.
+                    //
+                    // `status` on its own is NOT the state of a run, and reading it as if it were
+                    // is what put a "Queued" chip on a search that had already filed fifteen leads.
+                    // A run is sliced: the worker does ONE search query (~10s), writes the row back
+                    // to 'queued' and returns, so all the way through searching → promoting →
+                    // enriching the row reads 'queued' except for the few seconds a slice is
+                    // actually executing. Hence the three companions below, and the `, j.id DESC`
+                    // tiebreaker on every one of them — four subqueries that each pick "the latest
+                    // job" must pick the SAME job, and created_at alone can tie.
                     latestJobStatus: sql<string | null>`(
                         SELECT j.status FROM discovery_jobs j
                         WHERE j.campaign_id = ${discoveryCampaigns.id}
-                        ORDER BY j.created_at DESC LIMIT 1
+                        ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+                    )`,
+                    // The discriminator. NULL means no slice has ever claimed this job — the only
+                    // state that is honestly "Queued". Anything else (searching | promoting |
+                    // enriching) means the run is under way and 'queued' is merely where it rests
+                    // between slices.
+                    latestJobStage: sql<string | null>`(
+                        SELECT j.stage FROM discovery_jobs j
+                        WHERE j.campaign_id = ${discoveryCampaigns.id}
+                        ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+                    )`,
+                    // When the run last MOVED. A between-slices 'queued' is normal for seconds and
+                    // suspicious after ten minutes: the on-demand drain loops for at most twelve,
+                    // after which the run falls back to the ten-minute cron. Without this the UI
+                    // would trade one lie ("Queued" while working) for another ("Searching now"
+                    // forever on a run nothing is currently driving).
+                    latestJobUpdatedAt: sql<string | null>`(
+                        SELECT j.updated_at FROM discovery_jobs j
+                        WHERE j.campaign_id = ${discoveryCampaigns.id}
+                        ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+                    )`,
+                    // Position in the query plan, so a working run can prove it is advancing.
+                    // `cursor.flat` is the generated query list and `queryIndex` the resume point;
+                    // both are absent until the query_gen stage has run, hence the COALESCEs.
+                    // jsonb_array_length is strict, so a missing `flat` yields NULL, not an error.
+                    latestJobQueryIndex: sql<number>`(
+                        SELECT COALESCE((j.cursor ->> 'queryIndex')::int, 0) FROM discovery_jobs j
+                        WHERE j.campaign_id = ${discoveryCampaigns.id}
+                        ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+                    )`,
+                    latestJobQueryTotal: sql<number>`(
+                        SELECT COALESCE(jsonb_array_length(j.cursor -> 'flat'), 0) FROM discovery_jobs j
+                        WHERE j.campaign_id = ${discoveryCampaigns.id}
+                        ORDER BY j.created_at DESC, j.id DESC LIMIT 1
                     )`,
                     // When the last run REACHED A CONCLUSION, not when the newest job was created:
                     // "last run 3 minutes ago" next to a queued job that hasn't started yet is a lie.
@@ -265,7 +307,7 @@ export default withLambda(async (event) => {
                         SELECT j.updated_at FROM discovery_jobs j
                         WHERE j.campaign_id = ${discoveryCampaigns.id}
                           AND j.status IN ('completed','failed')
-                        ORDER BY j.created_at DESC LIMIT 1
+                        ORDER BY j.created_at DESC, j.id DESC LIMIT 1
                     )`,
                     leadsFound: sql<number>`(
                         SELECT COALESCE(SUM(j.leads_found), 0)::int FROM discovery_jobs j
@@ -308,6 +350,10 @@ export default withLambda(async (event) => {
                     nextRunAt: s.nextRunAt ? new Date(s.nextRunAt).toISOString() : null,
                     scheduleEnabled: s.scheduleEnabled === true,
                     latestJobStatus: s.latestJobStatus ?? null,
+                    latestJobStage: s.latestJobStage ?? null,
+                    latestJobUpdatedAt: s.latestJobUpdatedAt ? new Date(s.latestJobUpdatedAt).toISOString() : null,
+                    queryIndex: Number(s.latestJobQueryIndex ?? 0),
+                    queryTotal: Number(s.latestJobQueryTotal ?? 0),
                     lastFinishedAt: s.lastFinishedAt ? new Date(s.lastFinishedAt).toISOString() : null,
                     leadsFound: Number(s.leadsFound ?? 0),
                 })),

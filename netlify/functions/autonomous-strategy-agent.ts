@@ -288,20 +288,42 @@ function modalPerAssistant(clusters: Cluster[]): Cluster[] {
     return out;
 }
 
-/** Prior rejections for this field, so declining teaches the loop rather than being a dead end. */
+/**
+ * Prior rejections for this field, so declining teaches the loop rather than being a dead end.
+ *
+ * ⚠️ THE NOTE IS THE STEERING SIGNAL, and it used not to be selected at all. The reason label alone
+ * ("too_narrow") says a change was wrong but nothing about HOW — measured on staging 2026-08-07, a
+ * proposal declined `too_narrow` with a note naming two specific over-constraints was replaced by
+ * one that kept both verbatim and merely reworded itself. The reviewer's reasoning was written,
+ * stored, shown to humans, and then thrown away at exactly the point it was meant to be used.
+ *
+ * The note is FIRST-PARTY text — an authenticated member of this org typing about their own
+ * targeting — unlike the prospect-influenced prose §5.2 keeps out of these prompts. It is still
+ * bounded rather than trusted: capped at 2000 on write, sliced again here, labelled as reviewer
+ * commentary so it reads as data, and placed before the response contract. Nothing it can say
+ * widens what the run may do — `targetField` is a key lookup against a frozen map, the value shape
+ * is validated, and a human still approves every proposal.
+ */
 async function priorRejections(
     db: ReturnType<typeof getDb>, organisationId: number, targetField: string,
 ): Promise<string[]> {
     const rows = await db
-        .select({ reason: strategyProposals.rejectReason, value: strategyProposals.proposedValue })
+        .select({
+            reason: strategyProposals.rejectReason,
+            value: strategyProposals.proposedValue,
+            note: strategyProposals.rejectNote,
+        })
         .from(strategyProposals)
         .where(and(
             eq(strategyProposals.organisationId, organisationId),
             eq(strategyProposals.targetField, targetField),
             eq(strategyProposals.status, 'rejected'),
             isNotNull(strategyProposals.rejectReason),
-            // `other` carries only a free-text note, and one org's idiosyncratic phrasing in a
-            // prompt is poison rather than signal (§7.1). The note stays visible to humans.
+            // `other` stays out. Its effect string promises the user "your note is kept for you — it
+            // is not fed to the model", and that promise is the reason the option exists: somewhere
+            // to record a decision without steering the agent. Feeding notes from the STRUCTURED
+            // reasons does not break it. Reversing it is a one-line change here, but it would make
+            // that copy a lie, so it needs its own decision.
             inArray(strategyProposals.rejectReason, [...REJECT_REASONS_FED_TO_MODEL]),
         ))
         .orderBy(desc(strategyProposals.decidedAt))
@@ -309,7 +331,11 @@ async function priorRejections(
 
     return rows.map((r) => {
         const text = typeof r.value === 'string' ? r.value : JSON.stringify(r.value);
-        return `- Rejected as "${r.reason}": ${String(text).slice(0, 400)}`;
+        const line = `- Rejected as "${r.reason}": ${String(text).slice(0, 400)}`;
+        // Collapsed to one line: a note with its own newlines would otherwise look like new list
+        // items, and the model would read one reviewer's comment as several rejections.
+        const note = String(r.note ?? '').replace(/\s+/g, ' ').trim();
+        return note ? `${line}\n  The reviewer explained why: ${note.slice(0, 400)}` : line;
     });
 }
 
@@ -496,7 +522,10 @@ async function executeRun(result: StrategyAgentResult, startedAt: number): Promi
                     + `- Write instructions for how to WRITE the email, not an email.\n`
                     + `- Be concrete enough that two different drafts written from it would both avoid the fault.\n`
                     + (rejections.length
-                        ? `- These earlier suggestions for this same field were DECLINED. Do not repeat them:\n${rejections.join('\n')}\n`
+                        ? `- These earlier suggestions for this same field were DECLINED by a human reviewer. `
+                            + `Do not repeat them. Where a reviewer explained why, that explanation is the most `
+                            + `specific guidance you have — treat it as an instruction and correct for it, rather `
+                            + `than only avoiding the exact wording that was declined:\n${rejections.join('\n')}\n`
                         : '')
                     + `\nRespond ONLY with JSON: {"targetField":"${targetField}","proposedValue":"<the rewritten playbook>"}`,
                 messages: [{
@@ -696,7 +725,10 @@ async function executeRun(result: StrategyAgentResult, startedAt: number): Promi
                     + `- Be concrete enough that a query writer reading it would exclude the rejected kind.\n`
                     + `- The value must be a JSON OBJECT, not a string and not an array.\n`
                     + (rejections.length
-                        ? `- These earlier suggestions for this same field were DECLINED. Do not repeat them:\n${rejections.join('\n')}\n`
+                        ? `- These earlier suggestions for this same field were DECLINED by a human reviewer. `
+                            + `Do not repeat them. Where a reviewer explained why, that explanation is the most `
+                            + `specific guidance you have — treat it as an instruction and correct for it, rather `
+                            + `than only avoiding the exact wording that was declined:\n${rejections.join('\n')}\n`
                         : '')
                     + `\nRespond ONLY with JSON: {"targetField":"${targetField}","proposedValue":{ ...the rewritten persona... }}`,
                 messages: [{

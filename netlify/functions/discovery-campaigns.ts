@@ -138,7 +138,16 @@ export default withLambda(async (event) => {
                 latestJobStatus: sql<string | null>`(
                     SELECT j.status FROM discovery_jobs j
                     WHERE j.campaign_id = ${discoveryCampaigns.id}
-                    ORDER BY j.created_at DESC LIMIT 1
+                    ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+                )`,
+                // Mirrors signal-inbox.ts, and for the same reason: a sliced run rests at
+                // status='queued' between slices, so status alone cannot tell a search that has
+                // never been looked at from one that is part-way through and already producing
+                // leads. `stage` is NULL only until the first slice claims the job.
+                latestJobStage: sql<string | null>`(
+                    SELECT j.stage FROM discovery_jobs j
+                    WHERE j.campaign_id = ${discoveryCampaigns.id}
+                    ORDER BY j.created_at DESC, j.id DESC LIMIT 1
                 )`,
                 leadsFound: sql<number>`(
                     SELECT COALESCE(SUM(j.leads_found), 0)::int FROM discovery_jobs j

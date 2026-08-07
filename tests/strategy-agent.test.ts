@@ -213,6 +213,49 @@ check('prior rejections are fed back, minus the free-text bucket', () => {
         '`other` carries only a free-text note and must not reach the prompt');
 });
 
+check("the reviewer's note reaches the model, not just the reason label", () => {
+    // ⚠️ The regression this exists for: rejectNote was written, stored, shown to humans, and never
+    // SELECTED. Measured on staging 2026-08-07 — a proposal declined `too_narrow` with a note naming
+    // two specific over-constraints was replaced by one that kept both verbatim. A reason label says
+    // a change was wrong; only the note says how.
+    const fn = agentSrc.slice(agentSrc.indexOf('async function priorRejections'));
+    const body = fn.slice(0, fn.indexOf('\n}'));
+    assert.ok(/note:\s*strategyProposals\.rejectNote/.test(body),
+        'priorRejections does not select rejectNote — the note cannot steer what it never reads');
+    assert.ok(/r\.note/.test(body), 'the note is selected but never used in the formatted entry');
+    // Bounded, not trusted: it is first-party text but it still goes in a prompt.
+    assert.ok(/\.slice\(0,\s*\d+\)/.test(body.slice(body.indexOf('r.note'))),
+        'the note is fed unbounded — rejectNote allows 2000 chars, five of them is a prompt of its own');
+    // A multi-line note must not read as several separate rejections.
+    assert.ok(/replace\(\/\\s\+\/g, ' '\)/.test(body),
+        'newlines in a note are not collapsed — one comment would look like several list items');
+});
+
+check('the reject form does not promise privacy it no longer provides', () => {
+    // ⚠️ The note field used to read "kept for you, never sent to the model". Feeding rejectNote to
+    // the prompt made that a lie, and a lie of the worst shape: someone writes something believing
+    // it stays between them and their team, and it lands in a model prompt. Copy and behaviour have
+    // to move together here.
+    const ui = raw('src/components/assistant-strategy.js');
+    const form = ui.slice(ui.indexOf('function rejectForm'), ui.indexOf('function conflictBlock'));
+    const markup = form.replace(/<!--[\s\S]*?-->/g, ' ');
+    assert.ok(/data-sa-note/.test(markup), 'the note field is gone — this check tests nothing');
+    assert.ok(!/never sent to the model/i.test(markup),
+        'the note field still claims it is never sent, but priorRejections now feeds it');
+    assert.ok(!/kept for you/i.test(markup), 'the note field still implies the note stays private');
+});
+
+check('both prompts tell the model to ACT on the explanation, not just avoid the wording', () => {
+    // Feeding the note is half the fix. "Do not repeat them" alone invites a reworded duplicate,
+    // which is exactly what staging produced: same geography, same business model, new adjectives.
+    const sites = [...agentSrc.matchAll(/These earlier suggestions for this same field were DECLINED[\s\S]{0,400}?rejections\.join/g)];
+    assert.equal(sites.length, 2, `the rejection feedback block should appear in both passes, found ${sites.length}`);
+    for (const [block] of sites) {
+        assert.ok(/instruction/i.test(block), 'the prompt does not frame the explanation as an instruction');
+        assert.ok(/correct for it/i.test(block), 'the prompt never asks the model to correct for the stated reason');
+    }
+});
+
 // ── 3. The run is wired on both environments ─────────────────────────────────
 
 check('the production cron is registered and weekly', () => {
@@ -497,6 +540,64 @@ check('rejection evidence banks under its own key, never feedbackIds', () => {
 
     const writer = sourceOf('src/utils/strategy-proposals.ts');
     assert.ok(/leadRejectFeedback[\s\S]*appliedToTarget/.test(writer), 'rejections are never banked on apply');
+});
+
+check('the banking call is REACHABLE for every source, not just edit_pattern', () => {
+    // ⚠️ This is the check the one above could not make, and the gap was real: the assertion that
+    // `leadRejectFeedback … appliedToTarget` EXISTS passed happily while the call site read
+    // `if (p.source === 'edit_pattern') await bankEvidence(...)`. Only lead_rejection proposals
+    // carry rejectionIds, so that guard excluded the single source the branch was written for, and
+    // the whole half was dead. Measured on staging 2026-08-07: proposal #6 applied cleanly and left
+    // all 8 lead_reject_feedback rows applied_to_target = false, which would have re-proposed a
+    // retarget of the persona just applied, every week, forever.
+    //
+    // A source scan cannot see a guard UPSTREAM of a call, so assert on the call site itself.
+    const writer = sourceOf('src/utils/strategy-proposals.ts');
+    const apply = writer.slice(writer.indexOf('export async function applyStrategyChange'));
+    const body = apply.slice(0, apply.indexOf('\n}'));
+
+    const callLine = body.split('\n').find((l) => l.includes('bankEvidence('));
+    assert.ok(callLine, 'applyStrategyChange no longer banks its evidence at all');
+    assert.equal(callLine.trim(), 'await bankEvidence(db, p.evidence);',
+        `the banking call is not a bare statement — "${callLine.trim()}" can hide a source guard`);
+    assert.ok(!/p\.source/.test(body),
+        'applyStrategyChange branches on p.source; banking must stay source-agnostic');
+
+    // The guard belongs INSIDE bankEvidence, keyed by what the blob contains — that is what makes
+    // an unconditional call safe for both sources and for the next one added.
+    const bank = writer.slice(writer.indexOf('async function bankEvidence'));
+    const bankBody = bank.slice(0, bank.indexOf('\n}\n'));
+    assert.ok(/if \(feedbackIds\.length\)/.test(bankBody), 'bankEvidence must no-op on a missing feedbackIds');
+    assert.ok(/if \(rejectionIds\.length\)/.test(bankBody), 'bankEvidence must no-op on a missing rejectionIds');
+});
+
+check('every proposal source can spend its evidence', () => {
+    // Whole point of the fix: a source whose ids nothing banks proposes from the same rows forever.
+    // PROPOSAL_SOURCES is the closed list, so a new source added without a banking key fails here
+    // rather than silently looping in production.
+    const KEY_FOR_SOURCE: Record<string, string> = {
+        edit_pattern: 'feedbackIds',
+        lead_rejection: 'rejectionIds',
+        human: '',     // hand-made, funded by no evidence rows — nothing to spend.
+        win_loss: '',  // declared in the vocabulary but NOT produced by anything yet, so nothing to
+                       // bank. The assertion below is what stops that staying true silently.
+    };
+    const bank = sourceOf('src/utils/strategy-proposals.ts');
+    for (const source of PROPOSAL_SOURCES) {
+        const key = KEY_FOR_SOURCE[source];
+        assert.notEqual(key, undefined,
+            `PROPOSAL_SOURCES gained "${source}" — say which evidence key banks it, or "" if none`);
+        if (key) {
+            assert.ok(bank.includes(`blob.${key}`),
+                `"${source}" evidence is keyed by ${key}, which bankEvidence never reads`);
+        }
+    }
+
+    // If a proposer starts writing win_loss, its evidence needs a banking key decided WITH it —
+    // otherwise it inherits exactly the bug this block exists for.
+    const written = [...agentSrc.matchAll(/source: '([a-z_]+)'/g)].map((m) => m[1]);
+    assert.deepEqual([...new Set(written)].sort(), ['edit_pattern', 'lead_rejection'],
+        'a new proposal source is being written — give it an evidence key in KEY_FOR_SOURCE first');
 });
 
 check('the rejection pass enforces the same envelope as the edit pass', () => {

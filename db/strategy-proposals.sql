@@ -81,7 +81,10 @@ CREATE TABLE IF NOT EXISTS strategy_proposals (
   -- A CLOSED vocabulary, because a reject reason is an INPUT, not a record: the next run's prompt
   -- receives prior rejections, so declining teaches the loop rather than being a dead end.
   reject_reason     text,
-  reject_note       text,                       -- free text, for humans; never fed to the model
+  -- Free text. Fed into the next run's prompt alongside the reason for every STRUCTURED reason --
+  -- the label says a change was wrong, only the note says how. `other` is the exception: its note
+  -- is stored and shown to humans but withheld from the model, which is what its UI copy promises.
+  reject_note       text,
   decided_by        integer REFERENCES users(id) ON DELETE SET NULL,
   decided_at        timestamp,
 

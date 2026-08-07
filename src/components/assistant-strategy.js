@@ -202,7 +202,12 @@
           ${reasons.map((r) => `<option value="${esc(r.key)}">${esc(r.label)}</option>`).join('')}
         </select>
         <p data-sa-effect="${p.id}" class="text-[11px] text-gray-500 mt-1"></p>
-        <textarea data-sa-note="${p.id}" rows="2" placeholder="Anything to add? (optional — kept for you, never sent to the model)"
+        <!-- ⚠️ This used to promise "kept for you, never sent to the model", and that was true until
+             priorRejections() began selecting rejectNote (2026-08-07). The note now steers the next
+             suggestion for every structured reason. Only "Something else" (other) still withholds
+             it — REJECT_REASONS_FED_TO_MODEL excludes that bucket, and its effect line says so.
+             If the note ever stops being fed, change this back; never let it over-promise privacy. -->
+        <textarea data-sa-note="${p.id}" rows="2" placeholder="Anything to add? (optional — this steers the next suggestion, unless your reason is Something else)"
           class="mt-2 w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5"></textarea>
         <div class="flex gap-2 mt-2">
           <button type="button" data-sa-reject-confirm="${p.id}"
