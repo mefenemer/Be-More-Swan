@@ -5,7 +5,7 @@
 // branch/preview deploys. Staging (a branch deploy) therefore never fires `poll-goal-telemetry`,
 // so goal status never advances past 'pending' and the Assistants card always shows
 // "0 On Track / 0 Off Track" even when there has been activity. This endpoint lets an external
-// scheduler (see .github/workflows/staging-goal-telemetry-cron.yml) poke the SAME poll logic
+// scheduler (see .github/workflows/staging-crons.yml) poke the SAME poll logic
 // over HTTP so staging behaves like production — same pattern as run-content-jobs.ts.
 //
 // AUTH: guarded by a shared secret. If CRON_TRIGGER_SECRET is not configured the endpoint refuses

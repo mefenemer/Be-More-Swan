@@ -130,7 +130,7 @@ export async function runCampaignProposer(): Promise<CampaignAgentResult> {
 }
 
 // Netlify fires scheduled functions ONLY on the production deploy, so this never runs on staging —
-// .github/workflows/staging-campaign-cron.yml pokes run-campaign-agent instead, which calls the
+// .github/workflows/staging-crons.yml pokes run-campaign-agent instead, which calls the
 // same function. The two must stay in step.
 export default withLambda(async () => {
     try {

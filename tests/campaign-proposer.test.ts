@@ -280,7 +280,9 @@ check('the scheduled function has a staging poke, and it is secret-guarded', () 
     assert.match(wrapper, /runCampaignProposer/,
         'The wrapper must call the SAME run logic the schedule does, or staging and production drift.');
 
-    const workflow = read('.github/workflows/staging-campaign-cron.yml');
+    // Every staging cron lives in ONE workflow (issue #258) — ten separate schedules were being
+    // throttled to ~4% delivery by GitHub, and produced ten failure emails per upstream outage.
+    const workflow = read('.github/workflows/staging-crons.yml');
     assert.match(workflow, /run-campaign-agent/,
         'Netlify fires scheduled functions only on the production deploy — staging needs the poke.');
 });

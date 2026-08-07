@@ -723,7 +723,7 @@ node_bundler = "esbuild"
 # returns 202. Do not "simplify" this back into one function.
 #
 # ⚠️ Netlify fires scheduled functions ONLY on the production deploy. Staging is a branch deploy, so
-# this never runs there — .github/workflows/staging-strategy-cron.yml pokes run-strategy-agent
+# this never runs there — .github/workflows/staging-crons.yml pokes run-strategy-agent
 # instead, which dispatches the same worker. The two must stay in step.
 [functions.autonomous-strategy-agent]
   schedule = "0 5 * * 1"
@@ -741,7 +741,7 @@ node_bundler = "esbuild"
 # strategy run and the 06:00 content crons.
 #
 # ⚠️ Netlify fires scheduled functions ONLY on the production deploy. Staging is a branch deploy, so
-# this never runs there — .github/workflows/staging-campaign-cron.yml pokes run-campaign-agent
+# this never runs there — .github/workflows/staging-crons.yml pokes run-campaign-agent
 # instead, which calls the same function. The two must stay in step.
 [functions.autonomous-campaign-agent]
   schedule = "0 4 * * *"

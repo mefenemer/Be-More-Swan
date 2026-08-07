@@ -225,7 +225,8 @@ check('the production cron is registered and weekly', () => {
 });
 
 check('staging has its own workflow, because Netlify crons never fire on a branch deploy', () => {
-    const wf = raw('.github/workflows/staging-strategy-cron.yml');
+    // One consolidated workflow drives every staging cron (issue #258).
+    const wf = raw('.github/workflows/staging-crons.yml');
     assert.ok(wf.includes('run-strategy-agent'), 'the workflow does not poke the wrapper endpoint');
     assert.ok(wf.includes('CRON_TRIGGER_SECRET'), 'the workflow does not send the shared secret');
     assert.ok(wf.includes('staging--bemoreswan.netlify.app'), 'the workflow must target staging, never production');

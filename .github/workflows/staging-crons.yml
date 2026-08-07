@@ -1,0 +1,174 @@
+# Drives EVERY staging background job from a single scheduled workflow.
+#
+# ── Why staging needs this at all ───────────────────────────────────────────────────────────────
+# Netlify runs scheduled functions ONLY on the production deploy — never on branch/preview deploys.
+# Staging (https://staging--bemoreswan.netlify.app) is a branch deploy of the `staging` branch, so
+# none of its native crons fire there. HTTP functions still ENQUEUE work on staging, but nothing
+# drains it, so queues sit forever. This workflow pokes each staging worker over HTTP so staging
+# behaves like production. Production is unaffected — every URL here is the staging URL.
+#
+# ── Why ONE workflow instead of ten (issue #258) ────────────────────────────────────────────────
+# This replaces staging-{content,discovery,blog,sequence,account-memory,goal-telemetry,
+# follower-counts,insights,campaign,strategy}-cron.yml. Three reasons:
+#
+#  1. GitHub does not honour the declared cadence. Measured over 2026-08-05, a `*/5` workflow ran
+#     13 times (4.5% of 288 ticks) and an hourly one ran 10 times (42%) — an effective ceiling of
+#     roughly one run per workflow per ~2 hours, with gaps up to 3h17m. Ten workflows each competing
+#     for that shared scheduling pool is part of the problem; one workflow asks for one slot.
+#
+#  2. A single upstream GitHub outage used to produce ten separate failure emails. On 2026-08-06
+#     ("The job was not acquired by Runner of type hosted", 15:55Z→23:54Z) it produced eleven. Now
+#     it produces one, listing exactly which endpoints were affected.
+#
+#  3. It batches the Neon wake-ups. Neon compute is billed by active time and the quota is
+#     PROJECT-WIDE (see the staging outage 2026-07-11); netlify.toml deliberately aligns the prod
+#     drainers into one batch so the compute can autosuspend in the gaps. Ten workflows firing at
+#     ten unpredictable moments defeated that on staging. One burst restores it.
+#
+# ── Cadence is now elapsed-time, not wall-clock ─────────────────────────────────────────────────
+# Each endpoint declares a MINIMUM INTERVAL and is called only if that much time has passed since
+# it last SUCCEEDED. Last-success timestamps persist between runs in the Actions cache.
+#
+# This is strictly better than wall-clock cron for the rare jobs. `30 4 * * *` fires at one specific
+# minute per day; when GitHub drops that tick — which it demonstrably does — the job simply does not
+# run that day. Elapsed-time gating cannot be starved: the next delivered tick picks it up. The
+# trade is that the daily/weekly jobs drift rather than landing at a fixed hour, which is acceptable
+# on staging (their only reason for a fixed offset was to avoid colliding with the production run,
+# and prod is a different Netlify deploy against a different database).
+#
+# The schedule below is a REQUEST CEILING, not a promise. GitHub will deliver a fraction of these
+# ticks; asking for more costs nothing (dropped ticks are not billed and not run) and every endpoint
+# is gated by its own interval, so surplus ticks are free. Do not read `*/10` as "every 10 minutes"
+# — see issue #258 for what actually gets delivered.
+#
+# ── Required setup ──────────────────────────────────────────────────────────────────────────────
+# Repo secret CRON_TRIGGER_SECRET must match the Netlify env var of the same name, scoped to the
+# staging/branch-deploy context. Every wrapper endpoint FAILS CLOSED — it returns 503 until the
+# secret is set — so none of these can ever be an open, cost-incurring endpoint.
+#
+# NOTE: scheduled workflows only run from the DEFAULT branch (main). This file has no effect until
+# it is on main.
+
+name: Staging crons
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # request ceiling — see the note above, NOT the delivered cadence
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Ignore the interval gate and call every endpoint now"
+        type: boolean
+        default: false
+
+# Never let two bursts overlap — they would double-drain the same queues and race on the state cache.
+concurrency:
+  group: staging-crons
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restore last-success timestamps
+        uses: actions/cache@v4
+        with:
+          path: cron-state
+          # Unique key per run so the post-step always writes a fresh entry; the prefix restore-key
+          # picks up the most recent previous one. Accessed every run, so it never ages out.
+          key: staging-cron-state-${{ github.run_id }}
+          restore-keys: |
+            staging-cron-state-
+
+      - name: Poke staging workers
+        env:
+          BASE: "https://staging--bemoreswan.netlify.app/.netlify/functions"
+          CRON_SECRET: ${{ secrets.CRON_TRIGGER_SECRET }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::Repo secret CRON_TRIGGER_SECRET is not set — every endpoint would reject the call (401/503)."
+            exit 1
+          fi
+
+          mkdir -p cron-state
+          STATE="cron-state/last-success"
+          touch "$STATE"
+          NOW=$(date +%s)
+
+          # endpoint                min-interval(s)   curl-max-time(s)
+          # Ordered most time-sensitive first: if anything goes long, the queue drainers have
+          # already run. Intervals mirror the crons the ten previous workflows declared.
+          JOBS="
+          run-content-jobs          300     120
+          run-discovery-jobs        300     120
+          run-blog-jobs             1800    300
+          run-sequence-sends        3600    120
+          run-account-memory        3600    120
+          run-goal-telemetry        3600    120
+          run-follower-counts       14400   120
+          run-insights-ingest       21600   120
+          run-campaign-agent        86400   300
+          run-strategy-agent        604800  300
+          "
+
+          RAN=""; SKIPPED=""; FAILED=""
+
+          while read -r NAME INTERVAL MAXTIME; do
+            [ -z "${NAME:-}" ] && continue
+
+            LAST=$(grep -E "^${NAME} " "$STATE" 2>/dev/null | tail -1 | awk '{print $2}')
+            LAST=${LAST:-0}
+            AGE=$((NOW - LAST))
+
+            # On the very first run the state file is empty, so every endpoint is due and all ten
+            # fire once. That is one invocation each — the same thing each would have done at its
+            # next wall-clock boundary — not a loop.
+            if [ "$FORCE" != "true" ] && [ "$AGE" -lt "$INTERVAL" ]; then
+              SKIPPED="${SKIPPED} ${NAME}(${AGE}s/${INTERVAL}s)"
+              continue
+            fi
+
+            echo "::group::POST ${NAME} (due: ${AGE}s >= ${INTERVAL}s)"
+            HTTP_CODE=$(curl -sS -o /tmp/body.txt -w "%{http_code}" \
+              --max-time "$MAXTIME" --retry 2 --retry-delay 5 \
+              -X POST -H "Authorization: Bearer ${CRON_SECRET}" "${BASE}/${NAME}" || echo "000")
+            echo "HTTP ${HTTP_CODE}"
+            echo "----- response body -----"
+            cat /tmp/body.txt 2>/dev/null || true
+            echo
+            echo "-------------------------"
+            echo "::endgroup::"
+
+            case "$HTTP_CODE" in
+              2*)
+                # Stamp ONLY on success. A failed endpoint keeps its old timestamp, so it stays due
+                # and is retried on the very next tick instead of waiting out a full interval.
+                grep -vE "^${NAME} " "$STATE" > "${STATE}.tmp" 2>/dev/null || true
+                mv "${STATE}.tmp" "$STATE"
+                echo "${NAME} ${NOW}" >> "$STATE"
+                RAN="${RAN} ${NAME}"
+                ;;
+              *)
+                echo "::error::${NAME} returned HTTP ${HTTP_CODE}"
+                FAILED="${FAILED} ${NAME}(${HTTP_CODE})"
+                ;;
+            esac
+          done <<< "$JOBS"
+
+          echo "### Staging crons" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **ran:**${RAN:- none}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **skipped (not due):**${SKIPPED:- none}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **failed:**${FAILED:- none}" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "ran:    ${RAN:- none}"
+          echo "skipped:${SKIPPED:- none}"
+          echo "failed: ${FAILED:- none}"
+
+          # One non-zero exit carrying every failure, rather than ten separate red workflows.
+          if [ -n "$FAILED" ]; then
+            echo "::error::Endpoints failed:${FAILED}"
+            exit 1
+          fi

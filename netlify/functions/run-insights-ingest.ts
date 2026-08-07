@@ -7,7 +7,7 @@
 // `ingest-instagram-insights`, so post_insights stays empty there and the assistant-detail
 // "Performance Metrics" cards read "No published-post data yet" no matter how much the assistant
 // has published. This endpoint lets an external scheduler (see
-// .github/workflows/staging-insights-cron.yml) poke the SAME ingest logic over HTTP so staging
+// .github/workflows/staging-crons.yml) poke the SAME ingest logic over HTTP so staging
 // behaves like production — same pattern as run-goal-telemetry.ts / run-content-jobs.ts.
 //
 // AUTH: guarded by a shared secret. If CRON_TRIGGER_SECRET is not configured the endpoint refuses

@@ -5,7 +5,7 @@
 // branch/preview deploys. Staging is a branch deploy of the `staging` branch, so its
 // `refresh-follower-counts` cron never fires there and the Audience block would fall back to being
 // only as fresh as the last page visit. This endpoint lets an external scheduler (see
-// .github/workflows/staging-follower-counts-cron.yml) poke the SAME sweep over HTTP so staging
+// .github/workflows/staging-crons.yml) poke the SAME sweep over HTTP so staging
 // behaves like production — same pattern as run-goal-telemetry.ts.
 //
 // AUTH: guarded by a shared secret. If CRON_TRIGGER_SECRET is not configured the endpoint refuses to

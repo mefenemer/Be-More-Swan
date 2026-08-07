@@ -4,7 +4,7 @@
 // WHY THIS EXISTS: Netlify runs scheduled functions ONLY on the production deploy — never on
 // branch/preview deploys. Staging (a branch deploy) therefore never fires `process-content-jobs`,
 // so `generate-post` queues jobs that nothing ever drains. This endpoint lets an external
-// scheduler (see .github/workflows/staging-content-cron.yml) poke the SAME drain logic over HTTP
+// scheduler (see .github/workflows/staging-crons.yml) poke the SAME drain logic over HTTP
 // so staging behaves like production.
 //
 // AUTH: guarded by a shared secret. If CRON_TRIGGER_SECRET is not configured the endpoint refuses

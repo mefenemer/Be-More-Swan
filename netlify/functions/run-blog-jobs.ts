@@ -4,7 +4,7 @@
 // WHY THIS EXISTS: Netlify runs scheduled functions ONLY on the production deploy — never on
 // branch/preview deploys. Staging is a branch deploy, so neither `blog-horizon-fill` nor
 // `process-blog-jobs` ever fires there and autopilot would look completely dead on staging.
-// This endpoint lets an external scheduler (.github/workflows/staging-blog-cron.yml) poke BOTH
+// This endpoint lets an external scheduler (.github/workflows/staging-crons.yml) poke BOTH
 // halves over HTTP so staging behaves like production.
 //
 // Both halves run in one call, horizon-fill first, so a slot enqueued this tick is drafted in the

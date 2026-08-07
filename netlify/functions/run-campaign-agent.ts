@@ -5,7 +5,7 @@
 // WHY THIS EXISTS: Netlify runs scheduled functions ONLY on the production deploy — never on
 // branch/preview deploys. Staging is a branch deploy, so `autonomous-campaign-agent` never fires
 // there and no decision would ever appear autonomously. This endpoint lets an external scheduler
-// (.github/workflows/staging-campaign-cron.yml) poke the SAME run logic over HTTP — the same
+// (.github/workflows/staging-crons.yml) poke the SAME run logic over HTTP — the same
 // pattern as run-goal-telemetry.ts and run-strategy-agent.ts.
 //
 // AUTH: guarded by a shared secret. If CRON_TRIGGER_SECRET is not configured the endpoint refuses

@@ -424,7 +424,7 @@ months (§7).
 | `src/utils/notification-templates-catalog.ts` | + `strategy_proposal_pending` |
 | `src/utils/notification-actions.ts` | + `strategy_proposal_pending: 'action_required'` |
 | `netlify.toml` | `[functions.autonomous-strategy-agent] schedule = "0 5 * * 1"` |
-| `.github/workflows/staging-strategy-cron.yml` | **new** — branch deploys never fire native crons |
+| `.github/workflows/staging-crons.yml` | **new** — branch deploys never fire native crons |
 | `tests/strategy-proposals.test.ts` | **new** — 3-way vocabulary sync, envelope, no-write assertions |
 
 Notes on the surface:
