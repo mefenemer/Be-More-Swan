@@ -745,3 +745,25 @@ node_bundler = "esbuild"
 # instead, which calls the same function. The two must stay in step.
 [functions.autonomous-campaign-agent]
   schedule = "0 4 * * *"
+
+# Campaign order reconciliation — the RETURN path for the same feature. Moves orders off 'issued'
+# once the work they commissioned has actually been drafted, approved or turned down, releases any
+# order chained behind a delivered one, and finishes campaigns that have passed the end date the
+# user set. Until this existed every campaign order read "With the assistant" for ever and
+# campaigns.status could never reach 'finished'.
+#
+# A SEPARATE function from the agent above, deliberately. That one proposes and must never act;
+# this one only records what already happened. Merging them would make "the autonomous proposer
+# never places an order" a claim qualified by a flag rather than a property of the file — see the
+# header of src/utils/campaign-reconciler.ts.
+#
+# HOURLY. Drafting takes minutes and approval takes hours or days, so a tighter loop would only add
+# invocations and Neon wake-ups (the compute quota is PROJECT-WIDE — see the 2026-07-11 staging
+# outage); a looser one would leave the Orders tab stale after the user clicks Approve. On the hour,
+# joining the existing batch so the compute can still autosuspend in the gaps.
+#
+# ⚠️ Netlify fires scheduled functions ONLY on the production deploy. Staging is a branch deploy, so
+# this never runs there — .github/workflows/staging-crons.yml pokes run-campaign-reconciler
+# instead, which calls the same function. The two must stay in step.
+[functions.reconcile-campaigns]
+  schedule = "0 * * * *"

@@ -2867,6 +2867,12 @@ export const contentGenerationJobs = pgTable("content_generation_jobs", {
   // generates ONE caption/media for this job and creates a scheduled_posts row for EACH platform in
   // this list (sharing crosspost_group_id). NULL/empty ⇒ legacy single-platform job (uses `platform`).
   platforms: jsonb("platforms").$type<string[]>(),
+  // Campaign order tracing (db/campaign-order-tracing.sql). The campaign_orders row that
+  // commissioned this job, or NULL for ordinary drafting. This is the ONLY link from an order to
+  // the work it produced — artefact_id on the order is a single integer and one order fans out to
+  // as many as 20 jobs — so src/utils/campaign-reconciler.ts reads it to decide when an order has
+  // actually been delivered. Without it every campaign order sat at 'issued' forever.
+  campaignOrderId: integer("campaign_order_id"),
   // US-ADM-4.3.3: Admin test generation fields
   adminId: integer("admin_id").references(() => users.id, { onDelete: "set null" }),
   tokensInput: integer("tokens_input"),                    // Anthropic input token count

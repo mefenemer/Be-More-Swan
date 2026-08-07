@@ -165,7 +165,7 @@ export async function issueOrder(db: Db, orderId: number, ctx: IssueContext): Pr
     const executor = EXECUTORS[ctx.action];
     let outcome: ExecutorResult;
     try {
-        outcome = await executor(db, ctx);
+        outcome = await executor(db, ctx, orderId);
     } catch (err) {
         console.error('[campaign-orders] executor threw', { orderId, action: ctx.action, err });
         outcome = { ok: false, message: 'The assistant could not be reached. Nothing was charged.' };
@@ -230,7 +230,13 @@ interface ExecutorResult {
     summary?: string;
 }
 
-type Executor = (db: Db, ctx: IssueContext) => Promise<ExecutorResult>;
+/**
+ * `orderId` is passed separately rather than living on IssueContext because the context is built
+ * BEFORE the order row exists (placeOrder inserts, then issues). The two content executors stamp it
+ * on every job they enqueue — that stamp is the only thing that later lets the reconciler tell
+ * whether this order produced anything. See db/campaign-order-tracing.sql.
+ */
+type Executor = (db: Db, ctx: IssueContext, orderId: number) => Promise<ExecutorResult>;
 
 /**
  * Resolve the target assistant's current blueprint, compiling one if it has never had it.
@@ -261,7 +267,7 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
     // job row — it reaches the drafter through blueprint section 13-campaign, which the assistant
     // already reads. That is why there is no `brief` field on the job below and why there does not
     // need to be.
-    draft_social_posts: async (db, ctx) => {
+    draft_social_posts: async (db, ctx, orderId) => {
         const blueprintId = await resolveBlueprintId(db, ctx.targetAssistantId, ctx.organisationId);
         if (!blueprintId) return { ok: false, message: 'The Social Media Assistant has no usable setup yet, so nothing could be queued.' };
 
@@ -282,6 +288,9 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
                 maxAttempts: 3,
                 triggerType: 'on_demand',
                 targetPublishDate: new Date(now + (i + 1) * 24 * 60 * 60 * 1000),
+                // The trace back to this order. Without it the reconciler cannot tell whether the
+                // order produced anything, and it sits at 'issued' for ever.
+                campaignOrderId: orderId,
             });
         }
         return { ok: true, summary: `${count} post${count === 1 ? '' : 's'} queued for drafting` };
@@ -289,7 +298,7 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
 
     // Brief a pillar article. Same principle: the brief steers through the blueprint, the job row
     // just says "write one".
-    draft_blog_pillar: async (db, ctx) => {
+    draft_blog_pillar: async (db, ctx, orderId) => {
         const blueprintId = await resolveBlueprintId(db, ctx.targetAssistantId, ctx.organisationId);
         if (!blueprintId) return { ok: false, message: 'The Blog Writing Assistant has no usable setup yet, so nothing could be queued.' };
 
@@ -307,6 +316,7 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
                 triggerType: 'on_demand',
                 contentType: 'blog',
                 targetPublishDate: new Date(Date.now() + (i + 1) * 3 * 24 * 60 * 60 * 1000),
+                campaignOrderId: orderId,
             });
         }
         return { ok: true, summary: `${count} article${count === 1 ? '' : 's'} briefed` };

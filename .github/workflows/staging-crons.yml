@@ -108,6 +108,7 @@ jobs:
           run-sequence-sends        3600    120
           run-account-memory        3600    120
           run-goal-telemetry        3600    120
+          run-campaign-reconciler   3600    120
           run-follower-counts       14400   120
           run-insights-ingest       21600   120
           run-campaign-agent        86400   300
