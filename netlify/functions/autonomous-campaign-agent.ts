@@ -23,14 +23,25 @@
 // placed only by campaigns.ts `decide`, only after a human approves. tests/campaign-proposer.test.ts
 // asserts that against this source.
 //
-// ⚠️ NO NOTIFICATION IS SENT, and that is a deliberate gap rather than an oversight. There is no
-// `campaign_decision_pending` template row, and createNotification() with an unknown key logs and
-// returns false — a silent no-op that would look wired. The Review Queue tab badge already surfaces
-// these (the mirror sets approval_status='pending_approval'). Add the template before adding the
-// call; see notification-template-management.
+// ── It notifies, as of 2026-08-07 ────────────────────────────────────────────
+// Phase 1 shipped without this on purpose: there was no `campaign_decision_pending` template, and
+// createNotification() with an unknown key logs and returns false — a silent no-op that LOOKS
+// wired, so the call could not go in first. The template now exists in
+// src/utils/notification-templates-catalog.ts (no DDL: notification_templates is only an admin
+// override layer, and the catalog is the fallback), and the call site is at the foot of the run.
+//
+// The Review Queue badge was previously the only surface, which was not enough: a decision expires
+// in as little as two days (DECISION_TTL_DAYS.halt), so one could be filed, expire and be swept
+// without the user ever opening the tab.
+//
+// ONE notification per ORG per RUN, not one per decision. Three campaigns all filing on the same
+// morning is one alert, or the feature becomes the noise it exists to cut through.
 
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
+import { aiAssistants } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { isGlobalAiDisabled, setPlatformConfig } from '../../src/utils/platform-config';
 import {
     SCENARIO_REQUIREMENTS, buildEscalationProposal, buildHaltProposal, detectLeadQualityDrop,
@@ -54,10 +65,20 @@ export interface CampaignAgentResult {
     expired: number;
     escalations: number;
     halts: number;
+    /** Organisations told about a new decision. One notification per org per run, not per decision. */
+    notified: number;
+}
+
+/** What one organisation gets told, accumulated across its campaigns during the run. */
+interface OrgNotice {
+    count: number;
+    /** The FIRST proposal's title. A digest of five would be unreadable on a notification card. */
+    summary: string;
+    assistantId: number;
 }
 
 export async function runCampaignProposer(): Promise<CampaignAgentResult> {
-    const empty: CampaignAgentResult = { campaigns: 0, proposed: 0, expired: 0, escalations: 0, halts: 0 };
+    const empty: CampaignAgentResult = { campaigns: 0, proposed: 0, expired: 0, escalations: 0, halts: 0, notified: 0 };
 
     // The platform kill switch. This function makes no model call, so the letter of the flag does
     // not cover it — but a decision card appearing in someone's queue during an incident is still
@@ -77,8 +98,21 @@ export async function runCampaignProposer(): Promise<CampaignAgentResult> {
     // One lookup per ORG, not per campaign — several campaigns commonly share an organisation and
     // the hired-roles answer is identical for all of them.
     const rolesByOrg = new Map<number, Set<string>>();
+    const noticesByOrg = new Map<number, OrgNotice>();
     let escalations = 0;
     let halts = 0;
+
+    /** Record that this org has something new to be told about, without notifying yet. */
+    const note = (orgId: number, assistantId: number, title: string) => {
+        const prev = noticesByOrg.get(orgId);
+        // Keep the FIRST summary rather than the last: a run that files an escalation and then a
+        // halt should lead with the escalation the user has not seen, not overwrite it.
+        noticesByOrg.set(orgId, {
+            count: (prev?.count ?? 0) + 1,
+            summary: prev?.summary ?? title,
+            assistantId: prev?.assistantId ?? assistantId,
+        });
+    };
 
     for (const campaign of live) {
         try {
@@ -95,19 +129,71 @@ export async function runCampaignProposer(): Promise<CampaignAgentResult> {
             if (SCENARIO_REQUIREMENTS.escalation.every((r) => hired!.has(r))
                 && !await hasPendingDecision(db, campaign.id, 'escalation')) {
                 const hit = await detectOutperformingPost(db, campaign.organisationId, since7d);
-                if (hit && await persistProposal(db, campaign, buildEscalationProposal(hit))) escalations++;
+                if (hit) {
+                    const proposal = buildEscalationProposal(hit);
+                    if (await persistProposal(db, campaign, proposal)) {
+                        escalations++;
+                        note(campaign.organisationId, campaign.aiAssistantId, proposal.title);
+                    }
+                }
             }
 
             // ── Scenario 2 — the search is finding the wrong companies ─────────
             if (SCENARIO_REQUIREMENTS.halt.every((r) => hired!.has(r))
                 && !await hasPendingDecision(db, campaign.id, 'halt')) {
                 const hit = await detectLeadQualityDrop(db, campaign.organisationId, since24h);
-                if (hit && await persistProposal(db, campaign, buildHaltProposal(hit))) halts++;
+                if (hit) {
+                    const proposal = buildHaltProposal(hit);
+                    if (await persistProposal(db, campaign, proposal)) {
+                        halts++;
+                        note(campaign.organisationId, campaign.aiAssistantId, proposal.title);
+                    }
+                }
             }
         } catch (err) {
             // One campaign's failure must not cost the rest of the run. Logged with the id so a
             // recurring offender is findable, then skipped.
             console.error('[campaign-agent] campaign failed', { campaignId: campaign.id, err });
+        }
+    }
+
+    // ── Tell the user, once per org ──────────────────────────────────────────
+    // AFTER every campaign has been considered, so an org running three campaigns gets one alert
+    // rather than three. Runs outside the per-campaign try/catch above because a notification
+    // failure must not be attributed to a campaign, and createNotification never throws anyway —
+    // it returns false and logs, so a missing template degrades to silence rather than a failed run.
+    let notified = 0;
+    for (const [organisationId, notice] of noticesByOrg) {
+        try {
+            // The campaign's OWN orchestrator, not an arbitrary assistant in the org — this id is
+            // what gives the card its actor identity (the coloured avatar and name eyebrow) and
+            // what the "Review decision" CTA routes to.
+            const [owner] = await db
+                .select({ userId: aiAssistants.userId, name: aiAssistants.name })
+                .from(aiAssistants)
+                .where(eq(aiAssistants.id, notice.assistantId))
+                .limit(1);
+            if (!owner?.userId) continue;
+
+            // The merge engine has no plural rules, so the call site passes a resolved noun phrase.
+            const ok = await createNotification(db, 'campaign_decision_pending', {
+                userId: owner.userId,
+                assistantId: notice.assistantId,
+                // metadata.assistantId is what notifications.js reads for the deep link. The
+                // denormalised column above drives the actor avatar; they are read by different
+                // code paths and both are needed.
+                metadata: { assistantId: notice.assistantId },
+                context: {
+                    assistant: { name: owner.name || 'Your Campaign Assistant' },
+                    decision: {
+                        count: notice.count === 1 ? '1 decision' : `${notice.count} decisions`,
+                        summary: notice.summary,
+                    },
+                },
+            });
+            if (ok) notified++;
+        } catch (err) {
+            console.error('[campaign-agent] notify failed', { organisationId, err });
         }
     }
 
@@ -117,6 +203,7 @@ export async function runCampaignProposer(): Promise<CampaignAgentResult> {
         expired,
         escalations,
         halts,
+        notified,
     };
 
     // Non-blocking: a run that did its work and failed to record itself is still a successful run.

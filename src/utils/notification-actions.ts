@@ -100,6 +100,12 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     // (docs/strategy-agent-plan.md §6 specifies 'action_required'; no such category exists here —
     // the union is critical_action / suggested_action / state_change / informational / celebratory.)
     strategy_proposal_pending: 'suggested_action',
+    // The Campaign Assistant's equivalent, and suggested_action for the same reasons: it waits on a
+    // human, it expires on its own (2–14 days by kind, DECISION_TTL_DAYS), and a lapsed decision
+    // costs nothing because the agent re-proposes while the evidence still holds. Uncategorised
+    // types fall back to 'informational', which would file "your campaign needs a decision" under
+    // Updates rather than Action required — the same mistake blog_draft_ready documents below.
+    campaign_decision_pending: 'suggested_action',
     // state_change — completed / changed confirmations
     billing_renewed: 'state_change', billing_payment_received: 'state_change', payment_confirmation: 'state_change',
     plan_upgraded: 'state_change', downgrade_scheduled: 'state_change', downgrade_cancelled: 'state_change',

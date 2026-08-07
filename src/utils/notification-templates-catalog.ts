@@ -255,6 +255,31 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        // The Campaign Assistant's autonomous run has filed a decision and is waiting. Structurally
+        // identical to strategy_proposal_pending above and deliberately worded the same way: the
+        // decision is inert until approved, and saying so is what stops the alert reading as
+        // "something has already happened to your campaign".
+        //
+        // Until 2026-08-07 this template did not exist and the agent sent nothing at all — the
+        // Review Queue badge was the only surface, so a decision with a 2-to-14-day expiry could
+        // lapse entirely unseen. The agent could not simply call createNotification() first:
+        // an unknown key logs and returns false, which is a silent no-op that looks wired.
+        //
+        // One per org per RUN, not per decision — the call site resolves the noun phrase, since the
+        // merge engine has no plural rules.
+        templateKey: 'campaign_decision_pending',
+        name: 'Campaign decision waiting',
+        category: 'Assistants',
+        type: 'campaign_decision_pending',
+        title: 'Your campaign needs a decision',
+        message: '{{assistant.name}} has {{decision.count}} waiting on you — {{decision.summary}}. Nothing moves until you approve it.',
+        variables: [
+            ASSISTANT_NAME,
+            v('decision.count', 'Number of decisions', '1 decision'),
+            v('decision.summary', 'What it wants to do', 'a post doing 3× your average is worth building on'),
+        ],
+    },
+    {
         templateKey: 'goal_data_disconnected',
         name: 'Goal tracking paused',
         category: 'Assistants',

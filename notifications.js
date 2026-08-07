@@ -222,6 +222,17 @@ window.NotifKit = (function () {
                 window.routeToAssistantDetail?.(meta.assistantId);
             } };
         }
+        // A campaign decision lives in the Campaign Assistant's Review Queue tab ("Decisions"), not
+        // on any global page — there is no route that can show it otherwise. Without this the
+        // generic action fallback at the bottom drops the user on the dashboard to go and find it,
+        // which for a card that expires in as little as two days is most of the way to not
+        // notifying them at all.
+        if (notif.type === 'campaign_decision_pending' && meta.assistantId) {
+            return { label: 'Review decision', run: () => {
+                window._assistantDetailInitialTab = 'review-queue';
+                window.routeToAssistantDetail?.(meta.assistantId);
+            } };
+        }
         if ((notif.type === 'post_draft_ready' || notif.type === 'ai_review') && meta.postId) {
             return { label: 'Review draft', run: () => window.loadView?.('review-queue', { postId: meta.postId }) };
         }

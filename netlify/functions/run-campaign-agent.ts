@@ -17,7 +17,7 @@
 // `proposed` in the body is the real count.
 //
 // POST /.netlify/functions/run-campaign-agent
-//   → 200 { ok: true, campaigns, proposed, expired, escalations, halts }
+//   → 200 { ok: true, campaigns, proposed, expired, escalations, halts, notified }
 
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { runCampaignProposer } from './autonomous-campaign-agent';

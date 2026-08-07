@@ -92,6 +92,14 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         types: [
             'hitl_approval_required', 'review_red_urgency', 'risk_assessment_submitted',
             'risk_assessment_decision', 'risk_reclassification', 'action_rejected', 'action_expired',
+            // A campaign decision is exactly this category: work parked waiting on the user's
+            // answer. Listed explicitly because an unmapped type falls back to 'product_updates'
+            // (see FALLBACK_CATEGORY), which would let someone who muted product news silently
+            // stop receiving approval requests — and would hide the toggle where nobody looks for
+            // it. ⚠️ strategy_proposal_pending has the same problem and is NOT fixed here: moving
+            // a live notification between preference categories changes behaviour for users who
+            // have already set that toggle, so it wants its own change.
+            'campaign_decision_pending',
         ],
     },
     {
