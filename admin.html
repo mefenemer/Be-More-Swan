@@ -1682,6 +1682,81 @@
         </div>
       </section>
 
+      <!-- ── Send a Message (ad-hoc admin → user notification) ───────────── -->
+      <section id="view-send-notification" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div class="mb-6">
+          <h2 class="text-lg font-extrabold text-gray-900">Send a Message</h2>
+          <p class="text-sm text-gray-500 mt-0.5">Send a one-off in-app notification to a single user. It appears in their notification inbox immediately, under &#34;Be More Swan&#34;. This is not email &mdash; nothing is sent to their inbox.</p>
+        </div>
+
+        <div id="sn-status" class="hidden mb-4 text-sm rounded-lg px-3 py-2"></div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <!-- Left: compose -->
+          <div class="space-y-4">
+            <!-- Recipient -->
+            <div>
+              <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Recipient</label>
+              <div id="sn-picker">
+                <input id="sn-search" type="text" autocomplete="off" oninput="scheduleUserSearch()" placeholder="Search by name or email&hellip;"
+                       class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                <div id="sn-results" class="hidden mt-1 border border-gray-200 rounded-xl overflow-hidden bg-white divide-y divide-gray-100 max-h-64 overflow-y-auto"></div>
+              </div>
+              <div id="sn-chosen" class="hidden items-center justify-between gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
+                <div class="min-w-0">
+                  <p id="sn-chosen-name" class="text-sm font-bold text-gray-900 truncate"></p>
+                  <p id="sn-chosen-email" class="text-xs text-gray-500 truncate"></p>
+                </div>
+                <button type="button" onclick="clearSendRecipient()" class="text-xs font-bold text-gray-500 hover:text-gray-800 shrink-0">Change</button>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide">Title</label>
+                <span id="sn-title-count" class="text-xs text-gray-400">0/120</span>
+              </div>
+              <input id="sn-title" type="text" maxlength="120" oninput="updateSendPreview()"
+                     class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide">Message</label>
+                <span id="sn-message-count" class="text-xs text-gray-400">0/2000</span>
+              </div>
+              <textarea id="sn-message" rows="7" maxlength="2000" oninput="updateSendPreview()"
+                        class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"></textarea>
+              <p class="text-xs text-gray-400 mt-1">Plain text only &mdash; formatting and links are not rendered in a notification, and typing HTML will show as literal text. Line breaks are kept. The user cannot reply; if you need an answer, ask them to raise a support ticket.</p>
+            </div>
+
+            <div class="flex items-center gap-2 pt-1">
+              <button onclick="sendUserNotification()" id="sn-send-btn" disabled
+                      class="px-4 py-2 text-sm font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition disabled:opacity-50 disabled:cursor-not-allowed">Send message</button>
+              <button onclick="resetSendNotification()" type="button"
+                      class="px-3 py-2 text-sm font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition">Clear</button>
+            </div>
+          </div>
+
+          <!-- Right: live preview (mirrors the notification card in notifications.js) -->
+          <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Live Preview</label>
+            <div class="bg-gray-100 rounded-xl p-4">
+              <div class="bg-white rounded-xl border border-gray-200 p-4 flex gap-3">
+                <div class="w-10 h-10 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center shrink-0 text-lg">🔔</div>
+                <div class="min-w-0 flex-1">
+                  <p class="text-xs font-bold text-gray-400 mb-0.5">Be More Swan</p>
+                  <p id="sn-pv-title" class="text-sm font-bold text-gray-900 break-words"></p>
+                  <p id="sn-pv-message" class="text-sm text-gray-500 mt-0.5 break-words"></p>
+                  <p class="text-xs text-gray-400 mt-1">just now</p>
+                </div>
+              </div>
+            </div>
+            <p class="text-xs text-gray-400 mt-2">This is how the card appears in the user's inbox. They can dismiss it, and it is not sent by email.</p>
+          </div>
+        </div>
+      </section>
+
       <!-- ── Issue Reports (Testing) ─────────────────────────────────────── -->
       <section id="view-issue-reports" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
         <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
@@ -2206,6 +2281,7 @@ const VIEW_LABELS = {
   workspaces: 'Workspaces', 'workspace-detail': 'Workspace Detail',
   'blueprint-inspector': 'Blueprint Inspector', sandbox: 'Sandbox Environment',
   'email-templates': 'Manage Emails', 'notification-templates': 'Notification Templates',
+  'send-notification': 'Send a Message',
   systems: 'Systems & Connections',
   'issue-reports': 'Issue Reports', 'feature-roadmap': 'Feature Requests',
 };
@@ -2272,6 +2348,7 @@ const ADMIN_CATS = {
   comms: { label: 'Comms', children: [
     { view: 'email-templates',        icon: '✉️', label: 'Manage Emails',          perm: 'manage_comms_templates' },
     { view: 'notification-templates', icon: '🔔', label: 'Notification Templates', perm: 'manage_comms_templates' },
+    { view: 'send-notification',      icon: '📨', label: 'Send a Message',         perm: 'manage_comms_templates' },
   ]},
   // Security and Compliance were two rail entries holding five pages between them,
   // and an admin chasing an incident had to guess which one owned the trail.
@@ -2585,6 +2662,7 @@ function adminNav(view) {
   if (view === 'systems')             loadSystemStatus();
   if (view === 'email-templates')     loadEmailTemplates();
   if (view === 'notification-templates') loadNotificationTemplates();
+  if (view === 'send-notification')   resetSendNotification();
   if (view === 'issue-reports')       loadIssueReports();
   if (view === 'feature-roadmap')     loadFeatureRoadmap();
 }
@@ -3080,6 +3158,167 @@ function showNtStatus(kind, msg) {
   el.classList.remove('hidden');
 }
 function hideNtStatus() { document.getElementById('nt-status').classList.add('hidden'); }
+
+// ── Send a Message (ad-hoc admin → user in-app notification) ─────────────────
+// The section next door edits the COPY of automated notifications; this one actually inserts
+// one. Recipients come from admin-api?resource=users — the same env-routed list the rest of the
+// portal uses, so with the Sandbox toggle on you are picking (and messaging) a sandbox user.
+const SN_API = '/.netlify/functions/admin-send-notification';
+let snRecipient = null;   // { id, name, email } once chosen
+let snSearchTimer = null;
+let snSending = false;
+
+const snEsc = (s) => String(s ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// `hidden` is a plain display:none class and loses to any inline display the browser or a
+// utility class sets, so always drive style.display alongside it.
+function snShow(el, display) { el.classList.remove('hidden'); el.style.display = display || ''; }
+function snHide(el) { el.classList.add('hidden'); el.style.display = 'none'; }
+
+function showSnStatus(kind, msg) {
+  const el = document.getElementById('sn-status');
+  el.textContent = msg;
+  el.className = 'mb-4 text-sm rounded-lg px-3 py-2 ' +
+    (kind === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700');
+  snShow(el, 'block');
+}
+function hideSnStatus() { snHide(document.getElementById('sn-status')); }
+
+function resetSendNotification() {
+  snRecipient = null;
+  snSending = false;
+  const search = document.getElementById('sn-search');
+  if (!search) return;
+  search.value = '';
+  document.getElementById('sn-title').value = '';
+  document.getElementById('sn-message').value = '';
+  snHide(document.getElementById('sn-results'));
+  snHide(document.getElementById('sn-chosen'));
+  snShow(document.getElementById('sn-picker'), 'block');
+  hideSnStatus();
+  updateSendPreview();
+}
+
+function scheduleUserSearch() {
+  clearTimeout(snSearchTimer);
+  snSearchTimer = setTimeout(runUserSearch, 250);
+}
+
+async function runUserSearch() {
+  const q = document.getElementById('sn-search').value.trim();
+  const box = document.getElementById('sn-results');
+  // One or two characters matches most of the user table; make the admin be specific.
+  if (q.length < 2) { snHide(box); return; }
+  try {
+    const res = await fetch(`/.netlify/functions/admin-api?resource=users&q=${encodeURIComponent(q)}`);
+    if (!res.ok) throw new Error('search failed');
+    const d = await res.json();
+    const rows = d.users || [];
+    if (!rows.length) {
+      box.innerHTML = '<p class="px-3 py-2 text-sm text-gray-400">No users match that search.</p>';
+      snShow(box, 'block');
+      return;
+    }
+    // Data attributes + listeners, NOT an inline onclick: the browser decodes entities in an
+    // attribute value before the JS is parsed, so an escaped apostrophe in "O'Brien" would come
+    // back as a real quote and break out of the argument string.
+    box.innerHTML = rows.map((u) => {
+      const name = [u.firstName, u.lastName].filter(Boolean).join(' ').trim();
+      return `<button type="button" class="sn-result w-full text-left px-3 py-2 hover:bg-emerald-50 transition"
+                data-id="${u.id}" data-name="${snEsc(name)}" data-email="${snEsc(u.email)}">
+                <p class="text-sm font-bold text-gray-900 truncate">${snEsc(name || '(no name)')}</p>
+                <p class="text-xs text-gray-500 truncate">${snEsc(u.email)}${u.planName ? ' · ' + snEsc(u.planName) : ''}</p>
+              </button>`;
+    }).join('');
+    box.querySelectorAll('.sn-result').forEach((btn) => {
+      btn.addEventListener('click', () => chooseSendRecipient(
+        Number(btn.dataset.id), btn.dataset.name || '', btn.dataset.email || '',
+      ));
+    });
+    snShow(box, 'block');
+  } catch {
+    box.innerHTML = '<p class="px-3 py-2 text-sm text-rose-600">User search failed.</p>';
+    snShow(box, 'block');
+  }
+}
+
+function chooseSendRecipient(id, name, email) {
+  // dataset values arrive already entity-decoded by the parser — no unescaping needed.
+  snRecipient = { id, name, email };
+  document.getElementById('sn-chosen-name').textContent = snRecipient.name || '(no name)';
+  document.getElementById('sn-chosen-email').textContent = snRecipient.email;
+  snHide(document.getElementById('sn-results'));
+  snHide(document.getElementById('sn-picker'));
+  snShow(document.getElementById('sn-chosen'), 'flex');
+  updateSendPreview();
+}
+
+function clearSendRecipient() {
+  snRecipient = null;
+  snHide(document.getElementById('sn-chosen'));
+  snShow(document.getElementById('sn-picker'), 'block');
+  document.getElementById('sn-search').value = '';
+  document.getElementById('sn-search').focus();
+  updateSendPreview();
+}
+
+// Mirrors createAdminMessage() server-side: escape everything, then newlines become the one
+// tag the notification feed will actually render. If the preview and the card ever disagree,
+// this is the pair to check.
+function updateSendPreview() {
+  const title = document.getElementById('sn-title').value;
+  const message = document.getElementById('sn-message').value;
+  document.getElementById('sn-title-count').textContent = `${title.length}/120`;
+  document.getElementById('sn-message-count').textContent = `${message.length}/2000`;
+  document.getElementById('sn-pv-title').textContent = title || 'Your title appears here';
+  document.getElementById('sn-pv-message').innerHTML = message
+    ? snEsc(message).replace(/\r\n|\r|\n/g, '<br>')
+    : '<span class="text-gray-300">Your message appears here</span>';
+  document.getElementById('sn-send-btn').disabled =
+    snSending || !snRecipient || !title.trim() || !message.trim();
+}
+
+async function sendUserNotification() {
+  if (snSending || !snRecipient) return;
+  const title = document.getElementById('sn-title').value.trim();
+  const message = document.getElementById('sn-message').value.trim();
+  if (!title || !message) return;
+
+  const who = snRecipient.name ? `${snRecipient.name} (${snRecipient.email})` : snRecipient.email;
+  const envNote = getAdminEnv() === 'sandbox'
+    ? '\n\n⚠️ You are in SANDBOX — this goes to the sandbox copy of this user, not the live one.'
+    : '';
+  if (!confirm(`Send this message to ${who}?\n\nIt lands in their notification inbox straight away and cannot be unsent.${envNote}`)) return;
+
+  // Guard the double-click: there is no idempotency key, so two clicks are two notifications.
+  snSending = true;
+  const btn = document.getElementById('sn-send-btn');
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  hideSnStatus();
+  try {
+    const res = await fetch(`${SN_API}?resource=send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: snRecipient.id, title, message }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok || !d.sent) throw new Error(d.error || 'Send failed.');
+    // Name who the SERVER resolved, not who we think we picked — that is the only
+    // confirmation available; nothing reports back that the user actually saw it.
+    const sentTo = d.recipient?.name ? `${d.recipient.name} (${d.recipient.email})` : d.recipient?.email || who;
+    snSending = false;
+    resetSendNotification();
+    showSnStatus('success', `Message sent to ${sentTo}. It is in their notification inbox now.`);
+  } catch (err) {
+    snSending = false;
+    showSnStatus('error', err.message || 'Send failed.');
+  } finally {
+    btn.textContent = 'Send message';
+    updateSendPreview();
+  }
+}
 
 // ── US-ADM-4.3.1/4.3.2: Blueprint Inspector ─────────────────────────────────
 

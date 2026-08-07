@@ -294,7 +294,15 @@ check('search embeds the query asymmetrically', () => {
 
 check('search falls back to full text rather than returning nothing', () => {
     const fn = memoryText.slice(memoryText.indexOf('export async function searchMemory'));
-    assert.ok(fn.includes('content_tsv @@ plainto_tsquery'), 'the full-text fallback is missing');
+    // This used to pin the literal `content_tsv @@ plainto_tsquery`. That call was the bug: both
+    // safe parsers AND every content word, so recalling against a sentence needed all of its words
+    // in one memory row and matched nothing (measured 2026-08-07 on the two real staging rows —
+    // AND 0, OR 2). The fallback now goes through anyTermTsQuery, which parses with plainto and
+    // then rewrites the conjunction. 'plain' is required here specifically: `text` is arbitrary
+    // stored content, not a search box, so a hyphen in it must not become a negation.
+    // tests/text-search.test.ts owns the rule across all three retrieval sites.
+    assert.ok(fn.includes('content_tsv @@ ${anyTerm}'), 'the full-text fallback is missing');
+    assert.ok(/anyTermTsQuery\(text, 'plain'\)/.test(fn), 'the fallback must parse with plainto, not websearch');
     assert.ok(sqlText.includes('content_tsv'), 'the generated column must exist in the migration');
     assert.ok(sqlText.includes('USING GIN (content_tsv)'), 'the fallback needs its GIN index to be usable');
 });

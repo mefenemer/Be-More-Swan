@@ -27,6 +27,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { accountMemory, vectorEmbeddings } from '../../db/schema';
 import { embedTexts, embeddingsConfigured } from './kb-embeddings';
+import { anyTermTsQuery } from './text-search';
 import {
     DEFAULT_MEMORY_TOP_K, MAX_MEMORY_CHARS, MAX_MEMORY_TOP_K,
     isMemorySourceType, type MemorySourceType,
@@ -191,6 +192,13 @@ export async function searchMemory(
             return mapHits(rows);
         }
 
+        // ANY term, not all of them — see src/utils/text-search.ts. plainto_tsquery ANDs every
+        // word, so recalling against a sentence of arbitrary text ("chased them about the renewal
+        // quote last week") required all six content words in one memory row and matched nothing.
+        // 'plain' parsing is kept deliberately: `text` here is not a search box, it is whatever
+        // content we are recalling against, so a hyphen or quote mark in it must stay literal
+        // rather than becoming a negation or a phrase operator.
+        const anyTerm = anyTermTsQuery(text, 'plain');
         const rows = await db.execute<{
             id: number; account_node_id: number | null; source_type: string;
             source_id: number | null; content: string; occurred_at: Date;
@@ -198,9 +206,9 @@ export async function searchMemory(
             SELECT id, account_node_id, source_type, source_id, content, occurred_at
               FROM account_memory
              WHERE organisation_id = ${organisationId}
-               AND content_tsv @@ plainto_tsquery('english', ${text})
+               AND content_tsv @@ ${anyTerm}
                ${opts.accountNodeId ? sql`AND account_node_id = ${opts.accountNodeId}` : sql``}
-             ORDER BY ts_rank(content_tsv, plainto_tsquery('english', ${text})) DESC
+             ORDER BY ts_rank(content_tsv, ${anyTerm}) DESC
              LIMIT ${topK}
         `);
         return mapHits(rows);

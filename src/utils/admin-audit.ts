@@ -43,6 +43,7 @@ export type AdminAction =
     | 'email_template_restore'
     | 'notification_template_edit'
     | 'notification_template_restore'
+    | 'notification_sent'
     | 'session_timeout_config_update';
 
 export interface AdminAuditParams {

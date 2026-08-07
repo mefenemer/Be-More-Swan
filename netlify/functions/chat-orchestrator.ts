@@ -26,6 +26,7 @@ import { logAiUsage } from '../../src/utils/ai-usage';
 import { consumeTaskCredit } from '../../src/utils/task-credit';
 import { embedTexts } from '../../src/utils/kb-embeddings';
 import { buildInspoBlock } from '../../src/utils/inspo-profile';
+import { anyTermTsQuery } from '../../src/utils/text-search';
 import { computeScheduleSlots, resolvePostingSchedule } from '../../src/config/posting-cadence';
 import { EXCLUDE_PROFILE_RULE, SCORING_BANDS, icpBlock } from '../../src/config/icp-profile';
 import { normalizePlatform, platformFormat, type SocialPlatform } from '../../src/config/platform-formats';
@@ -804,13 +805,22 @@ async function retrieveKnowledgeBase(
         }
 
         // Keyword pass — full-text fallback over content_tsv (db/kb-articles.sql).
+        //
+        // ANY term, not all of them — see src/utils/text-search.ts. This used to be a bare
+        // websearch_to_tsquery, which ANDs every word, so a real support question ("how do I
+        // change the card on my account") demanded all of 'change', 'card' and 'account' inside a
+        // single chunk and matched nothing. The agent then answered with no KB grounding at all
+        // and said nothing about it, because an empty result is the same shape as "no articles
+        // are relevant". This path is reached whenever the semantic pass above returns nothing —
+        // including when the query embedding itself failed.
         if (rows.length === 0) {
+            const anyTerm = anyTermTsQuery(q);
             rows = await db
                 .select({ title: kbArticles.title, content: kbChunks.content })
                 .from(kbChunks)
                 .innerJoin(kbArticles, eq(kbChunks.kbArticleId, kbArticles.id))
-                .where(and(scope, sql`content_tsv @@ websearch_to_tsquery('english', ${q})`))
-                .orderBy(sql`ts_rank(content_tsv, websearch_to_tsquery('english', ${q})) DESC`)
+                .where(and(scope, sql`content_tsv @@ ${anyTerm}`))
+                .orderBy(sql`ts_rank(content_tsv, ${anyTerm}) DESC`)
                 .limit(KB_TOP_K);
         }
 

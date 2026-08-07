@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-send-notification",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4278",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/adfd9286-c1a1-4d20-bdfb-09976a6e5947/scratchpad/snharness"
+      ],
+      "port": 4278,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-datahub-toolbar",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

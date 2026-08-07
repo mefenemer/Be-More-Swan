@@ -23,11 +23,16 @@
 // Notification inserts were uniformly best-effort at the call sites (.catch(() => {}) or a
 // try/catch) because a failed notification must never break the flow that triggered it.
 // This module preserves that: it resolves, logs and swallows. Callers need no try/catch.
+//
+// ── One documented exception to "always template-keyed" ──────────────────────
+// createAdminMessage() at the bottom of this file takes literal copy instead of a templateKey.
+// It is not an oversight — see the comment there for why an admin typing to one user has no
+// template to key on, and why it is deliberately kept narrow rather than generalised.
 
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { notifications, notificationTemplates } from '../../db/schema';
-import { renderMergeVars, type MergeContext } from './email-template';
+import { escapeHtml, renderMergeVars, type MergeContext } from './email-template';
 import { getNotificationDefault } from './notification-templates-catalog';
 
 /**
@@ -193,4 +198,61 @@ export async function renderNotification(
         title: renderMergeVars(tpl.title, context),
         message: renderMergeVars(tpl.message, context),
     };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ad-hoc admin → user message (the documented exception noted in the header)
+// ─────────────────────────────────────────────────────────────────────────────
+// Everything above renders copy an admin edited AHEAD of time, keyed by templateKey, so the
+// wording of an automated notification is reviewable before it ever fires. An admin writing
+// directly to ONE user has no template to key on: the message is composed in the moment and
+// is the copy. Hence a separate, deliberately narrow entry point — literal title/message, one
+// recipient, one type, no merge context. Do not widen it into a back door for automated
+// notifications; those still belong in notification-templates-catalog.ts, where they can be
+// reviewed and switched off.
+//
+// Escaping is STRICTER here than on the template path, and the asymmetry is the point.
+// Template text is admin-authored markup that may legitimately carry inline formatting, with
+// only the interpolated user values escaped. This body is a person typing a sentence, so it is
+// escaped WHOLE and only newlines become markup. That way the admin sees exactly what the user
+// sees — rather than typing a <div> or an <a href> that the client-side allow-list in
+// notifications.js silently swallows (it permits only b/strong/em/i/u/br/span, and strips every
+// attribute, so links cannot render in a notification body at all).
+//
+// `category`/`priority`/`is_dismissible` are left to the DB trigger
+// (db/notifications-categorization.sql). 'admin_message' is absent from its CASE, so it lands
+// on the 'informational' default — dismissible, unpinned — which is what an FYI from the team
+// should be. src/utils/notification-actions.ts defaults it the same way.
+
+/** The notifications.type stamped on every ad-hoc admin message. */
+export const ADMIN_MESSAGE_TYPE = 'admin_message';
+
+/** Escape human-typed text, then promote newlines to the one tag the client will render. */
+function escapeAdminText(s: string): string {
+    return escapeHtml(s).replace(/\r\n|\r|\n/g, '<br>');
+}
+
+/**
+ * Insert a one-off, admin-composed in-app message for a single user.
+ *
+ * Best-effort like the rest of this module — returns false rather than throwing. NOTE that
+ * unlike the automated call sites, this one has a human waiting on the result, so the caller
+ * should surface a false as a failure instead of ignoring it.
+ */
+export async function createAdminMessage(
+    db: Inserter,
+    opts: { userId: number; title: string; message: string },
+): Promise<boolean> {
+    try {
+        await db.insert(notifications).values({
+            userId: opts.userId,
+            type: ADMIN_MESSAGE_TYPE,
+            title: escapeHtml(opts.title),
+            message: escapeAdminText(opts.message),
+        });
+        return true;
+    } catch (err: any) {
+        console.error('[notify] admin message insert failed:', err?.message || err);
+        return false;
+    }
 }

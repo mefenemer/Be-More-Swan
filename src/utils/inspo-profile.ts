@@ -31,6 +31,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { inspoItems, inspoChunks, inspoStyleProfiles } from '../../db/schema';
 import { embedTexts } from './kb-embeddings';
+import { anyTermTsQuery } from './text-search';
 import { gatewayGenerate } from '../lib/ai-gateway';
 
 type Db = ReturnType<typeof getDb>;
@@ -297,21 +298,16 @@ async function retrieveInspoChunks(
     // the query embedding call above fails at runtime (a 429 or a provider outage), which makes it
     // load-bearing in production rather than a dev convenience.
     //
-    // ⚠️ It must be OR, not AND. websearch_to_tsquery ANDs every content word, so
-    // "Announce that we now turn around every new client quote the same day" compiles to
-    // 'announc' & 'turn' & 'around' & 'everi' & 'new' & 'client' & 'quot' & 'day' — eight terms
-    // that must ALL appear in one ~700-char chunk. Measured on staging 2026-08-07: that topic
-    // matched 0 of 10 chunks while the single word 'ship' matched 9. Every real topic here is
-    // sentence-length (a context prompt, a user's chat message, a content pillar), so the fallback
-    // was returning nothing essentially always — silently, because zero rows is indistinguishable
-    // from "nothing relevant". Rewriting the conjunction to a disjunction keeps websearch's parsing
-    // and sanitising of untrusted input (quoted phrases, negation) and only loosens the match;
-    // ts_rank then does the real work, scoring chunks by how many terms actually hit.
+    // ⚠️ It must match ANY term, not all of them — src/utils/text-search.ts carries the full
+    // explanation and the measurement. In short: the parsers AND every content word, so a
+    // sentence-length topic (which is all any topic here ever is — a context prompt, a chat
+    // message, a content pillar) demanded every one of its words inside a single ~700-char chunk
+    // and matched nothing, silently.
     //
     // content_tsv is a GENERATED column defined only in the SQL migration (the drizzle schema
     // omits it, exactly as it does for kb_chunks), so it's referenced as a bare column here.
     // Unambiguous despite the join: only inspo_chunks has it.
-    const anyTerm = sql`replace(websearch_to_tsquery('english', ${q})::text, ' & ', ' | ')::tsquery`;
+    const anyTerm = anyTermTsQuery(q);
     return db
         .select(cols)
         .from(inspoChunks)

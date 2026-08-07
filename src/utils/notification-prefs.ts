@@ -76,6 +76,26 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         ],
     },
     {
+        // A message an admin typed by hand and sent to ONE named user — never automated, never
+        // bulk. Locked in-app because the alternative is worse than noisy: an unmapped type falls
+        // through to FALLBACK_CATEGORY ('product_updates'), which is user-mutable, so anyone who
+        // had muted product news would silently never receive it AND the admin would see a
+        // successful send. There is no delivery receipt anywhere in this system to catch that.
+        // Locked also matches the intent — nobody sends one of these speculatively.
+        // scope:'account' is load-bearing: assistant-scope rows render only in the Assistant
+        // Profile drawer, and an ad-hoc message has no assistant_id to key an override on, so it
+        // would have had no visible toggle at all.
+        key: 'admin_messages',
+        label: 'Messages from Be More Swan',
+        description: 'Direct messages from the Be More Swan team.',
+        scope: 'account',
+        // Email is inert today: nothing sends an admin_message email, and the type is
+        // deliberately absent from EMAIL_FALLBACK_TYPES. The row is here so the channel has a
+        // sane stored default if that ever changes.
+        inApp: LOCKED_ON, email: ON,
+        types: ['admin_message'],
+    },
+    {
         key: 'invoice_ready',
         label: 'Invoices',
         description: 'A new invoice is available to download.',
