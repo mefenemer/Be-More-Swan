@@ -24,6 +24,7 @@ import { logAiUsage } from '../../src/utils/ai-usage';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { consumeTaskCredit } from '../../src/utils/task-credit';
 import { displayCaption } from '../../src/utils/model-json';
+import { buildInspoBlock } from '../../src/utils/inspo-profile';
 import { platformFormat } from '../../src/config/platform-formats';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -83,6 +84,7 @@ export default withLambda(async (event: HandlerEvent) => {
             hashtags: scheduledPosts.hashtags,
             platform: scheduledPosts.platform,
             status: scheduledPosts.status,
+            assistantId: scheduledPosts.assistantId,
         })
         .from(scheduledPosts)
         .where(and(eq(scheduledPosts.id, postId), eq(scheduledPosts.organisationId, ctx.organisationId)))
@@ -103,6 +105,20 @@ export default withLambda(async (event: HandlerEvent) => {
 
     const limit = platformFormat(post.platform ?? 'instagram').charLimit ?? 2200;
 
+    // Inspo applies to 'tone' ONLY, and the exclusions are deliberate rather than an oversight:
+    // 'grammar' is told in as many words not to change the tone, so handing it a "write in this
+    // voice" directive sets the two instructions fighting; 'hashtags' returns no prose for a prose
+    // style directive to shape. 'tone' is the one action whose entire job is the voice, which is
+    // exactly what the user's Inspo library teaches. Retrieval ranks on the caption being revised.
+    // Never throws — degrades to a plain rewrite rather than failing the user's edit.
+    const inspoBlock = action === 'tone' && post.assistantId
+        ? await buildInspoBlock(db, {
+            assistantId: post.assistantId,
+            organisationId: ctx.organisationId,
+            topic: caption,
+        })
+        : null;
+
     try {
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
         const response = await anthropic.messages.create({
@@ -111,7 +127,13 @@ export default withLambda(async (event: HandlerEvent) => {
             system:
                 'You revise the words of ONE social media post. Return ONLY the replacement text — no preamble, '
                 + 'no explanation, no surrounding quotes, no code fences, and no commentary about what you changed. '
-                + 'Match the language of the original.',
+                + 'Match the language of the original.'
+                // Appended after the base rules, with the output-format rule restated last so the
+                // exemplars — which are themselves finished social posts — can't be mistaken for a
+                // template for the reply's SHAPE.
+                + (inspoBlock
+                    ? `\n\n${inspoBlock}\n\nReturn only the replacement text, on its own, with no other commentary.`
+                    : ''),
             messages: [{
                 role: 'user',
                 content: `Platform: ${post.platform || 'instagram'} (caption limit ${limit} characters)\n`

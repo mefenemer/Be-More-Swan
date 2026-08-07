@@ -120,7 +120,13 @@ jobs:
           while read -r NAME INTERVAL MAXTIME; do
             [ -z "${NAME:-}" ] && continue
 
-            LAST=$(grep -E "^${NAME} " "$STATE" 2>/dev/null | tail -1 | awk '{print $2}')
+            # `|| true` is load-bearing — do not remove. GitHub runs this step as `bash -e {0}`,
+            # and `pipefail` propagates grep's exit 1 ("no lines matched") out of the command
+            # substitution, which -e then treats as a fatal error. An endpoint with no recorded
+            # success is the NORMAL case (empty state file on a cache miss, or a newly added
+            # endpoint), so without this the script dies silently on the first endpoint — no
+            # output, no curl, exit 1 — and can never bootstrap its own state file.
+            LAST=$(grep -E "^${NAME} " "$STATE" 2>/dev/null | tail -1 | awk '{print $2}' || true)
             LAST=${LAST:-0}
             AGE=$((NOW - LAST))
 
@@ -133,9 +139,13 @@ jobs:
             fi
 
             echo "::group::POST ${NAME} (due: ${AGE}s >= ${INTERVAL}s)"
+            # On a timeout/connection failure curl exits non-zero but -w has ALREADY written "000",
+            # so don't echo another one — that reported real timeouts as "000000". Swallow the exit
+            # status (bash -e) and default to 000 for the usage errors where -w writes nothing.
             HTTP_CODE=$(curl -sS -o /tmp/body.txt -w "%{http_code}" \
               --max-time "$MAXTIME" --retry 2 --retry-delay 5 \
-              -X POST -H "Authorization: Bearer ${CRON_SECRET}" "${BASE}/${NAME}" || echo "000")
+              -X POST -H "Authorization: Bearer ${CRON_SECRET}" "${BASE}/${NAME}" || true)
+            HTTP_CODE=${HTTP_CODE:-000}
             echo "HTTP ${HTTP_CODE}"
             echo "----- response body -----"
             cat /tmp/body.txt 2>/dev/null || true

@@ -25,6 +25,7 @@ import { resolvePostFooter } from '../../src/utils/post-disclosure';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { consumeTaskCredit } from '../../src/utils/task-credit';
 import { embedTexts } from '../../src/utils/kb-embeddings';
+import { buildInspoBlock } from '../../src/utils/inspo-profile';
 import { computeScheduleSlots, resolvePostingSchedule } from '../../src/config/posting-cadence';
 import { EXCLUDE_PROFILE_RULE, SCORING_BANDS, icpBlock } from '../../src/config/icp-profile';
 import { normalizePlatform, platformFormat, type SocialPlatform } from '../../src/config/platform-formats';
@@ -111,6 +112,9 @@ interface RouteContext {
     /** aiAssistants.mediaSources — the ordered Media Source Selection list. The social route
      *  needs it to tell the model, truthfully, which visuals this assistant can produce. */
     mediaSources?: unknown;
+    /** The bounded Inspo block (style profile + top-K exemplars) for this turn — only populated
+     *  for routes with usesInspo. null/undefined (e.g. shadow handoff calls) injects nothing. */
+    inspoBlock?: string | null;
 }
 
 interface AssistantRoute {
@@ -119,6 +123,12 @@ interface AssistantRoute {
     /** When true the handler runs KB retrieval on the user's message and passes the
      *  result into buildRolePrompt via rc.knowledgeBase (kb_articles / kb_chunks). */
     usesKnowledgeBase?: boolean;
+    /** When true the handler builds the Inspo block for this turn and passes it into
+     *  buildRolePrompt via rc.inspoBlock. Set on the routes that WRITE the user's copy — a
+     *  post drafted in chat has to sound like one drafted by autopilot, and before this flag
+     *  existed it did not: process-content-jobs injected Inspo and this route never did, so
+     *  the same library shaped scheduled drafts and was invisible in chat. */
+    usesInspo?: boolean;
     /** Role-specific prompt body. buildSystemPrompt() appends the hardened
      *  <strict_configuration> block to this before every API call. */
     buildRolePrompt(rc: RouteContext): string;
@@ -1227,6 +1237,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
     // by the client from the hubLink the handler stamps on the reply.
     social_media_manager: {
         model: DEFAULT_MODEL,
+        usesInspo: true,
         // 1024 was not enough headroom for a finished caption plus hashtags plus the reply, and
         // the failure mode is the worst one available: the envelope truncates mid-string, the
         // JSON never parses, and parseStructuredReply degrades to STRUCTURED_REPLY_FALLBACK —
@@ -1266,6 +1277,10 @@ ONE POST PER REPLY. The draft object below holds exactly one post, so one reply 
 NEVER say a post has been drafted, written, saved, scheduled or queued for review unless THIS reply includes the post draft object. If uiElement is null then nothing has been saved, and a reply claiming otherwise sends the user to an empty Review Queue. When you have nothing to include, say plainly what you need in order to write it.`,
                 platformLine,
                 mediaLine,
+                // Before the JSON contract, deliberately. The block ends with up to four excerpts
+                // that are themselves finished social posts, so it is the last thing that should be
+                // allowed to suggest a reply SHAPE — the envelope instruction has to come after it.
+                rc.inspoBlock ?? '',
                 `Return STRICT JSON and NOTHING else — no markdown, no code fences, no prose before or after the object, and never repeat the conversation back. Keep "reply" to one or two short sentences. Every string must be valid JSON (escape any quotes or newlines inside caption/hashtags):
 {
   "reply": "your conversational message to the user",
@@ -1277,7 +1292,7 @@ NEVER say a post has been drafted, written, saved, scheduled or queued for revie
     "cardHeadline": "<the branded card's single line of type — see BRAND CARDS above>"` : ''}
   }
 }`,
-            ].join('\n\n');
+            ].filter(Boolean).join('\n\n');
         },
         parseResponse: parseStructuredReply,
     },
@@ -1519,6 +1534,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         ? await retrieveKnowledgeBase(db, orgId, session.aiAssistantId, message)
         : null;
 
+    // Inspo — the same bounded block process-content-jobs injects, so a post drafted here sounds
+    // like one drafted by autopilot. The user's message is the retrieval topic: in chat the brief
+    // IS the turn, which makes this the one seam where channel B always has something to rank on.
+    // Never throws (buildInspoBlock swallows its own failures), so a bad turn degrades to no Inspo
+    // rather than killing the conversation.
+    const inspoBlock = route.usesInspo
+        ? await buildInspoBlock(db, { assistantId: session.aiAssistantId, organisationId: orgId, topic: message })
+        : null;
+
     const rolePrompt = route.buildRolePrompt({
         assistantName: assistantRow.name,
         jobRole: assistantRow.jobRole,
@@ -1527,6 +1551,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         business,
         knowledgeBase,
         mediaSources: assistantRow.mediaSources,
+        inspoBlock,
     });
     const system = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,

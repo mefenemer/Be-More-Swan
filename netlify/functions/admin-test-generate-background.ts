@@ -14,7 +14,9 @@ import { users, aiBlueprints, contentGenerationJobs, scheduledPosts } from '../.
 import { hasPermission } from '../../src/utils/rbac';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmark';
+import { CONTENT_QUALITY_STANDARDS } from '../../src/constants/content-quality';
 import { renderBlueprintPrompt } from '../../src/utils/blueprint-prompt';
+import { buildInspoBlock } from '../../src/utils/inspo-profile';
 import { resolveDisclosureFooter, appendFooter } from '../../src/utils/disclosure-footer';
 import { parseModelJson, toCaptionText } from '../../src/utils/model-json';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -145,6 +147,22 @@ export default withLambda(async (event) => {
         let systemPrompt = 'You are an expert social media copywriter.\n';
         systemPrompt += renderBlueprintPrompt(sections);
 
+        // Same drift, one layer up: the blueprint render was brought back to parity but the two
+        // blocks production appends AFTER it were not, so the smoke test still reported on a prompt
+        // no customer receives. Inspo especially — an admin testing an assistant whose owner has
+        // taught it a voice would see output in a voice the real path never uses.
+        //
+        // Channel A (the always-on style profile) is now identical to production. Channel B ranks on
+        // the admin's context prompt, which is the closest analogue available here: a smoke test has
+        // no calendar slot, so it has no rotated pillar to fall back to the way a scheduled job does.
+        const inspoBlock = await buildInspoBlock(db, {
+            assistantId: job.assistantId!,
+            organisationId: job.organisationId,
+            topic: job.contextPrompt,
+        });
+        if (inspoBlock) systemPrompt += `\n\n${inspoBlock}`;
+
+        systemPrompt += `\n\n${CONTENT_QUALITY_STANDARDS}`;
         systemPrompt += `\n\n${AURA_SAFE_CONTENT_BENCHMARK}`;
 
         const gwResponse = await gatewayGenerate({ system: systemPrompt, messages });

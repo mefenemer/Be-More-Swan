@@ -450,10 +450,19 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // own strict rules are established first, and before the safety benchmark so that
         // always has the last word. Topic = the context prompt driving this specific draft.
         // Never throws — inspo degrades to nothing rather than failing the draft.
+        //
+        // The topic only ranks channel B (top-K retrieval); channel A's style profile is injected
+        // regardless. It used to be `job.context_prompt` alone, which is null on an autopilot job
+        // whenever the idea queue is empty — the normal steady state — so retrieval was skipped on
+        // every scheduled draft and the user's saved examples were never actually read. Measured on
+        // prod 2026-08-07: 7 of 7 scheduled jobs ran with no topic. Fall back to the pillar this
+        // slot is themed on (already rotated per calendar day, so sibling slots retrieve against
+        // DIFFERENT themes rather than all pulling the same chunks), then to the pillar list.
+        const inspoTopic = job.context_prompt || rotatedPillar || (pillarList.length ? pillarList.join(', ') : null);
         const inspoBlock = await buildInspoBlock(db, {
             assistantId: job.assistant_id,
             organisationId: job.organisation_id,
-            topic: job.context_prompt,
+            topic: inspoTopic,
         });
         if (inspoBlock) systemPrompt += `\n\n${inspoBlock}`;
 

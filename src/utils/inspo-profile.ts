@@ -293,16 +293,31 @@ async function retrieveInspoChunks(
         if (rows.length > 0) return rows;
     }
 
-    // Keyword fallback — works with no embedding provider configured (db/inspo-items.sql).
+    // Keyword fallback — the path taken with no embedding provider configured, and also whenever
+    // the query embedding call above fails at runtime (a 429 or a provider outage), which makes it
+    // load-bearing in production rather than a dev convenience.
+    //
+    // ⚠️ It must be OR, not AND. websearch_to_tsquery ANDs every content word, so
+    // "Announce that we now turn around every new client quote the same day" compiles to
+    // 'announc' & 'turn' & 'around' & 'everi' & 'new' & 'client' & 'quot' & 'day' — eight terms
+    // that must ALL appear in one ~700-char chunk. Measured on staging 2026-08-07: that topic
+    // matched 0 of 10 chunks while the single word 'ship' matched 9. Every real topic here is
+    // sentence-length (a context prompt, a user's chat message, a content pillar), so the fallback
+    // was returning nothing essentially always — silently, because zero rows is indistinguishable
+    // from "nothing relevant". Rewriting the conjunction to a disjunction keeps websearch's parsing
+    // and sanitising of untrusted input (quoted phrases, negation) and only loosens the match;
+    // ts_rank then does the real work, scoring chunks by how many terms actually hit.
+    //
     // content_tsv is a GENERATED column defined only in the SQL migration (the drizzle schema
     // omits it, exactly as it does for kb_chunks), so it's referenced as a bare column here.
     // Unambiguous despite the join: only inspo_chunks has it.
+    const anyTerm = sql`replace(websearch_to_tsquery('english', ${q})::text, ' & ', ' | ')::tsquery`;
     return db
         .select(cols)
         .from(inspoChunks)
         .innerJoin(inspoItems, eq(inspoChunks.inspoItemId, inspoItems.id))
-        .where(and(scope, sql`content_tsv @@ websearch_to_tsquery('english', ${q})`))
-        .orderBy(sql`ts_rank(content_tsv, websearch_to_tsquery('english', ${q})) DESC`)
+        .where(and(scope, sql`content_tsv @@ ${anyTerm}`))
+        .orderBy(sql`ts_rank(content_tsv, ${anyTerm}) DESC`)
         .limit(RETRIEVAL_K);
 }
 
