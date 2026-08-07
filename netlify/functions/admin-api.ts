@@ -34,9 +34,9 @@ import {
     agentAnomalies, agentAnomalyThresholds, taskRuns,
     legalHolds, jwtBlocklist, stripeDisputes, storageUsage, helpArticles,
     rewardAudits, userOrganisations,
-    leadReplies, contactTasks, issueReports,
+    leadReplies, contactTasks, issueReports, notifications,
 } from '../../db/schema';
-import { createNotification } from '../../src/utils/notify';
+import { createNotification, ADMIN_MESSAGE_TYPE } from '../../src/utils/notify';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { resolveEnvironment, runWithEnvironment } from '../../src/utils/env-context';
 import { sendMagicLinkEmail } from '../../src/utils/email';
@@ -1883,6 +1883,7 @@ export default withLambda(async (event) => {
             let client: any = null;
             let tickets: any[] = [];
             let issues: any[] = [];
+            let adminMessages: any[] = [];
             if (lead.email) {
                 const [snap] = await db.execute<{
                     user_id: number; first_name: string | null; last_name: string | null;
@@ -1995,10 +1996,23 @@ export default withLambda(async (event) => {
                     }).from(issueReports)
                       .where(eq(issueReports.userId, snap.user_id))
                       .orderBy(desc(issueReports.createdAt)).limit(50);
+
+                    // In App Messages — ad-hoc admin → user notifications sent from
+                    // Comms → Send a Message (notifications.type = 'admin_message'), newest
+                    // first. title/message are stored ALREADY HTML-escaped by
+                    // createAdminMessage (newlines promoted to <br>), so the client must
+                    // render them as-is rather than escaping a second time.
+                    adminMessages = await db.select({
+                        id: notifications.id, title: notifications.title,
+                        message: notifications.message, isRead: notifications.isRead,
+                        readAt: notifications.readAt, createdAt: notifications.createdAt,
+                    }).from(notifications)
+                      .where(and(eq(notifications.userId, snap.user_id), eq(notifications.type, ADMIN_MESSAGE_TYPE)))
+                      .orderBy(desc(notifications.createdAt)).limit(50);
                 }
             }
 
-            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lead, thread, tasks, client, tickets, issues }) };
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lead, thread, tasks, client, tickets, issues, adminMessages }) };
         }
 
         // POST ?resource=contact-update → edit name/company/phone/type/tags

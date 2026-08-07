@@ -6700,7 +6700,7 @@ async function openContact(id) {
   document.getElementById('contact-info').innerHTML = '<p class="p-1 text-gray-400">Loading…</p>';
   try {
     const data = await api(`/.netlify/functions/admin-api?resource=contact-detail&id=${id}`);
-    renderContactDetail(data.lead, data.thread || [], data.tasks || [], data.client || null, data.tickets || [], data.issues || []);
+    renderContactDetail(data.lead, data.thread || [], data.tasks || [], data.client || null, data.tickets || [], data.issues || [], data.adminMessages || []);
     renderContactInfo(data.lead, data.client || null);
     // Scroll the detail pane back to the top so the avatar/header is fully visible.
     if (detailPane.parentElement) detailPane.parentElement.scrollTop = 0;
@@ -6710,7 +6710,7 @@ async function openContact(id) {
   }
 }
 
-function renderContactDetail(lead, thread, tasks, client, tickets, issues) {
+function renderContactDetail(lead, thread, tasks, client, tickets, issues, adminMessages) {
   const pill = CT_TYPE_PILL[lead.contactType] || CT_TYPE_PILL.lead;
   // Prefer the client's account name for the header so it matches the read-only Contact info.
   const displayName = (client && client.accountName) || lead.name || '';
@@ -6770,6 +6770,8 @@ function renderContactDetail(lead, thread, tasks, client, tickets, issues) {
       ${_ctSupportSection(tickets, client)}
 
       ${_ctIssuesSection(issues, client)}
+
+      ${_ctAdminMessagesSection(adminMessages, client)}
 
       ${_ctSection(
         'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7l2 2 4-4',
@@ -6919,6 +6921,41 @@ function _ctIssuesSection(issues, client) {
     open ? `<span class="text-emerald-600">(${open} open)</span>` : `<span class="text-gray-400">(${issues.length})</span>`,
     `<div class="space-y-2">${issues.length ? issues.map(row).join('') : '<p class="text-xs text-gray-400 py-1">No issues reported yet.</p>'}</div>`
   );
+}
+
+// In App Messages — the ad-hoc admin → user notifications sent from Comms → Send a Message
+// (notifications.type = 'admin_message'), newest first, with whether the user has read each one.
+// Read-only: there is no reply channel on an in-app message, and no delivery receipt beyond
+// `isRead`. Same visibility rule as Support requests / Issues reported — shown for any contact
+// with an account, hidden for pure prospects (a notification needs a users row to point at).
+function _ctAdminMessagesSection(messages, client) {
+  messages = Array.isArray(messages) ? messages : [];
+  if (!messages.length && !client) return '';
+  const unread = messages.filter(m => !m.isRead).length;
+  const row = m => `
+    <div class="border ${m.isRead ? 'border-gray-200' : 'border-emerald-200 bg-emerald-50/40'} rounded-xl px-3 py-2.5">
+      <div class="flex items-start justify-between gap-3">
+        <p class="text-sm font-semibold text-gray-800 min-w-0">${_ctAdminMsgHtml(m.title)}</p>
+        <span class="shrink-0 text-xs font-semibold px-2 py-0.5 rounded-md ${m.isRead ? 'bg-gray-100 text-gray-500' : 'bg-emerald-100 text-emerald-800'}">${m.isRead ? 'Read' : 'Unread'}</span>
+      </div>
+      <p class="text-sm text-gray-600 mt-1">${_ctAdminMsgHtml(m.message)}</p>
+      <p class="text-xs text-gray-400 mt-2">Sent ${_ctWhen(m.createdAt)}${m.isRead && m.readAt ? ` · read ${_ctWhen(m.readAt)}` : ''}</p>
+    </div>`;
+  return _ctSection(
+    'M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z',
+    'In App Messages',
+    unread ? `<span class="text-emerald-600">(${unread} unread)</span>` : `<span class="text-gray-400">(${messages.length})</span>`,
+    `<div class="space-y-2">${messages.length ? messages.map(row).join('') : '<p class="text-xs text-gray-400 py-1">No in-app messages sent yet.</p>'}</div>`
+  );
+}
+
+// Admin message copy is ALREADY HTML-escaped when it is stored (createAdminMessage in
+// src/utils/notify.ts escapes the whole string, then promotes newlines to <br>), so passing it
+// through _escH here would show literal &amp;/&lt; to the admin. Instead strip every tag except
+// the attribute-free ones the user's own notification feed renders, so nothing a future write
+// path stores can inject markup into the portal.
+function _ctAdminMsgHtml(s) {
+  return String(s == null ? '' : s).replace(/<(?!\/?(?:br|b|strong|em|i|u)\s*\/?>)[^>]*>/gi, '');
 }
 
 function _ctQuickAction(onclick, label, path) {

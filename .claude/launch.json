@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-inapp-messages",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4279",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/4c4b2244-94d6-48c3-8eb3-dce20152bf96/scratchpad/imharness"
+      ],
+      "port": 4279,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-send-notification",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

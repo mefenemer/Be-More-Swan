@@ -175,4 +175,65 @@ check('the recipient picker avoids inline onclick', () => {
     assert.ok(/data-name=/.test(searchBody) && /addEventListener\('click'/.test(searchBody));
 });
 
+console.log('\n──── the sent messages show up in Contacts ────');
+
+const adminApiSrc = read('netlify/functions/admin-api.ts');
+
+check('contact-detail returns adminMessages', () => {
+    assert.ok(/JSON\.stringify\(\{ lead, thread, tasks, client, tickets, issues, adminMessages \}\)/.test(adminApiSrc),
+        'contact-detail must include adminMessages in its response');
+});
+
+check('the query filters on the shared constant, not a literal', () => {
+    // A hardcoded 'admin_message' here would silently return nothing the day the type is renamed
+    // in notify.ts — the panel would just look like no messages were ever sent.
+    assert.ok(/import \{ createNotification, ADMIN_MESSAGE_TYPE \}/.test(adminApiSrc),
+        'admin-api must import ADMIN_MESSAGE_TYPE from notify.ts');
+    assert.ok(/eq\(notifications\.type, ADMIN_MESSAGE_TYPE\)/.test(adminApiSrc),
+        'the contact-detail query must filter by ADMIN_MESSAGE_TYPE');
+});
+
+check('the section renders before Tasks', () => {
+    const detail = adminHtml.slice(adminHtml.indexOf('function renderContactDetail'));
+    const body = detail.slice(0, detail.indexOf('function _ctSection'));
+    const msgs = body.indexOf('_ctAdminMessagesSection(');
+    const tasks = body.indexOf("'Tasks',");
+    assert.ok(msgs > -1, 'the In App Messages section is not rendered');
+    assert.ok(tasks > -1, 'could not locate the Tasks section');
+    assert.ok(msgs < tasks, 'In App Messages must render before the Tasks section');
+});
+
+check('the section is titled "In App Messages"', () => {
+    assert.ok(/'In App Messages'/.test(adminHtml), 'the section heading is missing');
+});
+
+check('openContact passes the messages through', () => {
+    assert.ok(/data\.adminMessages \|\| \[\]/.test(adminHtml),
+        'openContact must forward data.adminMessages to renderContactDetail');
+});
+
+check('the panel does not escape the copy a second time', () => {
+    // createAdminMessage stores title/message ALREADY escaped. Running them through _escH here
+    // would surface literal &amp;/&lt; to the admin, and would turn its own <br> into text.
+    const start = adminHtml.indexOf('function _ctAdminMessagesSection');
+    assert.ok(start > -1, '_ctAdminMessagesSection is missing');
+    const body = adminHtml.slice(start, adminHtml.indexOf('function _ctQuickAction'));
+    assert.ok(!/_escH\(m\.(title|message)\)/.test(body), 'stored admin copy must not be re-escaped');
+    assert.ok(/_ctAdminMsgHtml\(m\.title\)/.test(body) && /_ctAdminMsgHtml\(m\.message\)/.test(body),
+        'title and message must go through the _ctAdminMsgHtml allow-list');
+});
+
+check('the allow-list drops attributes and unknown tags', () => {
+    const m = adminHtml.match(/function _ctAdminMsgHtml\(s\) \{[\s\S]*?\n\}/);
+    assert.ok(m, '_ctAdminMsgHtml is missing');
+    // Reconstruct the one-liner so the regex itself is under test, not a copy of it.
+    const fn = new Function('s', m![0].replace(/^function _ctAdminMsgHtml\(s\) \{/, '').replace(/\}$/, '')) as (s: string) => string;
+    assert.strictEqual(fn('line one<br>line two'), 'line one<br>line two', '<br> must survive');
+    assert.strictEqual(fn('<b>bold</b>'), '<b>bold</b>', 'plain <b> must survive');
+    assert.strictEqual(fn('<img src=x onerror=alert(1)>'), '', 'unknown tags must be stripped');
+    // A tag carrying attributes is dropped wholesale (an orphaned </b> may remain — inert).
+    assert.ok(!fn('<b onclick="x()">hi</b>').includes('onclick'), 'tags carrying attributes must be stripped');
+    assert.ok(!fn('<a href="http://evil">x</a>').includes('href'), 'links must not survive');
+});
+
 console.log(`\n${passed} checks passed.\n`);
