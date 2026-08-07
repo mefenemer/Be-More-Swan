@@ -529,4 +529,98 @@ check('the rejection pass skips before paying for a model call', () => {
     assert.ok(/a pending proposal already holds this field/.test(beforeModel), 'the pending check is too late');
 });
 
+// ── The per-assistant consent switch ─────────────────────────────────────────
+//
+// The plan feature entitles a WORKSPACE. Without a second gate, granting it opts in every eligible
+// assistant in that workspace at once, with no way to pilot the agent on one — which matters here
+// because the rejection pass rewrites target_persona, and that redirects cold outreach at real
+// strangers. Semantics of the flag itself live in tests/strategy-proposals.test.ts; this file
+// asserts that both passes actually consult it, and that nothing pays a model call first.
+
+check('both passes gate on per-assistant consent, not only on the plan feature', () => {
+    const editPass = runBody.slice(runBody.indexOf('for (const c of clusters'), runBody.indexOf('const rejectionClusters'));
+    const rejectionPass = runBody.slice(runBody.indexOf('const rejectionClusters'));
+    for (const [label, pass] of [['edit', editPass], ['rejection', rejectionPass]] as const) {
+        assert.ok(pass.length > 0, `the ${label} pass could not be located — this check tests nothing`);
+        assert.ok(/isStrategyAgentEnabledForAssistant/.test(pass),
+            `the ${label} pass proposes for assistants that were explicitly switched off`);
+        // ⚠️ Consent must be read BEFORE the model call, not just before the write. A skip that
+        // happens after generation still spends the money and still reads the evidence.
+        const beforeModel = pass.slice(0, pass.indexOf('gatewayGenerate'));
+        assert.ok(/isStrategyAgentEnabledForAssistant/.test(beforeModel),
+            `the ${label} pass checks consent after paying for the model call`);
+    }
+});
+
+check('the rejection pass loads the context it needs to check consent', () => {
+    // ⚠️ This pass reads its current value from discovery_campaigns, so onboardingContext is
+    // selected ONLY for the consent gate. Drop the column from the select and the gate silently
+    // reads undefined — which, because the default is ON, means it never skips anything.
+    const rejectionPass = runBody.slice(runBody.indexOf('const rejectionClusters'));
+    const select = rejectionPass.slice(rejectionPass.indexOf('const [assistant]'));
+    assert.ok(/onboardingContext:\s*aiAssistants\.onboardingContext/.test(select.slice(0, 400)),
+        'the rejection pass no longer selects onboardingContext — its consent gate always passes');
+});
+
+check('the consent switch is on the assistant profile, defaulting ON', () => {
+    const html = raw('assistant-detail.html');
+    assert.ok(html.includes('id="module-strategy-agent"'), 'the Operational Setup card is gone');
+    assert.ok(html.includes('id="edit_strategy_agent"'), 'the consent switch input is gone');
+    // The `edit_` prefix is not cosmetic: attachAutoSave() binds on [id^="edit_"], so a renamed
+    // input keeps rendering and silently stops saving.
+    assert.ok(/id="edit_strategy_agent"/.test(html), 'the input must keep the edit_ prefix to autosave');
+
+    const js = sourceOf('assistants.js');
+    // Default ON in BOTH directions. `?.checked === true` would write false whenever the card is
+    // not on the page, opting out every role that does not render it.
+    assert.ok(/strategyAgentEnabled:\s*document\.getElementById\('edit_strategy_agent'\)\?\.checked !== false/.test(js),
+        'the collector does not default a missing switch to ON');
+    assert.ok(/strategyAgentEl\.checked = ctx\.strategyAgentEnabled !== false/.test(js),
+        'the hydrator does not default an absent stored value to ON');
+});
+
+check('the locked switch uses a utility the compiled CSS actually has', () => {
+    // ⚠️ style.css is a BUILT artifact and rebuilding it churns unrelated classes across the whole
+    // file, so a card may only use variants that are already compiled. `peer-disabled:opacity-50`
+    // is not one of them: the switch would look identical enabled and disabled, and the only
+    // signal that a plan gate is in force would be that clicking does nothing.
+    const html = raw('assistant-detail.html');
+    const cardStart = html.indexOf('id="module-strategy-agent"');
+    assert.ok(cardStart !== -1, 'the card is gone — this check tests nothing');
+    // HTML comments stripped first: this card's comment NAMES the variants it must not use, and a
+    // scan that reads prose as markup fails on the explanation rather than on the code.
+    const card = html.slice(cardStart, html.indexOf('TAB: Creative Strategy', cardStart))
+        .replace(/<!--[\s\S]*?-->/g, ' ');
+    const variants = [...card.matchAll(/\bpeer-disabled:[\w-]+/g)].map((m) => m[0]);
+    assert.ok(variants.length > 0, 'the disabled switch has no visual treatment at all');
+    const css = raw('style.css');
+    for (const v of variants) {
+        assert.ok(css.includes(v.replace(':', '\\:')), `${v} is not in the compiled style.css — the disabled switch renders identically to the enabled one`);
+    }
+});
+
+check('the consent card is gated by the registry, never by a roleKey', () => {
+    // The point of the pair: a future role that inherits strategyTab inherits the switch with it.
+    // A roleKey test here would give that role a Strategy tab and no way to opt out of it.
+    const js = sourceOf('assistants.js');
+    const block = js.slice(js.indexOf('const strategy = cfg.strategyTab'));
+    const gate = block.slice(0, block.indexOf('if (strategy)'));
+    assert.ok(/toggle\('module-strategy-agent',\s*!!strategy\)/.test(gate),
+        'the card is not toggled from the same registry declaration as the tab');
+    assert.ok(!/lead_qualifier/.test(gate), 'the card is gated on a roleKey — future roles will not inherit it');
+});
+
+check('the entitlement reaches the card, which cannot resolve it alone', () => {
+    // There is no client-side feature map. assistant-strategy.js is the only place that learns
+    // whether the workspace has the plan feature, so it has to hand the answer over or the 🔒 chip
+    // never appears.
+    const ui = sourceOf('src/components/assistant-strategy.js');
+    assert.ok(/_setStrategyAgentEntitled/.test(ui), 'the component never reports the plan gate to the profile card');
+    const js = sourceOf('assistants.js');
+    assert.ok(/window\._setStrategyAgentEntitled\s*=/.test(js), 'nothing on the profile page receives it');
+    // Unresolved must read as entitled: a chip that appears late is a cosmetic delay, a switch
+    // disabled by a failed fetch is a setting the user cannot reach.
+    assert.ok(/let _strategyAgentEntitled = true/.test(js), 'the card defaults to locked before the gate resolves');
+});
+
 console.log(`\n${passed} checks passed.`);

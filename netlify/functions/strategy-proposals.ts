@@ -31,7 +31,8 @@ import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import { CONFIG_KEYS, getPlatformConfig } from '../../src/utils/platform-config';
 import {
     MIN_SAMPLE, REJECT_REASONS, REJECT_REASON_EFFECTS, REJECT_REASON_LABELS,
-    STRATEGY_AGENT_FEATURE, STRATEGY_TUNABLE_FIELDS, isProposalStatus, isRejectReason, tunableField,
+    STRATEGY_AGENT_FEATURE, STRATEGY_TUNABLE_FIELDS, isProposalStatus, isRejectReason,
+    isStrategyAgentEnabledForAssistant, tunableField,
 } from '../../src/config/strategy-proposals';
 import { MIN_EDIT_SAMPLE } from '../../src/config/template-feedback';
 import { applyStrategyChange, rejectProposal, rollbackProposal } from '../../src/utils/strategy-proposals';
@@ -78,13 +79,20 @@ export default withLambda(async (event) => {
     // IDOR guard — the assistant instance must belong to the caller's org. Every query below is
     // additionally scoped by organisationId, so a proposal id from another tenant reads as missing.
     const [assistant] = await db
-        .select({ id: aiAssistants.id, name: aiAssistants.name })
+        .select({ id: aiAssistants.id, name: aiAssistants.name, onboardingContext: aiAssistants.onboardingContext })
         .from(aiAssistants)
         .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId)))
         .limit(1);
     if (!assistant) return json(404, { error: 'Assistant not found.' });
 
     const enabled = await hasFeatureByOrg(db, orgId, STRATEGY_AGENT_FEATURE);
+
+    // ⚠️ The per-assistant consent switch deliberately does NOT gate this function. It stops the
+    // proposers PRODUCING (autonomous-strategy-agent.ts checks it in both passes); gating the API on
+    // it too would strand any pending proposal behind a toggle, un-appliable and invisible, which is
+    // worse than the silence it was flipped to create. It is reported so the tab can say why nothing
+    // new is arriving.
+    const assistantPaused = !isStrategyAgentEnabledForAssistant(assistant.onboardingContext);
 
     // A decision on a hidden feature is refused outright. `list` degrades to a gated response
     // instead, so the tab can render nothing without the client parsing a 403 as a normal state.
@@ -144,6 +152,7 @@ export default withLambda(async (event) => {
 
             return json(200, {
                 gated: false,
+                assistantPaused,
                 proposals: rows.map((r) => {
                     const field = tunableField(r.targetField);
                     const { decidedByFirstName, decidedByLastName, ...rest } = r;

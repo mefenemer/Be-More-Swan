@@ -24,8 +24,10 @@ import { fileURLToPath } from 'node:url';
 import {
     PROPOSAL_SOURCES, PROPOSAL_STATUSES, REJECT_REASONS, REJECT_REASON_LABELS,
     REJECT_REASON_EFFECTS, REJECT_REASONS_FED_TO_MODEL, STRATEGY_TUNABLE_FIELDS,
-    STRATEGY_FORBIDDEN_FIELDS, STRATEGY_AGENT_FEATURE, MIN_SAMPLE, PROPOSAL_EXPIRY_DAYS,
-    isProposalSource, isProposalStatus, isRejectReason, isValidValueFor, tunableField,
+    STRATEGY_FORBIDDEN_FIELDS, STRATEGY_AGENT_FEATURE, STRATEGY_AGENT_ASSISTANT_KEY,
+    MIN_SAMPLE, PROPOSAL_EXPIRY_DAYS,
+    isProposalSource, isProposalStatus, isRejectReason, isStrategyAgentEnabledForAssistant,
+    isValidValueFor, tunableField,
 } from '../src/config/strategy-proposals';
 
 let passed = 0;
@@ -346,6 +348,74 @@ check('the writer only ever writes tables the envelope names', () => {
         assert.ok(allowed.has(t), `the writer touches ${t}, which is outside the change envelope`);
     }
     assert.ok(written.has('strategyProposals'), 'the scan found no writes at all — it is not testing anything');
+});
+
+// ── The per-assistant consent switch ─────────────────────────────────────────
+//
+// Two gates in series, with OPPOSITE defaults, and the defaults are the whole design:
+// the plan feature is off until somebody grants it (commercial), the per-assistant switch is on
+// unless somebody revokes it (operational). Invert either one and the pair stops working — two
+// default-off gates give "I enabled it and nothing happened", two default-on gates give a feature
+// nobody sold running against a customer's outbound.
+
+check('the per-assistant switch defaults ON, and only an explicit false switches it off', () => {
+    // Absence means on. This is what makes the toggle need no backfill: every assistant that
+    // predates it, and every assistant created without the key, keeps behaving as it did.
+    assert.equal(isStrategyAgentEnabledForAssistant(undefined), true);
+    assert.equal(isStrategyAgentEnabledForAssistant(null), true);
+    assert.equal(isStrategyAgentEnabledForAssistant({}), true);
+    assert.equal(isStrategyAgentEnabledForAssistant({ [STRATEGY_AGENT_ASSISTANT_KEY]: true }), true);
+    assert.equal(isStrategyAgentEnabledForAssistant({ [STRATEGY_AGENT_ASSISTANT_KEY]: false }), false);
+
+    // onboarding_context is nullable and holds whatever onboarding last wrote — a non-object must
+    // not throw, and must not read as "off" either.
+    for (const junk of ['false', 0, [], 'nonsense']) {
+        assert.equal(isStrategyAgentEnabledForAssistant(junk), true, `${JSON.stringify(junk)} must read as on`);
+    }
+    // Falsy-but-not-false values are NOT an opt-out: only `false` is, so a half-written context
+    // cannot silently disable the agent.
+    assert.equal(isStrategyAgentEnabledForAssistant({ [STRATEGY_AGENT_ASSISTANT_KEY]: 0 }), true);
+    assert.equal(isStrategyAgentEnabledForAssistant({ [STRATEGY_AGENT_ASSISTANT_KEY]: null }), true);
+});
+
+check('the consent key cannot be reached through the prototype chain', () => {
+    // `{}` inherits toString; a key lookup that walked the chain would read a function as "not
+    // false" here, but the same laxity is what lets a crafted context answer for a missing key.
+    assert.equal(isStrategyAgentEnabledForAssistant(Object.create({ [STRATEGY_AGENT_ASSISTANT_KEY]: false })), true);
+});
+
+check('consent and entitlement are two different keys', () => {
+    // ⚠️ Sharing a key would collapse the distinction: the user's operational switch would be
+    // writing the workspace's commercial entitlement, from a page they control.
+    assert.notEqual(STRATEGY_AGENT_ASSISTANT_KEY, STRATEGY_AGENT_FEATURE);
+    assert.ok(!STRATEGY_AGENT_ASSISTANT_KEY.includes(STRATEGY_AGENT_FEATURE),
+        'the consent key contains the feature key — a source scan for one would match the other');
+});
+
+check('the consent switch never gates reading or deciding an existing proposal', () => {
+    // It stops PRODUCTION only. Gating the API on it too would strand a pending proposal behind a
+    // toggle: invisible, un-appliable, and un-declinable until the user guessed why.
+    const apiText = sourceOf('netlify/functions/strategy-proposals.ts');
+    assert.ok(apiText.includes('isStrategyAgentEnabledForAssistant'),
+        'the API does not read the consent switch at all, so it cannot report it');
+    assert.ok(/assistantPaused/.test(apiText), 'the API must report the paused state to the tab');
+    // The refusal path and the gated-list path must both key off the PLAN feature alone.
+    assert.ok(/if \(!enabled && action !== 'list'\)/.test(apiText),
+        'the 403 refusal is no longer keyed off the plan feature alone');
+    assert.ok(!/assistantPaused[\s\S]{0,80}return json\(403/.test(apiText),
+        'the consent switch is refusing decisions — pending proposals would be stranded');
+});
+
+check('the consent switch is stored where the blueprint already lives', () => {
+    // onboarding_context, not a new column: the worker already loads it for the field it is
+    // rewriting, so the gate costs no extra query in either pass.
+    const workerText = sourceOf('netlify/functions/autonomous-strategy-agent.ts');
+    const reads = [...workerText.matchAll(/isStrategyAgentEnabledForAssistant\(([^)]*)\)/g)].map((m) => m[1].trim());
+    assert.equal(reads.length, 2, `expected the gate in both passes, found ${reads.length}`);
+    for (const arg of reads) {
+        assert.equal(arg, 'assistant.onboardingContext',
+            'the gate is reading something other than the assistant it is about to rewrite');
+    }
 });
 
 console.log(`\n${passed} checks passed.`);

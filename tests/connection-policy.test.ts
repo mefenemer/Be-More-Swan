@@ -12,7 +12,7 @@
 // Pure logic — no DB required.
 
 import assert from 'node:assert';
-import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant, CATEGORY_LABELS, CONNECTOR_CATEGORY, ROLE_CONNECTIONS } from '../src/utils/connection-map';
+import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant, usesOutreachMailbox, CATEGORY_LABELS, CONNECTOR_CATEGORY, ROLE_CONNECTIONS, MAILBOX_ROLES } from '../src/utils/connection-map';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -146,6 +146,38 @@ check('supportedToolsForAssistant returns the whole catalogue for an unrestricte
     const tools = supportedToolsForAssistant(a);
     assert.equal(tools.some(t => t.key === 'social' && t.available), true);
     assert.equal(tools.some(t => t.key === 'crm' && !t.available), true);
+});
+
+// ── Outreach mailboxes (email category) ──────────────────────────────────────
+// `email` is live only for the roles that actually send through a connected mailbox. The pair of
+// checks below is the invariant: live for a mailbox role, still coming-soon for everyone else.
+check('supportedToolsForAssistant marks Email available for a mailbox role', () => {
+    const a = { roleKey: 'lead_qualifier', role: 'Lead Generation Assistant' };
+    const tools = supportedToolsForAssistant(a);
+    const email = tools.find(t => t.key === 'email');
+    assert.ok(email, 'email tool missing for lead_qualifier');
+    assert.equal(email.available, true);
+});
+
+check('Email stays coming-soon for a role with no mailbox send path', () => {
+    const a = { roleKey: 'inbox_manager', role: 'Inbox Assistant' };
+    assert.equal(supportedToolsForAssistant(a).find(t => t.key === 'email')?.available, false);
+});
+
+// A role marked as a mailbox role must actually be allowed the email category — otherwise
+// usesOutreachMailbox() is true, the server sends mailboxProviders, and the grid renders mailbox
+// cards for a category the policy would never have shown. Fail loudly on that mismatch.
+check('every MAILBOX_ROLES entry is allowed the email category', () => {
+    for (const roleKey of MAILBOX_ROLES) {
+        assert.ok(ROLE_CONNECTIONS[roleKey], `${roleKey} is not in ROLE_CONNECTIONS`);
+        assert.ok(ROLE_CONNECTIONS[roleKey].includes('email'), `${roleKey} is a mailbox role but is not allowed 'email'`);
+        assert.equal(usesOutreachMailbox({ roleKey, role: null }), true, roleKey);
+    }
+});
+
+check('a non-mailbox role does not use the outreach mailbox', () => {
+    assert.equal(usesOutreachMailbox({ roleKey: 'inbox_manager', role: 'Inbox Assistant' }), false);
+    assert.equal(usesOutreachMailbox(null), false);
 });
 
 // Guard against drift: every category the policy references must have display

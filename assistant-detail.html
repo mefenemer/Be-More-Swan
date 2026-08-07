@@ -1240,6 +1240,47 @@
       </div>
 
     </div><!-- /module-content-automation -->
+
+    <!-- Strategy Agent — per-assistant CONSENT for the proposer, distinct from the org-wide
+         `strategy_agent` plan feature that entitles the workspace to it at all. Two layers on
+         purpose: the plan answers "may this workspace use it", this answers "may it study THIS
+         assistant". Without the second, entitling an org opts in every eligible assistant at once,
+         with no way to pilot it on one.
+
+         Role-generic: shown by _applyDashboardRegistry for ANY role whose registry entry declares
+         `strategyTab`, so a second role inheriting the tab inherits this switch with it. Today that
+         is lead_qualifier alone — do NOT re-test the roleKey here.
+
+         DEFAULT ON when the workspace is entitled (see STRATEGY_AGENT_ASSISTANT_KEY): the
+         entitlement is already the deliberate opt-in, so this is an opt-OUT. Stored as
+         onboardingContext.strategyAgentEnabled; hydrated + persisted in assistants.js
+         (_detailHydrate / _detailCollect), read by autonomous-strategy-agent.ts in both passes.
+         The 🔒 chip is revealed by assistant-strategy.js once the server resolves the plan gate —
+         there is no client-side feature map to check here. -->
+    <div id="module-strategy-agent" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h3 class="text-lg font-bold text-gray-900 flex items-center gap-2">Strategy Proposals <span id="strategy-agent-lock" class="hidden text-xs font-bold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">🔒 Premium</span></h3>
+          <p class="text-sm text-gray-500 mt-1">Let this assistant learn from your decisions — the leads you rejected, the drafts you rewrote — and propose changes to how it targets and writes. Proposals arrive on the <strong>Strategy</strong> tab with the evidence behind them.</p>
+          <p class="text-sm text-gray-500 mt-2"><strong>Nothing is applied automatically.</strong> Every proposal waits for you to read it and click Apply, and anything you apply can be rolled back.</p>
+        </div>
+        <!-- ⚠️ peer-disabled:opacity-40, NOT opacity-50 — the compiled style.css carries the 40
+             variant and not the 50, and rebuilding Tailwind to add one churns unrelated classes
+             across the whole file. Same reason there is no peer-disabled:cursor-not-allowed: it
+             isn't compiled either, so the cursor is handled on the label instead. -->
+        <label id="strategy-agent-switch-label" class="relative inline-flex shrink-0 mt-1 cursor-pointer">
+          <input type="checkbox" id="edit_strategy_agent" class="sr-only peer">
+          <span class="w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-emerald-700 peer-disabled:opacity-40 transition
+            after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-5 after:h-5 after:bg-white after:rounded-full after:shadow after:transition-all peer-checked:after:translate-x-5"></span>
+        </label>
+      </div>
+      <p id="strategy-agent-off-note" class="hidden mt-4 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+        Switched off — this assistant will not be studied and no new proposals will be raised for it. Any proposal already waiting stays on the Strategy tab, and you can still apply or decline it.
+      </p>
+      <p id="strategy-agent-locked-note" class="hidden mt-4 text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+        The Strategy Agent isn't part of your current plan. This switch decides which assistants it studies once your workspace has it.
+      </p>
+    </div>
   </div>
 
   <!-- ── TAB: Creative Strategy ────────────────────────────────── -->
@@ -1558,7 +1599,10 @@
       <div class="flex items-start justify-between mb-2 gap-4 flex-wrap">
         <div>
           <h3 class="text-lg font-bold text-gray-900">Assistant Rules</h3>
-          <p class="text-sm text-gray-500 mt-1">Custom rules for this assistant. Anything you add here is written directly into this assistant's brief and shapes everything it produces.</p>
+          <!-- Both this subtitle and the note below assert that the rules STEER the assistant. That is
+               only true where the compiled blueprint reaches a model, so _applyAssistantRulesScope()
+               rewrites them for records-kind roles (issue #131). Don't hard-code the claim back. -->
+          <p id="assistant-rules-subtitle" class="text-sm text-gray-500 mt-1">Custom rules for this assistant. Anything you add here is written directly into this assistant's brief and shapes everything it produces.</p>
         </div>
         <div class="flex items-center gap-3 shrink-0">
           <span id="assistant-rules-status" class="text-sm font-bold text-emerald-600 transition-all"></span>
@@ -1569,19 +1613,33 @@
           </button>
         </div>
       </div>
-      <div class="mb-5 flex items-start gap-2 text-xs text-emerald-700 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
+      <div id="assistant-rules-scope-note" class="mb-5 flex items-start gap-2 text-xs text-emerald-700 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
         <svg class="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        <span>These rules are added to this assistant's brief. Changes apply to everything this assistant does from now on.</span>
+        <span id="assistant-rules-scope-text">These rules are added to this assistant's brief. Changes apply to everything this assistant does from now on.</span>
       </div>
       <div id="assistant-rules-editor" class="space-y-6">
         <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading rules…</div>
       </div>
     </div>
 
+    <!-- Lead-rejection evidence. Its OWN card as of issue #131: it used to sit inside Learned
+         Directives, which is now hidden for records-kind roles — which would have taken the only
+         surface a Lead Generator's rejections have down with it. Shown (and populated) by
+         _renderLeadRejectionEvidence(); stays hidden for every other role.
+         ⚠️ Heading copy lives here, body copy in the renderer; both are pinned by
+         tests/lead-reject-reasons.test.ts and must not claim the rejections taught anything. -->
+    <div id="card-lead-rejections" class="hidden bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+      <h3 class="text-lg font-bold text-gray-900 mb-4">What you rejected, and why</h3>
+      <div id="runbook-lead-rejections"></div>
+    </div>
+
     <!-- Learned Directives changelog (Epic 3.2) — the assistant's evolving Runbook. Moved here
          (issue #113) so all of this assistant's rules — hand-written and learned — live together;
-         moved into its own Rules section (issue #125) alongside Strict Rules and Assistant Rules. -->
-    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+         moved into its own Rules section (issue #125) alongside Strict Rules and Assistant Rules.
+         Gated (issue #131) to roles whose work actually reads these rows — see
+         _renderRunbookDirectives() for why a records-kind assistant could neither write here nor
+         have anything read it. -->
+    <div id="card-learned-directives" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="flex items-start justify-between gap-4 mb-4">
         <div>
           <h3 class="text-lg font-bold text-gray-900">Learned Directives</h3>

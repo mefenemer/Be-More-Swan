@@ -26,12 +26,13 @@
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, count, desc, eq, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, assistantRecords, masterAssistants, revenueEvents } from '../../db/schema';
+import { aiAssistants, assistantRecords, leadRejectFeedback, masterAssistants, revenueEvents } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { createDiscoveryRun } from '../../src/utils/discovery';
+import { triggerDiscoveryDrain } from '../../src/utils/trigger-drain';
 import { isSearchConfigured } from '../../src/lib/discovery-search';
 import { sendGmailMessage } from '../../src/utils/gmail';
 import { sendOutlookMessage } from '../../src/utils/outlook';
@@ -639,6 +640,47 @@ ${OUTREACH_SUBJECT_RULES}`;
             });
         }
 
+        // ── What the reviewer has taught the search by rejecting (Profile ▸ Rules) ────
+        // The read side of record_reject_feedback above. Learned Directives is otherwise fed
+        // entirely by content_rules, which only ever steers social and blog GENERATION — so a
+        // reviewer who had spent an afternoon categorising rejected leads opened that panel and
+        // found it empty, with no way to tell "captured but shown nowhere" from "never saved".
+        //
+        // Aggregated, not row-per-rejection: the reason is a GROUP BY key by design (see
+        // lead-reject-reasons.ts), and forty individual rows say less than six counts.
+        //
+        // `appliedCount` is the honesty column. A rejection only stops being inert evidence when
+        // the Strategy Agent banks it into a targeting proposal, which happens for orgs with the
+        // `strategy_agent` feature and nowhere else — reporting the raw total alone would let the
+        // panel imply the assistant had learned from every click.
+        if (action === 'list_reject_feedback') {
+            const rows = await db
+                .select({
+                    reason: leadRejectFeedback.reason,
+                    total: count(),
+                    applied: sql<number>`count(*) filter (where ${leadRejectFeedback.appliedToTarget})`.mapWith(Number),
+                    lastAt: sql<string | null>`max(${leadRejectFeedback.createdAt})`,
+                })
+                .from(leadRejectFeedback)
+                .where(and(
+                    eq(leadRejectFeedback.organisationId, orgId),
+                    eq(leadRejectFeedback.aiAssistantId, assistant.id),
+                ))
+                .groupBy(leadRejectFeedback.reason)
+                .orderBy(desc(count()));
+
+            return json(200, {
+                reasons: rows.map(r => ({
+                    reason: r.reason,
+                    count: Number(r.total),
+                    appliedCount: Number(r.applied),
+                    lastAt: r.lastAt,
+                })),
+                total: rows.reduce((n, r) => n + Number(r.total), 0),
+                appliedTotal: rows.reduce((n, r) => n + Number(r.applied), 0),
+            });
+        }
+
         // ── Send the outreach email for an approved lead (auto-send on approval) ──
         // Reads the assistant's outreachEmailProvider setup answer. For 'google', sends the
         // lead's outreach email from the connected Gmail account, then sets a chase reminder
@@ -936,6 +978,13 @@ Return STRICT JSON only (no markdown), an array of exactly 3 objects:
                 },
                 cadence: 'one_off',
             });
+
+            // The status below claims "discovery running", so make that true. Without the poke the
+            // job sat queued for up to a cron cycle while the record already said it was running.
+            // Awaited deliberately — see trigger-drain.ts.
+            if (jobId) {
+                await triggerDiscoveryDrain(event.headers as Record<string, string | undefined>, jobId, 'lead-generation:approve_idea');
+            }
 
             await db.update(assistantRecords)
                 .set({ status: 'approved · discovery running', updatedAt: new Date() })

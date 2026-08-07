@@ -77,22 +77,33 @@ const DEFAULT_GUARDRAILS: Guardrails = {
 
 export async function drainDiscoveryJobs(): Promise<number> {
     const db = getDb();
-    const now = new Date();
 
-    // Reset jobs stuck in 'processing' for >3 minutes (function timed out mid-slice).
+    // Reset jobs stuck in 'processing' for >3 minutes (function timed out mid-slice). A slice runs
+    // in ~10s and bumps updated_at, so a run making progress is never caught by this — including
+    // one being driven in a tight loop by run-discovery-jobs-background.
     await db.execute(
         `UPDATE discovery_jobs SET status = 'queued', next_retry_at = now()
          WHERE status = 'processing' AND updated_at < now() - interval '3 minutes' AND attempt < max_attempts`
     );
 
+    // Claim and select in ONE statement. This used to be a SELECT ... FOR UPDATE SKIP LOCKED
+    // followed by a separate UPDATE inside processJob, which left a window where two drainers
+    // could return the same row: the row lock is released when the SELECT statement ends, because
+    // db.execute does not wrap it in a transaction. That window was tolerable while the only
+    // drainer was a ten-minute cron. It is not, now that run-discovery-jobs-background loops the
+    // drain for minutes at a time and can overlap a cron tick — and a double-claimed slice means
+    // the same search query billed twice and its leads inserted twice.
     const jobs = await db.execute<JobRow>(
-        `SELECT id, job_id, organisation_id, campaign_id, attempt, max_attempts
-         FROM discovery_jobs
-         WHERE status = 'queued'
-           AND (next_retry_at IS NULL OR next_retry_at <= now())
-         ORDER BY created_at
-         LIMIT 5
-         FOR UPDATE SKIP LOCKED`
+        `UPDATE discovery_jobs SET status = 'processing', updated_at = now()
+         WHERE id IN (
+             SELECT id FROM discovery_jobs
+             WHERE status = 'queued'
+               AND (next_retry_at IS NULL OR next_retry_at <= now())
+             ORDER BY created_at
+             LIMIT 5
+             FOR UPDATE SKIP LOCKED
+         )
+         RETURNING id, job_id, organisation_id, campaign_id, attempt, max_attempts`
     );
     if (!jobs.length) return 0;
 
@@ -108,12 +119,10 @@ export default withLambda(async () => {
 // ── One bounded slice of one job ───────────────────────────────────────────────
 
 async function processJob(db: Db, job: JobRow): Promise<void> {
-    // Claim the slice. NOTE: attempt is bumped only on failure (handleFailure), not per slice —
-    // a legit run spans many slices and must not exhaust its retry budget just by making progress.
-    await db.execute(
-        `UPDATE discovery_jobs SET status = 'processing', updated_at = now() WHERE id = ${job.id}`
-    );
-
+    // The slice is ALREADY claimed — drainDiscoveryJobs set status='processing' in the same
+    // statement that selected this row, so there is no second claim to make here.
+    // NOTE: attempt is bumped only on failure (handleFailure), not per slice — a legit run spans
+    // many slices and must not exhaust its retry budget just by making progress.
     try {
         // Load campaign + owning assistant (name + roleKey for scoring prompt).
         const [campaign] = await db

@@ -224,6 +224,42 @@ export const PROPOSAL_EXPIRY_DAYS = 14;
  */
 export const STRATEGY_AGENT_FEATURE = 'strategy_agent';
 
+/**
+ * The per-assistant consent switch, held in `ai_assistants.onboarding_context` and toggled in
+ * Profile ▸ Operational Setup. Distinct from STRATEGY_AGENT_FEATURE above, which is commercial and
+ * org-wide: the plan says the WORKSPACE may use the agent, this says a PARTICULAR assistant's
+ * playbook is open to it.
+ *
+ * ⚠️ DEFAULT ON, which is the opposite of the plan feature and deliberate. The entitlement is
+ * already the considered opt-in — somebody had to grant it to this org on purpose — so this exists
+ * to opt one assistant OUT, not to be a second thing to remember to switch on. Two default-off
+ * gates in series produce "I enabled it and nothing happened", which is the failure this pair is
+ * meant to prevent, not cause.
+ *
+ * Absence therefore means ON, so no backfill is needed and assistants that predate the toggle
+ * behave exactly as they did. Only an explicit `false` switches the agent off.
+ */
+export const STRATEGY_AGENT_ASSISTANT_KEY = 'strategyAgentEnabled';
+
+/**
+ * May the Strategy Agent propose changes to THIS assistant's playbook?
+ *
+ * Read from onboardingContext, never trusted to be an object — the column is nullable and holds
+ * whatever onboarding last wrote. Anything that is not an explicit `false` reads as on.
+ *
+ * This gates PRODUCTION only. Proposals that already exist stay listable, appliable and rejectable
+ * while it is off, because hiding them would strand a pending proposal behind a toggle the user
+ * flipped for unrelated reasons.
+ */
+export function isStrategyAgentEnabledForAssistant(onboardingContext: unknown): boolean {
+    if (!onboardingContext || typeof onboardingContext !== 'object') return true;
+    // Own property only, exactly as tunableField() does two functions down. An inherited key is
+    // never something the user stored, and this is the one place where reading a key that isn't
+    // really there switches a live agent off.
+    if (!Object.prototype.hasOwnProperty.call(onboardingContext, STRATEGY_AGENT_ASSISTANT_KEY)) return true;
+    return (onboardingContext as Record<string, unknown>)[STRATEGY_AGENT_ASSISTANT_KEY] !== false;
+}
+
 // ── Guards ───────────────────────────────────────────────────────────────────
 
 export function isProposalSource(v: unknown): v is ProposalSource {

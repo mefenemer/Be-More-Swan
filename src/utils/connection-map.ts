@@ -104,6 +104,27 @@ export const CATEGORY_LABELS: Record<string, { label: string; description: strin
 // subsystem (connect-blog-destination + src/utils/blog-destinations), not the OAuth flow.
 export const EXTERNALLY_LIVE_CATEGORIES = new Set<string>(['cms']);
 
+// The mailbox providers an assistant can send outreach from. These live in
+// `workspace_integrations` (OAuth via /api/oauth/:provider/connect), NOT in CONNECTOR_CATEGORY —
+// tagging them there would put them through the social-card renderer, which has no card for them.
+export const MAILBOX_PROVIDERS = ['gmail', 'outlook'] as const;
+export type MailboxProvider = (typeof MAILBOX_PROVIDERS)[number];
+
+// Roles whose `email` category is served LIVE by those mailbox providers.
+//
+// This is role-scoped rather than a plain entry in EXTERNALLY_LIVE_CATEGORIES because the two
+// halves are independent: the Gmail/Outlook grants are workspace-wide and real for everybody, but
+// only these roles have code that actually sends through them (lead_qualifier → lead-generation.ts
+// `send_outreach`). Marking `email` live for a role with nothing to render would make the category
+// VANISH from the Connections grid — no connector card, and no "coming soon" card either — which is
+// the failure mode this module's header warns about. So a role joins this set at the same time as
+// the code that uses the mailbox, never before.
+export const MAILBOX_ROLES = new Set<string>(['lead_qualifier']);
+
+export function usesOutreachMailbox(a: AssistantRole | null | undefined): boolean {
+    return !!(a?.roleKey && MAILBOX_ROLES.has(a.roleKey));
+}
+
 export interface SupportedTool {
     key: string;         // category key (e.g. 'email')
     label: string;       // human label (e.g. 'Email')
@@ -119,6 +140,9 @@ export function supportedToolsForAssistant(a: AssistantRole | null | undefined):
     // Unrestricted role (unknown/custom) → surface the whole catalogue.
     const keys = cats ? Array.from(cats) : Object.keys(CATEGORY_LABELS);
     const liveCategories = new Set([...Object.values(CONNECTOR_CATEGORY), ...EXTERNALLY_LIVE_CATEGORIES]);
+    // `email` is live only for the roles that actually send through a connected mailbox — for
+    // everyone else it stays a "coming soon" category. See MAILBOX_ROLES.
+    if (usesOutreachMailbox(a)) liveCategories.add('email');
     return keys
         .filter(k => CATEGORY_LABELS[k])
         .map(k => ({ key: k, ...CATEGORY_LABELS[k], available: liveCategories.has(k) }))

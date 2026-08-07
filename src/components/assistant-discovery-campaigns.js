@@ -56,6 +56,34 @@
     cold: 'bg-gray-50 text-gray-500 border-gray-200',
   };
 
+  /**
+   * When this campaign next runs, in the viewer's timezone.
+   *
+   * Deliberately duplicated from `cadenceLine`/`when` in assistant-signal-inbox.js rather than
+   * shared: these are IIFE script-tag modules with no import graph between them, and the two
+   * surfaces read the same three fields from the same two list endpoints. If the wording diverges,
+   * fix it in both — the rule they must agree on is that one_off has NO next run and a disabled
+   * schedule (a draft) has no date yet, so neither may print a time.
+   */
+  function scheduleLine(c) {
+    const cadence = c.cadence || 'one_off';
+    if (cadence === 'one_off') return 'Runs once each time you start it.';
+    const repeats = cadence === 'daily' ? 'daily' : 'weekly';
+    if (!c.scheduleEnabled) return `Repeats ${repeats} once started.`;
+    const t = Date.parse(c.nextRunAt || '');
+    if (!t) return `Repeats ${repeats}.`;
+    if (t <= Date.now()) return `Repeats ${repeats} — next run due, starting within the hour.`;
+    const d = new Date(t);
+    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const today = new Date();
+    const label = d.toDateString() === today.toDateString()
+      ? `today at ${time}`
+      : d.toDateString() === new Date(today.getTime() + 86400000).toDateString()
+        ? `tomorrow at ${time}`
+        : `${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })} at ${time}`;
+    return `Repeats ${repeats}. Next run ${label}.`;
+  }
+
   function body() { return state.overlay?.querySelector('[data-dc-body]'); }
   function setBody(html) { const b = body(); if (b) b.innerHTML = html; }
 
@@ -140,6 +168,7 @@
         </div>
         ${c.name ? `<p class="text-xs text-gray-500 mt-0.5">${esc(c.idea)}</p>` : ''}
         <p class="text-xs text-gray-500 mt-1">${Number(c.leadsFound || 0)} lead${Number(c.leadsFound) === 1 ? '' : 's'} found</p>
+        <p class="text-xs text-gray-400 mt-0.5">${paused ? 'Paused — it will not run until you resume it.' : esc(scheduleLine(c))}</p>
         <div class="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-100">
           ${primaryBtn}
           <button type="button" data-dc-view="${c.id}" class="px-3 py-1.5 bg-white border border-gray-200 text-gray-600 hover:border-gray-300 text-xs font-bold rounded-lg transition">View leads</button>

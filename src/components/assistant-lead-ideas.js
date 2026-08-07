@@ -161,6 +161,17 @@
         ? 'Discovery run started — leads will appear in your Leads tab shortly.'
         : 'Idea approved. Connect a web search provider to start discovering leads.');
       window._leadIdeasDidAddLeads = true;
+      // Approving an idea creates a real saved search server-side (lead-generation.ts calls
+      // createDiscoveryRun), but the Searches tab this modal was opened from has already loaded and
+      // has no way to learn about a write made in here — the user closed the modal onto a tab that
+      // still listed nothing, and only saw the new search after reloading the page by hand.
+      // Same event the chat modal fires for the same reason (chat-session.js), dispatched on
+      // `document` because this overlay is mounted at body level, and carrying the assistantId so
+      // only the inbox this belongs to reloads. Fired now, not on close, so the tab behind the modal
+      // shows the run as queued/searching and arms its own in-flight poll.
+      document.dispatchEvent(new CustomEvent('discovery:created', {
+        detail: { assistantId: state.assistantId, campaignId: data.campaignId ?? null },
+      }));
     } catch (err) {
       btn.disabled = false;
       if (declineBtn) declineBtn.disabled = false;

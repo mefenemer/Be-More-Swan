@@ -38,6 +38,10 @@
   let state = {
     assistantId: null,
     gated: false,
+    // The workspace is entitled but THIS assistant was switched off in Profile ▸ Operational Setup.
+    // Not the same as `gated`: proposals already raised stay listed and decidable, only new ones
+    // stop. Surfaced so an empty queue reads as a choice somebody made rather than a broken agent.
+    assistantPaused: false,
     proposals: [],
     counts: { pending: 0, applied: 0, rejected: 0, expired: 0 },
     progress: null,
@@ -392,6 +396,14 @@
           evidence behind it. Nothing is applied until you say so.
         </p>
       </div>
+      ${state.assistantPaused ? `
+      <div class="mb-4 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+        <p class="text-xs text-amber-800">
+          <strong>Paused for this assistant.</strong> No new proposals will be raised until you switch
+          Strategy Proposals back on in Profile &rsaquo; Operational Setup. Anything already here can
+          still be applied or declined.
+        </p>
+      </div>` : ''}
 
       ${state.notice ? `
         <div class="mb-3 bg-green-50 border border-green-200 rounded-lg p-3">
@@ -482,6 +494,7 @@
     try {
       const data = await call('list', { status: state.statusFilter || undefined });
       state.gated = !!data.gated;
+      state.assistantPaused = !!data.assistantPaused;
       state.proposals = data.proposals || [];
       state.counts = data.counts || state.counts;
       state.progress = data.progress || null;
@@ -571,9 +584,12 @@
    * would make a deploy problem invisible.
    */
   function showTabIfEnabled() {
+    const show = !state.gated;
+    // The Operational Setup consent card can't resolve the plan gate itself — this is the only
+    // place the answer exists on the client, so hand it over before touching the tab button.
+    window._setStrategyAgentEntitled?.(show);
     const btn = document.getElementById('maintab-btn-strategy');
     if (!btn) return;
-    const show = !state.gated;
     btn.classList.toggle('hidden', !show);
     btn.style.display = show ? '' : 'none';
   }

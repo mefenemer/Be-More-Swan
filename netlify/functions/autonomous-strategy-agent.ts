@@ -50,7 +50,8 @@ import {
     MIN_REJECT_SAMPLE, MIN_REJECT_SPREAD_DAYS, isLeadRejectReason, type LeadRejectReason,
 } from '../../src/config/lead-reject-reasons';
 import {
-    REJECT_REASONS_FED_TO_MODEL, STRATEGY_AGENT_FEATURE, isValidValueFor, tunableField,
+    REJECT_REASONS_FED_TO_MODEL, STRATEGY_AGENT_FEATURE, isStrategyAgentEnabledForAssistant,
+    isValidValueFor, tunableField,
 } from '../../src/config/strategy-proposals';
 import { expirePendingProposals, proposeChange } from '../../src/utils/strategy-proposals';
 
@@ -470,6 +471,14 @@ async function executeRun(result: StrategyAgentResult, startedAt: number): Promi
             .limit(1);
         if (!assistant) { skip('assistant not found in this org', where); continue; }
 
+        // Consent, as opposed to entitlement. The org may be entitled and this assistant still be
+        // switched off in Profile ▸ Operational Setup — that is how a workspace pilots the agent on
+        // one assistant without every other one proposing changes too. Default ON, so this only
+        // ever skips an assistant somebody explicitly opted out.
+        if (!isStrategyAgentEnabledForAssistant(assistant.onboardingContext)) {
+            skip('strategy agent switched off for this assistant', where); continue;
+        }
+
         const current = currentText(assistant.onboardingContext, field.key);
         const rejections = await priorRejections(db, c.organisationId, targetField);
         const reasonLabel = EDIT_REASON_LABELS[c.editReason as keyof typeof EDIT_REASON_LABELS] ?? c.editReason;
@@ -641,11 +650,19 @@ async function executeRun(result: StrategyAgentResult, startedAt: number): Promi
         if (existing) { skip('a pending proposal already holds this field', { ...where, targetField }); continue; }
 
         const [assistant] = await db
-            .select({ id: aiAssistants.id, name: aiAssistants.name })
+            // onboardingContext is selected only for the consent check below — the rejection pass
+            // reads its current value from discovery_campaigns, not from the blueprint.
+            .select({ id: aiAssistants.id, name: aiAssistants.name, onboardingContext: aiAssistants.onboardingContext })
             .from(aiAssistants)
             .where(and(eq(aiAssistants.id, c.aiAssistantId), eq(aiAssistants.organisationId, c.organisationId)))
             .limit(1);
         if (!assistant) { skip('assistant not found in this org', where); continue; }
+
+        // Same per-assistant consent gate as the edit pass. It matters more here: this pass rewrites
+        // target_persona, which redirects cold outreach at real strangers.
+        if (!isStrategyAgentEnabledForAssistant(assistant.onboardingContext)) {
+            skip('strategy agent switched off for this assistant', where); continue;
+        }
 
         // The personas the rejections were actually produced under. An apply writes ONE persona to
         // every active campaign (that blast radius is documented on writeFieldValue), so the model

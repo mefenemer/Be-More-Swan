@@ -173,6 +173,106 @@ check('the Leads-tab reject strip makes the same limited promise', () => {
     }
 });
 
+// ── 5. The Profile ▸ Rules read-back makes the same limited promise ──────────
+// The capture strips are honest about what a click does; this panel shows the accumulated
+// rejections back, so it is the surface most likely to imply the assistant has learned something.
+// Same rule. (It used to sit INSIDE "Learned Directives"; issue #131 promoted it to its own card
+// because that panel is now hidden for records-kind roles — see the nesting check below.)
+check('the lead-rejection panel does not claim the rejections taught the assistant', () => {
+    const src = read('assistants.js');
+    const start = src.indexOf('window._renderLeadRejectionEvidence = async function');
+    assert.ok(start !== -1, 'the lead-rejection panel is missing');
+    const fn = src.slice(start, src.indexOf('window._toggleDirective', start));
+    const copy = fn.replace(/\/\/.*$/gm, '');
+    for (const claim of [/teach/i, /learn/i, /next time/i, /improve/i]) {
+        assert.ok(!claim.test(copy),
+            `the panel claims learning the user cannot count on (${claim}) — the cluster proposer `
+            + 'is gated on the strategy_agent plan feature, which is default OFF');
+    }
+});
+
+// A failed fetch must not render as "nothing recorded". That inversion is the exact complaint the
+// panel exists to answer — a reviewer who cannot tell "captured but unshown" from "never saved".
+check('the lead-rejection panel distinguishes no-data from a failed read', () => {
+    const src = read('assistants.js');
+    const start = src.indexOf('window._renderLeadRejectionEvidence = async function');
+    const fn = src.slice(start, src.indexOf('window._toggleDirective', start));
+    const guard = fn.indexOf('!Array.isArray(payload.reasons)');
+    const empty = fn.indexOf('!payload.reasons.length');
+    assert.ok(guard !== -1 && empty !== -1 && guard < empty,
+        'the failed-read guard must come before the empty-state branch, or an error reads as "none"');
+});
+
+// ── 5b. The evidence panel must outlive the panel it used to live in ─────────
+// content_rules reach a model only via compiled blueprint §4, and blueprint-prompt.ts has exactly
+// two callers — process-content-jobs.ts and the admin smoke test. So Learned Directives is hidden
+// for records-kind roles (issue #131). The lead-rejection evidence was nested INSIDE that card,
+// which would have hidden the Lead Generator's only rejection surface along with it — the exact
+// "an afternoon of categorising showed up nowhere" complaint the panel exists to answer.
+check('the lead-rejection card is a sibling of Learned Directives, not nested inside it', () => {
+    const html = read('assistant-detail.html');
+    const lead = html.indexOf('id="card-lead-rejections"');
+    const learned = html.indexOf('id="card-learned-directives"');
+    assert.ok(lead !== -1, 'the lead-rejection card is missing');
+    assert.ok(learned !== -1, 'the Learned Directives card lost its id — the gate cannot find it');
+    assert.ok(lead < learned, 'the lead-rejection card must come BEFORE Learned Directives');
+    assert.ok(
+        html.slice(lead, learned).includes('id="runbook-lead-rejections"'),
+        'the evidence host must sit in its own card — nested in Learned Directives it inherits that '
+        + "card's gate and vanishes for the only role that populates it",
+    );
+});
+
+check('Learned Directives is gated on the queue kind, not shown to every role', () => {
+    const src = read('assistants.js');
+    const start = src.indexOf('window._renderRunbookDirectives = async function');
+    assert.ok(start !== -1, 'the directives renderer is missing');
+    const fn = src.slice(start, src.indexOf('window._renderLeadRejectionEvidence', start));
+    assert.ok(/_rulesSteerThisAssistant\(\)/.test(fn), 'the gate predicate is gone');
+    assert.ok(/card-learned-directives/.test(fn), 'the renderer no longer hides the card itself');
+    assert.ok(/if \(!steers\) return;/.test(fn),
+        'without the early return the panel still fetches and renders rules nothing reads');
+});
+
+check('the gate predicate is the review-queue kind', () => {
+    const src = read('assistants.js');
+    const start = src.indexOf('function _rulesSteerThisAssistant');
+    assert.ok(start !== -1, 'the predicate is missing');
+    const fn = src.slice(start, start + 300);
+    assert.ok(/_detailReviewQueue/.test(fn) && /'posts'/.test(fn),
+        "must key off reviewQueue.kind === 'posts' — the roles whose drafting worker reads §4");
+});
+
+// The green "Changes apply to everything this assistant does from now on" is true for social and
+// blog and false everywhere else. It must stay a role-dependent string, not markup.
+check('the Assistant Rules scope note does not hard-code the steering claim', () => {
+    const src = read('assistants.js');
+    const start = src.indexOf('function _applyAssistantRulesScope');
+    assert.ok(start !== -1, 'the scope note is no longer applied per role');
+    const fn = src.slice(start, src.indexOf('\nwindow._renderRunbookDirectives', start));
+    const recordsBranch = fn.slice(fn.indexOf('note.classList.remove(...EMERALD)'));
+    assert.ok(
+        !/everything this assistant does/.test(recordsBranch),
+        'the records-kind copy repeats the claim that made a Lead Generator look like it obeyed '
+        + 'rules no pipeline of its reads',
+    );
+    assert.ok(/won't change what it does today/.test(recordsBranch),
+        'the records-kind copy must say plainly that the rules do not steer this assistant');
+});
+
+// Aggregates are the point of a closed vocabulary — but `other` is a bucket, not a signal, and the
+// server must scope every read to one tenant AND one assistant.
+check('the reject-feedback read is scoped to the org and the assistant', () => {
+    const src = read('netlify/functions/lead-generation.ts');
+    const start = src.indexOf("if (action === 'list_reject_feedback')");
+    assert.ok(start !== -1, 'the list_reject_feedback action is missing');
+    const branch = src.slice(start, start + 2000);
+    assert.ok(/eq\(leadRejectFeedback\.organisationId, orgId\)/.test(branch), 'not tenant-scoped');
+    assert.ok(/eq\(leadRejectFeedback\.aiAssistantId, assistant\.id\)/.test(branch), 'not assistant-scoped');
+    assert.ok(/appliedToTarget/.test(branch),
+        'without the applied count the panel cannot tell evidence from an applied change');
+});
+
 // Same reason as the Review Queue's ordering test, checked in the other file: the reason is an
 // annotation on a decision already made. If the strip were built BEFORE the PATCH resolved, a
 // failed reject would leave the user categorising a lead that is still pending.

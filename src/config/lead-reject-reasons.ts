@@ -16,11 +16,14 @@
 // the matching check() in db/schema.ts). tests/lead-reject-reasons.test.ts parses all three and
 // asserts they agree — add one here alone and that test fails on purpose.
 //
-// ── ⚠️ Capture is not yet learning ───────────────────────────────────────────
-// This module and its table are the EVIDENCE half. Nothing consumes the rows to change targeting
-// yet: that is the rejection-cluster proposer in the Strategy Agent, which is not built. Say so in
-// any user-facing copy. Promising that a click "teaches the assistant" when no code reads the row
-// is the same failure as a chat reply claiming it saved a draft it never wrote.
+// ── ⚠️ Capture is still not learning, for most orgs ──────────────────────────
+// This module and its table are the EVIDENCE half. The rejection-cluster proposer in the Strategy
+// Agent (autonomous-strategy-agent.ts → target_persona) now DOES read them, but it is gated on the
+// `strategy_agent` plan feature, which is off by default — and even when it runs it PROPOSES a
+// targeting change for a human to approve rather than applying one. So the honest claim is
+// unchanged for user-facing copy: a click files evidence, it does not retrain anything. Promising
+// that it "teaches the assistant" is the same failure as a chat reply claiming it saved a draft it
+// never wrote. `applied_to_target` is what marks the rows that actually reached a search.
 
 /**
  * Why a reviewer rejected a lead.

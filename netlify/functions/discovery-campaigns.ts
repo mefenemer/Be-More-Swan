@@ -21,6 +21,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants, discoveryCampaigns, discoveryGuardrails, discoverySchedules, discoveryJobs, discoveredLeads } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { createDiscoveryRun } from '../../src/utils/discovery';
+import { triggerDiscoveryDrain } from '../../src/utils/trigger-drain';
 import { isSearchConfigured, normaliseDomain } from '../../src/lib/discovery-search';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -108,6 +109,14 @@ export default withLambda(async (event) => {
             status: asDraft ? 'draft' : 'active',
         });
 
+        // A one-off active campaign enqueued a job; start it now rather than leaving the user
+        // watching "Queued" until the next cron tick. jobId is null for a draft or a recurring
+        // cadence — a draft must spend nothing, and a recurring run belongs to the dispatcher.
+        // Awaited deliberately — see trigger-drain.ts.
+        if (result.jobId) {
+            await triggerDiscoveryDrain(event.headers as Record<string, string | undefined>, result.jobId, 'discovery-campaigns:create');
+        }
+
         return json(200, { ...result, cadence, asDraft, searchConfigured: isSearchConfigured() });
     }
 
@@ -119,6 +128,13 @@ export default withLambda(async (event) => {
                 id: discoveryCampaigns.id, name: discoveryCampaigns.name,
                 idea: discoveryCampaigns.idea, status: discoveryCampaigns.status,
                 createdAt: discoveryCampaigns.createdAt,
+                // Schedule facts, so a card can say WHEN it next runs rather than only how often.
+                // Mirrors signal-inbox.ts `list` — the two surfaces show the same search and must
+                // not disagree about it. isEnabled distinguishes "no next run exists" (draft, or
+                // one_off) from "next run is due"; nextRunAt alone cannot.
+                cadence: discoverySchedules.cadence,
+                nextRunAt: discoverySchedules.nextRunAt,
+                scheduleEnabled: discoverySchedules.isEnabled,
                 latestJobStatus: sql<string | null>`(
                     SELECT j.status FROM discovery_jobs j
                     WHERE j.campaign_id = ${discoveryCampaigns.id}
@@ -140,6 +156,7 @@ export default withLambda(async (event) => {
             })
             .from(discoveryCampaigns)
             .leftJoin(discoveryGuardrails, eq(discoveryGuardrails.campaignId, discoveryCampaigns.id))
+            .leftJoin(discoverySchedules, eq(discoverySchedules.campaignId, discoveryCampaigns.id))
             .where(and(
                 eq(discoveryCampaigns.organisationId, orgId),
                 eq(discoveryCampaigns.aiAssistantId, assistantId),
@@ -180,6 +197,12 @@ export default withLambda(async (event) => {
 
         const jobId = randomUUID();
         await db.insert(discoveryJobs).values({ jobId, organisationId: orgId, campaignId, triggerType: 'on_demand' });
+
+        // This is the "Start search" / "Run now" button. Someone is watching it, so start the run
+        // instead of leaving the row queued for the ten-minute cron (and, on a branch deploy where
+        // native crons never fire, leaving it queued for good). Awaited — see trigger-drain.ts.
+        await triggerDiscoveryDrain(event.headers as Record<string, string | undefined>, jobId, 'discovery-campaigns:run_now');
+
         return json(200, { jobId, searchConfigured: isSearchConfigured() });
     }
 

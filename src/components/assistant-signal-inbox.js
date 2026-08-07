@@ -156,11 +156,48 @@
   // search that had simply found nothing. Every state below therefore says what it means in plain
   // words and, where the user is the thing standing in the way, hands them the button.
 
-  const CADENCE_LINE = {
-    one_off: 'Runs once each time you start it.',
-    daily: 'Once started, it repeats daily at 08:00 UTC.',
-    weekly: 'Once started, it repeats weekly.',
-  };
+  /**
+   * "today at 08:00" / "tomorrow at 08:00" / "Fri 15 Aug at 08:00".
+   *
+   * Deliberately unlike `ago()` below, which stays relative: a PAST run is a rough fact ("ran 20
+   * minutes ago" is all anyone needs), but a FUTURE run is something the user plans around, and
+   * "in 14 hours" makes them do the arithmetic. Rendered in the viewer's own timezone — the
+   * schedule is stored in UTC and saying "08:00 UTC" to someone in another timezone was a small
+   * lie about when their leads would appear.
+   */
+  function when(t) {
+    const d = new Date(t);
+    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const day = d.toDateString();
+    const today = new Date();
+    if (day === today.toDateString()) return `today at ${time}`;
+    const tomorrow = new Date(today.getTime() + 86400000);
+    if (day === tomorrow.toDateString()) return `tomorrow at ${time}`;
+    return `${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })} at ${time}`;
+  }
+
+  /**
+   * What happens next, on its own — the row used to print a fixed string per cadence ("it repeats
+   * daily at 08:00 UTC") which never named an actual date, so a user with a weekly search could
+   * not tell whether that meant tomorrow or in six days.
+   *
+   * Three genuinely different states, and conflating them is what made the old copy wrong:
+   *   • one_off        — there IS no next run. It is the default cadence, so this is most searches.
+   *   • not enabled    — a draft: it repeats only once a human starts it, so no date exists yet.
+   *   • enabled        — a real timestamp, or "due" when the dispatcher has yet to pick it up.
+   * `nextRunAt` is seeded to now() at creation and the hourly dispatcher moves it forward, so a
+   * due-but-unfired schedule is normal and means "within the hour", not "overdue".
+   */
+  function cadenceLine(s) {
+    const cadence = s.cadence || 'one_off';
+    if (cadence === 'one_off') return 'It runs once each time you start it — nothing is scheduled after that.';
+    const repeats = cadence === 'daily' ? 'daily' : 'weekly';
+    if (!s.scheduleEnabled) return `Once started, it repeats ${repeats}.`;
+    const t = Date.parse(s.nextRunAt || '');
+    if (!t) return `It repeats ${repeats}.`;
+    if (t <= Date.now()) return `Repeats ${repeats} — the next run is due and starts within the hour.`;
+    return `Repeats ${repeats}. Next run ${when(t)}.`;
+  }
 
   /** "just now" / "14 minutes ago" / "3 days ago". Absolute dates read as noise at this size. */
   function ago(iso) {
@@ -185,7 +222,7 @@
   function searchState(s) {
     const job = s.latestJobStatus;
     const found = Number(s.leadsFound || 0);
-    const cadence = CADENCE_LINE[s.cadence] || CADENCE_LINE.one_off;
+    const cadence = cadenceLine(s);
     const total = found
       ? `${found} compan${found === 1 ? 'y' : 'ies'} found so far.`
       : 'No companies found yet.';
@@ -195,8 +232,13 @@
         line: 'Searching the web and scoring what it finds. Anything it finds appears below for your approval.' };
     }
     if (job === 'queued') {
+      // "starts within a few minutes" was wrong in both environments before the on-demand poke:
+      // the worker ran on a ten-minute cron, and branch deploys never fire native crons at all, so
+      // a staging search sat here indefinitely. Starting a search now pokes the queue directly
+      // (discovery-campaigns.ts run_now → run-discovery-jobs-background), so it really does begin
+      // straight away — but the poke is best-effort by design, so this promises no clock time.
       return { chip: 'bg-amber-50 text-amber-800 border-amber-200', label: 'Queued', running: true,
-        line: 'Queued — this starts within a few minutes and results land below.' };
+        line: 'Starting now — companies appear below as they are found and scored.' };
     }
     if (s.status === 'paused') {
       return { chip: 'bg-gray-100 text-gray-500 border-gray-200', label: 'Paused',
@@ -271,7 +313,7 @@
     if (state.savedSearches.some((s) => s.latestJobStatus === 'queued' || s.latestJobStatus === 'processing')) {
       return `<div class="p-8 text-center">
         <p class="text-sm font-semibold text-gray-900">Searching now</p>
-        <p class="text-xs text-gray-500 mt-1">Companies appear here as they are found and scored &mdash; usually within a few minutes. This page updates itself.</p>
+        <p class="text-xs text-gray-500 mt-1">A search works through one query at a time, so companies arrive here in batches rather than all at once. This page updates itself &mdash; you do not need to wait on it.</p>
       </div>`;
     }
     // "Found nothing" and "never got as far as looking" are different facts about an empty list,

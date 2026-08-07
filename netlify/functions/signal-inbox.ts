@@ -244,6 +244,14 @@ export default withLambda(async (event) => {
                     idea: discoveryCampaigns.idea,
                     status: discoveryCampaigns.status,
                     cadence: discoverySchedules.cadence,
+                    // The dispatcher's own claim key, so the row can name a DATE instead of the
+                    // generic "it repeats daily" it used to print. Both are returned because they
+                    // answer different questions: isEnabled says whether a next run exists at all
+                    // (a draft's schedule is disabled, and one_off never has one), nextRunAt says
+                    // when. Sending nextRunAt alone would let the UI promise a run that nothing is
+                    // scheduled to make.
+                    nextRunAt: discoverySchedules.nextRunAt,
+                    scheduleEnabled: discoverySchedules.isEnabled,
                     // Latest run first, matching the campaign list's subquery exactly — the two
                     // surfaces show the same search and must not disagree about its state.
                     latestJobStatus: sql<string | null>`(
@@ -297,6 +305,8 @@ export default withLambda(async (event) => {
                     label: savedSearchLabel(s.name, s.idea),
                     status: s.status,
                     cadence: s.cadence ?? 'one_off',
+                    nextRunAt: s.nextRunAt ? new Date(s.nextRunAt).toISOString() : null,
+                    scheduleEnabled: s.scheduleEnabled === true,
                     latestJobStatus: s.latestJobStatus ?? null,
                     lastFinishedAt: s.lastFinishedAt ? new Date(s.lastFinishedAt).toISOString() : null,
                     leadsFound: Number(s.leadsFound ?? 0),

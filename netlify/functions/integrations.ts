@@ -5,8 +5,8 @@ import { getDb } from '../../db/client';
 import { systemConnections, scheduledPosts, users, userOrganisations, auditLogs, workspaceIntegrations } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { storeSecret, deleteSecret, buildRefKey } from '../../src/utils/vault';
-import { deleteIntegration, isIntegrationProvider, serviceAutoRefreshes } from '../../src/utils/workspace-integrations';
-import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant } from '../../src/utils/connection-map';
+import { deleteIntegration, getIntegration, isIntegrationProvider, serviceAutoRefreshes } from '../../src/utils/workspace-integrations';
+import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant, usesOutreachMailbox, MAILBOX_PROVIDERS } from '../../src/utils/connection-map';
 import { getXUsage } from '../../src/utils/ai-credits';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
@@ -204,7 +204,23 @@ export default withLambda(async (event) => {
                 // Connections grid and onboarding summary can show what the assistant
                 // supports, not just what already has a connector.
                 const supportedTools = supportedToolsForAssistant(assistant);
-                return { statusCode: 200, body: JSON.stringify({ connections: visible, allowedServices, supportedTools, xCredits }) };
+                // Mailbox connectors (Gmail / Outlook) for the roles that send outreach from the
+                // user's own inbox. They live in workspace_integrations, so they are invisible to
+                // the `merged` system_connections list above and need their own lookup — without
+                // this the Connections grid showed "Email — Coming soon" over a mailbox that was
+                // already connected and sending. Same status rule as /api/oauth/status.
+                const mailboxProviders = usesOutreachMailbox(assistant) && currentOrgId
+                    ? await Promise.all(MAILBOX_PROVIDERS.map(async (provider) => {
+                        const row = await getIntegration(db, currentOrgId, provider);
+                        return {
+                            provider,
+                            connected: row?.status === 'active',
+                            status: row?.status ?? null,
+                            accountName: row?.externalAccountName ?? null,
+                        };
+                    }))
+                    : [];
+                return { statusCode: 200, body: JSON.stringify({ connections: visible, allowedServices, supportedTools, mailboxProviders, xCredits }) };
             }
 
             return { statusCode: 200, body: JSON.stringify({ connections: merged, xCredits }) };

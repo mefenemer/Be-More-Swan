@@ -2198,6 +2198,13 @@ window._openProfileDrawer = function() {
 window._openBriefDrawer = function(tabKey) {
     _briefShowPanel('tab-' + tabKey);
     const titles = { problem: 'Mandate', operation: 'Operational Setup', strategy: 'Creative Brief', platforms: 'Connections', rules: 'Rules', guardrails: 'Brand Safety & Legal', notifications: 'Notifications' };
+    // The 'strategy' card is the one the role registry RENAMES: roles with hasCreativeBrief:false
+    // (every non-social role) lose the marketing cards, so _applyRoleDashboard rewrites the nav
+    // card's title to "Brand Knowledge". Reading that element back keeps the drawer header saying
+    // whatever the card the user just clicked says — a static map here shipped a "Creative Brief"
+    // header above a panel the user had opened from a "Brand Knowledge" card.
+    const cardTitle = document.getElementById('opcard-strategy-title');
+    if (tabKey === 'strategy' && cardTitle && cardTitle.textContent.trim()) titles.strategy = cardTitle.textContent.trim();
     const titleEl = document.getElementById('brief-drawer-title');
     if (titleEl) titleEl.textContent = titles[tabKey] || tabKey;
     const backBtn = document.getElementById('brief-drawer-back');
@@ -2209,7 +2216,12 @@ window._openBriefDrawer = function(tabKey) {
     // Learned Directives lives alongside Assistant Rules on this panel (issue #113, moved into
     // its own Rules section in issue #125) — refresh it whenever the panel is opened, same as
     // the rules editor.
-    if (tabKey === 'rules') window._renderRunbookDirectives?.();
+    if (tabKey === 'rules') {
+        window._renderRunbookDirectives?.();
+        // Lead rejections are filed in their own table, so they need their own read — the
+        // content_rules fetch above will never surface them. Self-hides for non-lead roles.
+        window._renderLeadRejectionEvidence?.();
+    }
     _briefOpenChrome();
 };
 
@@ -2716,7 +2728,65 @@ const _RUNBOOK_ORIGIN = {
     tuning:             ['From tuning',   'bg-indigo-100 text-indigo-700'],
 };
 
+/** True where a content_rules row can actually reach a model — see _renderRunbookDirectives(). */
+function _rulesSteerThisAssistant() {
+    return ((window._detailReviewQueue || {}).kind || 'posts') === 'posts';
+}
+
+// ── Assistant Rules: say what the rules actually reach on THIS role (issue #131) ──
+// The panel shipped with a green "Changes apply to everything this assistant does from now on".
+// For a records-kind assistant that is simply untrue — the rules are stored, and no pipeline that
+// assistant runs ever reads them (see _renderRunbookDirectives for the trace). The card stays
+// visible and editable, because onboarding writes guardrails here for every role and hiding it
+// would strand rows the user can see nowhere else; only the promise is corrected.
+function _applyAssistantRulesScope() {
+    const note = document.getElementById('assistant-rules-scope-note');
+    const text = document.getElementById('assistant-rules-scope-text');
+    const subtitle = document.getElementById('assistant-rules-subtitle');
+    if (!note || !text) return;
+
+    const EMERALD = ['text-emerald-700', 'bg-emerald-50/70', 'border-emerald-100'];
+    // ⚠️ Every class here must ALREADY be compiled into style.css — Tailwind does not reliably scan
+    // classList strings, and rebuilding style.css churns unrelated classes. bg-amber-50 (not
+    // bg-amber-50/70, which is not compiled) is the one that exists. Check before changing these.
+    const AMBER = ['text-amber-800', 'bg-amber-50', 'border-amber-200'];
+
+    if (_rulesSteerThisAssistant()) {
+        note.classList.remove(...AMBER);
+        note.classList.add(...EMERALD);
+        text.textContent = "These rules are added to this assistant's brief. Changes apply to everything this assistant does from now on.";
+        if (subtitle) subtitle.textContent = "Custom rules for this assistant. Anything you add here is written directly into this assistant's brief and shapes everything it produces.";
+        return;
+    }
+
+    note.classList.remove(...EMERALD);
+    note.classList.add(...AMBER);
+    // Role-neutral first sentence: this holds for every records-kind role (leads, invoices,
+    // tickets, enrichment…). Only the pointer to the lever that DOES work is lead-specific.
+    const isLeadRole = (window._detailReviewQueue || {}).recordType === 'lead';
+    text.textContent = "Rules here are written into the brief that steers post and blog drafting. This assistant doesn't draft content, so they won't change what it does today."
+        + (isLeadRole ? ' To change who its searches look for, edit the excluded domains and negative keywords on the search itself.' : '');
+    if (subtitle) subtitle.textContent = 'Custom rules for this assistant, stored against its brief.';
+}
+
 window._renderRunbookDirectives = async function(assistantId) {
+    // ⚠️ Gated to roles whose work reads these rows (issue #131). content_rules reach a model ONLY
+    // through compiled blueprint §4, and src/utils/blueprint-prompt.ts has exactly two callers:
+    // process-content-jobs.ts (the social/blog drafting worker) and the admin smoke test. Nothing in
+    // the lead, invoice, ticket or enrichment pipelines reads it — they call getBlueprintVersion()
+    // to STAMP provenance and never open the sections. So on a records-kind assistant this panel
+    // could not be written to either (the tuning picker lists social drafts, so it is permanently
+    // empty there) nor read from: it listed "learned" rules that steer nothing, next to a toggle
+    // offering to pause a rule no code consults. Ungate this only when a records-kind pipeline
+    // genuinely reads §4 — not merely when one starts compiling a blueprint.
+    const card = document.getElementById('card-learned-directives');
+    const steers = _rulesSteerThisAssistant();
+    if (card) {
+        card.classList.toggle('hidden', !steers);
+        card.style.display = steers ? '' : 'none';
+    }
+    if (!steers) return;
+
     const host = document.getElementById('runbook-directives');
     if (!host) return;
     const aid = assistantId || window._currentAssistantId;
@@ -2754,6 +2824,87 @@ window._renderRunbookDirectives = async function(assistantId) {
             </button>
         </div>`;
     }).join('');
+};
+
+// ── Profile ▸ Rules ▸ what the reviewer recorded when rejecting leads ─────────
+//
+// Learned Directives above is content_rules, and content_rules only ever reach social and blog
+// GENERATION (assembleBlueprint §4). A Lead Generator's rejection reasons live in their own table
+// with no consumer on this page, so a reviewer who had categorised dozens of rejections opened this
+// panel, saw "No directives yet", and reasonably concluded nothing had been saved.
+//
+// ⚠️ This block reports EVIDENCE, not rules. It must not describe the rejections as having taught,
+// trained or improved the assistant: the only consumer is the Strategy Agent's cluster proposer,
+// which is gated on the `strategy_agent` plan feature (default OFF) and proposes a targeting change
+// for a human to approve rather than applying one. `appliedCount` is what distinguishes a rejection
+// that actually reached targeting from one still sitting as evidence, so it is rendered per reason
+// rather than summed away. Pinned by tests/lead-reject-reasons.test.ts.
+window._renderLeadRejectionEvidence = async function(assistantId) {
+    const host = document.getElementById('runbook-lead-rejections');
+    // The whole CARD is shown/hidden, not just this host — since issue #131 the panel is a top-level
+    // card rather than a block inside Learned Directives, which is now hidden for this very role.
+    const card = document.getElementById('card-lead-rejections');
+    const hide = () => {
+        if (card) { card.classList.add('hidden'); card.style.display = 'none'; }
+        if (host) host.innerHTML = '';
+    };
+    const show = () => {
+        if (card) { card.classList.remove('hidden'); card.style.display = ''; }
+    };
+    if (!host) return;
+    const aid = assistantId || window._currentAssistantId;
+    const RC = window.RevenueConstants;
+    // Leads only, and only when the vocabulary reached the browser — without the labels this can
+    // render nothing but raw enum keys, which is worse than staying quiet.
+    const isLeadRole = (window._detailReviewQueue || {}).recordType === 'lead';
+    if (!aid || !isLeadRole || !RC || typeof RC.leadRejectReasonLabel !== 'function') {
+        hide();
+        return;
+    }
+
+    let payload = null;
+    try {
+        const res = await fetch('/.netlify/functions/lead-generation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'list_reject_feedback', assistantId: aid }),
+        });
+        if (res.ok) payload = await res.json();
+    } catch { /* non-critical — the directives list below still renders */ }
+
+    // A failed lookup is not "no rejections". Say nothing rather than assert an empty history.
+    if (!payload || !Array.isArray(payload.reasons)) {
+        hide();
+        return;
+    }
+
+    show();
+    if (!payload.reasons.length) {
+        host.innerHTML = `
+          <p class="text-sm text-gray-500">Nothing recorded yet. When you reject a lead in the Review Queue or the Leads tab, the reason you pick is filed here.</p>`;
+        return;
+    }
+
+    const rows = payload.reasons.map(r => {
+        const when = r.lastAt ? new Date(r.lastAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+        const applied = Number(r.appliedCount) > 0
+            ? '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">Used to retarget a search</span>'
+            : '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-gray-100 text-gray-500">Recorded</span>';
+        return `<div class="flex items-start gap-3 px-3 py-2.5 rounded-xl border border-gray-100">
+            <span class="text-sm font-bold text-gray-900 w-10 shrink-0 tabular-nums">${Number(r.count)}×</span>
+            <div class="flex-1 min-w-0">
+                <p class="text-sm text-gray-800">${_escapeHtml(RC.leadRejectReasonLabel(r.reason) || r.reason)}</p>
+                <div class="flex items-center gap-2 mt-1 flex-wrap">${applied}<span class="text-xs text-gray-400">last ${_escapeHtml(when)}</span></div>
+            </div>
+        </div>`;
+    }).join('');
+
+    const total = Number(payload.total) || 0;
+    const appliedTotal = Number(payload.appliedTotal) || 0;
+    host.innerHTML = `
+      <p class="text-sm text-gray-500 mb-3">${total} rejection${total === 1 ? '' : 's'} recorded, grouped by what you said was wrong with the targeting. These aren't rules you can switch on and off — they're the evidence behind a proposed change to who your searches look for, which you approve on the Strategy tab.</p>
+      <div class="space-y-1.5">${rows}</div>
+      ${appliedTotal === 0 ? `<p class="text-xs text-gray-400 mt-3">None of these has changed a search yet. A reason has to come up repeatedly, across more than one search or more than one day, before a change is put to you. To act on one now, edit the search's excluded domains or negative keywords.</p>` : ''}`;
 };
 
 window._toggleDirective = async function(id, btn) {
@@ -3404,6 +3555,12 @@ function _applyDashboardRegistry(data) {
     // sufficient: init() asks the server whether the workspace has the feature and reveals its own
     // tab button only if so, because there is no client-side feature map to check here.
     const strategy = cfg.strategyTab;
+    // Profile ▸ Operational Setup ▸ Strategy Proposals rides the SAME registry declaration as the
+    // tab, deliberately: a role that gets the tab gets the consent switch for it, with no second
+    // list to keep in step. Shown even when the workspace isn't entitled — the card locks itself
+    // (🔒 chip, disabled switch) rather than vanishing, so the setting is discoverable before the
+    // plan has it. Do not narrow this to a roleKey.
+    toggle('module-strategy-agent', !!strategy);
     if (strategy) {
         setText('strategy-tab-label', strategy.label || 'Strategy');
         window.AssistantStrategy?.init({ assistantId: data.id, cfg: strategy });
@@ -3563,6 +3720,41 @@ const _OPERATIONAL_LABELS = {
     client_provided: 'Client Provided', assistant_generated: 'Assistant Generated', hybrid: 'Hybrid',
 };
 
+// Strategy Agent card (Operational Setup) — reflect the two independent states it has.
+//
+// The switch is per-assistant CONSENT and the user owns it. The 🔒 chip is the org-wide
+// `strategy_agent` plan ENTITLEMENT and the user does not — assistant-strategy.js calls
+// window._setStrategyAgentEntitled() once the server resolves it, because there is no client-side
+// feature map to read here. Unresolved is treated as entitled: the chip appears, it never
+// disappears wrongly.
+let _strategyAgentEntitled = true;
+
+function _applyStrategyAgentUi() {
+    const el = document.getElementById('edit_strategy_agent');
+    const on = el ? el.checked : true;
+    if (el) el.disabled = !_strategyAgentEntitled;
+    // A disabled input does not change the label's cursor on its own, and the compiled CSS has no
+    // peer-disabled:cursor-not-allowed to do it declaratively — so swap the two classes here.
+    const swLabel = document.getElementById('strategy-agent-switch-label');
+    if (swLabel) {
+        swLabel.classList.toggle('cursor-pointer', _strategyAgentEntitled);
+        swLabel.classList.toggle('cursor-not-allowed', !_strategyAgentEntitled);
+    }
+    // The "switched off" note is about production, and production is already stopped by the plan
+    // gate when the workspace isn't entitled — showing both notes would state the same silence twice.
+    const offNote = document.getElementById('strategy-agent-off-note');
+    if (offNote) offNote.classList.toggle('hidden', on || !_strategyAgentEntitled);
+    const lockedNote = document.getElementById('strategy-agent-locked-note');
+    if (lockedNote) lockedNote.classList.toggle('hidden', _strategyAgentEntitled);
+    const lock = document.getElementById('strategy-agent-lock');
+    if (lock) lock.classList.toggle('hidden', _strategyAgentEntitled);
+}
+
+window._setStrategyAgentEntitled = function (entitled) {
+    _strategyAgentEntitled = entitled !== false;
+    _applyStrategyAgentUi();
+};
+
 function _detailHydrate(data) {
     const ctx = data.context || {};
     const cfg = data.configuration || {};
@@ -3618,6 +3810,18 @@ function _detailHydrate(data) {
     // AI-media auto-publish opt-in (Autopilot card). Off unless explicitly stored true.
     const allowAiMediaEl = document.getElementById('edit_allow_ai_media');
     if (allowAiMediaEl) allowAiMediaEl.checked = ctx.allowAiMediaAutoPublish === true;
+    // Strategy Agent per-assistant consent (Operational Setup). DEFAULT ON — absence means on, so
+    // only an explicit false switches it off. Mirrors isStrategyAgentEnabledForAssistant() in
+    // src/config/strategy-proposals.ts; if you change the default, change it in BOTH places or the
+    // card will disagree with the worker about what is running.
+    const strategyAgentEl = document.getElementById('edit_strategy_agent');
+    if (strategyAgentEl) {
+        strategyAgentEl.checked = ctx.strategyAgentEnabled !== false;
+        // Property assignment, not addEventListener: _detailHydrate runs on every load, and a
+        // listener added each time would stack. Autosave binds separately via [id^="edit_"].
+        strategyAgentEl.onchange = _applyStrategyAgentUi;
+        _applyStrategyAgentUi();
+    }
     // workflowText is Be More Swan IP — not displayed to the user
 
     // Radios — trigger / source.
@@ -3972,6 +4176,10 @@ function _detailCollect(currentData) {
         publishPolicy: _collectPublishPolicy(currentData.context?.publishPolicy),
         // AI-media auto-publish opt-in (Autopilot card). Read from the toggle; default off.
         allowAiMediaAutoPublish: document.getElementById('edit_allow_ai_media')?.checked === true,
+        // Strategy Agent per-assistant consent. DEFAULT ON, so a MISSING checkbox must read true —
+        // `?.checked === true` would write false for any role whose card is not on the page, and
+        // silently opt future roles out of a feature they were meant to inherit.
+        strategyAgentEnabled: document.getElementById('edit_strategy_agent')?.checked !== false,
         // Operational Setup — mirrored into onboarding_context, not just configuration.inputs.
         // The blueprint only ever reads onboarding_context, so an edit that landed solely in
         // configuration.inputs changed what this page displayed and nothing the assistant knew.
@@ -4697,6 +4905,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
 
     // ── Learned Directives (issue #113: lives alongside Assistant Rules) ──
     window._renderRunbookDirectives?.(assistantId);
+    window._renderLeadRejectionEvidence?.(assistantId);
 
     // ── SMART Goals (Feature 1) ───────────────────────────────────
     await _fetchAndRenderGoals(assistantId);
@@ -5924,6 +6133,10 @@ async function _fetchAndRenderAssistantRules(assistantId) {
     _rulesAssistantId = parseInt(assistantId);
     const editor = document.getElementById('assistant-rules-editor');
     if (!editor) return;
+
+    // Before the fetch: the scope note is about the ROLE, not the rows, so it must be right even
+    // if loading the rules fails.
+    _applyAssistantRulesScope();
 
     let rules = [];
     try {
