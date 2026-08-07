@@ -406,7 +406,13 @@ async function executeRun(result: StrategyAgentResult, startedAt: number): Promi
     const featureByOrg = new Map<number, boolean>();
     // One notification per ORG per RUN, not per proposal (§9.4). Two proposers firing for one org
     // in a single run is two proposals and would otherwise be two alerts about the same visit.
-    const proposedByOrg = new Map<number, { count: number; summary: string; assistantName: string }>();
+    // assistantId is load-bearing, not decoration: strategy_proposal_pending is governed by the
+    // scope:'assistant' 'approvals' preference category, whose toggle is a per-assistant override
+    // resolved from notifications.assistant_id (see notification-prefs.ts). An unattributed row
+    // falls back to the workspace-wide value, which no UI can set — i.e. permanently on.
+    const proposedByOrg = new Map<number, {
+        count: number; summary: string; assistantName: string; assistantId: number;
+    }>();
 
     // Every skip records WHY. Six paths reach `skipped`, and without this the summary cannot
     // distinguish "correctly proposed nothing" from "silently broken" — the difference that
@@ -582,6 +588,7 @@ async function executeRun(result: StrategyAgentResult, startedAt: number): Promi
             count: (prev?.count ?? 0) + 1,
             summary: prev?.summary ?? `a new ${field.label} based on ${c.n} of your edits`,
             assistantName: prev?.assistantName ?? (assistant.name || 'Your assistant'),
+            assistantId: prev?.assistantId ?? c.aiAssistantId,
         });
     }
 
@@ -764,6 +771,7 @@ async function executeRun(result: StrategyAgentResult, startedAt: number): Promi
             count: (prev?.count ?? 0) + 1,
             summary: prev?.summary ?? `a new ${field.label} based on ${c.n} leads you rejected`,
             assistantName: prev?.assistantName ?? (assistant.name || 'Your assistant'),
+            assistantId: prev?.assistantId ?? c.aiAssistantId,
         });
     }
 
@@ -778,6 +786,10 @@ async function executeRun(result: StrategyAgentResult, startedAt: number): Promi
         // The merge engine has no plural rules, so the call site passes a resolved noun phrase.
         const ok = await createNotification(db, 'strategy_proposal_pending', {
             userId: owner.userId,
+            // Denormalised link + metadata, mirroring campaign_decision_pending: the first is what
+            // the Approvals preference override resolves against, the second is the deep link.
+            assistantId: info.assistantId,
+            metadata: { assistantId: info.assistantId },
             context: {
                 assistant: { name: info.assistantName },
                 proposal: {

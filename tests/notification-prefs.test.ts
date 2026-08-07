@@ -180,6 +180,34 @@ check('every publishing roleKey is a real assistant-scope-bearing role', () => {
     assert.ok(PUBLISHING_ROLE_KEYS.has('blog_writer'));
 });
 
+check('human-decision types are governed by Approvals, never the General fallback', () => {
+    // Both of these wait on a human answer. Left unmapped they fall back to product_updates, so
+    // muting product announcements would silently stop approval requests and the toggle would sit
+    // where nobody looks for it. strategy_proposal_pending joined 2026-08-07.
+    for (const type of ['campaign_decision_pending', 'strategy_proposal_pending']) {
+        assert.equal(categoryForType(type).key, 'approvals', `${type} is not governed by Approvals`);
+    }
+});
+
+check('every type routed to approvals has a notification category', () => {
+    // Same guard as content_calendar below: an uncategorised type silently falls back to
+    // 'informational', which files an approval request under Updates instead of Action required.
+    // NB not asserted as *_action — 'Approvals & Reviews' also carries the review OUTCOMES
+    // (risk_assessment_decision, risk_reclassification), which are correctly state_change.
+    const cat = PREF_CATEGORIES.find(c => c.key === 'approvals')!;
+    for (const type of cat.types) {
+        assert.notEqual(categoryOf(type), 'informational',
+            `${type} is uncategorised in TYPE_CATEGORY — it will default to 'informational'`);
+    }
+});
+
+check('the two pending-decision types ask for an action, and are dismissible', () => {
+    // Both wait on a human and lapse on their own, so suggested_action — not critical_action,
+    // which is undismissible and would pin an unkillable banner for a suggestion.
+    assert.equal(categoryOf('campaign_decision_pending'), 'suggested_action');
+    assert.equal(categoryOf('strategy_proposal_pending'), 'suggested_action');
+});
+
 check('every type routed to content_calendar has a notification category', () => {
     // An uncategorised type silently falls back to 'informational' in notification-actions.ts,
     // which is how blog_draft_ready / blog_content_decay were filed under Updates instead of

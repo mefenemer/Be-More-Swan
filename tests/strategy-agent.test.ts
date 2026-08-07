@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { EDIT_REASONS, MIN_EDIT_SAMPLE } from '../src/config/template-feedback';
 import { STRATEGY_TUNABLE_FIELDS, PROPOSAL_SOURCES } from '../src/config/strategy-proposals';
 import { categoryOf } from '../src/utils/notification-actions';
+import { categoryForType, PREF_CATEGORIES } from '../src/utils/notification-prefs';
 import { NOTIFICATION_DEFAULTS } from '../src/utils/notification-templates-catalog';
 
 let passed = 0;
@@ -336,6 +337,30 @@ check('the proposal alert is actionable but dismissible — never a pinned banne
     // critical_action is undismissible. Nothing here is broken: a lapsed proposal costs nothing and
     // the agent re-proposes while the evidence still supports it.
     assert.equal(categoryOf('strategy_proposal_pending'), 'suggested_action');
+});
+
+check('the alert is governed by Approvals, not the General fallback', () => {
+    // Moved off the product_updates fallback 2026-08-07. Unmapped types land there, so a user who
+    // muted product announcements silently stopped receiving strategy approval requests, and the
+    // only toggle that could bring them back was labelled "Product, Milestones & Support".
+    assert.equal(categoryForType('strategy_proposal_pending').key, 'approvals');
+});
+
+check('the alert is attributed to an assistant, or the Approvals toggle is unreachable', () => {
+    // 'approvals' is scope:'assistant'. Account Settings filters assistant-scope rows out
+    // (workspace.html), so the ONLY surface for this toggle is the Assistant Profile drawer, and
+    // the drawer writes a per-assistant override resolved from notifications.assistant_id. Drop the
+    // attribution and the row resolves to the workspace-wide value, which no UI can set — the alert
+    // would be permanently on, which is worse than sitting in the wrong bucket.
+    assert.equal(PREF_CATEGORIES.find((c) => c.key === 'approvals')!.scope, 'assistant');
+    const callIdx = runBody.indexOf("createNotification(db, 'strategy_proposal_pending'");
+    assert.ok(callIdx !== -1, 'the notification is never sent');
+    const callBody = runBody.slice(callIdx, callIdx + 900);
+    assert.match(callBody, /assistantId: info\.assistantId/, 'no denormalised assistant link — the preference override cannot bind');
+    assert.match(callBody, /metadata: \{ assistantId: info\.assistantId \}/, 'no metadata.assistantId (deep link)');
+    // The per-org fan-in has to carry the id for the call site to have one at all.
+    assert.match(runBody, /assistantId: prev\?\.assistantId \?\? c\.aiAssistantId/,
+        'the per-org collapse drops the assistant id');
 });
 
 check('the notification is per org per run, not per proposal', () => {

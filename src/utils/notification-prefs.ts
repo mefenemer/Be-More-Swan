@@ -96,10 +96,26 @@ export const PREF_CATEGORIES: PrefCategory[] = [
             // answer. Listed explicitly because an unmapped type falls back to 'product_updates'
             // (see FALLBACK_CATEGORY), which would let someone who muted product news silently
             // stop receiving approval requests — and would hide the toggle where nobody looks for
-            // it. ⚠️ strategy_proposal_pending has the same problem and is NOT fixed here: moving
-            // a live notification between preference categories changes behaviour for users who
-            // have already set that toggle, so it wants its own change.
+            // it.
             'campaign_decision_pending',
+            // The Strategy Agent's equivalent, joined 2026-08-07 for the same reason. It was left
+            // on the fallback when campaign_decision_pending landed because moving a LIVE type
+            // between categories changes delivery for anyone who had already muted product news:
+            // they start receiving strategy approvals again. That is the intended outcome — they
+            // muted product announcements, not approval requests — and it turned out to be moot:
+            // on 2026-08-07 NOBODY had product_updates or approvals muted on either channel, in
+            // staging (44 profiles) or production (4), and there were no per-assistant approvals
+            // overrides. Both categories default ON on both channels, so the move shipped as a
+            // no-op for every existing user. A future move of a live type deserves the same count.
+            // ⚠️ This only buys the user a real toggle because the notification is ATTRIBUTED to an
+            // assistant. 'approvals' is scope:'assistant', and assistant-scope rows render only in
+            // the Assistant Profile drawer (workspace.html filters them out of Account Settings),
+            // where the toggle writes a per-assistant override keyed on notifications.assistant_id.
+            // An unattributed row resolves to the workspace-wide value, which has no UI at all — so
+            // it would have become permanently ON, strictly worse than the wrong bucket. The
+            // createNotification call in netlify/functions/autonomous-strategy-agent.ts passes
+            // assistantId for exactly this reason; don't drop it.
+            'strategy_proposal_pending',
         ],
     },
     {
