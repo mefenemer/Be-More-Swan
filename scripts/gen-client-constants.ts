@@ -39,6 +39,9 @@ import {
 import {
     POSTING_CADENCES, NUMBER_WORDS, DEFAULT_POSTING_FREQUENCY, postsPerWeekFor, readCadence,
 } from '../src/config/posting-cadence';
+import {
+    LEAD_RECIPIENT_PATHS, resolveLeadRecipient, hasOutreachDraft, isLeadDeliverable,
+} from '../src/config/lead-recipient';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const OUTPUT_PATH = join(root, 'src', 'generated', 'platform-constants.js');
@@ -362,6 +365,33 @@ ${formatRows}
     isActive: function (value) {
       return readCadence(value).kind === 'scheduled';
     },
+  };
+
+  // ── Lead recipient ────────────────────────────────────────────────────────
+  // From src/config/lead-recipient.ts, stringified — the REAL functions, for the same reason as
+  // the cadence parser above. This rule decides who receives a cold email: the Review Queue prints
+  // the recipient from it, the server filters the queue with it, and send_outreach sends to it. A
+  // browser copy that forked would show one address above the Approve button and mail another.
+  //
+  // Free variables (LEAD_RECIPIENT_PATHS, resolveLeadRecipient, hasOutreachDraft) resolve to the
+  // declarations directly above, so the names must match.
+  var LEAD_RECIPIENT_PATHS = ${JSON.stringify(LEAD_RECIPIENT_PATHS)};
+  var resolveLeadRecipient = ${resolveLeadRecipient.toString()};
+  var hasOutreachDraft = ${hasOutreachDraft.toString()};
+  var isLeadDeliverable = ${isLeadDeliverable.toString()};
+
+  window.LeadRecipient = {
+    /** The address a send would actually use, or null when the lead cannot be reached. */
+    resolve: resolveLeadRecipient,
+
+    /** Does this lead carry a drafted email with a body? Cold leads deliberately carry none. */
+    hasDraft: hasOutreachDraft,
+
+    /**
+     * Is there an email here for a human to sign off? This is what stocks the Review Queue —
+     * keep it identical to the server's ?deliverable=1 filter or the badge and the list disagree.
+     */
+    isDeliverable: isLeadDeliverable,
   };
 })();
 `;

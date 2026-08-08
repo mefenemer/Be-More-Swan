@@ -153,6 +153,17 @@ export default withLambda(async (event) => {
                     SELECT COALESCE(SUM(j.leads_found), 0)::int FROM discovery_jobs j
                     WHERE j.campaign_id = ${discoveryCampaigns.id}
                 )`,
+                // What the latest run found on its own — mirrors signal-inbox.ts, and for the same
+                // reason: `leads_found` counts only newly INSERTED domains, so a re-run of a
+                // campaign that re-finds the same companies scores 0 while the cumulative total
+                // above still reads the first run's figure. This card said a bare "15 leads found",
+                // which reads as this run's result. Both surfaces show the same campaign and must
+                // not disagree about what it just did.
+                latestRunLeadsFound: sql<number>`(
+                    SELECT COALESCE(j.leads_found, 0)::int FROM discovery_jobs j
+                    WHERE j.campaign_id = ${discoveryCampaigns.id}
+                    ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+                )`,
                 // Guardrail snapshot so the Edit form can prefill without a second round-trip.
                 // Only the fields the form actually shows — maxCostGbpPerRun is operator-only.
                 maxLeadsPerRun: discoveryGuardrails.maxLeadsPerRun,

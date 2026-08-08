@@ -1624,7 +1624,16 @@ function _rqRecipient(r, statusKey) {
     if (r.recordType === 'meeting') return _rqDraft(r) ? _rqMeetingRecipientLine(r, statusKey) : '';
     if (r.recordType !== 'lead') return '';
     const d = r.data || {};
-    const to = (d.outreachDraft && d.outreachDraft.to) || d.contactEmail || (d.lead && d.lead.email) || '';
+    // Precedence lives in src/config/lead-recipient.ts and is mirrored here by the generator, NOT
+    // retyped: this line has to name the same address send_outreach will actually use, and the
+    // server's ?deliverable=1 filter has to agree with both about which leads are reachable.
+    const LR = window.LeadRecipient;
+    if (!LR || typeof LR.resolve !== 'function') {
+        // Constants failed to load. Saying nothing here would read as "no recipient, harmless"
+        // beside a button that still sends, so state the uncertainty instead.
+        return `<p class="text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 mt-2 inline-block">Couldn’t read the recipient — refresh before approving.</p>`;
+    }
+    const to = LR.resolve(d) || '';
     if (!to) return '';
     const personal = d.emailKind === 'personal';
     const scraped = d.emailSource === 'scrape';
@@ -1672,9 +1681,21 @@ async function _detailRqRenderRecords(statusKey) {
     if (!aid || !recordType) { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">No assistant selected.</p>'; return; }
     if (approval === null) { container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">These records don’t have a published state — see the Approved and Scheduled columns.</p>'; return; }
 
+    // Leads awaiting review are filtered to the ones that actually have an email to sign off —
+    // a resolvable recipient AND a drafted body. Everything else stays in the Leads tab for
+    // triage. Without this, a search finding 15 leads put all 15 here, because every promoted
+    // lead is inserted `pending_approval` and this column IS that slice — while typically only
+    // one or two are contactable at all. The predicate is src/config/lead-recipient.ts, shared
+    // with the server so this list and its badge cannot disagree.
+    //
+    // ⚠️ Review only. The Approved / Scheduled / Archived columns must keep showing every lead
+    // in that state: a lead approved before it had an address is still approved, and hiding it
+    // would lose it entirely.
+    const deliverableOnly = recordType === 'lead' && statusKey === 'review';
+
     let records = [];
     try {
-        const res = await fetch(`/.netlify/functions/assistant-records?assistantId=${aid}&recordType=${encodeURIComponent(recordType)}&approvalStatus=${approval}`);
+        const res = await fetch(`/.netlify/functions/assistant-records?assistantId=${aid}&recordType=${encodeURIComponent(recordType)}&approvalStatus=${approval}${deliverableOnly ? '&deliverable=1' : ''}`);
         if (!res.ok) throw new Error();
         records = (await res.json()).records || [];
     } catch { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">Failed to load.</p>'; return; }
@@ -1694,9 +1715,19 @@ async function _detailRqRenderRecords(statusKey) {
     _rqRecordsById.clear();
     for (const r of records) _rqRecordsById.set(r.id, r);
 
+    // An empty lead Review column is the NORMAL state, not a broken one: outreach is email-only,
+    // enrichment attempts hot/warm leads only and finds an address roughly one time in three, so
+    // most leads never become an email to approve. Saying only "nothing awaiting your review"
+    // beside a search that just filed fifteen leads reads as a bug — name where they went.
+    const emptyMsg = statusKey !== 'review'
+        ? 'Nothing here yet.'
+        : deliverableOnly
+            ? 'No emails waiting for you. Leads without a contact address can’t be emailed yet — they’re in the Leads tab.'
+            : 'Nothing awaiting your review.';
+
     container.innerHTML = records.length
         ? `<div class="divide-y divide-gray-100">${records.map((r) => _detailRqRecordCard(r, statusKey)).join('')}</div>`
-        : `<p class="text-sm text-gray-400 py-10 text-center">${statusKey === 'review' ? 'Nothing awaiting your review.' : 'Nothing here yet.'}</p>`;
+        : `<p class="text-sm text-gray-400 py-10 text-center">${emptyMsg}</p>`;
 }
 
 // Approve / reject / schedule a record from the Review Queue (PATCH assistant-records).

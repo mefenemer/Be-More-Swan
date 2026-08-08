@@ -249,17 +249,38 @@
     const job = s.latestJobStatus;
     const stage = s.latestJobStage || null;
     const found = Number(s.leadsFound || 0);
+    const latest = Number(s.latestRunLeadsFound || 0);
     const cadence = cadenceLine(s);
-    const total = found
-      ? `${found} compan${found === 1 ? 'y' : 'ies'} found so far.`
-      : 'No companies found yet.';
+    const companies = (n) => `${n} compan${n === 1 ? 'y' : 'ies'}`;
 
     // 'queued' is where a RUNNING search rests, not only where a new one waits. The worker takes
     // one search query per slice (~10s), writes the row back to 'queued' and returns, so a live run
     // reads 'queued' for almost its whole life — through searching, promoting and enriching alike.
     // Labelling that "Queued" told a user whose search had already filed fifteen leads that nothing
     // had started. `stage` is the discriminator: it is NULL until the first slice claims the job.
+    // Computed BEFORE the count line because that line has to say "this run" while one is in
+    // flight and "the last run" once it has stopped.
     const started = job === 'processing' || (job === 'queued' && !!stage);
+
+    // "found so far" is the CAMPAIGN total across every run. On a re-run it can stay completely
+    // still while the run itself did work, because leads_found counts only newly inserted domains
+    // and the insert ignores (campaign_id, domain) conflicts — so a repeat run that re-finds the
+    // same companies banks nothing. Saying only the total let a re-run that added nothing read as
+    // "15 companies found so far", which a user reasonably hears as "this run found 15".
+    //
+    // ⚠️ While a run is in flight `latest` is that run's count climbing, so it must never be
+    // called "the last run" — and "no new companies" must not be stated as a result before the
+    // run has had a chance to find any.
+    const runLabel = started ? 'this run' : 'the last run';
+    const total = !found
+      ? (started ? 'Nothing found yet.' : 'No companies found yet.')
+      : latest === found
+        ? `${companies(found)} found.`
+        : !latest
+          ? (started
+              ? `Nothing new yet this run — ${companies(found)} found so far.`
+              : `No new companies on the last run — ${companies(found)} found so far.`)
+          : `${companies(latest)} on ${runLabel} · ${companies(found)} so far.`;
     if (started) {
       // …but a run only rests between slices while something is driving it. The on-demand drain
       // gives up after twelve minutes and hands back to the ten-minute cron, so a row that has not

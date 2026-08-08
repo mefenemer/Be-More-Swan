@@ -84,6 +84,30 @@
     return `Repeats ${repeats}. Next run ${label}.`;
   }
 
+  /**
+   * What this campaign has found — the latest run and the running total, stated separately.
+   *
+   * ⚠️ This card used to print the cumulative total as a bare "15 leads found", which reads as
+   * the result of the run you just watched finish. It is not. `leads_found` counts only the
+   * domains a run actually INSERTED, and the candidate insert ignores conflicts on
+   * (campaign_id, domain) — so re-running a campaign that re-finds the same companies banks
+   * nothing and the total sits unchanged. A user who ran a search again and saw the same "15"
+   * had no way to tell "it found fifteen more" from "it found none".
+   *
+   * The total is only worth saying when it differs from the latest run, otherwise a first run
+   * would read "15 this run · 15 in total" and invite the reader to look for a distinction that
+   * isn't there yet.
+   */
+  function leadCountLine(c) {
+    const total = Number(c.leadsFound || 0);
+    const latest = Number(c.latestRunLeadsFound || 0);
+    const noun = (n) => `${n} lead${n === 1 ? '' : 's'}`;
+    if (!total) return 'No leads found yet.';
+    if (latest === total) return `${noun(total)} found.`;
+    if (!latest) return `No new leads on the last run — ${noun(total)} found in total.`;
+    return `${noun(latest)} on the last run · ${noun(total)} in total.`;
+  }
+
   function body() { return state.overlay?.querySelector('[data-dc-body]'); }
   function setBody(html) { const b = body(); if (b) b.innerHTML = html; }
 
@@ -175,7 +199,7 @@
           <span class="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border ${paused ? 'bg-gray-100 text-gray-500 border-gray-200' : draft ? STATUS_CHIP.queued : chip}">${paused ? 'paused' : statusLabel}</span>
         </div>
         ${c.name ? `<p class="text-xs text-gray-500 mt-0.5">${esc(c.idea)}</p>` : ''}
-        <p class="text-xs text-gray-500 mt-1">${Number(c.leadsFound || 0)} lead${Number(c.leadsFound) === 1 ? '' : 's'} found</p>
+        <p class="text-xs text-gray-500 mt-1">${leadCountLine(c)}</p>
         <p class="text-xs text-gray-400 mt-0.5">${paused ? 'Paused — it will not run until you resume it.' : esc(scheduleLine(c))}</p>
         <div class="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-100">
           ${primaryBtn}

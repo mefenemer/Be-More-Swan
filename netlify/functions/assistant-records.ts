@@ -2,7 +2,9 @@
 // Internal Data Hub API (Golden Rule 2) — CRUD for assistant_records, the tenant
 // work products behind the Data Hub tab on assistant-detail.html.
 //
-//  GET    ?assistantId=<id>&recordType=<type>[&format=csv]  → { records: [...] } or a CSV download
+//  GET    ?assistantId=<id>&recordType=<type>[&approvalStatus=<s>][&deliverable=1][&format=csv]
+//         → { records: [...] } or a CSV download. `deliverable=1` keeps only records that have
+//           both a resolvable recipient and a drafted body — see the block comment on the filter.
 //  POST   { assistantId, recordType, records: [{ title, status?, data }, ...], source? }
 //         → bulk insert (CSV import) or single insert; upserts on (assistant, type, title)
 //  PATCH  { id, status?, data? }                            → update one record's lifecycle/state
@@ -22,6 +24,7 @@ import { recordEvent } from '../../src/utils/revenue-ledger';
 import { getBlueprintVersion } from '../../src/utils/blueprint-version';
 import { getIcpSnapshot } from '../../src/utils/icp-snapshot';
 import { enqueueLeadHandoff } from '../../src/utils/lead-handoff';
+import { LEAD_RECIPIENT_SQL_PATHS, LEAD_DRAFT_BODY_SQL_PATH } from '../../src/config/lead-recipient';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const RECORD_TYPES = new Set(['lead', 'enrichment', 'meeting', 'invoice', 'ticket']);
@@ -269,6 +272,33 @@ export default withLambda(async (event) => {
             const approvalFilter = event.queryStringParameters?.approvalStatus;
             const APPROVAL_STATES = new Set(['pending_approval', 'approved', 'scheduled', 'rejected']);
 
+            // ── Optional deliverability filter (?deliverable=1) ──────────────────────────────
+            // Stocks the lead Review Queue with the leads that actually have an email awaiting
+            // sign-off, rather than every lead the last search happened to find.
+            //
+            // The complaint that produced this: a search returned 15 leads and Review showed 15,
+            // because every promoted lead is inserted `pending_approval` and Review IS that slice.
+            // But only a fraction are contactable — enrichment attempts hot/warm leads only and
+            // hits roughly one in three — so a queue promising "read this email and send it" was
+            // mostly stocked with leads that have no address and, for cold ones, no draft either.
+            //
+            // ⚠️ Deliberately NOT limited to leads: the param is generic so the predicate has one
+            // definition, but callers only pass it for record types where it means something. It
+            // is additive — omitted, this behaves exactly as it did before for every record type.
+            //
+            // Both paths come from src/config/lead-recipient.ts, which also generates the browser
+            // copy. Keep the shape of this predicate identical to `isLeadDeliverable` there: the
+            // Review badge counts what this returns, and a client that disagreed would render a
+            // count beside a list that contradicts it.
+            const deliverableOnly = event.queryStringParameters?.deliverable === '1';
+            const recipientSql = sql.raw(
+                LEAD_RECIPIENT_SQL_PATHS
+                    .map((p) => `NULLIF(BTRIM(data #>> '${p}'), '')`)
+                    .join(', '),
+            );
+            const deliverableWhere = sql`COALESCE(${recipientSql}) IS NOT NULL
+                AND ${sql.raw(`NULLIF(BTRIM(data #>> '${LEAD_DRAFT_BODY_SQL_PATH}'), '')`)} IS NOT NULL`;
+
             const records = await db
                 .select({
                     id: assistantRecords.id,
@@ -288,6 +318,7 @@ export default withLambda(async (event) => {
                     eq(assistantRecords.aiAssistantId, assistantId),
                     eq(assistantRecords.recordType, recordType),
                     ...(approvalFilter && APPROVAL_STATES.has(approvalFilter) ? [eq(assistantRecords.approvalStatus, approvalFilter)] : []),
+                    ...(deliverableOnly ? [deliverableWhere] : []),
                 ))
                 .orderBy(desc(assistantRecords.updatedAt));
 

@@ -313,6 +313,23 @@ export default withLambda(async (event) => {
                         SELECT COALESCE(SUM(j.leads_found), 0)::int FROM discovery_jobs j
                         WHERE j.campaign_id = ${discoveryCampaigns.id}
                     )`,
+                    // What the LATEST run found, as distinct from the campaign total above.
+                    //
+                    // ⚠️ These two diverge on every re-run, and the gap is not cosmetic.
+                    // `leads_found` only counts rows the run actually INSERTED — the candidate
+                    // insert is onConflictDoNothing on (campaign_id, domain)
+                    // (process-discovery-jobs.ts) — so a repeat run of the same campaign that
+                    // re-finds the same companies adds nothing and its own count is 0, while the
+                    // cumulative total still reads whatever the first run banked. Printing only
+                    // the total let a re-run that found nothing new report "15 leads found".
+                    //
+                    // Same ORDER BY as every other latest-job subquery here: four of them must
+                    // pick the SAME job, and created_at alone can tie.
+                    latestRunLeadsFound: sql<number>`(
+                        SELECT COALESCE(j.leads_found, 0)::int FROM discovery_jobs j
+                        WHERE j.campaign_id = ${discoveryCampaigns.id}
+                        ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+                    )`,
                 })
                 .from(discoveryCampaigns)
                 .leftJoin(discoverySchedules, eq(discoverySchedules.campaignId, discoveryCampaigns.id))
@@ -356,6 +373,7 @@ export default withLambda(async (event) => {
                     queryTotal: Number(s.latestJobQueryTotal ?? 0),
                     lastFinishedAt: s.lastFinishedAt ? new Date(s.lastFinishedAt).toISOString() : null,
                     leadsFound: Number(s.leadsFound ?? 0),
+                    latestRunLeadsFound: Number(s.latestRunLeadsFound ?? 0),
                 })),
             });
         }

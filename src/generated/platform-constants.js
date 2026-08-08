@@ -304,4 +304,31 @@
       return readCadence(value).kind === 'scheduled';
     },
   };
+
+  // ── Lead recipient ────────────────────────────────────────────────────────
+  // From src/config/lead-recipient.ts, stringified — the REAL functions, for the same reason as
+  // the cadence parser above. This rule decides who receives a cold email: the Review Queue prints
+  // the recipient from it, the server filters the queue with it, and send_outreach sends to it. A
+  // browser copy that forked would show one address above the Approve button and mail another.
+  //
+  // Free variables (LEAD_RECIPIENT_PATHS, resolveLeadRecipient, hasOutreachDraft) resolve to the
+  // declarations directly above, so the names must match.
+  var LEAD_RECIPIENT_PATHS = [["outreachDraft","to"],["contactEmail"],["lead","email"]];
+  var resolveLeadRecipient = function resolveLeadRecipient(data){if(!data||typeof data!=="object")return null;for(const path of LEAD_RECIPIENT_PATHS){let value=data;for(const key of path){if(!value||typeof value!=="object"){value=null;break}value=value[key]}if(typeof value==="string"&&value.trim())return value.trim()}return null};
+  var hasOutreachDraft = function hasOutreachDraft(data){if(!data||typeof data!=="object")return false;const draft=data.outreachDraft;if(!draft||typeof draft!=="object")return false;const body=draft.body;return typeof body==="string"&&body.trim().length>0};
+  var isLeadDeliverable = function isLeadDeliverable(data){return resolveLeadRecipient(data)!==null&&hasOutreachDraft(data)};
+
+  window.LeadRecipient = {
+    /** The address a send would actually use, or null when the lead cannot be reached. */
+    resolve: resolveLeadRecipient,
+
+    /** Does this lead carry a drafted email with a body? Cold leads deliberately carry none. */
+    hasDraft: hasOutreachDraft,
+
+    /**
+     * Is there an email here for a human to sign off? This is what stocks the Review Queue —
+     * keep it identical to the server's ?deliverable=1 filter or the badge and the list disagree.
+     */
+    isDeliverable: isLeadDeliverable,
+  };
 })();

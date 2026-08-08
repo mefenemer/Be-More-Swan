@@ -704,6 +704,46 @@
           btn.textContent = 'Copied ✓';
         }});
       }
+      // Approve — the TRIAGE decision: "this company is worth pursuing." It lives here because
+      // this tab is where every lead is, in every state, with the Approval and Contact columns
+      // beside it — the two facts the decision needs.
+      //
+      // ⚠️ This does NOT send anything, and must not. Approving in the Review Queue sends the
+      // drafted email (the button there says "Approve & send email"); approving HERE only records
+      // the targeting decision, because most leads on this tab have no address to send to —
+      // enrichment attempts hot/warm leads only and hits roughly one in three. Keeping the two
+      // acts apart is the whole point of the split: judging a company is fast and high-volume,
+      // judging an email is slow and low-volume, and one button cannot be both.
+      //
+      // Offered for anything not already approved. Not hidden for rejected leads: reversing a
+      // rejection is a legitimate correction, and the Approval cell states the result either way.
+      if (record.approvalStatus !== 'approved') {
+        buttons.push({ label: 'Approve', async run(btn, status) {
+          const res = await fetch(API, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: record.id, approvalStatus: 'approved' }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || 'Could not approve that lead.');
+          record.approvalStatus = 'approved';
+          btn.textContent = 'Approved';
+          // Same two surfaces the reject path updates: the row's Approval cell and the banner on
+          // the open record. refreshRow rewrites cells in place rather than re-rendering the
+          // table, which would collapse the panel the user is still reading.
+          refreshRow(record);
+          const chip = btn.closest('[data-hub-detail]')?.querySelector('[data-hub-approval]');
+          if (chip) chip.innerHTML = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${APPROVAL_CHIP.approved.cls}">${esc(APPROVAL_CHIP.approved.label)}</span>`;
+          // Say what did and did not happen. A user who has used the Review Queue has learned that
+          // approving sends — leaving that unsaid here would let them believe mail went out.
+          const LR = window.LeadRecipient;
+          const reachable = LR && typeof LR.isDeliverable === 'function' && LR.isDeliverable(record.data);
+          status.textContent = reachable
+            ? 'Approved. Nothing has been sent — the drafted email is waiting for you in the Review tab.'
+            : 'Approved. Nothing has been sent: there’s no contact address for this lead yet.';
+        }});
+      }
+
       // Reject — see the block comment above rejectReasonStrip for why this is a different act
       // from "Record outcome → Disqualified", and why it needed to exist on this tab: users read a
       // lead in full HERE, and had to go and find it again in Review to turn it down.
