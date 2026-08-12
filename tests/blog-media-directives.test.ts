@@ -13,7 +13,7 @@ import assert from 'node:assert';
 import { marked } from 'marked';
 import { renderMarkdown } from '../src/utils/markdown-render';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const BmsDirectives = require('../src/lib/marked-bms-directives.js');
+const BmsDirectives = require('../src/public/marked-bms-directives.js');
 
 let passed = 0;
 /**

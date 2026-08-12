@@ -19,7 +19,7 @@
 import type { Marked as MarkedType } from 'marked';
 import sanitizeHtml from 'sanitize-html';
 // Plain .js, UMD-ish, deliberately shared with the browser — see that file's header.
-import { install as installDirectives } from '../lib/marked-bms-directives.js';
+import { install as installDirectives } from '../public/marked-bms-directives.js';
 
 /**
  * The isolated, directive-enabled marked instance, loaded on first use.

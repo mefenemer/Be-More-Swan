@@ -5141,20 +5141,20 @@ function formatCurrency(amount, currency) {
 <script src="/src/components/assistant-inspo.js"></script>
 <!-- Role-specific onboarding schemas — the catalogue's Hire Role buttons route any roleKey
      defined here to assistant-setup.html (schema-driven wizard) instead of onboarding.html. -->
-<script src="/src/config/assistant-onboarding-schemas.js"></script>
+<script src="/src/public/assistant-onboarding-schemas.js"></script>
 <!-- Role marketing copy (read from master_assistants via the API) + shared detail modal —
      the catalogue primes this registry from the list it already fetches, then opens the modal
      for any roleKey. -->
-<script src="/src/config/assistant-content.js"></script>
+<script src="/src/public/assistant-content.js"></script>
 <!-- Role-specific Mandate "Quick Start Suggestions" — clickable bottleneck prompts
      rendered into assistant-detail.html ▸ Profile ▸ Mandate by _renderMandateSuggestions(). -->
-<script src="/src/config/mandate-suggestions.js"></script>
+<script src="/src/public/mandate-suggestions.js"></script>
 <script src="/src/components/assistant-detail-modal.js"></script>
 <!-- Content Engine: Blog Studio native modal (self-injects markup; uses marked/DOMPurify above). -->
 <!-- The :::media / ::::columns tokenizer. The SAME file is imported server-side by
      markdown-render.ts, so the Studio's preview can't disagree with what actually publishes
      (docs/blog-media-composition-plan.md §3.2). Must load BEFORE markdown-editor.js. -->
-<script src="/src/lib/marked-bms-directives.js"></script>
+<script src="/src/public/marked-bms-directives.js"></script>
 <script src="/src/components/markdown-editor.js"></script>
 <script src="/src/components/blog-studio-modal.js"></script>
 <script src="/calendar.js?v=20260731-nav-reload"></script>

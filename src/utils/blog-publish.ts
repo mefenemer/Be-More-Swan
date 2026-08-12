@@ -16,7 +16,7 @@ import { and, eq, ne } from 'drizzle-orm';
 import { blogPosts, contentAssets, contentProvenance, widgetConfigs } from '../../db/schema';
 import { renderMarkdown, excerpt } from './markdown-render';
 import { isC2paSigningEnabled, signStoredImageAsset, type ManifestSummary } from './c2pa-sign';
-import { stripMediaForSyndication as stripMedia } from '../lib/marked-bms-directives.js';
+import { stripMediaForSyndication as stripMedia } from '../public/marked-bms-directives.js';
 import { resolveCanonical } from './blog-seo';
 import { fireOrchestrations } from './orchestration';
 

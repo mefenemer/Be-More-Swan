@@ -1,3 +1,149 @@
+# ── Source exposure: block the server-only tree ────────────────────────────────
+#
+# There is no `publish` key under [build], so Netlify publishes the REPO ROOT. Everything not
+# excluded by Netlify's own defaults is therefore on the open web. Measured on prod 2026-08-12:
+# netlify/functions/*.ts, netlify/edge-functions/auth-guard.ts (the auth guard itself, with its
+# PROTECTED_PATHS), db/schema.ts, every db/*.sql migration, all 147 files in src/utils/,
+# scripts/, tests/, docs/, and package-lock.json — all 200. See docs/source-exposure-plan.md.
+#
+# No credentials leaked: .env, .git/, .claude/, netlify.toml and node_modules/ are all 404 by
+# Netlify default. This is information disclosure, not a breach — but it hands over the complete
+# schema, every endpoint's logic and exact dependency versions for CVE matching.
+#
+# ⚠️ THESE RULES MUST COME FIRST. Netlify evaluates redirects top-down, first match wins.
+# ⚠️ `force = true` IS LOAD-BEARING. Without it a redirect loses to a real file that exists at
+#    that path, so every rule below would silently do nothing while reading as correct. Verify by
+#    fetching the URL, never by reading this file.
+#
+# ⚠️ NEVER block /src/* wholesale — the browser loads real modules from under it. The public
+#    subtree is exactly: src/components/, src/generated/, src/public/, src/i18n.js. Everything
+#    else under src/ is TypeScript the browser cannot execute. The four client-side .js files
+#    that used to sit in src/config/ and src/lib/ were moved to src/public/ precisely so this
+#    boundary is structural rather than a list of exceptions.
+#
+# tests/directory-exposure.test.ts fails the build when a new top-level directory appears that is
+# neither in its public allow-list nor blocked here.
+
+# ⚠️ There is no 404.html in this repo — `to` is required by the schema but the BODY comes from
+#    Netlify's default 404 page. `status = 404` is what makes the response a 404, and that is the
+#    part that matters. Confirm with a real fetch after the first deploy; if a blocked path ever
+#    answers 200, this is the line to look at.
+[[redirects]]
+  from = "/db/*"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/seed/*"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/netlify/*"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/scripts/*"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/tests/*"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/docs/*"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/remotion/*"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/legal/*"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/src/config/*"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/src/lib/*"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/src/utils/*"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/src/constants/*"
+  to = "/404.html"
+  status = 404
+  force = true
+
+# Root-level manifests and configs. package-lock.json is the one that matters most: it pins every
+# dependency to an exact version, which turns CVE matching from research into a lookup.
+[[redirects]]
+  from = "/package.json"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/package-lock.json"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/tsconfig.json"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/drizzle.config.ts"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/remotion.config.ts"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/deno.lock"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/TODO.md"
+  to = "/404.html"
+  status = 404
+  force = true
+
 # Brand transition (US5.2 / AC5.2): permanent 301 from the legacy domain to Be More Swan.
 # Effective once both aura-assist.com and bemoreswan.com are attached to the Netlify site
 # and DNS (AC5.1, external) points at Netlify.
