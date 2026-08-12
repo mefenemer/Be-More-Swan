@@ -22,7 +22,8 @@
   'use strict';
 
   const API = '/.netlify/functions/discovery-campaigns';
-  const state = { assistantId: null, cfg: null, overlay: null, searchConfigured: true };
+  // briefCampaignId / brief hold the Phase 0 review step between generate_brief and approve_brief.
+  const state = { assistantId: null, cfg: null, overlay: null, searchConfigured: true, briefCampaignId: null, brief: null };
 
   function esc(value) {
     return String(value ?? '')
@@ -179,13 +180,14 @@
         : c.latestJobStatus ? esc(c.latestJobStatus) : 'no runs yet';
     const ghost = 'px-2.5 py-1 bg-white border border-gray-200 text-gray-600 hover:border-gray-300 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed';
     // Primary action: Cancel while a run is in flight, else Run now (blocked while paused).
-    // A draft says "Start search" and is emphasised, because it is the ONLY thing standing between
-    // an approved proposal and any leads — and starting it is also what activates a recurring
-    // cadence server-side (discovery-campaigns.ts run_now).
+    // A draft says "Review & start" and is emphasised: it is the ONLY thing standing between an
+    // approved proposal and any leads, and it opens the BRIEF rather than starting a run, because
+    // a draft is by definition a search plan nobody has read yet. Approving it is also what
+    // activates a recurring cadence server-side (discovery-campaigns.ts approve_brief).
     const primaryBtn = running
       ? `<button type="button" data-dc-cancel="${c.id}" class="px-3 py-1.5 bg-white border border-gray-200 text-red-600 hover:border-red-300 hover:bg-red-50 text-xs font-bold rounded-lg transition">Cancel run</button>`
       : draft
-        ? `<button type="button" data-dc-run="${c.id}" class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition">Start search</button>`
+        ? `<button type="button" data-dc-brief="${c.id}" class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition">Review &amp; start</button>`
         : `<button type="button" data-dc-run="${c.id}" class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed" ${paused ? 'disabled title="Resume this campaign to run it"' : ''}>Run now</button>`;
     return `
       <div class="border border-gray-200 rounded-xl p-4 ${paused ? 'opacity-70' : ''}" data-campaign="${c.id}" data-dc-idea-val="${esc(c.idea)}"
@@ -270,17 +272,179 @@
         requireHumanApproval: !!root.querySelector('[data-dc-approval]')?.checked,
       },
     };
+    // Phase 0: the form no longer starts a search. It saves the campaign as a DRAFT — spending
+    // nothing — and goes to the brief, where the user reads the actual web searches before any
+    // money is committed. `asDraft` is what stops createDiscoveryRun enqueuing a job here.
+    btn.disabled = true; btn.textContent = 'Drafting the plan…';
+    try {
+      // fromForm distinguishes this from a chat proposal: the server dedupes repeat chat
+      // approvals by idea, and must NOT do that to a deliberate form submission.
+      const data = await call('create', { ...payload, asDraft: true, fromForm: true });
+      state.searchConfigured = data.searchConfigured !== false;
+      if (!state.searchConfigured) {
+        window.showToast?.('Campaign saved. Connect a web search provider to start finding leads.');
+        await refresh();
+        return;
+      }
+      await openBrief(data.campaignId);
+    } catch (err) {
+      btn.disabled = false; btn.textContent = 'Start finding leads';
+      if (errEl) { errEl.textContent = err.message; errEl.classList.remove('hidden'); }
+    }
+  }
+
+  // ── The brief: what this search will actually do, before it does it ──────────
+  //
+  // ⚠️ This exists because a prod run spent its entire budget on `site:linkedin.com/jobs`,
+  // `site:trustpilot.com OR site:g2.com` and `best social media agencies UK ... directories`.
+  // Every result was discarded or scored cold. The queries were visible nowhere until after the
+  // money was gone — they were generated inside the job — so the only feedback channel a user had
+  // was rejecting fifteen useless leads afterwards. Reading them takes seconds.
+  //
+  // Costs nothing extra: the worker skips its own query_gen when the job's cursor is pre-seeded,
+  // so approving RELOCATES the Haiku call rather than adding one.
+
+  const STRATEGY_LABELS = {
+    niche_scrape: 'How they describe themselves',
+    intent_signal: 'Signs they need this',
+    footprint: 'What they’re missing',
+  };
+
+  function briefView(brief) {
+    const q = brief.queries || {};
+    const groups = ['niche_scrape', 'intent_signal', 'footprint'].map((key) => {
+      const list = Array.isArray(q[key]) ? q[key] : [];
+      return `
+        <div class="mt-3">
+          <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">${esc(STRATEGY_LABELS[key])}</p>
+          <div data-dc-group="${key}" class="mt-1.5 space-y-1.5">
+            ${list.map((query) => queryRow(key, query)).join('')}
+          </div>
+          <button type="button" data-dc-add="${key}" class="mt-1.5 text-[11px] font-bold text-emerald-700 hover:text-emerald-800 transition cursor-pointer">+ Add a search</button>
+        </div>`;
+    }).join('');
+
+    const ex = brief.exclusions || {};
+    const skipped = Array.isArray(ex.categories) ? ex.categories : [];
+    const negatives = Array.isArray(ex.negativeKeywords) ? ex.negativeKeywords : [];
+
+    return `
+      <div class="border border-gray-200 rounded-xl p-4">
+        <p class="font-bold text-gray-900">Here’s what it will search</p>
+        <p class="text-xs text-gray-500 mt-0.5">These are the exact web searches. Edit or remove any that look wrong — each one costs a search, and a bad one fills your Leads tab with things you can’t sell to.</p>
+        ${groups}
+
+        <div class="mt-4 pt-3 border-t border-gray-100">
+          <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">It will skip</p>
+          <p class="text-xs text-gray-600 mt-1">${skipped.length ? esc(skipped.join(' · ')) : 'Nothing configured.'}</p>
+          ${negatives.length ? `<p class="text-xs text-gray-600 mt-1">Plus anything matching: <span class="font-semibold">${esc(negatives.join(', '))}</span></p>` : ''}
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 mt-4">
+          <button type="button" data-dc-approve class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Approve &amp; start searching</button>
+          <button type="button" data-dc-regen class="px-3 py-2 bg-white border border-gray-200 text-gray-700 hover:border-gray-300 text-sm font-bold rounded-lg transition disabled:opacity-60">Draft a different plan</button>
+          <button type="button" data-dc-brief-cancel class="px-3 py-2 text-sm font-bold text-gray-500 hover:text-gray-700 transition">Later</button>
+          <span class="hidden text-xs font-semibold text-red-600 w-full" data-dc-brief-error></span>
+        </div>
+      </div>`;
+  }
+
+  function queryRow(key, query) {
+    return `
+      <div class="flex items-start gap-2" data-dc-query>
+        <input type="text" value="${esc(query)}" data-dc-query-input
+          class="flex-1 min-w-0 border border-gray-200 rounded-lg px-2 py-1.5 text-xs font-mono text-gray-700 focus:ring-2 focus:ring-emerald-700 transition">
+        <button type="button" data-dc-remove class="shrink-0 px-2 py-1.5 text-[11px] font-bold text-gray-400 hover:text-red-600 transition cursor-pointer" title="Remove this search">Remove</button>
+      </div>`;
+  }
+
+  /** Read the (possibly edited) plan back out of the DOM. */
+  function collectQueries(root) {
+    const out = { niche_scrape: [], intent_signal: [], footprint: [] };
+    for (const key of Object.keys(out)) {
+      const group = root.querySelector(`[data-dc-group="${key}"]`);
+      if (!group) continue;
+      out[key] = [...group.querySelectorAll('[data-dc-query-input]')]
+        .map((el) => el.value.trim())
+        .filter(Boolean);
+    }
+    return out;
+  }
+
+  async function openBrief(campaignId) {
+    state.briefCampaignId = campaignId;
+    setBody('<p class="text-sm text-gray-400 py-10 text-center">Drafting the search plan…</p>');
+    let data;
+    try {
+      data = await call('generate_brief', { campaignId });
+    } catch (err) {
+      setBody(`<div class="bg-red-50 border border-red-200 rounded-xl p-4 text-sm font-semibold text-red-700">${esc(err.message)}</div>`);
+      return;
+    }
+    if (data.searchConfigured === false) {
+      setBody('<div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm font-semibold text-amber-900">Saved. Connect a web search provider to start finding leads.</div>');
+      return;
+    }
+    if (data.failed) {
+      setBody(`<div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm font-semibold text-amber-900">${esc(data.message || 'Could not draft a search plan.')}</div>`);
+      return;
+    }
+    state.brief = data;
+    setBody(briefView(data));
+    wireBrief();
+  }
+
+  function wireBrief() {
+    const b = body();
+    if (!b) return;
+    b.querySelector('[data-dc-approve]')?.addEventListener('click', (e) => approveBrief(e.currentTarget));
+    b.querySelector('[data-dc-regen]')?.addEventListener('click', () => openBrief(state.briefCampaignId));
+    b.querySelector('[data-dc-brief-cancel]')?.addEventListener('click', () => refresh());
+    b.querySelectorAll('[data-dc-remove]').forEach((el) => {
+      el.addEventListener('click', () => el.closest('[data-dc-query]')?.remove());
+    });
+    b.querySelectorAll('[data-dc-add]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const key = el.getAttribute('data-dc-add');
+        const group = b.querySelector(`[data-dc-group="${key}"]`);
+        if (!group) return;
+        group.insertAdjacentHTML('beforeend', queryRow(key, ''));
+        const rows = group.querySelectorAll('[data-dc-query-input]');
+        rows[rows.length - 1]?.focus();
+        group.querySelectorAll('[data-dc-remove]').forEach((r) => {
+          if (r.dataset.dcWired) return;
+          r.dataset.dcWired = '1';
+          r.addEventListener('click', () => r.closest('[data-dc-query]')?.remove());
+        });
+      });
+    });
+  }
+
+  async function approveBrief(btn) {
+    const root = body();
+    const errEl = root.querySelector('[data-dc-brief-error]');
+    if (errEl) errEl.classList.add('hidden');
+    const queries = collectQueries(root);
+    const total = queries.niche_scrape.length + queries.intent_signal.length + queries.footprint.length;
+    if (!total) {
+      if (errEl) { errEl.textContent = 'Keep at least one search, or this campaign has nothing to run.'; errEl.classList.remove('hidden'); }
+      return;
+    }
     btn.disabled = true; btn.textContent = 'Starting…';
     try {
-      const data = await call('create', payload);
-      state.searchConfigured = data.searchConfigured !== false;
-      window.showToast?.(state.searchConfigured
-        ? 'Campaign started — leads will appear in your Leads tab shortly.'
-        : 'Campaign saved. Connect a web search provider to start finding leads.');
+      const data = await call('approve_brief', {
+        campaignId: state.briefCampaignId,
+        queries,
+        persona: state.brief?.persona ?? null,
+        exclusions: state.brief?.exclusions ?? null,
+      });
+      window.showToast?.(data.alreadyRunning
+        ? 'A run is already in progress.'
+        : `Approved — running ${data.queryCount} search${data.queryCount === 1 ? '' : 'es'}. Leads appear in your Leads tab as they’re found.`);
       window._leadIdeasDidAddLeads = true;
       await refresh();
     } catch (err) {
-      btn.disabled = false; btn.textContent = 'Start finding leads';
+      btn.disabled = false; btn.textContent = 'Approve & start searching';
       if (errEl) { errEl.textContent = err.message; errEl.classList.remove('hidden'); }
     }
   }
@@ -440,6 +604,8 @@
     if (!b) return;
     b.querySelector('[data-dc-create]')?.addEventListener('click', (e) => create(e.currentTarget));
     b.querySelectorAll('[data-dc-run]').forEach((el) => el.addEventListener('click', () => runNow(el)));
+    // A draft has never been read by anyone — send it to the brief rather than starting it blind.
+    b.querySelectorAll('[data-dc-brief]').forEach((el) => el.addEventListener('click', () => openBrief(Number(el.getAttribute('data-dc-brief')))));
     b.querySelectorAll('[data-dc-view]').forEach((el) => el.addEventListener('click', () => viewLeads(el)));
     b.querySelectorAll('[data-dc-cancel]').forEach((el) => el.addEventListener('click', () => cancelRun(el)));
     b.querySelectorAll('[data-dc-toggle]').forEach((el) => el.addEventListener('click', () => togglePause(el)));

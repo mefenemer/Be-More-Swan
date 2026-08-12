@@ -24,6 +24,7 @@ import { recordEvent } from '../../src/utils/revenue-ledger';
 import { getBlueprintVersion } from '../../src/utils/blueprint-version';
 import { getIcpSnapshot } from '../../src/utils/icp-snapshot';
 import { enqueueLeadHandoff } from '../../src/utils/lead-handoff';
+import { recordLeadRejection } from '../../src/utils/lead-reject-feedback';
 import { LEAD_RECIPIENT_SQL_PATHS, LEAD_DRAFT_BODY_SQL_PATH } from '../../src/config/lead-recipient';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -560,15 +561,65 @@ export default withLambda(async (event) => {
         }
 
         if (event.httpMethod === 'DELETE') {
-            let body: { id?: number };
+            let body: { id?: number; reason?: unknown };
             try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
             const id = Number(body.id);
             if (!Number.isInteger(id)) return json(400, { error: 'id is required.' });
+
+            // ── Everything below runs BEFORE the delete, and that ordering is load-bearing ──
+            //
+            // `discovered_leads.assistant_record_id` is ON DELETE SET NULL (db/schema.ts), so the
+            // moment this record goes, the link back to its discovery row is gone with it. That is
+            // how a prod assistant ended up with 35 discovered leads all marked 'promoted' and only
+            // 14 still linked: 21 records were deleted by hand, and each one silently severed its
+            // own provenance while leaving the discovery row claiming it had been promoted.
+            //
+            // Two consequences, both fixed here:
+            //   1. recordLeadRejection() resolves provenance BY assistant_record_id, so a reason
+            //      captured after the delete could never find the lead, the campaign, or the domain.
+            //   2. The discovery row's status must move to its real terminal state. 'discarded' is
+            //      already in the CHECK constraint; leaving it at 'promoted' with a null link makes
+            //      the lifecycle vocabulary describe something that is no longer true.
+            const [existing] = await db.select({
+                id: assistantRecords.id,
+                recordType: assistantRecords.recordType,
+                aiAssistantId: assistantRecords.aiAssistantId,
+            }).from(assistantRecords)
+                .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
+                .limit(1);
+            if (!existing) return json(404, { error: 'Record not found.' });
+
+            let feedbackRecorded = false;
+            if (existing.recordType === 'lead') {
+                // Optional: deleting is a decision the user has already made, and a reason they
+                // decline to give must never block it. An unknown value is dropped by
+                // recordLeadRejection (closed vocabulary), which logs the offending value.
+                const reason = typeof body.reason === 'string' ? body.reason : '';
+                if (reason) {
+                    const result = await recordLeadRejection(db, {
+                        organisationId: orgId,
+                        aiAssistantId: existing.aiAssistantId,
+                        assistantRecordId: existing.id,
+                        reason,
+                    });
+                    feedbackRecorded = result.id !== null;
+                }
+
+                // Mark the discovery row discarded whether or not a reason was given — the state
+                // is a fact about the row, not about how thoughtfully it was removed.
+                await db.update(discoveredLeads)
+                    .set({ status: 'discarded', updatedAt: new Date() })
+                    .where(and(
+                        eq(discoveredLeads.assistantRecordId, existing.id),
+                        eq(discoveredLeads.organisationId, orgId),
+                    ));
+            }
+
             const [row] = await db.delete(assistantRecords)
                 .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
                 .returning({ id: assistantRecords.id });
             if (!row) return json(404, { error: 'Record not found.' });
-            return json(200, { deleted: row.id });
+            return json(200, { deleted: row.id, feedbackRecorded });
         }
 
         return { statusCode: 405, body: 'Method Not Allowed' };

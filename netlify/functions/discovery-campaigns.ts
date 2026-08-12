@@ -7,6 +7,11 @@
 //        → creates campaign (+guardrails+schedule); one_off enqueues a run now. → { campaignId, jobId }
 //   POST { action: 'list',      assistantId }
 //        → this assistant's campaigns, newest first, each with its latest run status.
+//   POST { action: 'generate_brief', campaignId }
+//        → drafts the search plan for review BEFORE anything is spent. → { queries, exclusions }
+//   POST { action: 'approve_brief',  campaignId, queries }
+//        → stores the approved plan, starts the campaign, and enqueues a run whose cursor is
+//          pre-seeded with those queries so the worker skips its own query_gen. → { jobId }
 //   POST { action: 'run_now',   campaignId }
 //        → enqueues an on_demand run for an existing campaign (no duplicate if one is in flight).
 //   POST { action: 'list_leads', campaignId }
@@ -23,6 +28,10 @@ import { requireTenant } from '../../src/utils/tenant';
 import { createDiscoveryRun } from '../../src/utils/discovery';
 import { triggerDiscoveryDrain } from '../../src/utils/trigger-drain';
 import { isSearchConfigured, normaliseDomain } from '../../src/lib/discovery-search';
+import {
+    generateQueries, flattenQueries, QUERY_GEN_MODEL, type GeneratedQueries,
+} from '../../src/lib/discovery-query-gen';
+import { logAiUsage } from '../../src/utils/ai-usage';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 function json(statusCode: number, body: unknown) {
@@ -32,6 +41,43 @@ function json(statusCode: number, body: unknown) {
 function str(v: unknown, max: number): string | null {
     return typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null;
 }
+
+/** Cap per strategy on an APPROVED plan. Matches the generator's ceiling — each query is paid search. */
+const MAX_QUERIES_PER_STRATEGY = 10;
+
+/** Sanitise one strategy's worth of user-edited queries. A query is a search string, nothing more. */
+function cleanQueryList(v: unknown): string[] {
+    if (!Array.isArray(v)) return [];
+    return v
+        .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+        .map((x) => x.trim().slice(0, 300))
+        .slice(0, MAX_QUERIES_PER_STRATEGY);
+}
+
+/** The queries from a stored brief, flattened. Empty when no brief has ever been approved. */
+function readApprovedQueries(brief: unknown): string[] {
+    if (!brief || typeof brief !== 'object') return [];
+    const q = (brief as Record<string, unknown>).queries;
+    if (!q || typeof q !== 'object') return [];
+    const groups = q as Record<string, unknown>;
+    return (['niche_scrape', 'intent_signal', 'footprint'] as const)
+        .flatMap((k) => cleanQueryList(groups[k]));
+}
+
+/**
+ * Plain-English names for what the deterministic filter throws away, for the brief to state.
+ *
+ * The exclusions are half of what a user approves — "it will skip directories, job boards and
+ * social networks" is the reassurance the old create form never gave.
+ */
+const EXCLUSION_CATEGORY_LABELS: Record<string, string> = {
+    social: 'social networks',
+    aggregator: 'directories and review sites',
+    media: 'news, magazines and podcasts',
+    reference: 'encyclopaedias and data platforms',
+    jobs: 'job boards',
+    content_page: 'articles, guides and PDFs',
+};
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -69,10 +115,15 @@ export default withLambda(async (event) => {
 
         // Approving the same proposal twice must not buy two campaigns. It is a live risk rather
         // than a theoretical one: chat transcripts re-hydrate from chatMessages.uiElementJson on
-        // reload, so an old proposal card comes back with working buttons. Scoped to the draft
-        // path on purpose — re-submitting the FORM with the same idea is a deliberate act, and
-        // silently handing back the old campaign would look like the button was broken.
-        if (asDraft) {
+        // reload, so an old proposal card comes back with working buttons.
+        //
+        // ⚠️ Scoped to the CHAT path, not to `asDraft`. Phase 0 made the form send asDraft too —
+        // it now saves a draft and sends the user to the brief instead of starting a run — so
+        // keying the dedupe on that flag alone would silently hand a form submission back its
+        // previous campaign. Re-submitting the form with the same idea is a deliberate act, and
+        // getting someone else's older draft would look like the button was broken.
+        const fromForm = body.fromForm === true;
+        if (asDraft && !fromForm) {
             const [existing] = await db.select({ id: discoveryCampaigns.id })
                 .from(discoveryCampaigns)
                 .where(and(
@@ -184,6 +235,137 @@ export default withLambda(async (event) => {
             ))
             .orderBy(desc(discoveryCampaigns.createdAt));
         return json(200, { campaigns, searchConfigured: isSearchConfigured() });
+    }
+
+    // ── generate a brief for review, before anything is searched ────────────────
+    //
+    // Phase 0. Query generation used to happen INSIDE the job, so the first time anyone saw what
+    // the assistant was about to search was never — a prod run spent its whole budget on
+    // `site:linkedin.com/jobs` and `best social media agencies UK ... directories` and the only
+    // feedback channel was rejecting the leads afterwards.
+    //
+    // Cost-neutral, not an extra call: the worker skips its own query_gen stage entirely when the
+    // job's cursor already carries `flat` (process-discovery-jobs.ts). Generating here and seeding
+    // the cursor at approval RELOCATES the existing Haiku call rather than adding one.
+    if (action === 'generate_brief') {
+        const campaignId = Number(body.campaignId);
+        const [campaign] = await db.select({
+            id: discoveryCampaigns.id,
+            idea: discoveryCampaigns.idea,
+            targetPersona: discoveryCampaigns.targetPersona,
+            icpSnapshot: discoveryCampaigns.icpSnapshot,
+            approvedBrief: discoveryCampaigns.approvedBrief,
+        })
+            .from(discoveryCampaigns)
+            .leftJoin(discoveryGuardrails, eq(discoveryGuardrails.campaignId, discoveryCampaigns.id))
+            .where(and(eq(discoveryCampaigns.id, campaignId), eq(discoveryCampaigns.organisationId, orgId)))
+            .limit(1);
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+        if (!isSearchConfigured()) return json(200, { searchConfigured: false });
+
+        const [g] = await db.select({
+            negativeKeywords: discoveryGuardrails.negativeKeywords,
+            excludedDomains: discoveryGuardrails.excludedDomains,
+        }).from(discoveryGuardrails).where(eq(discoveryGuardrails.campaignId, campaignId)).limit(1);
+
+        const negativeKeywords = Array.isArray(g?.negativeKeywords) ? g!.negativeKeywords as string[] : [];
+        const excludedDomains = Array.isArray(g?.excludedDomains) ? g!.excludedDomains as string[] : [];
+
+        // A previously approved plan steers a REGENERATION — never a replay. See QueryGenInput.
+        const prior = readApprovedQueries(campaign.approvedBrief);
+
+        const gen = await generateQueries({
+            idea: campaign.idea,
+            targetPersona: (campaign.targetPersona ?? null) as Record<string, unknown> | null,
+            icpSnapshot: (campaign.icpSnapshot ?? null) as Record<string, unknown> | null,
+            negativeKeywords,
+            approvedQueries: prior,
+        });
+        void logAiUsage({
+            workspaceId: orgId, assistantId: Number(body.assistantId) || 0,
+            model: QUERY_GEN_MODEL, inputTokens: gen.inputTokens, outputTokens: gen.outputTokens,
+            sessionId: `discovery:brief:${campaignId}`, dataCategories: ['business_context'],
+        });
+        if (gen.flat.length === 0) {
+            return json(200, { failed: true, message: 'Could not draft a search plan for this idea. Try describing the business you are looking for more concretely.' });
+        }
+
+        // The exclusions are returned alongside the queries because they are half of what the user
+        // is approving: "it will skip directories, job boards and social networks" is reassurance
+        // the old UI never gave, and it is the difference between a plan and a list of strings.
+        return json(200, {
+            queries: gen.queries,
+            persona: campaign.targetPersona ?? null,
+            icpSnapshot: campaign.icpSnapshot ?? null,
+            exclusions: {
+                negativeKeywords,
+                excludedDomains,
+                categories: Object.values(EXCLUSION_CATEGORY_LABELS),
+            },
+            searchConfigured: true,
+        });
+    }
+
+    // ── approve a brief and start the run it describes ──────────────────────────
+    if (action === 'approve_brief') {
+        const campaignId = Number(body.campaignId);
+        const [campaign] = await db.select({ id: discoveryCampaigns.id, status: discoveryCampaigns.status })
+            .from(discoveryCampaigns)
+            .where(and(eq(discoveryCampaigns.id, campaignId), eq(discoveryCampaigns.organisationId, orgId)))
+            .limit(1);
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+
+        // Take the queries from the REQUEST, not from a regeneration: the whole point is that the
+        // run executes what was on screen, including the user's edits.
+        const raw = (body.queries && typeof body.queries === 'object') ? body.queries as Record<string, unknown> : {};
+        const queries: GeneratedQueries = {
+            niche_scrape: cleanQueryList(raw.niche_scrape),
+            intent_signal: cleanQueryList(raw.intent_signal),
+            footprint: cleanQueryList(raw.footprint),
+        };
+        const flat = flattenQueries(queries);
+        if (flat.length === 0) return json(400, { error: 'A search plan needs at least one query.' });
+
+        await db.update(discoveryCampaigns)
+            .set({
+                approvedBrief: {
+                    queries,
+                    persona: body.persona ?? null,
+                    exclusions: (body.exclusions && typeof body.exclusions === 'object') ? body.exclusions : null,
+                    approvedAt: new Date().toISOString(),
+                    approvedBy: userId,
+                },
+                // Approving is what starts a campaign, mirroring run_now: a draft that has been
+                // read and signed off is no longer a draft. Only 'draft' promotes — resurrecting a
+                // deliberately paused campaign here would undo a human's decision.
+                ...(campaign.status === 'draft' ? { status: 'active' as const } : {}),
+                updatedAt: new Date(),
+            })
+            .where(eq(discoveryCampaigns.id, campaignId));
+        if (campaign.status === 'draft') {
+            await db.update(discoverySchedules)
+                .set({ isEnabled: sql`${discoverySchedules.cadence} <> 'one_off'`, updatedAt: new Date() })
+                .where(eq(discoverySchedules.campaignId, campaignId));
+        }
+
+        const [inflight] = await db.select({ id: discoveryJobs.id })
+            .from(discoveryJobs)
+            .where(and(eq(discoveryJobs.campaignId, campaignId), sql`${discoveryJobs.status} IN ('queued','processing')`))
+            .limit(1);
+        if (inflight) return json(200, { alreadyRunning: true });
+
+        // ⚠️ The cursor is SEEDED here, and that is what makes Phase 0 free. The worker runs its
+        // query_gen stage only when `cursor.flat` is missing, so a pre-seeded cursor means the
+        // approved queries run verbatim AND the Haiku call is not paid for twice. stage must be
+        // 'searching' to match what query_gen would have set.
+        const jobId = randomUUID();
+        await db.insert(discoveryJobs).values({
+            jobId, organisationId: orgId, campaignId, triggerType: 'on_demand',
+            cursor: { flat, queryIndex: 0 }, stage: 'searching',
+        });
+
+        await triggerDiscoveryDrain(event.headers as Record<string, string | undefined>, jobId, 'discovery-campaigns:approve_brief');
+        return json(200, { jobId, queryCount: flat.length, searchConfigured: isSearchConfigured() });
     }
 
     // ── enqueue an on-demand run for an existing campaign ───────────────────────

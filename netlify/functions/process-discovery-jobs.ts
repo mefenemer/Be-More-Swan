@@ -23,9 +23,9 @@ import {
 } from '../../db/schema';
 import { generateQueries, type DiscoveryStrategy } from '../../src/lib/discovery-query-gen';
 import { scoreCandidates, type ScoreCandidate } from '../../src/lib/discovery-scoring';
-import { search, isSearchConfigured, normaliseDomain, SearchNotConfiguredError } from '../../src/lib/discovery-search';
+import { search, isSearchConfigured, normaliseDomain, fetchSiteIdentity, SearchNotConfiguredError } from '../../src/lib/discovery-search';
 import { enrichLeadContact } from '../../src/lib/discovery-enrich';
-import { classifyCandidate } from '../../src/lib/discovery-domain-filter';
+import { classifyCandidate, resolveCandidateDomain } from '../../src/lib/discovery-domain-filter';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { enqueueScenarioTrigger } from '../../src/utils/scenario-engine';
 import { recordEvent } from '../../src/utils/revenue-ledger';
@@ -50,6 +50,10 @@ const PROMOTE_BATCH = 20;
 // sequential HTTPS fetches (2.5s timeout each), so the batch runs CONCURRENTLY and stays
 // small — the tick budget is ~10s and 3 searches/tick already caused 504s.
 const ENRICH_BATCH = 5;
+// Whole-slice budget for reading rewritten candidates' home pages for their real name. Only
+// rewritten hits need one, they run concurrently, and the slice already spends ~10s on a search
+// plus a scoring call — so this is deliberately smaller than the per-lead enrichment budget.
+const IDENTITY_BUDGET_MS = 4000;
 
 type JobRow = {
     id: number; job_id: string; organisation_id: number; campaign_id: number;
@@ -132,6 +136,7 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
                 idea: discoveryCampaigns.idea,
                 targetPersona: discoveryCampaigns.targetPersona,
                 icpSnapshot: discoveryCampaigns.icpSnapshot,
+                approvedBrief: discoveryCampaigns.approvedBrief,
                 assistantName: aiAssistants.name,
             })
             .from(discoveryCampaigns)
@@ -176,6 +181,13 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
                 targetPersona: (campaign.targetPersona ?? null) as Record<string, unknown> | null,
                 icpSnapshot: icp,
                 negativeKeywords: guardrails.negativeKeywords,
+                // A brief the user approved steers this REGENERATION (Phase 0). Reaching this
+                // branch at all means the cursor was not seeded, i.e. this is a scheduled re-run
+                // rather than the approved first run — and re-issuing the approved strings
+                // verbatim would return the same domains, which the (campaign_id, domain) dedupe
+                // then discards wholesale. So the plan is shown to the model as the shape the user
+                // signed off, and fresh queries are written within it.
+                approvedQueries: approvedQueriesOf(campaign.approvedBrief),
             });
             tokensUsed += gen.inputTokens + gen.outputTokens;
             void logAiUsage({
@@ -241,22 +253,43 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
             searchCallsMade += 1;
             costGbp += callCost;
 
-            // Brand-safety filter + domain dedupe within this slice.
+            // Resolve each hit to the company it is about, then dedupe, then apply guardrails.
+            //
+            // ⚠️ The resolve step MUST come before the dedupe. It can rewrite blog.foo.co.uk to
+            // foo.co.uk, so two hits that look distinct at this point (a company's blog post and
+            // its home page) collapse to one domain — dedupe after the rewrite or they survive as
+            // duplicates and only collide at the (campaign_id, domain) unique index.
+            //
+            // resolveCandidateDomain subsumes the old classifyCandidate test: it drops everything
+            // that was dropped before, except the two shapes where the company is real and only
+            // the PAGE was wrong (its own blog post, a blog./careers. subdomain). Those it keeps,
+            // pointing at the root domain. See docs/discovery-candidate-resolution-plan.md.
             const seen = new Set<string>();
-            const candidates = results
+            const resolved = results
                 .map((r) => ({ ...r, domain: normaliseDomain(r.domain || r.url) }))
-                .filter((r) => r.domain && !seen.has(r.domain) && (seen.add(r.domain), true))
-                .filter((r) => !isExcluded(r.domain!, `${r.title} ${r.snippet}`, guardrails))
-                // Drop non-prospects (directories, social, listicles, vendor blogs) BEFORE
-                // scoring — a live run qualified tiktok.com and cvent.com as warm leads.
-                // Runs pre-scoring so dropped candidates cost no tokens either.
-                .filter((r) => {
-                    const verdict = classifyCandidate({ domain: r.domain, url: r.url, title: r.title });
-                    if (verdict.excluded) {
+                .map((r) => {
+                    const res = resolveCandidateDomain({ domain: r.domain, url: r.url, title: r.title });
+                    if (!res) {
+                        const verdict = classifyCandidate({ domain: r.domain, url: r.url, title: r.title });
                         console.log(`[discovery] job ${job.job_id} dropped ${r.domain} (${verdict.category}): ${verdict.reason}`);
+                        return null;
                     }
-                    return !verdict.excluded;
-                });
+                    if (res.rewritten) {
+                        console.log(`[discovery] job ${job.job_id} resolved ${r.domain} → ${res.domain}: ${res.reason}`);
+                    }
+                    return { ...r, domain: res.domain, rewrittenFrom: res.rewritten ? r.domain : null };
+                })
+                .filter((r): r is NonNullable<typeof r> => r !== null)
+                .filter((r) => r.domain && !seen.has(r.domain) && (seen.add(r.domain), true))
+                .filter((r) => !isExcluded(r.domain!, `${r.title} ${r.snippet}`, guardrails));
+
+            // A rewritten candidate's title and snippet describe the ARTICLE that surfaced it, not
+            // the company — and `companyName` is taken straight from the title. Read the company's
+            // own home page for an honest name before scoring. Budgeted across the whole slice and
+            // run concurrently: enrichment learned the hard way that four slow-but-not-timing-out
+            // fetches compound past the function tick (LEAD_BUDGET_MS in discovery-enrich.ts).
+            // On timeout or failure the lead is kept with its domain as the name — never dropped.
+            const candidates = await resolveIdentities(resolved, job.job_id);
 
             if (candidates.length === 0) continue;
 
@@ -271,7 +304,13 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
                     sourceUrl: c.url,
                     discoveredVia: strategy,
                     matchedQuery: query,
-                    signals: { snippet: c.snippet },
+                    // rewrittenFrom records that this lead is the ROOT of the page that actually
+                    // ranked — the company is right, the URL that found it was its blog post or a
+                    // publishing subdomain. Without it, a lead whose sourceUrl is an article looks
+                    // like a filter failure rather than a deliberate resolution. jsonb, no migration.
+                    signals: c.rewrittenFrom
+                        ? { snippet: c.snippet, rewrittenFrom: c.rewrittenFrom }
+                        : { snippet: c.snippet },
                     status: 'discovered' as const,
                 })))
                 // Match the PARTIAL unique index (…) WHERE domain IS NOT NULL — Postgres won't
@@ -656,6 +695,67 @@ async function promoteOne(
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
+/** The queries from a stored approved brief, flattened. Empty when none was ever approved. */
+function approvedQueriesOf(brief: unknown): string[] {
+    if (!brief || typeof brief !== 'object') return [];
+    const q = (brief as Record<string, unknown>).queries;
+    if (!q || typeof q !== 'object') return [];
+    const groups = q as Record<string, unknown>;
+    return (['niche_scrape', 'intent_signal', 'footprint'] as const).flatMap((k) => {
+        const list = groups[k];
+        return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string' && !!x.trim()) : [];
+    });
+}
+
+interface ResolvedHit {
+    title: string;
+    url: string;
+    snippet: string;
+    domain: string;
+    /** The hit's original domain when it was rewritten to a root, else null. */
+    rewrittenFrom: string | null;
+}
+
+/**
+ * Give rewritten candidates an honest name before they reach the scorer.
+ *
+ * A rewritten hit's title and snippet describe the ARTICLE that surfaced it — "How To Host A
+ * Corporate Retreat" — while `companyName` downstream is taken straight from the title. Left
+ * alone, the Leads tab fills with article headlines and the scorer judges companies by prose
+ * about the market. That is exactly why this rewrite was deferred when it was first considered.
+ *
+ * Only rewritten hits are fetched; an ordinary hit already carries the company's own page title.
+ *
+ * ⚠️ On failure the lead is KEPT and named by its domain, with the article snippet cleared. The
+ * filter's stated bias is false negatives over false positives, and the scorer is the second gate:
+ * a cold-rated lead is recoverable, whereas one carrying a misleading name and snippet corrupts
+ * both the Leads tab and the scoring decision. Never fall back to the article's own words.
+ */
+async function resolveIdentities(hits: ResolvedHit[], jobId: string): Promise<ResolvedHit[]> {
+    const needing = hits.filter((h) => h.rewrittenFrom);
+    if (needing.length === 0) return hits;
+
+    const deadline = Date.now() + IDENTITY_BUDGET_MS;
+    await Promise.all(needing.map(async (hit) => {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+            hit.title = hit.domain;
+            hit.snippet = '';
+            return;
+        }
+        const identity = await fetchSiteIdentity(hit.domain, { timeoutMs: remaining });
+        if (identity?.title) {
+            hit.title = identity.title;
+            hit.snippet = identity.description || '';
+        } else {
+            console.log(`[discovery] job ${jobId} could not read ${hit.domain}; naming it by domain`);
+            hit.title = hit.domain;
+            hit.snippet = '';
+        }
+    }));
+    return hits;
+}
 
 async function loadGuardrails(db: Db, campaignId: number): Promise<Guardrails> {
     const [g] = await db.select().from(discoveryGuardrails).where(eq(discoveryGuardrails.campaignId, campaignId)).limit(1);

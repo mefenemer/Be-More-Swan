@@ -3,9 +3,14 @@
 Raised 2026-08-08 from prod (Zaphod): "a new search returned 15 leads, and there are also 15 leads
 in the Review tab, which is not correct."
 
-Status: **Phase 1 built 2026-08-08 (items 1–3 and 5, plus the empty state from item 8) — not yet
-deployed or verified against real data.** Item 4 deliberately deferred; see the note under it.
-Phases 0, 2 and 3 scoped, not started.
+Status:
+- **Phase 1 — built and DEPLOYED to prod + staging 2026-08-08** (items 1–3 and 5, plus the empty
+  state from item 8). Item 4 deliberately deferred; see the note under it.
+- **Two unplanned fixes built 2026-08-08 after prod diagnosis — see "What the prod data showed".**
+  Not yet deployed at time of writing.
+- **Phase 0 — BUILT 2026-08-08.** ⚠️ Needs `db/discovery-approved-brief.sql` applied to each
+  environment BEFORE the code deploys; the column is additive and nullable, but the API writes it.
+- Phases 2 and 3 scoped, not started.
 
 ## Why this exists
 
@@ -198,6 +203,64 @@ mirrored in `_rqRecipient` (`assistants.js:1627`). A third copy would drift; ext
 **Migration: none.** The fifteen rows currently in prod Review are not rewritten — they simply
 resolve to Leads or Review depending on whether they have a recipient. Reversible by dropping the
 query param.
+
+## What the prod data showed, and the two fixes it forced
+
+Phase 1 shipped, then the prod rows were read. Zaphod held 14 pending leads, **0 deliverable** — and
+the reason was not the filter. Every lead scored **cold**, every `outreachDraft` was present and
+**null**, and `enrichAttemptedAt` was unset on all of them. Each of those is the system behaving
+exactly as designed: cold leads get no draft, and `enrichBatch` only scrapes hot/warm.
+
+The leads themselves were the problem. Of 35 discovered across two campaigns: adobe.com,
+hubspot.com, salesforce.com, hootsuite.com, shopify.com, huffingtonpost.co.uk, digiday.com,
+podcasts.apple.com, anchor.fm, feeds.libsyn.com, startup.jobs, builtinnyc.com. Vendors, media,
+podcasts, job boards. **Not one was a sellable company.**
+
+### Fix A — the query generator was asking for exactly what the filter throws away
+
+`discovery-query-gen.ts` described `niche_scrape` as *"directories, maps, 'best X in Y' style"* and
+`intent_signal` as *"hiring pages, tech-stack mentions, recent press, public reviews"* — while
+`discovery-domain-filter.ts` blocks aggregators, media and job boards and rejects titles matching
+`/directory/` and `/top \d+|best \d+/`. The model was not misbehaving; it did what it was told. The
+run duly produced `site:trustpilot.com OR site:g2.com`, `site:linkedin.com/jobs`,
+`inurl:careers OR inurl:jobs` and `best social media agencies UK ... directories`.
+
+Rewritten so all three strategies aim at **the prospect's own website**, with the prohibition block
+generated from the filter's own tables (a category added there reaches the prompt on the next run).
+The prompt now also states the architectural *why*, because without it someone reasonably re-adds
+"search LinkedIn for companies hiring X" — a good intent signal that yields a lead for linkedin.com.
+
+⚠️ **Unresolved and worth a decision:** third-party intent sources are architecturally unusable.
+The worker takes the SERP hit's domain as the prospect, so job boards and review sites — where
+buying signals genuinely live — can never produce a lead for the company they describe. Fixing it
+means rewriting a candidate to its root domain, which then feeds the scorer a title that describes
+an article. The same trade-off is already recorded for a real prospect's blog post being dropped.
+
+### Fix B — Delete was destroying the evidence that would have prevented all of it
+
+21 of those 35 leads had been deleted by hand. Every one was a junk hit, so every one was evidence
+the search was aimed wrong — and Delete captured none of it, while Reject captures a reason that
+feeds `lead_reject_feedback`. Delete is also the button that makes a screenful of noise vanish
+fastest, so the intuitive action was the lossy one.
+
+Worse, `discovered_leads.assistant_record_id` is `ON DELETE SET NULL`, so each delete severed its
+own provenance and left the discovery row reading `status='promoted'` — a state the lifecycle
+vocabulary cannot describe.
+
+Now: deleting a lead offers the reason vocabulary first, names Reject as the non-destructive
+alternative, and marks the discovery row `discarded` whether or not a reason is given.
+⚠️ **Both writes MUST precede the delete** — `recordLeadRejection` resolves provenance *by*
+`assistant_record_id`, so anything collected afterwards attaches to nothing, silently.
+`tests/lead-delete-evidence.test.ts` pins the ordering, and strips comments before doing so: the
+first draft passed by matching the function name inside a comment sitting above the code.
+
+### What this changed about priorities
+
+**Phase 2 item 6 (paid enrichment) would have been money on fire here** — buying addresses for a
+podcast feed and two news sites. It stays parked until targeting is fixed. **Phase 0 is now the
+clear next build**, and the evidence for it is concrete: had the fifteen queries been on screen
+before the run, `site:linkedin.com/jobs` and *"best social media agencies UK directories"* would
+have been obvious in seconds.
 
 ## Phase 2 — make a lead reachable, and say so
 

@@ -16,6 +16,7 @@
 //   DISCOVERY_FETCH_TIMEOUT_MS  — per-page fetch timeout for footprint checks (default 8000)
 
 import * as cheerio from 'cheerio';
+import { safeFetchText } from '../utils/safe-fetch';
 
 const PROVIDER = (process.env.DISCOVERY_SEARCH_PROVIDER ?? 'serper').toLowerCase();
 const SERPER_API_KEY = process.env.SERPER_API_KEY;
@@ -80,6 +81,57 @@ export async function search(query: string, opts: { limit?: number } = {}): Prom
 
     if (PROVIDER === 'serper') return searchSerper(query, limit);
     throw new SearchNotConfiguredError(`Unknown DISCOVERY_SEARCH_PROVIDER "${PROVIDER}".`);
+}
+
+/** How a company describes itself on its own home page. */
+export interface SiteIdentity {
+    title: string;
+    description: string;
+}
+
+/**
+ * Read a domain's home page for the company's OWN name and description.
+ *
+ * ⚠️ Exists because of `companyName: c.title || c.domain` in the worker: when a candidate is
+ * rewritten to its root domain (see resolveCandidateDomain), the SERP title still describes the
+ * ARTICLE that surfaced it. Keeping it would file a lead called "How To Host A Corporate Retreat"
+ * and hand the scorer a snippet about an article — which is precisely why the rewrite was deferred
+ * the first time it was considered. One cheap fetch buys an honest name instead.
+ *
+ * Uses safeFetchText, not the bare fetch above: this URL is derived from search results, so every
+ * redirect hop must stay re-validated against the SSRF guard.
+ *
+ * Best-effort by design — returns null on any failure, and the caller keeps the domain as the
+ * lead's name. A missing title must never cost us the lead.
+ */
+export async function fetchSiteIdentity(
+    domain: string,
+    opts: { timeoutMs?: number } = {},
+): Promise<SiteIdentity | null> {
+    try {
+        const { body } = await safeFetchText(`https://${domain}/`, {
+            timeoutMs: opts.timeoutMs ?? FETCH_TIMEOUT_MS,
+            maxBytes: 1024 * 1024,
+        });
+        const $ = cheerio.load(body);
+        // og:site_name first — it is the company's name by definition, where <title> is often the
+        // name plus a tagline plus the page. Fall back through og:title to <title>.
+        const title = (
+            $('meta[property="og:site_name"]').attr('content')
+            || $('meta[property="og:title"]').attr('content')
+            || $('title').first().text()
+            || ''
+        ).replace(/\s+/g, ' ').trim().slice(0, 200);
+        const description = (
+            $('meta[name="description"]').attr('content')
+            || $('meta[property="og:description"]').attr('content')
+            || ''
+        ).replace(/\s+/g, ' ').trim().slice(0, 500);
+        if (!title && !description) return null;
+        return { title, description };
+    } catch {
+        return null;
+    }
 }
 
 /**

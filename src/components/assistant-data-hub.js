@@ -480,6 +480,78 @@
     document.body.appendChild(overlay);
   }
 
+  /** Delete one record and drop it from the table. Shared by the plain and lead delete paths. */
+  async function deleteRecord(id, reason) {
+    const res = await fetch(API, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(reason ? { id, reason } : { id }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Could not delete the record.');
+    state.records = state.records.filter((r) => r.id !== id);
+    renderTable();
+    return data;
+  }
+
+  // ── Deleting a lead, and not throwing away what it taught us ────────────────
+  //
+  // ⚠️ This strip asks BEFORE the delete, which is the opposite of rejectReasonStrip below, and
+  // the difference is forced rather than stylistic. `discovered_leads.assistant_record_id` is
+  // ON DELETE SET NULL, and recordLeadRejection() resolves the lead, campaign and domain BY that
+  // id — so a reason collected after the row is gone can never be attributed to anything.
+  //
+  // Why it matters: on a prod assistant, 21 of 35 discovered leads had been deleted by hand. Every
+  // one of them was a junk hit (podcasts, news articles, job boards) — which is to say every one
+  // was evidence that the search was aimed wrong, and all of it was discarded by the button that
+  // makes the mess disappear fastest. Reject captures that evidence; Delete captured nothing. The
+  // fix is not to remove Delete but to stop it being the silent option.
+  function deleteReasonStrip(record) {
+    const RC = window.RevenueConstants;
+    const strip = document.createElement('div');
+    strip.className = 'w-full mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2';
+    const reasons = (RC && Array.isArray(RC.leadRejectReasons)) ? RC.leadRejectReasons : [];
+    const chip = 'px-2 py-1 text-[11px] font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-red-300 hover:text-red-800 transition cursor-pointer';
+
+    strip.innerHTML = `
+      <p class="text-[11px] font-bold text-gray-800">Delete ${esc(record.title || 'this lead')}?</p>
+      <p class="text-[11px] text-gray-600 mb-2">This removes it for good. If the problem is that the search shouldn’t have found it, <strong>Reject</strong> keeps the record and tells future searches what to avoid.</p>
+      ${reasons.length ? `<div class="flex flex-wrap gap-1.5">
+        ${reasons.map((r) => `<button type="button" class="${chip}" data-hub-del-reason="${esc(r)}">${esc(RC.leadRejectReasonLabel(r))}</button>`).join('')}
+      </div>
+      <p class="text-[11px] text-gray-500 mt-1.5">Pick a reason to delete it and record what the search got wrong.</p>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-2">
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg bg-white border border-red-200 text-red-700 hover:bg-red-100 transition cursor-pointer" data-hub-del-plain>Delete without a reason</button>
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-500 hover:text-gray-700 transition cursor-pointer" data-hub-del-cancel>Cancel</button>
+      </div>
+      <p class="hidden text-[11px] font-semibold mt-1.5" data-hub-del-status></p>`;
+
+    const status = strip.querySelector('[data-hub-del-status]');
+    strip.querySelector('[data-hub-del-cancel]').addEventListener('click', () => strip.remove());
+
+    const go = async (reason) => {
+      strip.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+      status.classList.remove('hidden');
+      status.className = 'text-[11px] font-semibold text-gray-500 mt-1.5';
+      status.textContent = 'Deleting…';
+      try {
+        await deleteRecord(record.id, reason);
+      } catch (err) {
+        strip.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+        status.className = 'text-[11px] font-semibold text-red-600 mt-1.5';
+        status.textContent = err.message || 'Could not delete that lead.';
+      }
+    };
+
+    strip.addEventListener('click', (e) => {
+      const chosen = e.target.closest('[data-hub-del-reason]');
+      if (chosen) { go(chosen.getAttribute('data-hub-del-reason')); return; }
+      if (e.target.closest('[data-hub-del-plain]')) go(undefined);
+    });
+    return strip;
+  }
+
   // ── Rejecting a lead, and saying why ────────────────────────────────────────
   //
   // ⚠️ Reject and "Record outcome → Disqualified" are NOT the same act, and offering only the
@@ -776,16 +848,15 @@
       }
     }
 
-    buttons.push({ label: 'Delete', danger: true, async run(btn, status, row) {
-      const res = await fetch(API, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: record.id }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Could not delete the record.');
-      state.records = state.records.filter((r) => r.id !== record.id);
-      renderTable();
+    // Deleting a LEAD asks why first — see deleteReasonStrip for why this one confirms up front
+    // while Reject deliberately asks afterwards. Every other record type deletes as before.
+    buttons.push({ label: 'Delete', danger: true, async run(btn, status) {
+      if (state.hub.recordType === 'lead') {
+        btn.disabled = false;   // the strip owns the action now; leave the button usable
+        status.parentElement?.appendChild(deleteReasonStrip(record));
+        return;
+      }
+      await deleteRecord(record.id);
     }});
 
     const status = document.createElement('p');

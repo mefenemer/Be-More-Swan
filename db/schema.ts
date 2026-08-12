@@ -3295,6 +3295,14 @@ export const discoveryCampaigns = pgTable("discovery_campaigns", {
   status: text("status").notNull().default("draft"),
   // ICP snapshot taken at activation so a run is reproducible if onboarding changes later.
   icpSnapshot: jsonb("icp_snapshot"),
+  // The search plan a human read and approved before the run was allowed to spend anything —
+  // { queries, persona, exclusions, approvedAt, approvedBy }. NULL means no brief was ever
+  // approved, which is how every campaign predating db/discovery-approved-brief.sql reads.
+  // ⚠️ Deliberately NOT nested inside icpSnapshot: that column is the attribution key stamped
+  // onto every revenue-ledger event, and overloading it would change what those rows mean.
+  // ⚠️ The stored queries are the FIRST run's instance, not a script to replay — identical
+  // queries re-find identical domains and the (campaign_id, domain) dedupe then discards them all.
+  approvedBrief: jsonb("approved_brief"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
