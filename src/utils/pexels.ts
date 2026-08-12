@@ -277,14 +277,34 @@ export async function createPexelsAsset(
     return asset.id;
 }
 
-// Create a contentAssets row for a Pexels candidate, attach it to the post(s) via the
-// scheduledPostAssets junction, and keep the deprecated contentAssetIds array in sync during the
-// migration window. Returns the new asset id. Handles both photos and videos.
+// Create a contentAssets row for a Pexels candidate and SWAP it in as the post's media, via the
+// scheduledPostAssets junction plus the deprecated contentAssetIds array. Returns the new asset id.
+// Handles both photos and videos.
 //
 // `postIds` carries the caller's cross-post fan-out (mediaTargetPostIds): one stock photo chosen for
 // a post that goes to four platforms is attached to all four, but the asset row is created ONCE —
 // looping the whole helper per sibling would mint four identical content_assets and four Pexels
 // download records for a single pick.
+//
+// ── Why this SWAPS rather than appends ──────────────────────────────────────────────────────────
+// "Find a photo" is a single-media picker, the same control as "Use my own" beside it — a carousel
+// is built somewhere else entirely (set-post-slides, which alone knows each format's slide ceiling).
+// This used to APPEND to whatever the post already carried, so choosing a stock photo for a post
+// that already had a picture left it holding two, and every consequence of that was silent:
+//
+//   • approve-post counts contentAssetIds against the format's maxItems, so a LinkedIn Feed post
+//     (max 1) was refused with "takes at most 1 — this post has 2" and could not be scheduled at
+//     all. The user had done nothing wrong and the message named a slide count they never chose.
+//   • with no format_key to catch it, the post published instead with BOTH images, the old one
+//     leading — so the picture the user picked was not the picture that went out.
+//   • resolvePostImage picks the first row the database happens to return from an unordered
+//     `inArray`, so even the editor's own thumbnail was a coin toss between old and new.
+//   • mediaMissing stayed set. Sourcing a replacement for media deleted from My Content is exactly
+//     what the "⚠️ Media deleted → Source new media" prompt sends you here to do, and the flag it
+//     drives was never cleared — so the warning came back the moment the post was reopened.
+//
+// attach-draft-media.ts is the reference implementation of this swap; the two must agree, because
+// they are two buttons on one panel and a user cannot see which endpoint they reached.
 export async function attachPexelsImageToPost(
     db: Db,
     args: { postId: number; postIds?: number[]; userId: number; orgId: number | null; candidate: PexelsCandidate | PexelsVideoCandidate; assetType?: 'image' | 'video' },
@@ -294,23 +314,27 @@ export async function attachPexelsImageToPost(
     const assetId = await createPexelsAsset(db, { userId, orgId, candidate, assetType: args.assetType });
     const asset = { id: assetId };
 
+    // Drop the media these posts were carrying before inserting the replacement, so a post is never
+    // momentarily holding both — approve-post and the publishers read this table.
+    await db.delete(scheduledPostAssets).where(inArray(scheduledPostAssets.scheduledPostId, targets));
     await db.insert(scheduledPostAssets)
         .values(targets.map(id => ({ scheduledPostId: id, contentAssetId: asset.id, position: 0 })))
         .onConflictDoNothing();
 
-    // Keep the deprecated JSONB array in sync so resolvePostImage() (which reads it) works today.
-    // Read-then-write per post because this APPENDS to whatever each row already carries, and
-    // siblings can legitimately differ (someone may have set one platform's picture by hand).
-    for (const id of targets) {
-        const [post] = await db.select({ ids: scheduledPosts.contentAssetIds })
-            .from(scheduledPosts).where(eq(scheduledPosts.id, id)).limit(1);
-        const existing = Array.isArray(post?.ids) ? (post!.ids as number[]) : [];
-        if (!existing.includes(asset.id)) {
-            await db.update(scheduledPosts)
-                .set({ contentAssetIds: [...existing, asset.id], updatedAt: new Date() })
-                .where(eq(scheduledPosts.id, id));
-        }
-    }
+    // The deprecated JSONB array is kept in step because resolvePostImage() still reads it.
+    // Text overlays and the base pin go with the old picture: they were positioned against an image
+    // this post no longer has. Same reset as attach-draft-media, and the same one the editor has
+    // always ASSUMED happened here (gpAiShowThumb clears p.overlays on the client).
+    await db.update(scheduledPosts)
+        .set({
+            contentAssetIds: [asset.id],
+            mediaMissing: false,
+            mediaMissingNote: null,
+            imageOverlays: null,
+            overlayBaseAssetId: null,
+            updatedAt: new Date(),
+        })
+        .where(inArray(scheduledPosts.id, targets));
 
     return asset.id;
 }

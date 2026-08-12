@@ -125,6 +125,67 @@ check('the writes target the resolved list, not the requested id', () => {
     }
 });
 
+// ── A single-media picker SWAPS; it never appends ───────────────────────────────────────────────
+// "Find a photo" (pexels-search → attachPexelsImageToPost), "Use my own" (attach-draft-media) and
+// "Generate with AI" (regenerate-post-media) are three buttons on ONE panel, and the user cannot see
+// which endpoint they reached. A carousel is built somewhere else entirely — set-post-slides, which
+// alone knows each format's slide ceiling — so none of these three may ever leave a post holding
+// more media than it started with.
+//
+// The stock picker did. It appended, and every consequence was silent: approve-post counts
+// contentAssetIds against the format's maxItems, so a LinkedIn Feed post (max 1) that already had a
+// picture was refused with "takes at most 1 — this post has 2"; without a format_key to catch it the
+// post published BOTH images with the old one leading; and mediaMissing was never cleared, so the
+// "⚠️ Media deleted → Source new media" prompt that sends you to this very picker came straight back.
+check('every single-media picker replaces the post’s media rather than adding to it', () => {
+    const pexels = fn('src/utils/pexels.ts');
+    const attachFrom = pexels.indexOf('export async function attachPexelsImageToPost(');
+    assert.ok(attachFrom !== -1, 'expected the stock-photo attach to exist');
+    const attachPexels = pexels.slice(attachFrom);
+
+    // The array write is the one publish-social-posts reads (resolvePostMediaList), so an append
+    // here is what actually reaches LinkedIn.
+    assert.match(attachPexels, /contentAssetIds: \[asset\.id\]/,
+        'the stock picker must SET the post’s media, not append to whatever it already carried');
+    assert.ok(!/contentAssetIds: \[\.\.\.existing/.test(attachPexels),
+        'the append is back — a second picture blocks approval on any format with maxItems 1');
+
+    // The junction table has to agree with the array, or approve-post and the publishers read two
+    // different pictures off the same post.
+    assert.match(attachPexels, /\.delete\(scheduledPostAssets\)[\s\S]{0,200}inArray\(scheduledPostAssets\.scheduledPostId, targets\)/,
+        'the old junction rows must go before the replacement lands');
+
+    for (const f of ['netlify/functions/attach-draft-media.ts', 'netlify/functions/regenerate-post-media.ts']) {
+        assert.match(fn(f), /contentAssetIds: \[assetId\]/, `${f}: the sibling picker must swap too`);
+    }
+});
+
+// Sourcing a replacement is the whole point of the "media deleted" prompt, so the flag it drives has
+// to come off wherever that prompt can land the user. It cleared on two of the three paths.
+check('sourcing new media clears the “media deleted” flag on every path that can source it', () => {
+    for (const f of [
+        'src/utils/pexels.ts',
+        'netlify/functions/attach-draft-media.ts',
+        'netlify/functions/regenerate-post-media.ts',
+    ]) {
+        assert.match(fn(f), /mediaMissing: false/, `${f}: the warning outlives the fix it asked for`);
+        assert.match(fn(f), /mediaMissingNote: null/, `${f}: the note is what the banner prints`);
+    }
+});
+
+// Overlays are positioned against a specific image. The editor has always ASSUMED the server drops
+// them when the picture is swapped — gpAiShowThumb clears p.overlays and _gpOverlayCountByPost the
+// moment a stock photo attaches — so a server that kept them left the cache and the row disagreeing
+// about what is on the post.
+check('swapping the picture drops the text that was placed on the old one', () => {
+    assert.match(fn('src/utils/pexels.ts'), /imageOverlays: null,[\s\S]{0,120}overlayBaseAssetId: null/,
+        'the stock picker must clear the overlay design and its base pin, like attach-draft-media');
+    const ws = fn('workspace.html');
+    const thumb = ws.slice(ws.indexOf('function gpAiShowThumb('));
+    assert.match(thumb.slice(0, 4000), /p\.overlays = \[\]/,
+        'the client mirrors the reset — if it stops, the server-side clear above is the surprise');
+});
+
 check('the approve-time overlay bake still writes ONE post', () => {
     // The bake uploads an image flattened against a single post's overlay design. Fanning it out
     // would stamp one platform's text onto all of them — so keepOverlays opts out by default.

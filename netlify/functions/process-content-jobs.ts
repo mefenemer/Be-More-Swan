@@ -1107,7 +1107,13 @@ async function runAutoPublishGate(db: ReturnType<typeof getDb>, args: {
 
 // Attach an already-created/selected content asset to a draft via the scheduledPostAssets junction,
 // keeping the deprecated contentAssetIds array in sync (resolvePostImage still reads it during the
-// migration window). Mirrors attachPexelsImageToPost, but for an asset the resolver already produced.
+// migration window).
+//
+// APPENDS, deliberately — and this is the one place that is right. Both callers are attaching to a
+// row that was created moments ago, and the sibling loop above builds a cross-post's shared asset
+// SET one id at a time, so replacing would leave each sibling holding only the last one. The
+// user-facing pickers are the opposite case and must swap instead; see attachPexelsImageToPost,
+// which used to append here too and blocked approval on any format with a maxItems of 1.
 async function attachAssetToPost(db: ReturnType<typeof getDb>, postId: number, assetId: number): Promise<void> {
     await db.insert(scheduledPostAssets)
         .values({ scheduledPostId: postId, contentAssetId: assetId, position: 0 })
