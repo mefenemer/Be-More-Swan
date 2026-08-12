@@ -313,7 +313,11 @@
       <p id="view-asset-empty" class="hidden text-sm text-gray-500">This asset has no previewable media.</p>
     </div>
     <div class="px-5 py-3 border-t border-gray-100 flex justify-end">
-      <a id="view-asset-download" href="#" target="_blank" rel="noopener" download
+      <!-- Points at content-asset-download, NOT at the media URL itself: the `download` attribute
+           is ignored cross-origin, and every asset URL (presigned R2, Pexels CDN) is cross-origin,
+           so a direct href navigates to the picture instead of saving it. No target="_blank" —
+           the response is an attachment, and a blank tab that downloads and closes just flickers. -->
+      <a id="view-asset-download" href="#" download
         class="px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-lg hover:bg-emerald-700 transition inline-flex items-center gap-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
         Download

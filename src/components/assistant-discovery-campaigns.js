@@ -175,9 +175,16 @@
     // live campaign that simply hasn't fired, which is the difference the user needs to see.
     // Reuses the amber chip classes already compiled into style.css (no Tailwind rebuild).
     const draft = c.status === 'draft' && !c.latestJobStatus;
+    // ⚠️ `draft` above additionally requires NO run history, which is right for the "never
+    // started" label and wrong for the button. A campaign whose targeting was edited is put back
+    // to draft while keeping its old jobs, and keying the button on `draft` left it showing
+    // "Run now" — i.e. the brief was unreachable for any campaign that had ever run, which is
+    // most of them. Status alone decides whether a plan still needs reading.
+    const needsBrief = c.status === 'draft';
     const statusLabel = draft ? 'draft — not started'
       : inFlight ? 'searching'
-        : c.latestJobStatus ? esc(c.latestJobStatus) : 'no runs yet';
+        : needsBrief ? 'plan needs review'
+          : c.latestJobStatus ? esc(c.latestJobStatus) : 'no runs yet';
     const ghost = 'px-2.5 py-1 bg-white border border-gray-200 text-gray-600 hover:border-gray-300 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed';
     // Primary action: Cancel while a run is in flight, else Run now (blocked while paused).
     // A draft says "Review & start" and is emphasised: it is the ONLY thing standing between an
@@ -186,7 +193,7 @@
     // activates a recurring cadence server-side (discovery-campaigns.ts approve_brief).
     const primaryBtn = running
       ? `<button type="button" data-dc-cancel="${c.id}" class="px-3 py-1.5 bg-white border border-gray-200 text-red-600 hover:border-red-300 hover:bg-red-50 text-xs font-bold rounded-lg transition">Cancel run</button>`
-      : draft
+      : needsBrief
         ? `<button type="button" data-dc-brief="${c.id}" class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition">Review &amp; start</button>`
         : `<button type="button" data-dc-run="${c.id}" class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed" ${paused ? 'disabled title="Resume this campaign to run it"' : ''}>Run now</button>`;
     return `
@@ -205,6 +212,7 @@
         <p class="text-xs text-gray-400 mt-0.5">${paused ? 'Paused — it will not run until you resume it.' : esc(scheduleLine(c))}</p>
         <div class="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-100">
           ${primaryBtn}
+          ${running || needsBrief ? '' : `<button type="button" data-dc-brief="${c.id}" class="${ghost}">Review plan</button>`}
           <button type="button" data-dc-view="${c.id}" class="px-3 py-1.5 bg-white border border-gray-200 text-gray-600 hover:border-gray-300 text-xs font-bold rounded-lg transition">View leads</button>
           <button type="button" data-dc-edit="${c.id}" class="${ghost}">Edit</button>
           <button type="button" data-dc-toggle="${c.id}" data-paused="${paused ? '1' : '0'}" class="${ghost}">${paused ? 'Resume' : 'Pause'}</button>

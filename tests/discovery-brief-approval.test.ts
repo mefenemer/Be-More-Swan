@@ -129,6 +129,26 @@ check('a draft campaign routes to the brief, not to a blind run', () => {
     assert.ok(/Review &amp; start/.test(UI), 'the draft button copy no longer says the brief will be shown');
 });
 
+check('the brief is reachable for a campaign that has ALREADY run', () => {
+    // ⚠️ Found by using it: the `draft` const additionally requires no run history, which is
+    // right for the "never started" label and wrong for the button. Keyed on `draft`, a campaign
+    // put back to draft after its targeting was edited still showed "Run now" — so the brief was
+    // unreachable for any campaign that had ever run, i.e. nearly all of them.
+    assert.ok(/const needsBrief = c\.status === 'draft';/.test(UI),
+        'the button no longer keys on status alone — an edited campaign with run history cannot reach its brief');
+    assert.ok(/: needsBrief\n\s*\? `<button type="button" data-dc-brief/.test(UI),
+        'the primary button is not driven by needsBrief');
+    // And any settled campaign can read its plan without committing to a run.
+    assert.ok(/\$\{running \|\| needsBrief \? '' : `<button type="button" data-dc-brief/.test(UI),
+        'there is no way to review the plan of an active campaign before running it');
+    assert.ok(/Review plan/.test(UI), 'the secondary review action is gone');
+});
+
+check('a draft with run history says its plan needs review, not "completed"', () => {
+    assert.ok(/needsBrief \? 'plan needs review'/.test(UI),
+        'a campaign awaiting re-approval reports its last run status instead of its real state');
+});
+
 check('approving is what promotes a draft and enables a recurring schedule', () => {
     assert.ok(/status: 'active' as const/.test(APPROVE), 'approval no longer activates the campaign');
     assert.ok(/discoverySchedules\.cadence\} <> 'one_off'/.test(APPROVE),

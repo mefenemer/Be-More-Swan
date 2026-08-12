@@ -602,8 +602,24 @@ window._mcViewAsset = function (id) {
         empty.classList.remove('hidden');
     }
 
-    if (url) { dl.href = url; dl.classList.remove('hidden'); }
-    else { dl.classList.add('hidden'); }
+    // The button goes to our own download endpoint rather than to `url`. `url` is a presigned R2
+    // or a stock-CDN link — cross-origin, where the anchor's `download` attribute is ignored, so
+    // pointing at it directly only ever opened the image in a tab. The endpoint re-signs at click
+    // time with an attachment disposition, which also fixes downloads from a page left open longer
+    // than the 10-minute TTL on the display URL above.
+    //
+    // Toggled via style.display, not the `hidden` class: `hidden` and `inline-flex` are both plain
+    // display rules of equal specificity and `.inline-flex` is defined later in style.css, so it
+    // wins — classList.add('hidden') here left a dead button on screen with a stale href.
+    if (url) {
+        dl.href = `/.netlify/functions/content-asset-download?assetId=${asset.id}`;
+        dl.style.display = '';
+        dl.classList.remove('hidden');
+    } else {
+        dl.removeAttribute('href');
+        dl.style.display = 'none';
+        dl.classList.add('hidden');
+    }
 
     modal.classList.remove('hidden');
 };
