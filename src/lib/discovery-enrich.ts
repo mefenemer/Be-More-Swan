@@ -81,31 +81,68 @@ const MAX_BYTES = 400_000;
  * Extract every plausible contact address from a page, best first.
  * Reads `mailto:` hrefs (highest signal — an explicit contact link) before falling back
  * to addresses written in body text.
+ *
+ * ── The fusion bug this guards against (prod, indielee.com, 2026-08-12) ──────
+ * cheerio's `.text()` concatenates adjacent text nodes with NOTHING between them, so
+ * `<span>Support</span><a>hello@indielee.com</a>` reads as "Supporthello@indielee.com" —
+ * and EMAIL_RE happily matches the whole thing, because the label ran straight into the
+ * local part. `supporthello@indielee.com` then passed every check in classify(): the
+ * domain is genuinely the lead's, and the prefix is on no blocklist.
+ *
+ * It cost more than one bad address. `supporthello` is not in ROLE_PREFIXES, so it was
+ * graded 'personal' — and by swallowing the real `hello@indielee.com` it left the page
+ * with no role address to find, so the correct, higher-quality inbox was never returned.
+ * The lead reached the Review Queue with an undeliverable recipient and an Approve button.
+ *
+ * Two defences below: a boundary between text nodes so the fusion cannot form, and a
+ * suffix check so a fused address can never outlive the real one it swallowed.
  */
 export function extractEmails(html: string, leadDomain: string | null): Array<{ email: string; kind: EmailKind }> {
     const $ = cheerio.load(html);
-    const found: string[] = [];
+    const found: Array<{ addr: string; from: 'mailto' | 'text' }> = [];
 
     // mailto: links first — an explicit "contact us" affordance beats a text match.
     $('a[href^="mailto:"]').each((_, el) => {
         const href = $(el).attr('href') || '';
         const addr = href.slice('mailto:'.length).split('?')[0].trim();
-        if (addr) found.push(addr);
+        if (addr) found.push({ addr, from: 'mailto' });
     });
 
     $('script, style, noscript, svg').remove();
+
+    // ⚠️ Insert an explicit boundary after every element BEFORE reading text, or adjacent
+    // nodes fuse (see above). Done through the DOM rather than by stripping tags out of the
+    // raw HTML with a regex, because `.text()` also decodes entities — and an address
+    // written `&#104;ello@acme.com` must still be found.
+    //
+    // The trade-off is deliberate: an address split ACROSS elements (`hello@<b>acme.com</b>`)
+    // now fails to match instead of fusing. That direction is the safe one. This module's
+    // hard rule is extraction, never inference — a missed address leaves a lead visibly
+    // un-emailable, while a fabricated one gets sent to a real stranger.
+    $('body').find('*').each((_, el) => { $(el).after('\n'); });
+
     const text = $('body').text();
-    for (const m of text.matchAll(EMAIL_RE)) found.push(m[0]);
+    for (const m of text.matchAll(EMAIL_RE)) found.push({ addr: m[0], from: 'text' });
 
     const seen = new Set<string>();
-    const out: Array<{ email: string; kind: EmailKind }> = [];
-    for (const raw of found) {
-        const email = raw.toLowerCase().trim().replace(/^mailto:/, '').replace(/[.,;:)]+$/, '');
-        if (seen.has(email)) continue;
+    const candidates: Array<{ email: string; kind: EmailKind; from: 'mailto' | 'text' }> = [];
+    for (const { addr, from } of found) {
+        const email = addr.toLowerCase().trim().replace(/^mailto:/, '').replace(/[.,;:)]+$/, '');
+        if (seen.has(email)) continue;   // mailto pushed first, so it wins the dedupe
         seen.add(email);
         const kind = classify(email, leadDomain);
-        if (kind) out.push({ email, kind });
+        if (kind) candidates.push({ email, kind, from });
     }
+
+    // Second defence. Fusion can only ever PREPEND junk to a real address, so a text match
+    // that ends with an address the page also published as a mailto: link is that same
+    // address with a label stuck to its front. Scoped to text-vs-mailto on purpose: dropping
+    // any suffix match would discard `presales@acme.com` merely because `sales@acme.com`
+    // exists, and two mailto links are two deliberate addresses, not an accident.
+    const explicit = candidates.filter((c) => c.from === 'mailto').map((c) => c.email);
+    const out = candidates
+        .filter((c) => !(c.from === 'text' && explicit.some((m) => m !== c.email && c.email.endsWith(m))))
+        .map(({ email, kind }) => ({ email, kind }));
 
     // Role addresses outrank personal ones: they're both more durable and the safer
     // target for cold outreach. Otherwise preserve discovery order (mailto: before text).
