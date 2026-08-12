@@ -61,6 +61,37 @@ check('the prompt no longer ASKS for directories, listicles, jobs, press or revi
     for (const [re, msg] of banned) assert.ok(!re.test(PROMPT), msg);
 });
 
+check('the prompt makes naming the prospect’s TRADE step one', () => {
+    // ⚠️ Second failure mode, found by previewing two REAL prod campaigns after the exclusions
+    // were fixed. Both briefs aimed at the product category rather than the buyer:
+    // "social media scheduling tool" returns Buffer and Hootsuite; "user-generated content
+    // platform" returns UGC vendors. One campaign's idea contained a product pitch, the other
+    // was the user's own prose about the customer's PAIN — so this was never an idea-writing
+    // problem. The instruction said "the trade language a business in this niche uses", and
+    // given an idea about social-media pain, "this niche" reads as social media.
+    assert.ok(/NAME THE PROSPECT'S TRADE/.test(PROMPT), 'the trade-first step is gone');
+    assert.ok(/the business that HAS that problem/i.test(PROMPT),
+        'the prompt no longer distinguishes the buyer from the problem');
+    // Concrete examples of the inversion, in both directions. The model demonstrably knew vendors
+    // were a hazard (it was excluding hootsuite.com by itself) while still aiming at them, which
+    // is a missing instruction rather than a weak model — so the examples have to be explicit.
+    for (const wrong of ['social media scheduling tool', 'user-generated content platform']) {
+        assert.ok(PROMPT.includes(wrong), `the prompt no longer shows "${wrong}" as a wrong query`);
+    }
+    for (const right of ['independent skincare brand', 'family law firm Manchester']) {
+        assert.ok(PROMPT.includes(right), `the prompt no longer shows "${right}" as a right query`);
+    }
+    assert.ok(/anchored to the trade/i.test(PROMPT),
+        'the all-arrays anchoring rule is gone — intent and footprint queries drift back to the product category');
+});
+
+check('the prompt spells out that site: takes a full domain', () => {
+    // The model was emitting `-site:blog`, `-site:agency`, `-site:medium` — bare words that the
+    // search engine silently ignores, so every one was a filter the query only appeared to have.
+    assert.ok(/take a FULL DOMAIN/.test(PROMPT), 'the site:-operator rule is gone');
+    assert.ok(/-inurl:blog/.test(PROMPT), 'the -inurl: alternative is no longer offered');
+});
+
 check('the prompt states the architectural rule that makes all this necessary', () => {
     // Without the WHY, a future edit re-adds "search LinkedIn for companies hiring X" because
     // it sounds like a good intent signal. It is — but the lead it produces is linkedin.com.

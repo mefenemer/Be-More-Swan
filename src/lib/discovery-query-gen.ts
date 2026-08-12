@@ -130,18 +130,45 @@ A query that surfaces an article about your market produces a lead for the magaz
 that surfaces a job advert produces a lead for the job board. Both are then discarded. So aim
 every query at the prospect's own domain — their services, products, locations or about pages.
 
+STEP ONE — NAME THE PROSPECT'S TRADE. Do this before writing a single query.
+
+The hypothesis below will usually describe the PROBLEM being solved or the PRODUCT being sold.
+Searching for either finds the vendors, not the buyers:
+  WRONG "social media scheduling tool"      → returns Buffer, Hootsuite, Later
+  WRONG "user-generated content platform"   → returns UGC software companies
+  WRONG "lead generation outreach tool"     → returns sales software
+  WRONG "content calendar tool uk"          → returns more software
+The prospect is the business that HAS that problem, and it does not describe itself by the
+problem. A bakery calls itself a bakery. Name the trade, then search for it:
+  RIGHT "independent skincare brand"
+  RIGHT "small batch homeware brand UK"
+  RIGHT "family law firm Manchester"
+  RIGHT "boutique letting agency"
+If the hypothesis names no trade, infer several concrete ones from the industries and size band
+and cover each. Four specific trades beat one abstract category every time.
+
 Produce exactly three query arrays, each a distinct ANGLE on finding those company websites:
-- "niche_scrape": the trade language a business in this niche uses to describe ITSELF — the
-  words that appear on its own services or about page.
-- "intent_signal": the pain or gap stated in the company's OWN words on its OWN site.
-- "footprint": omission queries — phrases implying the manual process the solution replaces,
-  with -inurl:/-site: operators used to push away vendors and platforms.
+- "niche_scrape": the trade term itself, as a business in that trade writes it on its own
+  services or about page. This array should read like a list of trades, not a list of topics.
+- "intent_signal": the trade term PLUS the pain in the prospect's own words. The trade anchors
+  the search to real businesses; the pain narrows it. A pain phrase on its own returns articles
+  about the pain.
+- "footprint": the trade term PLUS an omission — a phrase implying the manual process the
+  solution replaces — with -inurl:/-site: operators pushing away vendors and platforms.
+
+⚠️ Every array must be anchored to the trade. A query with no trade term in it is almost always
+a query about the product category, and will be thrown away.
 
 ${exclusionRules}
 ${steering}
 Rules:
 - Up to ${perStrategy} queries per array. Fewer, high-precision queries beat many vague ones.
 - Use real Google search operators where they help (inurl:, -inurl:, -site:, quoted phrases).
+- ⚠️ site: and -site: take a FULL DOMAIN and nothing else: -site:medium.com, -site:linkedin.com.
+  A bare word after -site: is silently ignored by the search engine, so it costs you a filter you
+  thought you had. To exclude a word in a URL PATH use -inurl: instead:
+    WRONG  -site:blog   -site:agency   -site:medium   -site:recruitment
+    RIGHT  -inurl:blog  -inurl:agency  -site:medium.com   -inurl:recruitment
 - NEVER target these excluded terms/competitors: ${negatives.length ? JSON.stringify(negatives) : '(none provided)'}.
 - Ground every query in the idea, persona and ICP below.
 
