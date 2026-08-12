@@ -49,6 +49,13 @@ check('drops vendor content marketing (guide / template titles)', () => {
     drop({ domain: 'oxmaint.com', url: 'https://oxmaint.com/x', title: 'Hotel Preventive Maintenance Schedule Template (Excel)' }, 'template');
 });
 
+check('drops the magazine and brand directory that reached the scorer (2026-08-12 prod run)', () => {
+    // Both scored 0, so the verdict was right — it just cost a scoring slot to reach. Neither has
+    // an article path or a listicle title on its landing page, so the domain is the only handle.
+    drop({ domain: 'countryandtownhouse.com', url: 'https://countryandtownhouse.com/', title: 'Country & Town House' }, 'C&TH magazine');
+    drop({ domain: 'makeitbritish.co.uk', url: 'https://makeitbritish.co.uk/', title: 'Make it British | Buy British Made Products' }, 'brand directory');
+});
+
 check('drops directory-titled pages', () => {
     drop({ domain: 'example.org', url: 'https://example.org/x', title: 'Directories - Healthcare Hospitality Network' }, 'directory');
 });

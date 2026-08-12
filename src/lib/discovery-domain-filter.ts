@@ -61,7 +61,10 @@ block('aggregator',
     'crunchbase.com', 'pitchbook.com', 'zoominfo.com', 'apollo.io', 'owler.com',
     'companieshouse.gov.uk', 'dnb.com', 'bloomberg.com',
     // Supplier/wholesale directories seen in the 2026-08-08 prod run.
-    'salehoo.com', 'alibaba.com', 'faire.com', 'etsy.com');
+    'salehoo.com', 'alibaba.com', 'faire.com', 'etsy.com',
+    // Brand directories, added 2026-08-12 from the same run as countryandtownhouse.com below —
+    // a curated index of British-made brands is a list OF prospects, never one itself.
+    'makeitbritish.co.uk');
 
 block('media',
     'bbc.co.uk', 'bbc.com', 'theguardian.com', 'nytimes.com', 'forbes.com', 'ft.com',
@@ -78,7 +81,12 @@ block('media',
     // discussed is Case B, and the host itself sells nothing we target. `libsyn.com` covers the
     // per-show subdomains (feeds.libsyn.com, rossbolenpodcast.libsyn.com) via the suffix match.
     'podcasts.apple.com', 'anchor.fm', 'libsyn.com', 'buzzsprout.com', 'podbean.com',
-    'soundcloud.com', 'spotify.com', 'captivate.fm', 'transistor.fm');
+    'soundcloud.com', 'spotify.com', 'captivate.fm', 'transistor.fm',
+    // Lifestyle/consumer titles, added 2026-08-12. These reach the scorer through the front door:
+    // a magazine's homepage carries no /blog path and no listicle title, so nothing upstream of
+    // the LLM has an opinion about it. It scored 0 — correctly — for the price of a scoring slot,
+    // which is exactly the cost this list exists to avoid paying twice.
+    'countryandtownhouse.com');
 
 block('reference',
     'wikipedia.org', 'wikimedia.org', 'quora.com', 'stackexchange.com', 'stackoverflow.com',
