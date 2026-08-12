@@ -239,6 +239,41 @@
   }
 
   /**
+   * "Contact details for 4 of 65 — 20 publish none, 41 scored cold so were never checked."
+   *
+   * Enrichment hits about one SMB site in three, so a search that found 65 companies stocks the
+   * Review tab with a handful. Without this line an empty Review reads as a broken assistant; with
+   * it, the emptiness is a result — and it points at the right remedy, which is usually TARGETING
+   * (too many cold leads) rather than the scraper.
+   *
+   * ⚠️ The four counts partition the total, so they must be stated as parts of it and never added
+   * up independently. They come from src/config/lead-contact-state.ts, the same definitions the
+   * Leads tab's Contact column is pinned against — this sentence sits one click from that table
+   * and a user WILL check it against the chips.
+   *
+   * Returns '' when the search has no leads: "contact details for 0 of 0" is noise on a search
+   * whose own line already says nothing was found.
+   */
+  function contactAggregateLine(s) {
+    const total = Number(s.contactTotal || 0);
+    if (!total) return '';
+    const found = Number(s.contactReachable || 0);
+    const none = Number(s.contactNonePublished || 0);
+    const cold = Number(s.contactNotAttempted || 0);
+    const pending = Number(s.contactPending || 0);
+
+    const parts = [];
+    // Each clause explains a different remedy, which is the whole point of not collapsing them:
+    // "publishes none" sends you to find an address by hand, "scored cold" sends you to targeting.
+    if (none) parts.push(`${none} publish${none === 1 ? 'es' : ''} none`);
+    if (cold) parts.push(`${cold} scored cold so ${cold === 1 ? 'was' : 'were'} never checked`);
+    if (pending) parts.push(`${pending} still to check`);
+
+    const lead = `Contact details for ${found} of ${total}`;
+    return parts.length ? `${lead} — ${parts.join(', ')}.` : `${lead}.`;
+  }
+
+  /**
    * Collapse (campaign status × latest job status × stage) into one thing to show the user.
    *
    * Order matters: an in-flight job outranks the campaign status, because "searching now" is the
@@ -318,8 +353,17 @@
         line: `The last run stopped before it finished ${ago(s.lastFinishedAt)}. Starting it again is safe.` };
     }
     if (job === 'completed') {
+      // The reachability aggregate belongs on a FINISHED run and nowhere else. Mid-run the counts
+      // are still moving (enriching is the last stage), and on a failed run they describe a
+      // pipeline that stopped early — in both cases the sentence would be true of the database and
+      // misleading about the search.
+      //
+      // Returned as its own field, not appended to `line`. Concatenated, it landed between the
+      // count and the cadence — "65 companies found. Contact details for 4 of 65 — 9 publish
+      // none, 52 scored cold so were never checked. It runs once each time you start it…" — three
+      // sentences of different kinds in one grey paragraph, which buries the one the user came for.
       return { chip: 'bg-emerald-50 text-emerald-800 border-emerald-200', label: `Ran ${ago(s.lastFinishedAt)}`, action: 'run',
-        line: `${total} ${cadence}` };
+        line: `${total} ${cadence}`, reach: contactAggregateLine(s) };
     }
     return { chip: 'bg-gray-100 text-gray-500 border-gray-200', label: 'No runs yet', action: 'run',
       line: `Active but it has not run yet. ${cadence}` };
@@ -343,6 +387,7 @@
               <span class="text-xs font-bold px-2 py-0.5 rounded-full border ${st.chip}">${esc(st.label)}</span>
             </div>
             <p class="text-xs text-gray-500 mt-1">${esc(st.line)}</p>
+            ${st.reach ? `<p class="text-xs text-gray-700 mt-1">${esc(st.reach)}</p>` : ''}
           </div>
           <div class="shrink-0">${btn}</div>
         </div>

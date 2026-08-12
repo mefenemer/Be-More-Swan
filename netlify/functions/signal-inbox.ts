@@ -27,6 +27,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { recordEvent } from '../../src/utils/revenue-ledger';
 import { getBlueprintVersion } from '../../src/utils/blueprint-version';
 import { enqueueLeadHandoff } from '../../src/utils/lead-handoff';
+import { CONTACT_AGGREGATE_SCOPE_SQL, CONTACT_BUCKET_SQL } from '../../src/config/lead-contact-state';
 import {
     resolveSourceLabel, savedSearchLabel, isBatchable, decodeCursor, encodeCursor,
     INBOX_PAGE_SIZE, type Signal, type HandoffState,
@@ -330,6 +331,41 @@ export default withLambda(async (event) => {
                         WHERE j.campaign_id = ${discoveryCampaigns.id}
                         ORDER BY j.created_at DESC, j.id DESC LIMIT 1
                     )`,
+                    // How many of this search's companies can actually be emailed (Phase 2 item 8).
+                    //
+                    // Counted over the CAMPAIGN, not the latest job, on purpose. `leads_found` is
+                    // insert-only, so a re-run that re-finds the same companies banks 0 and a
+                    // job-scoped aggregate would read "0 of 0" while 65 leads sit in the Leads tab.
+                    // The copy names its own denominator so the two numbers cannot be confused.
+                    //
+                    // ⚠️ Predicates come from src/config/lead-contact-state.ts, which the Contact
+                    // column's contactState() is pinned against by test. Do not inline them here:
+                    // an aggregate that disagrees with the table under it is worse than no
+                    // aggregate. sql.raw is safe — these are module constants, never user input.
+                    contactTotal: sql<number>`(
+                        SELECT count(*)::int FROM discovered_leads dl
+                        WHERE dl.campaign_id = ${discoveryCampaigns.id} AND ${sql.raw(CONTACT_AGGREGATE_SCOPE_SQL)}
+                    )`,
+                    contactReachable: sql<number>`(
+                        SELECT count(*)::int FROM discovered_leads dl
+                        WHERE dl.campaign_id = ${discoveryCampaigns.id} AND ${sql.raw(CONTACT_AGGREGATE_SCOPE_SQL)}
+                          AND (${sql.raw(CONTACT_BUCKET_SQL.reachable)})
+                    )`,
+                    contactNonePublished: sql<number>`(
+                        SELECT count(*)::int FROM discovered_leads dl
+                        WHERE dl.campaign_id = ${discoveryCampaigns.id} AND ${sql.raw(CONTACT_AGGREGATE_SCOPE_SQL)}
+                          AND (${sql.raw(CONTACT_BUCKET_SQL.nonePublished)})
+                    )`,
+                    contactNotAttempted: sql<number>`(
+                        SELECT count(*)::int FROM discovered_leads dl
+                        WHERE dl.campaign_id = ${discoveryCampaigns.id} AND ${sql.raw(CONTACT_AGGREGATE_SCOPE_SQL)}
+                          AND (${sql.raw(CONTACT_BUCKET_SQL.notAttempted)})
+                    )`,
+                    contactPending: sql<number>`(
+                        SELECT count(*)::int FROM discovered_leads dl
+                        WHERE dl.campaign_id = ${discoveryCampaigns.id} AND ${sql.raw(CONTACT_AGGREGATE_SCOPE_SQL)}
+                          AND (${sql.raw(CONTACT_BUCKET_SQL.pending)})
+                    )`,
                 })
                 .from(discoveryCampaigns)
                 .leftJoin(discoverySchedules, eq(discoverySchedules.campaignId, discoveryCampaigns.id))
@@ -374,6 +410,11 @@ export default withLambda(async (event) => {
                     lastFinishedAt: s.lastFinishedAt ? new Date(s.lastFinishedAt).toISOString() : null,
                     leadsFound: Number(s.leadsFound ?? 0),
                     latestRunLeadsFound: Number(s.latestRunLeadsFound ?? 0),
+                    contactTotal: Number(s.contactTotal ?? 0),
+                    contactReachable: Number(s.contactReachable ?? 0),
+                    contactNonePublished: Number(s.contactNonePublished ?? 0),
+                    contactNotAttempted: Number(s.contactNotAttempted ?? 0),
+                    contactPending: Number(s.contactPending ?? 0),
                 })),
             });
         }

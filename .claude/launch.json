@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-searches-aggregate",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/a45ef15b-eea6-4246-9dac-62024d5a79c9/scratchpad/siagg/server.mjs"
+      ],
+      "port": 4291,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-lead-profile",
       "runtimeExecutable": "node",
       "runtimeArgs": [
