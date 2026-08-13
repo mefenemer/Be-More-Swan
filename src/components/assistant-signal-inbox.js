@@ -262,11 +262,17 @@
     const cold = Number(s.contactNotAttempted || 0);
     const pending = Number(s.contactPending || 0);
 
+    const missed = Number(s.contactMissed || 0);
+
     const parts = [];
     // Each clause explains a different remedy, which is the whole point of not collapsing them:
-    // "publishes none" sends you to find an address by hand, "scored cold" sends you to targeting.
+    // "publishes none" sends you to find an address by hand, "scored cold" sends you to targeting,
+    // "not looked up" sends you to run the search again.
     if (none) parts.push(`${none} publish${none === 1 ? 'es' : ''} none`);
     if (cold) parts.push(`${cold} scored cold so ${cold === 1 ? 'was' : 'were'} never checked`);
+    // ⚠️ Distinct from `pending`, which is a promise. These are hot/warm leads the run ended
+    // without reaching, so nothing will look them up unless someone asks it to (item 11).
+    if (missed) parts.push(`${missed} ${missed === 1 ? 'was' : 'were'} not looked up`);
     if (pending) parts.push(`${pending} still to check`);
 
     const lead = `Contact details for ${found} of ${total}`;

@@ -359,6 +359,30 @@ export default withLambda(async (event) => {
 
             // Meetings carry their per-task sync ledger so the Inbox card can show "N of M synced".
             const enriched = await attachActionItemSync(db, orgId, records);
+
+            // Phase 2 item 11. The Contact column shows "Checking…" for any hot/warm lead with no
+            // attempt stamp — true only while something is actually scraping. `enrichBatch()` runs
+            // per JOB, so once every job on a lead's campaign is terminal, nothing will ever visit
+            // it and the chip was promising work that will never happen. One query per request,
+            // lead hubs only; every other record type is unaffected and pays nothing.
+            //
+            // ⚠️ 'queued' counts as LIVE. A sliced discovery run rests at queued between slices and
+            // spends most of its life there, so treating it as terminal would flip every in-flight
+            // lead to "Not attempted" mid-run — the opposite lie, and a more convincing one.
+            if (recordType === 'lead' && enriched.length) {
+                const live = await db.execute<{ assistant_record_id: number }>(
+                    `SELECT DISTINCT dl.assistant_record_id
+                       FROM discovered_leads dl
+                       JOIN discovery_jobs j ON j.campaign_id = dl.campaign_id
+                      WHERE dl.organisation_id = ${orgId}
+                        AND dl.assistant_record_id IS NOT NULL
+                        AND j.status IN ('queued','processing')`,
+                );
+                const inFlight = new Set(live.map((r) => r.assistant_record_id));
+                return json(200, {
+                    records: enriched.map((r) => ({ ...r, enrichmentInFlight: inFlight.has(r.id) })),
+                });
+            }
             return json(200, { records: enriched });
         }
 

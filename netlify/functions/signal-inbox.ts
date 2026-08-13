@@ -366,6 +366,14 @@ export default withLambda(async (event) => {
                         WHERE dl.campaign_id = ${discoveryCampaigns.id} AND ${sql.raw(CONTACT_AGGREGATE_SCOPE_SQL)}
                           AND (${sql.raw(CONTACT_BUCKET_SQL.pending)})
                     )`,
+                    // Hot/warm, never looked up, and nothing running to look them up (item 11).
+                    // Counted apart from `pending` because "still to check" is a promise and this
+                    // is the absence of one — the remedy is a re-run or a hand-typed address.
+                    contactMissed: sql<number>`(
+                        SELECT count(*)::int FROM discovered_leads dl
+                        WHERE dl.campaign_id = ${discoveryCampaigns.id} AND ${sql.raw(CONTACT_AGGREGATE_SCOPE_SQL)}
+                          AND (${sql.raw(CONTACT_BUCKET_SQL.missed)})
+                    )`,
                 })
                 .from(discoveryCampaigns)
                 .leftJoin(discoverySchedules, eq(discoverySchedules.campaignId, discoveryCampaigns.id))
@@ -415,6 +423,7 @@ export default withLambda(async (event) => {
                     contactNonePublished: Number(s.contactNonePublished ?? 0),
                     contactNotAttempted: Number(s.contactNotAttempted ?? 0),
                     contactPending: Number(s.contactPending ?? 0),
+                    contactMissed: Number(s.contactMissed ?? 0),
                 })),
             });
         }

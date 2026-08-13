@@ -69,12 +69,21 @@
   // looked" are different facts with different remedies — the first sends you off to find an
   // address by hand, the second says the lead scored cold and the problem is TARGETING, not
   // scraping. Collapsing them to "No" would hide the more useful of the two.
+  // `why` is the tooltip when there is no address to show instead. A chip reading "Not attempted"
+  // with no explanation invites the reading "the product is broken"; the reason is what turns it
+  // into a next action.
   const CONTACT_CHIP = {
     role: { short: 'Role inbox', cls: 'bg-green-50 text-green-700 border-green-100' },
     personal: { short: 'Named person', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
-    none: { short: 'None found', cls: 'bg-red-50 text-red-700 border-red-200' },
-    checking: { short: 'Checking…', cls: 'bg-blue-50 text-blue-800 border-blue-200' },
-    unchecked: { short: 'Not checked', cls: 'bg-gray-100 text-gray-500 border-gray-200' },
+    none: { short: 'None found', cls: 'bg-red-50 text-red-700 border-red-200',
+      why: 'We read this company’s website and it publishes no contact address. Add one by hand to email them.' },
+    checking: { short: 'Checking…', cls: 'bg-blue-50 text-blue-800 border-blue-200',
+      why: 'A search is running now and this lead is queued for a contact lookup.' },
+    unchecked: { short: 'Not checked', cls: 'bg-gray-100 text-gray-500 border-gray-200',
+      why: 'This lead scored cold, and only hot and warm leads are looked up. The fix is targeting, not the lookup.' },
+    // Phase 2 item 11: hot/warm, never attempted, and nothing is running to attempt it.
+    missed: { short: 'Not attempted', cls: 'bg-amber-50 text-amber-700 border-amber-200',
+      why: 'The last search finished without looking this one up. Nothing is queued for it — run the search again or add an address by hand.' },
   };
 
   /** The address on a lead, or null. Same precedence the Review Queue's recipient line uses. */
@@ -100,15 +109,23 @@
    * that has run, an already-enriched lead that came back empty reads "Checking…" instead of
    * "None found" — which is why the SQL applies BEFORE this ships.
    *
-   * ⚠️ "Checking…" also covers a run that DIED before its enrichment stage, where nothing is
-   * actually in progress. Accepted: the Searches tab is the surface that owns run health and says
-   * "Last run failed" with a Run again button, so the truth is one tab away rather than absent.
+   * ⚠️ "Checking…" used to cover a run that had FINISHED or DIED before enriching, where nothing
+   * was in progress at all — it was a documented accepted edge, and it was a lie the column told
+   * indefinitely. `enrichmentInFlight` (stamped per record by assistant-records.ts) closes it:
+   * enrichment only ever runs inside a live job, so with every job on this lead's campaign
+   * terminal, an unstamped hot/warm lead is not queued for anything. It reads "Not attempted",
+   * which is both true and actionable, instead of "Checking…" forever.
+   *
+   * ⚠️ Absent `enrichmentInFlight` resolves to "Not attempted", not "Checking…". A record from a
+   * surface that does not supply the flag should understate what the pipeline is doing rather than
+   * promise work; "Checking…" is the claim that needs evidence.
    */
   function contactState(record) {
     const d = record.data || {};
     if (contactEmailOf(record)) return d.emailKind === 'personal' ? 'personal' : 'role';
     if (d.enrichAttemptedAt) return 'none';
-    return record.status === 'cold' ? 'unchecked' : 'checking';
+    if (record.status === 'cold') return 'unchecked';
+    return record.enrichmentInFlight ? 'checking' : 'missed';
   }
 
   // Resolve a hubTab column key against a record: envelope fields first, then a
@@ -1051,7 +1068,9 @@
         // screen to answer a question that is really just "can I send to this one?".
         const s = CONTACT_CHIP[contactState(record)];
         const email = contactEmailOf(record);
-        cell = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${s.cls} whitespace-nowrap"${email ? ` title="${esc(email)}"` : ''}>${esc(s.short)}</span>`;
+        // The address when there is one, otherwise the reason there is not.
+        const tip = email || s.why || '';
+        cell = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${s.cls} whitespace-nowrap"${tip ? ` title="${esc(tip)}"` : ''}>${esc(s.short)}</span>`;
       } else {
         cell = esc(cellValue(record, c.key));
       }

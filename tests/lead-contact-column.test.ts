@@ -80,9 +80,18 @@ check('an attempt that found nothing reads "we looked and found nothing"', () =>
     assert.strictEqual(contactState(lead('cold', stamped)), 'none');
 });
 
-check('a hot/warm lead with no attempt stamp is still queued for one', () => {
-    assert.strictEqual(contactState(lead('warm')), 'checking');
-    assert.strictEqual(contactState(lead('hot')), 'checking');
+check('a hot/warm lead with no attempt stamp is queued only while a job is LIVE', () => {
+    // Phase 2 item 11. This used to assert 'checking' unconditionally, which is what the column
+    // did — and it was the accepted lie documented above contactState(): a run that finished or
+    // died left every unreached lead claiming to be in progress, permanently. `enrichBatch()` only
+    // runs inside a live job, so the claim needs a live job behind it.
+    const live = { enrichmentInFlight: true };
+    assert.strictEqual(contactState({ ...lead('warm'), ...live }), 'checking');
+    assert.strictEqual(contactState({ ...lead('hot'), ...live }), 'checking');
+
+    assert.strictEqual(contactState(lead('warm')), 'missed');
+    assert.strictEqual(contactState(lead('hot')), 'missed');
+    assert.strictEqual(contactState({ ...lead('hot'), enrichmentInFlight: false }), 'missed');
 });
 
 check('a cold lead with no address reads "nobody looked, and nobody will"', () => {
@@ -161,14 +170,21 @@ check('the lead hub lists the column, and its key is the synthetic one', () => {
 check('every state contactState can return has a chip', () => {
     const map = HUB.slice(HUB.indexOf('const CONTACT_CHIP'), HUB.indexOf('};', HUB.indexOf('const CONTACT_CHIP')));
     const declared = [...map.matchAll(/^\s{4}(\w+):/gm)].map((m) => m[1]).sort();
-    assert.deepEqual(declared, ['checking', 'none', 'personal', 'role', 'unchecked'],
+    // 'missed' joined the set for Phase 2 item 11: hot/warm, never looked up, and no live job to
+    // look it up — previously rendered as "Checking…" forever.
+    assert.deepEqual(declared, ['checking', 'missed', 'none', 'personal', 'role', 'unchecked'],
         'CONTACT_CHIP and contactState() have drifted — an unmapped state throws on render');
 });
 
 check('the chip renders the STATE, and keeps the address out of the cell', () => {
     const row = HUB.slice(HUB.indexOf('function rowHtml'), HUB.indexOf('function refreshRow'));
     const branch = row.slice(row.indexOf("c.key === 'contact'"));
-    assert.ok(/title="\$\{esc\(email\)\}"/.test(branch),
+    // The tooltip carries the ADDRESS when there is one, and the reason for its absence otherwise
+    // (item 11). Both, never the raw address in the cell — a column of a hundred people's contact
+    // details answers a question nobody asked.
+    assert.ok(/const tip = email \|\| s\.why/.test(branch),
+        'the tooltip must prefer the address, falling back to why there is none');
+    assert.ok(/title="\$\{esc\(tip\)\}"/.test(branch),
         'the address should ride in the tooltip, so it is available without being rendered per row');
     assert.ok(/\$\{esc\(s\.short\)\}/.test(branch),
         'the cell must render the state label, never the raw address');

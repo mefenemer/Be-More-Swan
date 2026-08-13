@@ -26,6 +26,7 @@ import {
     CONTACT_BUCKETS,
     CONTACT_BUCKET_SQL,
     CONTACT_STATE_TO_BUCKET,
+    LIVE_JOB_SQL,
     contactBucketOf,
     type ContactBucket,
 } from '../src/config/lead-contact-state';
@@ -73,20 +74,49 @@ check('contactBucketOf agrees with the Contact column on every shape', () => {
     const emails = [null, '', '   ', 'hello@acme.co.uk'];
     const stamps = [null, '2026-08-12T10:00:00.000Z'];
     const ratings = ['hot', 'warm', 'cold'];
+    const inFlight = [true, false];
 
     for (const contactEmail of emails) {
         for (const enrichAttemptedAt of stamps) {
             for (const rating of ratings) {
-                const column = contactState({ status: rating, data: { contactEmail, enrichAttemptedAt } });
-                const bucket = contactBucketOf({ contactEmail, enrichAttemptedAt, rating });
-                assert.equal(
-                    bucket, CONTACT_STATE_TO_BUCKET[column],
-                    `drift for email=${JSON.stringify(contactEmail)} stamp=${!!enrichAttemptedAt} rating=${rating}: ` +
-                    `column says "${column}" (→ ${CONTACT_STATE_TO_BUCKET[column]}), aggregate says "${bucket}"`,
-                );
+                for (const enrichmentInFlight of inFlight) {
+                    const column = contactState({ status: rating, enrichmentInFlight, data: { contactEmail, enrichAttemptedAt } });
+                    const bucket = contactBucketOf({ contactEmail, enrichAttemptedAt, rating, enrichmentInFlight });
+                    assert.equal(
+                        bucket, CONTACT_STATE_TO_BUCKET[column],
+                        `drift for email=${JSON.stringify(contactEmail)} stamp=${!!enrichAttemptedAt} rating=${rating} live=${enrichmentInFlight}: ` +
+                        `column says "${column}" (→ ${CONTACT_STATE_TO_BUCKET[column]}), aggregate says "${bucket}"`,
+                    );
+                }
             }
         }
     }
+});
+
+check('"Checking…" requires a live job — it is a claim, not a default', () => {
+    // Phase 2 item 11. This chip promises work is queued. `enrichBatch()` only ever runs inside a
+    // live job, so with every job terminal the promise cannot be kept and the column said it
+    // anyway, indefinitely. Absent evidence, understate.
+    const hotNoStamp = { status: 'hot', data: { contactEmail: null, enrichAttemptedAt: null } };
+    assert.equal(contactState({ ...hotNoStamp, enrichmentInFlight: true }), 'checking');
+    assert.equal(contactState({ ...hotNoStamp, enrichmentInFlight: false }), 'missed');
+    assert.equal(contactState(hotNoStamp), 'missed', 'an absent flag must not promise a lookup');
+    // A cold lead is unaffected: it was never eligible, live run or not.
+    for (const live of [true, false]) {
+        assert.equal(contactState({ status: 'cold', enrichmentInFlight: live, data: {} }), 'unchecked');
+    }
+});
+
+check('the missed chip explains itself, and every no-address chip does', () => {
+    // A bare "Not attempted" reads as "the product is broken". The reason is what makes it a next
+    // action, and it is the tooltip only because the address occupies that slot when there is one.
+    const HUB_SRC = read('src/components/assistant-data-hub.js');
+    for (const chip of ['none', 'checking', 'unchecked', 'missed']) {
+        const re = new RegExp(`${chip}: \\{[^}]*why:`, 's');
+        assert.ok(re.test(HUB_SRC), `the "${chip}" chip carries no explanation`);
+    }
+    assert.ok(/const tip = email \|\| s\.why/.test(HUB_SRC),
+        'the tooltip no longer falls back to the reason when there is no address');
 });
 
 check('every Contact chip maps to a bucket, and every bucket is reachable', () => {
@@ -99,7 +129,7 @@ check('every Contact chip maps to a bucket, and every bucket is reachable', () =
     const mapped = new Set(Object.values(CONTACT_STATE_TO_BUCKET));
     for (const b of CONTACT_BUCKETS) assert.ok(mapped.has(b), `no Contact chip ever produces "${b}"`);
     // The five chips the column actually defines.
-    for (const chip of ['role', 'personal', 'none', 'checking', 'unchecked']) {
+    for (const chip of ['role', 'personal', 'none', 'checking', 'unchecked', 'missed']) {
         assert.ok(chips.includes(chip), `the column renders "${chip}" but the aggregate does not map it`);
     }
 });
@@ -110,16 +140,19 @@ check('the buckets partition the population — exactly one per lead', () => {
     for (const contactEmail of [null, 'a@b.com']) {
         for (const enrichAttemptedAt of [null, 'x']) {
             for (const rating of ['hot', 'warm', 'cold', null, 'weird']) {
-                const hits = CONTACT_BUCKETS.filter((b) => contactBucketOf({ contactEmail, enrichAttemptedAt, rating }) === b);
-                assert.equal(hits.length, 1, `rating=${rating} email=${contactEmail} stamp=${enrichAttemptedAt} landed in ${hits.length} buckets`);
+                for (const enrichmentInFlight of [true, false]) {
+                    const hits = CONTACT_BUCKETS.filter((b) => contactBucketOf({ contactEmail, enrichAttemptedAt, rating, enrichmentInFlight }) === b);
+                    assert.equal(hits.length, 1, `rating=${rating} email=${contactEmail} stamp=${enrichAttemptedAt} live=${enrichmentInFlight} landed in ${hits.length} buckets`);
+                }
             }
         }
     }
 });
 
-check('an unexpected rating falls into "still to check", never out of the total', () => {
-    assert.equal(contactBucketOf({ rating: null }), 'pending');
-    assert.equal(contactBucketOf({ rating: 'something_new' }), 'pending');
+check('an unexpected rating stays inside the total', () => {
+    assert.equal(contactBucketOf({ rating: null, enrichmentInFlight: true }), 'pending');
+    assert.equal(contactBucketOf({ rating: 'something_new', enrichmentInFlight: true }), 'pending');
+    assert.equal(contactBucketOf({ rating: null }), 'missed', 'no live job means no promise');
 });
 
 // ── The SQL mirror ────────────────────────────────────────────────────────────
@@ -138,6 +171,11 @@ check('every predicate reads the same three fields as the JS mirror', () => {
     }
     assert.ok(/enrichAttemptedAt/.test(CONTACT_BUCKET_SQL.nonePublished), 'nonePublished must key off the attempt stamp');
     assert.ok(/dl\.rating = 'cold'/.test(CONTACT_BUCKET_SQL.notAttempted), 'notAttempted must key off a cold rating');
+    // The item-11 split: identical leads, separated only by whether a job is live.
+    assert.ok(CONTACT_BUCKET_SQL.pending.includes(LIVE_JOB_SQL), 'pending must require a live job');
+    assert.ok(CONTACT_BUCKET_SQL.missed.includes(`NOT ${LIVE_JOB_SQL}`), 'missed must require NO live job');
+    assert.ok(/status IN \('queued','processing'\)/.test(LIVE_JOB_SQL),
+        "a sliced run RESTS at 'queued' — dropping it would flip every in-flight lead to Not attempted");
     assert.ok(/rejected|discarded/.test(CONTACT_AGGREGATE_SCOPE_SQL), 'rejected leads must be out of scope');
 });
 
