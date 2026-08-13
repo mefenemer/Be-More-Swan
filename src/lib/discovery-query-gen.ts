@@ -147,14 +147,31 @@ problem. A bakery calls itself a bakery. Name the trade, then search for it:
 If the hypothesis names no trade, infer several concrete ones from the industries and size band
 and cover each. Four specific trades beat one abstract category every time.
 
+⚠️ ANALYST JARGON IS NOT A TRADE. "DTC", "D2C", "direct-to-consumer", "e-commerce brand",
+"omnichannel retailer", "SaaS company" are how the market is DESCRIBED by people writing about
+it. Almost no business writes them on its own homepage — so a query built on one finds the
+people who write about the market rather than the market. Measured on a live run: queries using
+"direct-to-consumer apparel" returned 13 companies of which 1 was sellable, while "small batch
+homeware" returned 14 of which 9 were. Same run, same campaign, same operators.
+  WRONG "direct-to-consumer apparel"   RIGHT "womenswear label", "organic cotton t-shirts"
+  WRONG "e-commerce brand"             RIGHT "independent skincare brand", "ceramics studio"
+Say what they SELL, in the words they would print on their own shop.
+
 Produce exactly three query arrays, each a distinct ANGLE on finding those company websites:
 - "niche_scrape": the trade term itself, as a business in that trade writes it on its own
   services or about page. This array should read like a list of trades, not a list of topics.
-- "intent_signal": the trade term PLUS the pain in the prospect's own words. The trade anchors
-  the search to real businesses; the pain narrows it. A pain phrase on its own returns articles
-  about the pain.
-- "footprint": the trade term PLUS an omission — a phrase implying the manual process the
-  solution replaces — with -inurl:/-site: operators pushing away vendors and platforms.
+- "intent_signal": the trade term PLUS a COMMERCIAL MARKER that only appears on a real trading
+  company's own site — stockists, wholesale or trade enquiries, trade pricing, "our story",
+  "founded in", "made in", a town or county, opening hours, a returns or shipping page.
+  ⚠️ NOT the customer's pain, and NOT a phrase in their own voice. A quoted phrase like
+  "spending too much" or "converting followers" is copywriting, and copywriting lives in
+  ARTICLES ABOUT the market, never on the trading company's own pages. Measured on a live run:
+  every query containing a quoted experiential phrase returned zero sellable companies.
+- "footprint": the trade term PLUS -inurl:/-site: operators pushing away the hosts and page types
+  that keep winning — blogs, marketplaces, social profiles, help centres.
+  ⚠️ The operators do not rescue a bad trade term; they only prune a good one. On the same run
+  the identical operator pattern returned five real companies with one trade term and none with
+  another. Choose the trade term first.
 
 ⚠️ Every array must be anchored to the trade. A query with no trade term in it is almost always
 a query about the product category, and will be thrown away.

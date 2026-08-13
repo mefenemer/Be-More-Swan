@@ -55,6 +55,14 @@ check('the prompt no longer ASKS for directories, listicles, jobs, press or revi
         [/directories, maps/i, 'niche_scrape still asks for directories and maps'],
         [/"best X in Y"/i, 'niche_scrape still asks for "best X in Y" roundups'],
         [/hiring pages/i, 'intent_signal still asks for hiring pages — job boards are blocklisted'],
+        // Added 2026-08-12 from per-query yield on prod campaign 2. The 08-08 fix removed the
+        // hiring/press/reviews asks and the next run went from 0 sellable companies out of 15 to
+        // 14 out of 50 — but three queries still returned nothing, and all three were built on a
+        // quoted experiential phrase or on analyst jargon. Both are now prohibited by name.
+        [/pain in the prospect's own words/i,
+            'intent_signal still asks for the pain in the prospect\'s own words — that phrasing lives in articles, not on company sites'],
+        [/a phrase implying the manual process/i,
+            'footprint still asks for a phrase implying the manual process — measured at zero sellable companies'],
         [/recent press/i, 'intent_signal still asks for press — media is blocklisted'],
         [/public reviews/i, 'intent_signal still asks for reviews — review sites are blocklisted'],
     ];
@@ -80,6 +88,14 @@ check('the prompt makes naming the prospect’s TRADE step one', () => {
     }
     for (const right of ['independent skincare brand', 'family law firm Manchester']) {
         assert.ok(PROMPT.includes(right), `the prompt no longer shows "${right}" as a right query`);
+    }
+    // Analyst jargon is a distinct failure from the vendor inversion above: "direct-to-consumer
+    // apparel" IS the buyer, described in the words of someone writing about the buyer. It reads
+    // like a correct query and returns commentary. On prod campaign 2 it scored 1 sellable company
+    // from 13, against 9 from 14 for "small batch homeware" in the same run.
+    assert.ok(/ANALYST JARGON IS NOT A TRADE/.test(PROMPT), 'the jargon rule is gone');
+    for (const jargon of ['direct-to-consumer', 'e-commerce brand']) {
+        assert.ok(PROMPT.includes(jargon), `the prompt no longer names "${jargon}" as jargon to avoid`);
     }
     assert.ok(/anchored to the trade/i.test(PROMPT),
         'the all-arrays anchoring rule is gone — intent and footprint queries drift back to the product category');
