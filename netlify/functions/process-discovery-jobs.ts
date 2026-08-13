@@ -477,13 +477,13 @@ async function enrichBatch(db: Db, job: JobRow, counters: Counters): Promise<voi
 
     // Concurrent: 5 leads x up to 4 sequential fetches would blow the tick budget serially.
     await Promise.all(batch.map(async (lead) => {
-        let hit = null as Awaited<ReturnType<typeof enrichLeadContact>>;
+        let found: Awaited<ReturnType<typeof enrichLeadContact>> = { contact: null, handles: {} };
         try {
-            hit = await enrichLeadContact(lead.domain);
+            found = await enrichLeadContact(lead.domain);
         } catch {
             // Best-effort: a scrape failure must never fail the run.
         }
-        await recordEnrichment(db, lead.id, lead.assistant_record_id, hit,
+        await recordEnrichment(db, lead.id, lead.assistant_record_id, found,
             { organisationId: job.organisation_id, aiAssistantId: lead.ai_assistant_id, blueprintVersion, icpSnapshot });
     }));
 
@@ -566,18 +566,27 @@ async function publishSignals(db: Db, job: JobRow): Promise<void> {
  * retried forever) and mirrors that stamp — plus, on a hit, the address — onto the linked
  * assistant_record, so lead-generation.ts `send_outreach` resolves `data.contactEmail` with no
  * change there and the Leads tab can say which leads have actually been looked at.
+ *
+ * `socialHandles` rides the SAME merge as the address, deliberately. A handle is worth most on the
+ * leads where the email search MISSED — "no published address, here is their LinkedIn" — so it must
+ * survive the miss path, which the existing `stamp` object already does. It is written only when a
+ * profile was actually found; an empty object would make `socialHandles` present-but-useless and
+ * every UI check would then have to test the object's size rather than its existence.
  */
 async function recordEnrichment(
     db: Db, leadId: number, assistantRecordId: number | null,
-    hit: { email: string; kind: string; source: string; foundOn: string } | null,
+    found: { contact: { email: string; kind: string; source: string; foundOn: string } | null; handles: Record<string, string> },
     ledger?: { organisationId: number; aiAssistantId: number; blueprintVersion?: string | null; icpSnapshot?: Record<string, unknown> | null },
 ): Promise<void> {
+    const hit = found.contact;
+    const handles = found.handles ?? {};
     const stamp: Record<string, unknown> = { enrichAttemptedAt: new Date().toISOString() };
     if (hit) {
         stamp.emailKind = hit.kind;        // 'role' | 'personal' — personal needs a closer look
         stamp.emailSource = hit.source;    // 'scrape'
         stamp.emailFoundOn = hit.foundOn;  // provenance for the Review Queue
     }
+    if (Object.keys(handles).length > 0) stamp.socialHandles = handles;
 
     await db.update(discoveredLeads)
         .set({
@@ -592,6 +601,11 @@ async function recordEnrichment(
     // aggregating — it is a fact about our scraper — and emitting it would make "enrichment rate"
     // read as 100% of attempts. `emailKind` rides along because the personal-inbox gate keys off it,
     // so the ledger can later answer whether role addresses convert better than personal ones.
+    //
+    // ⚠️ A handles-only outcome emits NOTHING, on purpose. `lead_enriched` is the metric for "this
+    // lead became contactable by the machine", and a social profile does not make one contactable —
+    // no code path in this platform can send to it. Counting it would inflate the one number that
+    // says whether tier-1 enrichment is worth its fetches.
     if (hit && ledger) {
         await recordEvent(db, 'lead_enriched', {
             organisationId: ledger.organisationId,

@@ -87,6 +87,9 @@ export default withLambda(async (event) => {
             cap: aiAssistants.autonomousMediaMonthlyCap,
             mediaSources: aiAssistants.mediaSources,
             onboardingContext: aiAssistants.onboardingContext,
+            // Carries appliedDefaults.platforms — the connection-id half of the per-assistant
+            // "Use for this assistant" selection (see assistant-platform-selection.ts).
+            configuration: aiAssistants.configuration,
             orgName: organisations.name,
         })
         .from(aiAssistants)
@@ -115,7 +118,12 @@ export default withLambda(async (event) => {
         // across every platform the assistant targets — siblings share a crosspost_group_id so the
         // Review Queue shows one card the human previews per platform (not N per-platform posts).
         // Legacy assistants with no recognised platforms stay Instagram-only.
-        const targetPlatforms = await resolveConnectedDraftPlatforms(db, a.organisationId);
+        // Scoped to the assistant, so a platform switched off in its Connections tab drops out of
+        // the fan-out here exactly as it does in the scheduled path (schedule-gap-fill.ts).
+        const targetPlatforms = await resolveConnectedDraftPlatforms(db, a.organisationId, {
+            onboardingContext: a.onboardingContext,
+            configuration: a.configuration,
+        });
         const platforms: AutonomousDraftPlatform[] = targetPlatforms.length ? targetPlatforms : ['instagram'];
         const representative = platforms[0];
         const fmt = platformFormat(representative);

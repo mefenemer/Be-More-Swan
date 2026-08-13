@@ -27,14 +27,14 @@ import {
 } from './publish-policy';
 import { normalizePlatform } from '../config/platform-formats';
 import { resolveLiveSocialConnections } from './live-social-connections';
+import { resolveAssistantEnabledPlatforms, type AssistantPlatformScope } from './assistant-platform-selection';
 
 type Db = ReturnType<typeof getDb>;
 
 /**
  * The platforms an assistant should autonomously DRAFT for: the org's LIVE connections intersected
- * with the platforms a drafter actually exists for. This mirrors findLiveConnection's liveness
- * filter exactly, so we only ever draft for a platform the post could genuinely publish to —
- * connecting a platform is all it takes, no onboarding config to keep in sync. Order follows
+ * with the platforms a drafter actually exists for, and — when the caller passes the assistant —
+ * with the platforms the user has switched ON for that assistant. Order follows
  * AUTONOMOUS_DRAFT_PLATFORMS for determinism. Empty when the org has no live connection on any
  * drafter platform — callers fall back to their legacy single-stream default.
  *
@@ -42,10 +42,22 @@ type Db = ReturnType<typeof getDb>;
  * query system_connections directly, which meant a connected Threads account — whose token lives in
  * workspace_integrations — was invisible here: Autopilot fanned every cross-post across the four
  * legacy platforms and dropped Threads with no error to explain the missing post.
+ *
+ * `assistant` is optional and its absence means "org-level answer only", which is what the caller
+ * wants when there is no single assistant in scope. Pass it wherever there is one: connected and
+ * enabled are two different questions, and answering only the first is why turning a platform off
+ * in an assistant's Connections tab changed nothing about what it drafted.
  */
-export async function resolveConnectedDraftPlatforms(db: Db, orgId: number): Promise<AutonomousDraftPlatform[]> {
+export async function resolveConnectedDraftPlatforms(
+    db: Db,
+    orgId: number,
+    assistant?: Omit<AssistantPlatformScope, 'organisationId'>,
+): Promise<AutonomousDraftPlatform[]> {
     const live = await resolveLiveSocialConnections(db, orgId);
-    return AUTONOMOUS_DRAFT_PLATFORMS.filter(p => live.has(p));
+    const connected = AUTONOMOUS_DRAFT_PLATFORMS.filter(p => live.has(p));
+    if (!assistant) return connected;
+    const enabled = await resolveAssistantEnabledPlatforms(db, { organisationId: orgId, ...assistant });
+    return enabled ? connected.filter(p => enabled.has(p)) : connected;
 }
 
 export interface AutoPublishDecision extends GateDecision {

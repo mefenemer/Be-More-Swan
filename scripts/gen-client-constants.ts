@@ -42,6 +42,7 @@ import {
 import {
     LEAD_RECIPIENT_PATHS, resolveLeadRecipient, hasOutreachDraft, isLeadDeliverable,
 } from '../src/config/lead-recipient';
+import { ROLE_EMAIL_PREFIXES, roleOrPersonal, classifyEmailKind } from '../src/config/lead-email-kind';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const OUTPUT_PATH = join(root, 'src', 'generated', 'platform-constants.js');
@@ -392,6 +393,28 @@ ${formatRows}
      * keep it identical to the server's ?deliverable=1 filter or the badge and the list disagree.
      */
     isDeliverable: isLeadDeliverable,
+  };
+
+  // ── Lead email kind ───────────────────────────────────────────────────────
+  // From src/config/lead-email-kind.ts, stringified — the REAL classifier, and it has to be, for a
+  // sharper reason than the two above. The browser writes emailKind now: a user typing an address
+  // into Edit lead is the second writer of a field the scraper used to own alone. If the two
+  // disagree, the same inbox is a "Role inbox" when scraped and a "Named person" when typed, on a
+  // label that stands in for the GDPR footing of contacting it.
+  //
+  // Free variables (ROLE_EMAIL_PREFIXES, roleOrPersonal) resolve to the declarations directly
+  // above, so the names must match. The Set is rebuilt from its members because JSON.stringify
+  // renders a Set as {} — a silently empty vocabulary that would classify every address as a person.
+  var ROLE_EMAIL_PREFIXES = new Set(${JSON.stringify([...ROLE_EMAIL_PREFIXES])});
+  var roleOrPersonal = ${roleOrPersonal.toString()};
+  var classifyEmailKind = ${classifyEmailKind.toString()};
+
+  window.LeadEmailKind = {
+    /** 'role' | 'personal' for a whole address, or null if it is not an address at all. */
+    classify: classifyEmailKind,
+
+    /** Same rule, for a bare local part. */
+    ofLocalPart: roleOrPersonal,
   };
 })();
 `;

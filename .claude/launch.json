@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-lead-contact",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/2f7594b5-f5ea-4da7-aa6b-24b64a83643f/scratchpad/leadcontactharness/server.mjs"
+      ],
+      "port": 4295,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-searches-aggregate",
       "runtimeExecutable": "node",
       "runtimeArgs": [

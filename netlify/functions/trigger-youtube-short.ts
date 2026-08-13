@@ -28,6 +28,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { enqueueYoutubeShortJob } from '../../src/utils/schedule-gap-fill';
 import { resolveLiveSocialConnections } from '../../src/utils/live-social-connections';
+import { isPlatformOptedInForAssistant } from '../../src/utils/assistant-platform-selection';
 import { assembleBlueprint } from '../../src/utils/blueprint';
 import { remotionConfigured } from '../../src/lib/remotion-lambda';
 import { r2IsConfigured } from '../../src/lib/media-persist';
@@ -82,11 +83,21 @@ export default withLambda(async (event) => {
     if (!Number.isInteger(assistantId)) return json(400, { error: 'assistantId required.' });
 
     const [assistant] = await db
-        .select({ id: aiAssistants.id })
+        .select({
+            id: aiAssistants.id,
+            onboardingContext: aiAssistants.onboardingContext,
+            configuration: aiAssistants.configuration,
+        })
         .from(aiAssistants)
         .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId)))
         .limit(1);
     if (!assistant) return json(404, { error: 'Assistant not found.' });
+
+    const platformScope = {
+        organisationId: orgId,
+        onboardingContext: assistant.onboardingContext,
+        configuration: assistant.configuration,
+    };
 
     // Refuse BEFORE drafting, for the same reason the weekly enqueuer does: a Short's last step is
     // becoming a video, and without a renderer we would spend a model call to produce a card that
@@ -95,6 +106,17 @@ export default withLambda(async (event) => {
         return json(503, {
             error: 'Video rendering is not configured in this environment, so a Short cannot be produced.',
             code: 'RENDER_UNAVAILABLE',
+        });
+    }
+
+    // Connected and switched on are two different questions, and the workspace can be connected
+    // while THIS assistant is not ticked for YouTube. Refuse with a message that names the switch,
+    // so the answer is actionable rather than a bare refusal about an account that is plainly
+    // linked. Opt-in, matching the weekly enqueuer: an untouched assistant is not ticked.
+    if (!(await isPlatformOptedInForAssistant(db, platformScope, 'youtube'))) {
+        return json(409, {
+            error: 'YouTube is switched off for this assistant. Turn on “Use for this assistant” on the YouTube card in its Connections tab first.',
+            code: 'YOUTUBE_DISABLED_FOR_ASSISTANT',
         });
     }
 

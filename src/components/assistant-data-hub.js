@@ -334,6 +334,81 @@
     return wrap;
   }
 
+  // ── Social profiles (Phase 2 item 7) ────────────────────────────────────────
+  //
+  // Captured by discovery-enrich.ts from the lead's own footer, at no extra fetch cost, and stored
+  // at `data.socialHandles`. The point of showing them is the "None found" lead: two thirds of SMB
+  // sites publish no address, and until now that verdict was a dead end. A LinkedIn is not an
+  // address, but it is somewhere a human can go next.
+  //
+  // ⚠️ THE COPY IS THE FEATURE. Nothing in this platform can send a DM — `send_outreach` is
+  // email-only and `lead-threads.ts` declares `channel?: 'email' | 'dm'` with nothing anywhere
+  // setting 'dm'. A row of social icons next to an outreach product implies an outbound channel
+  // that does not exist, so the label says "open" and the note says who does the work.
+
+  // Mirrors SocialPlatformKey in src/lib/discovery-enrich.ts. A key missing here is not a bug that
+  // breaks anything — an unrecognised platform is simply not rendered — but it does mean a captured
+  // profile silently never reaches the user, so keep the two in step.
+  const SOCIAL_LABELS = {
+    linkedin: 'LinkedIn', instagram: 'Instagram', facebook: 'Facebook', x: 'X',
+    tiktok: 'TikTok', youtube: 'YouTube', pinterest: 'Pinterest', threads: 'Threads',
+  };
+
+  /** The valid profile URLs on a lead, keyed by platform. Empty object when there are none. */
+  function socialLinksOf(record) {
+    const raw = record.data && record.data.socialHandles;
+    if (!raw || typeof raw !== 'object') return {};
+    const out = {};
+    for (const [k, v] of Object.entries(raw)) {
+      if (SOCIAL_LABELS[k] && typeof v === 'string' && /^https?:\/\//i.test(v.trim())) out[k] = v.trim();
+    }
+    return out;
+  }
+
+  /** One sentence for the Contact tooltip naming what a row has, or '' — table rows carry no links. */
+  function socialHint(record) {
+    const names = Object.keys(socialLinksOf(record)).map((k) => SOCIAL_LABELS[k]);
+    if (names.length === 0) return '';
+    // "Instagram, Facebook and TikTok" — a comma-joined list reads as a machine dump in a sentence
+    // a person is meant to act on.
+    const list = names.length === 1 ? names[0]
+      : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+    return `Open the row for their ${list} profile${names.length > 1 ? 's' : ''}.`;
+  }
+
+  /**
+   * The profile links on a lead, or null when it has none.
+   *
+   * ⚠️ Every URL here began as an `href` on a stranger's website — attacker-influenceable input that
+   * we are about to put back into an `href`. The scraper only ever stores http/https, but this
+   * re-checks rather than trusting it: the value has since been through a jsonb column and the
+   * records PATCH endpoint, so the render is the last place that can be sure. Anything else is
+   * dropped silently — a `javascript:` URL is not a profile, and there is nothing to tell the user.
+   */
+  function socialBanner(record) {
+    const links = Object.entries(socialLinksOf(record))
+      .map(([k, v]) => `<a href="${esc(v)}" target="_blank" rel="noopener noreferrer nofollow"
+           class="text-xs font-bold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100 cursor-pointer">${esc(SOCIAL_LABELS[k])} &#8599;</a>`);
+    if (links.length === 0) return null;
+
+    // Which sentence depends on whether the email search succeeded, because that decides what the
+    // user is looking at this for: a fallback route, or extra background on a lead they can already
+    // write to. Both say plainly that opening these is a human's job.
+    const note = contactEmailOf(record)
+      ? 'Background on this lead. Opening a profile is a manual step — nothing here posts or messages.'
+      : 'No published email address was found. These are the profiles this company links from its own site — open one to make contact yourself. Nothing here sends a message.';
+
+    const wrap = document.createElement('div');
+    wrap.className = 'mb-4';
+    wrap.innerHTML = `
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Profiles</span>
+        ${links.join('')}
+      </div>
+      <p class="text-xs text-gray-500 mt-1.5">${esc(note)}</p>`;
+    return wrap;
+  }
+
   /**
    * Record (or correct) a lead's deal outcome.
    *
@@ -772,6 +847,16 @@
 
     // Leads: edit the lead's details, and copy the outreach draft without re-opening the chat.
     if (state.hub.recordType === 'lead') {
+      // The Contact chip has been telling users to "add an address by hand" for a while, and the
+      // only place to do it was an Email field three items down a modal called "Edit lead" — a
+      // remedy nobody would find from the sentence offering it. On a lead with no address this is
+      // the only action that unblocks anything, so it leads the row and says what it does.
+      if (!contactEmailOf(record)) {
+        buttons.push({ label: 'Add an address', async run(btn) {
+          btn.disabled = false;
+          openEditLeadModal(record, { focus: 'contactEmail' });
+        }});
+      }
       buttons.push({ label: 'Edit', async run(btn) {
         btn.disabled = false;           // opening a modal shouldn't leave the button stuck disabled
         openEditLeadModal(record);
@@ -1042,6 +1127,11 @@
     if (state.hub.recordType === 'lead') panel.appendChild(approvalBanner(record));
     const outcome = state.hub.recordType === 'lead' ? outcomeBanner(record) : null;
     if (outcome) panel.appendChild(outcome);
+    // Above the card for the same reason as the two banners: on a lead with no address these links
+    // are the only thing on the record a user can act on, and inside the field list they would read
+    // as one more stored value.
+    const social = state.hub.recordType === 'lead' ? socialBanner(record) : null;
+    if (social) panel.appendChild(social);
     panel.appendChild(body || keyValueFallback(record.data));
     panel.appendChild(detailActions(record));
     return panel;
@@ -1068,8 +1158,11 @@
         // screen to answer a question that is really just "can I send to this one?".
         const s = CONTACT_CHIP[contactState(record)];
         const email = contactEmailOf(record);
-        // The address when there is one, otherwise the reason there is not.
-        const tip = email || s.why || '';
+        // The address when there is one, otherwise the reason there is not — plus, on a lead with
+        // no address, the fact that there IS something to open. Without this line the profiles are
+        // only discoverable by opening every red chip in the table one at a time, which is the same
+        // dead end the chip had before, one click further in.
+        const tip = email || [s.why, socialHint(record)].filter(Boolean).join(' ') || '';
         cell = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${s.cls} whitespace-nowrap"${tip ? ` title="${esc(tip)}"` : ''}>${esc(s.short)}</span>`;
       } else {
         cell = esc(cellValue(record, c.key));
@@ -1404,7 +1497,50 @@
     { key: 'notes', label: 'Notes', ph: 'Context, next step…', textarea: true },
   ];
 
-  function openEditLeadModal(record) {
+  /**
+   * Keep an address's provenance in step with the address itself (Phase 2 item 9).
+   *
+   * ── Why this is not optional ────────────────────────────────────────────────
+   * `contactState()` above reads `emailKind === 'personal' ? 'personal' : 'role'`. An address with
+   * NO kind therefore renders as "Role inbox" — the green, safe-looking chip — even when it is
+   * plainly a named individual. The Edit lead form has always been able to write `contactEmail`,
+   * and it has never written a kind, so every hand-typed address in the product has been labelled a
+   * generic company inbox. That is the wrong direction to be wrong in: a named individual is the
+   * weakest GDPR footing here, and the chip is what a user checks before approving an email.
+   *
+   * ⚠️ ONLY ON A REAL CHANGE. Re-stamping an untouched address would rewrite a SCRAPED one's source
+   * to 'manual', and the Review Queue's personal-inbox confirmation fires on
+   * `emailKind === 'personal' && emailSource === 'scrape'` (signal-inbox.ts, lead-generation.ts).
+   * Opening this form and pressing Save on an unrelated field would then silently disarm that gate
+   * for the rest of the lead's life. Comparing against the address as loaded is what prevents it.
+   *
+   * The 'manual' source itself is deliberate and unchanged: a user-supplied address is not
+   * harvested, so it is correctly exempt from a gate that exists to catch harvesting.
+   */
+  function stampContactProvenance(prevData, nextData) {
+    const before = String(prevData.contactEmail || '').trim().toLowerCase();
+    const after = String(nextData.contactEmail || '').trim().toLowerCase();
+    if (before === after) return;                       // untouched — leave its provenance alone
+
+    if (!after) {                                       // cleared: the provenance describes nothing
+      delete nextData.emailKind;
+      delete nextData.emailSource;
+      delete nextData.emailFoundOn;
+      return;
+    }
+    nextData.emailSource = 'manual';
+    // Same classifier the scraper runs, generated from src/config/lead-email-kind.ts. The fallback
+    // is 'personal' because it is the cautious one: it over-warns rather than quietly promoting an
+    // unclassifiable address to a role inbox.
+    nextData.emailKind = (window.LeadEmailKind && window.LeadEmailKind.classify(after)) || 'personal';
+    // Provenance for the Review Queue, which otherwise shows a bare address with no account of
+    // where it came from. `emailFoundOn` is a URL on the scrape path, so it is dropped rather than
+    // stuffed with prose.
+    delete nextData.emailFoundOn;
+    nextData.emailEnteredAt = new Date().toISOString();
+  }
+
+  function openEditLeadModal(record, opts) {
     const data = record.data && typeof record.data === 'object' ? record.data : {};
     const cur = (f) => f.key === 'title' ? (record.title ?? '') : f.key === 'status' ? (record.status ?? '') : (data[f.key] ?? '');
     const overlay = document.createElement('div');
@@ -1455,6 +1591,7 @@
         const v = form.elements[f.key]?.value?.trim();
         if (v) nextData[f.key] = v; else delete nextData[f.key];
       }
+      stampContactProvenance(data, nextData);
       const nextStatus = form.elements.status?.value?.trim() || null;
       submit.disabled = true;
       status.textContent = 'Saving…';
@@ -1475,7 +1612,10 @@
     });
 
     document.body.appendChild(overlay);
-    overlay.querySelector('input[name="title"]')?.focus();
+    // Arriving from "Add an address" lands the cursor in the Email field rather than on Company:
+    // the button named one job, and the form should not ask the user to find it again.
+    const wanted = opts && opts.focus ? overlay.querySelector(`[name="${opts.focus}"]`) : null;
+    (wanted || overlay.querySelector('input[name="title"]'))?.focus();
   }
 
   async function init({ hub, assistantId }) {

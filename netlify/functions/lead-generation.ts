@@ -60,6 +60,7 @@ import { evaluateDoNotContact } from '../../src/config/do-not-contact';
 // One normaliser for the lead_scoring_card wire shape, shared with discovery scoring — the
 // do-not-contact gate reads the card this produces, so the two paths must not drift apart.
 import { normaliseLeadCard, type LeadScoringCard } from '../../src/lib/discovery-scoring';
+import { classifyEmailKind } from '../../src/config/lead-email-kind';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /** Chase reminder for an approved+contacted lead: 3 days out at 09:00, nudged off weekends. */
@@ -291,10 +292,17 @@ ${OUTREACH_SUBJECT_RULES}`;
             // so the Review Queue recipient line reads from the same field.
             // emailSource 'manual' (not 'scrape') deliberately keeps the personal-inbox gate
             // off: a hand-entered address is user-supplied, not harvested.
+            //
+            // ⚠️ `emailKind` is NOT optional alongside it. The Leads tab reads
+            // `emailKind === 'personal' ? 'personal' : 'role'`, so an address stored without one
+            // renders as "Role inbox" — a named individual mislabelled as a generic company inbox,
+            // which is the LESS cautious of the two labels on the weakest GDPR footing the product
+            // has. Same classifier the scraper uses, so the two writers cannot disagree.
             const submittedEmail = str(lead.email, 200);
             if (submittedEmail) {
                 card.contactEmail = submittedEmail;
                 card.emailSource = 'manual';
+                card.emailKind = classifyEmailKind(submittedEmail) ?? 'personal';
             }
 
             const id = await upsertRecord('lead', title, String(card.rating), card, 'manual');

@@ -17,9 +17,10 @@
 
 import * as cheerio from 'cheerio';
 import { safeFetchText } from '../utils/safe-fetch';
+import { roleOrPersonal, type EmailKind } from '../config/lead-email-kind';
 
-/** Where a contact address came from, and how much trust it earns. */
-export type EmailKind = 'role' | 'personal';
+/** Where a contact address came from, and how much trust it earns. Re-exported for existing callers. */
+export type { EmailKind };
 
 export interface EnrichmentResult {
     email: string;
@@ -33,18 +34,10 @@ export interface EnrichmentResult {
 // carries a footer address on most SMB sites and costs one fetch.
 const CANDIDATE_PATHS = ['', '/contact', '/contact-us', '/about'];
 
-// Generic inbox prefixes. These are corporate role addresses, not identified individuals —
-// the defensible lane for B2B outreach under UK GDPR legitimate interests / PECR.
-const ROLE_PREFIXES = new Set([
-    'info', 'hello', 'hi', 'contact', 'contactus', 'enquiries', 'enquiry', 'inquiries',
-    'sales', 'admin', 'office', 'team', 'mail', 'general', 'reception', 'bookings',
-    'support', 'help', 'ask', 'talk', 'connect', 'business',
-    // Hospitality/venue desks — a live staging run classified reservations@ as 'personal'
-    // and warned on it. Misclassifying role→personal only over-warns (the safe direction),
-    // but it puts needless friction on the reviewer, so keep this list current.
-    'reservations', 'reservation', 'booking', 'events', 'event', 'enquires', 'frontdesk',
-    'stay', 'guestservices', 'concierge', 'hire', 'orders', 'shop', 'studio', 'welcome',
-]);
+// The role-vs-personal vocabulary now lives in src/config/lead-email-kind.ts. It moved out of this
+// file when the scraper stopped being the only writer of `emailKind`: a hand-typed address (item 9)
+// has to be classified by the SAME rule, in the browser, or the two writers label the same inbox
+// differently. `roleOrPersonal` below is the rule this file used to hold, unchanged.
 
 // Never contact these, and never let them shadow a real address.
 const BLOCKED_PREFIXES = [
@@ -66,6 +59,117 @@ const BLOCKED_DOMAIN_FRAGMENTS = [
 const ASSET_EXTENSIONS = /\.(png|jpe?g|gif|svg|webp|css|js|woff2?|ttf|ico|mp4|pdf)$/i;
 
 const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+
+// ── Social profiles (Phase 2 item 7) ─────────────────────────────────────────
+//
+// Tier-1 enrichment finds an address on roughly one SMB site in three, so "None found" is the
+// majority verdict and today it is a dead end. A company that publishes no email almost always
+// publishes a LinkedIn or an Instagram, in the footer, as a plain <a href> on a page this module
+// already fetches. Capturing it turns "None found, nothing you can do" into "no email — here is
+// their LinkedIn", at zero extra network cost.
+//
+// ⚠️ NOT `SOCIAL_PLATFORMS` from src/config/platform-formats.ts. That list is the platforms this
+// product can PUBLISH to, which is a different question from the platforms a prospect might be
+// reachable on — it omits TikTok and Pinterest, both ordinary channels for a DTC brand. Borrowing
+// it would silently drop them. Two vocabularies because there are genuinely two concepts.
+//
+// ⚠️ NOTHING HERE SENDS A DM. `send_outreach` is email-only, and lead-threads.ts declares
+// `channel?: 'email' | 'dm'` with nothing anywhere setting 'dm'. A captured handle is a link for a
+// HUMAN to open, and every surface that shows one must say so rather than implying an outbound
+// channel that does not exist.
+
+export type SocialPlatformKey =
+    'linkedin' | 'instagram' | 'facebook' | 'x' | 'tiktok' | 'youtube' | 'pinterest' | 'threads';
+
+export type SocialHandles = Partial<Record<SocialPlatformKey, string>>;
+
+/**
+ * How to recognise a company's own profile URL, per platform.
+ *
+ * `profile` must match the PATH of a real profile; `reject` catches the paths that share the same
+ * host but are not one — share widgets, tracking pixels, policy pages, individual posts. Share
+ * links are the important half: nearly every site with a blog carries
+ * `twitter.com/intent/tweet?url=…` and `facebook.com/sharer/sharer.php?u=…` on every article, and
+ * treating those as the company's profile would give every lead the same three fake handles.
+ */
+const SOCIAL_MATCHERS: Array<{ key: SocialPlatformKey; hosts: RegExp; profile: RegExp; reject: RegExp }> = [
+    { key: 'linkedin',  hosts: /(^|\.)linkedin\.com$/i,
+      profile: /^\/(company|in|school|showcase)\/[^/]+/i,
+      reject: /^\/(shareArticle|sharing|share|login|signup|pub\/dir|feed|posts)/i },
+    { key: 'instagram', hosts: /(^|\.)instagram\.com$/i,
+      profile: /^\/[^/]+\/?$/,
+      reject: /^\/(p|reel|reels|tv|explore|accounts|stories|direct)(\/|$)/i },
+    { key: 'facebook',  hosts: /(^|\.)facebook\.com$/i,
+      profile: /^\/(pages\/[^/]+\/[^/]+|profile\.php|[^/]+)\/?$/,
+      reject: /^\/(sharer|share|share\.php|dialog|plugins|tr|policies|help|login|privacy|terms|business|events)(\/|\.|$)/i },
+    { key: 'x',         hosts: /(^|\.)(twitter\.com|x\.com)$/i,
+      profile: /^\/[^/]+\/?$/,
+      reject: /^\/(intent|share|home|i|search|hashtag|privacy|tos|login)(\/|$)/i },
+    { key: 'tiktok',    hosts: /(^|\.)tiktok\.com$/i,
+      profile: /^\/@[^/]+/i,
+      reject: /^\/(share|embed|discover|tag|legal|login)(\/|$)/i },
+    { key: 'youtube',   hosts: /(^|\.)(youtube\.com|youtu\.be)$/i,
+      profile: /^\/(@[^/]+|channel\/[^/]+|c\/[^/]+|user\/[^/]+)/i,
+      reject: /^\/(watch|embed|results|playlist|shorts|feed|redirect|t)(\/|$)/i },
+    { key: 'pinterest', hosts: /(^|\.)pinterest\.[a-z.]+$/i,
+      profile: /^\/[^/]+\/?$/,
+      reject: /^\/(pin|_created|search|categories|login|about|policy)(\/|$)/i },
+    { key: 'threads',   hosts: /(^|\.)threads\.(net|com)$/i,
+      profile: /^\/@[^/]+/i,
+      reject: /^\/(intent|search|login|privacy|terms)(\/|$)/i },
+];
+
+/** Handles that are obviously the PLATFORM's own, not a company's. */
+const RESERVED_HANDLES = new Set([
+    'home', 'about', 'help', 'privacy', 'terms', 'legal', 'login', 'signup', 'explore',
+    'settings', 'business', 'developers', 'careers', 'press', 'blog', 'support', 'security',
+]);
+
+/**
+ * Extract the company's own social profile links from a page.
+ *
+ * EXTRACTION ONLY, on the same hard rule as the addresses above — a handle is never guessed from
+ * the company name. Every URL returned was literally an `<a href>` on the page.
+ *
+ * ⚠️ Footer links are preferred over the rest of the document. A footer social row is the company's
+ * own; a link in body copy is as likely to be someone ELSE's profile that an article mentions, and
+ * this module's whole contract is that a returned contact belongs to the lead. When a page has a
+ * footer, only the footer is read; the fallback to the whole document is for the many SMB sites
+ * whose markup has no <footer> element at all.
+ */
+export function extractSocialHandles(html: string, leadDomain: string | null): SocialHandles {
+    const $ = cheerio.load(html);
+    $('script, style, noscript').remove();
+
+    const footer = $('footer');
+    const scope = footer.length ? footer : $('body');
+    const out: SocialHandles = {};
+
+    scope.find('a[href]').each((_, el) => {
+        const href = ($(el).attr('href') || '').trim();
+        if (!href || href.startsWith('#')) return;
+        let url: URL;
+        try { url = new URL(href, `https://${leadDomain ?? 'example.com'}`); } catch { return; }
+        if (url.protocol !== 'https:' && url.protocol !== 'http:') return;
+
+        const host = url.hostname.toLowerCase().replace(/^www\./, '');
+        const path = url.pathname.replace(/\/+$/, '') || '/';
+
+        for (const m of SOCIAL_MATCHERS) {
+            if (!m.hosts.test(host)) continue;
+            if (m.reject.test(path)) return;          // a share widget or a policy page
+            if (!m.profile.test(path)) return;
+            const slug = path.split('/').filter(Boolean).pop() ?? '';
+            if (RESERVED_HANDLES.has(slug.toLowerCase().replace(/^@/, ''))) return;
+            // First match per platform wins: footers list one profile each, and a later match is
+            // more likely to be a second company's than a better link to the same one.
+            if (!out[m.key]) out[m.key] = `${url.origin}${path}`;
+            return;
+        }
+    });
+
+    return out;
+}
 
 // Per-lead wall clock. The worker tick is ~10s total (see QUERIES_PER_SLICE in
 // process-discovery-jobs.ts — 3 searches/tick already caused 504s), so a lead that
@@ -171,22 +275,37 @@ function classify(email: string, leadDomain: string | null): EmailKind | null {
         if (domain !== normalised && !domain.endsWith(`.${normalised}`)) return null;
     }
 
-    const bare = prefix.replace(/[._-]/g, '');
-    return ROLE_PREFIXES.has(prefix) || ROLE_PREFIXES.has(bare) ? 'role' : 'personal';
+    return roleOrPersonal(prefix);
 }
 
+/** Everything one lead's scrape yielded. `contact` is null far more often than not — that is normal. */
+export interface EnrichmentOutcome {
+    contact: EnrichmentResult | null;
+    handles: SocialHandles;
+}
+
+const NOTHING: EnrichmentOutcome = { contact: null, handles: {} };
+
 /**
- * Find a contact address for one lead by reading its own website.
- * Best-effort by design: returns null on anything unexpected (dead domain, JS-only site,
+ * Find a contact address — and any social profiles — for one lead by reading its own website.
+ * Best-effort by design: yields nothing on anything unexpected (dead domain, JS-only site,
  * no published address, SSRF rejection). A lead with no email is a normal outcome, not a
  * failure — it just stays un-emailable, exactly as it is today.
+ *
+ * ⚠️ Handles are harvested from EVERY page fetched, and merged, while the address search keeps its
+ * early return. Those two want opposite things: the email search stops the moment it finds a role
+ * address (each extra fetch is budget the whole batch shares), but a site that publishes its email
+ * on the homepage may still carry its Instagram only in a /contact footer. Collecting per page
+ * costs nothing — the HTML is already in memory — and a handle found on a page we were fetching
+ * anyway is free, which is the entire economic argument for this feature.
  */
-export async function enrichLeadContact(domain: string | null): Promise<EnrichmentResult | null> {
-    if (!domain) return null;
+export async function enrichLeadContact(domain: string | null): Promise<EnrichmentOutcome> {
+    if (!domain) return NOTHING;
     const host = domain.toLowerCase().replace(/^www\./, '').replace(/\/+$/, '');
-    if (!host || !host.includes('.')) return null;
+    if (!host || !host.includes('.')) return NOTHING;
 
     let best: { email: string; kind: EmailKind; foundOn: string } | null = null;
+    const handles: SocialHandles = {};
     const deadline = Date.now() + LEAD_BUDGET_MS;
 
     for (const path of CANDIDATE_PATHS) {
@@ -204,15 +323,24 @@ export async function enrichLeadContact(domain: string | null): Promise<Enrichme
             continue;
         }
 
+        // Merge before the email checks below, so an early return still banks this page's handles.
+        // Earlier pages win: CANDIDATE_PATHS starts at the homepage, whose footer is the most
+        // canonical place a company lists its own profiles.
+        for (const [k, v] of Object.entries(extractSocialHandles(body, host))) {
+            if (!handles[k as SocialPlatformKey]) handles[k as SocialPlatformKey] = v;
+        }
+
         const hits = extractEmails(body, host);
         if (hits.length === 0) continue;
 
         // A role address is the best outcome available — take it and stop paying for fetches.
-        if (hits[0].kind === 'role') return { email: hits[0].email, kind: 'role', source: 'scrape', foundOn: url };
+        if (hits[0].kind === 'role') {
+            return { contact: { email: hits[0].email, kind: 'role', source: 'scrape', foundOn: url }, handles };
+        }
 
         // Hold the personal address but keep looking: /contact may yet yield a role inbox.
         if (!best) best = { email: hits[0].email, kind: hits[0].kind, foundOn: url };
     }
 
-    return best ? { ...best, source: 'scrape' } : null;
+    return { contact: best ? { ...best, source: 'scrape' } : null, handles };
 }

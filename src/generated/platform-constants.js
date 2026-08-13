@@ -331,4 +331,26 @@
      */
     isDeliverable: isLeadDeliverable,
   };
+
+  // ── Lead email kind ───────────────────────────────────────────────────────
+  // From src/config/lead-email-kind.ts, stringified — the REAL classifier, and it has to be, for a
+  // sharper reason than the two above. The browser writes emailKind now: a user typing an address
+  // into Edit lead is the second writer of a field the scraper used to own alone. If the two
+  // disagree, the same inbox is a "Role inbox" when scraped and a "Named person" when typed, on a
+  // label that stands in for the GDPR footing of contacting it.
+  //
+  // Free variables (ROLE_EMAIL_PREFIXES, roleOrPersonal) resolve to the declarations directly
+  // above, so the names must match. The Set is rebuilt from its members because JSON.stringify
+  // renders a Set as {} — a silently empty vocabulary that would classify every address as a person.
+  var ROLE_EMAIL_PREFIXES = new Set(["info","hello","hi","contact","contactus","enquiries","enquiry","inquiries","sales","admin","office","team","mail","general","reception","bookings","support","help","ask","talk","connect","business","reservations","reservation","booking","events","event","enquires","frontdesk","stay","guestservices","concierge","hire","orders","shop","studio","welcome"]);
+  var roleOrPersonal = function roleOrPersonal(localPart){const prefix=localPart.trim().toLowerCase();const bare=prefix.replace(/[._-]/g,"");return ROLE_EMAIL_PREFIXES.has(prefix)||ROLE_EMAIL_PREFIXES.has(bare)?"role":"personal"};
+  var classifyEmailKind = function classifyEmailKind(email){const value=String(email??"").trim().toLowerCase();if(!value||(value.match(/@/g)||[]).length!==1)return null;const[local,domain]=value.split("@");if(!local||!domain||!domain.includes("."))return null;return roleOrPersonal(local)};
+
+  window.LeadEmailKind = {
+    /** 'role' | 'personal' for a whole address, or null if it is not an address at all. */
+    classify: classifyEmailKind,
+
+    /** Same rule, for a bare local part. */
+    ofLocalPart: roleOrPersonal,
+  };
 })();

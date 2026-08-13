@@ -180,10 +180,17 @@ check('the chip renders the STATE, and keeps the address out of the cell', () =>
     const row = HUB.slice(HUB.indexOf('function rowHtml'), HUB.indexOf('function refreshRow'));
     const branch = row.slice(row.indexOf("c.key === 'contact'"));
     // The tooltip carries the ADDRESS when there is one, and the reason for its absence otherwise
-    // (item 11). Both, never the raw address in the cell — a column of a hundred people's contact
-    // details answers a question nobody asked.
-    assert.ok(/const tip = email \|\| s\.why/.test(branch),
-        'the tooltip must prefer the address, falling back to why there is none');
+    // (item 11), now joined by the social-profile hint (item 7). Both, never the raw address in the
+    // cell — a column of a hundred people's contact details answers a question nobody asked.
+    //
+    // Matched loosely on purpose: the ordering is what matters (address first, everything else only
+    // when there is no address), not the expression that builds the fallback.
+    assert.ok(/const tip = email \|\|/.test(branch),
+        'the tooltip must prefer the address over any fallback');
+    assert.ok(/s\.why/.test(branch),
+        'the tooltip must still fall back to why there is no address');
+    assert.ok(/socialHint\(record\)/.test(branch),
+        'the fallback must name the profiles a row carries, or they are only findable row by row');
     assert.ok(/title="\$\{esc\(tip\)\}"/.test(branch),
         'the address should ride in the tooltip, so it is available without being rendered per row');
     assert.ok(/\$\{esc\(s\.short\)\}/.test(branch),

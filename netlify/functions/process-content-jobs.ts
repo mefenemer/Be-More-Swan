@@ -33,6 +33,7 @@ import {
     type PriorPost,
 } from '../../src/utils/draft-variety';
 import { decideAutoPublish, describeDecision, resolveConnectedDraftPlatforms } from '../../src/utils/auto-publish-runtime';
+import { isPlatformOptedInForAssistant } from '../../src/utils/assistant-platform-selection';
 import { platformFormat } from '../../src/config/platform-formats';
 import {
     SHORT_DURATION_S, SHORT_FORMAT_KEY, SHORT_HEIGHT, SHORT_MEDIA_SOURCES, SHORT_POST_FORMAT, SHORT_WIDTH,
@@ -66,8 +67,15 @@ const BACKOFF_SECS = [10, 30, 90];
 // It also answers with DRAFTER platforms rather than any connected one, which keeps YouTube out:
 // every drafter here produces stills, so a YouTube fallback would draft posts that can never
 // publish (video-mandatory).
-async function resolveFallbackPlatform(db: ReturnType<typeof getDb>, organisationId: number): Promise<string> {
-    const [platform] = await resolveConnectedDraftPlatforms(db, organisationId);
+//
+// Scoped to the assistant when its onboarding context is to hand, so the fallback lands on a
+// platform the user has actually left switched on for it rather than merely one the org connected.
+async function resolveFallbackPlatform(
+    db: ReturnType<typeof getDb>,
+    organisationId: number,
+    assistant?: { onboardingContext: unknown; configuration?: unknown },
+): Promise<string> {
+    const [platform] = await resolveConnectedDraftPlatforms(db, organisationId, assistant);
     return platform ?? 'instagram';
 }
 
@@ -219,8 +227,18 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // to always include (spelled exactly); onboardingContext.hashtagAliases = variant→canonical
         // rewrites (e.g. HireDontLearn→HireNotLearn). Read live from onboardingContext so a config
         // change applies without waiting on a blueprint recompile. Empty ⇒ generic hygiene only.
-        const [asstCfg] = await db.select({ onboardingContext: aiAssistants.onboardingContext })
+        const [asstCfg] = await db.select({
+            onboardingContext: aiAssistants.onboardingContext,
+            // Also the per-assistant platform selection — see assistant-platform-selection.ts and
+            // the enabled-platform guard below.
+            configuration: aiAssistants.configuration,
+        })
             .from(aiAssistants).where(eq(aiAssistants.id, job.assistant_id)).limit(1);
+        const platformScope = {
+            organisationId: job.organisation_id,
+            onboardingContext: asstCfg?.onboardingContext ?? null,
+            configuration: asstCfg?.configuration ?? null,
+        };
         const brandCtx = (asstCfg?.onboardingContext ?? {}) as Record<string, unknown>;
         const rawCanon = brandCtx.brandHashtags;
         const canonicalTags = (Array.isArray(rawCanon) ? rawCanon.map(String)
@@ -244,7 +262,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             ? job.platforms.filter((p): p is string => typeof p === 'string' && p.length > 0)
             : [];
         const fanOut = fanoutPlatforms.length > 1;
-        const platform      = (fanoutPlatforms[0] || job.platform) || await resolveFallbackPlatform(db, job.organisation_id);
+        const platform      = (fanoutPlatforms[0] || job.platform) || await resolveFallbackPlatform(db, job.organisation_id, platformScope);
         const targetPlatforms = fanoutPlatforms.length ? fanoutPlatforms : [platform];
         // Platform-agnostic wording when one idea spans several platforms (the same idea ships to all,
         // but each platform now gets a length/hashtag-appropriate variant — see fitForPlatform below).
@@ -357,6 +375,26 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // reelScript the video branch produces for a human to film. The still is then rendered to a
         // 10s 9:16 mp4 further down, which is where it turns into something YouTube will take.
         const isYoutubeShort = platform === 'youtube' && !fanOut;
+
+        // A Short already sitting in the queue when the user switched YouTube off for this assistant
+        // would otherwise still be drafted — the enqueue-side gate (resolveWeeklyShortSlot) only
+        // stops the NEXT one, and there is always up to a week of lead time between the two. Cancel
+        // it here instead, before the model call, so flipping the switch takes effect immediately
+        // rather than after one last unwanted post appears in the Review Queue.
+        //
+        // Deliberately narrow: only the standalone Short reaches this branch. A cross-post's
+        // platform list was already filtered at enqueue, and a human-composed YouTube post never
+        // travels through this queue at all (create-manual-post.ts writes the row directly).
+        if (isYoutubeShort && !(await isPlatformOptedInForAssistant(db, platformScope, 'youtube'))) {
+            await db.execute(
+                `UPDATE content_generation_jobs
+                 SET status = 'cancelled', error_message = 'YouTube is not switched on for this assistant', updated_at = now()
+                 WHERE id = ${job.id}`
+            );
+            console.log(`[process-content-jobs] job ${job.job_id}: YouTube not switched on for assistant ${job.assistant_id} — Short cancelled`);
+            return;
+        }
+
         const format = isYoutubeShort
             ? 'image'
             : ['image', 'carousel', 'reel', 'video', 'story'].includes(requestedFormat) ? requestedFormat : 'image';

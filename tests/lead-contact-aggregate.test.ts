@@ -115,7 +115,9 @@ check('the missed chip explains itself, and every no-address chip does', () => {
         const re = new RegExp(`${chip}: \\{[^}]*why:`, 's');
         assert.ok(re.test(HUB_SRC), `the "${chip}" chip carries no explanation`);
     }
-    assert.ok(/const tip = email \|\| s\.why/.test(HUB_SRC),
+    // Matched on the ordering, not the whole expression: item 7 appends the social-profile hint to
+    // the same fallback, and pinning the exact text would break on every future addition to it.
+    assert.ok(/const tip = email \|\|[^\n]*s\.why/.test(HUB_SRC),
         'the tooltip no longer falls back to the reason when there is no address');
 });
 

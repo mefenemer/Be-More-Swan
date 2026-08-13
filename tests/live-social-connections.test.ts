@@ -156,8 +156,11 @@ await check('the composer/capacity platform list includes workspace-backed platf
 
 await check('the worker fallback platform can never be a platform with no drafter', () => {
     const s = src('netlify/functions/process-content-jobs.ts');
+    // The assistant scope arg is optional and only NARROWS the answer (see
+    // assistant-platform-selection.ts), so what matters here is unchanged: the candidates come from
+    // the shared drafter list rather than a local array.
     assert.ok(
-        /resolveConnectedDraftPlatforms\(db, organisationId\)/.test(s),
+        /resolveConnectedDraftPlatforms\(db, organisationId(, [A-Za-z]+)?\)/.test(s),
         'resolveFallbackPlatform should reuse the drafter list (keeps YouTube out, brings Threads in)',
     );
 });

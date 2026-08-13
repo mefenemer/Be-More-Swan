@@ -17,6 +17,7 @@ import { resolvePostingSchedule, computeScheduleSlots, readCadence } from '../co
 import { assembleBlueprint } from './blueprint';
 import { resolveConnectedDraftPlatforms } from './auto-publish-runtime';
 import { resolveLiveSocialConnections } from './live-social-connections';
+import { isPlatformOptedInForAssistant } from './assistant-platform-selection';
 import { remotionConfigured } from '../lib/remotion-lambda';
 import { r2IsConfigured } from '../lib/media-persist';
 
@@ -132,7 +133,13 @@ export async function enqueueScheduleGapFill(
     // post per platform, all sharing a crosspost_group_id → one Review Queue card, preview per platform.
     // Orgs with no live connection on any drafter platform keep the single stream (platforms null → the
     // worker resolves the org's fallback connection).
-    const targetPlatforms = await resolveConnectedDraftPlatforms(db, assistant.organisationId);
+    // Scoped to THIS assistant, not just the org: a platform the user has switched off in the
+    // assistant's Connections tab ("Use for this assistant") must drop out of the fan-out. The org
+    // stays connected — another assistant may still post there — but this one stops drafting for it.
+    const targetPlatforms = await resolveConnectedDraftPlatforms(db, assistant.organisationId, {
+        onboardingContext: assistant.onboardingContext,
+        configuration: assistant.configuration,
+    });
 
     // A cross-post's per-platform rows all share ONE publish_date, so coverage is per SLOT, not per
     // platform: a day with two preferred times needs two cross-posts to be "covered". We dedupe planned
@@ -313,8 +320,22 @@ export async function enqueueYoutubeShortJob(db: Db, args: {
 /**
  * When the assistant's next weekly YouTube Short should be drafted, or null if it shouldn't.
  *
- * Due when the org has a LIVE YouTube connection and there is no Short already planned or in flight
- * in the next seven days. The lookahead is a fixed week rather than the draft horizon deliberately:
+ * Due when the assistant is explicitly ticked for YouTube, the org has a LIVE YouTube connection,
+ * and there is no Short already planned or in flight in the next seven days.
+ *
+ * The opt-in check is separate from the liveness one on purpose, and it is the one that was
+ * missing: YouTube is deliberately absent from AUTONOMOUS_DRAFT_PLATFORMS, so the Short is the ONLY
+ * thing that autonomously drafts for YouTube — which made this function the single reason a user
+ * who had turned YouTube off for their assistant kept finding a new Short in the Review Queue every
+ * week. Nothing else read the switch, so there was no way to stop it without disconnecting the
+ * channel for the whole workspace.
+ *
+ * Opt-in rather than the default-on rule the ordinary stream uses (isPlatformEnabledForAssistant):
+ * a live channel is not a request for a video a week, and in practice the assistants hit by this
+ * had no recorded selection at all — falling open on a blank one would have left them producing
+ * exactly the Short the user was trying to stop.
+ *
+ * The lookahead is a fixed week rather than the draft horizon deliberately:
  * an assistant with a 3-day horizon would otherwise never see the Short it queued for day five and
  * would enqueue another every hour the cron ran.
  *
@@ -338,23 +359,46 @@ async function resolveWeeklyShortSlot(
     // switch on.
     if (!remotionConfigured() || !r2IsConfigured()) return null;
 
+    const optedIn = await isPlatformOptedInForAssistant(
+        db,
+        {
+            organisationId: assistant.organisationId,
+            onboardingContext: assistant.onboardingContext,
+            configuration: assistant.configuration,
+        },
+        'youtube',
+    );
+    if (!optedIn) return null;
+
     const live = await resolveLiveSocialConnections(db, assistant.organisationId);
     if (!live.has('youtube')) return null;
 
     const weekEnd = new Date(now.getTime() + WEEK_MS);
+    const weekAgo = new Date(now.getTime() - WEEK_MS);
 
-    const [plannedShort] = await db
+    // The dedupe window looks BACKWARD as well as forward, and that is what makes the cadence
+    // weekly. Looking only forward is how a "weekly" Short drafted one EVERY DAY: the moment a
+    // Short's 08:00 slot passed it stopped matching `publishDate >= now`, the next hourly run saw
+    // no future Short, and enqueued another for tomorrow's slot — nine Shorts in nine working days
+    // on the production assistant this was found on, none of them ever approved. Nothing about that
+    // looked wrong from inside the function: it asked an honest question about the future and got
+    // an honest answer, having forgotten everything it did yesterday.
+    //
+    // 'published' belongs in the status list for the same reason. A Short that actually went out is
+    // the strongest possible evidence this week's is done, and leaving it out would resume the
+    // daily loop for exactly the users whose Shorts are working.
+    const [recentShort] = await db
         .select({ id: scheduledPosts.id })
         .from(scheduledPosts)
         .where(and(
             eq(scheduledPosts.assistantId, assistant.id),
             eq(scheduledPosts.platform, 'youtube'),
-            gte(scheduledPosts.publishDate, now),
+            gte(scheduledPosts.publishDate, weekAgo),
             lte(scheduledPosts.publishDate, weekEnd),
-            sql`status IN ('draft','pending_approval','in_review','approved','scheduled','publishing')`,
+            sql`status IN ('draft','pending_approval','in_review','approved','scheduled','publishing','published')`,
         ))
         .limit(1);
-    if (plannedShort) return null;
+    if (recentShort) return null;
 
     const [inflightShort] = await db
         .select({ id: contentGenerationJobs.id })
