@@ -113,6 +113,14 @@ interface PlanEntry {
     campaignId: number;
     companyName: string;
     domain: string | null;
+    /**
+     * `demote` moves the lead's standing; `classify` only records what it is.
+     *
+     * Both write the same two rows — the split exists so the operator reading a plan can tell the
+     * five entries that change a score from the fifty that add a label, rather than scrolling a
+     * flat list looking for the ones that matter.
+     */
+    kind: 'demote' | 'classify';
     prospectType: ProspectType;
     rationale: string | null;
     beforeScore: number;
@@ -246,8 +254,11 @@ async function main() {
     }
 
     let demoted = 0;
+    let classified = 0;
     let unchanged = 0;
     let unclassified = 0;
+    let skippedKeyLoss = 0;
+    let conflicted = 0;
     let leftReviewQueue = 0;
     let inputTokens = 0;
     let outputTokens = 0;
@@ -289,10 +300,64 @@ async function main() {
                 const before = asCard(lead.scoringCard, lead.companyName);
                 const after = applyProspectType(before, prospectType);
 
-                if (after.score === before.score && after.rating === before.rating
-                    && (after.outreachDraft === null) === (before.outreachDraft === null)) {
+                const scoreMoved = after.score !== before.score || after.rating !== before.rating
+                    || (after.outreachDraft === null) !== (before.outreachDraft === null);
+                const stored = before.prospectType ?? null;
+                const classificationNew = stored === null;
+
+                if (!scoreMoved && !classificationNew && stored === prospectType) {
                     unchanged++;
-                    console.log(`    · ${label}  ${prospectType}  — unchanged (${before.score}/${before.rating})`);
+                    console.log(`    · ${label}  ${prospectType}  — already recorded (${before.score}/${before.rating})`);
+                    continue;
+                }
+
+                // ⚠️ NEVER overwrite a classification that is already on the card. This backfill
+                // ADDS a missing verdict; it does not revise an existing one.
+                //
+                // Learned on prod: credobeauty.com was stored `aggregator`, and that verdict is
+                // what capped it 72/hot → 10/cold. A later pass called it `target_business` and
+                // the write went through, because the clamp is a ceiling so the score never moved
+                // and the change looked cosmetic. It was not — the card ended up asserting
+                // `target_business` above a reason reading "classified aggregator … so capped at
+                // 10". The classifier is not deterministic (temperature 0 is not determinism), so
+                // a disagreement between runs is expected and must never be resolved by whichever
+                // run happened to go last. Report it and leave the record alone.
+                if (stored !== null && stored !== prospectType) {
+                    conflicted++;
+                    console.log(`    ! ${label}\n        CONFLICT — stored "${stored}", this run says "${prospectType}". Left as stored.`);
+                    continue;
+                }
+
+                // ⚠️ `discovered_leads.scoring_card` is REPLACED, not merged (unlike the mirrored
+                // record, which carries enrichment stamps beside the card). Anything the stored card
+                // holds that normaliseLeadCard does not emit would be dropped on the floor. Every
+                // card the worker writes is already normalised, so this should never fire — which is
+                // exactly why it must be checked rather than assumed.
+                const storedKeys = (lead.scoringCard && typeof lead.scoringCard === 'object')
+                    ? Object.keys(lead.scoringCard as Record<string, unknown>) : [];
+                const lost = storedKeys.filter((k) => !(k in after));
+                if (lost.length) {
+                    skippedKeyLoss++;
+                    console.log(`    ! ${label}\n        SKIPPED — writing the card would drop: ${lost.join(', ')}`);
+                    continue;
+                }
+
+                // Classification-only: the verdict is recorded, nothing about the lead's standing
+                // moves. Worth writing on its own — a cold lead the classifier calls `media` and a
+                // cold lead that is a real company scoring badly on fit look identical in the Leads
+                // tab, and they need opposite fixes (queries versus the ICP). The clamp is a
+                // ceiling, so anything already at or below it keeps its score.
+                if (!scoreMoved) {
+                    classified++;
+                    console.log(`    = ${label}  ${before.score}/${before.rating}  ${prospectType}` +
+                        (rationale ? `\n        "${rationale}"` : ''));
+                    plan.push({
+                        leadId: lead.id, campaignId, companyName: lead.companyName, domain: lead.domain,
+                        kind: 'classify', prospectType, rationale,
+                        beforeScore: before.score, beforeRating: before.rating,
+                        afterScore: after.score, afterRating: after.rating,
+                        leavesReviewTab: false,
+                    });
                     continue;
                 }
 
@@ -323,6 +388,7 @@ async function main() {
                     campaignId,
                     companyName: lead.companyName,
                     domain: lead.domain,
+                    kind: 'demote',
                     prospectType,
                     rationale,
                     beforeScore: before.score,
@@ -335,15 +401,32 @@ async function main() {
         }
     }
 
+    // What the run is FOR, banked as data rather than left in the scrollback: how many of this
+    // campaign's leads were never companies we could sell to. A cold lead the classifier calls
+    // `media` and a cold lead that is a real company scoring badly on fit look identical in the
+    // Leads tab and need opposite fixes — the queries, or the ICP.
+    const byType = new Map<string, number>();
+    for (const e of plan) byType.set(e.prospectType, (byType.get(e.prospectType) ?? 0) + 1);
+
     console.log('\n  ── Summary ────────────────────────────────');
     console.log(`  leads in scope          : ${leads.length}`);
     console.log(`  demoted by the gate     : ${demoted}`);
-    console.log(`  unchanged               : ${unchanged}`);
+    console.log(`  classification recorded : ${classified}`);
+    console.log(`  already recorded        : ${unchanged}`);
     console.log(`  not classified (skipped): ${unclassified}`);
+    if (skippedKeyLoss) console.log(`  skipped, would lose keys: ${skippedKeyLoss}`);
+    if (conflicted) console.log(`  classification conflicts : ${conflicted} (left as stored)`);
     console.log(`  leaving the Review tab  : ${leftReviewQueue}`);
     console.log(`  tokens                  : ${inputTokens} in / ${outputTokens} out`);
 
-    if (demoted > 0) {
+    if (byType.size) {
+        console.log('\n  ── What this campaign actually found ──────');
+        for (const [t, n] of [...byType.entries()].sort((a, b) => b[1] - a[1])) {
+            console.log(`  ${t.padEnd(24)}: ${n}`);
+        }
+    }
+
+    if (plan.length > 0) {
         const doc: Plan = {
             createdAt: new Date().toISOString(),
             target: describeTarget(),
@@ -387,6 +470,8 @@ async function applyPlan(): Promise<void> {
 
     const db = getDb();
     let applied = 0;
+    let demoted = 0;
+    let classified = 0;
     let skipped = 0;
 
     for (const e of doc.entries) {
@@ -439,13 +524,21 @@ async function applyPlan(): Promise<void> {
         }
 
         applied++;
-        console.log(`    ✓ ${label}  ${e.beforeScore}/${e.beforeRating} → ${after.score}/${after.rating}  ${e.prospectType}`
-            + (e.leavesReviewTab ? '   ⚠️ left the Review tab' : ''));
+        if (e.kind === 'classify') {
+            classified++;
+            console.log(`    = ${label}  ${after.score}/${after.rating}  ${e.prospectType}  (classification only)`);
+        } else {
+            demoted++;
+            console.log(`    ✓ ${label}  ${e.beforeScore}/${e.beforeRating} → ${after.score}/${after.rating}  ${e.prospectType}`
+                + (e.leavesReviewTab ? '   ⚠️ left the Review tab' : ''));
+        }
     }
 
     console.log('\n  ── Summary ────────────────────────────────');
-    console.log(`  applied : ${applied}`);
-    console.log(`  skipped : ${skipped}`);
+    console.log(`  applied                : ${applied}`);
+    console.log(`    demoted              : ${demoted}`);
+    console.log(`    classification only  : ${classified}`);
+    console.log(`  skipped                : ${skipped}`);
     console.log('');
 }
 

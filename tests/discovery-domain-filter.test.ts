@@ -56,6 +56,58 @@ check('drops the magazine and brand directory that reached the scorer (2026-08-1
     drop({ domain: 'makeitbritish.co.uk', url: 'https://makeitbritish.co.uk/', title: 'Make it British | Buy British Made Products' }, 'brand directory');
 });
 
+// ── The 2026-08-12 prod harvest ───────────────────────────────────────────────
+// Once every lead in prod campaign 2 carried a prospectType, the shape of the waste was legible:
+// 51 of 65 companies found were never prospects, and 18 of those were content pages. These are the
+// real domains and titles, and each one cost a full scoring slot before being thrown away.
+
+check('drops the trade press and consumer titles that ranked for DTC queries', () => {
+    drop({ domain: 'businessoffashion.com', url: 'https://businessoffashion.com/', title: 'Direct-to-Consumer - The Business of Fashion' }, 'BoF');
+    drop({ domain: 'glossy.co', url: 'https://glossy.co/', title: "Why community is beauty's next big growth channel" }, 'Glossy');
+    drop({ domain: 'vogue.com', url: 'https://vogue.com/', title: 'Vogue' }, 'Vogue');
+    drop({ domain: 'fashionista.com', url: 'https://fashionista.com/', title: 'Fashionista' }, 'Fashionista');
+    drop({ domain: 'sheerluxe.com', url: 'https://sheerluxe.com/', title: 'SheerLuxe' }, 'SheerLuxe');
+    drop({ domain: 'yougov.com', url: 'https://yougov.com/', title: 'YouGov' }, 'YouGov');
+});
+
+check('drops numbered brand listicles by TITLE, whatever the domain', () => {
+    // The generalising half of the fix: a domain block catches one publisher, this catches the
+    // shape wherever it appears next.
+    drop({ domain: 'someblog.co.uk', url: 'https://someblog.co.uk/x', title: '21 UK Beauty Brands That Need to Be on Your Radar' }, 'numbered brands');
+    drop({ domain: 'someblog.co.uk', url: 'https://someblog.co.uk/x', title: '9 Small Interiors Brands We Love' }, 'numbered brands');
+    drop({ domain: 'someblog.co.uk', url: 'https://someblog.co.uk/x', title: '40+ Direct-to-Consumer Fashion Brands' }, 'plus-suffixed count');
+    drop({ domain: 'someblog.co.uk', url: 'https://someblog.co.uk/x', title: '10 Small Business Home Decor Shops That Will Make You Smile' }, 'numbered shops');
+    drop({ domain: 'someblog.co.uk', url: 'https://someblog.co.uk/x', title: 'Meet 9 Indie Beauty Brands Refreshing the Body-Care Aisle' }, 'meet N brands');
+});
+
+check('a NUMBER in a real company name is not a listicle', () => {
+    // The expensive mistake this pattern could have made. Anchoring is what prevents it.
+    keep({ domain: 'acmegroup.com', url: 'https://acmegroup.com/brands', title: 'Our 3 Brands' }, 'parent company');
+    keep({ domain: '4handsbrewing.com', url: 'https://4handsbrewing.com', title: '4 Hands Brewing Co' }, 'number in name');
+    keep({ domain: '100acrewood.co.uk', url: 'https://100acrewood.co.uk', title: '100 Acre Wood Farm Shop' }, 'number in name');
+});
+
+check('an ICP-relative verdict is left to the scorer, not hardcoded here', () => {
+    // The scorer called all four `aggregator`, correctly, for a DTC-brand ICP — they retail many
+    // brands rather than being one. They are still real trading companies, and this list applies to
+    // every tenant, so blocking them would silently delete prospects for a user selling to
+    // multi-brand retailers. Same for suppliers: treyd.io is a real fintech.
+    keep({ domain: 'credobeauty.com', url: 'https://credobeauty.com', title: 'Credo Beauty' }, 'multi-brand retailer');
+    keep({ domain: 'dermstore.com', url: 'https://dermstore.com', title: 'Dermstore' }, 'multi-brand retailer');
+    keep({ domain: 'sostter.com', url: 'https://sostter.com', title: 'Sostter' }, 'marketplace');
+    keep({ domain: 'treyd.io', url: 'https://treyd.io', title: 'Treyd' }, 'supplier to the ICP');
+    keep({ domain: 'bigblue.co', url: 'https://bigblue.co', title: 'Bigblue' }, 'supplier to the ICP');
+});
+
+check('a real company whose ARTICLE ranked keeps its domain', () => {
+    // resolveCandidateDomain's job. planetorganic.com and mi-elskincare.com are real retailers
+    // whose blog posts surfaced; blocking the domain because one page was editorial would be the
+    // expensive mistake.
+    keep({ domain: 'planetorganic.com', url: 'https://planetorganic.com', title: 'Planet Organic' }, 'real retailer');
+    keep({ domain: 'mi-elskincare.com', url: 'https://mi-elskincare.com', title: 'Mi-el Skincare' }, 'real brand');
+    keep({ domain: 'vervaunt.com', url: 'https://vervaunt.com', title: 'Vervaunt' }, 'real consultancy');
+});
+
 check('drops directory-titled pages', () => {
     drop({ domain: 'example.org', url: 'https://example.org/x', title: 'Directories - Healthcare Hospitality Network' }, 'directory');
 });

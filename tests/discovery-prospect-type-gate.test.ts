@@ -225,6 +225,44 @@ check('a plan refuses to land on a database it was not built against', () => {
     assert.ok(/REFUSING TO APPLY/.test(src), 'the mismatch must abort, not warn');
 });
 
+check('the backfill banks a classification even when the score does not move', () => {
+    // A cold lead the classifier calls "media" and a cold lead that is a real company scoring
+    // badly on fit look identical in the Leads tab, and they need opposite fixes — the queries, or
+    // the ICP. Recording only score CHANGES threw that distinction away: on prod campaign 2 it
+    // left 50 of 55 cold leads carrying no classification at all.
+    const src = read('scripts/rescore-lead-prospect-type.ts');
+    assert.ok(/classificationNew/.test(src), 'the script no longer notices a newly-known classification');
+    assert.ok(/kind: 'classify'/.test(src), 'classification-only entries are never planned');
+    // Skipped only when nothing at all is new: the score has not moved AND the card already
+    // carries this exact verdict. The third clause is what makes a DISAGREEMENT fall through to
+    // the conflict branch below rather than being silently treated as "already recorded".
+    assert.ok(/if \(!scoreMoved && !classificationNew && stored === prospectType\)/.test(src),
+        'the skip condition no longer distinguishes "already recorded" from "disagrees"');
+});
+
+check('a stored classification is never overwritten by a later run', () => {
+    // Caught on prod. credobeauty.com was stored `aggregator`, and that verdict is what capped it
+    // 72/hot → 10/cold. A later pass called it `target_business` and the write went through,
+    // because the clamp is a ceiling so the score did not move and the change looked cosmetic —
+    // leaving a card that asserted `target_business` directly above a reason reading "classified
+    // aggregator … so capped at 10". The classifier is not deterministic, so disagreement between
+    // runs is expected and must never be settled by whichever run went last.
+    const src = read('scripts/rescore-lead-prospect-type.ts');
+    assert.ok(/const classificationNew = stored === null/.test(src),
+        'a classification is only NEW when the card carries none — it must not mean "differs"');
+    assert.ok(/CONFLICT — stored/.test(src), 'a disagreement is no longer surfaced');
+    assert.ok(/stored !== null && stored !== prospectType\) \{[\s\S]{0,200}?continue;/.test(src),
+        'a conflicting classification must skip the write, not apply it');
+});
+
+check('a card that would lose stored keys is skipped, never written', () => {
+    // discovered_leads.scoring_card is REPLACED, not merged — unlike the mirrored record. Anything
+    // the stored card carries that normaliseLeadCard does not emit would be dropped silently.
+    const src = read('scripts/rescore-lead-prospect-type.ts');
+    assert.ok(/would drop/.test(src), 'the key-loss guard is gone');
+    assert.ok(/skippedKeyLoss\+\+/.test(src), 'a lossy write is no longer counted as skipped');
+});
+
 check('the backfill is dry-run by default and names its target', () => {
     const src = read('scripts/rescore-lead-prospect-type.ts');
     assert.ok(src.includes("args.includes('--apply')"), 'writes must be opt-in');

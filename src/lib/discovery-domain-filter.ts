@@ -64,7 +64,17 @@ block('aggregator',
     'salehoo.com', 'alibaba.com', 'faire.com', 'etsy.com',
     // Brand directories, added 2026-08-12 from the same run as countryandtownhouse.com below —
     // a curated index of British-made brands is a list OF prospects, never one itself.
-    'makeitbritish.co.uk');
+    'makeitbritish.co.uk',
+    // From prod campaign 2. Both index businesses as their PRODUCT rather than selling anything of
+    // their own: dtcetc.com ranks 320 DTC clothing brands, checkthat.ai lists tool reviews.
+    //
+    // ⚠️ Deliberately NOT added alongside them: credobeauty.com, dermstore.com, sostter.com and
+    // countrylivingshop.co.uk. The scorer called those `aggregator` and it was right FOR THIS ICP
+    // — they retail many brands rather than being one. But they are real trading companies with
+    // staff and budgets, and this list is a module constant applied to every tenant. A user whose
+    // ICP is "multi-brand retailers" would lose them for good, silently. ICP-relative exclusions
+    // belong to the scorer's gate; only never-a-company-for-anyone belongs here.
+    'dtcetc.com', 'checkthat.ai');
 
 block('media',
     'bbc.co.uk', 'bbc.com', 'theguardian.com', 'nytimes.com', 'forbes.com', 'ft.com',
@@ -86,11 +96,23 @@ block('media',
     // a magazine's homepage carries no /blog path and no listicle title, so nothing upstream of
     // the LLM has an opinion about it. It scored 0 — correctly — for the price of a scoring slot,
     // which is exactly the cost this list exists to avoid paying twice.
-    'countryandtownhouse.com');
+    'countryandtownhouse.com',
+    // Harvested 2026-08-12 from prod campaign 2, once every lead carried a prospectType: of 65
+    // companies found, 51 were never prospects and 18 of those were content pages. Trade press and
+    // consumer titles first — each one below ranked for a DTC-brand query and cost a scoring slot.
+    'businessoffashion.com', 'glossy.co', 'vogue.com', 'fashionista.com', 'beautyindependent.com',
+    'thedtcinsider.com',
+    // Independent editorial sites. Blogs on their own domain rather than on a blocked host, so the
+    // medium.com/substack.com entries never caught them.
+    'thegoodtrade.com', 'sheerluxe.com', 'stylebyemilyhenderson.com', 'livethatglow.com',
+    'wandersomewhere.com');
 
 block('reference',
     'wikipedia.org', 'wikimedia.org', 'quora.com', 'stackexchange.com', 'stackoverflow.com',
-    'britannica.com', 'statista.com', 'researchgate.net', 'scribd.com', 'slideshare.net');
+    'britannica.com', 'statista.com', 'researchgate.net', 'scribd.com', 'slideshare.net',
+    // A market-research house publishing brand rankings — same shape as statista.com above, and it
+    // ranked for "most popular fashion brands UK" on the 2026-08-12 prod run.
+    'yougov.com');
 
 block('jobs',
     'indeed.com', 'indeed.co.uk', 'monster.com', 'totaljobs.com', 'reed.co.uk',
@@ -116,6 +138,19 @@ const CONTENT_TITLE_PATTERNS: Array<[RegExp, string]> = [
     [/\bthe guide to\b|\ba guide to\b/i,      'title reads as a how-to guide'],
     [/\btop\s*\d+\b|\bbest\s+\d+\b/i,         'title is a ranked listicle'],
     [/\b\d+\s+(?:best|top)\b/i,               'title is a ranked listicle'],
+    // The DTC-era listicle: a count of OTHER PEOPLE'S companies, with no "top"/"best" anywhere.
+    // "21 UK Beauty Brands…", "9 Small Interiors Brands We Love", "40+ Direct-to-Consumer Fashion
+    // Brands", "10 Small Business Home Decor Shops" — six of these ranked on the 2026-08-12 prod
+    // run and every one was scored at full token cost before being thrown away.
+    //
+    // ⚠️ Anchored to the START of the title, or to an explicit listicle lead-in, precisely so a
+    // real company's own page survives: "Our 3 Brands" on a parent company, "4 Hands Brewing Co",
+    // "100 Acre Wood Farm Shop". An unanchored /\d+ …brands/ would delete all three, and this file
+    // trades false negatives for false positives on purpose.
+    [/^\s*\d+\+?\s+(?:[\w'&-]+\s+){0,4}(?:brands|shops|stores|labels|makers|retailers)\b/i,
+                                              'title is a ranked listicle'],
+    [/\b(?:meet|discover|explore|introducing)\s+\d+\+?\s+(?:[\w'&-]+\s+){0,4}(?:brands|shops|stores|labels|makers|retailers)\b/i,
+                                              'title is a ranked listicle'],
     [/\btemplate\b|\bchecklist\b|\bworksheet\b/i, 'title offers a downloadable template'],
     [/\bhow to\b/i,                           'title is a how-to article'],
     [/\bwhat is\b|\bwhy you should\b/i,       'title is an explainer article'],
@@ -340,7 +375,7 @@ export const EXCLUDED_SUBDOMAINS: readonly string[] = NON_COMPANY_SUBDOMAINS;
 export const EXCLUDED_TITLE_SHAPES: readonly string[] = [
     'PDF documents',
     'guides ("The guide to …", "A guide to …")',
-    'ranked listicles ("Top 10 …", "Best 5 …")',
+    'ranked listicles ("Top 10 …", "Best 5 …", "21 UK Beauty Brands …", "40+ DTC Fashion Brands …")',
     'downloadable templates, checklists or worksheets',
     'how-to articles',
     'explainers ("What is …", "Why you should …")',
