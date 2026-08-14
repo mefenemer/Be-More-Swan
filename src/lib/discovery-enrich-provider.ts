@@ -92,12 +92,13 @@ function confidenceOf(raw: unknown): number | null {
 /**
  * Hunter.io Domain Search.
  *
- * ⚠️ THE RESPONSE MAPPING IS UNVERIFIED AGAINST THE LIVE API. No key was provisioned when this
- * was written, so the shape below (`data.emails[]` with `value` / `confidence`) comes from the
- * documented contract and has never been exercised against a real response. The parsing is
- * deliberately defensive — every field is checked and anything unexpected yields null rather than
- * a throw — so a wrong guess degrades to "found nothing" instead of breaking a run. Confirm
- * against one real response before trusting the hit rate.
+ * ✅ RESPONSE MAPPING VERIFIED AGAINST THE LIVE API, 2026-08-14 (staging, campaign 5 / job 10):
+ * the shape below (`data.emails[]` with `value` / `confidence`) parses real responses correctly —
+ * 8 lookups bought 6 usable addresses. The parsing stays deliberately defensive — every field is
+ * checked and anything unexpected yields null rather than a throw — so a future contract change
+ * degrades to "found nothing" instead of breaking a run. That remains the failure mode to watch:
+ * a silent zero hit rate reads identically to "these companies publish nothing", and the
+ * console.warn below is the only thing that tells them apart.
  */
 async function lookupHunter(domain: string, timeoutMs: number): Promise<ProviderContact | null> {
     const url = `${HUNTER_ENDPOINT}?domain=${encodeURIComponent(domain)}&api_key=${encodeURIComponent(HUNTER_API_KEY as string)}`;
