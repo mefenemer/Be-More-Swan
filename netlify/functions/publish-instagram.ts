@@ -44,6 +44,19 @@ const META_THROTTLE_CODES = new Set([4, 17, 32, 341, 613]);
 const META_TRANSIENT_CODES = new Set([1, 2]);
 
 /**
+ * The container is not ready yet — #9007 / subcode 2207027, "Media ID is not available".
+ *
+ * Graph reports it as a 400, which is what made it look permanent, but nothing about the post is
+ * wrong: media_publish simply arrived before the container finished processing. Observed on prod
+ * post 362 (2026-08-13, an IMAGE) — burned on attempt 1 of 3 for a race that a retry seconds later
+ * would have won.
+ *
+ * NOT a throttle: isThrottle must keep excluding it, or one unlucky container would defer every
+ * other post in the org for an hour.
+ */
+const META_CONTAINER_NOT_READY_CODES = new Set([9007]);
+
+/**
  * Is this failure worth another attempt?
  *
  * Reads BOTH the HTTP status and Meta's application code, because either one alone gets it wrong:
@@ -61,7 +74,9 @@ const META_TRANSIENT_CODES = new Set([1, 2]);
 export function isRetryable(httpStatus: number | null, code: number | null): boolean {
     if (httpStatus === 429 || (httpStatus != null && httpStatus >= 500)) return true;
     if (code == null) return false;
-    return META_THROTTLE_CODES.has(code) || META_TRANSIENT_CODES.has(code);
+    return META_THROTTLE_CODES.has(code)
+        || META_TRANSIENT_CODES.has(code)
+        || META_CONTAINER_NOT_READY_CODES.has(code);
 }
 
 /** A throttle defers every post for the org, not just this one — see handlePublishFailure. */
@@ -78,6 +93,94 @@ export function isThrottle(httpStatus: number | null, code: number | null): bool
  */
 async function graphJson<T>(res: Response): Promise<T> {
     return (await res.json().catch(() => ({}))) as T;
+}
+
+/**
+ * Polling profiles for waitForContainerReady.
+ *
+ * VIDEO_POLL reproduces the original video figures exactly — first check after 5s, give up at 120s —
+ * so encoding behaviour is untouched. IMAGE_POLL checks IMMEDIATELY, because an image container is
+ * usually ready the moment it exists: the common case costs one extra request and no added latency,
+ * and only the unlucky case waits at all.
+ */
+const VIDEO_POLL = { firstDelayMs: 5_000, intervalMs: 5_000, timeoutMs: 120_000, what: 'Video processing' } as const;
+const IMAGE_POLL = { firstDelayMs: 0, intervalMs: 1_000, timeoutMs: 30_000, what: 'Image processing' } as const;
+
+/**
+ * Wait for a media container to report FINISHED before publishing it.
+ *
+ * Instagram's /media endpoint is asynchronous for BOTH kinds. Only video was ever polled here, on
+ * the assumption that an image container is ready as soon as it is created. It usually is — but when
+ * it is not, media_publish answers 400 with #9007 / subcode 2207027 ("Media ID is not available")
+ * and the post used to burn on attempt 1, because that code classified as permanent. Prod post 362
+ * on 2026-08-13 is the case in point.
+ *
+ * Two independent guards, deliberately: this poll removes the race, and #9007 staying retryable
+ * (META_CONTAINER_NOT_READY_CODES) catches whatever still slips through — a container can finish
+ * between the poll and the publish call.
+ */
+export async function waitForContainerReady(args: {
+    containerId: string;
+    token: string;
+    firstDelayMs: number;
+    intervalMs: number;
+    timeoutMs: number;
+    what: string;
+    /** Seam for tests; defaults to the real Graph call. */
+    poll?: (containerId: string) => Promise<{ status: number | null; status_code?: string; error?: { code: number; message: string; error_subcode?: number } }>;
+    sleep?: (ms: number) => Promise<void>;
+}): Promise<{ ok: true } | { ok: false; reason: FailureReason }> {
+    const sleep = args.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)));
+    const poll = args.poll ?? (async (id: string) => {
+        const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${id}?fields=status_code&access_token=${args.token}`);
+        const data = await graphJson<{ status_code?: string; error?: { code: number; message: string; error_subcode?: number } }>(res);
+        return { status: res.status, ...data };
+    });
+
+    const started = Date.now();
+    let delay = args.firstDelayMs;
+    for (;;) {
+        if (delay > 0) await sleep(delay);
+        delay = args.intervalMs;
+
+        const r = await poll(args.containerId);
+
+        // A clean read that simply carries no status_code means READY, not broken.
+        //
+        // This matters because images were never polled before, so there is no evidence that an
+        // IMAGE container reports status_code on this Graph version at all. Treating the field's
+        // absence as ERROR (what the video-only loop did) would turn "we added a health check" into
+        // "every image post now fails" — the worst possible outcome for a reliability fix. Assuming
+        // ready restores exactly the old image behaviour, and #9007 stays retryable underneath it.
+        // An error object, or a non-2xx status, is still an error; only silence is optimistic.
+        const httpOk = r.status != null && r.status >= 200 && r.status < 300;
+        const statusCode = r.status_code ?? (httpOk && !r.error ? 'FINISHED' : 'ERROR');
+        if (statusCode === 'FINISHED') return { ok: true };
+
+        if (statusCode === 'ERROR') {
+            // A container Instagram rejected outright stays permanent — re-uploading the identical
+            // file cannot succeed. But a poll that merely failed to REACH Graph (a 5xx on the status
+            // read) says nothing about the container, so it must not be mistaken for a rejection.
+            const retryable = isRetryable(r.status, r.error?.code ?? null);
+            return { ok: false, reason: {
+                httpStatus: r.status,
+                errorCode: r.error?.code ?? null,
+                errorMessage: r.error?.message ?? `${args.what} failed (${r.status})`,
+                errorSubcode: r.error?.error_subcode,
+                isRetryable: retryable,
+            } };
+        }
+
+        // Still IN_PROGRESS. Check the clock only after a poll, so a zero first delay always gets at
+        // least one real answer rather than timing out against a stale deadline.
+        if (Date.now() - started > args.timeoutMs) {
+            return { ok: false, reason: {
+                httpStatus: null, errorCode: null,
+                errorMessage: `${args.what} timed out after ${Math.round(args.timeoutMs / 1000)}s`,
+                isRetryable: true,
+            } };
+        }
+    }
 }
 
 function userMessage(reason: FailureReason): string {
@@ -319,38 +422,18 @@ export default withLambda(async () => {
             }
             await db.update(scheduledPosts).set({ containerId, updatedAt: new Date() }).where(eq(scheduledPosts.id, post.id));
 
-            // Video-only: poll container status until FINISHED (or ERROR).
-            // Never for a carousel: its parent is assembled from children that are already ready, and
-            // status_code is not what a CAROUSEL container reports.
-            if (isVideo && !isCarousel) {
-                const POLL_INTERVAL_MS = 5_000;
-                const POLL_TIMEOUT_MS  = 120_000;
-                const pollStart = Date.now();
-                let statusCode = 'IN_PROGRESS';
-                while (statusCode !== 'FINISHED') {
-                    if (Date.now() - pollStart > POLL_TIMEOUT_MS) {
-                        const reason: FailureReason = { httpStatus: null, errorCode: null, errorMessage: 'Video processing timed out after 120s', isRetryable: true };
-                        await handlePublishFailure(db, post, reason, now);
-                        return;
-                    }
-                    await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
-                    const pollRes = await fetch(
-                        `https://graph.facebook.com/${GRAPH_VERSION}/${containerId}?fields=status_code&access_token=${token}`
-                    );
-                    const pollData = await graphJson<{ status_code?: string; error?: { code: number; message: string; error_subcode?: number } }>(pollRes);
-                    statusCode = pollData.status_code ?? 'ERROR';
-                    if (statusCode === 'ERROR') {
-                        const err = pollData.error;
-                        // A container Instagram rejected outright stays permanent — re-uploading the
-                        // identical file cannot succeed. But a poll that merely failed to REACH Graph
-                        // (a 5xx on the status read) says nothing about the container, so it must not
-                        // be mistaken for a rejection.
-                        const retryable = isRetryable(pollRes.status, err?.code ?? null);
-                        const reason: FailureReason = { httpStatus: pollRes.status, errorCode: err?.code ?? null, errorMessage: err?.message ?? `Video processing failed (${pollRes.status})`, errorSubcode: err?.error_subcode, isRetryable: retryable };
-                        await handlePublishFailure(db, post, reason, now);
-                        if (!retryable) failed++;
-                        return;
-                    }
+            // Wait for the container to report FINISHED. Never for a carousel: its parent is
+            // assembled from children that are already ready, and status_code is not what a CAROUSEL
+            // container reports.
+            if (!isCarousel) {
+                const wait = await waitForContainerReady({
+                    containerId, token,
+                    ...(isVideo ? VIDEO_POLL : IMAGE_POLL),
+                });
+                if (!wait.ok) {
+                    await handlePublishFailure(db, post, wait.reason, now);
+                    if (!wait.reason.isRetryable) failed++;
+                    return;
                 }
             }
 

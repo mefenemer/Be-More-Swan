@@ -28,12 +28,20 @@
 // Run:  npx tsx tests/instagram-retry-classification.test.ts
 
 import assert from 'node:assert';
-import { isRetryable, isThrottle } from '../netlify/functions/publish-instagram';
+import { isRetryable, isThrottle, waitForContainerReady } from '../netlify/functions/publish-instagram';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
     try { fn(); passed++; console.log(`  ✓ ${name}`); }
     catch (err) { console.error(`  ✗ ${name}\n    ${(err as Error).message}`); process.exitCode = 1; }
+}
+
+const checks: Array<Promise<void>> = [];
+function checkAsync(name: string, fn: () => Promise<void>): void {
+    checks.push(fn().then(
+        () => { passed++; console.log(`  ✓ ${name}`); },
+        err => { console.error(`  ✗ ${name}\n    ${(err as Error).message}`); process.exitCode = 1; },
+    ));
 }
 
 console.log('\nHTTP-level failures — the half that had no error object at all\n');
@@ -133,4 +141,121 @@ check('nothing that was retryable before became permanent', () => {
     assert.equal(isRetryable(429, null), true);
 });
 
-console.log(`\n${passed} passed\n`);
+// ── #9007: the container that wasn't ready yet ──────────────────────────────────────────────────
+// Prod post 362 (2026-08-13, assistant 1, format IMAGE) failed with
+//   {"errorCode": 9007, "httpStatus": 400, "isRetryable": false,
+//    "errorMessage": "Media ID is not available", "errorSubcode": 2207027}
+// and was never retried. Nothing was wrong with the post: media_publish simply arrived before the
+// container finished processing. A 400 made it look permanent, so one lost race burned the post on
+// attempt 1 of 3.
+
+console.log('\nContainer readiness\n');
+
+check('#9007 is a timing failure, so it retries', () => {
+    assert.equal(isRetryable(400, 9007), true, 'the exact prod shape must now back off and retry');
+    // Not a throttle — deferring the whole org for an hour over one slow container is an
+    // overreaction, and would delay every other post that was fine.
+    assert.equal(isThrottle(400, 9007), false);
+});
+
+check('the content-policy subcode next door stays permanent', () => {
+    // 2207026 and 2207027 differ by one digit and mean opposite things: a rejected post that will
+    // never publish, versus a container that just needs a moment. Retrying the first is pure waste.
+    assert.equal(isRetryable(400, 2207026), false);
+});
+
+checkAsync('an image container is checked IMMEDIATELY, not after a wait', async () => {
+    // The whole point of a separate image profile: the container is normally ready the instant it
+    // exists, so the common case must not pay a poll interval before publishing.
+    const sleeps: number[] = [];
+    let polls = 0;
+    const r = await waitForContainerReady({
+        containerId: 'c1', token: 't', firstDelayMs: 0, intervalMs: 1_000, timeoutMs: 30_000, what: 'Image processing',
+        sleep: async ms => { sleeps.push(ms); },
+        poll: async () => { polls++; return { status: 200, status_code: 'FINISHED' }; },
+    });
+    assert.deepEqual(r, { ok: true });
+    assert.equal(polls, 1, 'one request');
+    assert.deepEqual(sleeps, [], 'and no waiting at all');
+});
+
+checkAsync('a container that needs a moment is waited for, then published', async () => {
+    const statuses = ['IN_PROGRESS', 'IN_PROGRESS', 'FINISHED'];
+    const sleeps: number[] = [];
+    const r = await waitForContainerReady({
+        containerId: 'c1', token: 't', firstDelayMs: 0, intervalMs: 1_000, timeoutMs: 30_000, what: 'Image processing',
+        sleep: async ms => { sleeps.push(ms); },
+        poll: async () => ({ status: 200, status_code: statuses.shift() }),
+    });
+    assert.deepEqual(r, { ok: true });
+    // Immediate first check, then the interval between subsequent ones.
+    assert.deepEqual(sleeps, [1_000, 1_000]);
+});
+
+checkAsync('the video profile still waits 5s before its first check', async () => {
+    // Encoding takes real time; polling a video container instantly is a wasted request. This pins
+    // that the shared helper did not quietly change video behaviour.
+    const sleeps: number[] = [];
+    await waitForContainerReady({
+        containerId: 'c1', token: 't', firstDelayMs: 5_000, intervalMs: 5_000, timeoutMs: 120_000, what: 'Video processing',
+        sleep: async ms => { sleeps.push(ms); },
+        poll: async () => ({ status: 200, status_code: 'FINISHED' }),
+    });
+    assert.deepEqual(sleeps, [5_000]);
+});
+
+checkAsync('a container Instagram rejected outright is permanent', async () => {
+    const r = await waitForContainerReady({
+        containerId: 'c1', token: 't', firstDelayMs: 0, intervalMs: 1, timeoutMs: 30_000, what: 'Image processing',
+        sleep: async () => {},
+        poll: async () => ({ status: 400, status_code: 'ERROR', error: { code: 2207026, message: 'Content policy', error_subcode: 2207026 } }),
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.ok === false && r.reason.isRetryable, false, 're-uploading the same file cannot succeed');
+});
+
+checkAsync('a clean read with no status_code means ready, not broken', async () => {
+    // Images were never polled before this change, so there is no evidence an IMAGE container even
+    // reports status_code on this Graph version. If the field's absence read as ERROR, adding a
+    // health check would fail EVERY image post — strictly worse than the race it set out to fix.
+    // Silence on a 2xx therefore means "carry on", which is exactly the old image behaviour.
+    const r = await waitForContainerReady({
+        containerId: 'c1', token: 't', firstDelayMs: 0, intervalMs: 1, timeoutMs: 30_000, what: 'Image processing',
+        sleep: async () => {},
+        poll: async () => ({ status: 200 }),      // no status_code, no error
+    });
+    assert.deepEqual(r, { ok: true });
+});
+
+checkAsync('but an error object on a 200 is still an error', async () => {
+    const r = await waitForContainerReady({
+        containerId: 'c1', token: 't', firstDelayMs: 0, intervalMs: 1, timeoutMs: 30_000, what: 'Image processing',
+        sleep: async () => {},
+        poll: async () => ({ status: 200, error: { code: 10, message: 'No permission' } }),
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.ok === false && r.reason.isRetryable, false);
+});
+
+checkAsync('a 5xx on the STATUS read is not evidence about the container', async () => {
+    const r = await waitForContainerReady({
+        containerId: 'c1', token: 't', firstDelayMs: 0, intervalMs: 1, timeoutMs: 30_000, what: 'Image processing',
+        sleep: async () => {},
+        poll: async () => ({ status: 503 }),      // no status_code, no error object
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.ok === false && r.reason.isRetryable, true, 'we failed to REACH Graph, that is all');
+});
+
+checkAsync('a container that never finishes times out, and the timeout retries', async () => {
+    const r = await waitForContainerReady({
+        containerId: 'c1', token: 't', firstDelayMs: 0, intervalMs: 5, timeoutMs: 1_000, what: 'Image processing',
+        poll: async () => ({ status: 200, status_code: 'IN_PROGRESS' }),
+    });
+    assert.equal(r.ok, false);
+    // Retryable on purpose: a container still encoding says nothing bad about the post.
+    assert.equal(r.ok === false && r.reason.isRetryable, true);
+    assert.match(r.ok === false ? r.reason.errorMessage : '', /Image processing timed out after 1s/);
+});
+
+void Promise.all(checks).then(() => console.log(`\n${passed} passed\n`));
