@@ -744,14 +744,17 @@
 
   // SC6: cancel a scheduled downgrade
   window._cancelScheduledDowngrade = async function () {
-    if (!confirm('Cancel the scheduled downgrade and stay on your current plan?')) return;
+    if (!(await window.confirmModal('You stay on your current plan.', {
+      title: 'Cancel the scheduled downgrade?', confirmLabel: 'Yes, cancel it', cancelLabel: 'Keep the downgrade',
+      confirmColor: '#059669',
+    }))) return;
     try {
       const res  = await fetch('/.netlify/functions/billing-downgrade', { method: 'DELETE' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed');
       if (typeof window.initBilling === 'function') window.initBilling();
     } catch (e) {
-      alert('Could not cancel downgrade: ' + e.message);
+      window.showToast?.('Could not cancel downgrade: ' + e.message, { icon: '⚠️' });
     }
   };
 

@@ -26,6 +26,7 @@ import { getIcpSnapshot } from '../../src/utils/icp-snapshot';
 import { enqueueLeadHandoff } from '../../src/utils/lead-handoff';
 import { recordLeadRejection } from '../../src/utils/lead-reject-feedback';
 import { LEAD_RECIPIENT_SQL_PATHS, LEAD_DRAFT_BODY_SQL_PATH } from '../../src/config/lead-recipient';
+import { crmDescription, crmHeaders, crmRow, isCrmTarget, splitName, websiteUrl } from '../../src/config/crm-export';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const RECORD_TYPES = new Set(['lead', 'enrichment', 'meeting', 'invoice', 'ticket']);
@@ -322,6 +323,73 @@ export default withLambda(async (event) => {
                     ...(deliverableOnly ? [deliverableWhere] : []),
                 ))
                 .orderBy(desc(assistantRecords.updatedAt));
+
+            // CRM-shaped lead export (Phase 2 item 12). Same rows as the generic CSV below, with
+            // the column headers HubSpot's and Salesforce's importers auto-match — see
+            // src/config/crm-export.ts for what is deliberately left out and why.
+            //
+            // ⚠️ The website comes from `discovered_leads`, NOT from the record. A promoted lead's
+            // `data` is its scoring card (discovery-scoring.ts `normaliseLeadCard` returns a closed
+            // shape), which carries no domain and no contact name at all — so shaping the headers
+            // alone would ship a Website column that is empty on every discovery-found lead, which
+            // is the single most valuable column in a CRM import after the address. One extra query
+            // per export, on the CSV path only.
+            const crmTarget = event.queryStringParameters?.crm;
+            if (event.queryStringParameters?.format === 'csv' && isCrmTarget(crmTarget) && recordType === 'lead') {
+                const ids = records.map((r) => r.id);
+                const discovery = ids.length
+                    ? await db
+                        .select({
+                            assistantRecordId: discoveredLeads.assistantRecordId,
+                            domain: discoveredLeads.domain,
+                            contactName: discoveredLeads.contactName,
+                        })
+                        .from(discoveredLeads)
+                        .where(and(
+                            eq(discoveredLeads.organisationId, orgId),
+                            inArray(discoveredLeads.assistantRecordId, ids),
+                        ))
+                    : [];
+                const byRecord = new Map(discovery.map((d) => [d.assistantRecordId, d]));
+
+                const lines = [crmHeaders(crmTarget).map(csvCell).join(',')];
+                for (const r of records) {
+                    const d = (r.data && typeof r.data === 'object' && !Array.isArray(r.data)) ? r.data as Record<string, unknown> : {};
+                    const found = byRecord.get(r.id);
+                    // A CSV-imported or hand-added lead has no discovery row, but may well carry
+                    // these on the record itself — prefer whichever exists rather than assuming one
+                    // provenance. `website` is what the import template calls the column.
+                    const name = (typeof d.contactName === 'string' && d.contactName.trim())
+                        ? d.contactName : (found?.contactName ?? '');
+                    const domain = (typeof d.website === 'string' && d.website.trim())
+                        ? d.website : (found?.domain ?? '');
+                    // Everything the row knows that has nowhere else to go. The approval state is
+                    // here rather than in a status column on purpose: as prose it can never be an
+                    // invalid picklist value and fail the import.
+                    const description = crmDescription({
+                        score: d.score, reasons: d.reasons,
+                        nextStep: d.suggestedNextStep, approvalStatus: r.approvalStatus,
+                    });
+
+                    lines.push(crmRow(crmTarget, {
+                        company: r.title ?? '',
+                        ...splitName(name),
+                        email: typeof d.contactEmail === 'string' ? d.contactEmail : '',
+                        website: websiteUrl(domain),
+                        industry: typeof d.industry === 'string' ? d.industry : '',
+                        rating: r.status ?? '',
+                        description,
+                    }).map(csvCell).join(','));
+                }
+                return {
+                    statusCode: 200,
+                    headers: {
+                        'Content-Type': 'text/csv; charset=utf-8',
+                        'Content-Disposition': `attachment; filename="leads-${crmTarget}.csv"`,
+                    },
+                    body: lines.join('\r\n'),
+                };
+            }
 
             // Spreadsheet fallback (Golden Rule 1): export the hub as a flat CSV. Columns are
             // the union of each record's top-level scalar data fields plus the record envelope.

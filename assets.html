@@ -612,13 +612,17 @@
 
     // ── SC4 (SC4a–SC4d): Remove Member ─────────────────────────────────
     window._removeMember = async function (userId, name) {
-      if (!confirm(`Remove ${name} from this workspace?\n\nThey will be notified by email and lose access immediately.`)) return;
+      if (!(await window.confirmModal('They will be notified by email and lose access immediately.', {
+        title: `Remove ${window.escapeHtml(name)} from this workspace?`,
+        confirmLabel: 'Yes, remove them',
+        cancelLabel: 'Keep their access',
+      }))) return;
       try {
         const res  = await fetch(`/.netlify/functions/manage-members?id=${userId}`, { method: 'DELETE' });
         const data = await res.json();
-        if (!res.ok || data.error) { alert(data.error || 'Failed to remove member.'); return; }
+        if (!res.ok || data.error) { window.showToast?.(data.error || 'Failed to remove member.', { icon: '⚠️' }); return; }
         await load();
-      } catch { alert('Network error. Please try again.'); }
+      } catch { window.showToast?.('Network error. Please try again.', { icon: '⚠️' }); }
     };
 
     // Close modals on backdrop click

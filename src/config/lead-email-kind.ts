@@ -21,10 +21,38 @@
 // classifier below is written in plain, portable JS with no dependencies — it is stringified into
 // that file verbatim.
 
-/** Where an address came from. Drives the Review Queue's personal-inbox gate, which is scrape-only. */
-export type EmailSource = 'scrape' | 'manual';
+/**
+ * Where an address came from. Drives the Review Queue's personal-inbox gate.
+ *
+ * - `scrape`   — read off the company's own public website.
+ * - `manual`   — typed in by the user, who therefore already knows whose inbox it is.
+ * - `provider` — BOUGHT from a paid enrichment vendor (src/lib/discovery-enrich-provider.ts).
+ */
+export type EmailSource = 'scrape' | 'manual' | 'provider';
 
 export type EmailKind = 'role' | 'personal';
+
+/**
+ * Does this address need an explicit "yes, email this named person" before anything is sent?
+ *
+ * ⚠️ THE RULE IS "THE USER DID NOT TYPE IT", NOT "WE SCRAPED IT". Both gates used to test
+ * `emailSource === 'scrape'` literally, which was correct while scraping was the only way an
+ * address arrived unattended. It stopped being correct the moment addresses could be PURCHASED: a
+ * bought address would carry a different source, match neither gate, and a named individual whose
+ * details we paid a broker for would be emailed with no confirmation at all — a worse case than
+ * the scraped one the gate was built for, not a lesser one.
+ *
+ * Written as "anything except manual" so the safe direction is the DEFAULT: a source added in
+ * future is gated until someone deliberately exempts it here.
+ *
+ * The two enforcement points are netlify/functions/lead-generation.ts (`send_outreach`, the
+ * server-side gate that actually blocks the send) and netlify/functions/signal-inbox.ts (the
+ * warning shown before approval). They must agree, which is why this predicate exists rather
+ * than the condition being written out twice.
+ */
+export function needsPersonalInboxConfirmation(kind: unknown, source: unknown): boolean {
+    return kind === 'personal' && source !== 'manual' && !!source;
+}
 
 /**
  * Generic inbox prefixes — corporate role addresses, not identified individuals.

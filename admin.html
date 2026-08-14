@@ -17,6 +17,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Admin Workspace | Be More Swan</title>
+  <!-- Toast + the confirm/alert/prompt dialogs. In <head> and not deferred: handlers reach
+       for these, so they must exist before anything can run. -->
+  <script src="/dialogs.js"></script>
   <link href="./style.css" rel="stylesheet">
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <!-- US-COMMS-1.1: Quill WYSIWYG editor for the email template builder (loaded on demand) -->
@@ -2415,7 +2418,7 @@ function _checkResolvedEnv(res, requestedEnv) {
   }
   if (!_sandboxDowngradeWarned) {
     _sandboxDowngradeWarned = true;
-    alert('Sandbox mode is not available on this deployment (no sandbox database is configured), so pages kept showing Live data. Switched the toggle back to Live.');
+    window.showToast?.('Sandbox mode is not available on this deployment (no sandbox database is configured), so pages kept showing Live data. Switched the toggle back to Live.', { icon: '⚠️' });
   }
 }
 
@@ -2888,7 +2891,7 @@ function mergeVarError(data) {
 
 async function restoreEmailTemplate() {
   if (!_etCurrent) return;
-  if (!confirm('Restore this email to the original system default? Your edits will be discarded.')) return;
+  if (!(await window.confirmModal('Your edits will be discarded.', { title: 'Restore this email to the original system default?' }))) return;
   const btn = document.getElementById('et-restore-btn');
   btn.disabled = true;
   try {
@@ -3117,7 +3120,7 @@ async function saveNotifTemplate() {
 
 async function restoreNotifTemplate() {
   if (!_ntCurrent) return;
-  if (!confirm('Restore this notification to the original system default? Your edits will be discarded.')) return;
+  if (!(await window.confirmModal('Your edits will be discarded.', { title: 'Restore this notification to the original system default?' }))) return;
   const btn = document.getElementById('nt-restore-btn');
   btn.disabled = true;
   try {
@@ -3289,7 +3292,7 @@ async function sendUserNotification() {
   const envNote = getAdminEnv() === 'sandbox'
     ? '\n\n⚠️ You are in SANDBOX — this goes to the sandbox copy of this user, not the live one.'
     : '';
-  if (!confirm(`Send this message to ${who}?\n\nIt lands in their notification inbox straight away and cannot be unsent.${envNote}`)) return;
+  if (!(await window.confirmModal(`It lands in their notification inbox straight away and cannot be unsent.${window.escapeHtml(envNote)}`, { title: `Send this message to ${window.escapeHtml(who)}?` }))) return;
 
   // Guard the double-click: there is no idempotency key, so two clicks are two notifications.
   snSending = true;
@@ -3409,7 +3412,7 @@ async function bpLoadAssistants() {
 
 async function bpCompile(force = false) {
   const asstId = document.getElementById('bp-asst-select').value;
-  if (!asstId) { alert('Please select an assistant first.'); return; }
+  if (!asstId) { window.showToast?.('Please select an assistant first.', { icon: '⚠️' }); return; }
   _bpCurrentAssistantId = asstId;
   const prevResult = force ? _bpCurrentResult : null;
   document.getElementById('bp-sections').innerHTML = '<p class="text-gray-400 text-sm animate-pulse">Compiling blueprint…</p>';
@@ -3463,7 +3466,7 @@ function bpShowDiff(prevSections, nextSections) {
 
 async function bpDryRun() {
   const asstId = document.getElementById('bp-asst-select').value;
-  if (!asstId) { alert('Please select an assistant first.'); return; }
+  if (!asstId) { window.showToast?.('Please select an assistant first.', { icon: '⚠️' }); return; }
   document.getElementById('bp-sections').innerHTML = '<p class="text-gray-400 text-sm animate-pulse">Running dry run…</p>';
   document.getElementById('bp-diff-panel')?.remove();
   try {
@@ -3689,22 +3692,22 @@ async function bpConfirmSend() {
   const asstId = _bpCurrentAssistantId;
   if (!asstId) return;
   const confirmCheck = document.getElementById('bp-confirm-check');
-  if (confirmCheck && !confirmCheck.checked) { alert('Please confirm the blueprint is correct and complete.'); return; }
+  if (confirmCheck && !confirmCheck.checked) { window.showToast?.('Please confirm the blueprint is correct and complete.', { icon: '⚠️' }); return; }
   const ackWarnings = document.getElementById('bp-ack-warnings');
-  if (ackWarnings && !ackWarnings.checked) { alert('Please acknowledge the warnings first.'); return; }
+  if (ackWarnings && !ackWarnings.checked) { window.showToast?.('Please acknowledge the warnings first.', { icon: '⚠️' }); return; }
   try {
     const res = await fetch(`/.netlify/functions/assemble-blueprint?assistantId=${asstId}&action=send`, { method: 'POST' });
     if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
     closeBottomSheet('bp-send');
-    alert('Blueprint sent. Send event logged.');
-  } catch (e) { alert('Send failed: ' + e.message); }
+    window.showToast?.('Blueprint sent. Send event logged.', { icon: '⚠️' });
+  } catch (e) { window.showToast?.('Send failed: ' + e.message, { icon: '⚠️' }); }
 }
 
 let _bpHistoryRows = [];
 
 async function bpLoadHistory() {
   const asstId = _bpCurrentAssistantId || document.getElementById('bp-asst-select').value;
-  if (!asstId) { alert('Select an assistant first.'); return; }
+  if (!asstId) { window.showToast?.('Select an assistant first.', { icon: '⚠️' }); return; }
   const el = document.getElementById('bp-history');
   el.innerHTML = '<p class="text-gray-400 text-xs animate-pulse">Loading…</p>';
   el.classList.remove('hidden');
@@ -3751,7 +3754,7 @@ function bpUpdateCompareBtn() {
 
 function bpViewHistorySnapshot(idx) {
   const row = _bpHistoryRows[idx];
-  if (!row?.sections) { alert('Frozen snapshot not available for this entry.'); return; }
+  if (!row?.sections) { window.showToast?.('Frozen snapshot not available for this entry.', { icon: '⚠️' }); return; }
   // Render the frozen sections in a full-screen overlay
   let panel = document.getElementById('bp-snapshot-panel');
   if (!panel) { panel = document.createElement('div'); panel.id = 'bp-snapshot-panel'; panel.className = 'fixed inset-0 z-[200] bg-white flex flex-col'; document.body.appendChild(panel); }
@@ -4034,23 +4037,25 @@ function bpTestRerun() {
 }
 
 function bpTestCopy() {
-  if (!_bpTestLastResult?.post) { alert('No result to copy.'); return; }
+  if (!_bpTestLastResult?.post) { window.showToast?.('No result to copy.', { icon: '⚠️' }); return; }
   const { caption, hashtags } = _bpTestLastResult.post;
   const text = [caption, hashtags].filter(Boolean).join('\n\n');
-  navigator.clipboard.writeText(text).then(() => alert('Output copied to clipboard.')).catch(() => alert('Copy failed — try manually selecting the text.'));
+  navigator.clipboard.writeText(text)
+    .then(() => window.showToast?.('Output copied to clipboard.', { icon: '✅' }))
+    .catch(() => window.showToast?.('Copy failed — try manually selecting the text.', { icon: '⚠️' }));
 }
 
 async function bpTestSaveReference() {
-  if (!_bpTestJobId) { alert('No test result to save.'); return; }
+  if (!_bpTestJobId) { window.showToast?.('No test result to save.', { icon: '⚠️' }); return; }
   try {
     const res = await fetch('/.netlify/functions/admin-test-generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ saveReference: true, jobId: _bpTestJobId }),
     });
-    if (res.ok) alert('Test result saved as reference against this blueprint version.');
-    else { const d = await res.json().catch(() => ({})); alert(d.error || 'Save failed.'); }
-  } catch (e) { alert('Network error: ' + e.message); }
+    if (res.ok) window.showToast?.('Test result saved as reference against this blueprint version.', { icon: '⚠️' });
+    else { const d = await res.json().catch(() => ({})); window.showToast?.(d.error || 'Save failed.', { icon: '⚠️' }); }
+  } catch (e) { window.showToast?.('Network error: ' + e.message, { icon: '⚠️' }); }
 }
 
 function bpViewTestSnapshot(r) {
@@ -4165,12 +4170,12 @@ async function loadPublishPipeline() {
 }
 
 async function ppRetryPost(postId) {
-  if (!confirm(`Manually retry post #${postId}?`)) return;
+  if (!(await window.confirmModal(``, { title: `Manually retry post #${window.escapeHtml(postId)}?` }))) return;
   try {
     const res = await fetch(`/.netlify/functions/admin-api?resource=retry-post&postId=${postId}`, { method: 'POST' });
-    if (res.ok) { alert('Post queued for retry.'); loadPublishPipeline(); }
-    else { const d = await res.json(); alert('Retry failed: ' + (d.error ?? 'Unknown')); }
-  } catch { alert('Network error'); }
+    if (res.ok) { window.showToast?.('Post queued for retry.', { icon: '⚠️' }); loadPublishPipeline(); }
+    else { const d = await res.json(); window.showToast?.('Retry failed: ' + (d.error ?? 'Unknown'), { icon: '⚠️' }); }
+  } catch { window.showToast?.('Network error', { icon: '⚠️' }); }
 }
 
 function loadWorkspaces() {
@@ -4458,14 +4463,14 @@ async function submitIssueUpdate(id) {
     });
     await openIssuePanel(id);
     if (!document.getElementById('view-issue-reports').classList.contains('hidden')) loadIssueReports();
-  } catch (e) { alert(e.message); }
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 // Save an admin edit to the issue description. Independent of the status/message flow —
 // it doesn't notify the reporter or thread a message.
 async function submitIssueDescription(id) {
   const description = document.getElementById('ir-description')?.value?.trim() || '';
-  if (!description) { alert('Description cannot be empty.'); return; }
+  if (!description) { window.showToast?.('Description cannot be empty.', { icon: '⚠️' }); return; }
   try {
     await api(`${IR_API}?id=${id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
@@ -4473,7 +4478,7 @@ async function submitIssueDescription(id) {
     });
     await openIssuePanel(id);
     if (!document.getElementById('view-issue-reports').classList.contains('hidden')) loadIssueReports();
-  } catch (e) { alert(e.message); }
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 // ── "Pass to Developer" AI auto-fix handoff ──────────────────────────────────
@@ -4548,13 +4553,13 @@ function _updatePassAllBtn(issues) {
 async function passAllToDeveloper() {
   const btn = document.getElementById('ir-pass-all-btn');
   const n = Number(btn?.dataset.count || 0);
-  if (!confirm(`Pass all ${n} reported issue${n === 1 ? '' : 's'} to the AI developer? Each will be fixed on its own branch with a pull request opened for review.`)) return;
+  if (!(await window.confirmModal(`Each will be fixed on its own branch with a pull request opened for review.`, { title: `Pass all ${window.escapeHtml(n)} reported issue${n === 1 ? '' : 's'} to the AI developer?` }))) return;
   if (btn) { btn.disabled = true; btn.textContent = '🤖 Queuing…'; }
   try {
     await api(`${IR_API}?action=handoff-all`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     });
-  } catch (e) { alert(e.message); }
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
   finally { loadIssueReports(); }
 }
 
@@ -4577,13 +4582,13 @@ function _updateMoveAllToBacklogBtn(issues) {
 async function moveAllToBacklog() {
   const btn = document.getElementById('ir-backlog-all-btn');
   const n = Number(btn?.dataset.count || 0);
-  if (!confirm(`Move all ${n} reported issue${n === 1 ? '' : 's'} to the Backlog?`)) return;
+  if (!(await window.confirmModal(``, { title: `Move all ${window.escapeHtml(n)} reported issue${n === 1 ? '' : 's'} to the Backlog?` }))) return;
   if (btn) { btn.disabled = true; btn.textContent = 'Moving…'; }
   try {
     await api(`${IR_API}?action=backlog-all`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     });
-  } catch (e) { alert(e.message); }
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
   finally { loadIssueReports(); }
 }
 
@@ -4607,25 +4612,25 @@ function _updateMoveAllToDeveloperBtn(issues) {
 async function moveBacklogAllToDeveloper() {
   const btn = document.getElementById('ir-backlog-dev-all-btn');
   const n = Number(btn?.dataset.count || 0);
-  if (!confirm(`Pass all ${n} backlog issue${n === 1 ? '' : 's'} to the AI developer? Each will be fixed on its own branch with a pull request opened for review.`)) return;
+  if (!(await window.confirmModal(`Each will be fixed on its own branch with a pull request opened for review.`, { title: `Pass all ${window.escapeHtml(n)} backlog issue${n === 1 ? '' : 's'} to the AI developer?` }))) return;
   if (btn) { btn.disabled = true; btn.textContent = '🤖 Queuing…'; }
   try {
     await api(`${IR_API}?action=handoff-backlog-all`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     });
-  } catch (e) { alert(e.message); }
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
   finally { loadIssueReports(); }
 }
 
 async function passToDeveloper(id) {
-  if (!confirm('Pass this issue to the AI developer? It will be fixed on a branch and a pull request opened for review.')) return;
+  if (!(await window.confirmModal('It will be fixed on a branch and a pull request opened for review.', { title: 'Pass this issue to the AI developer?' }))) return;
   try {
     await api(`${IR_API}?id=${id}&action=handoff`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     });
     await openIssuePanel(id);
     if (!document.getElementById('view-issue-reports').classList.contains('hidden')) loadIssueReports();
-  } catch (e) { alert(e.message); }
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 // ── Run AI-proposed migration SQL against staging Neon, from inside the ticket ─
@@ -4661,8 +4666,8 @@ function _irSqlCard(i) {
 
 async function runIssueSql(id) {
   const sql = document.getElementById('ir-sql')?.value || '';
-  if (!sql.trim()) { alert('There is no SQL to run.'); return; }
-  if (!confirm('Run this SQL against the STAGING database now? This executes immediately as the database owner.')) return;
+  if (!sql.trim()) { window.showToast?.('There is no SQL to run.', { icon: '⚠️' }); return; }
+  if (!(await window.confirmModal('This executes immediately as the database owner.', { title: 'Run this SQL against the STAGING database now?' }))) return;
   const btn = event?.target?.closest('button');
   if (btn) { btn.disabled = true; btn.textContent = 'Running…'; }
   try {
@@ -4672,10 +4677,10 @@ async function runIssueSql(id) {
     });
     await openIssuePanel(id);
     if (!document.getElementById('view-issue-reports').classList.contains('hidden')) loadIssueReports();
-    if (!res.ok) alert('The SQL did not run cleanly — see the staging database response in the ticket.');
+    if (!res.ok) window.showToast?.('The SQL did not run cleanly — see the staging database response in the ticket.', { icon: '⚠️' });
   } catch (e) {
     if (btn) { btn.disabled = false; }
-    alert(e.message);
+    window.showToast?.(e.message, { icon: '⚠️' });
   }
 }
 
@@ -4779,7 +4784,7 @@ function _irProdCard(i) {
 }
 
 async function requestMerge(id) {
-  if (!confirm('Merge this fix to the staging branch now? The developer runner will merge the pull request and the issue will move to “Fixed & Ready to Test”.')) return;
+  if (!(await window.confirmModal('The developer runner will merge the pull request and the issue will move to “Fixed & Ready to Test”.', { title: 'Merge this fix to the staging branch now?' }))) return;
   const btn = event?.target?.closest('button');
   if (btn) { btn.disabled = true; btn.textContent = 'Requesting…'; }
   try {
@@ -4790,12 +4795,12 @@ async function requestMerge(id) {
     if (!document.getElementById('view-issue-reports').classList.contains('hidden')) loadIssueReports();
   } catch (e) {
     if (btn) { btn.disabled = false; }
-    alert(e.message);
+    window.showToast?.(e.message, { icon: '⚠️' });
   }
 }
 
 async function requestProdPromote(id) {
-  if (!confirm('Promote this fix to PRODUCTION now? The developer runner will push staging → main and prod will redeploy with everything currently on staging. This affects live users.')) return;
+  if (!(await window.confirmModal('The developer runner will push staging → main and prod will redeploy with everything currently on staging. This affects live users.', { title: 'Promote this fix to PRODUCTION now?' }))) return;
   const btn = event?.target?.closest('button');
   if (btn) { btn.disabled = true; btn.textContent = 'Requesting…'; }
   try {
@@ -4806,12 +4811,12 @@ async function requestProdPromote(id) {
     if (!document.getElementById('view-issue-reports').classList.contains('hidden')) loadIssueReports();
   } catch (e) {
     if (btn) { btn.disabled = false; }
-    alert(e.message);
+    window.showToast?.(e.message, { icon: '⚠️' });
   }
 }
 
 async function requestConflictFix(id) {
-  if (!confirm('Have the AI developer investigate this failed merge, resolve any conflicts, and retry? The issue will move to “Fixed & Ready to Test” once it succeeds.')) return;
+  if (!(await window.confirmModal('The issue will move to “Fixed & Ready to Test” once it succeeds.', { title: 'Have the AI developer investigate this failed merge, resolve any conflicts, and retry?' }))) return;
   const btn = event?.target?.closest('button');
   if (btn) { btn.disabled = true; btn.textContent = 'Requesting…'; }
   try {
@@ -4822,7 +4827,7 @@ async function requestConflictFix(id) {
     if (!document.getElementById('view-issue-reports').classList.contains('hidden')) loadIssueReports();
   } catch (e) {
     if (btn) { btn.disabled = false; }
-    alert(e.message);
+    window.showToast?.(e.message, { icon: '⚠️' });
   }
 }
 
@@ -4867,7 +4872,7 @@ function _updateMergeAllBtns(issues) {
       // Failed merges pop back into the eligible list above — flag them; whatever did
       // merge has already been committed to staging automatically.
       if (eligible.length > 0) {
-        alert(`${eligible.length} merge${eligible.length === 1 ? '' : 's'} failed — open the ticket${eligible.length === 1 ? '' : 's'} to see the runner output, or press “Merge all” to retry.`);
+        window.showToast?.(`${eligible.length} merge${eligible.length === 1 ? '' : 's'} failed — open the ticket${eligible.length === 1 ? '' : 's'} to see the runner output, or press “Merge all” to retry.`, { icon: '⚠️' });
       }
     }
   }
@@ -4876,15 +4881,15 @@ function _updateMergeAllBtns(issues) {
 async function requestMergeAll() {
   const btn = document.getElementById('ir-merge-all-btn');
   const n = Number(btn?.dataset.count || 0);
-  if (!confirm(`Merge all ${n} ready fix${n === 1 ? '' : 'es'} to the staging branch now? The developer runner will merge each pull request in turn and staging will rebuild automatically once every merge has finished.`)) return;
+  if (!(await window.confirmModal(`The developer runner will merge each pull request in turn and staging will rebuild automatically once every merge has finished.`, { title: `Merge all ${window.escapeHtml(n)} ready fix${n === 1 ? '' : 'es'} to the staging branch now?` }))) return;
   if (btn) { btn.disabled = true; btn.textContent = '🔀 Queuing…'; }
   try {
     const d = await api(`${IR_API}?action=request-merge-all`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     });
     if ((d.queued || 0) > 0) { _irMergeAllTracking = true; }
-    else alert('Nothing to merge — no fix PRs are ready (fixes awaiting a database migration must be run from their ticket first).');
-  } catch (e) { alert(e.message); }
+    else window.showToast?.('Nothing to merge — no fix PRs are ready (fixes awaiting a database migration must be run from their ticket first).', { icon: '⚠️' });
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
   finally { loadIssueReports(); }
 }
 
@@ -5004,11 +5009,13 @@ async function frSetStatus(id, status) {
       body: JSON.stringify({ status }),
     });
     loadFeatureRoadmap();
-  } catch (e) { alert(e.message); loadFeatureRoadmap(); }
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); loadFeatureRoadmap(); }
 }
 
 async function frMergeRequest(sourceId) {
-  const targetId = prompt('Merge this request INTO which request id? (votes will be combined)');
+  const targetId = await window.promptModal('Votes from both are combined.', {
+    title: 'Merge this request into which request id?', placeholder: 'Request id', confirmLabel: 'Merge', required: true,
+  });
   if (!targetId) return;
   try {
     await api(`${FR_API}?action=merge`, {
@@ -5016,7 +5023,7 @@ async function frMergeRequest(sourceId) {
       body: JSON.stringify({ sourceId, targetId: Number(targetId) }),
     });
     loadFeatureRoadmap();
-  } catch (e) { alert(e.message); }
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 // ── Add / edit form + AI enhance (US04) ─────────────────────────────────────
@@ -5076,7 +5083,7 @@ function closeRoadmapForm() { document.getElementById('fr-form').classList.add('
 
 async function frEnhanceDescription() {
   const text = document.getElementById('fr-form-desc').value.trim();
-  if (!text) { alert('Add some description text first.'); return; }
+  if (!text) { window.showToast?.('Add some description text first.', { icon: '⚠️' }); return; }
   const btn = document.getElementById('fr-enhance-btn');
   const prev = btn.textContent; btn.textContent = '✨ Enhancing…'; btn.disabled = true;
   try {
@@ -5086,7 +5093,7 @@ async function frEnhanceDescription() {
     });
     document.getElementById('fr-enhance-text').textContent = d.enhanced || '';
     document.getElementById('fr-enhance-preview').classList.remove('hidden');
-  } catch (e) { alert(e.message); }
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
   finally { btn.textContent = prev; btn.disabled = false; }
 }
 function frAcceptEnhance() {
@@ -5099,7 +5106,7 @@ function frRejectEnhance() { _frResetEnhance(); }
 // ── Brief drafting (for Claude to execute) ──────────────────────────────────
 async function frDraftBrief() {
   const title = document.getElementById('fr-form-title-input').value.trim();
-  if (!title) { alert('Add a title first.'); return; }
+  if (!title) { window.showToast?.('Add a title first.', { icon: '⚠️' }); return; }
   const description = document.getElementById('fr-form-desc').value.trim();
   const btn = document.getElementById('fr-draft-brief-btn');
   const prev = btn.textContent; btn.textContent = '✨ Drafting…'; btn.disabled = true;
@@ -5109,14 +5116,14 @@ async function frDraftBrief() {
       body: JSON.stringify({ title, description }),
     });
     document.getElementById('fr-form-brief').value = d.brief || '';
-  } catch (e) { alert(e.message); }
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
   finally { btn.textContent = prev; btn.disabled = false; }
 }
 
 async function submitRoadmapForm() {
   const id = document.getElementById('fr-form-id').value;
   const title = document.getElementById('fr-form-title-input').value.trim();
-  if (!title) { alert('Title is required.'); return; }
+  if (!title) { window.showToast?.('Title is required.', { icon: '⚠️' }); return; }
   const description = document.getElementById('fr-form-desc').value.trim();
   const category = document.getElementById('fr-form-category').value;
   const priority = document.getElementById('fr-form-priority').value;
@@ -5138,15 +5145,15 @@ async function submitRoadmapForm() {
     }
     closeRoadmapForm();
     loadFeatureRoadmap();
-  } catch (e) { alert(e.message); }
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 async function deleteRoadmapItem(id) {
-  if (!confirm('Permanently delete this request?')) return;
+  if (!(await window.confirmModal('', { title: 'Permanently delete this request?' }))) return;
   try {
     await api(`${FR_API}?id=${id}`, { method: 'DELETE' });
     loadFeatureRoadmap();
-  } catch (e) { alert(e.message); }
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 // ── Roadmap Gantt (US05) — drag from Backlog onto a quarter ──────────────────
@@ -5216,7 +5223,7 @@ async function frGanttDrop(e, quarter) {
       body: JSON.stringify(body),
     });
     loadFeatureRoadmap();
-  } catch (err) { alert(err.message); loadFeatureRoadmap(); }
+  } catch (err) { window.showToast?.(err.message, { icon: '⚠️' }); loadFeatureRoadmap(); }
 }
 
 // ── Epic: Superadmin Environment Management — US4/US5: Sandbox panel ──────────
@@ -5675,19 +5682,19 @@ async function openUserPanel(uid) {
 function closeUserPanel() { document.getElementById('user-detail-panel').classList.add('hidden'); }
 
 async function suspendUser(uid) {
-  if (!confirm('Suspend this user?')) return;
+  if (!(await window.confirmModal('', { title: 'Suspend this user?' }))) return;
   try {
     await api(`/.netlify/functions/admin-api?resource=user&id=${uid}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status:'suspended' }) });
     closeUserPanel(); loadUsers();
-  } catch(e) { alert(e.message); }
+  } catch(e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 async function promoteAdmin(uid) {
-  if (!confirm('Grant admin role to this user?')) return;
+  if (!(await window.confirmModal('', { title: 'Grant admin role to this user?' }))) return;
   try {
     await api(`/.netlify/functions/admin-api?resource=user&id=${uid}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ role:'admin' }) });
     closeUserPanel(); loadUsers();
-  } catch(e) { alert(e.message); }
+  } catch(e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 async function deleteUser(uid, email) {
@@ -5804,7 +5811,7 @@ async function patchTicket(tid, field, value) {
       body: JSON.stringify({ [field]: value }),
     });
     if (document.getElementById('view-tickets') && !document.getElementById('view-tickets').classList.contains('hidden')) loadTickets();
-  } catch(e) { alert(e.message); }
+  } catch(e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 async function submitReply(tid) {
@@ -5818,7 +5825,7 @@ async function submitReply(tid) {
     document.getElementById('reply-body').value = '';
     await openTicketPanel(tid);
     if (!document.getElementById('view-tickets').classList.contains('hidden')) loadTickets();
-  } catch(e) { alert(e.message); }
+  } catch(e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 // ── Catalog ───────────────────────────────────────────────────────────────────
@@ -5955,7 +5962,7 @@ function _catalogRowHtml(a) {
 
 async function toggleCatalogStatus(id, currentlyComingSoon) {
   const action = currentlyComingSoon ? 'launch this role live' : 'mark this role as Coming Soon';
-  if (!confirm(`Are you sure you want to ${action}? ${currentlyComingSoon ? 'This will trigger the waitlist email blast.' : ''}`)) return;
+  if (!(await window.confirmModal(`${currentlyComingSoon ? 'This will trigger the waitlist email blast.' : ''}`, { title: `Are you sure you want to ${window.escapeHtml(action)}?` }))) return;
   try {
     // Use master-assistants PATCH which also handles notification fan-out
     const r = await fetch(`/.netlify/functions/master-assistants?id=${id}`, {
@@ -5964,9 +5971,9 @@ async function toggleCatalogStatus(id, currentlyComingSoon) {
     });
     if (!r.ok) throw new Error((await r.json()).error || 'Failed');
     const d = await r.json();
-    if (d.notifiedCount) alert(`✅ Role launched! ${d.notifiedCount} users notified.`);
+    if (d.notifiedCount) window.showToast?.(`Role launched! ${d.notifiedCount} users notified.`, { icon: '✅' });
     loadCatalog();
-  } catch(e) { alert(e.message); }
+  } catch(e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 // ── System Logs ───────────────────────────────────────────────────────────────
@@ -6167,7 +6174,7 @@ async function quickToggleFlag(key, newEnabled) {
       body: JSON.stringify({ enabled: newEnabled }),
     });
     loadFeatureFlags();
-  } catch(e) { alert('Failed: ' + e.message); }
+  } catch(e) { window.showToast?.('Failed: ' + e.message, { icon: '⚠️' }); }
 }
 
 function openFlagEditor(key, enabled, rollout, tiersJson, vipsJson) {
@@ -6222,13 +6229,13 @@ async function saveFeatureFlag() {
     document.getElementById('ff-edit-panel').classList.add('hidden');
     _ffEditKey = null;
     loadFeatureFlags();
-  } catch(e) { alert('Save failed: ' + e.message); }
+  } catch(e) { window.showToast?.('Save failed: ' + e.message, { icon: '⚠️' }); }
 }
 
 async function createFeatureFlag() {
   const key  = document.getElementById('ff-new-key').value.trim();
   const desc = document.getElementById('ff-new-desc').value.trim();
-  if (!key) { alert('A flag key is required.'); return; }
+  if (!key) { window.showToast?.('A flag key is required.', { icon: '⚠️' }); return; }
   try {
     await api('/.netlify/functions/admin-api?resource=feature-flags', {
       method: 'POST',
@@ -6238,7 +6245,7 @@ async function createFeatureFlag() {
     document.getElementById('ff-new-key').value  = '';
     document.getElementById('ff-new-desc').value = '';
     loadFeatureFlags();
-  } catch(e) { alert('Create failed: ' + e.message); }
+  } catch(e) { window.showToast?.('Create failed: ' + e.message, { icon: '⚠️' }); }
 }
 
 // ── US-ADM-3.2.1: Emergency Controls / Kill Switches ──────────────────────────
@@ -6306,16 +6313,21 @@ function renderKillSwitches() {
 async function toggleKillSwitch(key, newValue) {
   const def = KILL_SWITCH_DEFS.find(d => d.key === key);
   const label = def?.label || key;
-  const reason = prompt(`${newValue ? '⚠️ ENABLING' : 'Disabling'} "${label}"\n\nYou must enter a reason for this change:`);
+  const reason = await window.promptModal('You must enter a reason for this change.', {
+    title: `${newValue ? 'Enabling' : 'Disabling'} “${window.escapeHtml(label)}”`,
+    placeholder: 'Reason', multiline: true, required: true, confirmLabel: newValue ? 'Enable' : 'Disable',
+  });
   if (reason === null) return; // cancelled
-  if (!reason.trim()) { alert('A reason is required.'); return; }
+  if (!reason.trim()) { window.showToast?.('A reason is required.', { icon: '⚠️' }); return; }
   await saveKillSwitch(key, newValue, reason);
 }
 
 async function saveKillSwitch(key, value, reason) {
   if (!reason) {
-    reason = prompt(`Reason for updating "${key}":`);
-    if (!reason?.trim()) { alert('A reason is required.'); return; }
+    reason = await window.promptModal('', {
+      title: `Reason for updating “${window.escapeHtml(key)}”`, placeholder: 'Reason', multiline: true, required: true,
+    });
+    if (!reason?.trim()) { window.showToast?.('A reason is required.', { icon: '⚠️' }); return; }
   }
   try {
     await api('/.netlify/functions/admin-api?resource=platform-config', {
@@ -6325,7 +6337,7 @@ async function saveKillSwitch(key, value, reason) {
     });
     _killSwitchConfig[key] = value;
     renderKillSwitches();
-  } catch(e) { alert('Failed to save: ' + e.message); }
+  } catch(e) { window.showToast?.('Failed to save: ' + e.message, { icon: '⚠️' }); }
 }
 
 // ── US-ADM-5.2.1: Manage Admins ──────────────────────────────────────────────
@@ -6415,12 +6427,17 @@ async function loadPendingRoleApprovals() {
 
 async function openRoleChange(userId, email, currentRole) {
   const roles = ['user', 'support_agent', 'billing_admin', 'platform_admin', 'super_admin'];
-  const newRole = prompt(`Change role for ${email}\nCurrent: ${currentRole}\n\nNew role (${roles.join(' | ')}):`);
+  const newRole = await window.promptModal(
+    `Current: <strong>${window.escapeHtml(currentRole)}</strong><br><br>One of: ${roles.join(' · ')}`,
+    { title: `Change role for ${window.escapeHtml(email)}`, placeholder: roles.join(' | '), confirmLabel: 'Next', required: true },
+  );
   if (!newRole?.trim() || !roles.includes(newRole.trim())) {
-    if (newRole !== null) alert('Invalid role. Must be one of: ' + roles.join(', '));
+    if (newRole !== null) window.showToast?.('Invalid role. Must be one of: ' + roles.join(', '), { icon: '⚠️' });
     return;
   }
-  const reason = prompt('Reason for this role change (required):');
+  const reason = await window.promptModal('', {
+    title: 'Reason for this role change', placeholder: 'Required', multiline: true, required: true,
+  });
   if (!reason?.trim()) return;
   try {
     const res  = await fetch('/.netlify/functions/admin-api?resource=request-role-change', {
@@ -6428,28 +6445,31 @@ async function openRoleChange(userId, email, currentRole) {
       body: JSON.stringify({ targetUserId: userId, newRole: newRole.trim(), reason }),
     });
     const data = await res.json();
-    if (!res.ok) { alert('Error: ' + data.error); return; }
+    if (!res.ok) { window.showToast?.('Error: ' + data.error, { icon: '⚠️' }); return; }
     if (data.pending) {
-      alert(`✅ Promotion to super_admin submitted.\n\nRequest ID: ${data.requestId}\n\nA second super_admin must approve within 24 hours.`);
+      window.alertModal(
+        `Request ID: <strong>${window.escapeHtml(data.requestId)}</strong><br><br>A second super_admin must approve within 24 hours.`,
+        { title: 'Promotion to super_admin submitted' },
+      );
     } else {
-      alert(`✅ Role changed to ${data.newRole} successfully.`);
+      window.showToast?.(`Role changed to ${data.newRole} successfully.`, { icon: '✅' });
     }
     loadManageAdmins();
-  } catch(e) { alert(e.message); }
+  } catch(e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 async function approveRoleChange(requestId, targetEmail) {
-  if (!confirm(`Approve super_admin promotion for ${targetEmail}?\n\nThis will take effect immediately.`)) return;
+  if (!(await window.confirmModal(`This will take effect immediately.`, { title: `Approve super_admin promotion for ${window.escapeHtml(targetEmail)}?` }))) return;
   try {
     const res  = await fetch('/.netlify/functions/admin-api?resource=approve-role-change', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ requestId }),
     });
     const data = await res.json();
-    if (!res.ok) { alert('Error: ' + data.error); return; }
-    alert(`✅ ${data.targetEmail} is now ${data.newRole}.`);
+    if (!res.ok) { window.showToast?.('Error: ' + data.error, { icon: '⚠️' }); return; }
+    window.showToast?.(`${data.targetEmail} is now ${data.newRole}.`, { icon: '✅' });
     loadManageAdmins();
-  } catch(e) { alert(e.message); }
+  } catch(e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 // ── US-ADM-2.2.1: Dunning Queue ──────────────────────────────────────────────
@@ -6505,7 +6525,10 @@ async function loadDunningQueue() {
 }
 
 async function markPaymentArranged(planId, email) {
-  const reason = prompt(`Mark payment arranged offline for ${email}\n\nNote (e.g. "Bank transfer ref #1234"):`);
+  const reason = await window.promptModal('', {
+    title: `Mark payment arranged offline for ${window.escapeHtml(email)}`,
+    placeholder: 'e.g. Bank transfer ref #1234', multiline: true, required: true, confirmLabel: 'Mark arranged',
+  });
   if (!reason?.trim()) return;
   try {
     const res  = await fetch('/.netlify/functions/admin-api?resource=dunning-override', {
@@ -6514,10 +6537,10 @@ async function markPaymentArranged(planId, email) {
       body: JSON.stringify({ planId, reason }),
     });
     const data = await res.json();
-    if (!res.ok) { alert('Error: ' + data.error); return; }
-    alert(`✅ Payment marked as arranged. Dunning suppressed for 14 days (until ${new Date(data.graceEnd).toLocaleDateString('en-GB')}).`);
+    if (!res.ok) { window.showToast?.('Error: ' + data.error, { icon: '⚠️' }); return; }
+    window.showToast?.(`Payment marked as arranged. Dunning suppressed for 14 days (until ${new Date(data.graceEnd).toLocaleDateString('en-GB')}).`, { icon: '✅' });
     loadDunningQueue();
-  } catch(e) { alert('Request failed: ' + e.message); }
+  } catch(e) { window.showToast?.('Request failed: ' + e.message, { icon: '⚠️' }); }
 }
 
 // ── US-ADM-2.2.1: Disputes Tab ───────────────────────────────────────────────
@@ -7042,20 +7065,20 @@ async function _ctAddTask() {
   const title = (input.value || '').trim();
   if (!title) return;
   try { await _ctPost('contact-task', { leadId: _selectedContactId, title }); await openContact(_selectedContactId); }
-  catch (e) { alert('Failed: ' + e.message); }
+  catch (e) { window.showToast?.('Failed: ' + e.message, { icon: '⚠️' }); }
 }
 async function _ctToggleTask(taskId, done) {
   try { await _ctPost('contact-task-toggle', { taskId, done }); await openContact(_selectedContactId); }
-  catch (e) { alert('Failed: ' + e.message); }
+  catch (e) { window.showToast?.('Failed: ' + e.message, { icon: '⚠️' }); }
 }
 async function _ctSetType(type) {
   try { await _ctPost('contact-update', { leadId: _selectedContactId, contactType: type }); await openContact(_selectedContactId); loadContacts(); }
-  catch (e) { alert('Failed: ' + e.message); }
+  catch (e) { window.showToast?.('Failed: ' + e.message, { icon: '⚠️' }); }
 }
 // Pipeline status + sales notes, reusing the endpoints the retired Sales Pipeline used.
 async function _ctSetStatus(status) {
   try { await _ctPost('lead-status', { leadId: _selectedContactId, status }); }
-  catch (e) { alert('Failed: ' + e.message); }
+  catch (e) { window.showToast?.('Failed: ' + e.message, { icon: '⚠️' }); }
 }
 async function _ctSaveNotes(salesNotes) {
   try { await _ctPost('lead-notes', { leadId: _selectedContactId, salesNotes }); }
@@ -7075,20 +7098,20 @@ async function _ctSaveInfo() {
     await _ctPost('contact-update', payload);
     const s = document.getElementById('ci-saved'); s.classList.remove('hidden'); setTimeout(() => s.classList.add('hidden'), 1500);
     loadContacts();
-  } catch (e) { alert('Failed: ' + e.message); }
+  } catch (e) { window.showToast?.('Failed: ' + e.message, { icon: '⚠️' }); }
 }
 function _ctCurrentTags() { const c = _contactsCache.find(x => x.id === _selectedContactId); return Array.isArray(c?.tags) ? c.tags.slice() : []; }
 async function _ctAddTag() {
-  const tag = (prompt('Add a tag') || '').trim();
+  const tag = (await window.promptModal('', { title: 'Add a tag', placeholder: 'Tag', confirmLabel: 'Add', required: true }) || '').trim();
   if (!tag) return;
   const tags = _ctCurrentTags(); if (!tags.includes(tag)) tags.push(tag);
   try { await _ctPost('contact-update', { leadId: _selectedContactId, tags }); await openContact(_selectedContactId); loadContacts(); }
-  catch (e) { alert('Failed: ' + e.message); }
+  catch (e) { window.showToast?.('Failed: ' + e.message, { icon: '⚠️' }); }
 }
 async function _ctRemoveTag(tag) {
   const tags = _ctCurrentTags().filter(t => t !== tag);
   try { await _ctPost('contact-update', { leadId: _selectedContactId, tags }); await openContact(_selectedContactId); loadContacts(); }
-  catch (e) { alert('Failed: ' + e.message); }
+  catch (e) { window.showToast?.('Failed: ' + e.message, { icon: '⚠️' }); }
 }
 
 // ── US-ADM-2.3.1: Billing Reconciliation Queue ────────────────────────────────
@@ -7151,17 +7174,17 @@ async function loadReconciliation() {
   }
 }
 async function syncPlanToStripe(planId, newTierKey, stripeSubscriptionId) {
-  if (!confirm(`Sync plan #${planId} to tier "${newTierKey}" (as per Stripe)? This will update the DB and write an audit log entry.`)) return;
+  if (!(await window.confirmModal(`This will update the DB and write an audit log entry.`, { title: `Sync plan #${window.escapeHtml(planId)} to tier "${window.escapeHtml(newTierKey)}" (as per Stripe)?` }))) return;
   try {
     const d = await api('/.netlify/functions/admin-api?resource=reconciliation', {
       method: 'POST',
       body: JSON.stringify({ planId, newTierKey, stripeSubscriptionId, reason: 'reconciliation_sync' }),
     });
     if (d.success) {
-      alert('Sync complete. Reloading queue…');
+      window.showToast?.('Sync complete. Reloading queue…', { icon: '⚠️' });
       loadReconciliation();
     }
-  } catch(e) { alert('Sync failed: ' + e.message); }
+  } catch(e) { window.showToast?.('Sync failed: ' + e.message, { icon: '⚠️' }); }
 }
 
 // ── US-ADM-3.1.1: COGS Dashboard ──────────────────────────────────────────────
@@ -7370,18 +7393,18 @@ async function saveModelConfig(id) {
       body: JSON.stringify({ model }),
     });
     loadModelConfig();
-  } catch(e) { alert(e.message); }
+  } catch(e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 async function toggleModelActive(id, isActive) {
-  if (!confirm(`${isActive?'Disable':'Enable'} this model slot? Changes take effect immediately.`)) return;
+  if (!(await window.confirmModal(`Changes take effect immediately.`, { title: `${isActive?'Disable':'Enable'} this model slot?` }))) return;
   try {
     await api(`/.netlify/functions/admin-api?resource=model-config&id=${id}`, {
       method:'PATCH', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ isActive: !isActive }),
     });
     loadModelConfig();
-  } catch(e) { alert(e.message); }
+  } catch(e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 async function createModelConfig() {
@@ -7389,7 +7412,7 @@ async function createModelConfig() {
   const provider = document.getElementById('new-provider')?.value?.trim() || 'openai';
   const model    = document.getElementById('new-model')?.value?.trim();
   const budget   = document.getElementById('new-budget')?.value;
-  if (!slot || !model) { alert('Slot name and model are required.'); return; }
+  if (!slot || !model) { window.showToast?.('Slot name and model are required.', { icon: '⚠️' }); return; }
   try {
     await api('/.netlify/functions/admin-api?resource=model-config', {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -7399,7 +7422,7 @@ async function createModelConfig() {
     document.getElementById('new-model').value = '';
     document.getElementById('new-budget').value = '';
     loadModelConfig();
-  } catch(e) { alert(e.message); }
+  } catch(e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 // ── US-ADM-4.1.1: Assistant Lifecycle & Version Control ──────────────────────
@@ -7491,21 +7514,24 @@ function openNewVersionForm() {
 async function submitNewVersion() {
   const systemPrompt = document.getElementById('nv-system-prompt').value.trim();
   const changeNote   = document.getElementById('nv-change-note').value.trim();
-  if (!changeNote) { alert('Changelog note is required.'); return; }
+  if (!changeNote) { window.showToast?.('Changelog note is required.', { icon: '⚠️' }); return; }
   try {
     const res  = await fetch(`/.netlify/functions/admin-api?resource=assistant-versions&id=${_versionAssistantId}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ systemPrompt: systemPrompt || null, changeNote }),
     });
     const data = await res.json();
-    if (!res.ok) { alert('Error: ' + data.error); return; }
+    if (!res.ok) { window.showToast?.('Error: ' + data.error, { icon: '⚠️' }); return; }
     document.getElementById('new-version-form').classList.add('hidden');
     await refreshVersionHistory();
-  } catch(e) { alert(e.message); }
+  } catch(e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 async function rollbackToVersion(versionId, versionNumber) {
-  const reason = prompt(`Rollback to v${versionNumber}\n\nReason (required):`);
+  const reason = await window.promptModal('', {
+    title: `Rollback to v${window.escapeHtml(versionNumber)}`,
+    placeholder: 'Reason', multiline: true, required: true, confirmLabel: 'Roll back',
+  });
   if (!reason?.trim()) return;
   try {
     const res  = await fetch(`/.netlify/functions/admin-api?resource=assistant-rollback&id=${_versionAssistantId}`, {
@@ -7513,10 +7539,10 @@ async function rollbackToVersion(versionId, versionNumber) {
       body: JSON.stringify({ versionId, reason }),
     });
     const data = await res.json();
-    if (!res.ok) { alert('Error: ' + data.error); return; }
-    alert(`✅ Rolled back to v${versionNumber}. New version v${data.versionNumber} created.`);
+    if (!res.ok) { window.showToast?.('Error: ' + data.error, { icon: '⚠️' }); return; }
+    window.showToast?.(`Rolled back to v${versionNumber}. New version v${data.versionNumber} created.`, { icon: '✅' });
     await refreshVersionHistory();
-  } catch(e) { alert(e.message); }
+  } catch(e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 // Bulk publish
@@ -7554,7 +7580,7 @@ async function submitBulkPublish() {
     const data = await res.json();
     if (!res.ok) { errEl.textContent = data.error || res.statusText; errEl.classList.remove('hidden'); return; }
     document.getElementById('bulk-publish-modal').classList.add('hidden');
-    alert(`✅ ${data.published} assistant${data.published > 1 ? 's' : ''} published to Live.`);
+    window.showToast?.(`${data.published} assistant${data.published > 1 ? 's' : ''} published to Live.`, { icon: '✅' });
     loadCatalog();
   } catch(e) { errEl.textContent = e.message; errEl.classList.remove('hidden'); }
 }
@@ -7641,7 +7667,10 @@ async function submitBillingOverride() {
         const data = await res.json();
         if (!res.ok) { errEl.textContent = data.error || res.statusText; errEl.classList.remove('hidden'); return; }
         document.getElementById('billing-override-modal').classList.add('hidden');
-        alert(`✅ Override applied successfully.\n\nAction: ${action}\nStripe ref: ${data.stripeRef || 'N/A'}`);
+        window.alertModal(
+            `Action: <strong>${window.escapeHtml(action)}</strong><br>Stripe ref: <strong>${window.escapeHtml(data.stripeRef || 'N/A')}</strong>`,
+            { title: 'Override applied successfully' },
+        );
         loadUserDetail(_billingOverrideUserId);
     } catch(e) {
         errEl.textContent = 'Request failed: ' + e.message;
@@ -7717,7 +7746,10 @@ async function submitAiCredits() {
 // ── US-ADM-1.1.1: Lock / Unlock account ──────────────────────────────────────
 async function lockAccount(userId, email, action) {
     const label = action === 'lock' ? 'Lock' : 'Unlock';
-    const reason = prompt(`${label} account for ${email}\n\nPlease provide a reason:`);
+    const reason = await window.promptModal('', {
+        title: `${label} account for ${window.escapeHtml(email)}`,
+        placeholder: 'Reason', multiline: true, required: true, confirmLabel: label,
+    });
     if (!reason?.trim()) return;
     try {
         const res = await fetch(`/.netlify/functions/admin-api?resource=lock-account&id=${userId}`, {
@@ -7726,17 +7758,22 @@ async function lockAccount(userId, email, action) {
             body: JSON.stringify({ action, reason }),
         });
         const data = await res.json();
-        if (!res.ok) { alert('Error: ' + (data.error || res.statusText)); return; }
-        alert(`Account ${action === 'lock' ? 'locked' : 'unlocked'} successfully.`);
+        if (!res.ok) { window.showToast?.('Error: ' + (data.error || res.statusText), { icon: '⚠️' }); return; }
+        window.showToast?.(`Account ${action === 'lock' ? 'locked' : 'unlocked'} successfully.`, { icon: '⚠️' });
         loadUserDetail(userId); // Refresh panel to show updated status
-    } catch(e) { alert('Request failed: ' + e.message); }
+    } catch(e) { window.showToast?.('Request failed: ' + e.message, { icon: '⚠️' }); }
 }
 
 // ── US-ADM-1.1.1: Admin-initiated email change (double-opt-in) ───────────────
 async function adminEmailChange(userId, currentEmail) {
-    const newEmail = prompt(`Change email for ${currentEmail}\n\nNew email address:`);
-    if (!newEmail?.trim() || !newEmail.includes('@')) { if (newEmail !== null) alert('Please enter a valid email address.'); return; }
-    const reason = prompt(`Reason for this email change (required):`);
+    const newEmail = await window.promptModal('', {
+        title: `Change email for ${window.escapeHtml(currentEmail)}`,
+        placeholder: 'New email address', confirmLabel: 'Next', required: true,
+    });
+    if (!newEmail?.trim() || !newEmail.includes('@')) { if (newEmail !== null) window.showToast?.('Please enter a valid email address.', { icon: '⚠️' }); return; }
+    const reason = await window.promptModal('', {
+        title: 'Reason for this email change', placeholder: 'Required', multiline: true, required: true,
+    });
     if (!reason?.trim()) return;
     try {
         const res = await fetch(`/.netlify/functions/admin-api?resource=email-change&id=${userId}`, {
@@ -7745,38 +7782,54 @@ async function adminEmailChange(userId, currentEmail) {
             body: JSON.stringify({ newEmail: newEmail.trim(), reason }),
         });
         const data = await res.json();
-        if (!res.ok) { alert('Error: ' + (data.error || res.statusText)); return; }
-        alert(`✅ Confirmation emails sent.\n\nThe user must click the link sent to ${newEmail.trim()} within 24 hours to confirm the change.`);
-    } catch(e) { alert('Request failed: ' + e.message); }
+        if (!res.ok) { window.showToast?.('Error: ' + (data.error || res.statusText), { icon: '⚠️' }); return; }
+        window.alertModal(
+            `The user must click the link sent to <strong>${window.escapeHtml(newEmail.trim())}</strong> within 24 hours to confirm the change.`,
+            { title: 'Confirmation emails sent' },
+        );
+    } catch(e) { window.showToast?.('Request failed: ' + e.message, { icon: '⚠️' }); }
 }
 
 // ── US-ADM-1.3.1: GDPR SAR Data Export ───────────────────────────────────────
 async function sarExport(userId, email) {
-  if (!confirm(`Generate a GDPR Subject Access Request data export for ${email}?\n\nA download link (valid 72 hours) will be sent to your in-app notifications.`)) return;
+  if (!(await window.confirmModal(`A download link (valid 72 hours) will be sent to your in-app notifications.`, { title: `Generate a GDPR Subject Access Request data export for ${window.escapeHtml(email)}?` }))) return;
   try {
     const d = await api('/.netlify/functions/admin-sar-export', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ targetUserId: userId }),
     });
-    alert(`✅ SAR export ready!\n\nDownload link (72h):\n${d.downloadUrl}\n\nAlso sent to your in-app notifications.`);
-  } catch(e) { alert('SAR export failed: ' + e.message); }
+    // A modal, not a toast: the link is the deliverable, and a toast takes it away after four
+    // seconds. It is also sent to notifications, so a mis-click is recoverable either way.
+    window.alertModal(
+      `Download link (valid 72 hours):<br><a href="${window.escapeHtml(d.downloadUrl)}" target="_blank" rel="noopener"`
+      + ` style="color:#059669;font-weight:600;word-break:break-all;">${window.escapeHtml(d.downloadUrl)}</a>`
+      + `<br><br>Also sent to your in-app notifications.`,
+      { title: 'SAR export ready' },
+    );
+  } catch(e) { window.showToast?.('SAR export failed: ' + e.message, { icon: '⚠️' }); }
 }
 
 // ── US-ADM-1.3.2: GDPR Right to Erasure ──────────────────────────────────────
 async function gdprEraseUser(userId, email) {
-  const reason = prompt(
-    `GDPR RIGHT TO ERASURE\n\nUser: ${email}\n\n` +
-    `This will:\n` +
-    `  • Anonymise the user's email, name, and profile\n` +
-    `  • Cancel their Stripe subscription\n` +
-    `  • Delete drafts and notifications\n` +
-    `  • Retain payments/invoices (7-year legal obligation)\n\n` +
-    `Enter the reason for this erasure (REQUIRED):`
+  const bullet = (t) => `<span style="display:block;margin-top:.35rem;padding-left:.85rem;text-indent:-.85rem;">• ${t}</span>`;
+  const reason = await window.promptModal(
+    `User: <strong>${window.escapeHtml(email)}</strong><br><br>This will:`
+    + bullet('Anonymise the user’s email, name, and profile')
+    + bullet('Cancel their Stripe subscription')
+    + bullet('Delete drafts and notifications')
+    + bullet('Retain payments/invoices (7-year legal obligation)'),
+    {
+      title: 'GDPR right to erasure',
+      placeholder: 'Reason for this erasure (required)',
+      multiline: true,
+      required: true,
+      confirmLabel: 'Continue',
+    },
   );
   if (reason === null) return;
-  if (!reason.trim()) { alert('A reason is required for GDPR erasure.'); return; }
-  if (!confirm(`Final confirmation: permanently erase all personal data for ${email}?\n\nThis cannot be undone.`)) return;
+  if (!reason.trim()) { window.showToast?.('A reason is required for GDPR erasure.', { icon: '⚠️' }); return; }
+  if (!(await window.confirmModal(`This cannot be undone.`, { title: `Final confirmation: permanently erase all personal data for ${window.escapeHtml(email)}?` }))) return;
 
   try {
     const d = await api('/.netlify/functions/admin-gdpr-erase', {
@@ -7784,9 +7837,12 @@ async function gdprEraseUser(userId, email) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ targetUserId: userId, reason: reason.trim() }),
     });
-    alert(`✅ GDPR erasure complete.\nAccount anonymised to: ${d.anonymisedEmail}`);
+    window.alertModal(
+      `Account anonymised to: <strong>${window.escapeHtml(d.anonymisedEmail)}</strong>`,
+      { title: 'GDPR erasure complete' },
+    );
     loadUsers(); // Refresh the user list
-  } catch(e) { alert('Erasure failed: ' + e.message); }
+  } catch(e) { window.showToast?.('Erasure failed: ' + e.message, { icon: '⚠️' }); }
 }
 
 // ── US-ADM-1.2.1: Admin Impersonation ────────────────────────────────────────
@@ -7797,14 +7853,22 @@ const IMPERSONATION_REASONS = [
   { value: 'account_recovery',      label: 'Account Recovery' },
 ];
 async function startImpersonation(targetId, targetEmail) {
-  const reasonOptions = IMPERSONATION_REASONS.map(r => `  ${r.value} — ${r.label}`).join('\n');
-  const reason = prompt(`Impersonate ${targetEmail}\n\nSelect a reason (paste the key exactly):\n${reasonOptions}`);
+  const reasonOptions = IMPERSONATION_REASONS
+    .map(r => `<span style="display:block;margin-top:.3rem;"><code style="background:#f3f4f6;padding:.05rem .3rem;border-radius:.25rem;">${window.escapeHtml(r.value)}</code> — ${window.escapeHtml(r.label)}</span>`)
+    .join('');
+  const reason = await window.promptModal(
+    `Select a reason — type the key exactly:${reasonOptions}`,
+    { title: `Impersonate ${window.escapeHtml(targetEmail)}`, placeholder: 'Reason key', confirmLabel: 'Next', required: true },
+  );
   if (!reason) return;
   if (!IMPERSONATION_REASONS.find(r => r.value === reason.trim())) {
-    alert('Invalid reason. Please use one of the listed keys.');
+    window.showToast?.('Invalid reason. Please use one of the listed keys.', { icon: '⚠️' });
     return;
   }
-  if (!confirm(`You are about to impersonate ${targetEmail}.\nReason: ${reason}\n\nThis will be fully audited. Continue?`)) return;
+  if (!(await window.confirmModal(
+    `Reason: <strong>${window.escapeHtml(reason)}</strong><br><br>This will be fully audited.`,
+    { title: `Impersonate ${window.escapeHtml(targetEmail)}?`, confirmLabel: 'Yes, impersonate', cancelLabel: 'Cancel' },
+  ))) return;
 
   try {
     // Store the current admin session token so workspace.html can restore it on end
@@ -7824,17 +7888,20 @@ async function startImpersonation(targetId, targetEmail) {
     // Navigate to workspace to start impersonation
     window.location.href = '/workspace.html';
   } catch(e) {
-    alert('Impersonation failed: ' + e.message + '\n(Check your role — requires platform_admin or super_admin)');
+    window.alertModal(
+      `${window.escapeHtml(e.message)}<br><br>Check your role — impersonation requires platform_admin or super_admin.`,
+      { title: 'Impersonation failed', confirmColor: '#dc2626' },
+    );
   }
 }
 
 // ── Send Login Link (US6 Sc2) ─────────────────────────────────────────────────
 async function sendLoginLink(uid) {
-  if (!confirm('Send a 24-hour passwordless login link to this user\'s email?')) return;
+  if (!(await window.confirmModal('', { title: 'Send a 24-hour passwordless login link to this user\'s email?' }))) return;
   try {
     await api(`/.netlify/functions/admin-api?resource=send-login-link&id=${uid}`, { method:'POST' });
-    alert('✅ Login link sent successfully.');
-  } catch(e) { alert('Failed: ' + e.message); }
+    window.showToast?.('Login link sent successfully.', { icon: '✅' });
+  } catch(e) { window.showToast?.('Failed: ' + e.message, { icon: '⚠️' }); }
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
@@ -7963,7 +8030,7 @@ async function submitLogIncident() {
   const dataTypesRaw = document.getElementById('inc-data-types').value;
   const dataTypes   = dataTypesRaw.split(',').map(s => s.trim()).filter(Boolean);
 
-  if (!title || !description) { alert('Title and description are required.'); return; }
+  if (!title || !description) { window.showToast?.('Title and description are required.', { icon: '⚠️' }); return; }
 
   try {
     const res = await fetch('/.netlify/functions/report-security-incident', {
@@ -7971,24 +8038,27 @@ async function submitLogIncident() {
       body: JSON.stringify({ title, description, severity, affectedUserCount: userCount, dataTypesAffected: dataTypes }),
     });
     const d = await res.json();
-    if (!res.ok) { alert(d.error || 'Failed to log incident.'); return; }
+    if (!res.ok) { window.showToast?.(d.error || 'Failed to log incident.', { icon: '⚠️' }); return; }
     document.getElementById('modal-log-incident').classList.add('hidden');
     loadBreachResponse();
-  } catch { alert('Connection failed.'); }
+  } catch { window.showToast?.('Connection failed.', { icon: '⚠️' }); }
 }
 
 async function confirmRevokeTokens(incidentId, affectedUserIds) {
-  if (!confirm('⚠️ This will immediately revoke ALL connected app tokens for affected users. They will need to reconnect their integrations. Proceed?')) return;
+  if (!(await window.confirmModal(
+    'This takes effect immediately. Affected users will need to reconnect their integrations.',
+    { title: 'Revoke ALL connected app tokens?', confirmLabel: 'Yes, revoke them', cancelLabel: 'Cancel' },
+  ))) return;
   try {
     const res = await fetch('/.netlify/functions/emergency-revoke-tokens', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ incidentId, affectedUserIds }),
     });
     const d = await res.json();
-    if (!res.ok) { alert(d.error || 'Revocation failed.'); return; }
-    alert(`✓ Emergency revocation complete. ${d.totalRevoked ?? 0} token(s) revoked. Affected users notified.`);
+    if (!res.ok) { window.showToast?.(d.error || 'Revocation failed.', { icon: '⚠️' }); return; }
+    window.showToast?.(`✓ Emergency revocation complete. ${d.totalRevoked ?? 0} token(s) revoked. Affected users notified.`, { icon: '⚠️' });
     loadBreachResponse();
-  } catch { alert('Connection failed.'); }
+  } catch { window.showToast?.('Connection failed.', { icon: '⚠️' }); }
 }
 
 function openIcoModal(incidentId, inc) {
@@ -8011,10 +8081,10 @@ async function submitIcoNotification() {
   const measuresTaken         = document.getElementById('ico-measures').value.trim();
 
   if (!natureOfBreach || !categoriesOfData || !likelyConsequences || !measuresTaken) {
-    alert('All 5 fields are required for ICO notification.'); return;
+    window.showToast?.('All 5 fields are required for ICO notification.', { icon: '⚠️' }); return;
   }
 
-  if (!confirm('Submit this notification to the ICO? This action will be permanently logged.')) return;
+  if (!(await window.confirmModal('This action will be permanently logged.', { title: 'Submit this notification to the ICO?' }))) return;
 
   try {
     const res = await fetch('/.netlify/functions/submit-regulator-notification', {
@@ -8022,11 +8092,11 @@ async function submitIcoNotification() {
       body: JSON.stringify({ incidentId, natureOfBreach, categoriesOfData, approximateSubjectCount, likelyConsequences, measuresTaken }),
     });
     const d = await res.json();
-    if (!res.ok) { alert(d.error || 'Submission failed.'); return; }
+    if (!res.ok) { window.showToast?.(d.error || 'Submission failed.', { icon: '⚠️' }); return; }
     document.getElementById('modal-ico-notification').classList.add('hidden');
-    alert(`✓ ICO notification logged. ${d.withinSla ? 'Within 72-hour SLA.' : '⚠️ Outside 72-hour SLA — ' + Math.round(d.hoursElapsed) + 'h elapsed.'}`);
+    window.showToast?.(`✓ ICO notification logged. ${d.withinSla ? 'Within 72-hour SLA.' : '⚠️ Outside 72-hour SLA — ' + Math.round(d.hoursElapsed) + 'h elapsed.'}`, { icon: '⚠️' });
     loadBreachResponse();
-  } catch { alert('Connection failed.'); }
+  } catch { window.showToast?.('Connection failed.', { icon: '⚠️' }); }
 }
 
 // ── popstate: back/forward navigation restores the correct view ──────────────
@@ -8211,7 +8281,7 @@ async function toggleHelpArticlePublished(id, newValue) {
     await api(`/.netlify/functions/admin-api?resource=help-articles&id=${id}`, { method: 'PATCH', body: JSON.stringify({ is_published: newValue }) });
     await mdLoadHelpArticles();
   } catch (e) {
-    showToast('Failed to update article: ' + (e.message || e), 'error');
+    window.showToast?.('Failed to update article: ' + (e.message || e), { icon: '⚠️' });
   }
 }
 
@@ -8239,14 +8309,14 @@ async function mdPreviewHelpSeed() {
 }
 
 async function mdApplyHelpSeed() {
-  if (!confirm('Apply the help article seed? Existing articles with matching titles will be updated in place.')) return;
+  if (!(await window.confirmModal('Existing articles with matching titles will be updated in place.', { title: 'Apply the help article seed?' }))) return;
   try {
     const d = await api('/.netlify/functions/admin-api?resource=help-articles-seed', { method: 'POST' });
-    showToast(`Seed applied — ${d.applied} articles upserted.`, 'success');
+    window.showToast?.(`Seed applied — ${d.applied} articles upserted.`, { icon: '✅' });
     document.getElementById('md-help-seed-preview').classList.add('hidden');
     await mdLoadHelpArticles();
   } catch (e) {
-    showToast('Seed failed: ' + (e.message || e), 'error');
+    window.showToast?.('Seed failed: ' + (e.message || e), { icon: '⚠️' });
   }
 }
 
@@ -8338,10 +8408,10 @@ function pfUpdateSaveBtn() {
 async function pfToggleEnabled(id, newVal) {
   try {
     await api(MD_API + '?resource=plan-feature-defs&id=' + id, { method: 'PATCH', body: JSON.stringify({ isEnabled: newVal }) });
-    showToast('Feature ' + (newVal ? 'enabled' : 'disabled') + '.', 'success');
+    window.showToast?.('Feature ' + (newVal ? 'enabled' : 'disabled') + '.', { icon: '✅' });
     await mdLoadPlanFeatures();
   } catch (e) {
-    showToast('Failed: ' + (e.message || e), 'error');
+    window.showToast?.('Failed: ' + (e.message || e), { icon: '⚠️' });
   }
 }
 
@@ -8382,10 +8452,10 @@ async function pfSave(applyMode) {
   try {
     const r = await api(MD_API + '?resource=plan-feature-values', { method: 'PATCH', body: JSON.stringify({ updates, applyMode }) });
     const who = applyMode === 'new' ? `${r.affectedSubscribers} existing subscriber(s) frozen` : 'applied to all accounts';
-    showToast(`Saved ${r.applied} change(s) — ${who}.`, 'success');
+    window.showToast?.(`Saved ${r.applied} change(s) — ${who}.`, { icon: '✅' });
     await mdLoadPlanFeatures();
   } catch (e) {
-    showToast('Save failed: ' + (e.message || e), 'error');
+    window.showToast?.('Save failed: ' + (e.message || e), { icon: '⚠️' });
   }
 }
 
@@ -8419,7 +8489,7 @@ async function pfSubmitAddFeature() {
   const key = document.getElementById('pf-add-key').value.trim();
   const label = document.getElementById('pf-add-label').value.trim();
   const category = document.getElementById('pf-add-cat').value.trim();
-  if (!key || !label || !category) { showToast('Key, label and category are required.', 'error'); return; }
+  if (!key || !label || !category) { window.showToast?.('Key, label and category are required.', { icon: '⚠️' }); return; }
   const body = {
     key, label, category,
     description: document.getElementById('pf-add-desc').value.trim() || null,
@@ -8432,10 +8502,10 @@ async function pfSubmitAddFeature() {
   try {
     await api(MD_API + '?resource=plan-feature-defs', { method: 'POST', body: JSON.stringify(body) });
     pfCloseAddFeature();
-    showToast('Feature added.', 'success');
+    window.showToast?.('Feature added.', { icon: '✅' });
     await mdLoadPlanFeatures();
   } catch (e) {
-    showToast('Failed to add: ' + (e.message || e), 'error');
+    window.showToast?.('Failed to add: ' + (e.message || e), { icon: '⚠️' });
   }
 }
 
@@ -8532,10 +8602,10 @@ function afUpdateSaveBtn() {
 async function afToggleEnabled(id, newVal) {
   try {
     await api(MD_API + '?resource=assistant-feature-defs&id=' + id, { method: 'PATCH', body: JSON.stringify({ isEnabled: newVal }) });
-    showToast('Feature ' + (newVal ? 'enabled' : 'disabled') + '.', 'success');
+    window.showToast?.('Feature ' + (newVal ? 'enabled' : 'disabled') + '.', { icon: '✅' });
     await mdLoadAssistantFeatures();
   } catch (e) {
-    showToast('Failed: ' + (e.message || e), 'error');
+    window.showToast?.('Failed: ' + (e.message || e), { icon: '⚠️' });
   }
 }
 
@@ -8547,10 +8617,10 @@ async function afSave() {
   if (!updates.length) return;
   try {
     const r = await api(MD_API + '?resource=assistant-feature-values', { method: 'PATCH', body: JSON.stringify({ updates }) });
-    showToast(`Saved ${r.applied} change(s) — live immediately.`, 'success');
+    window.showToast?.(`Saved ${r.applied} change(s) — live immediately.`, { icon: '✅' });
     await mdLoadAssistantFeatures();
   } catch (e) {
-    showToast('Save failed: ' + (e.message || e), 'error');
+    window.showToast?.('Save failed: ' + (e.message || e), { icon: '⚠️' });
   }
 }
 
@@ -8581,7 +8651,7 @@ async function afSubmitAddFeature() {
   const key = document.getElementById('af-add-key').value.trim();
   const label = document.getElementById('af-add-label').value.trim();
   const category = document.getElementById('af-add-cat').value.trim();
-  if (!key || !label || !category) { showToast('Key, label and category are required.', 'error'); return; }
+  if (!key || !label || !category) { window.showToast?.('Key, label and category are required.', { icon: '⚠️' }); return; }
   const body = {
     key, label, category,
     description: document.getElementById('af-add-desc').value.trim() || null,
@@ -8590,10 +8660,10 @@ async function afSubmitAddFeature() {
   try {
     await api(MD_API + '?resource=assistant-feature-defs', { method: 'POST', body: JSON.stringify(body) });
     afCloseAddFeature();
-    showToast('Capability added.', 'success');
+    window.showToast?.('Capability added.', { icon: '✅' });
     await mdLoadAssistantFeatures();
   } catch (e) {
-    showToast('Failed to add: ' + (e.message || e), 'error');
+    window.showToast?.('Failed to add: ' + (e.message || e), { icon: '⚠️' });
   }
 }
 
@@ -8678,11 +8748,11 @@ async function mdSaveRecord() {
     else if (f.type === 'list') value = el.value.split('\n').map(s => s.trim()).filter(Boolean);
     else if (f.type === 'json') {
       try { value = el.value.trim() ? JSON.parse(el.value) : {}; }
-      catch { alert(f.label + ' must be valid JSON.'); el.focus(); return; }
+      catch { window.showToast?.(f.label + ' must be valid JSON.', { icon: '⚠️' }); el.focus(); return; }
     }
     else value = el.value;
     if (f.required && (value === '' || value === null)) {
-      alert(f.label + ' is required.');
+      window.showToast?.(f.label + ' is required.', { icon: '⚠️' });
       el.focus();
       return;
     }
@@ -8694,7 +8764,7 @@ async function mdSaveRecord() {
     mdCloseForm();
     mdLoadTab(_mdActiveTab);
   } catch (e) {
-    alert('Save failed: ' + (e.message || e));
+    window.showToast?.('Save failed: ' + (e.message || e), { icon: '⚠️' });
   }
 }
 
@@ -8751,7 +8821,7 @@ async function managePriceLoadHistory(planId) {
 
 async function managePriceSave() {
   const price = Number(document.getElementById('mp-new-price').value);
-  if (!(price > 0)) { alert('Enter a positive monthly price.'); return; }
+  if (!(price > 0)) { window.showToast?.('Enter a positive monthly price.', { icon: '⚠️' }); return; }
   const effRaw = document.getElementById('mp-effective-from').value; // '' or 'YYYY-MM-DDTHH:mm' (local)
   const body = { planId: _mpPlanId, newPriceGbp: price };
   if (effRaw) body.effectiveFrom = new Date(effRaw).toISOString();
@@ -8812,7 +8882,7 @@ async function downloadRopaExport() {
     a.click();
     URL.revokeObjectURL(url);
   } catch (e) {
-    alert('RoPA export failed: ' + (e.message || e));
+    window.showToast?.('RoPA export failed: ' + (e.message || e), { icon: '⚠️' });
   }
 }
 
@@ -8910,7 +8980,7 @@ async function confirmCascadeDelete() {
     closeCascadeDeleteSheet();
     if (typeof _cascadeOnSuccess === 'function') _cascadeOnSuccess();
   } catch (e) {
-    alert('Delete failed: ' + (e.message || e));
+    window.showToast?.('Delete failed: ' + (e.message || e), { icon: '⚠️' });
     btn.disabled = false;
     btn.textContent = 'Delete';
   }

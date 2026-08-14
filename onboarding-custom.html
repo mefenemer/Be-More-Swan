@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Custom Operations Setup | Be More Swan</title>
+  <!-- Toast + the confirm/alert/prompt dialogs. In <head> and not deferred: handlers reach
+       for these, so they must exist before anything can run. -->
+  <script src="/dialogs.js"></script>
   <link href="./style.css" rel="stylesheet">
   <script src="./explainers.js?v=20260630-2" defer></script>
   <!-- Plan limits (maxApps/maxSteps) for the wizard gates. Not deferred: the inline scripts
@@ -489,14 +492,14 @@
       if (prob.value.trim().length < 10) { prob.classList.add('input-error'); prob.nextElementSibling.classList.remove('hidden'); isValid = false; }
     } else if (currentStep === 3) {
       const trigger = document.querySelector('input[name="trigger_type"]:checked');
-      if (!trigger) { alert("Please select a trigger type."); isValid = false; }
+      if (!trigger) { window.showToast?.("Please select a trigger type.", { icon: '⚠️' }); isValid = false; }
       const source = document.querySelector('input[name="content_source"]:checked');
-      if (!source) { alert("Please select an input source."); isValid = false; }
+      if (!source) { window.showToast?.("Please select an input source.", { icon: '⚠️' }); isValid = false; }
     } else if (currentStep === 4) {
       const hasCheckedApp = document.querySelectorAll('input[name="app_selection"]:checked').length > 0;
       const hasOtherApp = document.getElementById('other_apps').value.trim() !== '';
       if (!hasCheckedApp && !hasOtherApp) {
-        alert("Please select at least one delivery destination or system endpoint.");
+        window.showToast?.("Please select at least one delivery destination or system endpoint.", { icon: '⚠️' });
         isValid = false;
       }
     } else if (currentStep === 5 && !document.getElementById('tech_escape_hatch').checked) {
@@ -584,7 +587,7 @@ ${document.getElementById('acceptance_criteria_rules').value || missingFallback}
     if (!validateCurrentStep()) return;
     if (currentStep === 6) generateBrief();
     if (currentStep < totalSteps) { currentStep++; updateUI(); }
-    else { alert("Blueprint finalized! Redirecting to checkout..."); }
+    else { window.showToast?.("Blueprint finalized! Redirecting to checkout...", { icon: '⚠️' }); }
   }
 
   function prevStep() {

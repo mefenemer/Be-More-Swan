@@ -95,7 +95,12 @@ check('the surviving set is derived from the group by ROW, not by platform', () 
     assert.ok(!/p\.platform !== post\.platform/.test(code), 'platform-wise filtering is the bug this replaces');
     assert.match(fn, /formatKey: p\.formatKey \?\? null/, 'survivors must keep their declared formats');
     assert.match(fn, /if \(!remaining\.length\)/, 'the last destination must be refused before the request, not by a 400');
-    assert.match(fn, /confirm\(/, 'removal deletes that destination\'s caption, media and overlays — it has to ask');
+    // It has to ask — and ask in the product's own dialog. A bare confirm() is the browser's chrome
+    // dropped into the middle of the review modal, which is what this replaced.
+    assert.match(fn, /await window\.confirmModal\(/,
+        'removal deletes that destination\'s caption, media and overlays — it has to ask');
+    assert.ok(!/(?<!window\.)\bconfirm\(/.test(fn.replace(/window\.confirmModal\(/g, '')),
+        'ask through window.confirmModal, not the browser confirm()');
 });
 
 check('set-post-platforms is called from exactly one place', () => {

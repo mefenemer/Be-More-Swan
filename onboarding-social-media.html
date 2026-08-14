@@ -5,6 +5,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Assistant Setup | Be More Swan</title>
+  <!-- Toast + the confirm/alert/prompt dialogs. In <head> and not deferred: handlers reach
+       for these, so they must exist before anything can run. -->
+  <script src="/dialogs.js"></script>
   <link href="./style.css" rel="stylesheet">
   <script src="./explainers.js?v=20260630-2" defer></script>
   <!-- Generated from src/config/*.ts by `npm run gen:constants`. Needed here for
@@ -1310,7 +1313,7 @@
     // --- Step 1 Validation: assistant must be selected ---
     if (currentStep === 1) {
       if (!document.querySelector('input[name="selected_assistant"]:checked')) {
-        alert('Please select a Digital Assistant to continue.');
+        window.showToast?.('Please select a Digital Assistant to continue.', { icon: '⚠️' });
         return false;
       }
       return true;
@@ -1405,7 +1408,7 @@
       }
 
       if (!hasPlatform) {
-        alert("Please select a platform.");
+        window.showToast?.("Please select a platform.", { icon: '⚠️' });
         isValid = false;
       } else if (!allHandlesValid) {
         isValid = false;
@@ -1956,21 +1959,21 @@
         document.getElementById('setup-loading-view').classList.add('hidden');
         document.getElementById('btn-next').disabled = false;
         document.getElementById('btn-back').style.display = 'block';
-        alert(`Setup failed: ${errData.error}`);
+        window.showToast?.(`Setup failed: ${errData.error}`, { icon: '⚠️' });
       } else {
         document.getElementById('setup-initial-view').classList.remove('hidden');
         document.getElementById('setup-loading-view').classList.add('hidden');
         document.getElementById('btn-next').disabled = false;
         document.getElementById('btn-back').style.display = 'block';
         const errData = await response.json();
-        alert(`Setup failed: ${errData.error}`);
+        window.showToast?.(`Setup failed: ${errData.error}`, { icon: '⚠️' });
       }
     } catch (err) {
       document.getElementById('setup-initial-view').classList.remove('hidden');
       document.getElementById('setup-loading-view').classList.add('hidden');
       document.getElementById('btn-next').disabled = false;
       document.getElementById('btn-back').style.display = 'block';
-      alert('Connection failed. Please try again.');
+      window.showToast?.('Connection failed. Please try again.', { icon: '⚠️' });
     }
   } // end submitToBackend
 
@@ -2227,7 +2230,7 @@
 
   async function generateAINames() {
     const theme = document.getElementById('ai_theme_input').value.trim();
-    if (!theme) return alert('Please enter a theme first.');
+    if (!theme) return window.showToast?.('Please enter a theme first.', { icon: '⚠️' });
 
     const btn = document.getElementById('btn-generate-names');
     const resultsContainer = document.getElementById('ai-names-results');
@@ -2309,11 +2312,13 @@
     }
   }
   async function clearDraftAndRestart() {
-    if (confirm("Are you sure? This will delete your current progress and restart onboarding.")) {
+    if (await window.confirmModal('This deletes your current progress and restarts onboarding.', {
+      title: 'Start again?', confirmLabel: 'Yes, start again', cancelLabel: 'Keep my progress',
+    })) {
       try {
         if (draftId) await fetch(`/.netlify/functions/onboarding-draft?id=${draftId}`, { method: 'DELETE' });
         window.location.href = 'onboarding.html?restart=true';
-      } catch (e) { alert("Could not clear draft."); }
+      } catch (e) { window.showToast?.("Could not clear draft.", { icon: '⚠️' }); }
     }
   }
   window.submitToBackend = submitToBackend;
@@ -2479,7 +2484,7 @@ async function acceptDpaAndRetry() {
   } catch {
     btn.disabled = false;
     btn.textContent = 'Accept DPA & Activate Assistant';
-    alert('Failed to record DPA acceptance. Please try again.');
+    window.showToast?.('Failed to record DPA acceptance. Please try again.', { icon: '⚠️' });
   }
 }
 </script>

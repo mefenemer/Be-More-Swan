@@ -2429,7 +2429,7 @@ document.getElementById('btn-confirm-revoke-all')?.addEventListener('click', asy
     }
   } catch {
     document.getElementById('modal-revoke-all').classList.add('hidden');
-    alert('Network error. Please try again.');
+    window.showToast?.('Network error. Please try again.', { icon: '⚠️' });
   } finally {
     btn.textContent = 'Yes, Revoke All';
     btn.disabled = false;
@@ -2456,9 +2456,9 @@ window._revokeConnection = async function (connectionId, onSuccess) {
       body: JSON.stringify({ scope: 'single', connectionId }),
     });
     const data = await res.json();
-    if (!res.ok) { alert(data.error || 'Failed to disconnect.'); return; }
+    if (!res.ok) { window.showToast?.(data.error || 'Failed to disconnect.', { icon: '⚠️' }); return; }
     if (typeof onSuccess === 'function') onSuccess();
-  } catch { alert('Network error. Please try again.'); }
+  } catch { window.showToast?.('Network error. Please try again.', { icon: '⚠️' }); }
 };
 </script>
 

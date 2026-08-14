@@ -28,6 +28,7 @@ import { recordEvent } from '../../src/utils/revenue-ledger';
 import { getBlueprintVersion } from '../../src/utils/blueprint-version';
 import { enqueueLeadHandoff } from '../../src/utils/lead-handoff';
 import { CONTACT_AGGREGATE_SCOPE_SQL, CONTACT_BUCKET_SQL } from '../../src/config/lead-contact-state';
+import { needsPersonalInboxConfirmation } from '../../src/config/lead-email-kind';
 import {
     resolveSourceLabel, savedSearchLabel, isBatchable, decodeCursor, encodeCursor,
     INBOX_PAGE_SIZE, type Signal, type HandoffState,
@@ -99,10 +100,15 @@ function classifySignal(row: LeadRow): { state: HandoffState; reviewReason: stri
         return { state: 'filtered', reviewReason: null, filterReason: 'Scored cold against your profile' };
     }
 
-    if (emailKind === 'personal' && emailSource === 'scrape') {
+    // Same predicate as the server-side send gate in lead-generation.ts — if these two ever
+    // disagree, the inbox batch-approves a lead that the sender then refuses to send, or worse,
+    // stays quiet about one it will happily send to a named individual.
+    if (needsPersonalInboxConfirmation(emailKind, emailSource)) {
         return {
             state: 'needs_review',
-            reviewReason: 'The only contact found belongs to a named individual and was scraped — approve it yourself rather than in a batch.',
+            reviewReason: emailSource === 'provider'
+                ? 'The only contact found belongs to a named individual and came from a paid data provider — approve it yourself rather than in a batch.'
+                : 'The only contact found belongs to a named individual and was scraped — approve it yourself rather than in a batch.',
             filterReason: null,
         };
     }

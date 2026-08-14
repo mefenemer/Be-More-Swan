@@ -5,6 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Onboarding | Be More Swan</title>
+    <!-- Toast + the confirm/alert/prompt dialogs. In <head> and not deferred: handlers reach
+         for these, so they must exist before anything can run. -->
+    <script src="/dialogs.js"></script>
     <link href="./style.css" rel="stylesheet">
     <link rel="icon" href="/favicon/favicon.ico" sizes="any">
     <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
@@ -47,7 +50,7 @@
 
                 if (response.status === 401 || response.status === 403) {
                     // The backend caught an unverified user that bypassed the frontend check
-                    alert("Your account is pending verification. Please check your email.");
+                    window.showToast?.("Your account is pending verification. Please check your email.", { icon: '⚠️' });
                     window.location.href = '/check-email.html';
                     return;
                 }
@@ -59,7 +62,7 @@
                     window.location.href = '/dashboard.html';
                 } else {
                     console.error("Provisioning Error:", data.error);
-                    alert(data.error || "Something went wrong.");
+                    window.showToast?.(data.error || "Something went wrong.", { icon: '⚠️' });
                 }
             } catch (error) {
                 console.error("Network Error:", error);
@@ -181,7 +184,7 @@
                         <!-- Performance Marketing + Inventory & Order are COMING SOON, not Locked.
                              Their wizards (onboarding-performance.html / onboarding-inventory.html)
                              collect six steps of answers and end at
-                             `alert("Blueprint finalized! Redirecting to checkout...")` — they persist
+                             `window.showToast?.("Blueprint finalized! Redirecting to checkout...", { icon: '⚠️' })` — they persist
                              nothing and create no assistant, so there is no state in which selecting
                              one is useful. "Locked" was the wrong affordance regardless: it invites an
                              upgrade, and no tier unlocks a wizard that does not work.

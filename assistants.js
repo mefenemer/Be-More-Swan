@@ -2101,7 +2101,9 @@ window._detailRqBlogAct = async function (btn, action) {
 
     // Delete — hard-deletes the draft (blog-posts.ts DELETE, org-scoped; published posts are blocked).
     if (action === 'delete') {
-        if (!confirm('Delete this blog draft? This cannot be undone.')) return;
+        if (!(await window.confirmModal('This cannot be undone.', {
+            title: 'Delete this blog draft?', confirmLabel: 'Yes, delete', cancelLabel: 'Keep it',
+        }))) return;
         const buttons = card.querySelectorAll('button');
         buttons.forEach((b) => { b.disabled = true; });
         try {
@@ -2121,8 +2123,11 @@ window._detailRqBlogAct = async function (btn, action) {
     // Unpublish — takes the post off the org's own site and back to draft. Syndicated copies can't
     // be retracted (no adapter unpublish), so say so up front and name the ones that stay live.
     if (action === 'unpublish') {
-        if (!confirm('Take this post off your site? It goes back to a draft — the URL and its content are kept, '
-            + 'so you can publish it again later. Copies on other platforms stay live.')) return;
+        if (!(await window.confirmModal(
+            'It goes back to a draft — the URL and its content are kept, so you can publish it again later.'
+            + '<br><br>Copies on other platforms stay live.',
+            { title: 'Take this post off your site?', confirmLabel: 'Yes, unpublish', cancelLabel: 'Leave it live' },
+        ))) return;
         const buttons = card.querySelectorAll('button');
         buttons.forEach((b) => { b.disabled = true; });
         try {
@@ -2947,7 +2952,9 @@ window._toggleDirective = async function(id, btn) {
 };
 
 window._deleteDirective = async function(id) {
-    if (!confirm('Delete this directive? Your assistant will no longer follow it.')) return;
+    if (!(await window.confirmModal('Your assistant will no longer follow it.', {
+        title: 'Delete this directive?', confirmLabel: 'Yes, delete', cancelLabel: 'Keep it',
+    }))) return;
     try { await fetch(`/.netlify/functions/content-rules?id=${id}`, { method: 'DELETE' }); } catch { /* non-critical */ }
     window._renderRunbookDirectives();
 };
@@ -4555,16 +4562,14 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                 archiveBtn.disabled = true;
                 try {
                     const r = await fetch(`/.netlify/functions/manage-assistant?id=${assistantId}`, { method: 'DELETE' });
-                    if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'Failed to archive assistant.'); archiveBtn.disabled = false; return; }
+                    if (!r.ok) { const d = await r.json().catch(() => ({})); window.showToast?.(d.error || 'Failed to archive assistant.', { icon: '⚠️' }); archiveBtn.disabled = false; return; }
                     window.showToast?.('Assistant archived.');
                     window.loadView?.('dashboard');
-                } catch { alert('Network error — please try again.'); archiveBtn.disabled = false; }
+                } catch { window.showToast?.('Network error — please try again.', { icon: '⚠️' }); archiveBtn.disabled = false; }
             };
-            if (window.showConfirmModal) {
-                window.showConfirmModal(message, doArchive, { title: 'Archive assistant?', confirmLabel: 'Yes, archive', cancelLabel: 'Keep assistant' });
-            } else if (confirm(message)) {
-                await doArchive();
-            }
+            // No confirm() fallback any more: the dialogs live in /dialogs.js, which every page
+            // running this script loads in <head>.
+            window.showConfirmModal(message, doArchive, { title: 'Archive assistant?', confirmLabel: 'Yes, archive', cancelLabel: 'Keep assistant' });
         };
 
         // Issue #191: an archived assistant can't be archived or paused/resumed again — hide
@@ -4623,7 +4628,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                     });
                     if (!r.ok) {
                         const d = await r.json().catch(() => ({}));
-                        alert(d.error || 'Failed to reinstate assistant.');
+                        window.showToast?.(d.error || 'Failed to reinstate assistant.', { icon: '⚠️' });
                         reinstateBtn.disabled = false;
                         reinstateBtn.textContent = original;
                         return;
@@ -4631,7 +4636,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                     window.showToast?.('Assistant reinstated.');
                     window.routeToAssistantDetail?.(assistantId);
                 } catch {
-                    alert('Network error — please try again.');
+                    window.showToast?.('Network error — please try again.', { icon: '⚠️' });
                     reinstateBtn.disabled = false;
                     reinstateBtn.textContent = original;
                 }
@@ -5686,7 +5691,7 @@ async function _renderKickOff(assistantId) {
             });
             if (!res.ok) {
                 const d = await res.json().catch(() => ({}));
-                alert(d.error || 'Could not start the assistant. Please check the checklist and try again.');
+                window.showToast?.(d.error || 'Could not start the assistant. Please check the checklist and try again.', { icon: '⚠️' });
                 btn.disabled = false;
                 btn.textContent = original;
                 return;
@@ -5698,7 +5703,7 @@ async function _renderKickOff(assistantId) {
             if (window._detailCurrentData) { window._detailCurrentData.lifecycleStatus = 'working'; window._detailCurrentData.isActive = true; }
             window._renderStatusPill?.();
         } catch {
-            alert('Network error — please try again.');
+            window.showToast?.('Network error — please try again.', { icon: '⚠️' });
             btn.disabled = false;
             btn.textContent = original;
         }
@@ -6307,7 +6312,9 @@ function _buildRuleRow(catId, placeholder, rule) {
 
     tr.querySelector('.ar-del').addEventListener('click', async () => {
         if (tr.dataset.ruleId) {
-            if (!confirm('Delete this rule? It will no longer be applied to this assistant.')) return;
+            if (!(await window.confirmModal('It will no longer be applied to this assistant.', {
+                title: 'Delete this rule?', confirmLabel: 'Yes, delete', cancelLabel: 'Keep it',
+            }))) return;
             _setRulesStatus('Saving…');
             try {
                 const r = await fetch(`${RULES_API}?id=${tr.dataset.ruleId}`, { method: 'DELETE' });
@@ -7206,11 +7213,7 @@ window._deleteGoal = async function (id) {
             if (res.ok) await _fetchAndRenderGoals(_goalsAssistantId);
         } catch { /* no-op */ }
     };
-    if (window.showConfirmModal) {
-        window.showConfirmModal('Delete this goal? This cannot be undone.', doDelete, { title: 'Delete goal?', confirmLabel: 'Yes, delete goal', cancelLabel: 'Keep goal' });
-    } else if (confirm('Delete this goal? This cannot be undone.')) {
-        await doDelete();
-    }
+    window.showConfirmModal('This cannot be undone.', doDelete, { title: 'Delete goal?', confirmLabel: 'Yes, delete goal', cancelLabel: 'Keep goal' });
 };
 
 // ── Review Progress (US2.2) — trendline vs trajectory chart + base-tier manual path ──
@@ -7350,7 +7353,7 @@ function _openUpgrade(msg) {
     if (typeof window.openUpgradeModal === 'function') {
         window.openUpgradeModal('Upgrade your plan', 'Premium AI optimization', msg);
     } else {
-        alert(msg);
+        window.showToast?.(msg, { icon: '⚠️' });
     }
 }
 
@@ -7417,7 +7420,7 @@ window._toggleAutonomousMedia = async function () {
         _autonomousMediaEnabled = !!data.autonomousMediaEnabled;
         _autonomousMediaCap = data.autonomousMediaMonthlyCap ?? _autonomousMediaCap;
         _applyAutonomousMediaUi();
-    } catch (e) { alert('Could not update the setting: ' + e.message); }
+    } catch (e) { window.showToast?.('Could not update the setting: ' + e.message, { icon: '⚠️' }); }
 };
 
 // issue #64: the cap is meant to be bounded by the plan's included monthly credits. Raising it
@@ -7439,7 +7442,7 @@ window._saveAutonomousMediaCap = async function () {
                 confirmOverage ? 'Monthly credit cap updated — extra usage above your plan allowance will be billed.'
                                 : 'Monthly credit cap updated.'
             );
-        } catch (e) { alert('Could not update the cap: ' + e.message); input.value = _autonomousMediaCap; }
+        } catch (e) { window.showToast?.('Could not update the cap: ' + e.message, { icon: '⚠️' }); input.value = _autonomousMediaCap; }
     };
 
     if (cap > _planMonthlyCredits) {
@@ -7453,13 +7456,8 @@ window._saveAutonomousMediaCap = async function () {
             confirmColor: '#ff007f',
             onCancel: () => { input.value = _autonomousMediaCap; },
         };
-        if (window.showConfirmModal) {
-            window.showConfirmModal(message, () => commit(true), opts);
-        } else if (confirm(message)) {
-            await commit(true);
-        } else {
-            input.value = _autonomousMediaCap;
-        }
+        // opts.onCancel already restores the input, so the modal covers both answers.
+        window.showConfirmModal(message, () => commit(true), opts);
         return;
     }
 
@@ -7524,7 +7522,7 @@ async function _persistMediaSources(prev) {
         _mediaSources = _normalizeMediaSources(data.mediaSources);
     } catch (e) {
         _mediaSources = prev;   // revert on failure
-        alert('Could not update media sources: ' + e.message);
+        window.showToast?.('Could not update media sources: ' + e.message, { icon: '⚠️' });
     }
     _applyMediaSourcesUi();
 }
@@ -7599,15 +7597,24 @@ window._getAiRecommendations = async function (goalId) {
 };
 
 // Progress selected recommendations — opens a checklist confirmation.
-window._progressSelectedRecs = function () {
+window._progressSelectedRecs = async function () {
     const checked = [...document.querySelectorAll('.rec-checkbox:checked')];
     if (!checked.length) {
-        alert('Please select at least one recommendation to progress.');
+        window.showToast?.('Please select at least one recommendation to progress.', { icon: '⚠️' });
         return;
     }
+    // The recommendations are model-written text read back out of the DOM, so they are escaped
+    // into the dialog rather than trusted as markup.
     const items = checked.map(cb => cb.closest('label')?.querySelector('span')?.textContent?.trim()).filter(Boolean);
-    const list = items.map(t => `• ${t}`).join('\n');
-    if (confirm(`Progress the following ${items.length} recommendation${items.length > 1 ? 's' : ''}?\n\n${list}\n\nThis will add them to your action plan.`)) {
+    const list = items
+        .map(t => `<span style="display:block;margin-top:.35rem;padding-left:.85rem;text-indent:-.85rem;">• ${window.escapeHtml(t)}</span>`)
+        .join('');
+    if (await window.confirmModal(`${list}<br><br>This will add them to your action plan.`, {
+        title: `Progress ${items.length} recommendation${items.length > 1 ? 's' : ''}?`,
+        confirmLabel: 'Yes, add them',
+        cancelLabel: 'Not yet',
+        confirmColor: '#059669',
+    })) {
         const box = document.getElementById('review-recommendations');
         if (box) {
             box.innerHTML += `<div class="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-800 font-medium">
@@ -7636,10 +7643,10 @@ window._magicWand = async function (field, inputId, btn) {
         });
         const data = await res.json().catch(() => ({}));
         if (res.status === 402) return _openUpgrade('The AI Magic Wand requires a higher plan.');
-        if (!res.ok || !data.suggestion) { alert(data.error || 'Could not generate a suggestion.'); return; }
+        if (!res.ok || !data.suggestion) { window.showToast?.(data.error || 'Could not generate a suggestion.', { icon: '⚠️' }); return; }
         _showWandSuggestion(field, inputId, data.suggestion);
     } catch {
-        alert('Could not generate a suggestion.');
+        window.showToast?.('Could not generate a suggestion.', { icon: '⚠️' });
     } finally {
         if (btn) { btn.disabled = false; btn.style.opacity = ''; }
         wandImg?.classList.remove('is-casting');

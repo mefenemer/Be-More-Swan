@@ -28,6 +28,8 @@ import { fitForPlatform, isShortForm, type BrandHashtags } from '../../src/utils
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { operationalSetupLines } from '../../src/utils/operational-setup';
 import { renderBlueprintPrompt } from '../../src/utils/blueprint-prompt';
+import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
+import { resolvePostingSchedule } from '../../src/config/posting-cadence';
 import {
     buildVarietyBlock, VARIETY_LOOKBACK, findNearDuplicate, nearDuplicateRetryPrompt,
     type PriorPost,
@@ -477,7 +479,17 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // the prompt a customer actually gets. stripDisclosureEchoes() in platform-caption.ts still
         // cleans up any disclosure the model echoes anyway, including from blueprints compiled
         // before the withholding rules existed.
+        // What day it is. Stated FIRST, before the blueprint dump: the blueprint carries its own
+        // dates (section 2's effectiveDate is a hire-time snapshot) and the model must read those
+        // as history, not as "now". Without this block nothing in the prompt named the date at all,
+        // so drafts dated themselves from the model's training prior — captions saying "in 2025",
+        // wrong-year titles, off-season hooks. Scoped to the slot's publish date and the account's
+        // posting timezone, because a draft generated days ahead is READ on its slot, not today.
         let systemPrompt = `You are an expert social media copywriter.\n`;
+        systemPrompt += `${currentDatePromptBlock({
+            publishDate: job.target_publish_date,
+            timezone: resolvePostingSchedule(brandCtx).timezone,
+        })}\n\n`;
         systemPrompt += renderBlueprintPrompt(sections);
 
         // Inspo (AC5) — the styles/tones the user parked in the Inspo tab. Injected here, NOT

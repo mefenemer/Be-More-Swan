@@ -25,7 +25,9 @@ export type { EmailKind };
 export interface EnrichmentResult {
     email: string;
     kind: EmailKind;
-    source: 'scrape';
+    // 'provider' is set by the worker's tier-2 waterfall, not by anything in this file — this
+    // module only ever scrapes. Widened here because the worker reuses this shape for both.
+    source: 'scrape' | 'provider';
     /** The page it was actually found on — provenance for the Review Queue. */
     foundOn: string;
 }

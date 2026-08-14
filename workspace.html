@@ -5,6 +5,10 @@
   <!-- Loaded in <head> (not with the body scripts) so window.ScrollLock exists before any
        overlay or loadView call can reach for it. -->
   <script src="/src/components/scroll-lock.js"></script>
+  <!-- Same reasoning: showToast and the confirm/alert/prompt dialogs must exist before any
+       handler can reach for them. Not deferred — a deferred script runs after parsing, and an
+       inline block that calls one of these at load time would find nothing there. -->
+  <script src="/dialogs.js"></script>
   <script src="./session-timeout.js" defer></script>
   <script src="/src/i18n.js"></script>
   <meta charset="UTF-8">
@@ -143,7 +147,7 @@ async function submitDpaAcceptance(btn) {
     } catch {
         btn.disabled = false;
         btn.textContent = 'Accept DPA & Continue';
-        alert('Failed to record acceptance. Please try again.');
+        window.showToast?.('Failed to record acceptance. Please try again.', { icon: '⚠️' });
     }
 }
 </script>
@@ -226,7 +230,7 @@ async function submitTosAcceptance(btn) {
     } catch {
         btn.disabled = false;
         btn.textContent = 'Accept Terms & Continue';
-        alert('Failed to record acceptance. Please try again.');
+        window.showToast?.('Failed to record acceptance. Please try again.', { icon: '⚠️' });
     }
 }
 
@@ -1673,7 +1677,7 @@ window.showComplianceModals = function showComplianceModals(force) {
       } catch {
         btn.disabled = false;
         btn.textContent = 'Request Access to Existing Workspace';
-        alert('Could not send the request. Please try again.');
+        window.showToast?.('Could not send the request. Please try again.', { icon: '⚠️' });
       }
     };
     m.classList.remove('hidden');
@@ -2169,7 +2173,7 @@ function formatCurrency(amount, currency) {
           } catch (e) {
             endBtn.disabled = false;
             endBtn.textContent = 'End Session';
-            alert('Failed to end session. Please try again.');
+            window.showToast?.('Failed to end session. Please try again.', { icon: '⚠️' });
           }
         });
 
@@ -3119,32 +3123,7 @@ function formatCurrency(amount, currency) {
       finally { window.setBusyCursor(false); }
     };
 
-    // Lightweight, dependency-free toast. Inline styles on purpose: arbitrary
-    // Tailwind classes aren't in the prebuilt style.css, so they'd no-op here.
-    window.showToast = function (message, opts = {}) {
-      let container = document.getElementById('aura-toast-container');
-      if (!container) {
-        container = document.createElement('div');
-        container.id = 'aura-toast-container';
-        container.style.cssText = 'position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);z-index:11000;display:flex;flex-direction:column;gap:.5rem;align-items:center;pointer-events:none;';
-        document.body.appendChild(container);
-      }
-      const toast = document.createElement('div');
-      toast.setAttribute('role', 'status');
-      toast.style.cssText = 'pointer-events:auto;max-width:90vw;background:#1f2937;color:#fff;padding:.75rem 1rem;border-radius:.75rem;box-shadow:0 10px 25px rgba(0,0,0,.18);font-size:.875rem;font-weight:500;display:flex;align-items:center;gap:.5rem;opacity:0;transform:translateY(.5rem);transition:opacity .2s ease,transform .2s ease;';
-      const icon = document.createElement('span');
-      icon.textContent = opts.icon || '🔒';
-      const text = document.createElement('span');
-      text.textContent = message;
-      toast.append(icon, text);
-      container.appendChild(toast);
-      requestAnimationFrame(() => { toast.style.opacity = '1'; toast.style.transform = 'translateY(0)'; });
-      setTimeout(() => {
-        toast.style.opacity = '0';
-        toast.style.transform = 'translateY(.5rem)';
-        setTimeout(() => toast.remove(), 250);
-      }, opts.duration || 4000);
-    };
+    // showToast now lives in /dialogs.js (loaded in <head>).
 
     const _LOCK_SVG = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>';
 
@@ -4535,32 +4514,8 @@ function formatCurrency(amount, currency) {
     }
   };
 
-  // ── US3: destructive confirm modal + draft cancellation ──────────────
-  // Generic confirm modal (inline styles — arbitrary Tailwind classes aren't in the prebuilt CSS).
-  window.showConfirmModal = function(message, onConfirm, opts = {}) {
-    document.getElementById('aura-confirm-modal')?.remove();
-    const overlay = document.createElement('div');
-    overlay.id = 'aura-confirm-modal';
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:11500;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);padding:1rem;';
-    const title   = opts.title   || 'Cancel setup?';
-    const confirm = opts.confirmLabel || 'Yes, delete draft';
-    const cancel  = opts.cancelLabel  || 'Keep editing';
-    const confirmBg = opts.confirmColor || '#dc2626';
-    overlay.innerHTML = `
-      <div style="background:#fff;border-radius:1rem;max-width:24rem;width:100%;padding:1.5rem;box-shadow:0 20px 50px rgba(0,0,0,.25);">
-        <h3 style="font-size:1.05rem;font-weight:700;color:#111827;margin:0 0 .5rem;">${title}</h3>
-        <p style="font-size:.875rem;color:#4b5563;margin:0 0 1.25rem;line-height:1.5;">${message}</p>
-        <div style="display:flex;gap:.5rem;justify-content:flex-end;">
-          <button id="acm-cancel" style="cursor:pointer;font-size:.875rem;font-weight:600;color:#374151;background:#fff;border:1px solid #d1d5db;padding:.5rem .9rem;border-radius:.6rem;">${cancel}</button>
-          <button id="acm-confirm" style="cursor:pointer;font-size:.875rem;font-weight:600;color:#fff;background:${confirmBg};border:none;padding:.5rem .9rem;border-radius:.6rem;">${confirm}</button>
-        </div>
-      </div>`;
-    document.body.appendChild(overlay);
-    const close = (cancelled) => { overlay.remove(); if (cancelled && opts.onCancel) opts.onCancel(); };
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(true); });
-    overlay.querySelector('#acm-cancel').addEventListener('click', () => close(true));
-    overlay.querySelector('#acm-confirm').addEventListener('click', async () => { close(false); await onConfirm(); });
-  };
+  // The confirm / alert / prompt dialogs and the toast now live in /dialogs.js,
+  // loaded in <head> — every page needs them, not just this one.
 
   async function _deleteDraft(draftId) {
     const res = await fetch(`/.netlify/functions/onboarding-draft?id=${draftId}`, { method: 'DELETE' });
@@ -4571,7 +4526,7 @@ function formatCurrency(amount, currency) {
   window.cancelDraftSetup = function(key) {
     const item = (window._inProgressItems || {})[key];
     if (!item || item.kind !== 'draft') return;
-    window.showConfirmModal('Are you sure you want to cancel this setup? All progress will be lost.', async () => {
+    window.showConfirmModal('All progress will be lost.', async () => {
       if (await _deleteDraft(item.draftId)) {
         document.getElementById(`ip-card-${key}`)?.remove(); // AC3.3: instant removal, no refresh
         delete window._inProgressItems[key];
@@ -4579,19 +4534,19 @@ function formatCurrency(amount, currency) {
       } else {
         window.showToast?.('Could not cancel setup. Please try again.');
       }
-    });
+    }, { title: 'Cancel setup?', confirmLabel: 'Yes, delete draft', cancelLabel: 'Keep editing' });
   };
 
   // From inside the Setup Checklist view. AC3.2 + AC3.3 (route back to dashboard).
   window.cancelDraftFromChecklist = function(draftId) {
-    window.showConfirmModal('Are you sure you want to cancel this setup? All progress will be lost.', async () => {
+    window.showConfirmModal('All progress will be lost.', async () => {
       if (await _deleteDraft(draftId)) {
         window.showToast?.('Setup cancelled.', { icon: '🗑️' });
         window.loadView('dashboard');
       } else {
         window.showToast?.('Could not cancel setup. Please try again.');
       }
-    });
+    }, { title: 'Cancel setup?', confirmLabel: 'Yes, delete draft', cancelLabel: 'Keep editing' });
   };
 
   // ── US4: poll while anything is still validating; toast when one goes "ready" ──
@@ -5023,7 +4978,12 @@ function formatCurrency(amount, currency) {
       return;
     }
     // Pause (AC4.2/4.3): immediate halt via the lifecycle transition.
-    if (!confirm('Pause this assistant? It will stop all actions until you kick it off again.')) return;
+    const ok = await window.confirmModal('It will stop all actions until you kick it off again.', {
+      title: 'Pause this assistant?',
+      confirmLabel: 'Yes, pause',
+      cancelLabel: 'Keep working',
+    });
+    if (!ok) return;
     try {
       const res = await fetch('/.netlify/functions/manage-assistant?id=' + id, {
         method: 'PATCH',
@@ -5032,32 +4992,37 @@ function formatCurrency(amount, currency) {
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
-        alert(d.error || 'Failed to update assistant.');
+        window.showToast?.(d.error || 'Failed to update assistant.', { icon: '⚠️' });
         return;
       }
       // Refresh both grids
       await window.fetchAndRenderAssistants('dashboard-assistants-grid');
       await window.fetchAndRenderAssistants('directory-assistants-grid', { placeholders: true });
     } catch (e) {
-      alert('Network error — please try again.');
+      window.showToast?.('Network error — please try again.', { icon: '⚠️' });
     }
   };
 
   // US6 AC5.1: archiving is permanent — confirm with a clear "cannot be undone" warning.
   window._assistantDelete = async function(id, name) {
-    if (!confirm(`Archive "${name}"?\n\nThis permanently stops the assistant and removes it from your active workspace. Its history is kept for reporting, but this cannot be undone.`)) return;
+    // Same wording as the archive confirm in assistants.js — one action, asked one way.
+    const ok = await window.confirmModal(
+      `This permanently stops <strong>${_rqEsc(name)}</strong> and removes it from your active workspace. Its history is kept for reporting, but this cannot be undone.`,
+      { title: 'Archive assistant?', confirmLabel: 'Yes, archive', cancelLabel: 'Keep assistant' },
+    );
+    if (!ok) return;
     try {
       const res = await fetch('/.netlify/functions/manage-assistant?id=' + id, { method: 'DELETE' });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
-        alert(d.error || 'Failed to archive assistant.');
+        window.showToast?.(d.error || 'Failed to archive assistant.', { icon: '⚠️' });
         return;
       }
       window.showToast?.('Assistant archived.');
       await window.fetchAndRenderAssistants('dashboard-assistants-grid');
       await window.fetchAndRenderAssistants('directory-assistants-grid', { placeholders: true });
     } catch (e) {
-      alert('Network error — please try again.');
+      window.showToast?.('Network error — please try again.', { icon: '⚠️' });
     }
   };
 </script>
@@ -5674,7 +5639,7 @@ async function sdApprove(postId, action) {
         // Bake user text overlays into the image before approval (fail-closed); skip on reject.
         if (action !== 'reject') {
             try { await gpApplyOverlaysBeforeApprove(postId); }
-            catch (e) { alert(e && e.message ? e.message : 'Could not apply your text overlays.'); return false; }
+            catch (e) { window.showToast?.(e && e.message ? e.message : 'Could not apply your text overlays.', { icon: '⚠️' }); return false; }
         }
         const res = await fetch('/.netlify/functions/approve-post', {
             method: 'POST',
@@ -5683,10 +5648,10 @@ async function sdApprove(postId, action) {
         });
         const d = await res.json().catch(() => ({}));
         if (rqHandleNotConnected(res.status, d, _rqPostCache[postId]?.assistantId)) return false;
-        if (!res.ok) { alert(d.error || 'Failed to approve post.'); return false; }
+        if (!res.ok) { window.showToast?.(d.error || 'Failed to approve post.', { icon: '⚠️' }); return false; }
         rqLoadItems();
         return true;
-    } catch { alert('Network error — please try again.'); return false; }
+    } catch { window.showToast?.('Network error — please try again.', { icon: '⚠️' }); return false; }
 }
 
 // sdToggleReject / sdSubmitReject were removed here on 2026-08-05. They were unreachable — no
@@ -5854,16 +5819,24 @@ function rqHandleNotConnected(status, d, assistantId) {
     // The format gate shares this seam because every approve path already routes 422s through here,
     // and a post in an unpublishable format must be refused exactly as loudly as a disconnected
     // platform — both mean "approving this would queue something that cannot go out".
+    // Both dialogs are shown WITHOUT awaiting: this function answers its callers synchronously
+    // (true = "this response has been dealt with"), and every one of them returns immediately
+    // afterwards. Awaiting here would mean changing that contract at four call sites to say
+    // nothing new — the answer is already known by the time the dialog opens.
     if (status === 422 && d?.code === 'FORMAT_NOT_SCHEDULABLE') {
         const fmt = (typeof _pceFormat === 'function' && _pceFormat(d.formatKey)) || null;
-        alert(`${fmt ? `“${fmt.n}” can’t be scheduled yet.\n\n` : ''}${d.error || 'This post format isn’t supported yet.'}\n\nPick a different format in Post setup to approve this post.`);
+        window.alertModal(
+            `${_rqEsc(d.error || 'This post format isn’t supported yet.')}<br><br>Pick a different format in Post setup to approve this post.`,
+            { title: fmt ? `“${_rqEsc(fmt.n)}” can’t be scheduled yet` : 'This format can’t be scheduled yet' },
+        );
         return true;
     }
     if (status !== 422 || d?.code !== 'PLATFORM_NOT_CONNECTED') return false;
     const label = rqPlatformLabel(d.platform);
-    if (confirm(`${d.error || `Connect your ${label} account before this post can be scheduled or published.`}\n\nGo to Connections now?`)) {
-        rqGoConnect(assistantId);
-    }
+    window.confirmModal(
+        _rqEsc(d.error || `Connect your ${label} account before this post can be scheduled or published.`),
+        { title: 'Go to Connections now?', confirmLabel: 'Yes, take me there', cancelLabel: 'Not now', confirmColor: '#059669' },
+    ).then(ok => { if (ok) rqGoConnect(assistantId); });
     return true;
 }
 
@@ -6640,7 +6613,7 @@ window.rqAskForSuggestion = async function () {
             body: JSON.stringify({ postId: _prqPostId, includeSuggestions: true }),
         });
         const d = await res.json().catch(() => ({}));
-        if (!res.ok) { alert(d.error || 'Could not produce a suggestion.'); return; }
+        if (!res.ok) { window.showToast?.(d.error || 'Could not produce a suggestion.', { icon: '⚠️' }); return; }
         if (!(d.suggestions || []).length) {
             // An honest "nothing to add" is a real answer, and better than inventing a nit.
             btn.textContent = 'Nothing to suggest — this reads well';
@@ -6648,7 +6621,7 @@ window.rqAskForSuggestion = async function () {
             return;
         }
         _prqRenderReview({ ...d, openWarnings: d.openWarnings });
-    } catch { alert('Network error — please try again.'); }
+    } catch { window.showToast?.('Network error — please try again.', { icon: '⚠️' }); }
     finally { btn.disabled = false; if (btn.textContent === 'Thinking…') btn.textContent = original; }
 };
 
@@ -6704,27 +6677,49 @@ async function _prqResolve(warning, action, extra) {
             body: JSON.stringify({ postId: _prqPostId, warning, action, ...extra }),
         });
         const d = await res.json().catch(() => ({}));
-        if (!res.ok) { alert(d.error || 'Could not update that warning.'); return; }
+        if (!res.ok) { window.showToast?.(d.error || 'Could not update that warning.', { icon: '⚠️' }); return; }
         _prqRenderReview({ ...d.review, openWarnings: d.openWarnings });
-    } catch { alert('Network error — please try again.'); }
+    } catch { window.showToast?.('Network error — please try again.', { icon: '⚠️' }); }
 }
 
-window.rqSourceWarning = function (index) {
+// The warning is the assistant's words about the user's copy, so it is escaped into both dialogs —
+// they are written as HTML, and a flagged claim containing an angle bracket would vanish into it.
+window.rqSourceWarning = async function (index) {
     const warning = _prqWarningAt(index);
     if (!warning) return;
-    const url = prompt(`Where does this come from?\n\n${warning}\n\nPaste the source URL:`);
+    const url = await window.promptModal(_rqEsc(warning), {
+        title: 'Where does this come from?',
+        placeholder: 'https://…',
+        confirmLabel: 'Next',
+        required: true,
+    });
     if (url === null) return;
-    if (!url.trim()) { alert('A source URL is needed to mark this as sourced.'); return; }
-    const note = prompt('Any note to go with it? (optional)') || '';
+    if (!url.trim()) { window.showToast?.('A source URL is needed to mark this as sourced.', { icon: '⚠️' }); return; }
+    const note = await window.promptModal('Anything worth recording alongside the source?', {
+        title: 'Add a note (optional)',
+        placeholder: 'Optional',
+        confirmLabel: 'Mark as sourced',
+        multiline: true,
+    });
+    if (note === null) return;   // backing out of the note backs out of the whole disposition
     _prqResolve(warning, 'sourced', { sourceUrl: url.trim(), note });
 };
 
-window.rqDismissWarning = function (index) {
+window.rqDismissWarning = async function (index) {
     const warning = _prqWarningAt(index);
     if (!warning) return;
-    const note = prompt(`Why does this not apply?\n\n${warning}\n\nThis is recorded against the post:`);
+    const note = await window.promptModal(
+        `${_rqEsc(warning)}<br><br>This is recorded against the post.`,
+        {
+            title: 'Why does this not apply?',
+            placeholder: 'A brief reason',
+            confirmLabel: 'Dismiss warning',
+            multiline: true,
+            required: true,
+        },
+    );
     if (note === null) return;
-    if (!note.trim()) { alert('Please give a brief reason.'); return; }
+    if (!note.trim()) { window.showToast?.('Please give a brief reason.', { icon: '⚠️' }); return; }
     _prqResolve(warning, 'not_applicable', { note: note.trim() });
 };
 
@@ -6951,7 +6946,7 @@ window.rqAcceptVerifyRewrite = async function (index) {
             body: JSON.stringify({ postId: _prqPostId, mode: 'accept', caption }),
         });
         const d = await res.json().catch(() => ({}));
-        if (!res.ok) { alert(d.error || 'Could not save the rewrite.'); return; }
+        if (!res.ok) { window.showToast?.(d.error || 'Could not save the rewrite.', { icon: '⚠️' }); return; }
         if (window.showToast) window.showToast('Caption updated', { icon: '✏️' });
         if (typeof rqLoadItems === 'function') rqLoadItems();
         window.detailRqRefresh?.();
@@ -6961,7 +6956,7 @@ window.rqAcceptVerifyRewrite = async function (index) {
         // siblings, so patching one cached row would not be enough either; refetching rebuilds the
         // whole group.
         openPostReview(_prqPostId, { refresh: true });
-    } catch { alert('Network error — please try again.'); }
+    } catch { window.showToast?.('Network error — please try again.', { icon: '⚠️' }); }
 };
 
 // Apply the suggestions ALREADY on screen — one rewrite, previewed. This never asks for a new set
@@ -6978,8 +6973,8 @@ window.rqPreviewSuggestions = async function () {
             body: JSON.stringify({ postId: _prqPostId, mode: 'suggest' }),
         });
         const d = await res.json().catch(() => ({}));
-        if (!res.ok) { alert(d.error || 'Could not produce a rewrite.'); return; }
-        if (d.unchanged) { alert('The assistant had nothing to change here.'); return; }
+        if (!res.ok) { window.showToast?.(d.error || 'Could not produce a rewrite.', { icon: '⚠️' }); return; }
+        if (d.unchanged) { window.showToast?.('The assistant had nothing to change here.', { icon: '⚠️' }); return; }
         document.getElementById('prq-rewrite-before').textContent = d.before;
         // Editable on purpose: the human accepts, edits, or discards, and whatever is in this box
         // is exactly what gets saved.
@@ -6988,7 +6983,7 @@ window.rqPreviewSuggestions = async function () {
         // Hide BOTH actions while the proposal is up — offering "Ignore" next to a pending rewrite
         // is ambiguous (ignore the suggestions, or the rewrite?). Discard on the proposal does that.
         document.getElementById('prq-suggestion-actions')?.classList.add('hidden');
-    } catch { alert('Network error — please try again.'); }
+    } catch { window.showToast?.('Network error — please try again.', { icon: '⚠️' }); }
     finally { btn.disabled = false; btn.textContent = original; }
 };
 
@@ -7011,10 +7006,10 @@ window.rqIgnoreSuggestions = async function () {
             body: JSON.stringify({ postId: _prqPostId, mode: 'dismiss' }),
         });
         const d = await res.json().catch(() => ({}));
-        if (!res.ok) { alert(d.error || 'Could not dismiss those suggestions.'); return; }
+        if (!res.ok) { window.showToast?.(d.error || 'Could not dismiss those suggestions.', { icon: '⚠️' }); return; }
         // Repaint from the server's copy so the panel reflects what was actually stored.
         _prqRenderReview({ ...d.review, openWarnings: d.openWarnings });
-    } catch { alert('Network error — please try again.'); }
+    } catch { window.showToast?.('Network error — please try again.', { icon: '⚠️' }); }
     finally { btn.disabled = false; }
 };
 
@@ -7032,7 +7027,7 @@ window.rqApplySuggestions = async function () {
             body: JSON.stringify({ postId: _prqPostId, mode: 'accept', caption }),
         });
         const d = await res.json().catch(() => ({}));
-        if (!res.ok) { alert(d.error || 'Could not save the rewrite.'); return; }
+        if (!res.ok) { window.showToast?.(d.error || 'Could not save the rewrite.', { icon: '⚠️' }); return; }
         if (window.showToast) window.showToast('Caption updated', { icon: '✏️' });
         rqCancelSuggestions();
         // Both surfaces render this queue; refresh whichever is mounted.
@@ -7047,7 +7042,7 @@ window.rqApplySuggestions = async function () {
         // its refetch and repaints the caption we just replaced. Same defect the verify-rewrite path
         // had — both write a new caption, so both have to invalidate.
         openPostReview(_prqPostId, { refresh: true });
-    } catch { alert('Network error — please try again.'); }
+    } catch { window.showToast?.('Network error — please try again.', { icon: '⚠️' }); }
     finally { if (btn) { btn.disabled = false; btn.textContent = 'Save this version'; } }
 };
 
@@ -7624,7 +7619,15 @@ async function rqReviewRemovePlatform(id) {
     const others = labels.length > 1
         ? labels.slice(0, -1).join(', ') + ' and ' + labels[labels.length - 1]
         : labels[0];
-    if (!confirm(`Stop posting this to ${label}?\n\nThe ${label} caption, media and any text placed on it are deleted. ${others} ${remaining.length > 1 ? 'are' : 'is'} untouched.`)) return;
+    const ok = await window.confirmModal(
+        `The ${_rqEsc(label)} caption, media and any text placed on it are deleted.<br><br>${_rqEsc(others)} ${remaining.length > 1 ? 'are' : 'is'} untouched.`,
+        {
+            title: `Stop posting this to ${_rqEsc(label)}?`,
+            confirmLabel: `Yes, drop ${_rqEsc(label)}`,
+            cancelLabel: 'Keep it',
+        },
+    );
+    if (!ok) return;
 
     try {
         const d = await _pceApplyPlatforms(remaining);
@@ -11767,7 +11770,12 @@ async function rqReviewDiscardDraft() {
     const ids = _rqReviewGroupIds.length ? [..._rqReviewGroupIds] : (_rqReviewPostId != null ? [_rqReviewPostId] : []);
     if (!ids.length) { closePostReview(); return; }
     const what = ids.length > 1 ? `this post and its ${ids.length - 1} other platform${ids.length > 2 ? 's' : ''}` : 'this post';
-    if (!confirm(`Discard ${what}? This cannot be undone from here.`)) return;
+    const ok = await window.confirmModal('This cannot be undone from here.', {
+        title: `Discard ${what}?`,
+        confirmLabel: 'Yes, discard',
+        cancelLabel: 'Keep it',
+    });
+    if (!ok) return;
 
     const results = await Promise.all(ids.map(id =>
         fetch(`/.netlify/functions/scheduled-posts?id=${id}`, { method: 'DELETE' })
@@ -12073,7 +12081,7 @@ async function rqReviewApprove() {
         const msg = igNoImg.length === targets.length
             ? 'Instagram needs an image. Use "Add or change image" before approving.'
             : 'Your Instagram post needs an image. Switch to the Instagram tab and use "Add or change image" before approving.';
-        if (window.showToast) window.showToast(msg, { icon: '🖼️', duration: 5000 }); else alert(msg);
+        window.showToast?.(msg, { icon: '🖼️', duration: 5000 });
         return;
     }
     await _rqApproveTargets(targets, 'approve');
@@ -12100,11 +12108,16 @@ async function rqReviewPublishNow() {
     if (missing.length) {
         const which = [...new Set(missing.map(t => window.PlatformConstants.label(t.platform)))].join(' and ');
         const msg = `${which} needs media before it can be published. Add some to the picture layer first.`;
-        if (window.showToast) window.showToast(msg, { icon: '🖼️', duration: 5000 }); else alert(msg);
+        window.showToast?.(msg, { icon: '🖼️', duration: 5000 });
         return;
     }
     const where = [...new Set(targets.map(t => window.PlatformConstants.label(t.platform)))].join(', ');
-    if (!confirm(`Publish to ${where} right now?\n\nThis goes out immediately and can't be unpublished from here.`)) return;
+    const ok = await window.confirmModal("This goes out immediately and can't be unpublished from here.", {
+        title: `Publish to ${_rqEsc(where)} right now?`,
+        confirmLabel: 'Yes, publish now',
+        cancelLabel: 'Not yet',
+    });
+    if (!ok) return;
     await _rqApproveTargets(targets, 'publish_now');
 }
 
@@ -12183,10 +12196,16 @@ function _rqSetCommitBusy(on) {
     }
 }
 
-/** Run a blocking confirm() without the busy cursor — it is the user's turn, nothing is working. */
-function _rqConfirmIdle(message) {
+/**
+ * Ask, with the busy cursor lifted — it is the user's turn, nothing is working.
+ *
+ * Awaits the styled dialog rather than blocking on confirm(), so the busy state has to be restored
+ * when the ANSWER arrives, not when the call returns. The ref-counted busy depth makes that safe:
+ * this drops a frame and puts it straight back, leaving whatever the caller was holding intact.
+ */
+async function _rqConfirmIdle(message, opts = {}) {
     _rqSetCommitBusy(false);
-    try { return confirm(message); } finally { _rqSetCommitBusy(true); }
+    try { return await window.confirmModal(message, opts); } finally { _rqSetCommitBusy(true); }
 }
 
 async function _rqApproveTargets(targets, action, opts = {}) {
@@ -12203,11 +12222,20 @@ async function _rqApproveTargetsInner(targets, action, opts = {}) {
     const r0 = await _rqApproveOne(first, action, opts);
     if (r0.complianceBlocked) {
         // Siblings of a cross-post share one caption, so one acknowledgement covers the group.
-        const list = r0.warnings.map(w => `\n  • ${w}`).join('');
-        const ok = _rqConfirmIdle(
-            `This post has ${r0.warnings.length} compliance warning${r0.warnings.length === 1 ? '' : 's'}:${list}` +
-            `\n\nThese are flagged for a human to check — a price, a claim, or a required disclosure.` +
-            `\n\nApprove anyway? Your decision and these warnings are recorded in the audit log.`
+        // The warnings are an LLM's words about the user's own copy, so they are escaped: this
+        // message is written as HTML, and a flagged price with an angle bracket in it would
+        // otherwise disappear into the markup.
+        const list = r0.warnings
+            .map(w => `<span style="display:block;margin-top:.35rem;padding-left:.85rem;text-indent:-.85rem;">• ${_rqEsc(w)}</span>`)
+            .join('');
+        const ok = await _rqConfirmIdle(
+            `These are flagged for a human to check — a price, a claim, or a required disclosure.` +
+            `${list}<br><br>Approve anyway? Your decision and these warnings are recorded in the audit log.`,
+            {
+                title: `${r0.warnings.length} compliance warning${r0.warnings.length === 1 ? '' : 's'} on this post`,
+                confirmLabel: 'Approve anyway',
+                cancelLabel: 'Go back',
+            },
         );
         if (!ok) return;
         return _rqApproveTargets(targets, action, { ...opts, acknowledgeWarnings: true });
@@ -12215,13 +12243,17 @@ async function _rqApproveTargetsInner(targets, action, opts = {}) {
     if (r0.pastSchedule) {
         // The whole group shares this slot — offer to publish everything now instead. (Nothing was
         // approved: a past-schedule 409 leaves the first post untouched, so re-running is clean.)
-        if (_rqConfirmIdle((r0.message || 'The scheduled time has passed.') + '\n\nPublish now instead?')) {
+        if (await _rqConfirmIdle(_rqEsc(r0.message || 'The scheduled time has passed.'), {
+            title: 'Publish now instead?',
+            confirmLabel: 'Yes, publish now',
+            cancelLabel: 'Not yet',
+        })) {
             return _rqApproveTargets(targets, 'publish_now');
         }
         return;
     }
     if (r0.handled) return;
-    if (!r0.ok) { alert(r0.error || 'Failed to approve.'); return; }
+    if (!r0.ok) { window.showToast?.(r0.error || 'Failed to approve.', { icon: '⚠️' }); return; }
     // The siblings go together, not one after another. Sequential was costing a full round trip per
     // platform on the one click the reviewer waits on — and it bought nothing, because the gates that
     // must stop a group before it half-commits (past-schedule, compliance, connections) have ALREADY
@@ -12235,7 +12267,7 @@ async function _rqApproveTargetsInner(targets, action, opts = {}) {
     // the first post, abandoning the remaining calls mid-flight would leave MORE of it half-done, not
     // less. (Promise.all resolves them all — _rqApproveOne returns its errors rather than throwing.)
     const failed = results.find(r => !r.ok);
-    if (failed) { alert(failed.error || 'Failed to approve.'); return; }
+    if (failed) { window.showToast?.(failed.error || 'Failed to approve.', { icon: '⚠️' }); return; }
     // Say what the assistant is going to do about it, in the modal, and let the user close it. A
     // toast was the only confirmation before, so "approved" and "what happens next" were both gone
     // in three seconds — on the one action in the queue that hands work to somebody else.
@@ -12316,8 +12348,7 @@ async function rqReviewToggleDisclosure(included) {
         if (_rqPostCache[_rqReviewPostId]) _rqReviewRenderActive();
     } catch (e) {
         if (cb) cb.checked = !included;   // revert the switch on failure
-        if (window.showToast) window.showToast(e.message || 'Could not update the footer.');
-        else alert(e.message || 'Could not update the footer.');
+        window.showToast?.(e.message || 'Could not update the footer.', { icon: '⚠️' });
     } finally {
         if (cb) cb.disabled = false;
     }
@@ -12349,7 +12380,7 @@ async function rqReviewSaveAmend() {
                 method: 'PATCH', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ caption, hashtags, linkUrl, ctaText }),
             });
-            if (!res.ok) { alert('Could not save your changes.'); return; }
+            if (!res.ok) { window.showToast?.('Could not save your changes.', { icon: '⚠️' }); return; }
             // Cache what the SERVER stored, not what we sent. The two differ on purpose: a caption
             // that arrives without the AI disclosure — the assistant's suggestion from chat, an
             // applied rewrite, a line someone deleted by hand — has it re-appended on the write. Echo
@@ -12374,7 +12405,7 @@ async function rqReviewSaveAmend() {
             msg.textContent = applyAll ? `Saved to all ${targetIds.length} platforms.` : 'Saved.';
             msg.className = 'text-xs font-semibold text-emerald-700';
         }
-    } catch { alert('Network error — please try again.'); }
+    } catch { window.showToast?.('Network error — please try again.', { icon: '⚠️' }); }
 }
 
 // Swap the post preview for a pulsing "revising" state so the regenerate action stays
@@ -12413,7 +12444,12 @@ async function rqReviewRequestChanges() {
     const id = _rqReviewPostId;
     if (!id) return;
     const feedback = document.getElementById('post-review-feedback').value.trim();
-    if (!feedback) { alert('Please describe what I should change.'); return; }
+    if (!feedback) {
+        // The empty box IS the problem, so put the cursor in it rather than only saying so.
+        window.showToast?.('Please describe what I should change.', { icon: '⚠️' });
+        document.getElementById('post-review-feedback')?.focus();
+        return;
+    }
     const btn = document.getElementById('post-review-regen-btn');
     if (btn) {
         btn.disabled = true;
@@ -12427,7 +12463,7 @@ async function rqReviewRequestChanges() {
         const d = await res.json().catch(() => ({}));
         if (!res.ok) {
             rqReviewResetRegenBtn();
-            alert(d.error || 'Could not regenerate this post.');
+            window.showToast?.(d.error || 'Could not regenerate this post.', { icon: '⚠️' });
             return;
         }
         // Started: show the assistant "working" so the action reads as connected, then hand
@@ -12441,7 +12477,7 @@ async function rqReviewRequestChanges() {
         }, 1400);
     } catch {
         rqReviewResetRegenBtn();
-        alert('Network error — please try again.');
+        window.showToast?.('Network error — please try again.', { icon: '⚠️' });
     }
 }
 
@@ -12680,7 +12716,7 @@ async function rqReviewScheduleMyself() {
  */
 async function rqReviewReject() {
     const reason = document.getElementById('post-review-reason').value.trim();
-    if (!reason) { alert('Please enter a reason for rejecting.'); return; }
+    if (!reason) { window.showToast?.('Please enter a reason for rejecting.', { icon: '⚠️' }); return; }
     const targets = _rqReviewTargets();
     if (!targets.length) return;
     try {
@@ -12692,7 +12728,7 @@ async function rqReviewReject() {
             body: JSON.stringify({ postId: targets[0].id, feedbackText: reason, applyAsRule: true }),
         });
         const d = await res.json().catch(() => ({}));
-        if (!res.ok) { alert(d.error || 'Could not reject the post.'); return; }
+        if (!res.ok) { window.showToast?.(d.error || 'Could not reject the post.', { icon: '⚠️' }); return; }
 
         // Say what actually happened. The redraft is best-effort by design (no blueprint, queue
         // full, enqueue failed) and the response reports which — promising a rewrite that was
@@ -12705,7 +12741,7 @@ async function rqReviewReject() {
             ? `${archived} Your assistant is drafting a replacement — it'll appear here shortly.`
             : archived);
         _rqReviewRefresh();
-    } catch { alert('Network error — please try again.'); }
+    } catch { window.showToast?.('Network error — please try again.', { icon: '⚠️' }); }
 }
 
 function rqTimeAgo(ts) {
@@ -12737,7 +12773,7 @@ async function rqApprove(id) {
 
 async function rqReject(id) {
     const reason = (document.getElementById(`rq-reason-${id}`) || {}).value?.trim();
-    if (!reason) { alert('Please enter a rejection reason.'); return; }
+    if (!reason) { window.showToast?.('Please enter a rejection reason.', { icon: '⚠️' }); return; }
     await rqDecide(id, 'rejected', reason);
 }
 
@@ -12750,13 +12786,13 @@ async function rqDecide(id, decision, rejectionReason) {
         });
         if (!res.ok) {
             const d = await res.json().catch(() => ({}));
-            alert(d.error || 'Failed to process action.');
+            window.showToast?.(d.error || 'Failed to process action.', { icon: '⚠️' });
             return;
         }
         rqLoadItems();
         refreshPendingBadge();
     } catch {
-        alert('Network error — please try again.');
+        window.showToast?.('Network error — please try again.', { icon: '⚠️' });
     }
 }
 
@@ -12795,12 +12831,12 @@ async function confirmAutonomousOverride() {
         });
         if (!res.ok) {
             const d = await res.json().catch(() => ({}));
-            alert(d.error || 'Failed to save setting.');
+            window.showToast?.(d.error || 'Failed to save setting.', { icon: '⚠️' });
         } else {
             closeAutonomousOverrideModal();
         }
     } catch {
-        alert('Network error — please try again.');
+        window.showToast?.('Network error — please try again.', { icon: '⚠️' });
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'I Accept'; }
     }
@@ -13312,13 +13348,18 @@ async function gpLoadPreview(postId) {
 // Image rules before publishing/scheduling a Work-with-AI draft: Instagram cannot publish without an
 // image (hard block); other platforms can post text-only but an image is strongly recommended, so
 // prompt before continuing without one. Returns true when it's OK to proceed.
-function gpEnsureMediaBeforeApproval() {
+async function gpEnsureMediaBeforeApproval() {
     if (_gpHasMedia) return true;
     if (_gpSelectedPlatform === 'instagram') {
         gpSetStatus('Instagram requires an image or video. Use the media options above to attach one before posting.', 'error');
         return false;
     }
-    return window.confirm("You haven't added any media. Posts with images or video perform better — post without one?");
+    return window.confirmModal('Posts with images or video perform better.', {
+        title: "You haven't added any media",
+        confirmLabel: 'Post without one',
+        cancelLabel: 'Let me add some',
+        confirmColor: '#059669',
+    });
 }
 
 // Publishing/scheduling a draft needs a live connection for its platform (drafting doesn't).
@@ -13342,7 +13383,7 @@ async function gpApplyApprovalConnectGate(platform) {
 
 async function gpApprovePost() {
     if (!_gpCurrentPostId) return;
-    if (!gpEnsureMediaBeforeApproval()) return;
+    if (!(await gpEnsureMediaBeforeApproval())) return;
     if (!(await gpApplyApprovalConnectGate(_gpDraftPlatform || _gpSelectedPlatform))) return;
     if (!(await sdApprove(_gpCurrentPostId, 'publish_now'))) return;
     gpSetStatus('Post approved and queued to publish now.');
@@ -13355,7 +13396,7 @@ async function gpApprovePost() {
 // lands the draft in the next free slot of the assistant's posting cadence (pickOptimalSlot).
 async function gpAssistantSchedule() {
     if (!_gpCurrentPostId) return;
-    if (!gpEnsureMediaBeforeApproval()) return;
+    if (!(await gpEnsureMediaBeforeApproval())) return;
     if (!(await gpApplyApprovalConnectGate(_gpDraftPlatform || _gpSelectedPlatform))) return;
     if (!(await sdApprove(_gpCurrentPostId, 'approve'))) return;
     gpSetStatus('Your assistant scheduled the post into its next available slot.');
@@ -13366,7 +13407,7 @@ async function gpAssistantSchedule() {
 
 async function gpSchedulePost() {
     if (!_gpCurrentPostId) return;
-    if (!gpEnsureMediaBeforeApproval()) return;
+    if (!(await gpEnsureMediaBeforeApproval())) return;
     if (!(await gpApplyApprovalConnectGate(_gpDraftPlatform || _gpSelectedPlatform))) return;
     // Show date/time picker — set minimum to 5 minutes from now
     const picker = document.getElementById('gen-post-schedule-input');
@@ -13483,7 +13524,7 @@ function gpStartVoice(targetId = 'gen-post-context') {
         console.error('[voice] window.SwanSpeech is undefined — /src/components/speech-recognition.js did not load.');
         return;
     }
-    if (!window.SwanSpeech.isSupported()) { alert('Voice input is not supported in this browser. Try Chrome or Safari.'); return; }
+    if (!window.SwanSpeech.isSupported()) { window.showToast?.('Voice input is not supported in this browser. Try Chrome or Safari.', { icon: '⚠️' }); return; }
 
     // Clicking the mic that is already listening means "stop", the way every dictation button does.
     if (_gpVoice && _gpVoice.targetId === targetId) { gpStopVoice(); return; }
@@ -13868,7 +13909,13 @@ async function gpwSubmit() {
             openMediaPicker();
             return;
         }
-        if (!window.confirm("You haven't added an image. Posts with images perform better — continue without one?")) {
+        const ok = await window.confirmModal('Posts with images perform better.', {
+            title: "You haven't added an image",
+            confirmLabel: 'Continue without one',
+            cancelLabel: 'Let me add one',
+            confirmColor: '#059669',
+        });
+        if (!ok) {
             openMediaPicker();
             return;
         }
@@ -14942,7 +14989,7 @@ function gpAiPollVideo(jobId) {
 
 async function gpSubmitReject() {
     const reason = document.getElementById('gen-post-reject-reason')?.value?.trim();
-    if (!reason) { alert('Please enter a rejection reason.'); return; }
+    if (!reason) { window.showToast?.('Please enter a rejection reason.', { icon: '⚠️' }); return; }
     if (!_gpCurrentPostId) return;
     try {
         // reject-post, not approve-post action:'reject' — see rqReviewReject. Rejecting a post you
@@ -14954,12 +15001,12 @@ async function gpSubmitReject() {
             body: JSON.stringify({ postId: _gpCurrentPostId, feedbackText: reason, applyAsRule: true }),
         });
         const d = await res.json().catch(() => ({}));
-        if (!res.ok) { alert(d.error || 'Failed to reject post.'); return; }
+        if (!res.ok) { window.showToast?.(d.error || 'Failed to reject post.', { icon: '⚠️' }); return; }
         gpSetStatus(d.revisionQueued ? 'Post rejected — a replacement is being drafted.' : 'Post rejected.');
         document.getElementById('gen-post-reject-form')?.classList.add('hidden');
         document.getElementById('gen-post-preview')?.classList.add('hidden');
         setTimeout(closeGeneratePostSheet, 1500);
-    } catch { alert('Network error — please try again.'); }
+    } catch { window.showToast?.('Network error — please try again.', { icon: '⚠️' }); }
 }
 </script>
 
@@ -15821,13 +15868,13 @@ async function gpSubmitReject() {
     body.querySelectorAll('.setup-wizard-draft-cancel').forEach(btn => {
       btn.addEventListener('click', () => {
         const draftId = Number(btn.getAttribute('data-draft-id'));
-        window.showConfirmModal?.('Are you sure you want to cancel this setup? All progress will be lost.', async () => {
+        window.showConfirmModal?.('All progress will be lost.', async () => {
           try {
             const res = await fetch(`/.netlify/functions/onboarding-draft?id=${draftId}`, { method: 'DELETE' });
             if (res.ok) { window.showToast?.('Setup cancelled.', { icon: '🗑️' }); refresh(); }
             else window.showToast?.('Could not cancel setup. Please try again.');
           } catch { window.showToast?.('Could not cancel setup. Please try again.'); }
-        });
+        }, { title: 'Cancel setup?', confirmLabel: 'Yes, delete draft', cancelLabel: 'Keep editing' });
       });
     });
 
@@ -15847,14 +15894,14 @@ async function gpSubmitReject() {
         });
         if (!res.ok) {
           const d = await res.json().catch(() => ({}));
-          alert(d.error || 'Could not start the assistant. Please complete the checklist and try again.');
+          window.showToast?.(d.error || 'Could not start the assistant. Please complete the checklist and try again.', { icon: '⚠️' });
           koBtn.disabled = false; koBtn.textContent = original; return;
         }
         window.showToast?.('Your assistant is now working! 🚀', { icon: '🚀' });
         window.fireConfetti?.();
         refresh();
       } catch {
-        alert('Network error — please try again.');
+        window.showToast?.('Network error — please try again.', { icon: '⚠️' });
         koBtn.disabled = false; koBtn.textContent = original;
       }
     });

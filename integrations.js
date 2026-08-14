@@ -1824,17 +1824,19 @@ window._intSaveScript = async function (key) {
             window._intCancelEdit(key);
         } else {
             if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save & push'; }
-            alert(data.error ?? 'Failed to save. Please try again.');
+            window.showToast?.(data.error ?? 'Failed to save. Please try again.', { icon: '⚠️' });
         }
     } catch {
         if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save & push'; }
-        alert('Network error. Please try again.');
+        window.showToast?.('Network error. Please try again.', { icon: '⚠️' });
     }
 };
 
 window._intUndoAutoResponder = async function (deadline) {
-    if (Date.now() > deadline) { alert('The 15-minute undo window has passed.'); return; }
-    if (!confirm('This will clear your Messenger greeting and auto-reply from Meta. Continue?')) return;
+    if (Date.now() > deadline) { window.showToast?.('The 15-minute undo window has passed.', { icon: '⚠️' }); return; }
+    if (!(await window.confirmModal('Your Messenger greeting and auto-reply are cleared from Meta.', {
+        title: 'Undo the auto-responder?', confirmLabel: 'Yes, clear them', cancelLabel: 'Leave them',
+    }))) return;
     const undoBtn = document.getElementById('ar-undo-btn');
     if (undoBtn) { undoBtn.disabled = true; undoBtn.textContent = 'Reverting…'; }
     try {
@@ -1846,7 +1848,7 @@ window._intUndoAutoResponder = async function (deadline) {
         document.getElementById('auto-responder-chat-panel')?.classList.add('hidden');
     } catch {
         if (undoBtn) { undoBtn.disabled = false; undoBtn.textContent = 'Undo (revert within 15 min)'; }
-        alert('Undo failed. Please clear the messages manually in Meta Business Suite.');
+        window.showToast?.('Undo failed. Please clear the messages manually in Meta Business Suite.', { icon: '⚠️' });
     }
 };
 
@@ -1969,11 +1971,11 @@ window._intSaveBio = async function (key) {
             window._intCancelBioEdit(key);
         } else {
             if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
-            alert(data.error ?? 'Failed to save. Please try again.');
+            window.showToast?.(data.error ?? 'Failed to save. Please try again.', { icon: '⚠️' });
         }
     } catch {
         if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
-        alert('Network error. Please try again.');
+        window.showToast?.('Network error. Please try again.', { icon: '⚠️' });
     }
 };
 
@@ -1987,6 +1989,6 @@ async function _doDisconnect() {
             await _loadConnections();
         }
     } catch {
-        alert('Could not disconnect. Please try again.');
+        window.showToast?.('Could not disconnect. Please try again.', { icon: '⚠️' });
     }
 }

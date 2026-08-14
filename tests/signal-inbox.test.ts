@@ -54,9 +54,15 @@ check('the server re-checks the gate rather than trusting the client', () => {
 });
 
 check('the personal-inbox rule matches the one send_outreach enforces', () => {
-    // Same predicate as lead-generation.ts: scraped AND belonging to a named individual.
-    assert.ok(fnText.includes("emailKind === 'personal'") && fnText.includes("emailSource === 'scrape'"),
-        'the needs_review carve-out must use the same two fields as the send gate');
+    // Both surfaces must call the SHARED predicate rather than spelling the condition out. They
+    // each used to test `emailSource === 'scrape'` literally, which was correct only while scraping
+    // was the sole way an address arrived unattended — a PURCHASED address matches neither literal,
+    // so a named individual bought from a broker would have been emailed with no confirmation at
+    // all. Asserting on the predicate is what keeps the two in step through changes like that.
+    assert.ok(fnText.includes('needsPersonalInboxConfirmation('),
+        'the needs_review carve-out must go through the shared predicate, not a hand-written condition');
+    assert.ok(!/emailSource === 'scrape'/.test(fnText),
+        'a literal scrape test has come back — it waves through every non-scraped source');
 });
 
 check('signal ids are feed-prefixed so the two id spaces cannot collide', () => {

@@ -197,7 +197,8 @@ check('there is exactly one rqReviewPublishNow, and it is the one with the gates
     const fn = workspace.slice(workspace.indexOf('async function rqReviewPublishNow()'));
     const body = fn.slice(0, 1800);
     assert.match(body, /rqEnsurePlatformConnection/, 'post-now skips the wait, not the checks');
-    assert.match(body, /confirm\(/, 'the one irreversible action in the editor must confirm');
+    // Must ask, and ask in the product's own dialog rather than the browser's grey box.
+    assert.match(body, /await window\.confirmModal\(/, 'the one irreversible action in the editor must confirm');
     assert.match(body, /_rqReviewTargets\(\)/, 'it must publish the whole group');
 });
 

@@ -126,10 +126,21 @@ check('an UNCHANGED address keeps its original provenance', () => {
     assert.ok(/if \(before === after\) return;/.test(fn),
         'provenance is re-stamped on every save — this silently converts scraped addresses to manual ones');
 
-    // And the gate it protects still reads both fields, so the above still matters.
-    const inbox = read('netlify/functions/signal-inbox.ts');
-    assert.ok(/emailKind === 'personal' && emailSource === 'scrape'/.test(inbox),
-        'the personal-inbox gate changed shape — re-check what "manual" now exempts');
+    // And the gate it protects still exempts exactly `manual`, so the above still matters.
+    //
+    // The gate has since generalised from "scraped" to "not typed by the user"
+    // (`needsPersonalInboxConfirmation`), because addresses can now be BOUGHT as well as scraped and
+    // a literal 'scrape' test would have waved a purchased named individual straight through. That
+    // widening makes the re-stamp hazard worse, not better: converting a scraped or purchased
+    // address to 'manual' is now the ONLY way to disarm the gate, so it must never happen by
+    // accident.
+    const kinds = read('src/config/lead-email-kind.ts');
+    assert.ok(/source !== 'manual'/.test(kinds),
+        'the personal-inbox gate no longer keys on manual — re-check what an accidental re-stamp would disarm');
+    for (const fn of ['netlify/functions/signal-inbox.ts', 'netlify/functions/lead-generation.ts']) {
+        assert.ok(/needsPersonalInboxConfirmation\(/.test(read(fn)),
+            `${fn} no longer routes through the shared predicate`);
+    }
 });
 
 check('clearing the address clears the provenance with it', () => {

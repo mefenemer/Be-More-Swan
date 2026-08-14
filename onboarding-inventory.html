@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Inventory & Orders Setup | Be More Swan</title>
+  <!-- Toast + the confirm/alert/prompt dialogs. In <head> and not deferred: handlers reach
+       for these, so they must exist before anything can run. -->
+  <script src="/dialogs.js"></script>
   <link href="./style.css" rel="stylesheet">
   <script src="./explainers.js?v=20260630-2" defer></script>
   <!-- Plan limits (maxApps/maxSteps) for the wizard gates. Not deferred: the inline scripts
@@ -397,9 +400,9 @@
       if (prob.value.trim().length < 10) { prob.classList.add('input-error'); prob.nextElementSibling.classList.remove('hidden'); isValid = false; }
     } else if (currentStep === 3) {
       const trigger = document.querySelector('input[name="trigger_type"]:checked');
-      if (!trigger) { alert("Please select an origin."); isValid = false; }
+      if (!trigger) { window.showToast?.("Please select an origin.", { icon: '⚠️' }); isValid = false; }
       const source = document.querySelector('input[name="content_source"]:checked');
-      if (!source) { alert("Please select a trigger event."); isValid = false; }
+      if (!source) { window.showToast?.("Please select a trigger event.", { icon: '⚠️' }); isValid = false; }
     } else if (currentStep === 5) {
       // Validate Technical Specifics
       ['val_crm_target_instance', 'val_extraction', 'val_production', 'val_fulfillment'].forEach(id => {
@@ -484,7 +487,7 @@ ${document.getElementById('acceptance_criteria_rules').value || missingFallback}
     if (!validateCurrentStep()) return;
     if (currentStep === 6) generateBrief();
     if (currentStep < totalSteps) { currentStep++; updateUI(); }
-    else { alert("Blueprint finalized! Redirecting to checkout..."); }
+    else { window.showToast?.("Blueprint finalized! Redirecting to checkout...", { icon: '⚠️' }); }
   }
 
   function prevStep() {

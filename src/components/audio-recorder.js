@@ -52,7 +52,7 @@
     const onDone = (opts && opts.onDone) || function () {};
 
     if (!supported()) {
-      alert('Recording isn’t available in this browser. You can still upload an audio file instead.');
+      window.showToast?.('Recording isn’t available in this browser. You can still upload an audio file instead.', { icon: '⚠️', duration: 6000 });
       onDone(null);
       return;
     }

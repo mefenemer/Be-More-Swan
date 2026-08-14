@@ -16,6 +16,8 @@ import type { getDb } from '../../db/client';
 import { aiAssistants, aiBlueprints, blogPosts, organisations } from '../../db/schema';
 import { logAiUsage } from './ai-usage';
 import { buildInspoBlock } from './inspo-profile';
+import { currentDatePromptBlock } from './current-date-prompt';
+import { resolvePostingSchedule } from '../config/posting-cadence';
 import { assembleBlueprint } from './blueprint';
 
 type Db = ReturnType<typeof getDb>;
@@ -176,7 +178,7 @@ export async function generateBlogBody(
     const notes = str(opts.notes, 4000);
 
     const [post] = await db
-        .select({ id: blogPosts.id, title: blogPosts.title, assistantId: blogPosts.assistantId })
+        .select({ id: blogPosts.id, title: blogPosts.title, assistantId: blogPosts.assistantId, publishDate: blogPosts.publishDate })
         .from(blogPosts)
         .where(and(eq(blogPosts.id, blogPostId), eq(blogPosts.organisationId, organisationId)))
         .limit(1);
@@ -185,6 +187,9 @@ export async function generateBlogBody(
     // Voice: the assistant's profile is the source of truth; the caller-supplied tone is the fallback.
     let tone = str(opts.tone, 200);
     let assistantPrompt = '';
+    // The account's own zone, for the date block below. Defaults when there is no authoring
+    // assistant — a blog post can be drafted without one.
+    let timezone = resolvePostingSchedule(null).timezone;
     if (post.assistantId) {
         const [assistant] = await db
             .select({ onboardingContext: aiAssistants.onboardingContext, systemPrompt: aiAssistants.systemPrompt })
@@ -194,6 +199,7 @@ export async function generateBlogBody(
         const actx = (assistant?.onboardingContext as Record<string, unknown> | null) ?? {};
         if (typeof actx.tone_of_voice === 'string' && actx.tone_of_voice.trim()) tone = actx.tone_of_voice.trim();
         if (assistant?.systemPrompt) assistantPrompt = assistant.systemPrompt.slice(0, 2000);
+        timezone = resolvePostingSchedule(actx).timezone;
     }
     if (!tone) tone = DEFAULT_TONE;
 
@@ -242,6 +248,10 @@ export async function generateBlogBody(
         model: BLOG_MODEL,
         max_tokens: 2500,
         system:
+            // Blog is the most year-exposed surface there is — "the 2025 guide to…" is a title
+            // format a blog writer reaches for unprompted, and an H1 with a stale year is visible
+            // on the customer's own domain. Leads the prompt, as on the social path.
+            `${currentDatePromptBlock({ publishDate: post.publishDate, timezone })}\n\n` +
             `You are a blog writer${org?.name ? ` for ${org.name}` : ''}. Write in a ${tone} tone. ` +
             (assistantPrompt ? `Voice guidance: ${assistantPrompt}\n` : '') +
             'Produce a complete, publish-ready blog post in Markdown: a single H1 title, a short ' +

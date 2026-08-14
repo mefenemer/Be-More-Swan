@@ -26,6 +26,7 @@ import { logAiUsage } from '../../src/utils/ai-usage';
 import { consumeTaskCredit } from '../../src/utils/task-credit';
 import { embedTexts } from '../../src/utils/kb-embeddings';
 import { buildInspoBlock } from '../../src/utils/inspo-profile';
+import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
 import { anyTermTsQuery } from '../../src/utils/text-search';
 import { computeScheduleSlots, resolvePostingSchedule } from '../../src/config/posting-cadence';
 import { EXCLUDE_PROFILE_RULE, SCORING_BANDS, icpBlock } from '../../src/config/icp-profile';
@@ -171,10 +172,15 @@ function formatConfigValue(value: unknown): string {
 }
 
 /**
- * Compose the final system string sent to Anthropic: the base prompt (the route's full
- * role prompt, which already folds in the instance's own aiAssistants.systemPrompt via
- * sharedContextBlock) followed by the onboardingContext rendered as human-readable
- * key/value rules inside <strict_configuration> tags.
+ * Compose the final system string sent to Anthropic: today's date, then the base prompt (the
+ * route's full role prompt, which already folds in the instance's own aiAssistants.systemPrompt
+ * via sharedContextBlock) followed by the onboardingContext rendered as human-readable key/value
+ * rules inside <strict_configuration> tags.
+ *
+ * The date block leads. Chat drafts real social posts (and answers "what should I post this
+ * week?"), and with no date in context the model dated them from its training prior — the same
+ * wrong-year bug the scheduled worker had. Both callers below route through here, so the live
+ * turn and the shadow comparison turn stay identical.
  */
 function buildSystemPrompt(baseSystemPrompt: string, onboardingContext: unknown): string {
     // onboardingContext is a JSON column, but tolerate a serialised string from older rows.
@@ -182,17 +188,25 @@ function buildSystemPrompt(baseSystemPrompt: string, onboardingContext: unknown)
     if (typeof context === 'string') {
         try { context = JSON.parse(context); } catch { context = null; }
     }
-    const entries = context && typeof context === 'object' && !Array.isArray(context)
-        ? Object.entries(context as Record<string, unknown>)
-            .filter(([, v]) => v !== null && v !== undefined && v !== '')
+    const ctxRecord = context && typeof context === 'object' && !Array.isArray(context)
+        ? context as Record<string, unknown>
+        : null;
+
+    // No publish date: a chat turn has no slot, so "today" is the only date that applies.
+    const dated = `${currentDatePromptBlock({
+        timezone: resolvePostingSchedule(ctxRecord).timezone,
+    })}\n\n${baseSystemPrompt}`;
+
+    const entries = ctxRecord
+        ? Object.entries(ctxRecord).filter(([, v]) => v !== null && v !== undefined && v !== '')
         : [];
-    if (entries.length === 0) return baseSystemPrompt;
+    if (entries.length === 0) return dated;
 
     const parameters = entries
         .map(([key, value]) => `- ${humanizeConfigKey(key)}: ${formatConfigValue(value)}`)
         .join('\n');
 
-    return `${baseSystemPrompt}
+    return `${dated}
 
 <strict_configuration>
 The user has configured your specific behavior with the following parameters. You MUST obey these rules at all times. If these rules conflict with your base instructions, these rules take priority:

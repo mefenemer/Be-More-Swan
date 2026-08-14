@@ -1034,13 +1034,14 @@ window._calConfirmReschedule = async function () {
         ));
         const failed = results.filter(r => !r.ok).length;
         if (failed) {
-            alert(failed === results.length
+            window.showToast?.(failed === results.length
                 ? 'Reschedule failed. Please try again.'
-                : `Rescheduled, but ${failed} of ${results.length} platforms could not be moved. Please check the calendar.`);
+                : `Rescheduled, but ${failed} of ${results.length} platforms could not be moved. Please check the calendar.`,
+                { icon: '⚠️' });
         }
         // Reload range to include new date if needed
         await _loadAndRender();
-    } catch (e) { alert('Reschedule failed. Please try again.'); }
+    } catch (e) { window.showToast?.('Reschedule failed. Please try again.', { icon: '⚠️' }); }
 };
 
 function _attachDragDrop() {

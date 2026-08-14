@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Log in to Be More Swan</title>
+  <!-- Toast + the confirm/alert/prompt dialogs. In <head> and not deferred: handlers reach
+       for these, so they must exist before anything can run. -->
+  <script src="/dialogs.js"></script>
   <link href="./style.css" rel="stylesheet">
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
@@ -77,7 +80,7 @@
 
     } catch (error) {
       console.error('Login error:', error);
-      alert('A network error occurred. Please try again.');
+      window.showToast?.('A network error occurred. Please try again.', { icon: '⚠️' });
 
       // Reset UI
       submitBtn.disabled = false;

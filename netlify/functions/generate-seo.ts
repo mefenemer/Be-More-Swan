@@ -15,6 +15,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { excerpt } from '../../src/utils/markdown-render';
+import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJson } from '../../src/utils/model-json';
 
@@ -58,6 +59,9 @@ export default withLambda(async (event: HandlerEvent) => {
             model: MODEL,
             max_tokens: 500,
             system:
+                // metaTitle and urlSlug are where a stale year does lasting damage: the slug is kept
+                // stable once published, so "best-crm-2025" is not something a later edit can undo.
+                `${currentDatePromptBlock()}\n\n` +
                 'You are an SEO assistant. Given a blog post, return ONLY a JSON object with keys: ' +
                 'metaTitle (<= 60 chars), metaDescription (<= 155 chars), urlSlug (lowercase, hyphenated, ' +
                 'no stop-word padding), tags (array of 3-6 short lowercase strings). No markdown, no extra text.',

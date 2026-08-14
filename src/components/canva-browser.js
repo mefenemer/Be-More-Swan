@@ -357,9 +357,7 @@
     } else {
       if (_opts.multiple === false) _selected.clear();
       if (_selected.size >= MAX_SELECTION) {
-        window.showToast
-          ? window.showToast('You can import up to ' + MAX_SELECTION + ' designs at a time.')
-          : alert('You can import up to ' + MAX_SELECTION + ' designs at a time.');
+        window.showToast?.('You can import up to ' + MAX_SELECTION + ' designs at a time.', { icon: '⚠️' });
         return;
       }
       var item = _items.find(function (i) { return String(i.id) === id; });

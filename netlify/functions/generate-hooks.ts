@@ -15,6 +15,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { excerpt } from '../../src/utils/markdown-render';
+import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJsonArray } from '../../src/utils/model-json';
 
@@ -50,6 +51,8 @@ export default withLambda(async (event: HandlerEvent) => {
             model: MODEL,
             max_tokens: 700,
             system:
+                // A hook is an H1 — the single most likely place for a "…in 2025" to appear.
+                `${currentDatePromptBlock()}\n\n` +
                 'You write high-converting blog hooks. Given a post, produce exactly 3 distinct ' +
                 'headline (h1) + one-sentence intro pairs that take different angles (e.g. curiosity, ' +
                 'benefit, contrarian). Return ONLY a JSON array of 3 objects: ' +

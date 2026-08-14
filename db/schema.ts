@@ -3340,6 +3340,13 @@ export const discoveryGuardrails = pgTable("discovery_guardrails", {
   maxLeadsPerRun: integer("max_leads_per_run").notNull().default(50),
   maxLeadsPerMonth: integer("max_leads_per_month").notNull().default(500),
   maxSearchCallsPerRun: integer("max_search_calls_per_run").notNull().default(100),
+  // Ceiling on PAID contact lookups per run (tier-2 enrichment, src/lib/discovery-enrich-provider.ts).
+  // Counts ATTEMPTS, not hits — a miss costs the same as a find. Deliberately smaller than
+  // maxLeadsPerRun: the free scraper covers roughly a third of hot/warm leads unaided, so a run
+  // needing more than this many purchases has a targeting problem worth noticing rather than
+  // spending through. Inert unless DISCOVERY_ENRICH_PROVIDER names a provider.
+  // SQL: db/discovery-enrichment-cap.sql (MANUAL APPLY — keep this line in sync or a push drops it).
+  maxEnrichmentCallsPerRun: integer("max_enrichment_calls_per_run").notNull().default(25),
   maxTokensPerRun: integer("max_tokens_per_run").notNull().default(200000),
   maxCostGbpPerRun: decimal("max_cost_gbp_per_run", { precision: 10, scale: 2 }).notNull().default("2.00"),
   negativeKeywords: jsonb("negative_keywords"),                  // hard-exclude terms (competitors, sensitive)

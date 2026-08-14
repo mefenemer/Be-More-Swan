@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-deselect-confirm",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/a49c3e3d-05e4-4a13-921d-4f323bf3cb04/scratchpad/deselharness/server.mjs"
+      ],
+      "port": 4301,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-lead-contact",
       "runtimeExecutable": "node",
       "runtimeArgs": [

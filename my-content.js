@@ -1260,10 +1260,10 @@ async function _doDelete() {
             const affected = d.affectedPosts?.length || 0;
             if (affected > 0) {
                 const msg = `Deleted. ${affected} ${affected === 1 ? 'post has' : 'posts have'} been flagged in Review for new media.`;
-                window.showToast ? window.showToast(msg, { icon: '⚠️', duration: 6000 }) : alert(msg);
+                window.showToast ? window.showToast(msg, { icon: '⚠️', duration: 6000 }) : window.showToast?.(msg, { icon: '⚠️' });
             }
         }
-    } catch { alert('Could not delete. Please try again.'); }
+    } catch { window.showToast?.('Could not delete. Please try again.', { icon: '⚠️' }); }
 }
 
 // ── Keep an expiring generated card ──────────────────────────────
@@ -1285,7 +1285,7 @@ window._mcKeepAsset = async function (assetId) {
         window.showToast ? window.showToast(msg, { icon: '📌' }) : null;
     } catch {
         const msg = 'Could not keep that card. Please try again.';
-        window.showToast ? window.showToast(msg, { icon: '⚠️' }) : alert(msg);
+        window.showToast ? window.showToast(msg, { icon: '⚠️' }) : window.showToast?.(msg, { icon: '⚠️' });
     }
 };
 
@@ -1318,7 +1318,7 @@ async function _doDetach() {
             _assetToDetach = null;
             await _loadAssets();
         }
-    } catch { alert('Could not detach. Please try again.'); }
+    } catch { window.showToast?.('Could not detach. Please try again.', { icon: '⚠️' }); }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────

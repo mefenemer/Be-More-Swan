@@ -918,10 +918,13 @@
 
     // Unpublish — takes the post off the org's own site only. Syndicated copies stay live (no
     // adapter can retract them), so name the ones that do in the confirm AND in the result banner.
-    el('bs-unpublish').addEventListener('click', function () {
+    el('bs-unpublish').addEventListener('click', async function () {
       if (!state.postId) return;
-      if (!confirm('Take this post off your site? It goes back to a draft — the URL and its content '
-        + 'are kept, so you can publish it again later. Copies on other platforms stay live.')) return;
+      if (!(await window.confirmModal(
+        'It goes back to a draft — the URL and its content are kept, so you can publish it again later.'
+        + '<br><br>Copies on other platforms stay live.',
+        { title: 'Take this post off your site?', confirmLabel: 'Yes, unpublish', cancelLabel: 'Leave it live' },
+      ))) return;
       setBanner('bs-action-status', 'Unpublishing…');
       api('unpublish-blog', { method: 'POST', body: JSON.stringify({ id: state.postId }) }).then(function (res) {
         if (!res.ok) {

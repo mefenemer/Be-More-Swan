@@ -161,7 +161,9 @@
   };
 
   window._deleteOrchestration = async function (id) {
-    if (!confirm('Delete this workflow?')) return;
+    if (!(await window.confirmModal('', {
+      title: 'Delete this workflow?', confirmLabel: 'Yes, delete', cancelLabel: 'Keep it',
+    }))) return;
     try { await fetch(`${_ORCH_API}?id=${id}`, { method: 'DELETE' }); } catch { /* non-critical */ }
     window._renderOrchestrations();
   };

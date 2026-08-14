@@ -857,6 +857,36 @@
           openEditLeadModal(record, { focus: 'contactEmail' });
         }});
       }
+      // "Look again" is offered ONLY on a lead we have actually looked at and found nothing on
+      // (state 'none'). On every other no-address state the stamp it clears is already absent, so
+      // the button would be a no-op dressed as an action: 'missed' and 'checking' are unstamped by
+      // definition, and 'unchecked' is a cold lead the scraper skips on rating.
+      if (contactState(record) === 'none') {
+        buttons.push({ label: 'Look again', async run(btn, status) {
+          const res = await fetch('/.netlify/functions/lead-generation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ action: 'look_again', assistantId: state.assistantId, recordId: record.id }),
+          });
+          const data = await res.json().catch(() => ({}));
+          // The server refuses for reasons the browser cannot evaluate — whether the lead came from
+          // a search at all, whether a domain is on file, what the discovery-side rating is. Show
+          // its sentence rather than a generic failure.
+          if (!res.ok) throw new Error(data.error || 'Could not re-queue this lead.');
+          delete record.data.enrichAttemptedAt;
+          btn.textContent = 'Queued ✓'; btn.disabled = true;
+          // ⚠️ Says what actually happens, and no more. Clearing the stamp does not scrape anything:
+          // enrichment only runs inside a live discovery job on this lead's own campaign. Promising
+          // a lookup that nothing has been scheduled to perform is the same lie "Checking…" used to
+          // tell, and item 11 exists because of it.
+          status.textContent = 'Queued. This company’s site will be read again the next time this search runs — start one from the Searches tab.';
+          // Reset the class: a previous failure in this row leaves `status` red, and a success
+          // message in red reads as another error.
+          status.className = 'text-xs font-semibold text-gray-600 w-full';
+          refreshRow(record);
+        }});
+      }
       buttons.push({ label: 'Edit', async run(btn) {
         btn.disabled = false;           // opening a modal shouldn't leave the button stuck disabled
         openEditLeadModal(record);
@@ -1356,6 +1386,20 @@
       </div>
       <p class="hidden -mt-3 mb-5 text-xs font-semibold" data-hub-status></p>
       <p class="-mt-3 mb-5 text-xs text-gray-400">${esc(hub.importHint)} Suggested columns: ${hub.importColumns.map((c) => `<span class="font-semibold text-gray-500">${esc(c)}</span>`).join(', ')}.</p>
+      ${hub.recordType === 'lead' ? `
+      <!-- Phase 2 item 12. Offered as a sentence rather than a third button: this answers a question
+           ("can I get these into my CRM?") rather than naming an action, and the toolbar row above
+           already wraps awkwardly on a phone with three buttons in it. No backticks in this comment
+           — it is inside a template literal. -->
+      <p class="-mt-3 mb-5 text-xs text-gray-400">
+        Already using a CRM? Download this list shaped for
+        <button type="button" data-hub-crm="hubspot" class="font-bold text-emerald-700 hover:text-emerald-800 underline cursor-pointer">HubSpot</button>
+        or
+        <button type="button" data-hub-crm="salesforce" class="font-bold text-emerald-700 hover:text-emerald-800 underline cursor-pointer">Salesforce</button>
+        — the column headers match their import templates.
+        Leads found by a search usually have a company inbox rather than a named person, so the name
+        columns are often empty; Salesforce needs a last name to import a row as a Lead.
+      </p>` : ''}
     `;
 
     const fileInput = host.querySelector('[data-hub-file]');
@@ -1386,6 +1430,17 @@
 
     host.querySelector('[data-hub-export]').addEventListener('click', () => {
       window.location.href = `${API}?assistantId=${state.assistantId}&recordType=${encodeURIComponent(hub.recordType)}&format=csv`;
+    });
+
+    // Same rows, CRM-shaped headers (Phase 2 item 12). `crm` is validated server-side against the
+    // known targets, so an unrecognised value falls through to the generic export rather than
+    // producing a file with no columns.
+    host.querySelectorAll('[data-hub-crm]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const target = btn.getAttribute('data-hub-crm');
+        window.location.href = `${API}?assistantId=${state.assistantId}&recordType=${encodeURIComponent(hub.recordType)}`
+          + `&format=csv&crm=${encodeURIComponent(target)}`;
+      });
     });
 
     const addBtn = host.querySelector('[data-hub-add]');
@@ -1508,11 +1563,12 @@
    * generic company inbox. That is the wrong direction to be wrong in: a named individual is the
    * weakest GDPR footing here, and the chip is what a user checks before approving an email.
    *
-   * ⚠️ ONLY ON A REAL CHANGE. Re-stamping an untouched address would rewrite a SCRAPED one's source
-   * to 'manual', and the Review Queue's personal-inbox confirmation fires on
-   * `emailKind === 'personal' && emailSource === 'scrape'` (signal-inbox.ts, lead-generation.ts).
-   * Opening this form and pressing Save on an unrelated field would then silently disarm that gate
-   * for the rest of the lead's life. Comparing against the address as loaded is what prevents it.
+   * ⚠️ ONLY ON A REAL CHANGE. Re-stamping an untouched address would rewrite a SCRAPED or PURCHASED
+   * one's source to 'manual', and 'manual' is precisely what the Review Queue's personal-inbox
+   * confirmation exempts — `needsPersonalInboxConfirmation` (src/config/lead-email-kind.ts) reads
+   * "personal AND not typed by the user". Opening this form and pressing Save on an unrelated field
+   * would then silently disarm that gate for the rest of the lead's life. Comparing against the
+   * address as loaded is what prevents it.
    *
    * The 'manual' source itself is deliberate and unchanged: a user-supplied address is not
    * harvested, so it is correctly exempt from a gate that exists to catch harvesting.

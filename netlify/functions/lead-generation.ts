@@ -28,7 +28,7 @@ import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, asc, count, desc, eq, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, assistantRecords, leadRejectFeedback, masterAssistants, revenueEvents } from '../../db/schema';
+import { aiAssistants, assistantRecords, discoveredLeads, leadRejectFeedback, masterAssistants, revenueEvents } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { createDiscoveryRun } from '../../src/utils/discovery';
@@ -45,6 +45,7 @@ import {
     isOutcome, isLossReason, type LossReason,
 } from '../../src/config/revenue-events';
 import { EDIT_REASONS, isEditReason } from '../../src/config/template-feedback';
+import { needsPersonalInboxConfirmation } from '../../src/config/lead-email-kind';
 import { EXCLUDE_PROFILE_DNC_RULE, EXCLUDE_PROFILE_RULE, SCORING_BANDS, icpBlock } from '../../src/config/icp-profile';
 import { recordTemplateEdit } from '../../src/utils/template-feedback';
 import {
@@ -390,6 +391,95 @@ ${OUTREACH_SUBJECT_RULES}`;
             });
 
             return json(200, { overridden: true, recordId, reason });
+        }
+
+        // ── Look again for a contact address (Phase 2 item 10) ────────────────────
+        //
+        // `signals->>'enrichAttemptedAt'` is what stops the scraper revisiting a lead forever: it is
+        // the stamp that makes "None found" mean "we looked", and `enrichBatch` filters on
+        // `IS NULL`. That is right for one run and wrong over months — a company that publishes a
+        // contact page in September is never looked at again. Clearing the stamp for ONE lead puts
+        // it back in the queue.
+        //
+        // ⚠️ Per-lead only, never a bulk re-scrape. A "re-check everything" button is a spend
+        // problem (every lead costs up to four fetches) and a politeness problem (we would be
+        // re-crawling strangers' sites on a timer they never agreed to).
+        //
+        // ⚠️ This does NOT itself scrape anything. Enrichment only ever runs inside a live discovery
+        // job on the lead's own campaign, so all this does is restore eligibility for the next run.
+        // Every refusal below exists so the button cannot claim otherwise: a lead the worker would
+        // skip anyway must be told why, not handed a cleared stamp and a false promise.
+        if (action === 'look_again') {
+            const recordId = Number(body.recordId);
+            if (!Number.isInteger(recordId)) return json(400, { error: 'recordId is required.' });
+
+            const [rec] = await db
+                .select({ id: assistantRecords.id, data: assistantRecords.data, status: assistantRecords.status })
+                .from(assistantRecords)
+                .where(and(
+                    eq(assistantRecords.id, recordId),
+                    eq(assistantRecords.organisationId, orgId),
+                    eq(assistantRecords.aiAssistantId, assistant.id),
+                    eq(assistantRecords.recordType, 'lead'),
+                ))
+                .limit(1);
+            if (!rec) return json(404, { error: 'Lead not found.' });
+
+            const data = (rec.data && typeof rec.data === 'object' && !Array.isArray(rec.data)) ? rec.data as Record<string, unknown> : {};
+            if (str(data.contactEmail as string, 200)) {
+                return json(400, { error: 'This lead already has an address — there is nothing to look for.' });
+            }
+
+            // The stamp that matters lives on `discovered_leads`, NOT on the record the UI edits:
+            // `enrichBatch` selects from discovered_leads, so clearing only the mirrored copy would
+            // change the chip and re-queue precisely nothing.
+            const [lead] = await db
+                .select({ id: discoveredLeads.id, domain: discoveredLeads.domain, rating: discoveredLeads.rating, status: discoveredLeads.status })
+                .from(discoveredLeads)
+                .where(and(
+                    eq(discoveredLeads.assistantRecordId, recordId),
+                    eq(discoveredLeads.organisationId, orgId),
+                ))
+                .limit(1);
+            // A hand-added or imported lead has no discovered_leads row at all. There is no site the
+            // scraper was ever pointed at, so "look again" is meaningless — say so rather than
+            // reporting success for a no-op.
+            if (!lead) {
+                return json(400, { error: 'This lead was added by hand rather than found by a search, so there is no website on file to check. Add an address instead.' });
+            }
+            if (!lead.domain) {
+                return json(400, { error: 'No website is recorded for this company, so there is nothing to read. Add an address by hand instead.' });
+            }
+            // Mirrors enrichBatch's own predicate. Clearing the stamp on a cold lead would leave it
+            // eligible-looking and never visited, which is the "Checking… forever" lie in a new coat.
+            if (lead.rating !== 'hot' && lead.rating !== 'warm') {
+                return json(400, { error: 'Only hot and warm leads are looked up, and this one scored cold. Re-scoring or better targeting is the fix, not another lookup.' });
+            }
+            if (lead.status !== 'promoted') {
+                return json(400, { error: 'This lead is not in the active set for its search, so a lookup would skip it.' });
+            }
+
+            // `-` removes the key outright. Setting it to null would NOT work: the filter is
+            // `signals ->> 'enrichAttemptedAt' IS NULL`, and a JSON null renders as SQL NULL there,
+            // but a later merge would then carry an explicit null around forever.
+            await db.update(discoveredLeads)
+                .set({ signals: sql`COALESCE(${discoveredLeads.signals}, '{}'::jsonb) - 'enrichAttemptedAt'`, updatedAt: new Date() })
+                .where(eq(discoveredLeads.id, lead.id));
+
+            // Clear the mirror too, or the Contact column keeps reading "None found" over a lead
+            // that is genuinely queued again — and the Searches aggregate (which reads
+            // discovered_leads) would disagree with the table (which reads this record). Those two
+            // are held in step deliberately; see src/config/lead-contact-state.ts.
+            //
+            // The same `-` operator rather than writing back the object read above: this record is
+            // also written by the Review Queue, the Edit form and the worker's mirror, and a
+            // read-modify-write here would silently discard anything one of them committed since
+            // the SELECT. Removing one key in the database touches only that key.
+            await db.update(assistantRecords)
+                .set({ data: sql`COALESCE(${assistantRecords.data}, '{}'::jsonb) - 'enrichAttemptedAt'`, updatedAt: new Date() })
+                .where(eq(assistantRecords.id, recordId));
+
+            return json(200, { requeued: true, recordId });
         }
 
         // ── Record the deal outcome for a lead (Phase 4.5) ────────────────────────
@@ -764,7 +854,11 @@ ${OUTREACH_SUBJECT_RULES}`;
             // the UI, so the gate holds for any caller. See [[lead-generator-discovery-plan]].
             const emailKind = str(data.emailKind as string, 20);
             const emailSource = str(data.emailSource as string, 20);
-            if (emailKind === 'personal' && emailSource === 'scrape' && body.confirmPersonal !== true) {
+            // ⚠️ Keyed on "the user did not type it", NOT on 'scrape'. A PURCHASED address is a
+            // named individual whose details we paid a broker for — a stronger reason to confirm
+            // than a scraped one, not a weaker one — and it carries emailSource 'provider', which
+            // a literal 'scrape' test would wave straight through. See needsPersonalInboxConfirmation.
+            if (needsPersonalInboxConfirmation(emailKind, emailSource) && body.confirmPersonal !== true) {
                 return json(200, { sent: false, reason: 'personal_inbox_unconfirmed', to: recipient });
             }
 

@@ -25,6 +25,9 @@ import { generateQueries, type DiscoveryStrategy } from '../../src/lib/discovery
 import { scoreCandidates, type ScoreCandidate } from '../../src/lib/discovery-scoring';
 import { search, isSearchConfigured, normaliseDomain, fetchSiteIdentity, SearchNotConfiguredError } from '../../src/lib/discovery-search';
 import { enrichLeadContact } from '../../src/lib/discovery-enrich';
+import {
+    isEnrichProviderConfigured, lookupProviderContact, ENRICH_COST_GBP_PER_LOOKUP,
+} from '../../src/lib/discovery-enrich-provider';
 import { classifyCandidate, resolveCandidateDomain } from '../../src/lib/discovery-domain-filter';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { enqueueScenarioTrigger } from '../../src/utils/scenario-engine';
@@ -54,6 +57,10 @@ const ENRICH_BATCH = 5;
 // rewritten hits need one, they run concurrently, and the slice already spends ~10s on a search
 // plus a scoring call — so this is deliberately smaller than the per-lead enrichment budget.
 const IDENTITY_BUDGET_MS = 4000;
+// Whole-slice budget for the PAID enrichment phase. Runs after the scrape phase and concurrently
+// across the batch, so the slice costs the slower of the two phases rather than their sum — the
+// compounding that cost this worker a round of 504s the first time round.
+const PAID_ENRICH_BUDGET_MS = 3000;
 
 type JobRow = {
     id: number; job_id: string; organisation_id: number; campaign_id: number;
@@ -67,12 +74,17 @@ interface Cursor {
 
 interface Guardrails {
     maxLeadsPerRun: number; maxLeadsPerMonth: number; maxSearchCallsPerRun: number;
+    maxEnrichmentCallsPerRun: number;
     maxTokensPerRun: number; maxCostGbpPerRun: number;
     negativeKeywords: string[]; excludedDomains: string[]; requireHumanApproval: boolean;
 }
 
 const DEFAULT_GUARDRAILS: Guardrails = {
     maxLeadsPerRun: 50, maxLeadsPerMonth: 500, maxSearchCallsPerRun: 100,
+    // Matches db/discovery-enrichment-cap.sql's default. A campaign row predating that migration
+    // reads NULL, and Number(null) is 0 — which would silently disable paid enrichment rather
+    // than cap it — so loadGuardrails coalesces to this instead.
+    maxEnrichmentCallsPerRun: 25,
     maxTokensPerRun: 200000, maxCostGbpPerRun: 2.0,
     negativeKeywords: [], excludedDomains: [], requireHumanApproval: true,
 };
@@ -215,7 +227,7 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
 
         // ── STAGE enriching: find a contact address for each promoted hot/warm lead ──
         if (state?.stage === 'enriching') {
-            await enrichBatch(db, job, { leadsFound, searchCallsMade, tokensUsed, costGbp });
+            await enrichBatch(db, job, guardrails, { leadsFound, searchCallsMade, tokensUsed, costGbp });
             return;
         }
 
@@ -446,7 +458,7 @@ async function promoteBatch(db: Db, job: JobRow, assistantId: number, guardrails
 // Runs after promoting so the Leads tab still fills live during the run. Leads that
 // yield nothing are stamped attempted so they're never re-scraped by a later tick.
 
-async function enrichBatch(db: Db, job: JobRow, counters: Counters): Promise<void> {
+async function enrichBatch(db: Db, job: JobRow, guardrails: Guardrails, counters: Counters): Promise<void> {
     // Only hot/warm leads are worth a fetch — cold leads never receive outreach.
     // ai_assistant_id is joined in (rather than fetched separately) purely so the ledger event can
     // be attributed to the assistant — this stage has the job, not the campaign row.
@@ -476,16 +488,67 @@ async function enrichBatch(db: Db, job: JobRow, counters: Counters): Promise<voi
     });
 
     // Concurrent: 5 leads x up to 4 sequential fetches would blow the tick budget serially.
-    await Promise.all(batch.map(async (lead) => {
+    const scraped = await Promise.all(batch.map(async (lead) => {
         let found: Awaited<ReturnType<typeof enrichLeadContact>> = { contact: null, handles: {} };
         try {
             found = await enrichLeadContact(lead.domain);
         } catch {
             // Best-effort: a scrape failure must never fail the run.
         }
-        await recordEnrichment(db, lead.id, lead.assistant_record_id, found,
-            { organisationId: job.organisation_id, aiAssistantId: lead.ai_assistant_id, blueprintVersion, icpSnapshot });
+        return { lead, found, paidAttempted: false };
     }));
+
+    // ── Tier 2: BUY an address for the leads the free scrape could not reach ────────────────
+    //
+    // Waterfall, deliberately in this order: the scrape is free and hits roughly one in three
+    // SMB sites, so paying for those would be spending money on data we already have. Only the
+    // misses reach a provider.
+    //
+    // ⚠️ Runs as a SECOND phase rather than inside the map above. Chaining a paid lookup onto
+    // each scrape makes the per-lead worst case 6s (LEAD_BUDGET_MS) + the provider timeout, and
+    // the leads run concurrently, so the slice would inherit the sum on a bad batch — the same
+    // compounding that already cost this worker a round of 504s. Splitting the phases means the
+    // slice is bounded by the SLOWER of the two, not their total, and the paid phase gets its
+    // own deadline it can abandon without failing anything.
+    //
+    // Costs nothing and does nothing unless DISCOVERY_ENRICH_PROVIDER names a configured
+    // provider — the default. See src/lib/discovery-enrich-provider.ts.
+    const misses = scraped.filter((s) => !s.found.contact && s.lead.domain);
+    if (misses.length > 0 && isEnrichProviderConfigured()) {
+        // What this RUN has already spent. Counted from the `paidLookupAt` stamp rather than a
+        // job column, mirroring `enrichAttemptedAt`, and stamped on a MISS too so the cap counts
+        // money SPENT rather than addresses found.
+        const [{ spent } = { spent: 0 }] = await db.execute<{ spent: number }>(
+            `SELECT count(*)::int AS spent FROM discovered_leads
+             WHERE job_id = ${job.id} AND signals ->> 'paidLookupAt' IS NOT NULL`
+        );
+        // Allocation is decided BEFORE the concurrent map: decrementing a shared counter inside
+        // parallel callbacks would let a batch overrun the cap by however many run at once.
+        const allowed = Math.max(0, Math.min(misses.length, guardrails.maxEnrichmentCallsPerRun - spent));
+        if (allowed < misses.length) {
+            console.log(`[discovery] job ${job.job_id} paid-enrichment cap reached (${spent}/${guardrails.maxEnrichmentCallsPerRun}) — ${misses.length - allowed} lead(s) left to the scraper`);
+        }
+        const deadline = Date.now() + PAID_ENRICH_BUDGET_MS;
+        await Promise.all(misses.slice(0, allowed).map(async (s) => {
+            const bought = await lookupProviderContact(s.lead.domain, { timeoutMs: deadline - Date.now() });
+            // Stamp the ATTEMPT whether or not it found anything — that is what the cap counts,
+            // and it stops a later slice paying again for the same domain.
+            s.paidAttempted = true;
+            counters.costGbp += ENRICH_COST_GBP_PER_LOOKUP;
+            if (bought) {
+                s.found = {
+                    ...s.found,
+                    contact: { email: bought.email, kind: bought.kind, source: 'provider', foundOn: bought.provider },
+                };
+            }
+        }));
+    }
+
+    await Promise.all(scraped.map((s) => recordEnrichment(
+        db, s.lead.id, s.lead.assistant_record_id, s.found,
+        { organisationId: job.organisation_id, aiAssistantId: s.lead.ai_assistant_id, blueprintVersion, icpSnapshot },
+        s.paidAttempted === true,
+    )));
 
     const [{ remaining } = { remaining: 0 }] = await db.execute<{ remaining: number }>(
         `SELECT count(*)::int AS remaining FROM discovered_leads
@@ -577,13 +640,18 @@ async function recordEnrichment(
     db: Db, leadId: number, assistantRecordId: number | null,
     found: { contact: { email: string; kind: string; source: string; foundOn: string } | null; handles: Record<string, string> },
     ledger?: { organisationId: number; aiAssistantId: number; blueprintVersion?: string | null; icpSnapshot?: Record<string, unknown> | null },
+    paidAttempted = false,
 ): Promise<void> {
     const hit = found.contact;
     const handles = found.handles ?? {};
     const stamp: Record<string, unknown> = { enrichAttemptedAt: new Date().toISOString() };
+    // ⚠️ Written on a MISS as well as a hit, and that is the point: this stamp is what the
+    // per-run cap counts, so it has to record money SPENT rather than addresses found. It also
+    // stops a later slice paying a second time for a domain the provider already had nothing for.
+    if (paidAttempted) stamp.paidLookupAt = new Date().toISOString();
     if (hit) {
         stamp.emailKind = hit.kind;        // 'role' | 'personal' — personal needs a closer look
-        stamp.emailSource = hit.source;    // 'scrape'
+        stamp.emailSource = hit.source;    // 'scrape' | 'provider' — drives the personal-inbox gate
         stamp.emailFoundOn = hit.foundOn;  // provenance for the Review Queue
     }
     if (Object.keys(handles).length > 0) stamp.socialHandles = handles;
@@ -779,6 +847,12 @@ async function loadGuardrails(db: Db, campaignId: number): Promise<Guardrails> {
         maxLeadsPerRun: g.maxLeadsPerRun,
         maxLeadsPerMonth: g.maxLeadsPerMonth,
         maxSearchCallsPerRun: g.maxSearchCallsPerRun,
+        // ⚠️ Coalesced, not read raw. A campaign row created before
+        // db/discovery-enrichment-cap.sql was applied has no value here, and letting that become
+        // 0 would look like a cap of zero — paid enrichment silently off — rather than "use the
+        // default". The environments this runs in are not guaranteed to be migrated in step with
+        // the deploy, so the code has to survive the gap in the safe direction.
+        maxEnrichmentCallsPerRun: g.maxEnrichmentCallsPerRun ?? DEFAULT_GUARDRAILS.maxEnrichmentCallsPerRun,
         maxTokensPerRun: g.maxTokensPerRun,
         maxCostGbpPerRun: Number(g.maxCostGbpPerRun),
         negativeKeywords: arr(g.negativeKeywords),

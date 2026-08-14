@@ -25,6 +25,7 @@ import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { consumeTaskCredit } from '../../src/utils/task-credit';
 import { displayCaption } from '../../src/utils/model-json';
 import { buildInspoBlock } from '../../src/utils/inspo-profile';
+import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
 import { platformFormat } from '../../src/config/platform-formats';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -85,6 +86,7 @@ export default withLambda(async (event: HandlerEvent) => {
             platform: scheduledPosts.platform,
             status: scheduledPosts.status,
             assistantId: scheduledPosts.assistantId,
+            publishDate: scheduledPosts.publishDate,
         })
         .from(scheduledPosts)
         .where(and(eq(scheduledPosts.id, postId), eq(scheduledPosts.organisationId, ctx.organisationId)))
@@ -125,7 +127,12 @@ export default withLambda(async (event: HandlerEvent) => {
             model: MODEL,
             max_tokens: 1200,
             system:
-                'You revise the words of ONE social media post. Return ONLY the replacement text — no preamble, '
+                // Leading with the date for the same reason the generator does: a rewrite is free to
+                // introduce a year that was never in the original ("a 2025 guide to…"), and an action
+                // like 'tone' rewrites the whole caption. Scoped to the post's own slot, which is the
+                // date this text will actually be read on.
+                `${currentDatePromptBlock({ publishDate: post.publishDate })}\n\n`
+                + 'You revise the words of ONE social media post. Return ONLY the replacement text — no preamble, '
                 + 'no explanation, no surrounding quotes, no code fences, and no commentary about what you changed. '
                 + 'Match the language of the original.'
                 // Appended after the base rules, with the output-format rule restated last so the

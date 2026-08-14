@@ -16,6 +16,8 @@ import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmark';
 import { CONTENT_QUALITY_STANDARDS } from '../../src/constants/content-quality';
 import { renderBlueprintPrompt } from '../../src/utils/blueprint-prompt';
+import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
+import { DEFAULT_POSTING_TIMEZONE } from '../../src/config/posting-cadence';
 import { buildInspoBlock } from '../../src/utils/inspo-profile';
 import { resolveDisclosureFooter, appendFooter } from '../../src/utils/disclosure-footer';
 import { parseModelJson, toCaptionText } from '../../src/utils/model-json';
@@ -145,6 +147,12 @@ export default withLambda(async (event) => {
         // three), the stale hire-time brief, and the workspace's plan price. A test that assembles
         // a different prompt from production reports on a prompt no customer ever receives.
         let systemPrompt = 'You are an expert social media copywriter.\n';
+        // Same date block, same position as production (see process-content-jobs) — a smoke test
+        // that omitted it would report on a prompt no customer receives, which is exactly the drift
+        // this handler has been bitten by twice. No slot and no onboarding context here, so there is
+        // no publish date to state and the timezone is the platform default rather than the
+        // account's; today's date and the year — the part that was actually wrong — are identical.
+        systemPrompt += `${currentDatePromptBlock({ timezone: DEFAULT_POSTING_TIMEZONE })}\n\n`;
         systemPrompt += renderBlueprintPrompt(sections);
 
         // Same drift, one layer up: the blueprint render was brought back to parity but the two

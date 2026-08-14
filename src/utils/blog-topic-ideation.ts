@@ -18,6 +18,7 @@ import type { getDb } from '../../db/client';
 import { blogPosts, organisations } from '../../db/schema';
 import { logAiUsage } from './ai-usage';
 import { buildInspoBlock } from './inspo-profile';
+import { currentDatePromptBlock } from './current-date-prompt';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -118,6 +119,10 @@ export async function ideateBlogTopic(
             model: MODEL,
             max_tokens: 400,
             system:
+                // Ideation picks the TITLE, so a stale year here is baked in before a word of the
+                // body is written — and the body generator, handed "The 2025 Guide To…", will
+                // reasonably keep it. Fixing blog-generate alone would not have caught this.
+                `${currentDatePromptBlock()}\n\n` +
                 'You plan a blog content calendar. Propose ONE blog post that would genuinely help ' +
                 'this business\'s audience — specific and useful, never generic filler, and not a ' +
                 'rehash of anything in the already-written list. ' +
