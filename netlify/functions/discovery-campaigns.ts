@@ -7,6 +7,11 @@
 //        → creates campaign (+guardrails+schedule); one_off enqueues a run now. → { campaignId, jobId }
 //   POST { action: 'list',      assistantId }
 //        → this assistant's campaigns, newest first, each with its latest run status.
+//   POST { action: 'get',       campaignId }
+//        → ONE campaign in full: idea, guardrails, schedule and the approved search plan. Backs
+//          the View / Edit / Schedule modals on the Searches tab.
+//   POST { action: 'schedule',  campaignId, cadence, daysOfWeek?, runAtHourUtc?, timezone?, enabled? }
+//        → rewrites the repeat schedule and recomputes next_run_at. → { nextRunAt, blockedBy }
 //   POST { action: 'generate_brief', campaignId }
 //        → drafts the search plan for review BEFORE anything is spent. → { queries, exclusions }
 //   POST { action: 'approve_brief',  campaignId, queries }
@@ -31,6 +36,9 @@ import { isSearchConfigured, normaliseDomain } from '../../src/lib/discovery-sea
 import {
     generateQueries, flattenQueries, QUERY_GEN_MODEL, type GeneratedQueries,
 } from '../../src/lib/discovery-query-gen';
+import {
+    computeNextRun, isDiscoveryCadence, normaliseDaysOfWeek, normaliseHourUtc,
+} from '../../src/utils/discovery-schedule';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -235,6 +243,116 @@ export default withLambda(async (event) => {
             ))
             .orderBy(desc(discoveryCampaigns.createdAt));
         return json(200, { campaigns, searchConfigured: isSearchConfigured() });
+    }
+
+    // ── one campaign, in full ───────────────────────────────────────────────────
+    //
+    // Backs the View / Edit / Schedule modals on the Searches tab. Deliberately NOT a widening of
+    // `list`: those three surfaces want the approved search plan, the exclusions and the schedule's
+    // day-and-hour, and none of that belongs on a row the tab renders for every search on every
+    // poll. One campaign, read when a human opens it.
+    if (action === 'get') {
+        const campaignId = Number(body.campaignId);
+        const [campaign] = await db.select({
+            id: discoveryCampaigns.id,
+            name: discoveryCampaigns.name,
+            idea: discoveryCampaigns.idea,
+            status: discoveryCampaigns.status,
+            createdAt: discoveryCampaigns.createdAt,
+            approvedBrief: discoveryCampaigns.approvedBrief,
+            targetPersona: discoveryCampaigns.targetPersona,
+            maxLeadsPerRun: discoveryGuardrails.maxLeadsPerRun,
+            negativeKeywords: discoveryGuardrails.negativeKeywords,
+            excludedDomains: discoveryGuardrails.excludedDomains,
+            requireHumanApproval: discoveryGuardrails.requireHumanApproval,
+            cadence: discoverySchedules.cadence,
+            daysOfWeek: discoverySchedules.daysOfWeek,
+            runAtHourUtc: discoverySchedules.runAtHourUtc,
+            timezone: discoverySchedules.timezone,
+            scheduleEnabled: discoverySchedules.isEnabled,
+            nextRunAt: discoverySchedules.nextRunAt,
+            lastRunAt: discoverySchedules.lastRunAt,
+            // Same latest-job shape (and the same created_at + id tiebreaker) as `list` above —
+            // the View modal states what the search is doing beside the same chip the row shows,
+            // and two orderings would let them describe different runs.
+            latestJobStatus: sql<string | null>`(
+                SELECT j.status FROM discovery_jobs j
+                WHERE j.campaign_id = ${discoveryCampaigns.id}
+                ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+            )`,
+            latestJobStage: sql<string | null>`(
+                SELECT j.stage FROM discovery_jobs j
+                WHERE j.campaign_id = ${discoveryCampaigns.id}
+                ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+            )`,
+            lastFinishedAt: sql<string | null>`(
+                SELECT j.updated_at FROM discovery_jobs j
+                WHERE j.campaign_id = ${discoveryCampaigns.id}
+                  AND j.status IN ('completed','failed')
+                ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+            )`,
+            runCount: sql<number>`(
+                SELECT count(*)::int FROM discovery_jobs j
+                WHERE j.campaign_id = ${discoveryCampaigns.id} AND j.status IN ('completed','failed')
+            )`,
+            leadsFound: sql<number>`(
+                SELECT COALESCE(SUM(j.leads_found), 0)::int FROM discovery_jobs j
+                WHERE j.campaign_id = ${discoveryCampaigns.id}
+            )`,
+            latestRunLeadsFound: sql<number>`(
+                SELECT COALESCE(j.leads_found, 0)::int FROM discovery_jobs j
+                WHERE j.campaign_id = ${discoveryCampaigns.id}
+                ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+            )`,
+        })
+            .from(discoveryCampaigns)
+            .leftJoin(discoveryGuardrails, eq(discoveryGuardrails.campaignId, discoveryCampaigns.id))
+            .leftJoin(discoverySchedules, eq(discoverySchedules.campaignId, discoveryCampaigns.id))
+            .where(and(eq(discoveryCampaigns.id, campaignId), eq(discoveryCampaigns.organisationId, orgId)))
+            .limit(1);
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+
+        // The plan the user actually approved, flattened per strategy. Empty until a brief has been
+        // approved — a draft has none, and View must say so rather than showing an empty list that
+        // reads as "it will search for nothing".
+        const brief = (campaign.approvedBrief && typeof campaign.approvedBrief === 'object')
+            ? campaign.approvedBrief as Record<string, unknown> : null;
+        const briefQueries = (brief?.queries && typeof brief.queries === 'object')
+            ? brief.queries as Record<string, unknown> : null;
+
+        return json(200, {
+            campaign: {
+                id: campaign.id,
+                name: campaign.name,
+                idea: campaign.idea,
+                status: campaign.status,
+                createdAt: campaign.createdAt,
+                maxLeadsPerRun: campaign.maxLeadsPerRun ?? 50,
+                negativeKeywords: Array.isArray(campaign.negativeKeywords) ? campaign.negativeKeywords : [],
+                excludedDomains: Array.isArray(campaign.excludedDomains) ? campaign.excludedDomains : [],
+                requireHumanApproval: campaign.requireHumanApproval !== false,
+                cadence: campaign.cadence ?? 'one_off',
+                daysOfWeek: normaliseDaysOfWeek(campaign.daysOfWeek),
+                runAtHourUtc: normaliseHourUtc(campaign.runAtHourUtc),
+                timezone: campaign.timezone ?? 'UTC',
+                scheduleEnabled: campaign.scheduleEnabled === true,
+                nextRunAt: campaign.nextRunAt ? new Date(campaign.nextRunAt).toISOString() : null,
+                lastRunAt: campaign.lastRunAt ? new Date(campaign.lastRunAt).toISOString() : null,
+                latestJobStatus: campaign.latestJobStatus ?? null,
+                latestJobStage: campaign.latestJobStage ?? null,
+                lastFinishedAt: campaign.lastFinishedAt ? new Date(campaign.lastFinishedAt).toISOString() : null,
+                runCount: Number(campaign.runCount ?? 0),
+                leadsFound: Number(campaign.leadsFound ?? 0),
+                latestRunLeadsFound: Number(campaign.latestRunLeadsFound ?? 0),
+                approvedQueries: briefQueries ? {
+                    niche_scrape: cleanQueryList(briefQueries.niche_scrape),
+                    intent_signal: cleanQueryList(briefQueries.intent_signal),
+                    footprint: cleanQueryList(briefQueries.footprint),
+                } : null,
+                briefApprovedAt: typeof brief?.approvedAt === 'string' ? brief.approvedAt : null,
+                skippedCategories: Object.values(EXCLUSION_CATEGORY_LABELS),
+            },
+        });
     }
 
     // ── generate a brief for review, before anything is searched ────────────────
@@ -459,6 +577,67 @@ export default withLambda(async (event) => {
                 .where(and(eq(discoveryJobs.campaignId, campaignId), sql`${discoveryJobs.status} IN ('queued','processing')`));
         }
         return json(200, { status: nextStatus });
+    }
+
+    // ── set how often a search repeats ──────────────────────────────────────────
+    //
+    // Cadence was previously write-once, at creation, from a three-option select — so "run it every
+    // Monday instead" meant archiving the search and building a new one, losing its history and its
+    // dedupe table with it. The schedule row always existed; nothing could edit it.
+    //
+    // Two rules this branch is careful about:
+    //   • A DRAFT keeps its schedule disabled whatever cadence is chosen. Enabling here would let a
+    //     search that nobody has read or started begin spending money on a timer — the exact thing
+    //     the draft state exists to prevent. Starting it (run_now / approve_brief) enables it.
+    //   • A PAUSED search likewise stays disabled: pausing is a decision, and editing the cadence is
+    //     not a request to undo it. Resume does that, explicitly.
+    if (action === 'schedule') {
+        const campaignId = Number(body.campaignId);
+        const [campaign] = await db.select({ id: discoveryCampaigns.id, status: discoveryCampaigns.status })
+            .from(discoveryCampaigns)
+            .where(and(eq(discoveryCampaigns.id, campaignId), eq(discoveryCampaigns.organisationId, orgId)))
+            .limit(1);
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+
+        if (!isDiscoveryCadence(body.cadence)) {
+            return json(400, { error: 'Choose how often this search should run.' });
+        }
+        const cadence = body.cadence;
+        const runAtHourUtc = normaliseHourUtc(body.runAtHourUtc);
+        // Only weekly carries days. Storing them for daily would be dead data that the next reader
+        // has to guess the meaning of — and computeNextRun ignores them there anyway.
+        const daysOfWeek = cadence === 'weekly' ? normaliseDaysOfWeek(body.daysOfWeek) : null;
+        if (cadence === 'weekly' && !daysOfWeek) {
+            return json(400, { error: 'Pick at least one day of the week.' });
+        }
+        const timezone = str(body.timezone, 64) ?? 'UTC';
+
+        // `enabled: false` is "keep the cadence but stop it firing" — the schedule equivalent of
+        // pausing, without touching the campaign's own status.
+        const wantEnabled = body.enabled !== false;
+        const isEnabled = wantEnabled && cadence !== 'one_off' && campaign.status === 'active';
+        const nextRunAt = isEnabled ? computeNextRun(cadence, runAtHourUtc, daysOfWeek, new Date()) : null;
+
+        const patch = {
+            cadence, daysOfWeek, runAtHourUtc, timezone, isEnabled, nextRunAt, updatedAt: new Date(),
+        };
+        const updated = await db.update(discoverySchedules)
+            .set(patch)
+            .where(eq(discoverySchedules.campaignId, campaignId))
+            .returning({ id: discoverySchedules.id });
+        // Every campaign gets a schedule row at creation, but a row that went missing must not make
+        // the cadence silently unsettable — the UI would report success and nothing would repeat.
+        if (updated.length === 0) {
+            await db.insert(discoverySchedules).values({ organisationId: orgId, campaignId, ...patch });
+        }
+
+        return json(200, {
+            cadence, daysOfWeek, runAtHourUtc, timezone, scheduleEnabled: isEnabled,
+            nextRunAt: nextRunAt ? nextRunAt.toISOString() : null,
+            // Why nothing is scheduled, when nothing is — the client says this out loud rather than
+            // showing a saved schedule with no next run and letting the user infer a bug.
+            blockedBy: isEnabled || cadence === 'one_off' ? null : campaign.status,
+        });
     }
 
     // ── cancel the in-flight run, leaving the campaign active ───────────────────

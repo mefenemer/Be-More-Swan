@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-searches-manage",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/cee00fae-2372-4360-aefb-664366d83494/scratchpad/searchharness/server.mjs"
+      ],
+      "port": 4305,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-rq-create-post",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

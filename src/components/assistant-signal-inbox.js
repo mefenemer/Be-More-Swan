@@ -2,7 +2,7 @@
  * src/components/assistant-signal-inbox.js
  * Signal Inbox tab — Phase 1a of docs/lead-generator-revenue-engine-plan.md.
  *
- * Everything that came IN before it became a lead. Two independent feeds behind one surface:
+ * The user's searches, and what each one found. Two independent feeds behind one surface:
  *   • saved searches — projected from discovered_leads, categorised "<Assistant> Search".
  *     Works with ONLY a Lead Generator hired.
  *   • social         — Phase 1b, additive. When absent the inbox is still fully populated and
@@ -10,9 +10,27 @@
  *
  * Backed by netlify/functions/signal-inbox.ts:
  *   • list    → POST signal-inbox { action:'list', assistantId, savedSearchId?, showFiltered?, cursor? }
- *   • approve → POST signal-inbox { action:'approve', assistantId, ids:[...] }   ← the CLASS A batch gate
- * and, for the one write that belongs to this screen, netlify/functions/discovery-campaigns.ts:
+ * and, for the writes that belong to a search rather than to its output,
+ * netlify/functions/discovery-campaigns.ts (via window.AssistantDiscoveryCampaigns):
  *   • start   → POST discovery-campaigns { action:'run_now', campaignId }
+ *   • view / edit / schedule / archive → that component's own modals
+ *
+ * ── Two levels, two reads ────────────────────────────────────────────────────
+ * The TAB lists searches: what each is doing, what it found, and the four controls that manage it.
+ * The RESULTS of a search open in a modal from its own row (openResults → loadResults).
+ * `load()` reads the tab and never filters by search — `countsBySearch` is only complete
+ * unfiltered, and every "View results (N)" button is derived from it.
+ *
+ * ── This tab decides nothing about a lead ────────────────────────────────────
+ * The results list is READ-ONLY, and that is a deliberate reversal. It used to carry a batch
+ * approve, which implied that approving is what turns a search result into a lead. It never was:
+ * every scored company is mirrored into assistant_records the moment the worker scores it
+ * (process-discovery-jobs.ts promoteOne), hot, warm and cold alike, so by the time a row appears
+ * here the lead already exists. Approving only clears an existing lead for OUTREACH — a decision
+ * the Leads tab already offers per lead, beside the Approval and Contact columns it needs, and one
+ * that is optional per search (the "review before outreach" guardrail auto-approves when unticked).
+ * Two triage surfaces over one `approval_status` column is how they drift; this is the one that
+ * went. Searches show what a search did.
  *
  * ── Saying what is happening ─────────────────────────────────────────────────
  * The list is only half the tab. Above it, every saved search states what it is DOING — not
@@ -25,11 +43,10 @@
  *   • `discovery:created` on `document` — the chat modal creating a search from outside this tab.
  *   • a poll while a run is in flight — the only change that happens with no user action here.
  *
- * ── The batch gate ───────────────────────────────────────────────────────────
- * Signals in `needs_review` get NO checkbox and are never selectable. That is deliberate and it is
- * the point of the whole screen: a scraped address belonging to a named individual must not be
- * swept into a bulk approve. The server re-checks this independently — this UI is a convenience,
- * never the enforcement.
+ * ⚠️ signal-inbox.ts still exposes `approve` and still refuses to batch a lead whose only contact
+ * is a named individual's scraped address. Nothing in this component calls it any more. It is kept
+ * because that gate is the enforcement, not this UI, and because bulk triage belongs with the leads
+ * if it ever returns — see tests/signal-inbox.test.ts, which pins it either way.
  *
  * Styling reuses classes already compiled into style.css (no rebuild — see the Tailwind drift note
  * in the project conventions). All server values are escaped on render; treat them as untrusted.
@@ -43,14 +60,21 @@
 
   let state = {
     assistantId: null,
+    // The results LIST belongs to the modal now, not to the tab. Kept on the same state object
+    // because the poll needs it, but only ever rendered inside the overlay.
     signals: [],
     counts: { total: 0, ready: 0, needsReview: 0, promoted: 0, filtered: 0 },
+    // Per-search totals, so a "View results (12)" button on one search cannot state the whole tab's
+    // number. Keyed by campaign id.
+    countsBySearch: {},
+    // Counts for the search whose results modal is open — held apart from the tab's own, so a modal
+    // read never overwrites them.
+    resultCounts: { total: 0, ready: 0, needsReview: 0, promoted: 0, filtered: 0 },
     savedSearches: [],
     savedSearchId: null,
-    showFiltered: false,
+    resultsOverlay: null,
     hasSocialFeed: false,
     sourceLabel: 'Saved search',
-    selected: new Set(),
     nextCursor: null,
     loading: false,
     error: null,
@@ -98,53 +122,55 @@
 
   // ── Rendering ──────────────────────────────────────────────────────────────
 
-  const CHIP = {
-    ready: 'bg-amber-50 text-amber-700 border-amber-200',
-    needs_review: 'bg-amber-50 text-amber-800 border-amber-300',
-    promoted: 'bg-green-50 text-green-700 border-green-100',
-    filtered: 'bg-gray-100 text-gray-500 border-gray-200',
-    auto_promoted: 'bg-green-50 text-green-700 border-green-100',
-    ignored: 'bg-gray-100 text-gray-500 border-gray-200',
+  /**
+   * Where a found company stands AS A LEAD.
+   *
+   * This replaced a chip drawn from `handoffStatus` — the batch gate's vocabulary ("Ready to
+   * approve", "Filtered"). That vocabulary described this screen's own workflow rather than the
+   * lead, and it was wrong in the ordinary case: a cold-scored company is `filtered` for batch
+   * purposes and sits in the Leads tab awaiting approval exactly like a hot one, so "Filtered" read
+   * as "discarded" about a lead the user owns. The rating chip beside this one already says how
+   * well it scored; this one says what has been decided about it, and nothing else.
+   */
+  const LEAD_CHIP = {
+    awaiting: 'bg-amber-50 text-amber-700 border-amber-200',
+    approved: 'bg-green-50 text-green-700 border-green-100',
+    rejected: 'bg-gray-100 text-gray-500 border-gray-200',
   };
-  const STATE_LABEL = {
-    ready: 'Ready to approve',
-    needs_review: 'Individual review',
-    promoted: 'Approved',
-    filtered: 'Filtered',
-    auto_promoted: 'Auto-promoted',
-    ignored: 'Ignored',
+  const LEAD_LABEL = {
+    awaiting: 'In Leads · awaiting you',
+    approved: 'Approved',
+    rejected: 'Rejected',
   };
   const ratingChip = (r) => r === 'hot' ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
     : r === 'warm' ? 'bg-amber-50 text-amber-700 border-amber-200'
     : 'bg-gray-100 text-gray-500 border-gray-200';
 
+  /**
+   * One company a search found — a RECORD of the find, not a decision to make.
+   *
+   * There is no checkbox and no approve button here any more, and that is the point. Every scored
+   * company is already a lead: the worker mirrors it into assistant_records the instant it is
+   * scored, whatever its rating (process-discovery-jobs.ts promoteOne). Approving never created the
+   * lead — it clears an existing one for outreach — so offering that decision on this tab put a
+   * second triage surface in front of the Leads tab, over the same `approval_status` column, and
+   * made a step that is genuinely optional (the per-search "review before outreach" guardrail) look
+   * mandatory. Searches show what a search did; leads are managed in the Leads tab.
+   */
   function row(s) {
-    const selectable = s.handoffStatus === 'ready';
-    const checked = state.selected.has(s.id) ? 'checked' : '';
-    const dim = s.handoffStatus === 'filtered' ? 'opacity-70' : '';
-    const warn = s.handoffStatus === 'needs_review';
+    const dim = s.handoffStatus === 'filtered' && s.leadState === 'rejected' ? 'opacity-70' : '';
     return `
-      <div class="flex items-start gap-3 p-4 border-b border-gray-100 ${dim} ${warn ? 'bg-amber-50' : ''}">
-        <div class="pt-0.5 w-5 shrink-0">
-          ${selectable
-            ? `<input type="checkbox" data-si-sel="${esc(s.id)}" ${checked} class="cursor-pointer">`
-            : warn ? '<span title="Excluded from batch approve">&#9888;&#65039;</span>' : ''}
-        </div>
+      <div class="flex items-start gap-3 p-4 border-b border-gray-100 ${dim}">
         <div class="min-w-0 flex-1">
           <p class="font-semibold text-gray-900 text-sm">${esc(s.title)}</p>
           ${s.excerpt ? `<p class="text-xs text-gray-500 mt-0.5">${esc(s.excerpt)}</p>` : ''}
           ${s.reviewReason ? `<p class="text-xs text-amber-800 mt-1">${esc(s.reviewReason)}</p>` : ''}
-          ${s.filterReason ? `<p class="text-xs text-gray-400 mt-1">${esc(s.filterReason)}</p>` : ''}
-        </div>
-        <div class="shrink-0 text-right">
-          <span class="text-xs font-bold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-800 border-emerald-200">${esc(s.sourceLabel)}</span>
-          <p class="text-xs text-gray-400 mt-1">${esc(s.savedSearchName || '')}</p>
         </div>
         <div class="shrink-0 w-20 text-right">
           ${s.rating ? `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${ratingChip(s.rating)}">${esc(s.rating)}${s.confidence != null ? ' &middot; ' + esc(s.confidence) : ''}</span>` : ''}
         </div>
-        <div class="shrink-0 w-32 text-right">
-          <span class="text-xs font-bold px-2 py-0.5 rounded-full border ${CHIP[s.handoffStatus] || CHIP.filtered}">${esc(STATE_LABEL[s.handoffStatus] || s.handoffStatus)}</span>
+        <div class="shrink-0 w-36 text-right">
+          <span class="text-xs font-bold px-2 py-0.5 rounded-full border ${LEAD_CHIP[s.leadState] || LEAD_CHIP.awaiting}">${esc(LEAD_LABEL[s.leadState] || LEAD_LABEL.awaiting)}</span>
         </div>
       </div>`;
   }
@@ -375,6 +401,16 @@
       line: `Active but it has not run yet. ${cadence}` };
   }
 
+  /**
+   * How many companies one search has found — every one of them, because that is now exactly what
+   * the modal shows. It counted only the non-filtered ones while the modal hid cold leads behind a
+   * toggle; both halves of that went when the approve step left this tab.
+   */
+  function resultsCount(id) {
+    const c = state.countsBySearch[id];
+    return { total: c ? c.total : 0 };
+  }
+
   // `last` rather than a `last:border-b-0` utility — that class is not in the compiled style.css,
   // and rebuilding Tailwind for one divider churns unrelated classes across the whole sheet.
   function searchRow(s, last) {
@@ -384,6 +420,18 @@
       : st.action === 'run'
         ? `<button type="button" data-si-start="${s.id}" class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Run again</button>`
         : '';
+
+    // The results button. Disabled — not hidden — while a search has found nothing: a row with no
+    // way to open its results reads as a broken control, where a disabled one with a reason reads
+    // as a fact about the search.
+    const rc = resultsCount(s.id);
+    const resultsBtn = rc.total === 0
+      ? `<button type="button" disabled title="This search has not found anything yet"
+           class="px-3 py-1.5 bg-white border border-gray-200 text-gray-400 text-xs font-bold rounded-lg opacity-60 cursor-not-allowed">View results</button>`
+      : `<button type="button" data-si-results="${s.id}"
+           class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition">View results (${rc.total})</button>`;
+
+    const ghost = 'px-2.5 py-1 bg-white border border-gray-200 text-gray-600 hover:border-gray-300 text-xs font-bold rounded-lg transition';
     return `
       <div class="p-4 ${last ? '' : 'border-b border-gray-100'}">
         <div class="flex items-start gap-3">
@@ -397,6 +445,15 @@
           </div>
           <div class="shrink-0">${btn}</div>
         </div>
+        <div class="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-100">
+          ${resultsBtn}
+          <span class="ml-auto flex flex-wrap items-center gap-2">
+            <button type="button" data-si-view="${s.id}" class="${ghost}">View</button>
+            <button type="button" data-si-edit="${s.id}" class="${ghost}">Edit</button>
+            <button type="button" data-si-schedule="${s.id}" class="${ghost}">Schedule</button>
+            <button type="button" data-si-archive="${s.id}" class="${ghost} text-gray-400 hover:text-red-600 hover:border-red-300">Archive</button>
+          </span>
+        </div>
       </div>`;
   }
 
@@ -406,57 +463,40 @@
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm mb-4">
         <div class="p-4 border-b border-gray-100">
           <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">Your searches</p>
-          <p class="text-xs text-gray-500 mt-1">Each search looks across the public web, scores what it finds against your profile, and files the companies below. You approve the ones worth pursuing &mdash; approved companies become leads and move to your Leads tab.</p>
+          <p class="text-xs text-gray-500 mt-1">Each search looks across the public web, scores what it finds against your profile, and files every company it finds as a lead in your <span class="font-semibold text-gray-700">Leads</span> tab &mdash; hot, warm or cold. Open a search&rsquo;s results to see what it found; decide who to pursue in the Leads tab.</p>
         </div>
         ${state.savedSearches.map((s, i) => searchRow(s, i === state.savedSearches.length - 1)).join('')}
       </div>`;
   }
 
   /**
-   * The empty list, explained by why it is empty. The old copy said "create a saved search" no
-   * matter what — advice that was actively wrong for the user who had just created one in chat and
-   * was being told to go and do it again.
+   * No searches at all — the only empty state the TAB itself can have now that results live behind
+   * a per-search button. The "it ran and found nothing" / "it never ran" / "it is running" copy
+   * moved to resultsEmptyState(), where it can name one search instead of guessing across all of
+   * them: this state used to say "create a saved search" to a user who had just created one in
+   * chat, and the fix was to make the empty state describe the actual situation.
    */
   function emptyState() {
-    if (!state.savedSearches.length) {
-      return `<div class="p-8 text-center">
-        <p class="text-sm font-semibold text-gray-900">No signals yet</p>
-        <p class="text-xs text-gray-500 mt-1">Create a saved search and your assistant will start filling this inbox.</p>
-        <button type="button" data-si-new-search
-          class="mt-3 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition">Find New Leads</button>
-      </div>`;
-    }
-    if (state.savedSearches.some((s) => s.latestJobStatus === 'queued' || s.latestJobStatus === 'processing')) {
-      return `<div class="p-8 text-center">
-        <p class="text-sm font-semibold text-gray-900">Searching now</p>
-        <p class="text-xs text-gray-500 mt-1">A search works through one query at a time, so companies arrive here in batches rather than all at once. This page updates itself &mdash; you do not need to wait on it.</p>
-      </div>`;
-    }
-    // "Found nothing" and "never got as far as looking" are different facts about an empty list,
-    // and only one of them is the user's cue to widen the search. A run that FAILED has produced
-    // no evidence about their profile at all — telling them to broaden it would be a guess
-    // dressed as a finding.
-    if (!state.savedSearches.some((s) => s.latestJobStatus === 'completed')) {
-      if (state.savedSearches.some((s) => s.latestJobStatus === 'failed')) {
-        return `<div class="p-8 text-center">
-          <p class="text-sm font-semibold text-gray-900">The last run did not finish</p>
-          <p class="text-xs text-gray-500 mt-1">Nothing has come in because the search stopped early, not because it found nothing. Starting it again is safe.</p>
-        </div>`;
-      }
-      return `<div class="p-8 text-center">
-        <p class="text-sm font-semibold text-gray-900">Nothing has been searched yet</p>
-        <p class="text-xs text-gray-500 mt-1">Your search is saved but has not run. Start it above and the companies it finds land here for your approval.</p>
-      </div>`;
-    }
     return `<div class="p-8 text-center">
-      <p class="text-sm font-semibold text-gray-900">Nothing new came in</p>
-      <p class="text-xs text-gray-500 mt-1">The last run found no companies that cleared your profile. Run it again, or widen the description under Find New Leads.</p>
+      <p class="text-sm font-semibold text-gray-900">No searches yet</p>
+      <p class="text-xs text-gray-500 mt-1">Create a search and your assistant will start looking for companies that match it.</p>
+      <button type="button" data-si-new-search
+        class="mt-3 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition">Find New Leads</button>
     </div>`;
   }
 
+  /**
+   * The tab: the searches themselves, and nothing else.
+   *
+   * The results used to be printed straight down this page, every search's companies interleaved
+   * under one filter chip row. That put the list a user reviews occasionally above the searches
+   * they manage constantly, and it meant "approve" acted on a mixed selection spanning searches.
+   * Results now open per search, from the row that produced them (openResults) — so the thing you
+   * approve is always the output of one search you can see the state of.
+   */
   function view() {
-    if (state.loading && !state.signals.length) {
-      return `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center text-sm text-gray-500">Loading your signals…</div>`;
+    if (state.loading && !state.savedSearches.length) {
+      return `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center text-sm text-gray-500">Loading your searches…</div>`;
     }
     if (state.error) {
       return `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
@@ -465,66 +505,23 @@
       </div>`;
     }
 
-    const c = state.counts;
-    const selCount = state.selected.size;
-
-    // Source chips filter the list BELOW; the searches panel above states what each one is doing.
-    // With a single search the chip row is pure noise — "All" and one chip that select the same
-    // rows — so it only appears once there is a genuine choice to make.
-    const searchChips = state.savedSearches.length > 1 ? `
-      <button type="button" data-si-search="" class="px-2.5 py-1 text-xs font-bold rounded-lg border transition ${state.savedSearchId === null ? 'bg-emerald-700 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}">All</button>
-      ${state.savedSearches.map((s) => `
-      <button type="button" data-si-search="${s.id}"
-        class="px-2.5 py-1 text-xs font-bold rounded-lg border transition ${state.savedSearchId === s.id ? 'bg-emerald-700 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}">${esc(s.label)}</button>`).join('')}` : '';
-
-    const empty = state.signals.length === 0;
-
-    // No summary-card row. Four big numbers across the top ("Signals / Ready to approve / Need
-    // review / Filtered") restated what the list below already shows, row by row and with the
-    // company names attached — and pushed the searches panel, which is the thing the user has to
-    // act on, below the fold. The two counts worth keeping are still on screen where the decision
-    // is made: "Show filtered (N)" on its own toggle, and "N need individual review" on the batch
-    // bar. The number of SEARCHES now rides on the tab button itself (updateTab).
     return `
-      ${searchesPanel()}
-
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm">
-        <div class="p-4 border-b border-gray-100 flex flex-wrap items-center gap-2">
-          ${searchChips}
-          <label class="ml-auto flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
-            <input type="checkbox" data-si-filtered ${state.showFiltered ? 'checked' : ''} class="cursor-pointer">
-            Show filtered (${c.filtered})
-          </label>
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm mb-4">
+        <div class="p-4 flex flex-wrap items-center gap-2">
+          <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mr-auto">Lead searches</p>
           <button type="button" data-si-lead-ideas
             class="px-2.5 py-1 text-xs font-bold rounded-lg border bg-white text-gray-600 border-gray-200 hover:border-gray-300 transition">Review Lead Ideas</button>
           <button type="button" data-si-new-search
             class="px-2.5 py-1 text-xs font-bold rounded-lg border bg-white text-emerald-700 border-emerald-200 hover:border-emerald-300 hover:bg-emerald-50 transition">Find New Leads</button>
         </div>
-
-        ${c.ready > 0 ? `
-        <div class="p-4 border-b border-gray-100 bg-emerald-50 flex flex-wrap items-center gap-3">
-          <label class="flex items-center gap-2 text-xs font-bold text-gray-700 cursor-pointer">
-            <input type="checkbox" data-si-all class="cursor-pointer"> ${selCount ? selCount + ' selected' : 'Select all ready'}
-          </label>
-          ${c.needsReview > 0 ? `<span class="text-xs font-bold px-2 py-0.5 rounded-full border bg-gray-100 text-gray-500 border-gray-200">${c.needsReview} need individual review</span>` : ''}
-          <button type="button" data-si-approve ${selCount ? '' : 'disabled'}
-            class="ml-auto px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
-            ${selCount ? 'Approve ' + selCount : 'Approve'}
-          </button>
-        </div>` : ''}
-
-        ${empty ? emptyState() : state.signals.map(row).join('')}
-
+        ${state.savedSearches.length ? '' : emptyState()}
         ${!state.hasSocialFeed ? `
         <div class="p-4 border-t border-gray-100 bg-gray-50 flex flex-wrap items-center gap-3">
           <p class="text-xs text-gray-500">Also capture comments, DMs and mentions as signals &mdash; needs a Social Media Assistant.</p>
         </div>` : ''}
       </div>
 
-      ${state.nextCursor ? `
-      <div class="text-center mt-4">
-        <button type="button" data-si-more class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-gray-300 text-xs font-bold rounded-lg transition">Load more</button>
-      </div>` : ''}`;
+      ${searchesPanel()}`;
   }
 
   function render() {
@@ -534,38 +531,156 @@
     bind(h);
   }
 
+  // ── The results modal ──────────────────────────────────────────────────────
+  //
+  // One search's companies, opened from its row. Everything about reviewing results lives in here:
+  // the filtered toggle, the batch gate, paging. The gate itself is unchanged and still enforced
+  // server-side — needs_review rows get no checkbox here and signal-inbox.ts re-classifies anyway.
+
+  function resultsModalView() {
+    const c = state.resultCounts;
+    const search = state.savedSearches.find((s) => s.id === state.savedSearchId);
+    const empty = state.signals.length === 0;
+    // What the user does next, and where. Stated once, at the top, because this list itself offers
+    // no action: the leads are already filed and the decision about them belongs to the Leads tab.
+    const waiting = c.total - c.promoted;
+
+    return `
+      <div class="p-4 border-b border-gray-100">
+        <p class="text-xs text-gray-500">${esc(search ? searchState(search).line : '')}</p>
+        ${c.total ? `<p class="text-xs text-gray-500 mt-1">${waiting > 0
+          ? esc(`${waiting} of ${c.total} still ${waiting === 1 ? 'has' : 'have'} no decision — approve or reject ${waiting === 1 ? 'it' : 'them'} in the Leads tab.`)
+          : 'Every one of them has been decided.'}</p>` : ''}
+      </div>
+
+      ${state.loading && empty
+        ? '<p class="text-sm text-gray-400 py-10 text-center">Loading results…</p>'
+        : empty ? resultsEmptyState() : state.signals.map(row).join('')}
+
+      ${state.nextCursor ? `
+      <div class="text-center p-4">
+        <button type="button" data-si-more class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-gray-300 text-xs font-bold rounded-lg transition">Load more</button>
+      </div>` : ''}`;
+  }
+
+  /**
+   * An empty results list, explained by why it is empty — for ONE search, so it can be specific in
+   * a way the old tab-wide empty state could not. The filtered case is the new one and the one that
+   * matters most: a search whose every company scored cold has a full results table and shows
+   * nothing, which reads as a broken modal rather than a targeting problem.
+   */
+  function resultsEmptyState() {
+    const s = state.savedSearches.find((x) => x.id === state.savedSearchId);
+    if (s && (s.latestJobStatus === 'queued' || s.latestJobStatus === 'processing')) {
+      return `<div class="p-8 text-center">
+        <p class="text-sm font-semibold text-gray-900">Searching now</p>
+        <p class="text-xs text-gray-500 mt-1">A search works through one query at a time, so companies arrive in batches rather than all at once. This list updates itself.</p>
+      </div>`;
+    }
+    if (s && s.latestJobStatus === 'failed') {
+      return `<div class="p-8 text-center">
+        <p class="text-sm font-semibold text-gray-900">The last run did not finish</p>
+        <p class="text-xs text-gray-500 mt-1">Nothing came in because the search stopped early, not because it found nothing. Starting it again is safe.</p>
+      </div>`;
+    }
+    if (s && !s.latestJobStatus) {
+      return `<div class="p-8 text-center">
+        <p class="text-sm font-semibold text-gray-900">This search has not run yet</p>
+        <p class="text-xs text-gray-500 mt-1">Start it from its row and the companies it finds land here for your approval.</p>
+      </div>`;
+    }
+    return `<div class="p-8 text-center">
+      <p class="text-sm font-semibold text-gray-900">Nothing came in</p>
+      <p class="text-xs text-gray-500 mt-1">The last run found no companies that cleared your profile. Run it again, or widen the description with Edit.</p>
+    </div>`;
+  }
+
+  function renderResults() {
+    const b = state.resultsOverlay?.querySelector('[data-si-results-body]');
+    if (!b) return;
+    b.innerHTML = resultsModalView();
+    bindResults(b);
+  }
+
+  function openResults(id) {
+    closeResults();
+    state.savedSearchId = id;
+    state.signals = [];
+    state.nextCursor = null;
+    state.pagedIn = false;
+    const search = state.savedSearches.find((s) => s.id === id);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 bg-gray-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm';
+    overlay.innerHTML = `
+      <div class="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+        <div class="flex items-start justify-between gap-4 p-5 border-b border-gray-100 shrink-0">
+          <div class="min-w-0">
+            <h3 class="text-lg font-bold text-gray-900">${esc(search ? search.label : 'Search results')}</h3>
+            <p class="text-sm text-gray-500 mt-0.5">What this search found. Every company is already a lead &mdash; pursue or turn them down in the Leads tab.</p>
+          </div>
+          <button type="button" data-si-results-close class="text-gray-400 hover:text-gray-600 text-2xl leading-none cursor-pointer shrink-0">&times;</button>
+        </div>
+        <div class="overflow-y-auto" data-si-results-body></div>
+      </div>`;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeResults(); });
+    overlay.querySelector('[data-si-results-close]').addEventListener('click', () => closeResults());
+    document.body.appendChild(overlay);
+    state.resultsOverlay = overlay;
+    loadResults();
+  }
+
+  function closeResults() {
+    if (!state.resultsOverlay) return;
+    state.resultsOverlay.remove();
+    state.resultsOverlay = null;
+    state.savedSearchId = null;
+    state.signals = [];
+    state.nextCursor = null;
+    state.pagedIn = false;
+  }
+
   // ── Events ─────────────────────────────────────────────────────────────────
 
+  /** The tab: searches and the buttons that manage them. */
   function bind(h) {
     h.querySelector('[data-si-retry]')?.addEventListener('click', () => load());
-    // 'change', not 'click' — fires for keyboard toggling too, and matches the other checkboxes.
-    h.querySelector('[data-si-filtered]')?.addEventListener('change', (e) => {
-      state.showFiltered = !!e.target.checked;
-      load();
-    });
-    h.querySelectorAll('[data-si-search]').forEach((b) => b.addEventListener('click', () => {
-      const v = b.getAttribute('data-si-search');
-      state.savedSearchId = v ? Number(v) : null;
-      load();
-    }));
-    h.querySelectorAll('[data-si-sel]').forEach((box) => box.addEventListener('change', () => {
-      const id = box.getAttribute('data-si-sel');
-      if (box.checked) state.selected.add(id); else state.selected.delete(id);
-      render();
-    }));
-    h.querySelector('[data-si-all]')?.addEventListener('change', (e) => {
-      // Selects only what the SERVER marked ready — never the needs_review rows.
-      state.selected = e.target.checked
-        ? new Set(state.signals.filter((s) => s.handoffStatus === 'ready').map((s) => s.id))
-        : new Set();
-      render();
-    });
     h.querySelectorAll('[data-si-start]').forEach((b) => b.addEventListener('click', () => startSearch(b)));
-    h.querySelector('[data-si-approve]')?.addEventListener('click', (e) => approve(e.currentTarget));
-    h.querySelector('[data-si-more]')?.addEventListener('click', () => load({ append: true }));
+    h.querySelectorAll('[data-si-results]').forEach((b) => b.addEventListener('click', () => openResults(Number(b.getAttribute('data-si-results')))));
     // Two of these can be on screen at once (toolbar + empty state), so bind them as a set.
     h.querySelectorAll('[data-si-new-search]').forEach((b) => b.addEventListener('click', openNewSearch));
     h.querySelector('[data-si-lead-ideas]')?.addEventListener('click', openLeadIdeas);
+    h.querySelectorAll('[data-si-view]').forEach((b) => b.addEventListener('click', () => manageSearch('openView', b, 'data-si-view')));
+    h.querySelectorAll('[data-si-edit]').forEach((b) => b.addEventListener('click', () => manageSearch('openEdit', b, 'data-si-edit')));
+    h.querySelectorAll('[data-si-schedule]').forEach((b) => b.addEventListener('click', () => manageSearch('openSchedule', b, 'data-si-schedule')));
+    h.querySelectorAll('[data-si-archive]').forEach((b) => b.addEventListener('click', () => manageSearch('archive', b, 'data-si-archive')));
+  }
+
+  /** The results modal: paging, and nothing else — the list is a read-only record. */
+  function bindResults(b) {
+    b.querySelector('[data-si-more]')?.addEventListener('click', () => loadResults({ append: true }));
+  }
+
+  /**
+   * View / Edit / Schedule / Archive — all four are decisions about the SEARCH, and they live in
+   * assistant-discovery-campaigns.js, which owns every write to a discovery campaign. This tab
+   * only routes to them and re-reads itself afterwards, because it renders those same searches
+   * from a different endpoint and would otherwise keep showing the old cadence or the archived row.
+   *
+   * Same init-then-open shape as openNewSearch: that component no-ops without an assistantId.
+   */
+  function manageSearch(method, btn, attr) {
+    const dc = window.AssistantDiscoveryCampaigns;
+    const id = Number(btn.getAttribute(attr));
+    if (!dc || !id || !state.assistantId) return;
+    dc.init({
+      assistantId: state.assistantId,
+      cfg: window.AssistantDashboardRegistry?.get('lead_qualifier')?.discoveryCampaigns,
+    });
+    // Archiving the search whose results are open would leave a modal listing a search that no
+    // longer exists; editing one changes what its results mean. Close first, reload after.
+    if (method !== 'openView') closeResults();
+    dc[method](id, () => load());
   }
 
   /**
@@ -653,46 +768,49 @@
     if (state.pollTimer) { clearTimeout(state.pollTimer); state.pollTimer = null; }
     const running = state.savedSearches.some((s) => s.latestJobStatus === 'queued' || s.latestJobStatus === 'processing');
     if (!running) return;
-    // Never yank the list out from under someone working in it: a reload clears the selection and
-    // drops back to page one, so a poll that fired mid-review would undo their work silently.
-    if (state.selected.size || state.pagedIn) return;
+    // Never yank the list out from under someone reading it: a reload drops back to page one, so a
+    // poll that fired after they had paged through would silently throw those pages away.
+    if (state.pagedIn) return;
     const h = host();
     if (!h || h.offsetParent === null || document.visibilityState === 'hidden') return;
-    state.pollTimer = setTimeout(() => { state.pollTimer = null; load(); }, POLL_MS);
+    state.pollTimer = setTimeout(() => {
+      state.pollTimer = null;
+      load();
+      // The modal is the surface actually being watched while a run is in flight — a poll that
+      // refreshed only the row behind it would leave the open list of companies frozen.
+      if (state.resultsOverlay) loadResults();
+    }, POLL_MS);
   }
 
-  async function load(opts) {
-    const append = !!(opts && opts.append);
+  /**
+   * The TAB's read: the searches, their state, and the counts the buttons and the tab badge state.
+   *
+   * Deliberately never filtered by a search. The response's `countsBySearch` is only complete for
+   * an unfiltered read, and it is what every "View results (N)" button is derived from — asking for
+   * one search's rows here would zero the others' buttons.
+   */
+  async function load() {
     state.loading = true;
     state.error = null;
-    if (!append) render();
+    render();
     try {
-      const data = await call('list', {
-        savedSearchId: state.savedSearchId ?? undefined,
-        showFiltered: state.showFiltered,
-        cursor: append ? state.nextCursor : undefined,
-      });
-      state.signals = append ? state.signals.concat(data.signals || []) : (data.signals || []);
+      const data = await call('list', { showFiltered: false });
       state.counts = data.counts || state.counts;
+      state.countsBySearch = data.countsBySearch || {};
       state.savedSearches = data.savedSearches || [];
-      // The server stopped listing archived searches, so a filter pinned to one would silently
-      // show an empty list with no chip selected. Fall back to All rather than a dead filter.
+      // Archived searches stop being listed, so a results modal open on one is now showing a search
+      // that is no longer here. Close it rather than leaving a dead list on screen.
       if (state.savedSearchId !== null && !state.savedSearches.some((s) => s.id === state.savedSearchId)) {
-        state.savedSearchId = null;
+        closeResults();
       }
       state.hasSocialFeed = !!data.hasSocialFeed;
       state.sourceLabel = data.sourceLabel || state.sourceLabel;
-      state.nextCursor = data.nextCursor || null;
-      if (!append) state.selected = new Set();
-      // Tracks "the user has paged past the first screen", which schedulePoll() treats as work in
-      // progress — a background reload would silently throw those pages away.
-      state.pagedIn = append;
     } catch (err) {
       // The columns arrive with db/signal-inbox-1a.sql, a MANUAL apply. Say so plainly rather than
       // showing a generic failure the user can do nothing with.
       state.error = err.code === 'MIGRATION_PENDING'
         ? 'Searches is not set up on this environment yet.'
-        : (err.message || 'Could not load your signals.');
+        : (err.message || 'Could not load your searches.');
     } finally {
       state.loading = false;
       updateTab();
@@ -701,27 +819,38 @@
     }
   }
 
-  async function approve(btn) {
-    const ids = [...state.selected];
-    if (!ids.length) return;
-    btn.disabled = true;
-    btn.textContent = 'Approving…';
+  /** The MODAL's read: one search's companies, paged. */
+  async function loadResults(opts) {
+    if (!state.savedSearchId || !state.resultsOverlay) return;
+    const append = !!(opts && opts.append);
+    state.loading = true;
+    if (!append) renderResults();
     try {
-      const res = await call('approve', { ids });
-      // The server may refuse some of them (it re-checks the gate against fresh state), so report
-      // what actually happened rather than assuming the whole selection went through.
-      if (res.skipped && res.skipped.length) {
-        window.showToast?.(`Approved ${res.approved}. ${res.skipped.length} need individual review.`, 'info');
-      } else {
-        window.showToast?.(`Approved ${res.approved} lead${res.approved === 1 ? '' : 's'}.`, 'success');
-      }
-      state.selected = new Set();
-      await load();
+      const data = await call('list', {
+        savedSearchId: state.savedSearchId,
+        // Always everything. `showFiltered` existed to keep un-approvable rows out of a batch
+        // approve; with no approve here, a cold-scored company is simply a result with a cold chip
+        // — and one that is a lead in the Leads tab like any other, so hiding it by default made
+        // this list disagree with the tab it points at.
+        showFiltered: true,
+        cursor: append ? state.nextCursor : undefined,
+      });
+      state.signals = append ? state.signals.concat(data.signals || []) : (data.signals || []);
+      // Filtered to this search, so `counts` describes THIS search — held apart from the tab's own
+      // counts, which the badge is derived from and which cover every search.
+      state.resultCounts = data.counts || state.resultCounts;
+      state.nextCursor = data.nextCursor || null;
+      // Tracks "the user has paged past the first screen", which schedulePoll() treats as work in
+      // progress — a background reload would silently throw those pages away.
+      state.pagedIn = append;
     } catch (err) {
-      window.showToast?.(err.message || 'Could not approve those signals.', 'error');
-      btn.disabled = false;
-      btn.textContent = `Approve ${ids.length}`;
+      const b = state.resultsOverlay?.querySelector('[data-si-results-body]');
+      if (b) b.innerHTML = `<p class="p-6 text-sm font-semibold text-red-700">${esc(err.message || 'Could not load these results.')}</p>`;
+      state.loading = false;
+      return;
     }
+    state.loading = false;
+    renderResults();
   }
 
   /**
@@ -730,7 +859,13 @@
    * Two different numbers on purpose, and they answer two different questions. The parenthetical
    * is inventory — how many searches this assistant is running, which is what the tab is FOR and
    * the thing a user checks without opening it. The amber badge is the same "needs you" affordance
-   * every other tab uses, and it counts signals awaiting approval, not searches.
+   * every other tab uses.
+   *
+   * ⚠️ That badge used to count LEADS awaiting approval. It was pointing at work that is not done
+   * on this tab — approving happens in Leads, and the Review tab already carries its own
+   * pending badge over the same records — so the same number was badged twice and one of them
+   * led nowhere. It now counts SEARCHES that cannot progress without the user: a draft nobody has
+   * started (it has searched nothing and spent nothing) and a search whose last run failed.
    *
    * `(0)` is suppressed: a bare "Searches" reads as an empty tab, where "Searches (0)" reads as a
    * counter that failed to load.
@@ -742,9 +877,9 @@
       label.textContent = searches ? `${state.tabLabel} (${searches})` : state.tabLabel;
     }
 
-    const el = document.getElementById('signals-ready-badge');
+    const el = document.getElementById('signals-attention-badge');
     if (!el) return;
-    const n = state.counts.ready + state.counts.needsReview;
+    const n = state.savedSearches.filter((s) => s.status === 'draft' || s.latestJobStatus === 'failed').length;
     el.textContent = n > 99 ? '99+' : String(n);
     el.classList.toggle('hidden', n === 0);
     // `hidden` loses to a class that sets display, so pin it directly too.

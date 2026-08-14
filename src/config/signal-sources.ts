@@ -67,6 +67,17 @@ export interface Signal {
     rating?: string | null;
     confidence: number | null;
     handoffStatus: HandoffState;
+    /**
+     * Where this company stands AS A LEAD — read straight off assistant_records.approval_status.
+     *
+     * ⚠️ Deliberately NOT derived from `handoffStatus`, which answers a different question ("may
+     * this be swept into a batch approve"). The two disagree on a real case: a cold-scored lead is
+     * `filtered` for batch purposes but is sitting in the Leads tab awaiting approval like any
+     * other, because every scored company is mirrored into assistant_records the moment it is
+     * found (process-discovery-jobs.ts promoteOne). Labelling that row "Filtered" told users a
+     * lead they own had been discarded.
+     */
+    leadState?: 'approved' | 'awaiting' | 'rejected' | null;
     /** Why it was filtered, when handoffStatus is 'filtered'. */
     filterReason?: string | null;
     /** Populated once the signal has become an assistant_records row. */

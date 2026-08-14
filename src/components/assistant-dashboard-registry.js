@@ -422,10 +422,17 @@
       // scores what it finds, and files leads for approval. Backed by discovery-campaigns.ts.
       // Design: docs/lead-generator-discovery-plan.md.
       //
-      // Its button lives in the SIGNAL INBOX toolbar, not the Leads tab action bar — a search
-      // files its results into the inbox and nothing into Leads directly, so the Leads-tab entry
-      // point was downstream of its own action. assistant-signal-inbox.js reads this config from
-      // the registry itself; nothing in assistants.js wires it any more.
+      // Its button lives in the SEARCHES toolbar, not the Leads tab action bar: creating a search
+      // is an act about searches, and the Leads-tab entry point sat downstream of its own result.
+      // assistant-signal-inbox.js reads this config from the registry itself; nothing in
+      // assistants.js wires it any more.
+      //
+      // ⚠️ This comment used to say a search "files its results into the inbox and nothing into
+      // Leads directly". That has not been true since the worker began mirroring each scored
+      // company on the spot (process-discovery-jobs.ts promoteOne): EVERY company a search finds —
+      // hot, warm or cold — is an assistant_records lead as soon as it is scored, and the Searches
+      // tab only projects those same rows. Approving is a decision about OUTREACH, not about
+      // becoming a lead, and it belongs to the Leads tab.
       discoveryCampaigns: {
         label: 'Find New Leads',
         title: 'Find New Leads',

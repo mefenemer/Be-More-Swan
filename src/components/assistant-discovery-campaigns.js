@@ -74,15 +74,17 @@
     const t = Date.parse(c.nextRunAt || '');
     if (!t) return `Repeats ${repeats}.`;
     if (t <= Date.now()) return `Repeats ${repeats} — next run due, starting within the hour.`;
+    return `Repeats ${repeats}. Next run ${whenLabel(t)}.`;
+  }
+
+  /** "today at 08:00" / "tomorrow at 08:00" / "Fri 15 Aug at 08:00", in the reader's timezone. */
+  function whenLabel(t) {
     const d = new Date(t);
     const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const today = new Date();
-    const label = d.toDateString() === today.toDateString()
-      ? `today at ${time}`
-      : d.toDateString() === new Date(today.getTime() + 86400000).toDateString()
-        ? `tomorrow at ${time}`
-        : `${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })} at ${time}`;
-    return `Repeats ${repeats}. Next run ${label}.`;
+    if (d.toDateString() === today.toDateString()) return `today at ${time}`;
+    if (d.toDateString() === new Date(today.getTime() + 86400000).toDateString()) return `tomorrow at ${time}`;
+    return `${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })} at ${time}`;
   }
 
   /**
@@ -523,10 +525,20 @@
     } catch (err) { btn.disabled = false; cardErr(btn, err.message); }
   }
 
-  // Edit an existing campaign's idea + guardrails, prefilled from the card's data-* snapshot.
-  function openEditModal(cardEl, id) {
-    if (!cardEl) return;
-    const g = (a, d) => cardEl.getAttribute(a) ?? d;
+  /**
+   * Edit an existing campaign's idea + guardrails.
+   *
+   * `values` is a plain snapshot rather than a DOM node so the SAME modal serves both callers: the
+   * campaign card in here (which has the values as data-* attributes already) and the Searches tab
+   * (which fetches them with `get`). Two edit forms over one table is how the two surfaces would
+   * drift apart — one growing a field the other silently clears.
+   *
+   * `onSaved` lets the caller re-read its own list; this component refreshes itself when the card
+   * is the caller and does nothing when it is not on screen.
+   */
+  function openEditModal(values, id, onSaved) {
+    if (!values) return;
+    const g = (a, d) => (values[a] ?? d);
     const overlay = document.createElement('div');
     overlay.className = 'fixed inset-0 bg-gray-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm';
     overlay.innerHTML = `
@@ -538,28 +550,28 @@
         <div class="p-5 space-y-3">
           <div>
             <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Name this search <span class="font-normal normal-case text-gray-400">(optional)</span></label>
-            <input data-edit-name type="text" maxlength="80" value="${esc(g('data-dc-name-val', ''))}" placeholder="e.g. UK retreat venues" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
+            <input data-edit-name type="text" maxlength="80" value="${esc(g('name', ''))}" placeholder="e.g. UK retreat venues" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
           </div>
           <div>
             <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Who to find</label>
-            <textarea data-edit-idea rows="3" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">${esc(g('data-dc-idea-val', ''))}</textarea>
+            <textarea data-edit-idea rows="3" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">${esc(g('idea', ''))}</textarea>
           </div>
           <div>
             <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Max leads / run</label>
-            <input data-edit-maxleads type="number" min="1" value="${esc(g('data-dc-maxleads-val', '50'))}" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
+            <input data-edit-maxleads type="number" min="1" value="${esc(g('maxLeadsPerRun', '50'))}" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
           </div>
           <div>
             <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Exclude words (comma-sep)</label>
-            <input data-edit-negatives type="text" value="${esc(g('data-dc-negatives-val', ''))}" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm" placeholder="marketing agency, franchise">
+            <input data-edit-negatives type="text" value="${esc(g('negativeKeywords', ''))}" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm" placeholder="marketing agency, franchise">
             <p class="text-[11px] text-gray-500 mt-1">Matched against each result's title and description. Keep them specific — a broad word here also drops good results that merely mention it.</p>
           </div>
           <div>
             <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Blocked domains (comma-sep)</label>
-            <input data-edit-domains type="text" value="${esc(g('data-dc-domains-val', ''))}" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm" placeholder="competitor.com, acme.co.uk">
+            <input data-edit-domains type="text" value="${esc(g('excludedDomains', ''))}" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm" placeholder="competitor.com, acme.co.uk">
             <p class="text-[11px] text-gray-500 mt-1">Exact company websites this search must skip. Domains you block from the review queue appear here — delete one to allow it back.</p>
           </div>
           <label class="flex items-center gap-2 text-sm text-gray-700">
-            <input data-edit-approval type="checkbox" ${g('data-dc-approval-val', '1') === '0' ? '' : 'checked'} class="rounded border-gray-300 text-emerald-700 focus:ring-emerald-700">
+            <input data-edit-approval type="checkbox" ${g('requireHumanApproval', true) === false ? '' : 'checked'} class="rounded border-gray-300 text-emerald-700 focus:ring-emerald-700">
             Review found leads before any outreach (recommended)
           </label>
           <p class="hidden text-xs font-semibold text-red-600" data-edit-error></p>
@@ -598,13 +610,371 @@
             requireHumanApproval: !!overlay.querySelector('[data-edit-approval]').checked,
           },
         });
-        window.showToast?.('Campaign updated.');
+        window.showToast?.('Search updated.');
         close();
-        await refresh();
+        // Only re-read this component's own list when it is actually on screen — opened from the
+        // Searches tab there is no campaign list behind this modal, and refresh() would write
+        // "Loading…" into a detached body.
+        if (state.overlay) await refresh();
+        onSaved?.();
       } catch (err) { saveBtn.disabled = false; saveBtn.textContent = 'Save changes'; errEl.textContent = err.message; errEl.classList.remove('hidden'); }
     });
     document.body.appendChild(overlay);
     overlay.querySelector('[data-edit-idea]')?.focus();
+  }
+
+  // ── Managing one search from the Searches tab ────────────────────────────────
+  //
+  // View / Edit / Schedule / Archive, each opening on its own overlay. They live HERE rather than
+  // in assistant-signal-inbox.js because every one of them WRITES to (or reads the full shape of) a
+  // discovery campaign, and this component is the single owner of that table's UI. The Searches tab
+  // owns the results; this owns the search.
+
+  const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const DAY_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  /**
+   * A standalone modal, independent of the Find New Leads overlay this component also renders.
+   * Returns the node and its close function so each caller can wire its own footer.
+   */
+  function modalShell({ title, subtitle, bodyHtml, maxWidth }) {
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 bg-gray-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm';
+    overlay.innerHTML = `
+      <div class="bg-white rounded-2xl shadow-xl w-full ${maxWidth || 'max-w-lg'} max-h-[90vh] flex flex-col">
+        <div class="flex items-start justify-between gap-4 p-5 border-b border-gray-100 shrink-0">
+          <div class="min-w-0">
+            <h3 class="text-lg font-bold text-gray-900">${esc(title)}</h3>
+            ${subtitle ? `<p class="text-sm text-gray-500 mt-0.5">${esc(subtitle)}</p>` : ''}
+          </div>
+          <button type="button" data-modal-close class="text-gray-400 hover:text-gray-600 text-2xl leading-none cursor-pointer shrink-0">&times;</button>
+        </div>
+        <div class="p-5 overflow-y-auto" data-modal-body>${bodyHtml}</div>
+      </div>`;
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelectorAll('[data-modal-close]').forEach((b) => b.addEventListener('click', close));
+    document.body.appendChild(overlay);
+    return { overlay, close };
+  }
+
+  /** A one-line "loading" modal, replaced in place once the fetch lands. */
+  function loadingModal(title) {
+    return modalShell({ title, bodyHtml: '<p class="text-sm text-gray-400 py-8 text-center">Loading…</p>' });
+  }
+
+  async function fetchCampaign(campaignId) {
+    const { campaign } = await call('get', { campaignId });
+    return campaign;
+  }
+
+  /** UTC hour → the same instant in the reader's own clock, e.g. "09:00". */
+  function localHourLabel(utcHour) {
+    const d = new Date();
+    d.setUTCHours(utcHour, 0, 0, 0);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  /** "08:00 UTC", spelled out, so the stored value is never a mystery. */
+  function utcHourLabel(utcHour) {
+    return `${String(utcHour).padStart(2, '0')}:00 UTC`;
+  }
+
+  /**
+   * The schedule as a sentence, for the read-only view.
+   *
+   * ⚠️ Says what the DISPATCHER does, not what the row wishes. A schedule can be perfectly well
+   * configured and still never fire — a draft has never been started and a paused search is meant
+   * not to run — and a modal that printed "Repeats weekly on Monday" for either would be describing
+   * an intention as a fact.
+   */
+  function scheduleSummary(c) {
+    const cadence = c.cadence || 'one_off';
+    if (cadence === 'one_off') return 'Runs once each time you start it. Nothing is scheduled.';
+    const days = Array.isArray(c.daysOfWeek) && c.daysOfWeek.length
+      ? c.daysOfWeek.map((d) => DAY_FULL[d]).join(', ')
+      : null;
+    const when = cadence === 'daily'
+      ? `every day at ${localHourLabel(c.runAtHourUtc)} (${utcHourLabel(c.runAtHourUtc)})`
+      : `every week on ${days || 'the same day it was started'} at ${localHourLabel(c.runAtHourUtc)} (${utcHourLabel(c.runAtHourUtc)})`;
+    if (!c.scheduleEnabled) {
+      const why = c.status === 'draft'
+        ? 'It has not been started yet, so nothing is scheduled.'
+        : c.status === 'paused'
+          ? 'It is paused, so nothing is scheduled.'
+          : 'The schedule is switched off, so nothing is scheduled.';
+      return `Set to run ${when}. ${why}`;
+    }
+    const t = Date.parse(c.nextRunAt || '');
+    if (!t) return `Runs ${when}.`;
+    if (t <= Date.now()) return `Runs ${when}. The next run is due and starts within the hour.`;
+    return `Runs ${when}. Next run ${whenLabel(t)}.`;
+  }
+
+  function queryListHtml(c) {
+    const q = c.approvedQueries;
+    const total = q ? q.niche_scrape.length + q.intent_signal.length + q.footprint.length : 0;
+    if (!total) {
+      return `<p class="text-xs text-gray-500">No search plan has been approved yet. Press <span class="font-semibold">Review plan</span> under Find New Leads to draft one — until then this search has nothing to run.</p>`;
+    }
+    return ['niche_scrape', 'intent_signal', 'footprint'].map((key) => {
+      const list = q[key] || [];
+      if (!list.length) return '';
+      return `
+        <div class="mt-2">
+          <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">${esc(STRATEGY_LABELS[key])}</p>
+          <ul class="mt-1 space-y-1">
+            ${list.map((s) => `<li class="text-xs font-mono text-gray-700 bg-gray-50 border border-gray-100 rounded px-2 py-1 break-words">${esc(s)}</li>`).join('')}
+          </ul>
+        </div>`;
+    }).join('');
+  }
+
+  function section(label, html) {
+    return `
+      <div class="border border-gray-200 rounded-xl p-4">
+        <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">${esc(label)}</p>
+        <div class="mt-1.5">${html}</div>
+      </div>`;
+  }
+
+  /** Read-only: everything this search IS, with no control that changes it. */
+  function viewBody(c) {
+    const listOr = (arr, none) => (Array.isArray(arr) && arr.length
+      ? `<p class="text-xs text-gray-700">${esc(arr.join(', '))}</p>`
+      : `<p class="text-xs text-gray-400">${esc(none)}</p>`);
+    const created = c.createdAt ? new Date(c.createdAt).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+    return `
+      <div class="space-y-3">
+        ${section('Who it looks for', `<p class="text-sm text-gray-800 whitespace-pre-wrap">${esc(c.idea)}</p>`)}
+        ${section('What it searches for', queryListHtml(c))}
+        ${section('What it skips', `
+          <p class="text-xs text-gray-600">${esc(c.skippedCategories.join(' · '))}</p>
+          <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide mt-2">Excluded words</p>
+          ${listOr(c.negativeKeywords, 'None')}
+          <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide mt-2">Blocked websites</p>
+          ${listOr(c.excludedDomains, 'None')}`)}
+        ${section('When it runs', `
+          <p class="text-xs text-gray-700">${esc(scheduleSummary(c))}</p>
+          <p class="text-xs text-gray-500 mt-1">${esc(c.requireHumanApproval
+            ? 'Companies it finds wait for your approval before any outreach.'
+            : 'Companies it finds are approved automatically — no review step before outreach.')}</p>
+          <p class="text-xs text-gray-500 mt-1">Up to ${esc(c.maxLeadsPerRun)} companies per run.</p>`)}
+        ${section('What it has found', `
+          <p class="text-xs text-gray-700">${esc(leadCountLine(c))}</p>
+          <p class="text-xs text-gray-500 mt-1">${esc(c.runCount === 0
+            ? 'It has not finished a run yet.'
+            : `${c.runCount} run${c.runCount === 1 ? '' : 's'} finished. Created ${created}.`)}</p>`)}
+      </div>`;
+  }
+
+  /**
+   * View — deliberately has no Save, no Start and no Edit. It is the answer to "what did I set this
+   * search up to do", and a read-only surface that quietly grows write controls stops being one.
+   */
+  async function openView(campaignId) {
+    const { overlay, close } = loadingModal('Search details');
+    try {
+      const c = await fetchCampaign(campaignId);
+      const b = overlay.querySelector('[data-modal-body]');
+      overlay.querySelector('h3').textContent = c.name || 'Search details';
+      if (b) b.innerHTML = viewBody(c);
+    } catch (err) {
+      const b = overlay.querySelector('[data-modal-body]');
+      if (b) b.innerHTML = `<p class="text-sm font-semibold text-red-700">${esc(err.message)}</p>`;
+    }
+    return close;
+  }
+
+  function hourOptions(selected) {
+    return Array.from({ length: 24 }, (_, h) => `
+      <option value="${h}" ${h === selected ? 'selected' : ''}>${esc(localHourLabel(h))} — ${esc(utcHourLabel(h))}</option>`).join('');
+  }
+
+  function scheduleBody(c) {
+    const cadence = c.cadence || 'one_off';
+    const days = Array.isArray(c.daysOfWeek) && c.daysOfWeek.length ? c.daysOfWeek : [1];
+    // Why a chosen schedule still will not fire. Stated up front rather than after saving: a user
+    // who sets a draft to run weekly and is told "Saved" has been told the wrong thing.
+    const blocked = c.status === 'draft'
+      ? 'This search has not been started yet. Save a schedule now if you like — it begins repeating once you press Start search.'
+      : c.status === 'paused'
+        ? 'This search is paused, so nothing will run until you resume it under Find New Leads.'
+        : null;
+    return `
+      <div class="space-y-3">
+        ${blocked ? `<div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs font-semibold text-amber-800">${esc(blocked)}</div>` : ''}
+        <div>
+          <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">How often</label>
+          <select data-sched-cadence class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
+            <option value="one_off" ${cadence === 'one_off' ? 'selected' : ''}>Only when I start it</option>
+            <option value="daily" ${cadence === 'daily' ? 'selected' : ''}>Every day</option>
+            <option value="weekly" ${cadence === 'weekly' ? 'selected' : ''}>Every week</option>
+          </select>
+        </div>
+
+        <div data-sched-days-wrap class="${cadence === 'weekly' ? '' : 'hidden'}">
+          <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Which days</label>
+          <div class="flex flex-wrap gap-1.5">
+            ${DAY_LABELS.map((label, i) => `
+              <label class="cursor-pointer">
+                <input type="checkbox" data-sched-day="${i}" ${days.includes(i) ? 'checked' : ''} class="peer sr-only">
+                <span class="inline-block px-2.5 py-1 text-xs font-bold rounded-lg border bg-white text-gray-600 border-gray-200 peer-checked:bg-emerald-700 peer-checked:text-white peer-checked:border-emerald-600 transition">${esc(label)}</span>
+              </label>`).join('')}
+          </div>
+          <p class="text-[11px] text-gray-500 mt-1">Each chosen day is a separate run, and each run costs searches.</p>
+        </div>
+
+        <div data-sched-time-wrap class="${cadence === 'one_off' ? 'hidden' : ''}">
+          <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">What time</label>
+          <select data-sched-hour class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
+            ${hourOptions(Number(c.runAtHourUtc ?? 8))}
+          </select>
+          <p class="text-[11px] text-gray-500 mt-1">Times are shown in your own timezone first, then as they are stored. Runs are picked up on the hour, so a search starts within the hour of its time.</p>
+        </div>
+
+        <label data-sched-enabled-wrap class="flex items-center gap-2 text-sm text-gray-700 ${cadence === 'one_off' ? 'hidden' : ''}">
+          <input data-sched-enabled type="checkbox" ${c.scheduleEnabled === false && c.status === 'active' ? '' : 'checked'} class="rounded border-gray-300 text-emerald-700 focus:ring-emerald-700">
+          Keep this schedule switched on
+        </label>
+
+        <p class="text-xs text-gray-500" data-sched-preview></p>
+        <p class="hidden text-xs font-semibold text-red-600" data-sched-error></p>
+        <div class="flex items-center justify-end gap-2 pt-1">
+          <button type="button" data-modal-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 rounded-lg cursor-pointer">Cancel</button>
+          <button type="button" data-sched-save class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Save schedule</button>
+        </div>
+      </div>`;
+  }
+
+  /** Schedule — the only surface that can change a saved search's cadence after it is created. */
+  async function openSchedule(campaignId, onSaved) {
+    const { overlay, close } = loadingModal('Schedule this search');
+    let c;
+    try {
+      c = await fetchCampaign(campaignId);
+    } catch (err) {
+      const b = overlay.querySelector('[data-modal-body]');
+      if (b) b.innerHTML = `<p class="text-sm font-semibold text-red-700">${esc(err.message)}</p>`;
+      return;
+    }
+    const b = overlay.querySelector('[data-modal-body]');
+    if (!b) return;
+    b.innerHTML = scheduleBody(c);
+    overlay.querySelectorAll('[data-modal-close]').forEach((btn) => btn.addEventListener('click', close));
+
+    const cadenceEl = b.querySelector('[data-sched-cadence]');
+    const daysWrap = b.querySelector('[data-sched-days-wrap]');
+    const timeWrap = b.querySelector('[data-sched-time-wrap]');
+    const enabledWrap = b.querySelector('[data-sched-enabled-wrap]');
+    const preview = b.querySelector('[data-sched-preview]');
+    const errEl = b.querySelector('[data-sched-error]');
+    const saveBtn = b.querySelector('[data-sched-save]');
+
+    const readDays = () => [...b.querySelectorAll('[data-sched-day]')]
+      .filter((el) => el.checked).map((el) => Number(el.getAttribute('data-sched-day')));
+
+    // Says what the choice means before it is made — "every week on Tue" is a different commitment
+    // from "every day", and the difference is the search budget.
+    const sync = () => {
+      const cad = cadenceEl.value;
+      daysWrap.classList.toggle('hidden', cad !== 'weekly');
+      timeWrap.classList.toggle('hidden', cad === 'one_off');
+      enabledWrap.classList.toggle('hidden', cad === 'one_off');
+      const hour = Number(b.querySelector('[data-sched-hour]').value);
+      const days = readDays();
+      preview.textContent = cad === 'one_off'
+        ? 'It will only run when you press Start search.'
+        : cad === 'daily'
+          ? `It will run once a day at ${localHourLabel(hour)} — about 7 runs a week.`
+          : days.length
+            ? `It will run on ${days.map((d) => DAY_FULL[d]).join(', ')} at ${localHourLabel(hour)} — ${days.length} run${days.length === 1 ? '' : 's'} a week.`
+            : 'Pick at least one day.';
+    };
+    cadenceEl.addEventListener('change', sync);
+    b.querySelector('[data-sched-hour]').addEventListener('change', sync);
+    b.querySelectorAll('[data-sched-day]').forEach((el) => el.addEventListener('change', sync));
+    sync();
+
+    saveBtn.addEventListener('click', async () => {
+      const cadence = cadenceEl.value;
+      const days = readDays();
+      errEl.classList.add('hidden');
+      if (cadence === 'weekly' && !days.length) {
+        errEl.textContent = 'Pick at least one day of the week.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+      saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
+      try {
+        const res = await call('schedule', {
+          campaignId,
+          cadence,
+          daysOfWeek: days,
+          runAtHourUtc: Number(b.querySelector('[data-sched-hour]').value),
+          // The reader's own zone, stored for display. The dispatcher works in UTC — see
+          // src/utils/discovery-schedule.ts — so this never changes when a run fires.
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+          enabled: !!b.querySelector('[data-sched-enabled]')?.checked,
+        });
+        // Report what will actually happen, not "Saved". `blockedBy` is the server telling us the
+        // cadence was stored but nothing will fire, which is the one outcome a bare success toast
+        // would hide.
+        window.showToast?.(res.blockedBy === 'draft'
+          ? 'Schedule saved. It starts repeating once you start the search.'
+          : res.blockedBy === 'paused'
+            ? 'Schedule saved. It stays paused until you resume the search.'
+            : res.nextRunAt
+              ? `Schedule saved — next run ${whenLabel(Date.parse(res.nextRunAt))}.`
+              : 'Schedule saved.', 'success');
+        close();
+        if (state.overlay) await refresh();
+        onSaved?.();
+      } catch (err) {
+        saveBtn.disabled = false; saveBtn.textContent = 'Save schedule';
+        errEl.textContent = err.message; errEl.classList.remove('hidden');
+      }
+    });
+  }
+
+  /** Edit, opened from anywhere: fetch the current values first rather than trusting a stale card. */
+  async function openEdit(campaignId, onSaved) {
+    let c;
+    try {
+      c = await fetchCampaign(campaignId);
+    } catch (err) {
+      window.showToast?.(err.message || 'Could not open that search.', 'error');
+      return;
+    }
+    openEditModal({
+      name: c.name || '',
+      idea: c.idea,
+      maxLeadsPerRun: c.maxLeadsPerRun,
+      negativeKeywords: (c.negativeKeywords || []).join(', '),
+      excludedDomains: (c.excludedDomains || []).join(', '),
+      requireHumanApproval: c.requireHumanApproval !== false,
+    }, campaignId, onSaved);
+  }
+
+  /**
+   * Archive, from anywhere. The confirm names what SURVIVES as well as what stops — archiving a
+   * search does not retract the companies it already found, and a user who thinks it might will
+   * keep a dead search on their list forever rather than risk it.
+   */
+  async function archive(campaignId, onDone) {
+    const msg = 'It stops running and leaves your Searches list. Companies it already found stay in your Leads tab.';
+    const ok = window.confirmModal
+      ? await window.confirmModal(msg, { title: 'Archive this search?', confirmLabel: 'Archive' })
+      : window.confirm(`Archive this search? ${msg}`);
+    if (!ok) return;
+    try {
+      await call('archive', { campaignId });
+      window.showToast?.('Search archived.', 'success');
+      if (state.overlay) await refresh();
+      onDone?.();
+    } catch (err) {
+      window.showToast?.(err.message || 'Could not archive that search.', 'error');
+    }
   }
 
   function wire() {
@@ -618,7 +988,19 @@
     b.querySelectorAll('[data-dc-cancel]').forEach((el) => el.addEventListener('click', () => cancelRun(el)));
     b.querySelectorAll('[data-dc-toggle]').forEach((el) => el.addEventListener('click', () => togglePause(el)));
     b.querySelectorAll('[data-dc-archive]').forEach((el) => el.addEventListener('click', () => archiveCampaign(el)));
-    b.querySelectorAll('[data-dc-edit]').forEach((el) => el.addEventListener('click', () => openEditModal(el.closest('[data-campaign]'), Number(el.getAttribute('data-dc-edit')))));
+    b.querySelectorAll('[data-dc-edit]').forEach((el) => el.addEventListener('click', () => {
+      const card = el.closest('[data-campaign]');
+      if (!card) return;
+      const attr = (a) => card.getAttribute(a) ?? '';
+      openEditModal({
+        name: attr('data-dc-name-val'),
+        idea: attr('data-dc-idea-val'),
+        maxLeadsPerRun: attr('data-dc-maxleads-val') || '50',
+        negativeKeywords: attr('data-dc-negatives-val'),
+        excludedDomains: attr('data-dc-domains-val'),
+        requireHumanApproval: attr('data-dc-approval-val') !== '0',
+      }, Number(el.getAttribute('data-dc-edit')));
+    }));
   }
 
   function open() {
@@ -669,5 +1051,8 @@
     state.cfg = cfg || null;
   }
 
-  window.AssistantDiscoveryCampaigns = { init, open };
+  // open() is the Find New Leads modal. The four below are per-search management, called from the
+  // Searches tab (assistant-signal-inbox.js) — each takes an optional callback so that tab can
+  // re-read itself, since it renders the same searches from a different endpoint.
+  window.AssistantDiscoveryCampaigns = { init, open, openView, openEdit, openSchedule, archive };
 })();

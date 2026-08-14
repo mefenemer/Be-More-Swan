@@ -2,7 +2,7 @@
 // The Signal Inbox read + batch-approve API (Phase 1a of docs/lead-generator-revenue-engine-plan.md).
 //
 //   POST { action: 'list',    assistantId, savedSearchId?, showFiltered?, cursor? }
-//        → { signals: Signal[], counts, savedSearches, nextCursor, hasSocialFeed }
+//        → { signals: Signal[], counts, countsBySearch, savedSearches, nextCursor, hasSocialFeed }
 //   POST { action: 'approve', assistantId, ids: string[] }
 //        → { approved, skipped } — the CLASS A batch gate
 //
@@ -106,9 +106,13 @@ function classifySignal(row: LeadRow): { state: HandoffState; reviewReason: stri
     if (needsPersonalInboxConfirmation(emailKind, emailSource)) {
         return {
             state: 'needs_review',
+            // ⚠️ Worded to be true in BOTH places it surfaces: as a fact on a read-only results row,
+            // and as the `skipped` reason when the approve API refuses to batch this lead. It used
+            // to end "approve it yourself rather than in a batch", which instructed the reader to
+            // use a control that no longer exists on the surface showing it.
             reviewReason: emailSource === 'provider'
-                ? 'The only contact found belongs to a named individual and came from a paid data provider — approve it yourself rather than in a batch.'
-                : 'The only contact found belongs to a named individual and was scraped — approve it yourself rather than in a batch.',
+                ? 'The only contact found belongs to a named individual and came from a paid data provider — decide on this one individually.'
+                : 'The only contact found belongs to a named individual and was scraped — decide on this one individually.',
             filterReason: null,
         };
     }
@@ -131,6 +135,12 @@ function projectSignal(row: LeadRow, sourceLabel: string): Signal {
         rating: row.rating,
         confidence: row.score,
         handoffStatus: state,
+        // The lead's own state, unmediated by the batch gate. `scheduled` counts as approved: it is
+        // an approved lead with a chase reminder set, not a third thing.
+        leadState: row.assistantRecordId
+            ? (row.approvalStatus === 'approved' || row.approvalStatus === 'scheduled' ? 'approved'
+                : row.approvalStatus === 'rejected' ? 'rejected' : 'awaiting')
+            : null,
         filterReason,
         reviewReason,
         assistantRecordId: row.assistantRecordId,
@@ -220,6 +230,29 @@ export default withLambda(async (event) => {
                 promoted: all.filter((s) => s.handoffStatus === 'promoted').length,
                 filtered: all.filter((s) => s.handoffStatus === 'filtered').length,
             };
+
+            // The same counts, split by search. Results now live behind a per-search "View results"
+            // button, and that button has to state a number the modal it opens will actually show —
+            // a global count on a per-search control would promise 65 and render 13.
+            //
+            // Derived from the SAME classified projection as `counts` above rather than counted in
+            // SQL: the ready/needs_review split reads two jsonb blobs through
+            // needsPersonalInboxConfirmation(), and a second implementation of that rule in SQL is
+            // how the button and the batch gate would come to disagree about which leads are safe.
+            //
+            // ⚠️ Only complete when no savedSearchId filter is applied — with one, `all` holds that
+            // search's rows alone. The tab reads it unfiltered; the modal ignores it.
+            const countsBySearch: Record<number, { total: number; ready: number; needsReview: number; promoted: number; filtered: number }> = {};
+            for (const s of all) {
+                const key = Number(s.savedSearchId);
+                if (!Number.isInteger(key)) continue;
+                const bucket = countsBySearch[key] ??= { total: 0, ready: 0, needsReview: 0, promoted: 0, filtered: 0 };
+                bucket.total += 1;
+                if (s.handoffStatus === 'ready') bucket.ready += 1;
+                else if (s.handoffStatus === 'needs_review') bucket.needsReview += 1;
+                else if (s.handoffStatus === 'promoted') bucket.promoted += 1;
+                else if (s.handoffStatus === 'filtered') bucket.filtered += 1;
+            }
 
             let visible = showFiltered ? all : all.filter((s) => s.handoffStatus !== 'filtered');
 
@@ -406,6 +439,7 @@ export default withLambda(async (event) => {
             return json(200, {
                 signals: page,
                 counts,
+                countsBySearch,
                 nextCursor,
                 sourceLabel,
                 hasSocialFeed: social.length > 0,

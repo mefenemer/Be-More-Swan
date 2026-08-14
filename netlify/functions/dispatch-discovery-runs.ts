@@ -9,23 +9,15 @@ import { randomUUID } from 'crypto';
 import { and, eq, lte, or, isNull, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { discoveryCampaigns, discoverySchedules, discoveryJobs } from '../../db/schema';
+import { computeNextRun, normaliseDaysOfWeek } from '../../src/utils/discovery-schedule';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 type Db = ReturnType<typeof getDb>;
 
-/** Advance a schedule to its next fire time. one_off disables itself after running. */
-function computeNextRun(cadence: string, runAtHourUtc: number, from: Date): Date | null {
-    if (cadence === 'one_off') return null;
-    const next = new Date(from);
-    next.setUTCHours(runAtHourUtc, 0, 0, 0);
-    if (cadence === 'daily') {
-        if (next <= from) next.setUTCDate(next.getUTCDate() + 1);
-        return next;
-    }
-    // weekly
-    next.setUTCDate(next.getUTCDate() + 7);
-    return next;
-}
+// The next-fire arithmetic lives in src/utils/discovery-schedule.ts. It was inline here and it
+// ignored days_of_week entirely — "weekly" meant "seven days after it last fired", so a search the
+// user asked to run on Mondays ran on whatever day it was first started, and the Schedule modal
+// would have promised a day this function never honoured.
 
 export async function dispatchDueRuns(): Promise<number> {
     const db: Db = getDb();
@@ -39,6 +31,7 @@ export async function dispatchDueRuns(): Promise<number> {
             organisationId: discoverySchedules.organisationId,
             cadence: discoverySchedules.cadence,
             runAtHourUtc: discoverySchedules.runAtHourUtc,
+            daysOfWeek: discoverySchedules.daysOfWeek,
         })
         .from(discoverySchedules)
         .innerJoin(discoveryCampaigns, eq(discoverySchedules.campaignId, discoveryCampaigns.id))
@@ -50,6 +43,20 @@ export async function dispatchDueRuns(): Promise<number> {
 
     let enqueued = 0;
     for (const s of due) {
+        const daysOfWeek = normaliseDaysOfWeek(s.daysOfWeek);
+
+        // A day-constrained schedule must not fire on a day the user did not choose. This only
+        // bites rows whose next_run_at predates the day being honoured at all — createDiscoveryRun
+        // seeds it to now() so the first run happens promptly, and a legacy weekly row carries
+        // whatever day it was created on. Rather than firing on the wrong day, advance the row: the
+        // computation below lands it on the next chosen day.
+        if (daysOfWeek && !daysOfWeek.includes(now.getUTCDay())) {
+            await db.update(discoverySchedules)
+                .set({ nextRunAt: computeNextRun(s.cadence, s.runAtHourUtc, daysOfWeek, now), updatedAt: now })
+                .where(eq(discoverySchedules.id, s.scheduleId));
+            continue;
+        }
+
         // Skip if this campaign already has an in-flight run — never stack runs.
         const [inflight] = await db
             .select({ id: discoveryJobs.id })
@@ -70,7 +77,7 @@ export async function dispatchDueRuns(): Promise<number> {
             enqueued += 1;
         }
 
-        const nextRunAt = computeNextRun(s.cadence, s.runAtHourUtc, now);
+        const nextRunAt = computeNextRun(s.cadence, s.runAtHourUtc, daysOfWeek, now);
         await db.update(discoverySchedules)
             .set({ lastRunAt: now, nextRunAt, isEnabled: s.cadence === 'one_off' ? false : true, updatedAt: now })
             .where(eq(discoverySchedules.id, s.scheduleId));

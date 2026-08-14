@@ -152,6 +152,76 @@ check('no social assistant shows an OFFER, never an empty state', () => {
         'the copy offers rather than nags');
 });
 
+// ── 4b. Results live behind their own search ─────────────────────────────────
+// The tab lists searches; a search's companies open in a modal from its own row. Two things have
+// to hold for that split to be honest.
+
+check('the tab reads counts for EVERY search, never one of them', () => {
+    // countsBySearch is only complete on an unfiltered read — the query is scoped to the filter —
+    // and every "View results (N)" button is derived from it. A savedSearchId on the tab's own
+    // read would zero the number on every other search's button.
+    const tabLoad = componentText.slice(landmark(componentText, 'async function load()'));
+    const body = tabLoad.slice(0, landmark(tabLoad, '\n  }'));
+    const request = /call\('list', \{([^}]*)\}\)/.exec(body);
+    assert.ok(request, "the tab's load no longer calls list — retarget this check");
+    assert.ok(!/savedSearchId/.test(request![1]),
+        "the tab's read must not filter by search — countsBySearch would come back partial");
+    assert.ok(/countsBySearch/.test(body), 'the tab must read the per-search counts');
+    assert.ok(fnText.includes('countsBySearch'), 'the server must return them');
+});
+
+check('a per-search results button states that search\'s own number', () => {
+    const fn = componentText.slice(landmark(componentText, 'function resultsCount('));
+    const body = fn.slice(0, landmark(fn, '\n  }'));
+    assert.ok(/state\.countsBySearch\[id\]/.test(body),
+        'the button count must come from the per-search map, not the tab-wide totals');
+});
+
+// ── 4c. Approving is not what makes a lead ───────────────────────────────────
+// Every scored company is mirrored into assistant_records the moment the worker scores it, hot,
+// warm or cold alike. The Searches tab therefore decides NOTHING about a lead: it projects rows
+// that already exist. A batch approve here implied the opposite — that a result becomes a lead
+// when you approve it — and put a second triage surface over the same approval_status column that
+// the Leads tab owns.
+
+check('the results list offers no approve, and no way to select rows', () => {
+    for (const marker of ['data-si-approve', 'data-si-sel', 'data-si-all']) {
+        assert.ok(!componentText.includes(marker),
+            `${marker} is back on the Searches tab. Approving is an OUTREACH decision and belongs to `
+            + 'the Leads tab, beside the Approval and Contact columns it needs — two surfaces over '
+            + 'one approval_status column is how they drift.');
+    }
+    assert.ok(!/call\('approve'/.test(componentText),
+        'this component must not call the approve action at all');
+});
+
+check('a found company is labelled by its LEAD state, not by the batch gate', () => {
+    // The old chip came from handoffStatus, whose vocabulary is about batching. It called a
+    // cold-scored lead "Filtered" — which reads as discarded — while that lead sat in the Leads tab
+    // awaiting approval exactly like a hot one.
+    assert.ok(fnText.includes('leadState'), 'the projection must carry the lead\'s own state');
+    // ⚠️ The end marker must be searched FROM the start one: `filterReason` appears earlier, in
+    // classifySignal, so an unanchored second landmark slices backwards and yields nothing.
+    const start = landmark(fnText, 'leadState:');
+    const proj = fnText.slice(start, landmark(fnText, 'filterReason', start));
+    assert.ok(/approvalStatus === 'approved' \|\| row\.approvalStatus === 'scheduled'/.test(proj),
+        'leadState must be read off approval_status; `scheduled` is an approved lead with a chase set');
+    assert.ok(/LEAD_LABEL/.test(componentText) && !/STATE_LABEL/.test(componentText),
+        'the row chip must render the lead state, not the handoff vocabulary');
+});
+
+check('the results modal shows everything the search found', () => {
+    // "Show filtered" existed to keep un-approvable rows out of a batch approve. With no approve
+    // here, hiding cold companies by default would make this list disagree with the Leads tab it
+    // points at, where those same companies are sitting.
+    const fn = componentText.slice(landmark(componentText, 'async function loadResults('));
+    const body = fn.slice(0, landmark(fn, '\n  }'));
+    assert.ok(/showFiltered: true/.test(body),
+        'the modal must ask for every row — a cold lead is a result with a cold chip, not a hidden one');
+    assert.ok(!componentText.includes('data-si-filtered'),
+        'the filtered toggle should be gone with the approve step that needed it');
+});
+
 check('auto-promotion is OFF by default', () => {
     // Shipping it on would bulk-promote the existing backlog on deploy — an unrequested,
     // effectively irreversible action. 75 is a suggestion, not an active default.
