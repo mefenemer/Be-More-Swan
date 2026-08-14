@@ -280,12 +280,79 @@ export interface ComputeSlotsArgs {
     now?: Date;
 }
 
+/** Eligible weekdays in the order a week is read, so an even spread reads as an even spread. */
+const MONDAY_FIRST: readonly WeekdayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+/** One recurring publish slot in the weekly pattern: a weekday and a wall-clock time on it. */
+export interface WeeklySlot {
+    day: WeekdayKey;
+    /** 'HH:MM' local to the schedule's timezone. */
+    time: string;
+}
+
+/**
+ * The assistant's WEEKLY PATTERN: which (weekday, time) pairs it actually publishes at.
+ *
+ * `posting_days` says which days are ELIGIBLE, not which days get a post — the frequency decides
+ * how many of them are used. Mon–Fri at 3× a week uses three of the five, and this is the function
+ * that picks which three.
+ *
+ * The pick is a pure function of (days, times, perWeek). That is the whole point, and it is what
+ * changed here. This selection used to happen downstream in computeScheduleSlots, against the
+ * rolling list of candidate instants inside (now, now + horizon] — so the answer depended on the
+ * hour the hourly gap-fill cron happened to ask. Simulated over one week, 3×/week on Mon–Fri:
+ *
+ *     asked Mon → Tue, Thu, Mon      asked Wed → Thu, Mon, Wed
+ *     asked Tue → Wed, Fri, Tue      asked Thu → Fri, Tue, Thu
+ *
+ * Never the same three days twice. Coverage is tallied per calendar day, so whichever day won a job
+ * first kept it and the rest were left bare — which is exactly how a user ends up with a post
+ * waiting some mornings and nothing on others, with no pattern they could name. Anchoring the
+ * choice on the week instead of on `now` makes Mon/Wed/Fri stay Mon/Wed/Fri.
+ *
+ * Ties go day-major (all of Monday's times, then Tuesday's), and midpoint sampling centres each
+ * pick in its bucket rather than clustering at the start of the week.
+ */
+export function selectWeeklySlots(days: WeekdayKey[], times: string[], perWeek: number): WeeklySlot[] {
+    if (perWeek <= 0) return [];
+    const dayset = new Set(days.length ? days : DEFAULT_POSTING_DAYS);
+    const ordered = MONDAY_FIRST.filter(d => dayset.has(d));
+    const timeList = (times.length ? times : DEFAULT_POSTING_TIMES).slice().sort();
+    if (!ordered.length || !timeList.length) return [];
+
+    // The full weekly grid of publishable moments, in week order.
+    const grid: WeeklySlot[] = [];
+    for (const day of ordered) for (const time of timeList) grid.push({ day, time });
+
+    // A cadence that asks for more posts than the grid offers is capped by the grid: the user gave
+    // us five weekdays and one time, so "daily" can only mean those five. (Unchanged behaviour —
+    // the old code returned every candidate whenever the target exceeded them.)
+    // Fortnightly (perWeek 0.5) rounds up to one slot a week here and is thinned to every other
+    // week by computeScheduleSlots, which is the only place that knows WHICH week it is looking at.
+    const count = Math.max(1, Math.min(grid.length, Math.round(perWeek)));
+    if (count >= grid.length) return grid;
+
+    const picked: WeeklySlot[] = [];
+    for (let i = 0; i < count; i++) {
+        picked.push(grid[Math.floor(((i + 0.5) * grid.length) / count)]);
+    }
+    return picked;
+}
+
+/** Stable index of the week a UTC calendar date falls in. Only its PARITY is used. */
+function weekIndex(year: number, month0: number, day: number): number {
+    return Math.floor(Date.UTC(year, month0, day) / (7 * 24 * 60 * 60 * 1000));
+}
+
 /**
  * Ordered list of concrete UTC instants the assistant should publish at across the draft horizon.
  *
- * Builds every candidate slot (eligible weekday × preferred time) inside (now, now + horizonDays],
- * then evenly down-samples to match the cadence's posts-per-week rate. Returns [] for on-demand
- * cadences (postsPerWeek <= 0) — nothing to pre-generate.
+ * Resolves the stable weekly pattern (see selectWeeklySlots), then walks each calendar day inside
+ * (now, now + horizonDays] and emits the pattern's instants that land in the window. Returns [] for
+ * on-demand cadences (postsPerWeek <= 0) — nothing to pre-generate.
+ *
+ * The count over a 7-day horizon is still the cadence's posts-per-week; what is new is that the
+ * DAYS no longer move between calls.
  */
 export function computeScheduleSlots({ schedule, horizonDays, now = new Date() }: ComputeSlotsArgs): Date[] {
     const perWeek = postsPerWeekFor(schedule.frequency);
@@ -293,13 +360,23 @@ export function computeScheduleSlots({ schedule, horizonDays, now = new Date() }
 
     const horizon = Math.max(1, Math.min(30, Math.round(horizonDays)));
     const tz = schedule.timezone || DEFAULT_POSTING_TIMEZONE;
-    const dayset = new Set(schedule.days.length ? schedule.days : DEFAULT_POSTING_DAYS);
-    const times = (schedule.times.length ? schedule.times : DEFAULT_POSTING_TIMES).slice().sort();
     const windowEnd = new Date(now.getTime() + horizon * 24 * 60 * 60 * 1000);
 
-    // Build candidate slots: walk each calendar day in the window, keep eligible weekdays, and for
-    // each preferred time emit the matching UTC instant inside (now, windowEnd].
-    const candidates: Date[] = [];
+    const pattern = selectWeeklySlots(schedule.days, schedule.times, perWeek);
+    if (!pattern.length) return [];
+    // Which times to publish at on a given weekday — usually one, occasionally several.
+    const timesByDay = new Map<WeekdayKey, string[]>();
+    for (const slot of pattern) {
+        const list = timesByDay.get(slot.day);
+        if (list) list.push(slot.time); else timesByDay.set(slot.day, [slot.time]);
+    }
+
+    // Cadences slower than weekly (fortnightly) publish on the pattern's day in alternate weeks
+    // only. Keyed on the slot's own calendar week rather than on `now`, so this stays as stable as
+    // the day choice itself.
+    const everyOtherWeek = perWeek < 1;
+
+    const slots: Date[] = [];
     const seenDays = new Set<string>();
     for (let offset = 0; offset <= horizon; offset++) {
         const probe = new Date(now.getTime() + offset * 24 * 60 * 60 * 1000);
@@ -309,30 +386,18 @@ export function computeScheduleSlots({ schedule, horizonDays, now = new Date() }
         seenDays.add(ymd);
 
         const weekday = WEEKDAY_KEYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
-        if (!dayset.has(weekday)) continue;
+        const dayTimes = timesByDay.get(weekday);
+        if (!dayTimes) continue;
+        if (everyOtherWeek && weekIndex(year, month - 1, day) % 2 !== 0) continue;
 
-        for (const t of times) {
+        for (const t of dayTimes) {
             const [h, m] = t.split(':').map(Number);
             const slot = zonedWallTimeToUtc(year, month - 1, day, h, m, tz);
             if (slot.getTime() > now.getTime() && slot.getTime() <= windowEnd.getTime()) {
-                candidates.push(slot);
+                slots.push(slot);
             }
         }
     }
-    candidates.sort((a, b) => a.getTime() - b.getTime());
-    if (!candidates.length) return [];
-
-    // Down-sample to the cadence's expected count over the horizon, spread evenly.
-    const target = Math.max(1, Math.round((perWeek / 7) * horizon));
-    if (target >= candidates.length) return candidates;
-
-    // Midpoint sampling: index = floor((i + 0.5) * n / target). The previous formula,
-    // floor(i * n / target), always picked index 0 and then clustered toward the start of the
-    // window — for 3-a-week over Mon–Fri it produced Thu/Fri/Tue (two adjacent days, then a gap)
-    // instead of an even Mon/Wed/Fri spread. Midpoint sampling centres each pick in its bucket.
-    const picked: Date[] = [];
-    for (let i = 0; i < target; i++) {
-        picked.push(candidates[Math.floor(((i + 0.5) * candidates.length) / target)]);
-    }
-    return picked;
+    slots.sort((a, b) => a.getTime() - b.getTime());
+    return slots;
 }

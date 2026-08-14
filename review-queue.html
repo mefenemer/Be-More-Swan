@@ -12,7 +12,12 @@
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
         Write Blog Post
       </button>
-      <button onclick="openGeneratePostSheet()" class="px-4 py-2 text-sm font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg transition cursor-pointer flex items-center gap-1.5">
+      <!-- Who the post gets created under. This view is org-wide, so unlike the assistant workspace
+           it has no assistant in context — revealed below only when there's a genuine choice. -->
+      <select id="rq-post-assistant" aria-label="Assistant to create the post under"
+        class="hidden px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-400"></select>
+      <!-- Hidden until an assistant that can post is resolved (gated below), same as the blog entry. -->
+      <button id="rq-create-post-btn" onclick="_rqCreatePost()" class="hidden px-4 py-2 text-sm font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg transition cursor-pointer items-center gap-1.5">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
         Create a Post
       </button>
@@ -66,6 +71,53 @@
     if (typeof rqOpenStatus === 'function') rqOpenStatus(statusKey, btn);
   };
   window._rqSafeOpenStatus('review', document.querySelector('.rq-col[data-status="review"]'));
+
+  // "Create a Post" — resolve the assistant here rather than inheriting one.
+  //
+  // A post row belongs to an assistant, but this view is org-wide (it fetches every assistant's
+  // drafts), so there is nothing to inherit. The button used to call openGeneratePostSheet() with
+  // no argument, which fell back to window._currentAssistantId: unset on a fresh load, so the click
+  // dead-ended on "Pick an assistant first" with no picker anywhere on the page to pick one from.
+  // Resolve the eligible assistants up front instead — hide the button when there are none, use the
+  // only one when there is one, and offer the choice on the page when there is more than one.
+  var _rqPostAssistants = [];
+  window._rqCreatePost = function () {
+    var sel = document.getElementById('rq-post-assistant');
+    var picked = (sel && !sel.classList.contains('hidden') && sel.value) ? Number(sel.value) : null;
+    var id = picked || (_rqPostAssistants[0] && _rqPostAssistants[0].id) || null;
+    // A null id would land back on the toast, but only on the fallback path below, where the
+    // button is revealed unresolved and openGeneratePostSheet's own context lookup still applies.
+    window.openGeneratePostSheet(id);
+  };
+  function _rqShowCreatePost() {
+    var btn = document.getElementById('rq-create-post-btn');
+    // Both classes: `hidden` alone loses to the button's own `items-center` display utility.
+    if (btn) { btn.classList.remove('hidden'); btn.classList.add('flex'); }
+  }
+  if (typeof window.resolvePostingAssistants === 'function') {
+    window.resolvePostingAssistants().then(function (list) {
+      _rqPostAssistants = Array.isArray(list) ? list : [];
+      // No assistant can post — leave the button hidden rather than offer a click that cannot work.
+      if (!_rqPostAssistants.length) return;
+      _rqShowCreatePost();
+      if (_rqPostAssistants.length < 2) return;   // nothing to choose between
+      var sel = document.getElementById('rq-post-assistant');
+      if (!sel) return;
+      sel.innerHTML = '';
+      _rqPostAssistants.forEach(function (a) {
+        var o = document.createElement('option');
+        o.value = String(a.id);
+        // textContent, not innerHTML — these are user-chosen assistant names.
+        o.textContent = a.role ? a.name + ' — ' + a.role : a.name;
+        sel.appendChild(o);
+      });
+      sel.classList.remove('hidden');
+    });
+  } else {
+    // Resolver missing (this view's script racing workspace.html's, the same window
+    // _rqSafeOpenStatus guards above): show the button and let it behave as it did before.
+    _rqShowCreatePost();
+  }
 
   // Blog Studio entry — only when the org has an active Blog Writer assistant.
   var _rqBlogWriterId = null;

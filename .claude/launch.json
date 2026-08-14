@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-rq-create-post",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4302",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/b74a0c71-a965-407a-b796-220857a5e004/scratchpad/harness"
+      ],
+      "port": 4302,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-deselect-confirm",
       "runtimeExecutable": "node",
       "runtimeArgs": [

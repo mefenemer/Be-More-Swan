@@ -1635,11 +1635,21 @@ function _rqRecipient(r, statusKey) {
     }
     const to = LR.resolve(d) || '';
     if (!to) return '';
-    const personal = d.emailKind === 'personal';
-    const scraped = d.emailSource === 'scrape';
+    // Provenance and the gate both come from window.LeadEmailKind, generated from
+    // src/config/lead-email-kind.ts. ⚠️ This line used to read `emailSource === 'scrape'`, so a
+    // BOUGHT address rendered with no origin at all — the one fact a reviewer most needs, since
+    // paying a broker for a named individual's details is the weakest GDPR/PECR footing here and
+    // the strongest reason to pause. The confirmation warning is keyed on the same predicate the
+    // server enforces, so the two cannot disagree about what needs a second look.
+    const EK = window.LeadEmailKind;
+    const origin = EK && typeof EK.sourceLabel === 'function' ? EK.sourceLabel(d.emailSource) : '';
+    const needsConfirm = EK && typeof EK.needsConfirmation === 'function'
+        ? EK.needsConfirmation(d.emailKind, d.emailSource)
+        : d.emailKind === 'personal';
+    const bought = d.emailSource === 'provider';
     return `<div class="mt-2">
-      <p class="text-[11px] text-gray-500">Outreach to <span class="font-bold text-gray-700 break-all">${_rqEsc(to)}</span>${scraped ? ' · found on their website' : ''}</p>
-      ${personal ? `<p class="text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 mt-1 inline-block">Personal inbox — check before approving</p>` : ''}
+      <p class="text-[11px] text-gray-500">Outreach to <span class="font-bold text-gray-700 break-all">${_rqEsc(to)}</span>${origin ? ` · ${_rqEsc(origin)}` : ''}</p>
+      ${needsConfirm ? `<p class="text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 mt-1 inline-block">${bought ? 'A named person, from bought data — check before approving' : 'Personal inbox — check before approving'}</p>` : ''}
     </div>`;
 }
 
@@ -3521,7 +3531,10 @@ function _applyDashboardRegistry(data) {
             if (pa.kind === 'chat') {
                 paBtn.onclick = () => { window.location.href = `assistant-chat.html?assistantId=${data.id}`; };
             } else {
-                paBtn.onclick = () => { if (window.openGeneratePostSheet) window.openGeneratePostSheet(); };
+                // Pass the id the same way the blog branch above does, rather than leaning on the
+                // _currentAssistantId global — this handler closes over the assistant it was built
+                // for, so it should say so.
+                paBtn.onclick = () => { if (window.openGeneratePostSheet) window.openGeneratePostSheet(data.id); };
             }
         }
     }

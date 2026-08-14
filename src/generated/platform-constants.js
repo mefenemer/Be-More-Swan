@@ -346,11 +346,29 @@
   var roleOrPersonal = function roleOrPersonal(localPart){const prefix=localPart.trim().toLowerCase();const bare=prefix.replace(/[._-]/g,"");return ROLE_EMAIL_PREFIXES.has(prefix)||ROLE_EMAIL_PREFIXES.has(bare)?"role":"personal"};
   var classifyEmailKind = function classifyEmailKind(email){const value=String(email??"").trim().toLowerCase();if(!value||(value.match(/@/g)||[]).length!==1)return null;const[local,domain]=value.split("@");if(!local||!domain||!domain.includes("."))return null;return roleOrPersonal(local)};
 
+  // Provenance vocabulary + the confirmation gate. Mirrored for the same reason as the classifier
+  // above: the Review Queue prints the origin and shows the warning, while the SERVER decides
+  // whether the send is allowed. A browser copy that forked would show a reassuring line beside a
+  // button the server then refuses — or, far worse, stay quiet about an address it will happily
+  // send to a named individual whose details were bought.
+  var EMAIL_SOURCE_LABELS = {"scrape":"found on their website","provider":"from a paid data provider","manual":""};
+  var emailSourceLabel = function emailSourceLabel(source){return EMAIL_SOURCE_LABELS[String(source??"")]??""};
+  var needsPersonalInboxConfirmation = function needsPersonalInboxConfirmation(kind,source){return kind==="personal"&&source!=="manual"&&!!source};
+
   window.LeadEmailKind = {
     /** 'role' | 'personal' for a whole address, or null if it is not an address at all. */
     classify: classifyEmailKind,
 
     /** Same rule, for a bare local part. */
     ofLocalPart: roleOrPersonal,
+
+    /** How to describe where an address came from. '' when there is nothing worth saying. */
+    sourceLabel: emailSourceLabel,
+
+    /**
+     * Does this address need an explicit "yes, email this named person" first?
+     * Keep identical to the server gate in lead-generation.ts — it is the same function.
+     */
+    needsConfirmation: needsPersonalInboxConfirmation,
   };
 })();

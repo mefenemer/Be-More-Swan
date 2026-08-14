@@ -42,7 +42,10 @@ import {
 import {
     LEAD_RECIPIENT_PATHS, resolveLeadRecipient, hasOutreachDraft, isLeadDeliverable,
 } from '../src/config/lead-recipient';
-import { ROLE_EMAIL_PREFIXES, roleOrPersonal, classifyEmailKind } from '../src/config/lead-email-kind';
+import {
+    ROLE_EMAIL_PREFIXES, roleOrPersonal, classifyEmailKind,
+    EMAIL_SOURCE_LABELS, emailSourceLabel, needsPersonalInboxConfirmation,
+} from '../src/config/lead-email-kind';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const OUTPUT_PATH = join(root, 'src', 'generated', 'platform-constants.js');
@@ -409,12 +412,30 @@ ${formatRows}
   var roleOrPersonal = ${roleOrPersonal.toString()};
   var classifyEmailKind = ${classifyEmailKind.toString()};
 
+  // Provenance vocabulary + the confirmation gate. Mirrored for the same reason as the classifier
+  // above: the Review Queue prints the origin and shows the warning, while the SERVER decides
+  // whether the send is allowed. A browser copy that forked would show a reassuring line beside a
+  // button the server then refuses — or, far worse, stay quiet about an address it will happily
+  // send to a named individual whose details were bought.
+  var EMAIL_SOURCE_LABELS = ${JSON.stringify(EMAIL_SOURCE_LABELS)};
+  var emailSourceLabel = ${emailSourceLabel.toString()};
+  var needsPersonalInboxConfirmation = ${needsPersonalInboxConfirmation.toString()};
+
   window.LeadEmailKind = {
     /** 'role' | 'personal' for a whole address, or null if it is not an address at all. */
     classify: classifyEmailKind,
 
     /** Same rule, for a bare local part. */
     ofLocalPart: roleOrPersonal,
+
+    /** How to describe where an address came from. '' when there is nothing worth saying. */
+    sourceLabel: emailSourceLabel,
+
+    /**
+     * Does this address need an explicit "yes, email this named person" first?
+     * Keep identical to the server gate in lead-generation.ts — it is the same function.
+     */
+    needsConfirmation: needsPersonalInboxConfirmation,
   };
 })();
 `;

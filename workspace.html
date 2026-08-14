@@ -2369,6 +2369,14 @@ function formatCurrency(amount, currency) {
         window.ScrollLock.releaseScoped();
         document.body.classList.remove('brief-drawer-open');
 
+        // Drop the assistant context when leaving for an org-wide view. _currentAssistantId was
+        // written in exactly one place (initAssistantDetail) and cleared in none, so it survived
+        // every later navigation: on the Review Queue or the Calendar, "which assistant?" was
+        // answered by whichever workspace happened to be opened earlier in the session, and a post
+        // created there was filed under it — a Lead Generator, if that was the last one visited.
+        // Cleared BEFORE the swap so the incoming view's own script can set it afresh.
+        if (routeKey !== 'assistant-detail') window._currentAssistantId = null;
+
         contentContainer.innerHTML = await response.text();
 
         // Re-execute any inline <script> blocks injected via innerHTML
@@ -12922,11 +12930,17 @@ let _gpHasMedia = false;           // work-with-AI: whether the current draft ha
  * this one function, so redefining it amalgamates every entry point at once instead of leaving some
  * buttons on the old screen and some on the new.
  *
+ * `assistantId` is optional and exists for the org-wide surfaces. Four of those five call sites sit
+ * inside an assistant workspace and pass nothing, keeping the _currentAssistantId fallback; the
+ * Review Queue reached from the side menu has no assistant in context and never can, so it resolves
+ * one itself (resolvePostingAssistants) and passes it in. Without that it landed on the toast below
+ * with no way to pick an assistant without leaving the page.
+ *
  * The draft is created immediately, because the editor edits a row. It lands in 'draft' status,
  * which no Review Queue column selects — so abandoning one leaves nothing behind for anyone to tidy.
  */
-async function openGeneratePostSheet() {
-    const assistantId = window._currentAssistantId || _gpCurrentAssistantId || null;
+async function openGeneratePostSheet(explicitAssistantId = null) {
+    const assistantId = explicitAssistantId || window._currentAssistantId || _gpCurrentAssistantId || null;
     if (!assistantId) { window.showToast?.('Pick an assistant first.', { icon: '⚠️' }); return; }
 
     // ── Ask where it is going, before it exists ───────────────────────────────────────────────
@@ -13064,6 +13078,38 @@ function gpChooseMode(mode) {
     }
 }
 
+/**
+ * The assistants a post can be created UNDER, most appropriate first (empty when there are none).
+ *
+ * Every post row has an assistantId, so every "Create a Post" entry point has to answer "which
+ * assistant?" — and the answer differs by surface. Inside an assistant workspace it is already
+ * decided; on an org-wide surface (Review Queue, reached from the side menu) nothing has decided
+ * it, and the button used to fall through to window._currentAssistantId, which on those pages is
+ * either unset or left over from an earlier navigation. One rule in one place, so a second surface
+ * cannot answer it differently.
+ *
+ * Social Media Assistants are preferred but not required: the list falls back to every active
+ * assistant, because orgs whose assistants predate the roleKey field would otherwise be locked out
+ * of creating a post at all. Deliberately uncached — hiring an assistant mid-session must show up.
+ *
+ * 'social_media_manager' is SMM_ROLE_KEY in src/constants/roles.ts; this file is not a module, so
+ * the key is spelled out here the same way blog-studio-modal.js spells out 'blog_writer'.
+ */
+async function resolvePostingAssistants() {
+    try {
+        const res = await fetch('/.netlify/functions/get-assistants', { credentials: 'same-origin' });
+        const data = res.ok ? await res.json() : { assistants: [] };
+        const active = (data.assistants || []).filter(a =>
+            a.status !== 'pending' && a.status !== 'failed' && a.status !== 'blocked' &&
+            a.lifecycleStatus !== 'archived');
+        const social = active.filter(a => a.roleKey === 'social_media_manager');
+        return social.length > 0 ? social : active;
+    } catch {
+        return [];
+    }
+}
+window.resolvePostingAssistants = resolvePostingAssistants;
+
 // Populate the assistant picker when no assistant is pre-selected. Auto-selects the org's
 // Social Media Assistant; only reveals the dropdown when there's more than one to choose from.
 async function gpPopulateAssistants() {
@@ -13074,15 +13120,7 @@ async function gpPopulateAssistants() {
     if (!wrap || !sel) return;
 
     try {
-        const res  = await fetch('/.netlify/functions/get-assistants');
-        const data = res.ok ? await res.json() : { assistants: [] };
-        const active = (data.assistants || []).filter(a =>
-            a.status !== 'pending' && a.status !== 'failed' && a.status !== 'blocked' &&
-            a.lifecycleStatus !== 'archived');
-        // Prefer Social Media Assistants, but fall back to all active assistants so orgs whose
-        // assistants predate the roleKey field aren't locked out of generating a post.
-        const social = active.filter(a => a.roleKey === 'social_media_manager');
-        const eligible = social.length > 0 ? social : active;
+        const eligible = await resolvePostingAssistants();
 
         if (eligible.length === 0) {
             wrap.classList.add('hidden');

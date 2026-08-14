@@ -33,6 +33,28 @@ export type EmailSource = 'scrape' | 'manual' | 'provider';
 export type EmailKind = 'role' | 'personal';
 
 /**
+ * How to describe an address's origin to the person about to email it.
+ *
+ * ⚠️ A PURCHASED address must say so. The Review Queue's recipient line originally read
+ * `emailSource === 'scrape' ? ' · found on their website' : ''`, so a bought address rendered
+ * with no origin at all — the one provenance a reviewer most needs before approving, since
+ * "we paid a broker for this named individual's details" is the weakest GDPR/PECR footing in
+ * the product and the strongest reason to hesitate.
+ *
+ * Empty string for 'manual': the user typed it, so telling them where it came from is noise.
+ */
+export const EMAIL_SOURCE_LABELS: Record<EmailSource, string> = {
+    scrape: 'found on their website',
+    provider: 'from a paid data provider',
+    manual: '',
+};
+
+/** The origin phrase for an address, or '' when there is nothing worth saying. */
+export function emailSourceLabel(source: unknown): string {
+    return (EMAIL_SOURCE_LABELS as Record<string, string>)[String(source ?? '')] ?? '';
+}
+
+/**
  * Does this address need an explicit "yes, email this named person" before anything is sent?
  *
  * ⚠️ THE RULE IS "THE USER DID NOT TYPE IT", NOT "WE SCRAPED IT". Both gates used to test

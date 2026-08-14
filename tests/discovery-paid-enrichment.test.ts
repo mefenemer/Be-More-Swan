@@ -34,7 +34,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { needsPersonalInboxConfirmation } from '../src/config/lead-email-kind';
+import { needsPersonalInboxConfirmation, emailSourceLabel } from '../src/config/lead-email-kind';
 import { isEnrichProviderConfigured, lookupProviderContact } from '../src/lib/discovery-enrich-provider';
 
 let passed = 0;
@@ -96,6 +96,30 @@ check('both enforcement points use the shared predicate, not a literal', () => {
         'signal-inbox.ts no longer uses the shared predicate');
     assert.ok(!/emailSource === 'scrape'/.test(SEND) && !/emailSource === 'scrape'/.test(INBOX),
         "a literal 'scrape' comparison is back — a purchased address would bypass it");
+});
+
+check('a purchased address states its origin to the reviewer', () => {
+    // ⚠️ The recipient line originally read `emailSource === 'scrape' ? ' · found on their
+    // website' : ''`, so a BOUGHT address rendered with no origin at all — the one provenance a
+    // reviewer most needs before approving an email to a named individual.
+    const ASSISTANTS = stripComments(read('assistants.js'));
+    const GENERATED = read('src/generated/platform-constants.js');
+    assert.ok(/EK\.sourceLabel\(d\.emailSource\)/.test(ASSISTANTS),
+        'the recipient line no longer reads the shared provenance vocabulary');
+    assert.ok(!/const scraped = d\.emailSource === 'scrape'/.test(ASSISTANTS),
+        "the literal 'scrape' test is back — a purchased address would render with no origin");
+    assert.ok(/EK\.needsConfirmation\(d\.emailKind, d\.emailSource\)/.test(ASSISTANTS),
+        'the warning no longer uses the same predicate the server enforces');
+    // And the browser must actually HAVE them.
+    assert.ok(/sourceLabel: emailSourceLabel/.test(GENERATED) && /needsConfirmation: needsPersonalInboxConfirmation/.test(GENERATED),
+        'window.LeadEmailKind is missing the provenance helpers — run npm run gen:constants');
+});
+
+check('every EmailSource has a provenance label, and only manual is silent', () => {
+    assert.equal(emailSourceLabel('scrape'), 'found on their website');
+    assert.equal(emailSourceLabel('provider'), 'from a paid data provider');
+    assert.equal(emailSourceLabel('manual'), '', 'the user typed it — telling them where it came from is noise');
+    assert.equal(emailSourceLabel('nonsense'), '', 'an unknown source must not throw or invent a label');
 });
 
 // ── 2. Off by default ────────────────────────────────────────────────────────
