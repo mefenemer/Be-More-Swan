@@ -35,6 +35,22 @@ const workspace = read('workspace.html');
 const calendarJs = read('calendar.js');
 const calendarHtml = read('calendar.html');
 
+/**
+ * indexOf for a source landmark, but LOUD when the landmark is gone.
+ *
+ * These checks work by slicing the file between two markers. A bare indexOf answers -1 for a marker
+ * that no longer exists, and `slice(-1, n)` is an empty string — so a renamed function does not fail
+ * as "the marker moved", it fails as whatever the assertion says about an empty slice. That is
+ * exactly what happened when openGeneratePostSheet gained a parameter: the anchor still said
+ * `openGeneratePostSheet()`, the slice came back empty, and the test reported "Create Post must open
+ * the picker" about code that opens the picker perfectly well.
+ */
+function landmark(hay: string, needle: string): number {
+    const at = hay.indexOf(needle);
+    assert.notEqual(at, -1, `source landmark missing (renamed or removed?): ${needle}`);
+    return at;
+}
+
 console.log('\nPost editor — one surface, one layout\n');
 
 // ── 1. One layout ───────────────────────────────────────────────────────────────────────────────
@@ -98,7 +114,13 @@ check('a new post is seeded across every connected platform', () => {
     // Create Post now ASKS, via the destination picker — but the picker opens pre-ticked with
     // exactly what this used to create silently, so the everyday post is still one click and the
     // seeding rule is unchanged. It just moved into pceOpenDestinationsForCreate.
-    const open = workspace.slice(workspace.indexOf('async function openGeneratePostSheet()'), workspace.indexOf('// Lowercase service names'));
+    // Anchored WITHOUT the closing paren: the function takes an optional explicitAssistantId for the
+    // org-wide surfaces (the Review Queue reached from the side menu has no assistant in context),
+    // and pinning the empty arg list made this check silently stop reading the function at all.
+    const open = workspace.slice(
+        landmark(workspace, 'async function openGeneratePostSheet('),
+        landmark(workspace, '// Lowercase service names'),
+    );
     assert.match(open, /await pceOpenDestinationsForCreate\(assistantId\)/, 'Create Post must open the picker');
     assert.ok(!/create-manual-post/.test(open), 'creating before asking is what the picker replaces');
 
