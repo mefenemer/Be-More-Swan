@@ -15,6 +15,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { landmark } from './landmark';
 import {
     SOURCE_KINDS, HANDOFF_STATES, isBatchable, resolveSourceLabel, savedSearchLabel,
     encodeCursor, decodeCursor, compareSignals, INBOX_PAGE_SIZE,
@@ -46,7 +47,7 @@ check('ONLY `ready` is batchable — needs_review can never be bulk-approved', (
 check('the server re-checks the gate rather than trusting the client', () => {
     // The approve branch must re-read and re-classify. A client-supplied handoffStatus would make
     // the gate bypassable by editing a fetch body.
-    const approveBranch = fnText.slice(fnText.indexOf("action === 'approve'"));
+    const approveBranch = fnText.slice(landmark(fnText, "action === 'approve'"));
     assert.ok(approveBranch.includes('classifySignal(row)'),
         'approve must re-classify server-side from fresh rows');
     assert.ok(approveBranch.includes('isBatchable('),
@@ -140,7 +141,7 @@ check('the inbox works with ONLY a Lead Generator hired', () => {
     assert.ok(fnText.includes("roleKey, 'social_media_manager'"),
         'social presence is detected, not assumed');
     // The saved-search feed must not be conditional on the social one.
-    const listBranch = fnText.slice(fnText.indexOf("action === 'list'"), fnText.indexOf("action === 'approve'"));
+    const listBranch = fnText.slice(landmark(fnText, "action === 'list'"), landmark(fnText, "action === 'approve'"));
     assert.ok(listBranch.includes('discoveredLeads'), 'saved-search signals are read unconditionally');
 });
 
@@ -195,8 +196,8 @@ check('the notification template exists with the variables the call site supplie
     // arrives with none of the tab's explanatory copy around it, so it has to name the thing the
     // user recognises (a company) and the tab they can find (Searches).
     // Only the title/message lines — templateKey and type legitimately keep the internal name.
-    const tpl = cat.slice(cat.indexOf("templateKey: 'search_signals_published'"));
-    const body = tpl.slice(0, tpl.indexOf('variables:'));
+    const tpl = cat.slice(landmark(cat, "templateKey: 'search_signals_published'"));
+    const body = tpl.slice(0, landmark(tpl, 'variables:'));
     const copy = body.split('\n').filter((l) => /^\s*(title|message):/.test(l)).join('\n');
     assert.ok(copy.includes('title:') && copy.includes('message:'), 'found both copy lines');
     assert.ok(!/signal/i.test(copy), 'user-facing copy must not use the word "signal"');

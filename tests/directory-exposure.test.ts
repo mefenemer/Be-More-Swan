@@ -30,6 +30,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {

@@ -33,6 +33,7 @@ import {
 import { EVENT_TYPES, TERMINAL_EVENT_TYPES } from '../src/config/revenue-events';
 import { addDays, startOfUtcDay } from '../src/utils/outreach-sequences';
 import { emailDomain, checkSuppression } from '../src/utils/suppression';
+import { landmark } from './landmark';
 
 let passed = 0;
 const checks: Array<Promise<void>> = [];
@@ -77,12 +78,12 @@ check('every enrolment state is in the SQL CHECK constraint', () => {
 });
 
 check('db/schema.ts check() constraints match (drizzle-kit push must not revert the DDL)', () => {
-    const block = schemaText.slice(schemaText.indexOf('sequenceEnrolments = pgTable'));
-    const stateCheck = block.slice(block.indexOf('sequence_enrolments_state_check'));
+    const block = schemaText.slice(landmark(schemaText, 'sequenceEnrolments = pgTable'));
+    const stateCheck = block.slice(landmark(block, 'sequence_enrolments_state_check'));
     for (const s of SEQUENCE_STATES) {
         assert.ok(stateCheck.slice(0, 300).includes(`'${s}'`), `schema.ts state check is missing '${s}'`);
     }
-    const haltCheck = block.slice(block.indexOf('sequence_enrolments_halt_reason_check'));
+    const haltCheck = block.slice(landmark(block, 'sequence_enrolments_halt_reason_check'));
     for (const r of SEQUENCE_HALT_REASONS) {
         assert.ok(haltCheck.slice(0, 600).includes(`'${r}'`), `schema.ts halt_reason check is missing '${r}'`);
     }
@@ -221,12 +222,12 @@ check('inbound replies halt running enrolments at the same moment the thread fli
         'the inbound reply branch must close any running cadence',
     );
     const recordAt = inboundText.indexOf('recordInboundMessage(db, thread.id');
-    const haltAt = inboundText.indexOf('haltEnrolmentsForThread(db, thread.id)');
+    const haltAt = landmark(inboundText, 'haltEnrolmentsForThread(db, thread.id)');
     assert.ok(recordAt > 0 && haltAt > recordAt, 'the halt must follow the state flip, not precede it');
 });
 
 check('haltEnrolmentsForThread only touches ACTIVE enrolments', () => {
-    const fn = helpersText.slice(helpersText.indexOf('export async function haltEnrolmentsForThread'));
+    const fn = helpersText.slice(landmark(helpersText, 'export async function haltEnrolmentsForThread'));
     assert.ok(
         fn.includes("eq(sequenceEnrolments.state, 'active')"),
         're-halting a completed enrolment would emit a duplicate ledger event on every reply',
@@ -246,12 +247,12 @@ check('claiming leases the row so overlapping invocations cannot both send it', 
 check('a (thread, step) idempotency check guards the succeeded-send-failed-bookkeeping window', () => {
     assert.ok(workerText.includes('alreadySent(db, row.lead_thread_id, templateVersion)'), 'missing idempotency check');
     const idemAt = workerText.indexOf('if (await alreadySent(');
-    const sendAt = workerText.indexOf('sendGmailMessage(db, row.organisation_id, outgoing)');
+    const sendAt = landmark(workerText, 'sendGmailMessage(db, row.organisation_id, outgoing)');
     assert.ok(idemAt > 0 && idemAt < sendAt, 'the idempotency check must precede the send');
 });
 
 check('enrolment relies on the unique index rather than a read-then-write race', () => {
-    const fn = helpersText.slice(helpersText.indexOf('export async function enrolInSequence'));
+    const fn = helpersText.slice(landmark(helpersText, 'export async function enrolInSequence'));
     assert.ok(
         fn.includes('onConflictDoNothing({ target: sequenceEnrolments.leadThreadId })'),
         'a SELECT-then-INSERT would let two concurrent approvals both enrol the same thread',
@@ -260,7 +261,7 @@ check('enrolment relies on the unique index rather than a read-then-write race',
 
 check('enrolment happens on a confirmed send, never on a UI action', () => {
     const sendAt = leadGenText.indexOf('if (provider === \'microsoft\') await sendOutlookMessage');
-    const enrolAt = leadGenText.indexOf('await enrolInSequence(db, {');
+    const enrolAt = landmark(leadGenText, 'await enrolInSequence(db, {');
     assert.ok(sendAt > 0 && enrolAt > sendAt, 'enrolInSequence must be called only after the email actually went out');
 });
 
@@ -269,22 +270,22 @@ check('enrolment happens on a confirmed send, never on a UI action', () => {
 check('every terminal transition clears next_send_at', () => {
     // The worker claims on (state, next_send_at). A terminal row that keeps a live timestamp is a
     // row that can still be claimed and sent.
-    const halt = helpersText.slice(helpersText.indexOf('export async function haltEnrolment'));
+    const halt = helpersText.slice(landmark(helpersText, 'export async function haltEnrolment'));
     assert.ok(halt.includes('nextSendAt: null'), 'haltEnrolment must clear next_send_at');
-    const advance = helpersText.slice(helpersText.indexOf('export async function advanceEnrolment'));
-    const completion = advance.slice(advance.indexOf("state: 'completed'"), advance.indexOf("state: 'completed'") + 200);
+    const advance = helpersText.slice(landmark(helpersText, 'export async function advanceEnrolment'));
+    const completion = advance.slice(landmark(advance, "state: 'completed'"), landmark(advance, "state: 'completed'") + 200);
     assert.ok(completion.includes('nextSendAt: null'), 'completing a cadence must clear next_send_at');
 });
 
 check('an unknown halt reason degrades to manual instead of failing the write', () => {
     // A rejected INSERT would leave the enrolment ACTIVE — the failure mode is "keeps sending",
     // so the vocabulary violation must never be allowed to abort the halt.
-    const fn = helpersText.slice(helpersText.indexOf('export async function haltEnrolment'));
+    const fn = helpersText.slice(landmark(helpersText, 'export async function haltEnrolment'));
     assert.ok(fn.includes('reason = \'manual\''), 'an out-of-vocabulary reason must fall back, not throw');
 });
 
 check('the daily-cap read fails CLOSED', () => {
-    const fn = helpersText.slice(helpersText.indexOf('export async function sequenceSendsToday'));
+    const fn = helpersText.slice(landmark(helpersText, 'export async function sequenceSendsToday'));
     assert.ok(
         fn.includes('Number.MAX_SAFE_INTEGER'),
         'a failed count must not read as zero — that would silently remove the daily ceiling',
@@ -356,7 +357,7 @@ check('the worker checks suppression per send, not once at enrolment', () => {
         workerText.includes('checkSuppression(db, row.organisation_id, recipient)'),
         'the worker must check suppression itself',
     );
-    const fn = helpersText.slice(helpersText.indexOf('export async function enrolInSequence'));
+    const fn = helpersText.slice(landmark(helpersText, 'export async function enrolInSequence'));
     assert.ok(
         !fn.includes('checkSuppression'),
         'checking only at enrolment would miss a domain added days into the cadence',
@@ -376,7 +377,7 @@ check('the opening email now checks suppression too', () => {
     // an org's own existing customers.
     assert.ok(leadGenText.includes('await checkSuppression(db, orgId, recipient)'), 'send_outreach must check suppression');
     const suppAt = leadGenText.indexOf('await checkSuppression(db, orgId, recipient)');
-    const sendAt = leadGenText.indexOf('if (provider === \'microsoft\') await sendOutlookMessage');
+    const sendAt = landmark(leadGenText, 'if (provider === \'microsoft\') await sendOutlookMessage');
     assert.ok(suppAt > 0 && suppAt < sendAt, 'the check must precede the send');
 });
 

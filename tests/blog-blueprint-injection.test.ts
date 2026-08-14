@@ -10,6 +10,7 @@
 
 import assert from 'node:assert';
 import { buildBlueprintGuardrailsBlock } from '../src/utils/blog-generate';
+import { landmark } from './landmark';
 
 let passed = 0;
 async function check(name: string, fn: () => void | Promise<void>) {
@@ -64,7 +65,7 @@ await check('serialises §4 rules and §11 knowledge, dropping blank rules', asy
 
 await check('rules are ordered before business knowledge', async () => {
     const block = await buildBlueprintGuardrailsBlock(dbReturning([{ sections: FULL_SECTIONS }]), OPTS);
-    assert.ok(block!.indexOf('CONTENT RULES') < block!.indexOf('BUSINESS KNOWLEDGE'));
+    assert.ok(landmark(block!, 'CONTENT RULES') < landmark(block!, 'BUSINESS KNOWLEDGE'));
 });
 
 await check('a blueprint with neither section produces no block', async () => {

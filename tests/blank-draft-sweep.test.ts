@@ -15,6 +15,7 @@
 import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
+import { landmark } from './landmark';
 
 let passed = 0;
 let total = 0;
@@ -63,7 +64,7 @@ check('an empty archive sweep does not skip the blank sweep', () => {
     // Restoring that shape would silently disable the blank sweep on every day with nothing to
     // archive — i.e. most days — while the function still reported success.
     const handlerStart = cleanup.indexOf('export default withLambda');
-    const blankCall = cleanup.indexOf('await sweepAbandonedBlanks(');
+    const blankCall = landmark(cleanup, 'await sweepAbandonedBlanks(');
     const earlyReturn = cleanup.indexOf('if (!expired.length)');
     assert.ok(handlerStart >= 0 && blankCall > handlerStart, 'blank sweep is not inside the handler');
     assert.ok(
@@ -103,13 +104,13 @@ check('the jsonb read is guarded by jsonb_typeof', () => {
     // jsonb_array_length() on a non-array ERRORS. content_asset_ids has no shape constraint, so one
     // malformed row would abort the entire sweep rather than being skipped — the same trap
     // release-post-media.ts documents for its CROSS JOIN LATERAL.
-    const arm = cleanup.slice(cleanup.indexOf('WITH untouched AS'), cleanup.indexOf('LIMIT ${limit}'));
+    const arm = cleanup.slice(landmark(cleanup, 'WITH untouched AS'), landmark(cleanup, 'LIMIT ${limit}'));
     assert.ok(
         /jsonb_typeof\(sp\.content_asset_ids\) <> 'array'/.test(arm),
         'jsonb_array_length is called without a jsonb_typeof guard; one malformed row kills the sweep'
     );
     assert.ok(
-        arm.indexOf('jsonb_typeof') < arm.indexOf('jsonb_array_length'),
+        landmark(arm, 'jsonb_typeof') < landmark(arm, 'jsonb_array_length'),
         'the typeof guard must be ORed BEFORE the length read to short-circuit it'
     );
 });

@@ -12,6 +12,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { landmark } from './landmark';
 
 let passed = 0, total = 0;
 function check(name: string, fn: () => void) {
@@ -67,7 +68,7 @@ check('a single-platform job fans out to nothing and still succeeds', () => {
 
 // ── The wiring, at source level ─────────────────────────────────────────────────────────────────
 check('the sibling insert is guarded per platform, not per fan-out', () => {
-    const loop = src.slice(src.indexOf('for (const siblingPlatform of targetPlatforms.slice(1))'));
+    const loop = src.slice(landmark(src, 'for (const siblingPlatform of targetPlatforms.slice(1))'));
     const bodyEnd = loop.indexOf('if (failed.length)');
     assert.ok(bodyEnd > 0, 'the tally must exist');
     const body = loop.slice(0, bodyEnd);

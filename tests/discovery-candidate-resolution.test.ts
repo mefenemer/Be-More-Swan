@@ -35,6 +35,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveCandidateDomain, classifyCandidate } from '../src/lib/discovery-domain-filter';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -191,13 +192,13 @@ check('the rewrite runs BEFORE the dedupe', () => {
 
 check('rewritten candidates have their identity re-read before scoring', () => {
     const iIdentity = WORKER.indexOf('resolveIdentities(');
-    const iScore = WORKER.indexOf('scoreCandidates(');
+    const iScore = landmark(WORKER, 'scoreCandidates(');
     assert.ok(iIdentity !== -1, 'resolveIdentities is gone — the scorer would see article headlines');
     assert.ok(iIdentity < iScore, 'identities must be resolved before scoring, not after');
 });
 
 check('a failed identity read names the lead by domain, never by the article', () => {
-    const fn = WORKER.slice(WORKER.indexOf('async function resolveIdentities'), WORKER.indexOf('async function loadGuardrails'));
+    const fn = WORKER.slice(landmark(WORKER, 'async function resolveIdentities'), landmark(WORKER, 'async function loadGuardrails'));
     assert.ok(/hit\.title = hit\.domain/.test(fn),
         'the fallback no longer names the lead by its domain');
     assert.ok(/hit\.snippet = ''/.test(fn),
@@ -207,7 +208,7 @@ check('a failed identity read names the lead by domain, never by the article', (
 });
 
 check('only rewritten hits are fetched, and the budget is bounded', () => {
-    const fn = WORKER.slice(WORKER.indexOf('async function resolveIdentities'), WORKER.indexOf('async function loadGuardrails'));
+    const fn = WORKER.slice(landmark(WORKER, 'async function resolveIdentities'), landmark(WORKER, 'async function loadGuardrails'));
     assert.ok(/hits\.filter\(\(h\) => h\.rewrittenFrom\)/.test(fn),
         'every candidate is being fetched — an ordinary hit already carries the company’s own title');
     assert.ok(/IDENTITY_BUDGET_MS/.test(WORKER), 'the slice budget is gone — slow sites would blow the function tick');

@@ -18,6 +18,7 @@
 
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
+import { landmark } from './landmark';
 
 let passed = 0;
 const test = (name: string, fn: () => void) => {
@@ -34,7 +35,7 @@ console.log('\nConnection ownership + tenant scoping\n');
 // ── The writer ───────────────────────────────────────────────────────────────────────────────
 
 test('a new Meta connection is written with an owner', () => {
-    const insert = metaOauth.slice(metaOauth.indexOf('db.insert(systemConnections)'));
+    const insert = metaOauth.slice(landmark(metaOauth, 'db.insert(systemConnections)'));
     assert.match(
         insert.slice(0, 400),
         /userId: connectionUserId/,
@@ -68,8 +69,8 @@ test('reconnecting heals a NULL owner but never reassigns a real one', () => {
 
 test('the unattributed-row query is scoped to the caller’s organisation', () => {
     const catalog = integrations.slice(
-        integrations.indexOf('const systemCatalog'),
-        integrations.indexOf('const userConnections'),
+        landmark(integrations, 'const systemCatalog'),
+        landmark(integrations, 'const userConnections'),
     );
     assert.match(catalog, /eq\(systemConnections\.organisationId, currentOrgId\)/, 'no org filter — cross-tenant read');
     assert.ok(
@@ -81,8 +82,8 @@ test('the unattributed-row query is scoped to the caller’s organisation', () =
 test('a caller with no organisation reads no connections at all', () => {
     // Previously an org-less session got EVERY unattributed row on the platform.
     const catalog = integrations.slice(
-        integrations.indexOf('const systemCatalog'),
-        integrations.indexOf('const userConnections'),
+        landmark(integrations, 'const systemCatalog'),
+        landmark(integrations, 'const userConnections'),
     );
     assert.match(catalog, /currentOrgId\s*\?/, 'must branch on org presence');
     assert.match(catalog, /:\s*\[\]/, 'and fall back to an empty list, not an unscoped query');
@@ -91,8 +92,8 @@ test('a caller with no organisation reads no connections at all', () => {
 test('vault references never reach the client', () => {
     // The pre-existing guarantee this fix relies on when scoping the exposure.
     // Bounded to the object literal itself — the surrounding comments discuss vaultRefKey by name.
-    const start = integrations.indexOf('const safeColumns');
-    const safeCols = integrations.slice(start, integrations.indexOf('};', start));
+    const start = landmark(integrations, 'const safeColumns');
+    const safeCols = integrations.slice(start, landmark(integrations, '};', start));
     assert.ok(!safeCols.includes('vaultRefKey'), 'token reference must never be selected');
     assert.ok(!/accessToken|refreshToken/.test(safeCols));
 });

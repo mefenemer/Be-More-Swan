@@ -21,6 +21,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { assetIdList, loadAssetMetricsById, orderMetrics, routeAsset } from '../src/utils/format-router';
+import { landmark } from './landmark';
 
 let passed = 0, total = 0;
 const deferred: Array<() => Promise<void>> = [];
@@ -138,7 +139,7 @@ check('the endpoint routes per row, and scopes siblings to the tenant', () => {
     assert.match(src, /routeAsset\(row\.platform, orderMetrics\(assetIdList\(row\.contentAssetIds\), metrics\), row\.formatKey\)/,
         'and must be routed from THAT row\'s media, against THAT row\'s declared format');
     // The sibling read used to have no org filter at all; a crosspost_group_id is not a secret.
-    const sibling = src.slice(src.indexOf('const siblings = groupId'), src.indexOf('// ── Keyed by ROW'));
+    const sibling = src.slice(landmark(src, 'const siblings = groupId'), landmark(src, '// ── Keyed by ROW'));
     assert.match(sibling, /me\.organisationId/, 'the sibling query must be tenant-scoped');
     assert.match(sibling, /formatKey: scheduledPosts\.formatKey/, 'the declared format must be read for every sibling');
 });

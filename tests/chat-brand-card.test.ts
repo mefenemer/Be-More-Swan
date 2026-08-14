@@ -21,6 +21,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { normalizeMediaSources } from '../src/utils/media-sources';
+import { landmark } from './landmark';
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
 const chat = read('../netlify/functions/chat-orchestrator.ts');
@@ -100,7 +101,7 @@ check('a failed card costs the picture and nothing else', () => {
     // The draft is saved and linked before the card is attempted. If that order inverts, a render
     // failure takes the user's post with it — strictly worse than the bug being fixed.
     const persistIdx = chat.indexOf('.returning({ id: scheduledPosts.id })');
-    const cardIdx = chat.indexOf('attachBrandCardToDrafts(db, {');
+    const cardIdx = landmark(chat, 'attachBrandCardToDrafts(db, {');
     assert.ok(persistIdx > 0 && cardIdx > persistIdx, 'the card is now rendered before the post is saved');
     assert.ok(/catch \(cardErr\)/.test(chat), 'the card render is no longer wrapped in its own guard');
 });

@@ -34,6 +34,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { landmark } from './landmark';
 import {
     LEAD_RECIPIENT_PATHS, LEAD_RECIPIENT_SQL_PATHS, LEAD_DRAFT_BODY_SQL_PATH,
     resolveLeadRecipient, hasOutreachDraft, isLeadDeliverable,
@@ -129,7 +130,7 @@ check('the browser copy of the precedence is generated from the real functions',
         'window.LeadRecipient is missing — run npm run gen:constants');
     // The stringified function must be the REAL one: its body has to reference the shared path
     // array rather than a retyped chain of ||, which is exactly the drift this replaced.
-    const fn = GENERATED.slice(GENERATED.indexOf('var resolveLeadRecipient'), GENERATED.indexOf('var hasOutreachDraft'));
+    const fn = GENERATED.slice(landmark(GENERATED, 'var resolveLeadRecipient'), landmark(GENERATED, 'var hasOutreachDraft'));
     assert.ok(/LEAD_RECIPIENT_PATHS/.test(fn),
         'the emitted resolver no longer walks the shared paths — it has been reimplemented by hand');
     // ⚠️ DERIVED from the config, never hardcoded here. A literal expectation would still pass
@@ -142,7 +143,7 @@ check('the browser copy of the precedence is generated from the real functions',
 check('the generated resolver behaves identically to the server one', () => {
     // Evaluate the emitted browser code and run BOTH implementations over the same fixtures. This
     // is the check that actually catches a stale generated file.
-    const decls = GENERATED.slice(GENERATED.indexOf('var LEAD_RECIPIENT_PATHS'), GENERATED.indexOf('window.LeadRecipient'));
+    const decls = GENERATED.slice(landmark(GENERATED, 'var LEAD_RECIPIENT_PATHS'), landmark(GENERATED, 'window.LeadRecipient'));
     // eslint-disable-next-line no-new-func
     const browser = new Function(`${decls}\nreturn { resolveLeadRecipient, isLeadDeliverable };`)() as {
         resolveLeadRecipient: (d: unknown) => string | null;
@@ -170,7 +171,7 @@ check('the generated resolver behaves identically to the server one', () => {
 });
 
 check('the Review Queue recipient line reads the shared resolver, not its own chain', () => {
-    const fn = ASSISTANTS.slice(ASSISTANTS.indexOf('function _rqRecipient'), ASSISTANTS.indexOf('function _detailRqRecordCard'));
+    const fn = ASSISTANTS.slice(landmark(ASSISTANTS, 'function _rqRecipient'), landmark(ASSISTANTS, 'function _detailRqRecordCard'));
     assert.ok(/LR\.resolve\(d\)/.test(fn), '_rqRecipient no longer uses window.LeadRecipient');
     assert.ok(!/d\.outreachDraft && d\.outreachDraft\.to\) \|\| d\.contactEmail/.test(fn),
         'the hand-copied precedence is back in _rqRecipient — it will drift from the sender again');
@@ -181,7 +182,7 @@ check('the Review Queue recipient line reads the shared resolver, not its own ch
 // ── 4. Review filters; the other columns must not ────────────────────────────
 
 check('only the lead Review column asks for deliverable leads', () => {
-    const fn = ASSISTANTS.slice(ASSISTANTS.indexOf('async function _detailRqRenderRecords'), ASSISTANTS.indexOf('window._detailRqRecordAct'));
+    const fn = ASSISTANTS.slice(landmark(ASSISTANTS, 'async function _detailRqRenderRecords'), landmark(ASSISTANTS, 'window._detailRqRecordAct'));
     assert.ok(/const deliverableOnly = recordType === 'lead' && statusKey === 'review'/.test(fn),
         'the filter is no longer scoped to leads awaiting review');
     assert.ok(/deliverableOnly \? '&deliverable=1' : ''/.test(fn),
@@ -191,7 +192,7 @@ check('only the lead Review column asks for deliverable leads', () => {
 check('an empty lead Review column explains where the leads went', () => {
     // Shipping the filter without this converts a full-looking queue into a bare "nothing awaiting
     // your review" beside a search that just filed fifteen leads, which reads as a bug.
-    const fn = ASSISTANTS.slice(ASSISTANTS.indexOf('async function _detailRqRenderRecords'), ASSISTANTS.indexOf('window._detailRqRecordAct'));
+    const fn = ASSISTANTS.slice(landmark(ASSISTANTS, 'async function _detailRqRenderRecords'), landmark(ASSISTANTS, 'window._detailRqRecordAct'));
     assert.ok(/they’re in the Leads tab/.test(fn),
         'the filtered empty state no longer points at the Leads tab');
 });
@@ -205,8 +206,8 @@ check('the Leads tab offers Approve alongside Reject', () => {
 });
 
 check('approving from the Leads tab PATCHes only, and never calls the sender', () => {
-    const start = HUB.indexOf("label: 'Approve', async run");
-    const block = HUB.slice(start, HUB.indexOf("label: 'Reject', async run"));
+    const start = landmark(HUB, "label: 'Approve', async run");
+    const block = HUB.slice(start, landmark(HUB, "label: 'Reject', async run"));
     assert.ok(/approvalStatus: 'approved'/.test(block), 'the PATCH no longer sets approved');
     assert.ok(!/lead-generation/.test(block) && !/send_outreach/.test(block),
         'the Leads tab must NOT send — approving here is the targeting decision, not the email');
@@ -225,7 +226,7 @@ check('both campaign endpoints report the latest run separately from the total',
     for (const p of ['netlify/functions/signal-inbox.ts', 'netlify/functions/discovery-campaigns.ts']) {
         const src = read(p);
         assert.ok(/latestRunLeadsFound/.test(src), `${p} no longer reports the latest run's count`);
-        const sub = src.slice(src.indexOf('latestRunLeadsFound'));
+        const sub = src.slice(landmark(src, 'latestRunLeadsFound'));
         assert.ok(/ORDER BY j\.created_at DESC, j\.id DESC LIMIT 1/.test(sub.slice(0, 400)),
             `${p}: the latest-job subquery needs the id tiebreaker or it can pick a different job from its neighbours`);
     }
@@ -236,7 +237,7 @@ check('a re-run that deduped to nothing does not read as a fresh haul', () => {
     // a repeat run of the same campaign banks 0 while the cumulative total stands still. The card
     // used to print the total alone, so that re-run reported "15 leads found".
     const CARDS = read('src/components/assistant-discovery-campaigns.js');
-    const fn = CARDS.slice(CARDS.indexOf('function leadCountLine'), CARDS.indexOf('function body()'));
+    const fn = CARDS.slice(landmark(CARDS, 'function leadCountLine'), landmark(CARDS, 'function body()'));
     assert.ok(/No new leads on the last run/.test(fn),
         'a zero-yield re-run must say so rather than restating the campaign total');
     assert.ok(/latest === total/.test(fn),
@@ -247,7 +248,7 @@ check('a running search says "this run", never "the last run"', () => {
     const INBOX = read('src/components/assistant-signal-inbox.js');
     const start = INBOX.indexOf('function searchState');
     assert.ok(start !== -1, 'searchState() is gone — the Searches chip no longer derives its state');
-    const body = INBOX.slice(start, INBOX.indexOf('\n  }', INBOX.indexOf('return { chip:', start)));
+    const body = INBOX.slice(start, landmark(INBOX, '\n  }', landmark(INBOX, 'return { chip:', start)));
 
     // `total` is reused by the in-flight lines ("Filing what it found…", "Searching the web…"), so
     // the count phrase has to know whether a run is happening NOW. If `started` were computed

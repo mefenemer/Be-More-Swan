@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { NOTIFICATION_DEFAULTS } from '../src/utils/notification-templates-catalog';
 import { PREF_CATEGORIES, categoryForType } from '../src/utils/notification-prefs';
 import { DECISION_TTL_DAYS } from '../src/config/campaign-vocab';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -101,7 +102,7 @@ check('the card deep-links to the Decisions tab, not the dashboard', () => {
 check('the call site passes the assistantId the deep link reads', () => {
     // Two different code paths: the denormalised column drives the actor avatar, metadata drives
     // the CTA. Passing only one leaves either an anonymous card or a dead button.
-    const callIdx = agentSrc.indexOf(`createNotification(db, '${KEY}'`);
+    const callIdx = landmark(agentSrc, `createNotification(db, '${KEY}'`);
     const callBody = agentSrc.slice(callIdx, callIdx + 1400);
     assert.match(callBody, /assistantId: notice\.assistantId/, 'no denormalised assistant link (actor identity)');
     assert.match(callBody, /metadata: \{ assistantId: notice\.assistantId \}/, 'no metadata.assistantId (deep link)');
@@ -143,12 +144,12 @@ check('the fan-in runs after every campaign has been considered', () => {
     // Sent mid-loop, an org running three campaigns would be told about the first and then again
     // about the second.
     const campaignLoop = agentSrc.indexOf('for (const campaign of live)');
-    const fanIn = agentSrc.indexOf('for (const [organisationId, notice] of noticesByOrg)');
+    const fanIn = landmark(agentSrc, 'for (const [organisationId, notice] of noticesByOrg)');
     assert.ok(campaignLoop !== -1 && fanIn > campaignLoop, 'the fan-in is not after the campaign loop');
 });
 
 check('a notification failure cannot fail the run or be blamed on a campaign', () => {
-    const fanIn = agentSrc.slice(agentSrc.indexOf('for (const [organisationId, notice] of noticesByOrg)'));
+    const fanIn = agentSrc.slice(landmark(agentSrc, 'for (const [organisationId, notice] of noticesByOrg)'));
     assert.ok(fanIn.includes('try {') && fanIn.includes('catch'), 'the notify loop is unguarded');
 });
 

@@ -17,6 +17,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { detectOptOut, newTextOnly } from '../src/config/opt-out';
 import { EVENT_TYPES } from '../src/config/revenue-events';
+import { landmark } from './landmark';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -156,7 +157,7 @@ check('checkSuppression consults opt-outs BEFORE the domain list', () => {
     // enforced everywhere without touching either caller.
     const src = read('src/utils/suppression.ts');
     const optIdx = src.indexOf('leadOptOuts');
-    const domIdx = src.indexOf('suppressionList.domain');
+    const domIdx = landmark(src, 'suppressionList.domain');
     assert.ok(optIdx > 0, 'suppression.ts must query lead_opt_outs');
     assert.ok(optIdx < domIdx, 'the address check must run before the domain check');
 });
@@ -178,7 +179,7 @@ check('the inbound webhook records the opt-out and closes the thread', () => {
 check('a failed opt-out write never 500s the webhook', () => {
     // A 500 makes SendGrid retry and eventually bounce a real prospect's reply.
     const src = read('netlify/functions/inbound-email.ts');
-    const i = src.indexOf('detectOptOut(messageBody, subject)');
+    const i = landmark(src, 'detectOptOut(messageBody, subject)');
     assert.match(src.slice(i, i + 2400), /catch \(err\)/, 'the opt-out write must be wrapped');
     assert.match(src.slice(i, i + 2400), /OPT-OUT NOT RECORDED/, 'a swallowed failure must be logged loudly');
 });

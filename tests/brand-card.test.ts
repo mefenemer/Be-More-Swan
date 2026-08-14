@@ -29,6 +29,7 @@ import { overlaysFingerprint, isBakedFor } from '../src/lib/post-render';
 import { pickFaceUrl } from '../src/lib/brand-card-webfont';
 import { rotateSources, resolveMediaForPost } from '../src/utils/media-resolver';
 import { normalizeMediaSources, DEFAULT_ORDER } from '../src/utils/media-sources';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void | Promise<void>): Promise<void> {
@@ -335,7 +336,7 @@ test('brand_card is a valid media source and rides in the default matrix', () =>
     assert.deepEqual(normalizeMediaSources(['brand_card']), ['brand_card']);
     assert.deepEqual(normalizeMediaSources(['brand-card']), ['brand_card']);  // hyphenated spelling
     assert.ok(DEFAULT_ORDER.includes('brand_card'));
-    assert.ok(DEFAULT_ORDER.indexOf('brand_card') < DEFAULT_ORDER.indexOf('ai'), 'cards must be tried before paid AI generation');
+    assert.ok(landmark(DEFAULT_ORDER, 'brand_card') < landmark(DEFAULT_ORDER, 'ai'), 'cards must be tried before paid AI generation');
 });
 
 test('rotation alternates stock and brand_card so neither starves', () => {

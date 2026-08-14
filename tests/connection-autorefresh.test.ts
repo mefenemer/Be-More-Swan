@@ -17,6 +17,7 @@
 
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
+import { landmark } from './landmark';
 
 let passed = 0;
 const test = (name: string, fn: () => void) => {
@@ -75,7 +76,7 @@ test('the dead-status check still runs before autoRefresh in the UI', () => {
     // regardless of autoRefresh. If these two ever swap order in _connHealth, marking the Meta
     // services auto-refreshing would start hiding real breakage instead of a false alarm.
     const health = read('../integrations.js');
-    const fn = health.slice(health.indexOf('function _connHealth('));
+    const fn = health.slice(landmark(health, 'function _connHealth('));
     const dead = fn.indexOf('isConnectionDead');
     const auto = fn.indexOf('conn.autoRefresh');
     assert.ok(dead !== -1 && auto !== -1, 'could not locate _connHealth internals — update this test');

@@ -14,6 +14,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { diagnosePostFailure, type FailureKind } from '../src/utils/post-failure-diagnosis';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void) { fn(); console.log(`  ✓ ${name}`); passed++; }
@@ -107,7 +108,7 @@ check('the recovery panel offers every way out, whatever the diagnosis', () => {
     // exception: it is shown when the diagnosis asks for it, because sending someone to re-authorise
     // a connection that is perfectly healthy is its own dead end.
     const src = ws();
-    const panel = src.slice(src.indexOf('function _rqFailureRecoveryHtml('), src.indexOf('function _rqAfterFailureAction('));
+    const panel = src.slice(landmark(src, 'function _rqFailureRecoveryHtml('), landmark(src, 'function _rqAfterFailureAction('));
     assert.ok(panel.length > 0, 'the panel builder must exist');
     for (const action of ['rqFailedRetry(', 'rqFailedFix(', 'rqFailedRetryAt(', 'rqFailedReject(']) {
         assert.ok(panel.includes(action), `${action} must be reachable from the panel`);
@@ -123,7 +124,7 @@ check('the panel never puts the platform’s own error text into an onclick', ()
     // Remote content, and it routinely contains quotes and parentheses — "(#100) Invalid parameter".
     // Interpolated into an attribute it breaks the handler at best. It is rendered as escaped text.
     const src = ws();
-    const panel = src.slice(src.indexOf('function _rqFailureRecoveryHtml('), src.indexOf('function _rqAfterFailureAction('));
+    const panel = src.slice(landmark(src, 'function _rqFailureRecoveryHtml('), landmark(src, 'function _rqAfterFailureAction('));
     const onclicks = panel.match(/onclick="[^"]*"/g) || [];
     for (const o of onclicks) {
         assert.ok(!/f\.(raw|title|remedy)|failureMessage/.test(o), `error text leaked into a handler: ${o}`);
@@ -137,7 +138,7 @@ check('the Content Library banner explains the failure the same way Review does'
     // explained two different ways depending on which tab you were standing in. Both now read the
     // `failure` object get-social-drafts attaches, and the raw text is demoted to a details element.
     const hub = readFileSync(path.join(import.meta.dirname, '..', 'src/components/assistant-data-hub.js'), 'utf8');
-    const banner = hub.slice(hub.indexOf('function failureBanner('), hub.indexOf('function libraryDetail('));
+    const banner = hub.slice(landmark(hub, 'function failureBanner('), landmark(hub, 'function libraryDetail('));
     assert.ok(banner.length > 0, 'the banner builder must exist');
     assert.match(banner, /p\.failure\b/, 'the banner must read the server-side diagnosis');
     assert.match(banner, /esc\(f\.title\)/, 'it leads with the classified cause');
@@ -158,7 +159,7 @@ check('a failed post can be opened from a cold cache', () => {
     // statuses when the cache is empty, and 'failed' was absent from it — so a deep link from a
     // notification produced "That post couldn't be opened" and nothing else.
     const src = ws();
-    const probe = src.slice(src.indexOf('for (const status of (known ?'), src.indexOf('for (const status of (known ?') + 200);
+    const probe = src.slice(landmark(src, 'for (const status of (known ?'), landmark(src, 'for (const status of (known ?') + 200);
     assert.match(probe, /'failed'/, "the cold-cache probe must ask for 'failed'");
 });
 

@@ -19,6 +19,7 @@
 import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
+import { landmark } from './landmark';
 
 let passed = 0;
 let total = 0;
@@ -55,7 +56,7 @@ function insertBodies(src: string): string[] {
         const i = src.indexOf(marker, from);
         if (i === -1) break;
         from = i + marker.length;
-        const open = src.indexOf('{', src.indexOf('.values(', i));
+        const open = src.indexOf('{', landmark(src, '.values(', i));
         if (open === -1) continue;
         // Walk braces so a nested object inside the values literal doesn't end it early.
         let depth = 0;

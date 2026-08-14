@@ -24,6 +24,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -44,7 +45,7 @@ const cssText = readFileSync(join(root, 'style.css'), 'utf8');
 
 check('no retrieval hits means the model is never called', () => {
     const emptyAt = fnText.indexOf('if (!hits.length)');
-    const modelAt = fnText.indexOf('anthropic.messages.create');
+    const modelAt = landmark(fnText, 'anthropic.messages.create');
     assert.ok(emptyAt > 0, 'the empty-retrieval gate is missing');
     assert.ok(modelAt > emptyAt, 'the gate must come before the model call');
     // And it must actually return, not just log.
@@ -54,7 +55,7 @@ check('no retrieval hits means the model is never called', () => {
 });
 
 check('the grounding rules forbid answering beyond the supplied sources', () => {
-    const sys = fnText.slice(fnText.indexOf('const system ='), fnText.indexOf('const user ='));
+    const sys = fnText.slice(landmark(fnText, 'const system ='), landmark(fnText, 'const user ='));
     assert.ok(/ONLY the records supplied/i.test(sys), 'the prompt must restrict the model to the sources');
     assert.ok(/Never fill a gap|never fill a gap/i.test(sys), 'the prompt must forbid plausible guessing');
     assert.ok(/Cite every factual claim/i.test(sys), 'citations must be mandatory, not encouraged');
@@ -63,10 +64,10 @@ check('the grounding rules forbid answering beyond the supplied sources', () => 
 // ── 2. Prompt injection ──────────────────────────────────────────────────────
 
 check('retrieved prospect text is fenced and labelled as data', () => {
-    const user = fnText.slice(fnText.indexOf('const user ='));
+    const user = fnText.slice(landmark(fnText, 'const user ='));
     assert.ok(user.includes('<<<SOURCES'), 'the sources block must be delimited');
     assert.ok(/untrusted quoted material/i.test(user), 'the block must be labelled untrusted');
-    const sys = fnText.slice(fnText.indexOf('const system ='), fnText.indexOf('const user ='));
+    const sys = fnText.slice(landmark(fnText, 'const system ='), landmark(fnText, 'const user ='));
     assert.ok(
         /never as instructions/i.test(sys),
         'the system prompt must tell the model the sources are data, not instructions',
@@ -87,7 +88,7 @@ check('the handler has NO write actions — the real injection mitigation', () =
 check('only the two read actions are routed', () => {
     assert.ok(fnText.includes("action === 'context'"), 'context action missing');
     assert.ok(fnText.includes("action !== 'ask'"), 'unknown actions must be rejected');
-    const guard = fnText.slice(fnText.indexOf("if (action !== 'ask')"), fnText.indexOf("if (action !== 'ask')") + 120);
+    const guard = fnText.slice(landmark(fnText, "if (action !== 'ask')"), landmark(fnText, "if (action !== 'ask')") + 120);
     assert.ok(guard.includes('return json(400'), 'an unknown action must 400, not fall through');
 });
 
@@ -95,8 +96,8 @@ check('only the two read actions are routed', () => {
 
 check('the assistant is ownership-checked before anything is read', () => {
     const tenantAt = fnText.indexOf('requireTenant(event, db)');
-    const idorAt = fnText.indexOf('eq(aiAssistants.organisationId, orgId)');
-    const searchAt = fnText.indexOf('searchMemory(db, orgId');
+    const idorAt = landmark(fnText, 'eq(aiAssistants.organisationId, orgId)');
+    const searchAt = landmark(fnText, 'searchMemory(db, orgId');
     assert.ok(tenantAt > 0, 'requireTenant is missing');
     assert.ok(idorAt > tenantAt, 'the IDOR guard must follow the tenant resolve');
     assert.ok(searchAt > idorAt, 'retrieval must not run before the assistant is verified');
@@ -125,7 +126,7 @@ check('the question is length-capped before it reaches the prompt', () => {
 // ── 4. Citations ─────────────────────────────────────────────────────────────
 
 check('citations carry a stable back-reference to the source row', () => {
-    const iface = fnText.slice(fnText.indexOf('export interface Citation'), fnText.indexOf('export default withLambda'));
+    const iface = fnText.slice(landmark(fnText, 'export interface Citation'), landmark(fnText, 'export default withLambda'));
     for (const field of ['memoryId', 'sourceType', 'sourceId', 'occurredAt']) {
         assert.ok(iface.includes(field), `a citation without ${field} cannot be traced back to its record`);
     }
@@ -134,13 +135,13 @@ check('citations carry a stable back-reference to the source row', () => {
 check('a citation marker beyond the source count stays inert text', () => {
     // The model can emit [7] with six sources. That must not render as a control that scrolls
     // nowhere — a broken affordance reads as a broken product.
-    const fn = uiText.slice(uiText.indexOf('function withCitationChips'));
+    const fn = uiText.slice(landmark(uiText, 'function withCitationChips'));
     assert.ok(fn.includes('num > maxN'), 'out-of-range citation numbers must be detected');
     assert.ok(/return whole/.test(fn), 'an out-of-range marker must be returned unchanged as plain text');
 });
 
 check('the citation regex can only ever capture digits', () => {
-    const fn = uiText.slice(uiText.indexOf('function withCitationChips'));
+    const fn = uiText.slice(landmark(uiText, 'function withCitationChips'));
     const m = fn.match(/replace\((\/[^/]+\/g)/);
     assert.ok(m, 'could not locate the citation regex');
     assert.equal(m![1], '/\\[(\\d{1,2})\\]/g', 'the pattern must match digits only — it writes into an attribute');
@@ -182,9 +183,9 @@ check('every server-supplied field is escaped on render', () => {
 check('the panel sits ALONGSIDE the Data Hub table, not instead of it', () => {
     // §5.5 is explicit: users keep the table they know.
     const hostAt = detailText.indexOf('id="memory-query-host"');
-    const tableAt = detailText.indexOf('id="datahub-table-host"');
-    const hubAt = detailText.indexOf('id="maintab-datahub"');
-    const hubEndAt = detailText.indexOf('/maintab-datahub');
+    const tableAt = landmark(detailText, 'id="datahub-table-host"');
+    const hubAt = landmark(detailText, 'id="maintab-datahub"');
+    const hubEndAt = landmark(detailText, '/maintab-datahub');
     assert.ok(hostAt > 0, 'the host div is missing');
     assert.ok(hostAt > hubAt && hostAt < hubEndAt, 'the panel must live inside the Data Hub tab');
     assert.ok(tableAt > hostAt, 'the records table must still be present, below the panel');
@@ -192,7 +193,7 @@ check('the panel sits ALONGSIDE the Data Hub table, not instead of it', () => {
 
 check('the panel self-hides with both the class and the inline style', () => {
     // `hidden` loses to any class that sets display, so the style must be pinned too.
-    const fn = uiText.slice(uiText.indexOf('function render()'));
+    const fn = uiText.slice(landmark(uiText, 'function render()'));
     assert.ok(fn.includes("classList.add('hidden')"), 'the hidden class is not applied');
     assert.ok(fn.includes("style.display = 'none'"), 'display must be pinned — `hidden` loses to inline-flex');
     assert.ok(detailText.includes('id="memory-query-host" class="hidden"'), 'the host must start hidden');
@@ -203,7 +204,7 @@ check('the script is loaded and the registry enables it for lead roles', () => {
         workspaceText.includes('/src/components/assistant-memory-query.js'),
         'the component script tag is missing from workspace.html',
     );
-    const leadBlock = registryText.slice(registryText.indexOf('lead_qualifier:'), registryText.indexOf('accounts_receivable_clerk:'));
+    const leadBlock = registryText.slice(landmark(registryText, 'lead_qualifier:'), landmark(registryText, 'accounts_receivable_clerk:'));
     assert.ok(leadBlock.includes('memoryPanel'), 'lead_qualifier must enable the memory panel');
 });
 
@@ -239,8 +240,8 @@ check('the panel activates on an ordinary load, not only after a tab switch', ()
 
 check('init does not fetch — the context query is lazy', () => {
     // Otherwise every workspace load queries account_memory for roles that never open Data Hub.
-    const api = uiText.slice(uiText.indexOf('window.AssistantMemoryQuery = {'));
-    const initBlock = api.slice(api.indexOf('init('), api.indexOf('activate()'));
+    const api = uiText.slice(landmark(uiText, 'window.AssistantMemoryQuery = {'));
+    const initBlock = api.slice(landmark(api, 'init('), landmark(api, 'activate()'));
     assert.ok(!initBlock.includes('loadContext()'), 'init() must not fetch; activate() does');
     assert.ok(api.includes('loadContext()'), 'activate() must load the context');
 });

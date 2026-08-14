@@ -25,6 +25,7 @@ import {
 } from '../src/config/icp-profile';
 import { applyProspectType, normaliseLeadCard } from '../src/lib/discovery-scoring';
 import { isLeadDeliverable, resolveLeadRecipient } from '../src/config/lead-recipient';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -213,7 +214,7 @@ check('the backfill never classifies and writes in one command', () => {
     const src = read('scripts/rescore-lead-prospect-type.ts');
     assert.ok(/if \(apply\) \{[\s\S]*?if \(!planFile\)[\s\S]*?process\.exit\(1\)/.test(src),
         '--apply must refuse to run without --plan');
-    assert.ok(!/classifyProspects/.test(src.slice(src.indexOf('async function applyPlan'))),
+    assert.ok(!/classifyProspects/.test(src.slice(landmark(src, 'async function applyPlan'))),
         'applyPlan must not call the classifier');
 });
 

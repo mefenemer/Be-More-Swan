@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { PREF_CATEGORIES, categoryForType } from '../src/utils/notification-prefs';
 import { EMAIL_FALLBACK_TYPES, CATEGORY_DISMISSIBLE } from '../src/utils/notification-actions';
 import { ADMIN_MESSAGE_TYPE } from '../src/utils/notify';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -99,7 +100,7 @@ console.log('\n──── the copy is escaped whole ────');
 
 check('createAdminMessage escapes the title and the body', () => {
     assert.ok(/export async function createAdminMessage/.test(notifySrc), 'createAdminMessage is missing');
-    const body = notifySrc.slice(notifySrc.indexOf('export async function createAdminMessage'));
+    const body = notifySrc.slice(landmark(notifySrc, 'export async function createAdminMessage'));
     assert.ok(/escapeHtml\(opts\.title\)/.test(body), 'the title must be escaped');
     assert.ok(/escapeAdminText\(opts\.message\)/.test(body), 'the message must go through escapeAdminText');
 });
@@ -109,7 +110,7 @@ check('escapeAdminText escapes first, then promotes newlines', () => {
     const m = notifySrc.match(/function escapeAdminText[\s\S]*?\n}/);
     assert.ok(m, 'escapeAdminText is missing');
     const src = m![0];
-    assert.ok(src.indexOf('escapeHtml') < src.indexOf('<br>'), 'escape must happen before the newline replacement');
+    assert.ok(landmark(src, 'escapeHtml') < landmark(src, '<br>'), 'escape must happen before the newline replacement');
 });
 
 check('<br> is the only tag produced, and it survives the client allow-list', () => {
@@ -169,8 +170,8 @@ check('the nav entry carries the same permission as the endpoint', () => {
 check('the recipient picker avoids inline onclick', () => {
     // Attribute values are entity-decoded before the JS is parsed, so an escaped apostrophe in a
     // name like O'Brien would break out of the argument string.
-    const block = adminHtml.slice(adminHtml.indexOf('async function runUserSearch'));
-    const searchBody = block.slice(0, block.indexOf('function chooseSendRecipient'));
+    const block = adminHtml.slice(landmark(adminHtml, 'async function runUserSearch'));
+    const searchBody = block.slice(0, landmark(block, 'function chooseSendRecipient'));
     assert.ok(!/onclick="chooseSendRecipient/.test(searchBody), 'result rows must not use an inline onclick');
     assert.ok(/data-name=/.test(searchBody) && /addEventListener\('click'/.test(searchBody));
 });
@@ -194,8 +195,8 @@ check('the query filters on the shared constant, not a literal', () => {
 });
 
 check('the section renders before Tasks', () => {
-    const detail = adminHtml.slice(adminHtml.indexOf('function renderContactDetail'));
-    const body = detail.slice(0, detail.indexOf('function _ctSection'));
+    const detail = adminHtml.slice(landmark(adminHtml, 'function renderContactDetail'));
+    const body = detail.slice(0, landmark(detail, 'function _ctSection'));
     const msgs = body.indexOf('_ctAdminMessagesSection(');
     const tasks = body.indexOf("'Tasks',");
     assert.ok(msgs > -1, 'the In App Messages section is not rendered');
@@ -217,7 +218,7 @@ check('the panel does not escape the copy a second time', () => {
     // would surface literal &amp;/&lt; to the admin, and would turn its own <br> into text.
     const start = adminHtml.indexOf('function _ctAdminMessagesSection');
     assert.ok(start > -1, '_ctAdminMessagesSection is missing');
-    const body = adminHtml.slice(start, adminHtml.indexOf('function _ctQuickAction'));
+    const body = adminHtml.slice(start, landmark(adminHtml, 'function _ctQuickAction'));
     assert.ok(!/_escH\(m\.(title|message)\)/.test(body), 'stored admin copy must not be re-escaped');
     assert.ok(/_ctAdminMsgHtml\(m\.title\)/.test(body) && /_ctAdminMsgHtml\(m\.message\)/.test(body),
         'title and message must go through the _ctAdminMsgHtml allow-list');

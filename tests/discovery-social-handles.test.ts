@@ -17,6 +17,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { extractSocialHandles } from '../src/lib/discovery-enrich';
 import { SOCIAL_PLATFORMS } from '../src/config/platform-formats';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -192,7 +193,7 @@ check('nothing in the platform can send to a captured handle', () => {
         'something now sets channel:\'dm\' — the "nothing here sends a message" copy on the profile links is no longer true');
 
     const hub = readFileSync(new URL('../src/components/assistant-data-hub.js', import.meta.url), 'utf8');
-    const banner = hub.slice(hub.indexOf('function socialBanner'), hub.indexOf('Record (or correct)'));
+    const banner = hub.slice(landmark(hub, 'function socialBanner'), landmark(hub, 'Record (or correct)'));
     assert.ok(/Nothing here (sends a message|posts or messages)/.test(banner),
         'the profile links must say plainly that opening one is the user’s job');
     assert.ok(/rel="noopener noreferrer nofollow"/.test(banner),

@@ -18,6 +18,7 @@
 
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -30,7 +31,7 @@ const FN = read('netlify/functions/lead-generation.ts');
 const HUB = read('src/components/assistant-data-hub.js');
 const WORKER = read('netlify/functions/process-discovery-jobs.ts');
 
-const ACTION = FN.slice(FN.indexOf("if (action === 'look_again')"), FN.indexOf("if (action === 'set_outcome')"));
+const ACTION = FN.slice(landmark(FN, "if (action === 'look_again')"), landmark(FN, "if (action === 'set_outcome')"));
 
 console.log('\n──── it clears the stamp the WORKER reads ────');
 
@@ -102,7 +103,7 @@ check('every lookup is scoped to the caller’s organisation', () => {
 
 console.log('\n──── the button says what actually happens ────');
 
-const BTN = HUB.slice(HUB.indexOf("label: 'Look again'"), HUB.indexOf("label: 'Edit'"));
+const BTN = HUB.slice(landmark(HUB, "label: 'Look again'"), landmark(HUB, "label: 'Edit'"));
 
 check('it is offered only where a stamp exists to clear', () => {
     // 'missed' and 'checking' are unstamped by definition and 'unchecked' is a cold lead — on all

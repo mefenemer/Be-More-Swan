@@ -22,6 +22,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { appendFooter, stripFooter, resolveDisclosureFooter } from '../src/utils/disclosure-footer';
 import { keepDisclosureOnCaption } from '../src/utils/post-disclosure';
+import { landmark } from './landmark';
 
 let passed = 0, total = 0;
 const deferred: Array<() => Promise<void>> = [];
@@ -164,7 +165,7 @@ check('the precedence rule has exactly one implementation', () => {
 // until a reload. Which is the symptom as reported.
 check('the editor caches what the SERVER stored, not what it sent', () => {
     const ws = readFileSync(path.join(ROOT, 'workspace.html'), 'utf8');
-    const save = ws.slice(ws.indexOf('async function rqReviewSaveAmend('));
+    const save = ws.slice(landmark(ws, 'async function rqReviewSaveAmend('));
     const head = save.slice(0, 2600);
     assert.ok(!/_rqPostCache\[tid\]\.caption = caption;/.test(head),
         'echoing our own text back hides the footer the server just added');
@@ -174,7 +175,7 @@ check('the editor caches what the SERVER stored, not what it sent', () => {
 
 check('the chat apply confirms by prefix, so a longer saved caption is not a failure', () => {
     const ws = readFileSync(path.join(ROOT, 'workspace.html'), 'utf8');
-    const apply = ws.slice(ws.indexOf('async function _pceApplyChatCaption('));
+    const apply = ws.slice(landmark(ws, 'async function _pceApplyChatCaption('));
     const head = apply.slice(0, 1400);
     assert.ok(!/!== caption\) \{\n\s+throw new Error\('Could not save that to your draft/.test(head),
         'exact equality now fails on EVERY successful save — the server appends the disclosure');

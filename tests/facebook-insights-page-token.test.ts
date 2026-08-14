@@ -16,6 +16,7 @@
 
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
+import { landmark } from './landmark';
 
 let passed = 0;
 const test = (name: string, fn: () => void) => {
@@ -44,7 +45,7 @@ test('tokenFor never returns the raw vault token to the insights calls', () => {
     // The vault read still exists — but ONLY inside grantIsDead, which needs the user token to ask
     // Meta whether the grant is alive. If a vault read reappears in tokenFor, the original bug is
     // back: a user token would flow into the page-post insights edge again.
-    const tokenFor = src.slice(src.indexOf('async function tokenFor('), src.indexOf('async function grantIsDead('));
+    const tokenFor = src.slice(landmark(src, 'async function tokenFor('), landmark(src, 'async function grantIsDead('));
     assert.ok(tokenFor.length > 0, 'could not locate tokenFor — update this test');
     assert.ok(
         !tokenFor.includes('getSecret('),
@@ -78,7 +79,7 @@ test('token_expired is only written after Meta confirms the grant is dead', () =
     // Ordering is the whole assertion: grantIsDead must gate the write, not merely appear near it.
     const loop = src.indexOf('for (const connId of suspectConnections)');
     const guard = src.indexOf('grantIsDead(connId)', loop);
-    const write = src.indexOf("status: 'token_expired'", loop);
+    const write = landmark(src, "status: 'token_expired'", loop);
     assert.ok(loop !== -1, 'could not locate the suspect-connection loop — update this test');
     assert.ok(guard !== -1 && guard < write, 'the token_expired write is not gated by grantIsDead');
     assert.ok(
@@ -88,7 +89,7 @@ test('token_expired is only written after Meta confirms the grant is dead', () =
 });
 
 test('grantIsDead fails closed — only a 190 on the credential itself counts', () => {
-    const fn = src.slice(src.indexOf('async function grantIsDead('), src.indexOf('let updated = 0'));
+    const fn = src.slice(landmark(src, 'async function grantIsDead('), landmark(src, 'let updated = 0'));
     assert.ok(fn.length > 0, 'could not locate grantIsDead — update this test');
     assert.ok(
         fn.includes('data.error?.code === 190'),
@@ -97,7 +98,7 @@ test('grantIsDead fails closed — only a 190 on the credential itself counts', 
     // A network blip, a missing vault ref or a thrown fetch must all leave the connection alone.
     // Returning true on any of those would resurrect the loop through a different door.
     assert.ok(fn.includes('return false;'), 'grantIsDead has no fail-closed path');
-    const catchBlock = fn.slice(fn.indexOf('} catch'));
+    const catchBlock = fn.slice(landmark(fn, '} catch'));
     assert.ok(
         catchBlock.includes('return false'),
         'a thrown liveness check must not be treated as evidence of expiry',

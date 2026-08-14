@@ -22,6 +22,7 @@ import { readFileSync } from 'node:fs';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../src/constants/safety-benchmark';
 import { OPERATIONAL_TRIGGERS, OPERATIONAL_SOURCES, operationalSetupLines } from '../src/utils/operational-setup';
 import { renderBlueprintPrompt, PROMPT_KEY_BLOCKLIST, PROMPT_SECTION_BLOCKLIST } from '../src/utils/blueprint-prompt';
+import { landmark } from './landmark';
 
 let passed = 0;
 const test = (name: string, fn: () => void) => {
@@ -149,7 +150,7 @@ test('section 3 falls back to the strict rules the profile actually writes', () 
 
 test('saving the profile recompiles the blueprint', () => {
     assert.match(saveFn, /assembleBlueprint\(assistantId/, 'a profile save must recompile');
-    const idx = saveFn.indexOf('assembleBlueprint(assistantId');
+    const idx = landmark(saveFn, 'assembleBlueprint(assistantId');
     assert.match(saveFn.slice(idx - 200, idx + 300), /catch/, 'a recompile failure must not fail the save');
 });
 
@@ -166,7 +167,7 @@ test('every content-rule mutation recompiles the blueprint', () => {
             `the ${mutation} path must recompile`,
         );
     }
-    const idx = rulesFn.indexOf('await assembleBlueprint');
+    const idx = landmark(rulesFn, 'await assembleBlueprint');
     assert.match(rulesFn.slice(idx - 200, idx + 300), /catch/, 'a recompile failure must not fail the edit');
 });
 

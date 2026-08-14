@@ -13,6 +13,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { buildVarietyBlock, VARIETY_LOOKBACK, VARIETY_VISUAL_LOOKBACK, type PriorPost } from '../src/utils/draft-variety';
+import { landmark } from './landmark';
 
 let passed = 0;
 const test = (name: string, fn: () => void) => {
@@ -94,7 +95,7 @@ test('the drafting query orders by a NOT NULL timestamp, not bare generated_at D
 
 test('the corpus is not narrowed to a single status', () => {
     const src = readFileSync(new URL('../netlify/functions/process-content-jobs.ts', import.meta.url), 'utf8');
-    const idx = src.indexOf('recentBlock = buildVarietyBlock');
+    const idx = landmark(src, 'recentBlock = buildVarietyBlock');
     const query = src.slice(Math.max(0, idx - 900), idx);
     assert.ok(
         !/scheduledPosts\.status/.test(query),

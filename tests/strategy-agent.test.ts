@@ -30,6 +30,7 @@ import { STRATEGY_TUNABLE_FIELDS, PROPOSAL_SOURCES } from '../src/config/strateg
 import { categoryOf } from '../src/utils/notification-actions';
 import { categoryForType, PREF_CATEGORIES } from '../src/utils/notification-prefs';
 import { NOTIFICATION_DEFAULTS } from '../src/utils/notification-templates-catalog';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -156,7 +157,7 @@ check('the aggregate resolves the assistant from template_feedback first', () =>
 
 check('template_feedback.ai_assistant_id exists in schema.ts and its migration', () => {
     const schemaText = raw('db/schema.ts');
-    const block = schemaText.slice(schemaText.indexOf('export const templateFeedback'));
+    const block = schemaText.slice(landmark(schemaText, 'export const templateFeedback'));
     assert.ok(block.slice(0, 1200).includes('aiAssistantId'), 'the column is missing from db/schema.ts');
     const sqlText = raw('db/template-feedback-assistant.sql');
     assert.ok(sqlText.includes('ADD COLUMN IF NOT EXISTS ai_assistant_id'), 'the migration does not add the column');
@@ -218,13 +219,13 @@ check("the reviewer's note reaches the model, not just the reason label", () => 
     // SELECTED. Measured on staging 2026-08-07 — a proposal declined `too_narrow` with a note naming
     // two specific over-constraints was replaced by one that kept both verbatim. A reason label says
     // a change was wrong; only the note says how.
-    const fn = agentSrc.slice(agentSrc.indexOf('async function priorRejections'));
-    const body = fn.slice(0, fn.indexOf('\n}'));
+    const fn = agentSrc.slice(landmark(agentSrc, 'async function priorRejections'));
+    const body = fn.slice(0, landmark(fn, '\n}'));
     assert.ok(/note:\s*strategyProposals\.rejectNote/.test(body),
         'priorRejections does not select rejectNote — the note cannot steer what it never reads');
     assert.ok(/r\.note/.test(body), 'the note is selected but never used in the formatted entry');
     // Bounded, not trusted: it is first-party text but it still goes in a prompt.
-    assert.ok(/\.slice\(0,\s*\d+\)/.test(body.slice(body.indexOf('r.note'))),
+    assert.ok(/\.slice\(0,\s*\d+\)/.test(body.slice(landmark(body, 'r.note'))),
         'the note is fed unbounded — rejectNote allows 2000 chars, five of them is a prompt of its own');
     // A multi-line note must not read as several separate rejections.
     assert.ok(/replace\(\/\\s\+\/g, ' '\)/.test(body),
@@ -237,7 +238,7 @@ check('the reject form does not promise privacy it no longer provides', () => {
     // it stays between them and their team, and it lands in a model prompt. Copy and behaviour have
     // to move together here.
     const ui = raw('src/components/assistant-strategy.js');
-    const form = ui.slice(ui.indexOf('function rejectForm'), ui.indexOf('function conflictBlock'));
+    const form = ui.slice(landmark(ui, 'function rejectForm'), landmark(ui, 'function conflictBlock'));
     const markup = form.replace(/<!--[\s\S]*?-->/g, ' ');
     assert.ok(/data-sa-note/.test(markup), 'the note field is gone — this check tests nothing');
     assert.ok(!/never sent to the model/i.test(markup),
@@ -302,7 +303,7 @@ check('⚠️ the work runs in a BACKGROUND function, never inline in a schedule
         'netlify/functions/run-strategy-agent.ts',
     ]) {
         const src = sourceOf(rel);
-        const handler = src.slice(src.indexOf('export default withLambda'));
+        const handler = src.slice(landmark(src, 'export default withLambda'));
         assert.ok(!/runStrategyAgent\(/.test(handler), `${rel} runs the agent inline — it will be killed by the timeout`);
         assert.ok(/triggerStrategyAgentRun\(/.test(handler), `${rel} does not dispatch to the background worker`);
     }
@@ -410,7 +411,7 @@ check('the notification is per org per run, not per proposal', () => {
     // §9.4 — two proposers firing for one org in a single run is two proposals and would otherwise
     // be two alerts about the same visit.
     assert.ok(runBody.includes('proposedByOrg'), 'notifications are not collapsed per org');
-    const notifyIdx = runBody.indexOf('createNotification');
+    const notifyIdx = landmark(runBody, 'createNotification');
     const loopIdx = runBody.indexOf('for (const [organisationId, info] of proposedByOrg)');
     assert.ok(loopIdx !== -1 && notifyIdx > loopIdx, 'the notification must be sent from the per-org loop, not the per-cluster loop');
 });
@@ -421,7 +422,7 @@ check('saveHumanDefault routes through applyStrategyChange, not a direct write',
     const writerSrc = sourceOf('src/utils/strategy-proposals.ts');
     const fnIdx = writerSrc.indexOf('export async function saveHumanDefault');
     assert.ok(fnIdx !== -1, 'saveHumanDefault is missing — the next human-save surface will write the field directly');
-    const body = writerSrc.slice(fnIdx, writerSrc.indexOf('\nexport ', fnIdx + 10));
+    const body = writerSrc.slice(fnIdx, landmark(writerSrc, '\nexport ', fnIdx + 10));
     assert.ok(body.includes('proposeChange'), 'it must create a proposal, so the save appears in history');
     assert.ok(body.includes('applyStrategyChange'), 'it must apply through the shared path');
     assert.ok(!/db\.update\(aiAssistants\)/.test(body), 'it must never write the assistant field itself');
@@ -452,8 +453,8 @@ check('the rejection cluster demands spread, not just a count', () => {
     // rewrite the persona for every campaign the assistant has on the strength of one sitting.
     // The loader is a module-level function, so this reads the whole file rather than runBody.
     const src = sourceOf('netlify/functions/autonomous-strategy-agent.ts');
-    const fn = src.slice(src.indexOf('async function loadRejectionClusters'));
-    const query = fn.slice(0, fn.indexOf('return rows'));
+    const fn = src.slice(landmark(src, 'async function loadRejectionClusters'));
+    const query = fn.slice(0, landmark(fn, 'return rows'));
     assert.ok(/MIN_REJECT_SAMPLE/.test(query), 'no sample threshold');
     assert.ok(/MIN_REJECT_CAMPAIGNS/.test(query), 'a burst inside ONE campaign must not qualify');
     assert.ok(/MIN_REJECT_SPREAD_DAYS/.test(query), 'a burst inside ONE day must not qualify');
@@ -468,15 +469,15 @@ check('every exit path records the run summary', () => {
     // on 2026-08-06. recordLastRun must live in the wrapper's finally, and nowhere else.
     const src = sourceOf('netlify/functions/autonomous-strategy-agent.ts');
     const wrapper = src.slice(
-        src.indexOf('export async function runStrategyAgent'),
-        src.indexOf('async function executeRun'),
+        landmark(src, 'export async function runStrategyAgent'),
+        landmark(src, 'async function executeRun'),
     );
     assert.ok(/finally\s*\{[^}]*recordLastRun/.test(wrapper),
         'recordLastRun must be in a finally so a throw still records');
     assert.ok(/catch[\s\S]*haltReason[\s\S]*throw/.test(wrapper),
         'a thrown error must be named in haltReason AND re-thrown, not swallowed');
 
-    const body = src.slice(src.indexOf('async function executeRun'), src.indexOf('async function recordLastRun'));
+    const body = src.slice(landmark(src, 'async function executeRun'), landmark(src, 'async function recordLastRun'));
     assert.ok(!/recordLastRun\(/.test(body),
         'the body must not record its own summary — the finally owns it, or exits diverge again');
     assert.ok(/isGlobalAiDisabled\(\)\)\s*\{[\s\S]{0,200}?haltReason/.test(body),
@@ -487,19 +488,19 @@ check('a halted run is never dressed up as a run that found nothing', () => {
     // Both are zeroes. If the strip renders them identically, it asserts the very thing it exists
     // to disprove. And the reason string must NOT cross the API: it carries a thrown error message.
     const api = sourceOf('netlify/functions/strategy-proposals.ts');
-    const projection = api.slice(api.indexOf('async function lastStrategyRun'));
+    const projection = api.slice(landmark(api, 'async function lastStrategyRun'));
     assert.ok(/halted:\s*typeof r\.haltReason === 'string'/.test(projection),
         'the API must expose halted as a derived BOOLEAN');
     assert.ok(!/haltReason:\s*(String\(|r\.haltReason)/.test(projection),
         'the raw haltReason must never be sent to a tenant — it can quote SQL and table names');
 
     const ui = readFileSync(join(root, 'src/components/assistant-strategy.js'), 'utf8');
-    const line = ui.slice(ui.indexOf('function lastRunLine'), ui.indexOf('function emptyState'));
+    const line = ui.slice(landmark(ui, 'function lastRunLine'), landmark(ui, 'function emptyState'));
     assert.ok(/if \(lr\.halted\)/.test(line), 'the strip must branch on halted');
     // ⚠️ Anchor on code-only text. The prose above the branch quotes the found-nothing wording, so
     // an indexOf for that phrase matches the COMMENT and measures nothing — the same positional
     // -anchor trap that silently re-pointed two checks in tests/lead-reject-reasons.test.ts.
-    assert.ok(line.indexOf('if (lr.halted)') < line.indexOf('const outcome'),
+    assert.ok(landmark(line, 'if (lr.halted)') < landmark(line, 'const outcome'),
         'the halted branch must return before the outcome wording is computed');
 });
 
@@ -511,8 +512,8 @@ check('the rejection query never hands a bare JS array to = ANY()', () => {
     // strategy_agent.last_run frozen at the previous week: identical, in the UI, to a cron that
     // never fired. An explicit ARRAY[...]::text[] built with sql.join is the only correct form.
     const src = sourceOf('netlify/functions/autonomous-strategy-agent.ts');
-    const fn = src.slice(src.indexOf('async function loadRejectionClusters'));
-    const query = fn.slice(0, fn.indexOf('return rows'));
+    const fn = src.slice(landmark(src, 'async function loadRejectionClusters'));
+    const query = fn.slice(0, landmark(fn, 'return rows'));
     assert.ok(
         !/=\s*ANY\(\$\{(?!\s*sql)/.test(query),
         '= ANY() must not receive an interpolated JS array — use ARRAY[...]::text[] via sql.join',
@@ -525,7 +526,7 @@ check('the rejection proposer never targets the field nothing reads', () => {
     // discovery_query_themes is the intuitive home for "the queries keep finding directories", and
     // it is a trap: no reader exists, so a proposal there applies cleanly and changes nothing while
     // telling the user they have retargeted.
-    const pass = runBody.slice(runBody.indexOf('const rejectionClusters'));
+    const pass = runBody.slice(landmark(runBody, 'const rejectionClusters'));
     assert.ok(!/discovery_query_themes/.test(pass), 'the rejection pass routes at a field nothing reads');
     assert.ok(/const targetField = 'target_persona'/.test(pass), 'it must target the live field');
 });
@@ -533,8 +534,8 @@ check('the rejection proposer never targets the field nothing reads', () => {
 check('rejection evidence banks under its own key, never feedbackIds', () => {
     // Both are bare integer arrays into different tenant-shared tables. The wrong key would not
     // throw — it would permanently mark unrelated template_feedback rows as spent.
-    const pass = runBody.slice(runBody.indexOf('const rejectionClusters'));
-    const evidence = pass.slice(pass.indexOf('evidence: {'), pass.indexOf('});', pass.indexOf('evidence: {')));
+    const pass = runBody.slice(landmark(runBody, 'const rejectionClusters'));
+    const evidence = pass.slice(landmark(pass, 'evidence: {'), landmark(pass, '});', landmark(pass, 'evidence: {')));
     assert.ok(/rejectionIds/.test(evidence), 'the rejection evidence must carry rejectionIds');
     assert.ok(!/feedbackIds/.test(evidence), 'rejection ids must never be written as feedbackIds');
 
@@ -553,8 +554,8 @@ check('the banking call is REACHABLE for every source, not just edit_pattern', (
     //
     // A source scan cannot see a guard UPSTREAM of a call, so assert on the call site itself.
     const writer = sourceOf('src/utils/strategy-proposals.ts');
-    const apply = writer.slice(writer.indexOf('export async function applyStrategyChange'));
-    const body = apply.slice(0, apply.indexOf('\n}'));
+    const apply = writer.slice(landmark(writer, 'export async function applyStrategyChange'));
+    const body = apply.slice(0, landmark(apply, '\n}'));
 
     const callLine = body.split('\n').find((l) => l.includes('bankEvidence('));
     assert.ok(callLine, 'applyStrategyChange no longer banks its evidence at all');
@@ -565,8 +566,8 @@ check('the banking call is REACHABLE for every source, not just edit_pattern', (
 
     // The guard belongs INSIDE bankEvidence, keyed by what the blob contains — that is what makes
     // an unconditional call safe for both sources and for the next one added.
-    const bank = writer.slice(writer.indexOf('async function bankEvidence'));
-    const bankBody = bank.slice(0, bank.indexOf('\n}\n'));
+    const bank = writer.slice(landmark(writer, 'async function bankEvidence'));
+    const bankBody = bank.slice(0, landmark(bank, '\n}\n'));
     assert.ok(/if \(feedbackIds\.length\)/.test(bankBody), 'bankEvidence must no-op on a missing feedbackIds');
     assert.ok(/if \(rejectionIds\.length\)/.test(bankBody), 'bankEvidence must no-op on a missing rejectionIds');
 });
@@ -601,7 +602,7 @@ check('every proposal source can spend its evidence', () => {
 });
 
 check('the rejection pass enforces the same envelope as the edit pass', () => {
-    const pass = runBody.slice(runBody.indexOf('const rejectionClusters'));
+    const pass = runBody.slice(landmark(runBody, 'const rejectionClusters'));
     assert.ok(/claimedField !== targetField/.test(pass), 'the model may answer about another field');
     assert.ok(/isValidValueFor/.test(pass), 'the value shape is unchecked');
     assert.ok(/Array\.isArray\(proposedValue\)/.test(pass),
@@ -614,7 +615,7 @@ check('every agent source names its own evidence unit in the review card', () =>
     // proposal (8 clicks) announced itself as 8 CLOSED DEALS. Overstating the evidence is the one
     // thing this card must never do — a human applies a real outreach change from it.
     const ui = sourceOf('src/components/assistant-strategy.js');
-    const block = ui.slice(ui.indexOf('const UNITS'), ui.indexOf('const bits'));
+    const block = ui.slice(landmark(ui, 'const UNITS'), landmark(ui, 'const bits'));
     assert.ok(block.length > 0, 'the UNITS map is gone — the unit fell back to a generic default again');
     for (const s of PROPOSAL_SOURCES) {
         assert.ok(block.includes(`${s}:`), `${s} has no evidence unit and would borrow another source's`);
@@ -623,8 +624,8 @@ check('every agent source names its own evidence unit in the review card', () =>
 });
 
 check('the rejection pass skips before paying for a model call', () => {
-    const pass = runBody.slice(runBody.indexOf('const rejectionClusters'));
-    const beforeModel = pass.slice(0, pass.indexOf('gatewayGenerate'));
+    const pass = runBody.slice(landmark(runBody, 'const rejectionClusters'));
+    const beforeModel = pass.slice(0, landmark(pass, 'gatewayGenerate'));
     assert.ok(/no active campaign to retarget/.test(beforeModel),
         'with no campaign there is nothing to write to — proposeChange would refuse anyway');
     assert.ok(/a pending proposal already holds this field/.test(beforeModel), 'the pending check is too late');
@@ -639,15 +640,15 @@ check('the rejection pass skips before paying for a model call', () => {
 // asserts that both passes actually consult it, and that nothing pays a model call first.
 
 check('both passes gate on per-assistant consent, not only on the plan feature', () => {
-    const editPass = runBody.slice(runBody.indexOf('for (const c of clusters'), runBody.indexOf('const rejectionClusters'));
-    const rejectionPass = runBody.slice(runBody.indexOf('const rejectionClusters'));
+    const editPass = runBody.slice(landmark(runBody, 'for (const c of clusters'), landmark(runBody, 'const rejectionClusters'));
+    const rejectionPass = runBody.slice(landmark(runBody, 'const rejectionClusters'));
     for (const [label, pass] of [['edit', editPass], ['rejection', rejectionPass]] as const) {
         assert.ok(pass.length > 0, `the ${label} pass could not be located — this check tests nothing`);
         assert.ok(/isStrategyAgentEnabledForAssistant/.test(pass),
             `the ${label} pass proposes for assistants that were explicitly switched off`);
         // ⚠️ Consent must be read BEFORE the model call, not just before the write. A skip that
         // happens after generation still spends the money and still reads the evidence.
-        const beforeModel = pass.slice(0, pass.indexOf('gatewayGenerate'));
+        const beforeModel = pass.slice(0, landmark(pass, 'gatewayGenerate'));
         assert.ok(/isStrategyAgentEnabledForAssistant/.test(beforeModel),
             `the ${label} pass checks consent after paying for the model call`);
     }
@@ -657,8 +658,8 @@ check('the rejection pass loads the context it needs to check consent', () => {
     // ⚠️ This pass reads its current value from discovery_campaigns, so onboardingContext is
     // selected ONLY for the consent gate. Drop the column from the select and the gate silently
     // reads undefined — which, because the default is ON, means it never skips anything.
-    const rejectionPass = runBody.slice(runBody.indexOf('const rejectionClusters'));
-    const select = rejectionPass.slice(rejectionPass.indexOf('const [assistant]'));
+    const rejectionPass = runBody.slice(landmark(runBody, 'const rejectionClusters'));
+    const select = rejectionPass.slice(landmark(rejectionPass, 'const [assistant]'));
     assert.ok(/onboardingContext:\s*aiAssistants\.onboardingContext/.test(select.slice(0, 400)),
         'the rejection pass no longer selects onboardingContext — its consent gate always passes');
 });
@@ -690,7 +691,7 @@ check('the locked switch uses a utility the compiled CSS actually has', () => {
     assert.ok(cardStart !== -1, 'the card is gone — this check tests nothing');
     // HTML comments stripped first: this card's comment NAMES the variants it must not use, and a
     // scan that reads prose as markup fails on the explanation rather than on the code.
-    const card = html.slice(cardStart, html.indexOf('TAB: Creative Strategy', cardStart))
+    const card = html.slice(cardStart, landmark(html, 'TAB: Creative Strategy', cardStart))
         .replace(/<!--[\s\S]*?-->/g, ' ');
     const variants = [...card.matchAll(/\bpeer-disabled:[\w-]+/g)].map((m) => m[0]);
     assert.ok(variants.length > 0, 'the disabled switch has no visual treatment at all');
@@ -704,8 +705,8 @@ check('the consent card is gated by the registry, never by a roleKey', () => {
     // The point of the pair: a future role that inherits strategyTab inherits the switch with it.
     // A roleKey test here would give that role a Strategy tab and no way to opt out of it.
     const js = sourceOf('assistants.js');
-    const block = js.slice(js.indexOf('const strategy = cfg.strategyTab'));
-    const gate = block.slice(0, block.indexOf('if (strategy)'));
+    const block = js.slice(landmark(js, 'const strategy = cfg.strategyTab'));
+    const gate = block.slice(0, landmark(block, 'if (strategy)'));
     assert.ok(/toggle\('module-strategy-agent',\s*!!strategy\)/.test(gate),
         'the card is not toggled from the same registry declaration as the tab');
     assert.ok(!/lead_qualifier/.test(gate), 'the card is gated on a roleKey — future roles will not inherit it');

@@ -20,6 +20,7 @@
 import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
+import { landmark } from './landmark';
 
 let passed = 0;
 let total = 0;
@@ -60,8 +61,8 @@ check("no post creator parks a row at 'draft' expecting a human to find it", () 
 });
 
 check("the Review Queue still has no 'draft' column", () => {
-    const block = workspace.slice(workspace.indexOf('const RQ_COLUMNS'));
-    const columns = block.slice(0, block.indexOf('};'));
+    const block = workspace.slice(landmark(workspace, 'const RQ_COLUMNS'));
+    const columns = block.slice(0, landmark(block, '};'));
     assert.ok(columns.includes("postStatus: 'pending_approval'"), 'RQ_COLUMNS lost its review column.');
     assert.ok(
         !columns.includes("postStatus: 'draft'"),
@@ -81,10 +82,10 @@ check('reject-post enqueues a real regeneration job', () => {
 });
 
 check('the job carries the rejected post id, and the feedback as context', () => {
-    const i = rejectPost.indexOf('insert(contentGenerationJobs)');
+    const i = landmark(rejectPost, 'insert(contentGenerationJobs)');
     // Window sized to the whole values() call, not a guessed byte count — a comment added inside
     // it once pushed revisedFromPostId past a fixed 1400 and failed this check on working code.
-    const body = rejectPost.slice(i, rejectPost.indexOf('});', i));
+    const body = rejectPost.slice(i, landmark(rejectPost, '});', i));
     assert.ok(body.includes('revisedFromPostId: postId'),
         'The job must name the post it revises, or the resulting draft cannot be badged "Revised".');
     assert.ok(body.includes('contextPrompt:'),
@@ -104,7 +105,7 @@ check('the rejection survives a failed enqueue', () => {
     assert.ok(i !== -1, 'no enqueue to check');
     // The rejection UPDATE must already be committed before the enqueue is attempted.
     assert.ok(
-        rejectPost.indexOf("status: 'rejected'") < i,
+        landmark(rejectPost, "status: 'rejected'") < i,
         'The post must be marked rejected BEFORE the regeneration is attempted, so a generation ' +
         'failure never silently un-rejects a post the user rejected.',
     );
@@ -113,7 +114,7 @@ check('the rejection survives a failed enqueue', () => {
         'The enqueue must be wrapped in a catch that lets the rejection stand.',
     );
     assert.ok(
-        /success:\s*true/.test(rejectPost.slice(rejectPost.indexOf('statusCode: 200'))),
+        /success:\s*true/.test(rejectPost.slice(landmark(rejectPost, 'statusCode: 200'))),
         'A rejection whose regeneration could not be queued must still report success — the post IS ' +
         'rejected. revisionQueued/revisionSkippedReason say what happened to the redraft.',
     );
@@ -127,7 +128,7 @@ check('the worker reads revised_from_post_id', () => {
         'process-content-jobs never selects the column, so a revision is indistinguishable from any ' +
         'other job and the resulting draft is never badged.',
     );
-    const select = worker.slice(worker.indexOf('FROM content_generation_jobs') - 600, worker.indexOf('FROM content_generation_jobs'));
+    const select = worker.slice(landmark(worker, 'FROM content_generation_jobs') - 600, landmark(worker, 'FROM content_generation_jobs'));
     assert.ok(select.includes('revised_from_post_id'), 'the column is used but not SELECTed');
 });
 
@@ -170,8 +171,8 @@ check('"revised post is ready" is sent when it IS ready', () => {
 // tuning session. Prod org 40 hand-rejected nine posts and got nine dead ends.
 
 check('the Review Queue rejects through reject-post, not approve-post', () => {
-    const fn = workspace.slice(workspace.indexOf('async function rqReviewReject'));
-    const body = fn.slice(0, fn.indexOf('\n}'));
+    const fn = workspace.slice(landmark(workspace, 'async function rqReviewReject'));
+    const body = fn.slice(0, landmark(fn, '\n}'));
     assert.ok(
         body.includes("functions/reject-post"),
         'rqReviewReject no longer calls reject-post, so rejecting produces no replacement draft again.',
@@ -183,16 +184,16 @@ check('the Review Queue rejects through reject-post, not approve-post', () => {
 });
 
 check('the Generate Post sheet rejects through reject-post too', () => {
-    const fn = workspace.slice(workspace.indexOf('async function gpSubmitReject'));
-    const body = fn.slice(0, fn.indexOf('\n}'));
+    const fn = workspace.slice(landmark(workspace, 'async function gpSubmitReject'));
+    const body = fn.slice(0, landmark(fn, '\n}'));
     assert.ok(body.includes('functions/reject-post'), 'gpSubmitReject regressed to approve-post.');
 });
 
 check('the failed-post Archive button deliberately does NOT redraft', () => {
     // The one remaining caller of approve-post's reject branch. Archiving a post that failed to
     // publish is not a request for a rewrite; if this ever changes it needs a copy change first.
-    const fn = workspace.slice(workspace.indexOf('async function rqFailedReject'));
-    const body = fn.slice(0, fn.indexOf('\n}'));
+    const fn = workspace.slice(landmark(workspace, 'async function rqFailedReject'));
+    const body = fn.slice(0, landmark(fn, '\n}'));
     assert.ok(
         /action:\s*'reject'/.test(body),
         'rqFailedReject now enqueues a redraft — the user pressed Archive and was promised nothing.',
@@ -215,9 +216,9 @@ check('a cross-post is rejected as one post and redrafted once', () => {
         'the revision job sets no crosspost_group_id — process-content-jobs stamps it verbatim onto ' +
         'the siblings it creates, so without one the redraft returns as N separate cards.',
     );
-    const rqReject = workspace.slice(workspace.indexOf('async function rqReviewReject'));
+    const rqReject = workspace.slice(landmark(workspace, 'async function rqReviewReject'));
     assert.ok(
-        !/for\s*\(const p of targets\)/.test(rqReject.slice(0, rqReject.indexOf('\n}'))),
+        !/for\s*\(const p of targets\)/.test(rqReject.slice(0, landmark(rqReject, '\n}'))),
         'rqReviewReject loops the endpoint per platform again — one rejection, N redrafts.',
     );
 });
@@ -240,9 +241,9 @@ check('nothing approve-post did on rejection was dropped in the move', () => {
 check('the reply never promises a redraft that was skipped', () => {
     // Same rule as the chat guard: revisionQueued is false when there is no blueprint, the queue is
     // full, or the enqueue threw — and the rejection still stands, so the toast must say so.
-    const fn = workspace.slice(workspace.indexOf('async function rqReviewReject'));
+    const fn = workspace.slice(landmark(workspace, 'async function rqReviewReject'));
     assert.ok(
-        /revisionQueued/.test(fn.slice(0, fn.indexOf('\n}'))),
+        /revisionQueued/.test(fn.slice(0, landmark(fn, '\n}'))),
         'the Review Queue toast ignores revisionQueued and claims a replacement unconditionally.',
     );
 });

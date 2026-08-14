@@ -15,6 +15,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { landmark } from './landmark';
 import {
     mintReplyToken, replyAddress, parseReplyToken, recipientFromParsePayload, inboundDomain,
 } from '../src/utils/reply-address';
@@ -124,7 +125,7 @@ check('a malformed envelope falls back to the To header instead of throwing', ()
 // ── 5. Wiring guarantees ─────────────────────────────────────────────────────
 
 check('the reply branch returns early and never falls into the support pipeline', () => {
-    const branch = inboundText.slice(inboundText.indexOf('Lead-reply branch'));
+    const branch = inboundText.slice(landmark(inboundText, 'Lead-reply branch'));
     assert.ok(branch.includes("return { statusCode: 200, body: 'Lead reply recorded.' }"),
         'a recorded reply must not also create a support lead');
     assert.ok(branch.includes("body: 'Unknown thread; skipped.'"),
@@ -133,7 +134,14 @@ check('the reply branch returns early and never falls into the support pipeline'
 
 check('a failure in the reply branch falls through rather than 500ing', () => {
     // A 500 makes SendGrid retry and eventually bounce a real prospect's reply.
-    const branch = inboundText.slice(inboundText.indexOf('Lead-reply branch'), inboundText.indexOf('Resolve/insert'));
+    // The end anchor used to be 'Resolve/insert', a string that has never appeared in
+    // inbound-email.ts — so this slice ran from the branch to END OF FILE and the check passed on
+    // the support pipeline's own try/catch rather than the branch's. Anchored now on the first
+    // statement after the branch closes.
+    const branch = inboundText.slice(
+        landmark(inboundText, 'Lead-reply branch'),
+        landmark(inboundText, 'if (messageBody.length > MAX_BODY_CHARS)'),
+    );
     assert.ok(/catch\s*\(err\)/.test(branch) && branch.includes('falling through to support'),
         'the branch must be wrapped and fall through on error');
 });
@@ -141,15 +149,15 @@ check('a failure in the reply branch falls through rather than 500ing', () => {
 check('an inbound message flips the thread to `replied` in the SAME call', () => {
     // This is what halts a sequence. A gap between "reply recorded" and "state updated" is a
     // window in which a follow-up could still go out to someone who just answered.
-    const fn = threadsText.slice(threadsText.indexOf('export async function recordInboundMessage'));
+    const fn = threadsText.slice(landmark(threadsText, 'export async function recordInboundMessage'));
     assert.ok(fn.includes("state: 'replied'"), 'must set the state');
-    assert.ok(fn.indexOf("state: 'replied'") < fn.indexOf('} catch'), 'inside the same try, not a later pass');
+    assert.ok(landmark(fn, "state: 'replied'") < landmark(fn, '} catch'), 'inside the same try, not a later pass');
 });
 
 check('an outbound message never revives a replied thread', () => {
     const fn = threadsText.slice(
-        threadsText.indexOf('export async function recordOutboundMessage'),
-        threadsText.indexOf('export interface InboundMessageInput'));
+        landmark(threadsText, 'export async function recordOutboundMessage'),
+        landmark(threadsText, 'export interface InboundMessageInput'));
     assert.ok(!fn.includes("state:"), 'recordOutboundMessage must not touch state — the prospect owns it');
 });
 
@@ -245,14 +253,14 @@ check('every Conversations query is organisation-scoped', () => {
         assert.ok(readApiText.includes(scope), `missing tenant scope: ${scope}`);
     }
     const idorAt = readApiText.indexOf('eq(aiAssistants.organisationId, orgId)');
-    const threadsAt = readApiText.indexOf('.from(leadThreads)');
+    const threadsAt = landmark(readApiText, '.from(leadThreads)');
     assert.ok(idorAt > -1 && idorAt < threadsAt, 'the IDOR guard must run before any thread is read');
 });
 
 check('`get` scopes by assistant as well as org', () => {
     // Org scope alone would let one assistant's tab open another assistant's conversation by
     // guessing an id — same tenant, wrong assistant.
-    const getBranch = readApiText.slice(readApiText.indexOf("action === 'get'"));
+    const getBranch = readApiText.slice(landmark(readApiText, "action === 'get'"));
     assert.ok(getBranch.includes('eq(leadThreads.aiAssistantId, assistantId)'),
         'the get branch must scope by aiAssistantId as well as organisationId');
 });
@@ -288,7 +296,7 @@ check('the label is resolved server-side, so the client holds no copy of the voc
 });
 
 check('the thread list ships excerpts, not whole message bodies', () => {
-    const listBranch = readApiText.slice(readApiText.indexOf("action === 'list'"), readApiText.indexOf("action === 'get'"));
+    const listBranch = readApiText.slice(landmark(readApiText, "action === 'list'"), landmark(readApiText, "action === 'get'"));
     assert.ok(listBranch.includes('left(') && listBranch.includes('EXCERPT_CHARS'),
         'the list rollup must truncate bodies in SQL — a full page would otherwise ship every word exchanged');
     assert.ok(!/body: leadMessages\.body/.test(listBranch), 'the list must not select full bodies');
@@ -309,7 +317,7 @@ check('the UI escapes every server value it renders', () => {
     // that emits a run has to escape it. Asserted as "no raw interpolation of run text" rather
     // than by naming a helper call, so the check survives a refactor of the diff itself.
     const diffAt = conversationsUiText.indexOf('function diffWords');
-    const diffBody = conversationsUiText.slice(diffAt, conversationsUiText.indexOf('function messageItem'));
+    const diffBody = conversationsUiText.slice(diffAt, landmark(conversationsUiText, 'function messageItem'));
     assert.ok(diffAt > -1 && diffBody.includes('esc('), 'the diff must escape what it renders');
     for (const raw of ['${r.text}', '${trail}', '${a[i]}', '${b[j]}']) {
         assert.ok(!diffBody.includes(raw), `diffWords interpolates ${raw} without escaping it`);
@@ -320,7 +328,7 @@ check('the UI escapes every server value it renders', () => {
 });
 
 check('Conversations is registered for the lead role only', () => {
-    const leadBlock = registryText.slice(registryText.indexOf('lead_qualifier: {'));
+    const leadBlock = registryText.slice(landmark(registryText, 'lead_qualifier: {'));
     assert.ok(leadBlock.includes('conversationsTab'), 'lead_qualifier must declare conversationsTab');
     assert.equal((registryText.match(/conversationsTab:/g) || []).length, 1,
         'only lead_qualifier has lead threads — no other role should show this tab');
@@ -353,7 +361,7 @@ check('every utility class the Conversations UI uses is already compiled into st
     for (const mapName of ['THREAD_CHIP', 'CLASS_CHIP']) {
         const at = conversationsUiText.indexOf(`const ${mapName} = {`);
         assert.ok(at > -1, `${mapName} not found — update this check if the palettes were renamed`);
-        const bodyEnd = conversationsUiText.indexOf('};', at);
+        const bodyEnd = landmark(conversationsUiText, '};', at);
         for (const lit of conversationsUiText.slice(at, bodyEnd).matchAll(/'([^']*)'/g)) addAll(lit[1]);
     }
 
@@ -364,7 +372,7 @@ check('every utility class the Conversations UI uses is already compiled into st
 });
 
 check('the Signal Inbox is the DECLARED landing tab, not an accident of tab order', () => {
-    const leadBlock = registryText.slice(registryText.indexOf('lead_qualifier: {'));
+    const leadBlock = registryText.slice(landmark(registryText, 'lead_qualifier: {'));
     assert.ok(/defaultMainTab:\s*'signals'/.test(leadBlock),
         "lead_qualifier must declare defaultMainTab: 'signals' rather than relying on the first-visible-tab fallback");
 });

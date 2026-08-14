@@ -35,6 +35,7 @@ import {
     type PostStatus,
 } from '../src/config/post-status';
 import { getNotificationDefault } from '../src/utils/notification-templates-catalog';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -103,7 +104,7 @@ check('a 402 from X routes to pauseForXCredits, never to handleFailure', () => {
 check('the pause happens AFTER the credit settle, so the hold is refunded', () => {
     // settleXHold(success:false) refunds. Pausing first returns early and leaks the hold on every
     // 402 — the org would be charged for a post that never went out.
-    const xArm = publisher.slice(publisher.indexOf("post.platform === 'x'"), publisher.indexOf("post.platform === 'linkedin'"));
+    const xArm = publisher.slice(landmark(publisher, "post.platform === 'x'"), landmark(publisher, "post.platform === 'linkedin'"));
     const settleAt = xArm.indexOf('settleXHold');
     const pauseAt = xArm.indexOf('result.status === 402');
     assert.ok(settleAt > -1 && pauseAt > -1, 'both the settle and the 402 branch must be in the X arm');
@@ -144,8 +145,8 @@ check('a credit-pack purchase also selects paused_credits', () => {
 });
 
 check('the pause never burns a publish attempt', () => {
-    const fn = publisher.slice(publisher.indexOf('async function pauseForXCredits'));
-    const body = fn.slice(0, fn.indexOf('\n}\n'));
+    const fn = publisher.slice(landmark(publisher, 'async function pauseForXCredits'));
+    const body = fn.slice(0, landmark(fn, '\n}\n'));
     assert.ok(!/attempt_count/.test(body),
         'a quota pause is not a failed attempt — counting it would eventually exhaust MAX_ATTEMPTS');
 });
@@ -168,7 +169,7 @@ check('a mixed cross-post group reports the parked sibling, not the published on
     const priority = calendarJs.match(/_GROUP_STATUS_PRIORITY = \[([^\]]+)\]/)?.[1] ?? '';
     assert.match(priority, /paused_credits/, 'otherwise the group falls through to members[0].status');
     const order = priority.split(',').map(s => s.trim().replace(/'/g, ''));
-    assert.ok(order.indexOf('paused_credits') < order.indexOf('published'),
+    assert.ok(landmark(order, 'paused_credits') < landmark(order, 'published'),
         'a group is never "done" while a sibling is still parked on quota');
 });
 

@@ -19,6 +19,7 @@
 import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
+import { landmark } from './landmark';
 import {
     SCHEDULE_ACTIVE_STATUSES,
     SCHEDULE_INACTIVE_STATUSES,
@@ -108,7 +109,7 @@ check('the calendar range query filters on the shared status list', () => {
     const src = read('netlify/functions/scheduled-posts.ts');
     assert.match(src, /from\s+'\.\.\/\.\.\/src\/config\/post-status'/,
         'scheduled-posts.ts must import the status rule rather than inlining a status list');
-    const rangeQuery = src.slice(src.indexOf('const posts = await db.select()'));
+    const rangeQuery = src.slice(landmark(src, 'const posts = await db.select()'));
     assert.match(rangeQuery.slice(0, 500), /inArray\(scheduledPosts\.status,\s*\[\.\.\.SCHEDULE_ACTIVE_STATUSES\]\)/,
         'the GET ?from&to range query must exclude posts whose schedule is not live');
 });
@@ -117,7 +118,7 @@ check('calendar.js asks the generated mirror instead of hardcoding statuses', ()
     const src = read('calendar.js');
     assert.match(src, /window\.PlatformConstants\.isScheduleActive\(status\)/,
         'calendar.js must read the generated rule');
-    const onDate = src.slice(src.indexOf('function _postsOnDate'));
+    const onDate = src.slice(landmark(src, 'function _postsOnDate'));
     assert.match(onDate.slice(0, 900), /_scheduleActive\(p\.status\)/,
         '_postsOnDate must drop posts whose schedule is not live');
 });

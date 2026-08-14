@@ -21,6 +21,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { landmark } from './landmark';
 import {
     LEAD_REJECT_REASONS, LEAD_REJECT_REASON_LABELS, LEAD_REJECT_REASONS_FOR_TARGETING,
     DOMAIN_EXCLUSION_REASONS, isLeadRejectReason,
@@ -39,8 +40,8 @@ const read = (p: string) => readFileSync(join(root, p), 'utf8');
 function inListValues(text: string, after: string): string[] {
     const start = text.indexOf(after);
     assert.ok(start !== -1, `could not find "${after}"`);
-    const open = text.indexOf('IN (', start);
-    const close = text.indexOf(')', open);
+    const open = landmark(text, 'IN (', start);
+    const close = landmark(text, ')', open);
     return [...text.slice(open, close).matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
 }
 
@@ -127,15 +128,15 @@ check('lead_reject_feedback has exactly one writer', () => {
 
 check('recordLeadRejection never throws', () => {
     const util = read('src/utils/lead-reject-feedback.ts');
-    const fn = util.slice(util.indexOf('export async function recordLeadRejection'));
+    const fn = util.slice(landmark(util, 'export async function recordLeadRejection'));
     assert.ok(/try\s*{/.test(fn) && /catch\s*\(/.test(fn), 'must swallow — the rejection already committed');
     assert.ok(/return EMPTY/.test(fn), 'failure must resolve, so a feedback error cannot fail a rejection');
 });
 
 check('the endpoint scopes the write to a LEAD owned by this tenant', () => {
     const src = read('netlify/functions/lead-generation.ts');
-    const action = src.slice(src.indexOf("if (action === 'record_reject_feedback')"));
-    const guard = action.slice(0, action.indexOf('recordLeadRejection'));
+    const action = src.slice(landmark(src, "if (action === 'record_reject_feedback')"));
+    const guard = action.slice(0, landmark(action, 'recordLeadRejection'));
     assert.ok(/organisationId, orgId/.test(guard), 'missing the tenant check');
     assert.ok(/recordType, 'lead'/.test(guard),
         'assistant_records is shared by six roles — a rejected invoice says nothing about targeting');
@@ -147,7 +148,7 @@ check('the reject strip does not claim the rejection teaches the assistant', () 
     const src = read('assistants.js');
     const start = src.indexOf('function _rqShowRejectReasonStrip');
     assert.ok(start !== -1, 'the strip is missing');
-    const fn = src.slice(start, src.indexOf('function _rqOfferDomainExclusion'));
+    const fn = src.slice(start, landmark(src, 'function _rqOfferDomainExclusion'));
     // Only the rendered copy matters; the comments above the function explain exactly why.
     const copy = fn.replace(/\/\/.*$/gm, '');
     for (const claim of [/teach/i, /learn/i, /next time/i, /improve/i]) {
@@ -164,7 +165,7 @@ check('the Leads-tab reject strip makes the same limited promise', () => {
     const src = read('src/components/assistant-data-hub.js');
     const start = src.indexOf('function rejectReasonStrip');
     assert.ok(start !== -1, 'the Leads-tab strip is missing');
-    const fn = src.slice(start, src.indexOf('function offerDomainExclusion'));
+    const fn = src.slice(start, landmark(src, 'function offerDomainExclusion'));
     const copy = fn.replace(/\/\/.*$/gm, '');
     for (const claim of [/teach/i, /learn/i, /next time/i, /improve/i]) {
         assert.ok(!claim.test(copy),
@@ -182,7 +183,7 @@ check('the lead-rejection panel does not claim the rejections taught the assista
     const src = read('assistants.js');
     const start = src.indexOf('window._renderLeadRejectionEvidence = async function');
     assert.ok(start !== -1, 'the lead-rejection panel is missing');
-    const fn = src.slice(start, src.indexOf('window._toggleDirective', start));
+    const fn = src.slice(start, landmark(src, 'window._toggleDirective', start));
     const copy = fn.replace(/\/\/.*$/gm, '');
     for (const claim of [/teach/i, /learn/i, /next time/i, /improve/i]) {
         assert.ok(!claim.test(copy),
@@ -195,8 +196,8 @@ check('the lead-rejection panel does not claim the rejections taught the assista
 // panel exists to answer — a reviewer who cannot tell "captured but unshown" from "never saved".
 check('the lead-rejection panel distinguishes no-data from a failed read', () => {
     const src = read('assistants.js');
-    const start = src.indexOf('window._renderLeadRejectionEvidence = async function');
-    const fn = src.slice(start, src.indexOf('window._toggleDirective', start));
+    const start = landmark(src, 'window._renderLeadRejectionEvidence = async function');
+    const fn = src.slice(start, landmark(src, 'window._toggleDirective', start));
     const guard = fn.indexOf('!Array.isArray(payload.reasons)');
     const empty = fn.indexOf('!payload.reasons.length');
     assert.ok(guard !== -1 && empty !== -1 && guard < empty,
@@ -227,7 +228,7 @@ check('Learned Directives is gated on the queue kind, not shown to every role', 
     const src = read('assistants.js');
     const start = src.indexOf('window._renderRunbookDirectives = async function');
     assert.ok(start !== -1, 'the directives renderer is missing');
-    const fn = src.slice(start, src.indexOf('window._renderLeadRejectionEvidence', start));
+    const fn = src.slice(start, landmark(src, 'window._renderLeadRejectionEvidence', start));
     assert.ok(/_rulesSteerThisAssistant\(\)/.test(fn), 'the gate predicate is gone');
     assert.ok(/card-learned-directives/.test(fn), 'the renderer no longer hides the card itself');
     assert.ok(/if \(!steers\) return;/.test(fn),
@@ -249,8 +250,8 @@ check('the Assistant Rules scope note does not hard-code the steering claim', ()
     const src = read('assistants.js');
     const start = src.indexOf('function _applyAssistantRulesScope');
     assert.ok(start !== -1, 'the scope note is no longer applied per role');
-    const fn = src.slice(start, src.indexOf('\nwindow._renderRunbookDirectives', start));
-    const recordsBranch = fn.slice(fn.indexOf('note.classList.remove(...EMERALD)'));
+    const fn = src.slice(start, landmark(src, '\nwindow._renderRunbookDirectives', start));
+    const recordsBranch = fn.slice(landmark(fn, 'note.classList.remove(...EMERALD)'));
     assert.ok(
         !/everything this assistant does/.test(recordsBranch),
         'the records-kind copy repeats the claim that made a Lead Generator look like it obeyed '
@@ -280,9 +281,9 @@ check('the Leads-tab strip is built only after the PATCH resolves', () => {
     const src = read('src/components/assistant-data-hub.js');
     const start = src.indexOf("buttons.push({ label: 'Reject'");
     assert.ok(start !== -1, 'the Leads-tab Reject button is missing');
-    const run = src.slice(start, src.indexOf('}});', start));
+    const run = src.slice(start, landmark(src, '}});', start));
     const throws = run.indexOf('throw new Error');
-    const strip = run.indexOf('rejectReasonStrip(record)');
+    const strip = landmark(run, 'rejectReasonStrip(record)');
     assert.ok(throws !== -1 && strip > throws,
         'the strip must be appended after the !res.ok guard, so a failed reject shows no strip');
 });
@@ -293,7 +294,7 @@ check('the strip appears after the reject, never as a gate in front of it', () =
     // resolved and the queue re-rendered. If the strip were awaited before the PATCH, a reviewer
     // could not clear a lead without categorising it.
     assert.ok(/_rqPendingReject = \{/.test(src), 'the reject branch must queue the strip, not show it');
-    const after = src.indexOf('_rqShowRejectReasonStrip();');
+    const after = landmark(src, '_rqShowRejectReasonStrip();');
     const render = src.indexOf('await _detailRqRenderGroups(_detailRqCurrentStatus);');
     assert.ok(after > render && render !== -1, 'the strip must be shown after the queue re-renders');
 });
@@ -320,7 +321,7 @@ function handlerBody(): string {
 
 check('a failed reject clears the pending strip', () => {
     const src = handlerBody();
-    const catchBlock = src.slice(src.indexOf('buttons.forEach((b) => { b.disabled = false; });'));
+    const catchBlock = src.slice(landmark(src, 'buttons.forEach((b) => { b.disabled = false; });'));
     assert.ok(/_rqPendingReject = null/.test(catchBlock.slice(0, 800)),
         'left set, the strip would surface on whatever the user did NEXT');
 });

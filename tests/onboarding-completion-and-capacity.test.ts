@@ -19,6 +19,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { checkAssistantCapacity, SEAT_OCCUPYING_STATUSES } from '../src/utils/assistant-capacity';
 import { extractOnboardingGuardrails } from '../src/utils/onboarding-guardrails';
+import { landmark } from './landmark';
 
 let passed = 0, total = 0;
 const deferred: Array<() => Promise<void>> = [];
@@ -101,7 +102,7 @@ check('the endpoint that creates an assistant from the form now checks capacity'
     // abandoned row rather than being refused for a seat it already holds.
     // Compared against the CALL SITE, not the import — which sits at the top of the file and would
     // make this assertion pass no matter where the gate actually ran.
-    assert.ok(src.indexOf('2. DEDUP CHECK') < src.indexOf('const capacityRefusal = await'),
+    assert.ok(landmark(src, '2. DEDUP CHECK') < landmark(src, 'const capacityRefusal = await'),
         'the dedup must run before the capacity gate');
 });
 
@@ -125,7 +126,7 @@ check('submitting clears every draft for that onboarding path', () => {
 check('a different role\'s setup is left alone', () => {
     // Multi-row drafts exist so two roles can be set up at once; the fix must not throw that away.
     const src = read('netlify/functions/onboarding.ts');
-    const block = src.slice(src.indexOf('// 7. CLEAR DRAFT'), src.indexOf('await createNotification'));
+    const block = src.slice(landmark(src, '// 7. CLEAR DRAFT'), landmark(src, 'await createNotification'));
     assert.match(block, /Scoped to the submitted draft's own path/);
     assert.ok(!/delete\(onboardingDrafts\)\.where\(eq\(onboardingDrafts\.userId, existingUser\.id\)\)\);\s*$/m.test(block.split('} else {')[0]),
         'the scoped branch must not delete every draft the user has');
@@ -172,7 +173,7 @@ check('onboarding.ts persists the extracted rules into content_rules for the new
         'rules must come from the shared extractor, not an inline re-parse');
     assert.match(src, /db\.insert\(contentRules\)\.values\(/,
         'the rules must land in content_rules — the table get-assistant-readiness reads');
-    const block = src.slice(src.indexOf('extractOnboardingGuardrails'), src.indexOf('// 7. CLEAR DRAFT'));
+    const block = src.slice(landmark(src, 'extractOnboardingGuardrails'), landmark(src, '// 7. CLEAR DRAFT'));
     assert.match(block, /assistantId:\s*newAssistant\.id/, 'rows must be keyed to the assistant just created');
     assert.match(block, /\.slice\(0, 300\)/, 'rule_text is capped at 300, as content-rules.ts enforces');
     // Best-effort: a guardrail write must never fail an otherwise-successful onboarding.

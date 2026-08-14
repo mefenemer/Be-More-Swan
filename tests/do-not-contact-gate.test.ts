@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { evaluateDoNotContact } from '../src/config/do-not-contact';
 import { SEQUENCE_HALT_REASONS } from '../src/config/outreach-sequences';
 import { EVENT_TYPES } from '../src/config/revenue-events';
+import { landmark } from './landmark';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -117,7 +118,7 @@ check('the gate runs before generation and before the thread is opened', () => {
     const gate = src.indexOf('evaluateDoNotContact(data)');
     assert.ok(gate > 0, 'gate not found');
     for (const later of ['openLeadThread(', 'send_outreach_gen', 'checkSuppression(']) {
-        assert.ok(src.indexOf(later) > gate, `the gate must run before ${later}`);
+        assert.ok(landmark(src, later) > gate, `the gate must run before ${later}`);
     }
 });
 

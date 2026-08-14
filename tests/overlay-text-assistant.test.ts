@@ -9,6 +9,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { landmark } from './landmark';
 
 let passed = 0, total = 0;
 function check(name: string, fn: () => void) {
@@ -36,7 +37,7 @@ check('the model call is metered as a task', () => {
 check('the post is tenant-guarded before anything is spent', () => {
     const guardAt = fn.indexOf('eq(scheduledPosts.organisationId, ctx.organisationId)');
     // The CALL, not the import at the top of the file.
-    const spendAt = fn.indexOf('await consumeTaskCredit(');
+    const spendAt = landmark(fn, 'await consumeTaskCredit(');
     assert.ok(guardAt > 0, 'the post must be scoped to the caller\'s org');
     assert.ok(guardAt < spendAt, 'spending a credit before proving ownership bills the wrong workspace');
 });
@@ -76,7 +77,7 @@ check('a failure shows the server\'s own message', () => {
 check('an accepted suggestion updates the textarea AND the canvas', () => {
     // The textarea is the model the rest of the panel reads from; the canvas is what the user is
     // looking at. Writing one and not the other leaves them disagreeing.
-    const block = editor.slice(editor.indexOf("const text = await suggestText("));
+    const block = editor.slice(landmark(editor, "const text = await suggestText("));
     assert.match(block.slice(0, 400), /ov\.text = text/);
     assert.match(block.slice(0, 400), /if \(ta\) ta\.value = text/);
     assert.match(block.slice(0, 400), /rerender\(\)/);

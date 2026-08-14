@@ -21,6 +21,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { landmark } from './landmark';
 import {
     PROPOSAL_SOURCES, PROPOSAL_STATUSES, REJECT_REASONS, REJECT_REASON_LABELS,
     REJECT_REASON_EFFECTS, REJECT_REASONS_FED_TO_MODEL, STRATEGY_TUNABLE_FIELDS,
@@ -253,7 +254,7 @@ check('the campaign store only targets columns that exist on discovery_campaigns
     for (const [key, f] of Object.entries(STRATEGY_TUNABLE_FIELDS)) {
         if (f.store !== 'campaign') continue;
         assert.ok(
-            new RegExp(`\\b${f.key}\\s*:`).test(schemaText.slice(schemaText.indexOf('export const discoveryCampaigns'))),
+            new RegExp(`\\b${f.key}\\s*:`).test(schemaText.slice(landmark(schemaText, 'export const discoveryCampaigns'))),
             `${key} targets discoveryCampaigns.${f.key}, which is not a column`,
         );
     }

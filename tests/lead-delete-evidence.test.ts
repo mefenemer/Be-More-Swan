@@ -28,6 +28,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LEAD_REJECT_REASONS } from '../src/config/lead-reject-reasons';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -82,7 +83,7 @@ check('the feedback write happens BEFORE the delete', () => {
 
 check('the discovery row is marked discarded BEFORE the delete', () => {
     const iUpdate = DELETE_BLOCK.indexOf('db.update(discoveredLeads)');
-    const iDelete = DELETE_BLOCK.indexOf('db.delete(assistantRecords)');
+    const iDelete = landmark(DELETE_BLOCK, 'db.delete(assistantRecords)');
     assert.ok(iUpdate !== -1, 'the discovery row is no longer moved to its terminal state');
     assert.ok(iUpdate < iDelete,
         'the status update runs AFTER the delete — assistant_record_id is already NULL, so it matches nothing');
@@ -116,8 +117,8 @@ check('a missing reason still deletes, and still discards the discovery row', ()
     // Someone clearing twenty junk rows must never be blocked on an explanation. The status
     // change is a fact about the row; only the feedback write is conditional.
     assert.ok(/if \(reason\) \{/.test(DELETE_BLOCK), 'the reason is no longer optional');
-    const iIfReason = DELETE_BLOCK.indexOf('if (reason) {');
-    const iUpdate = DELETE_BLOCK.indexOf('db.update(discoveredLeads)');
+    const iIfReason = landmark(DELETE_BLOCK, 'if (reason) {');
+    const iUpdate = landmark(DELETE_BLOCK, 'db.update(discoveredLeads)');
     assert.ok(iUpdate > iIfReason && !DELETE_BLOCK.slice(iIfReason, iUpdate).includes('return'),
         'the discarded update must sit outside the reason branch — it applies either way');
 });
@@ -128,9 +129,9 @@ check('non-lead records are untouched by any of it', () => {
 });
 
 check('a record belonging to another tenant is still a 404, before anything is written', () => {
-    const iLookup = DELETE_BLOCK.indexOf('const [existing]');
-    const iNotFound = DELETE_BLOCK.indexOf("return json(404, { error: 'Record not found.' })");
-    const iFeedback = DELETE_BLOCK.indexOf('recordLeadRejection');
+    const iLookup = landmark(DELETE_BLOCK, 'const [existing]');
+    const iNotFound = landmark(DELETE_BLOCK, "return json(404, { error: 'Record not found.' })");
+    const iFeedback = landmark(DELETE_BLOCK, 'recordLeadRejection');
     assert.ok(/eq\(assistantRecords\.organisationId, orgId\)/.test(DELETE_BLOCK.slice(iLookup, iFeedback)),
         'the pre-delete lookup is not tenant-scoped — an IDOR would now also write feedback rows');
     assert.ok(iNotFound < iFeedback, 'the ownership check must short-circuit before any write');
@@ -140,14 +141,14 @@ check('a record belonging to another tenant is still a 404, before anything is w
 
 check('deleting a lead opens the reason strip instead of deleting immediately', () => {
     assert.ok(/function deleteReasonStrip/.test(HUB), 'the delete confirmation strip is gone');
-    const btn = HUB.slice(HUB.indexOf("buttons.push({ label: 'Delete'"), HUB.indexOf('const status = document.createElement'));
+    const btn = HUB.slice(landmark(HUB, "buttons.push({ label: 'Delete'"), landmark(HUB, 'const status = document.createElement'));
     assert.ok(/state\.hub\.recordType === 'lead'/.test(btn),
         'the lead branch is gone — deleting a lead would again destroy its provenance silently');
     assert.ok(/deleteReasonStrip\(record\)/.test(btn), 'the strip is never shown');
 });
 
 check('the strip offers the real reason vocabulary, and an escape from it', () => {
-    const strip = HUB.slice(HUB.indexOf('function deleteReasonStrip'), HUB.indexOf('// ── Rejecting a lead'));
+    const strip = HUB.slice(landmark(HUB, 'function deleteReasonStrip'), landmark(HUB, '// ── Rejecting a lead'));
     assert.ok(/RC\.leadRejectReasons/.test(strip),
         'the strip no longer reads the shared vocabulary — a retyped list would drift from the CHECK constraint');
     assert.ok(/data-hub-del-plain/.test(strip),
@@ -156,13 +157,13 @@ check('the strip offers the real reason vocabulary, and an escape from it', () =
 });
 
 check('the strip names Reject as the non-destructive alternative', () => {
-    const strip = HUB.slice(HUB.indexOf('function deleteReasonStrip'), HUB.indexOf('// ── Rejecting a lead'));
+    const strip = HUB.slice(landmark(HUB, 'function deleteReasonStrip'), landmark(HUB, '// ── Rejecting a lead'));
     assert.ok(/<strong>Reject<\/strong>/.test(strip),
         'the strip no longer points at Reject — the whole point is that Delete stops being the silent default');
 });
 
 check('the reason reaches the server', () => {
-    const fn = HUB.slice(HUB.indexOf('async function deleteRecord'), HUB.indexOf('// ── Deleting a lead'));
+    const fn = HUB.slice(landmark(HUB, 'async function deleteRecord'), landmark(HUB, '// ── Deleting a lead'));
     assert.ok(/reason \? \{ id, reason \} : \{ id \}/.test(fn),
         'deleteRecord no longer forwards the reason — the strip would collect it and drop it');
     assert.ok(/credentials: 'same-origin'/.test(fn), 'the DELETE lost its credentials — it would 401');

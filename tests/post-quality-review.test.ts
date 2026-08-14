@@ -10,6 +10,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { landmark } from './landmark';
 import {
     hasComplianceWarnings, hashCaption, openWarnings, readCachedReview, normaliseVoiceScore,
     type QualityReview, type WarningDisposition,
@@ -138,7 +139,7 @@ check('the compliance-only prompt still demands a score', () => {
 
 check('the panel shows an unknown as unknown, not as 0 in red', () => {
     const ws = readFileSync(path.join(import.meta.dirname, '..', 'workspace.html'), 'utf8');
-    const render = ws.slice(ws.indexOf('function _prqRenderReview('), ws.indexOf('const warnings = data.complianceWarnings'));
+    const render = ws.slice(landmark(ws, 'function _prqRenderReview('), landmark(ws, 'const warnings = data.complianceWarnings'));
     assert.match(render, /Brand voice not scored/, 'null needs its own wording');
     assert.match(render, /text-gray-400/, 'and its own colour — red reads as a bad score');
     assert.ok(!/typeof data\.brandVoiceScore === 'number'\) \{\n        const s = data/.test(render),

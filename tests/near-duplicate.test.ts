@@ -14,6 +14,7 @@
 // Run:  npx tsx tests/near-duplicate.test.ts
 
 import assert from 'node:assert';
+import { landmark } from './landmark';
 import {
     captionSimilarity, findNearDuplicate, normaliseForCompare, nearDuplicateRetryPrompt,
     NEAR_DUPLICATE_WHOLE, NEAR_DUPLICATE_HOOK, type PriorPost,
@@ -134,7 +135,7 @@ test('the gate is bounded to a single re-ask', () => {
     const src = require('node:fs').readFileSync(
         new URL('../netlify/functions/process-content-jobs.ts', import.meta.url), 'utf8');
     const start = src.indexOf('Near-duplicate gate');
-    const end = src.indexOf('The raw model caption', start);
+    const end = landmark(src, 'The raw model caption', start);
     const block = src.slice(start, end);
     assert.ok(start > 0 && end > start, 'gate block not found');
     assert.equal((block.match(/gatewayGenerate\(/g) || []).length, 1, 'exactly one re-ask');

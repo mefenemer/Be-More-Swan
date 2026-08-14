@@ -19,6 +19,7 @@
 
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
+import { landmark } from './landmark';
 import {
     resolveBudget,
     clampToPlatform,
@@ -149,8 +150,8 @@ test('a blueprint gap can never block Kick Off', () => {
     // allRequiredDone gates the button. A warning list quietly becoming a blocker would be a
     // regression far worse than the missing information it set out to surface.
     const readiness = read('../netlify/functions/get-assistant-readiness.ts');
-    const block = readiness.slice(readiness.indexOf('for (const f of (bp?.missingFields'));
-    const pushed = block.slice(0, block.indexOf('} catch'));
+    const block = readiness.slice(landmark(readiness, 'for (const f of (bp?.missingFields'));
+    const pushed = block.slice(0, landmark(block, '} catch'));
     assert.match(pushed, /required: false/, 'blueprint items must be recommended, never required');
     assert.ok(!/required: true/.test(pushed), 'a blueprint gap is marked required');
 });
@@ -158,8 +159,8 @@ test('a blueprint gap can never block Kick Off', () => {
 test('checklist labels are escaped before render', () => {
     // "Connect ${platform}" is built from primary_platforms, which the user types.
     const ui = read('../assistants.js');
-    const render = ui.slice(ui.indexOf('listEl.innerHTML = items.map'));
-    const li = render.slice(0, render.indexOf("|| '<li"));
+    const render = ui.slice(landmark(ui, 'listEl.innerHTML = items.map'));
+    const li = render.slice(0, landmark(render, "|| '<li"));
     assert.match(li, /_escapeHtml\(it\.label\)/, 'label rendered raw');
     assert.match(li, /_escapeHtml\(it\.hint/, 'hint rendered raw');
 });

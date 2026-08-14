@@ -20,6 +20,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { systemConnections, workspaceIntegrations } from '../db/schema';
+import { landmark } from './landmark';
 import {
     resolveAssistantEnabledPlatforms,
     isPlatformEnabledForAssistant,
@@ -185,7 +186,7 @@ test('the weekly Short checks the switch BEFORE it enqueues', () => {
     // YouTube is absent from AUTONOMOUS_DRAFT_PLATFORMS, so the Short is the only autonomous
     // producer for it — this one check is the whole difference between the switch working and not.
     const s = src('src/utils/schedule-gap-fill.ts');
-    const fn = s.slice(s.indexOf('async function resolveWeeklyShortSlot'), s.indexOf('async function orgHasAvailableManualAsset'));
+    const fn = s.slice(landmark(s, 'async function resolveWeeklyShortSlot'), landmark(s, 'async function orgHasAvailableManualAsset'));
     // OPT-IN, not the default-on rule: a live channel is not a request for a video a week, and the
     // assistants this was found on had no recorded selection at all.
     assert.ok(/isPlatformOptedInForAssistant/.test(fn), 'the weekly Short must require an explicit tick');
@@ -194,7 +195,7 @@ test('the weekly Short checks the switch BEFORE it enqueues', () => {
         'the default-on rule would resume drafting Shorts for every untouched workspace',
     );
     assert.ok(
-        fn.indexOf('isPlatformOptedInForAssistant') < fn.indexOf('resolveLiveSocialConnections'),
+        landmark(fn, 'isPlatformOptedInForAssistant') < landmark(fn, 'resolveLiveSocialConnections'),
         'ask the cheap local question first — a switched-off platform should not cost a connection lookup',
     );
 });
@@ -204,7 +205,7 @@ test('the weekly Short dedupes on a window that looks BACKWARD too', () => {
     // passes it stops matching, the next hourly run sees no future Short and drafts another. Found
     // in production as nine Shorts in nine working days, none ever approved.
     const s = src('src/utils/schedule-gap-fill.ts');
-    const fn = s.slice(s.indexOf('async function resolveWeeklyShortSlot'), s.indexOf('async function orgHasAvailableManualAsset'));
+    const fn = s.slice(landmark(s, 'async function resolveWeeklyShortSlot'), landmark(s, 'async function orgHasAvailableManualAsset'));
     assert.ok(/weekAgo/.test(fn), 'the planned-Short lookup must have a lower bound in the PAST');
     assert.ok(
         !/gte\(scheduledPosts\.publishDate, now\)/.test(fn),
@@ -220,7 +221,7 @@ test('an on-demand Short refuses with a message that names the switch', () => {
     const s = src('netlify/functions/trigger-youtube-short.ts');
     assert.ok(/YOUTUBE_DISABLED_FOR_ASSISTANT/.test(s), 'the trigger must refuse when the assistant is switched off');
     assert.ok(
-        s.indexOf('YOUTUBE_DISABLED_FOR_ASSISTANT') < s.indexOf('enqueueYoutubeShortJob(db, {'),
+        landmark(s, 'YOUTUBE_DISABLED_FOR_ASSISTANT') < landmark(s, 'enqueueYoutubeShortJob(db, {'),
         'the refusal must precede the enqueue',
     );
     assert.ok(
@@ -238,7 +239,7 @@ test('a Short already queued when the switch flipped is cancelled, not drafted',
         'the worker must re-check the switch for a standalone Short',
     );
     assert.ok(
-        s.indexOf('isYoutubeShort && !(await isPlatformOptedInForAssistant') < s.indexOf('const isVideo'),
+        landmark(s, 'isYoutubeShort && !(await isPlatformOptedInForAssistant') < landmark(s, 'const isVideo'),
         'the check must come before the prompt is built and the model is called',
     );
 });

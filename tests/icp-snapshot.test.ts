@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { getIcpSnapshot, makeIcpSnapshotCache, icpFromOnboarding } from '../src/utils/icp-snapshot';
 import { icpBlock } from '../src/config/icp-profile';
 import { discoveredLeads, aiAssistants } from '../db/schema';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void | Promise<void>): void | Promise<void> {
@@ -102,7 +103,7 @@ function suppliesField(callText: string, fileText: string, field: string): boole
     for (const m of callText.matchAll(/\.\.\.(\w+)/g)) {
         const declIdx = fileText.search(new RegExp(`const\\s+${m[1]}\\s*=\\s*\\{`));
         if (declIdx === -1) continue;
-        const braceStart = fileText.indexOf('{', declIdx);
+        const braceStart = landmark(fileText, '{', declIdx);
         let depth = 0;
         for (let i = braceStart; i < fileText.length; i++) {
             if (fileText[i] === '{') depth++;

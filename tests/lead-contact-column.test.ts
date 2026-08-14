@@ -28,6 +28,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -44,10 +45,10 @@ const WORKER = read('netlify/functions/process-discovery-jobs.ts');
 
 /** Lift `contactState` + `contactEmailOf` out of the IIFE and run them for real. */
 function loadContactState(): (r: Record<string, unknown>) => string {
-    const emailFn = HUB.slice(HUB.indexOf('function contactEmailOf'), HUB.indexOf('/**', HUB.indexOf('function contactEmailOf')));
+    const emailFn = HUB.slice(landmark(HUB, 'function contactEmailOf'), landmark(HUB, '/**', landmark(HUB, 'function contactEmailOf')));
     const start = HUB.indexOf('function contactState');
     assert.ok(start !== -1, 'contactState() is gone — the column no longer derives its state');
-    const stateFn = HUB.slice(start, HUB.indexOf('\n  }', start) + 4);
+    const stateFn = HUB.slice(start, landmark(HUB, '\n  }', start) + 4);
     // eslint-disable-next-line no-new-func
     return new Function(`${emailFn}\n${stateFn}\nreturn contactState;`)() as (r: Record<string, unknown>) => string;
 }
@@ -109,7 +110,7 @@ console.log('\n──── the derivation still matches the pipeline ───�
 check('enrichment is still hot/warm only, which is what "Not checked" asserts', () => {
     const start = WORKER.indexOf('async function enrichBatch');
     assert.ok(start !== -1, 'enrichBatch() is gone — re-derive what "Not checked" can claim');
-    const fn = WORKER.slice(start, WORKER.indexOf('\n}', start));
+    const fn = WORKER.slice(start, landmark(WORKER, '\n}', start));
     assert.ok(/rating IN \('hot','warm'\)/.test(fn),
         'enrichBatch no longer filters to hot/warm. contactState() infers "Not checked" from a cold '
         + 'rating alone, so the column now lies about which leads were attempted — update both together.');
@@ -121,8 +122,8 @@ check('the attempt stamp is mirrored onto the record on a MISS, not just a hit',
     // Leads tab reads and the column could not tell a miss from a pending attempt.
     const start = WORKER.indexOf('async function recordEnrichment');
     assert.ok(start !== -1, 'recordEnrichment() is gone');
-    const fn = WORKER.slice(start, WORKER.indexOf('\n}', start));
-    const guard = fn.slice(fn.indexOf('if (!'), fn.indexOf('assistantRecords)', fn.indexOf('if (!')));
+    const fn = WORKER.slice(start, landmark(WORKER, '\n}', start));
+    const guard = fn.slice(landmark(fn, 'if (!'), landmark(fn, 'assistantRecords)', landmark(fn, 'if (!')));
     assert.ok(!/!hit\s*\|\|/.test(guard),
         'the assistant_records mirror is hit-only again — every miss stops reaching the Leads tab, '
         + 'and the Contact column silently reverts to calling misses "Checking…"');
@@ -133,8 +134,8 @@ check('the attempt stamp is mirrored onto the record on a MISS, not just a hit',
 check('the revenue ledger stays hit-only, unlike the mirror', () => {
     // Different jobs: the mirror is UI state, the ledger measures our scraper's hit RATE. Counting
     // misses there would report every attempt as a success.
-    const start = WORKER.indexOf('async function recordEnrichment');
-    const fn = WORKER.slice(start, WORKER.indexOf('\n}', start));
+    const start = landmark(WORKER, 'async function recordEnrichment');
+    const fn = WORKER.slice(start, landmark(WORKER, '\n}', start));
     assert.ok(/if \(hit && ledger\)/.test(fn),
         'lead_enriched must only be emitted on a hit');
 });
@@ -148,7 +149,7 @@ check('a backfill exists for records enriched before the mirror changed', () => 
 });
 
 check('contactState keys off the same two ratings, not a hardcoded third', () => {
-    const src = HUB.slice(HUB.indexOf('function contactState'), HUB.indexOf('function cellValue'));
+    const src = HUB.slice(landmark(HUB, 'function contactState'), landmark(HUB, 'function cellValue'));
     assert.ok(/record\.status === 'cold'/.test(src),
         'the "nobody looked" leg must test the rating the pipeline skips');
     assert.ok(!/'hot'|'warm'/.test(src.replace(/\/\/.*$/gm, '')),
@@ -158,7 +159,7 @@ check('contactState keys off the same two ratings, not a hardcoded third', () =>
 console.log('\n──── the column is wired and states are total ────');
 
 check('the lead hub lists the column, and its key is the synthetic one', () => {
-    const hub = REGISTRY.slice(REGISTRY.indexOf('hubTab: {', REGISTRY.indexOf('lead_qualifier:')));
+    const hub = REGISTRY.slice(landmark(REGISTRY, 'hubTab: {', landmark(REGISTRY, 'lead_qualifier:')));
     assert.ok(/\{ key: 'contact', label: 'Contact' \}/.test(hub),
         'the Leads hub no longer lists the Contact column');
     // Synthetic: there is no `contact` field on a record, so cellValue MUST special-case it or the
@@ -168,7 +169,7 @@ check('the lead hub lists the column, and its key is the synthetic one', () => {
 });
 
 check('every state contactState can return has a chip', () => {
-    const map = HUB.slice(HUB.indexOf('const CONTACT_CHIP'), HUB.indexOf('};', HUB.indexOf('const CONTACT_CHIP')));
+    const map = HUB.slice(landmark(HUB, 'const CONTACT_CHIP'), landmark(HUB, '};', landmark(HUB, 'const CONTACT_CHIP')));
     const declared = [...map.matchAll(/^\s{4}(\w+):/gm)].map((m) => m[1]).sort();
     // 'missed' joined the set for Phase 2 item 11: hot/warm, never looked up, and no live job to
     // look it up — previously rendered as "Checking…" forever.
@@ -177,8 +178,8 @@ check('every state contactState can return has a chip', () => {
 });
 
 check('the chip renders the STATE, and keeps the address out of the cell', () => {
-    const row = HUB.slice(HUB.indexOf('function rowHtml'), HUB.indexOf('function refreshRow'));
-    const branch = row.slice(row.indexOf("c.key === 'contact'"));
+    const row = HUB.slice(landmark(HUB, 'function rowHtml'), landmark(HUB, 'function refreshRow'));
+    const branch = row.slice(landmark(row, "c.key === 'contact'"));
     // The tooltip carries the ADDRESS when there is one, and the reason for its absence otherwise
     // (item 11), now joined by the social-profile hint (item 7). Both, never the raw address in the
     // cell — a column of a hundred people's contact details answers a question nobody asked.

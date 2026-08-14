@@ -17,6 +17,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { classifyEmailKind, roleOrPersonal, ROLE_EMAIL_PREFIXES } from '../src/config/lead-email-kind';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -100,7 +101,7 @@ console.log('\n──── every writer of an address writes a kind ───�
 
 check('the chat "add lead" path stamps a kind beside its source', () => {
     const fn = read('netlify/functions/lead-generation.ts');
-    const block = fn.slice(fn.indexOf('const submittedEmail'), fn.indexOf('const submittedEmail') + 400);
+    const block = fn.slice(landmark(fn, 'const submittedEmail'), landmark(fn, 'const submittedEmail') + 400);
     assert.ok(/card\.emailSource = 'manual'/.test(block), 'the manual source stamp has moved');
     assert.ok(/card\.emailKind = classifyEmailKind\(submittedEmail\)/.test(block),
         'a manually added lead stores an address with no kind — it will render as "Role inbox" whoever it belongs to');
@@ -110,7 +111,7 @@ check('the Edit lead form stamps provenance when the address changes', () => {
     const hub = read('src/components/assistant-data-hub.js');
     assert.ok(/stampContactProvenance\(data, nextData\)/.test(hub),
         'the Edit lead submit no longer stamps provenance');
-    const fn = hub.slice(hub.indexOf('function stampContactProvenance'), hub.indexOf('function openEditLeadModal'));
+    const fn = hub.slice(landmark(hub, 'function stampContactProvenance'), landmark(hub, 'function openEditLeadModal'));
     assert.ok(/nextData\.emailSource = 'manual'/.test(fn), 'a typed address must record that a human supplied it');
     assert.ok(/nextData\.emailKind =/.test(fn), 'a typed address must record what kind of inbox it is');
 });
@@ -122,7 +123,7 @@ check('an UNCHANGED address keeps its original provenance', () => {
     // unrelated field would then permanently disarm that gate for the lead — a safety control
     // removed by an action that looks like editing a note.
     const hub = read('src/components/assistant-data-hub.js');
-    const fn = hub.slice(hub.indexOf('function stampContactProvenance'), hub.indexOf('function openEditLeadModal'));
+    const fn = hub.slice(landmark(hub, 'function stampContactProvenance'), landmark(hub, 'function openEditLeadModal'));
     assert.ok(/if \(before === after\) return;/.test(fn),
         'provenance is re-stamped on every save — this silently converts scraped addresses to manual ones');
 
@@ -145,8 +146,8 @@ check('an UNCHANGED address keeps its original provenance', () => {
 
 check('clearing the address clears the provenance with it', () => {
     const hub = read('src/components/assistant-data-hub.js');
-    const fn = hub.slice(hub.indexOf('function stampContactProvenance'), hub.indexOf('function openEditLeadModal'));
-    const cleared = fn.slice(fn.indexOf('if (!after)'));
+    const fn = hub.slice(landmark(hub, 'function stampContactProvenance'), landmark(hub, 'function openEditLeadModal'));
+    const cleared = fn.slice(landmark(fn, 'if (!after)'));
     for (const key of ['emailKind', 'emailSource', 'emailFoundOn']) {
         assert.ok(new RegExp(`delete nextData\\.${key}`).test(cleared),
             `${key} outlives the address it describes — the next lead detail would show a kind for nothing`);
@@ -160,7 +161,7 @@ check('a lead with no address offers the fix on the record itself', () => {
     // only way to do it was an Email field inside a modal called "Edit lead". A remedy nobody can
     // find is not a remedy.
     const hub = read('src/components/assistant-data-hub.js');
-    const actions = hub.slice(hub.indexOf('function detailActions'), hub.indexOf('function detailPanel'));
+    const actions = hub.slice(landmark(hub, 'function detailActions'), landmark(hub, 'function detailPanel'));
     assert.ok(/if \(!contactEmailOf\(record\)\)/.test(actions),
         'the add-an-address action is not conditional on the lead actually lacking one');
     assert.ok(/label: 'Add an address'/.test(actions), 'the action is gone or renamed');

@@ -21,6 +21,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { landmark } from './landmark';
 import {
     CONTACT_AGGREGATE_SCOPE_SQL,
     CONTACT_BUCKETS,
@@ -47,10 +48,10 @@ const WORKER = read('netlify/functions/process-discovery-jobs.ts');
 
 /** Lift `contactState` + `contactEmailOf` out of the IIFE and run them for real. */
 function loadContactState(): (r: Record<string, unknown>) => string {
-    const emailFn = HUB.slice(HUB.indexOf('function contactEmailOf'), HUB.indexOf('/**', HUB.indexOf('function contactEmailOf')));
+    const emailFn = HUB.slice(landmark(HUB, 'function contactEmailOf'), landmark(HUB, '/**', landmark(HUB, 'function contactEmailOf')));
     const start = HUB.indexOf('function contactState');
     assert.ok(start !== -1, 'contactState() is gone — the column no longer derives its state');
-    const stateFn = HUB.slice(start, HUB.indexOf('\n  }', start) + 4);
+    const stateFn = HUB.slice(start, landmark(HUB, '\n  }', start) + 4);
     return new Function(`${emailFn}\n${stateFn}\nreturn contactState;`)() as (r: Record<string, unknown>) => string;
 }
 
@@ -58,7 +59,7 @@ function loadContactState(): (r: Record<string, unknown>) => string {
 function loadAggregateLine(): (s: Record<string, unknown>) => string {
     const start = INBOX.indexOf('function contactAggregateLine');
     assert.ok(start !== -1, 'contactAggregateLine() is gone — the Searches tab states no aggregate');
-    const fn = INBOX.slice(start, INBOX.indexOf('\n  }', start) + 4);
+    const fn = INBOX.slice(start, landmark(INBOX, '\n  }', start) + 4);
     return new Function(`${fn}\nreturn contactAggregateLine;`)() as (s: Record<string, unknown>) => string;
 }
 
@@ -239,10 +240,10 @@ check('the line is only shown on a finished run', () => {
     // inside the branch must not be able to fail this.
     const from = INBOX.indexOf("if (job === 'completed')");
     assert.ok(from !== -1, 'the completed branch is gone');
-    const completed = INBOX.slice(from, INBOX.indexOf('\n    }', from));
+    const completed = INBOX.slice(from, landmark(INBOX, '\n    }', from));
     assert.ok(/contactAggregateLine\(s\)/.test(completed),
         'the completed branch no longer states the aggregate');
-    const before = INBOX.slice(INBOX.indexOf('function searchState'), INBOX.indexOf("if (job === 'completed')"));
+    const before = INBOX.slice(landmark(INBOX, 'function searchState'), landmark(INBOX, "if (job === 'completed')"));
     assert.ok(!/contactAggregateLine/.test(before),
         'the aggregate has leaked into an in-flight, queued or failed state');
 });
@@ -254,7 +255,7 @@ check('the aggregate renders as its own line, not glued to the cadence', () => {
     assert.ok(/st\.reach \? `<p[^`]*>\$\{esc\(st\.reach\)\}<\/p>`/.test(INBOX),
         'searchRow no longer renders the aggregate in its own escaped element');
     // Every other state must leave the field unset, so no other row grows a second line.
-    const states = INBOX.slice(INBOX.indexOf('function searchState'), INBOX.indexOf('function searchRow'));
+    const states = INBOX.slice(landmark(INBOX, 'function searchState'), landmark(INBOX, 'function searchRow'));
     assert.equal((states.match(/reach:/g) || []).length, 1, 'only the completed state may carry `reach`');
 });
 

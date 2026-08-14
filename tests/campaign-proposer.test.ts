@@ -29,6 +29,7 @@ import {
     CAMPAIGN_ORDER_ACTIONS, DECISION_TTL_DAYS, ORDER_ACTION_SPECS, orderWorkItems,
 } from '../src/config/campaign-vocab';
 import { ORCHESTRATABLE_ROLE_KEYS } from '../src/constants/roles';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -253,7 +254,7 @@ check('the same decision is not filed twice', () => {
 
 check('expiry settles the Review Queue mirror too', () => {
     const fn = read('src/utils/campaign-proposer.ts');
-    const body = fn.slice(fn.indexOf('export async function expirePendingDecisions'));
+    const body = fn.slice(landmark(fn, 'export async function expirePendingDecisions'));
     assert.match(body, /assistantRecords/,
         'Expiring a decision without settling its mirror leaves a card in the Review Queue for ever, '
         + 'still counting towards the badge and still offering an Approve that campaigns.ts refuses.');
@@ -261,7 +262,7 @@ check('expiry settles the Review Queue mirror too', () => {
 
 check('the expiry sweep cannot be skipped by the proposal half', () => {
     const order = agent.indexOf('expirePendingDecisions');
-    const loop = agent.indexOf('for (const campaign of live)');
+    const loop = landmark(agent, 'for (const campaign of live)');
     assert.ok(order !== -1 && order < loop,
         'Expiry must run first and unconditionally — it is the half that keeps the queue honest.');
 });

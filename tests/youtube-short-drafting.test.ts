@@ -24,6 +24,7 @@ import {
 import { POST_FORMATS } from '../src/config/post-formats';
 import { AUTONOMOUS_DRAFT_PLATFORMS } from '../src/utils/publish-policy';
 import { readForceVideo, MAX_RENDER_SECONDS, RENDER_FPS } from '../src/lib/post-render';
+import { landmark } from './landmark';
 
 let passed = 0;
 const test = (name: string, fn: () => void) => {
@@ -63,13 +64,13 @@ test('the Short is enqueued as a standalone job, never as a fan-out', () => {
     // `platforms` NULL is what process-content-jobs reads as "one post, this platform" (and so
     // takes the Short branch), and a null group id is what keeps it out of the cross-post card.
     const s = src('src/utils/schedule-gap-fill.ts');
-    const helper = s.slice(s.indexOf('export async function enqueueYoutubeShortJob'));
+    const helper = s.slice(landmark(s, 'export async function enqueueYoutubeShortJob'));
     assert.ok(/platform: 'youtube'/.test(helper), 'the job must name its platform');
     assert.ok(/platforms: null/.test(helper), 'a platforms list would turn this into a fan-out');
     assert.ok(/crosspostGroupId: null/.test(helper), 'a group id would collapse it into the cross-post card');
 
     // ...and the weekly path must go through it rather than writing its own row.
-    const weekly = s.slice(s.indexOf('if (shortSlot)'), s.indexOf('for (const slot of uncovered)'));
+    const weekly = s.slice(landmark(s, 'if (shortSlot)'), landmark(s, 'for (const slot of uncovered)'));
     assert.ok(/enqueueYoutubeShortJob\(db, \{/.test(weekly), 'the weekly enqueue must use the shared helper');
 });
 
@@ -151,7 +152,7 @@ test('a failed render never strands the post as unpublishable', () => {
     // render_status holds the post at every publisher. Queueing without a worker behind it would
     // gate the post forever, so the helper rolls the gate back.
     const lib = src('src/lib/post-render.ts');
-    const fn = lib.slice(lib.indexOf('export async function queuePostRender'));
+    const fn = lib.slice(landmark(lib, 'export async function queuePostRender'));
     assert.ok(/renderStatus: null/.test(fn), 'a failed dispatch must un-gate the post');
     assert.ok(/status: 'failed'/.test(fn), 'and mark the job failed rather than leaving it queued');
     assert.ok(/await fetch\(/.test(fn), 'the trigger must be awaited or Lambda freezes before it leaves');
@@ -161,13 +162,13 @@ test('a video is never auto-published, whatever the policy says', () => {
     // brand_card is not held back by the AI-media rule (it is deterministic and on-brand, which is
     // sound for a still). A video nobody has watched, on a real channel, is not.
     const policy = src('src/utils/publish-policy.ts');
-    const gate = policy.slice(policy.indexOf('export async function gateAutonomousDraft'));
+    const gate = policy.slice(landmark(policy, 'export async function gateAutonomousDraft'));
     assert.ok(
         /AUTONOMOUS_DRAFT_PLATFORMS as readonly string\[\]\)\.includes\(args\.platform\)/.test(gate),
         'a platform with no autonomous drafter must always route to review',
     );
     assert.ok(
-        gate.indexOf('includes(args.platform)') < gate.indexOf('getPlatformMode'),
+        landmark(gate, 'includes(args.platform)') < landmark(gate, 'getPlatformMode'),
         'the platform check must come FIRST — it cannot be overridden by an auto_publish policy',
     );
 });
@@ -179,7 +180,7 @@ test('no renderer means no Short — never a draft gated on a render that cannot
     // the enqueuer (no wasted model call) and the drafter (the environment could lose its config
     // between the two).
     const enq = src('src/utils/schedule-gap-fill.ts');
-    const fn = enq.slice(enq.indexOf('async function resolveWeeklyShortSlot'));
+    const fn = enq.slice(landmark(enq, 'async function resolveWeeklyShortSlot'));
     assert.ok(
         /if \(!remotionConfigured\(\) \|\| !r2IsConfigured\(\)\) return null;/.test(fn),
         'the weekly slot must not be claimed when there is no renderer',
@@ -230,7 +231,7 @@ test('the trigger refuses when there is no renderer or no YouTube', () => {
     // Order matters: both refusals must precede the enqueue, or the caller pays for a model call
     // to produce a draft that cannot publish.
     assert.ok(
-        s.indexOf('RENDER_UNAVAILABLE') < s.indexOf('enqueueYoutubeShortJob(db, {'),
+        landmark(s, 'RENDER_UNAVAILABLE') < landmark(s, 'enqueueYoutubeShortJob(db, {'),
         'the render check must come before the enqueue',
     );
 });
@@ -240,7 +241,7 @@ test('the queue poke is awaited, and an abort still counts as sent', () => {
     // also refuse to block on a full drain, so the client aborts at 5s and reports success: the
     // request has already left, and aborting our end does not stop the server.
     const s = src('netlify/functions/trigger-youtube-short.ts');
-    const fn = s.slice(s.indexOf('async function pokeQueue'), s.indexOf('export default'));
+    const fn = s.slice(landmark(s, 'async function pokeQueue'), landmark(s, 'export default'));
     assert.ok(/await fetch\(/.test(fn), 'the poke must be awaited');
     assert.ok(/AbortError/.test(fn), 'an abort means the drain is running, not that it failed');
 });
@@ -269,7 +270,7 @@ test('a retry keeps forcing the video — it must not "skip" a Short back to a s
         'a forced render must bypass the needsVideoRender skip, not merely be computed beside it',
     );
     assert.ok(
-        s.indexOf('const forceVideo') < s.indexOf('!needsVideoRender('),
+        landmark(s, 'const forceVideo') < landmark(s, '!needsVideoRender('),
         'forceVideo must be decided before the skip branch can clear the gate',
     );
 });

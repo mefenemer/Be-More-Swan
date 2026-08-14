@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { POLL_CADENCE_HOURS_BY_TIER, DEFAULT_POLL_CADENCE_HOURS, pollCadenceHours } from '../src/config/goal-metrics';
+import { landmark } from './landmark';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => fs.readFileSync(path.join(ROOT, p), 'utf8');
@@ -34,7 +35,7 @@ console.log('\ngoal freshness note\n');
 
 check('poll-goal-telemetry still runs hourly, on the hour', () => {
     const toml = read('netlify.toml');
-    const block = toml.slice(toml.indexOf('[functions.poll-goal-telemetry]'));
+    const block = toml.slice(landmark(toml, '[functions.poll-goal-telemetry]'));
     assert.ok(block.startsWith('[functions.poll-goal-telemetry]'), 'poll-goal-telemetry is no longer scheduled in netlify.toml — the Goal Progress card promises a background check that would no longer happen');
     const schedule = /schedule\s*=\s*"([^"]+)"/.exec(block.slice(0, 200))?.[1];
     assert.strictEqual(schedule, '0 * * * *',
@@ -62,7 +63,7 @@ check('the card reads the cadence from the server instead of hardcoding one', ()
     const js = read('assistants.js');
     const start = js.indexOf('function _renderGoalFreshnessNote(');
     assert.ok(start > 0, '_renderGoalFreshnessNote is gone — if the note moved, move this guard with it');
-    const body = js.slice(start, js.indexOf('\n}', start));
+    const body = js.slice(start, landmark(js, '\n}', start));
     assert.ok(body.includes('_goalPollCadenceHours'),
         'the note no longer derives its cadence from the server value');
     // A literal cadence phrase would be right for one tier and wrong for the others. The branches

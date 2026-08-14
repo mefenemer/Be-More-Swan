@@ -16,6 +16,7 @@
 
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
+import { landmark } from './landmark';
 
 let passed = 0;
 const test = (name: string, fn: () => void) => {
@@ -169,7 +170,7 @@ test("a facebook data-deletion request removes the connection row itself", () =>
         );
     }
     assert.ok(
-        erase.indexOf('.delete(postInsights)') < erase.indexOf('.delete(systemConnections)'),
+        landmark(erase, '.delete(postInsights)') < landmark(erase, '.delete(systemConnections)'),
         'children must be deleted before the connection row they point at',
     );
 });

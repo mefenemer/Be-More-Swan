@@ -12,6 +12,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { SOCIAL_PLATFORMS, PLATFORM_FORMATS, normalizePlatform } from '../src/config/platform-formats';
+import { landmark } from './landmark';
 
 let passed = 0;
 const test = (name: string, fn: () => void) => {
@@ -33,8 +34,8 @@ test('the composer derives its chips instead of listing them', () => {
     // picker came to offer platforms the server refused. It is now built from the generated
     // constants, so the only thing left to assert is that nobody has written the list back.
     const html = readFileSync(new URL('../workspace.html', import.meta.url), 'utf8');
-    const decl = html.slice(html.indexOf('const _GP_PLATFORMS ='));
-    const line = decl.slice(0, decl.indexOf('\n'));
+    const decl = html.slice(landmark(html, 'const _GP_PLATFORMS ='));
+    const line = decl.slice(0, landmark(decl, '\n'));
     assert.ok(line.includes('PlatformConstants'), '_GP_PLATFORMS must come from the generated constants');
     assert.ok(!/id:\s*'instagram'/.test(line), '_GP_PLATFORMS is hand-written again');
 });

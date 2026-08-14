@@ -14,6 +14,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -56,7 +57,7 @@ check('every poke is AWAITED', () => {
 
 check('the poke never fails the enqueue it follows', () => {
     const s = read('src/utils/trigger-drain.ts');
-    const fn = s.slice(s.indexOf('async function poke'), s.indexOf('/** Start the content'));
+    const fn = s.slice(landmark(s, 'async function poke'), landmark(s, '/** Start the content'));
     assert.match(fn, /catch \(err\)/,
         'poke() must swallow its own failures — the job row is already committed, and throwing here '
         + 'would report a failure for work that was successfully queued.');
@@ -93,7 +94,7 @@ console.log('\n──── two drainers cannot claim the same slice ───�
 
 check('the job claim is a single atomic statement', () => {
     const s = read('netlify/functions/process-discovery-jobs.ts');
-    const fn = s.slice(s.indexOf('export async function drainDiscoveryJobs'), s.indexOf('export default'));
+    const fn = s.slice(landmark(s, 'export async function drainDiscoveryJobs'), landmark(s, 'export default'));
 
     // It was SELECT ... FOR UPDATE SKIP LOCKED, then a separate UPDATE inside processJob. db.execute
     // does not open a transaction, so the row lock ended with the SELECT and two drainers could
@@ -105,9 +106,9 @@ check('the job claim is a single atomic statement', () => {
     assert.match(fn, /FOR UPDATE SKIP LOCKED/,
         'concurrent drainers must skip each other\'s rows rather than queue behind them.');
 
-    const worker = s.slice(s.indexOf('async function processJob'));
+    const worker = s.slice(landmark(s, 'async function processJob'));
     assert.ok(
-        !/UPDATE discovery_jobs SET status = 'processing'/.test(worker.slice(0, worker.indexOf('try {'))),
+        !/UPDATE discovery_jobs SET status = 'processing'/.test(worker.slice(0, landmark(worker, 'try {'))),
         'processJob must NOT re-claim: the row arrives already claimed, and a second claim '
         + 'statement is what re-opens the window this test closes.',
     );
@@ -138,7 +139,7 @@ check('neither surface prints a next-run time for a one-off search', () => {
     for (const f of ['src/components/assistant-signal-inbox.js', 'src/components/assistant-discovery-campaigns.js']) {
         const s = read(f);
         const fn = s.slice(s.search(/function (cadenceLine|scheduleLine)\(/));
-        const body = fn.slice(0, fn.indexOf('\n  }'));
+        const body = fn.slice(0, landmark(fn, '\n  }'));
         assert.match(body, /cadence === 'one_off'\) return/,
             `${f} must return early for one_off, before any nextRunAt is read.`);
         assert.match(body, /scheduleEnabled/,
@@ -206,8 +207,8 @@ check('every "latest job" subquery picks the SAME job', () => {
 
 check('the Searches chip treats a staged queued job as running', () => {
     const s = read('src/components/assistant-signal-inbox.js');
-    const fn = s.slice(s.indexOf('function searchState('));
-    const body = fn.slice(0, fn.indexOf('\n  }'));
+    const fn = s.slice(landmark(s, 'function searchState('));
+    const body = fn.slice(0, landmark(fn, '\n  }'));
 
     assert.match(body, /job === 'processing' \|\| \(job === 'queued' && !!stage\)/,
         'searchState must read stage alongside status. Reading status alone is the bug: it labels a '
@@ -215,7 +216,7 @@ check('the Searches chip treats a staged queued job as running', () => {
 
     // Ordering: the running branch has to be reached BEFORE the bare `job === 'queued'` branch,
     // which is still correct for a job no slice has claimed.
-    assert.ok(body.indexOf('!!stage') < body.indexOf("if (job === 'queued')"),
+    assert.ok(landmark(body, '!!stage') < landmark(body, "if (job === 'queued')"),
         'the started check must come first, or the queued branch swallows every in-flight run.');
 });
 

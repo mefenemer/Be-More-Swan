@@ -11,6 +11,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { landmark } from './landmark';
 
 let passed = 0, total = 0;
 function check(name: string, fn: () => void) {
@@ -22,8 +23,8 @@ function check(name: string, fn: () => void) {
 const ROOT = path.resolve(import.meta.dirname, '..');
 const ws = readFileSync(path.join(ROOT, 'workspace.html'), 'utf8');
 const fn = readFileSync(path.join(ROOT, 'netlify/functions/rewrite-post-text.ts'), 'utf8');
-const rewrite = ws.slice(ws.indexOf('async function _railRewrite(action, tone) {'));
-const body = rewrite.slice(0, rewrite.indexOf('\n}\n'));
+const rewrite = ws.slice(landmark(ws, 'async function _railRewrite(action, tone) {'));
+const body = rewrite.slice(0, landmark(rewrite, '\n}\n'));
 
 console.log('\nquick rewrites edit in place\n');
 
@@ -39,7 +40,7 @@ check('the quick actions no longer cancel the draft', () => {
 
 check('the free-text Regenerate box still redrafts', () => {
     // The distinction is the point: one asks for different words, the other asks for a different post.
-    const req = ws.slice(ws.indexOf('async function rqReviewRequestChanges()'));
+    const req = ws.slice(landmark(ws, 'async function rqReviewRequestChanges()'));
     assert.match(req.slice(0, 2000), /request-post-changes/, 'a genuine redraft still uses the job pipeline');
 });
 
@@ -60,7 +61,7 @@ check('an over-limit rewrite warns instead of truncating mid-word', () => {
 check('it is metered, tenant-guarded, and refuses an empty caption first', () => {
     const guardAt = fn.indexOf('eq(scheduledPosts.organisationId, ctx.organisationId)');
     const emptyAt = fn.indexOf("if (!caption.trim())");
-    const spendAt = fn.indexOf('await consumeTaskCredit(');
+    const spendAt = landmark(fn, 'await consumeTaskCredit(');
     assert.ok(guardAt > 0 && guardAt < spendAt, 'prove ownership before billing a workspace');
     assert.ok(emptyAt > 0 && emptyAt < spendAt, 'refuse an empty caption before spending a credit on an apology');
     assert.match(fn, /if \(credit\.failed\) return json\(503/, 'an outage must not be reported as a plan limit');

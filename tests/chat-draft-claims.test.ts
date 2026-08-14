@@ -9,6 +9,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { replyClaimsPostSaved, honestDraftReply } from '../src/utils/chat-draft-claims';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void) { fn(); console.log(`  ✓ ${name}`); passed++; }
@@ -117,7 +118,7 @@ check('all three breach kinds are still distinguished', () => {
 
 check('the social route keeps enough tokens for a whole envelope', () => {
     // 1024 truncated a caption mid-JSON and lost the post. Guard the raise.
-    const social = orchestrator.slice(orchestrator.indexOf('social_media_manager: {'));
+    const social = orchestrator.slice(landmark(orchestrator, 'social_media_manager: {'));
     const maxTokens = social.match(/maxTokens:\s*(\d+)/);
     assert.ok(maxTokens, 'social route has no maxTokens');
     assert.ok(Number(maxTokens[1]) >= 2048, `social maxTokens fell back to ${maxTokens[1]}`);

@@ -23,6 +23,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { TransientRefreshError, TokenLostError, requestGrant } from '../netlify/functions/refresh-social-tokens';
+import { landmark } from './landmark';
 
 let passed = 0;
 const test = async (name: string, fn: () => void | Promise<void>) => {
@@ -166,8 +167,8 @@ await test('the persist budget can absorb one full cold-start connect', () => {
 
 await test('a transient failure returns without touching the connection', () => {
     const text = src('netlify/functions/refresh-social-tokens.ts');
-    const catchBlock = text.slice(text.indexOf('if (err instanceof TransientRefreshError)'));
-    const beforeReturn = catchBlock.slice(0, catchBlock.indexOf('return;'));
+    const catchBlock = text.slice(landmark(text, 'if (err instanceof TransientRefreshError)'));
+    const beforeReturn = catchBlock.slice(0, landmark(catchBlock, 'return;'));
     for (const forbidden of ['handleRefreshFailure', "status: 'paused'", 'token_refresh_failed']) {
         assert.ok(
             !beforeReturn.includes(forbidden),
@@ -178,8 +179,8 @@ await test('a transient failure returns without touching the connection', () => 
 
 await test('the failure handler logs before it writes, and guards every step', () => {
     const text = src('netlify/functions/refresh-social-tokens.ts');
-    const handler = text.slice(text.indexOf('async function handleRefreshFailure'));
-    const firstWrite = handler.indexOf('db.update(');
+    const handler = text.slice(landmark(text, 'async function handleRefreshFailure'));
+    const firstWrite = landmark(handler, 'db.update(');
     const firstLog = handler.indexOf('console.error(');
     assert.ok(firstLog >= 0 && firstLog < firstWrite,
         'the CONDEMNING log must be emitted before any database write, so it survives a DB outage');

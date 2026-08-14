@@ -24,6 +24,7 @@ import {
     EDIT_REASONS, EDIT_REASON_LABELS, EDIT_REASONS_FED_TO_MODEL, MIN_EDIT_SAMPLE, isEditReason,
 } from '../src/config/template-feedback';
 import { summariseEdit } from '../src/utils/template-feedback';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -40,8 +41,8 @@ const read = (p: string) => readFileSync(join(root, p), 'utf8');
 function inListValues(text: string, after: string): string[] {
     const start = text.indexOf(after);
     assert.ok(start !== -1, `could not find "${after}"`);
-    const open = text.indexOf('IN (', start);
-    const close = text.indexOf(')', open);
+    const open = landmark(text, 'IN (', start);
+    const close = landmark(text, ')', open);
     return [...text.slice(open, close).matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
 }
 
@@ -158,7 +159,7 @@ check('template_feedback has exactly one writer', () => {
 
 check('recordTemplateEdit never throws', () => {
     const util = read('src/utils/template-feedback.ts');
-    const fn = util.slice(util.indexOf('export async function recordTemplateEdit'));
+    const fn = util.slice(landmark(util, 'export async function recordTemplateEdit'));
     assert.ok(/try\s*{/.test(fn) && /catch\s*\(/.test(fn), 'must swallow — the edit already shipped');
     assert.ok(
         /return null/.test(fn),
@@ -168,9 +169,9 @@ check('recordTemplateEdit never throws', () => {
 
 check('the feedback action refuses a draft that was never edited', () => {
     const src = read('netlify/functions/lead-generation.ts');
-    const action = src.slice(src.indexOf("if (action === 'record_edit_feedback')"));
+    const action = src.slice(landmark(src, "if (action === 'record_edit_feedback')"));
     assert.ok(
-        /has not been edited/.test(action.slice(0, action.indexOf('return json(200'))),
+        /has not been edited/.test(action.slice(0, landmark(action, 'return json(200'))),
         'a feedback row with no diff would inflate the sample count the proposer gates on',
     );
 });
@@ -179,8 +180,8 @@ check('the feedback action refuses a draft that was never edited', () => {
 
 check('saveEmail stashes the original draft exactly once', () => {
     const js = read('assistants.js');
-    const branch = js.slice(js.indexOf("if (action === 'saveEmail')"));
-    const body = branch.slice(0, branch.indexOf('_rqPendingEdit ='));
+    const branch = js.slice(landmark(js, "if (action === 'saveEmail')"));
+    const body = branch.slice(0, landmark(branch, '_rqPendingEdit ='));
     assert.ok(/draftOriginal/.test(body), 'saveEmail must preserve the agent draft');
     assert.ok(
         /if\s*\(!\(rec\.data \|\| \{\}\)\.draftOriginal\)/.test(body),
@@ -191,7 +192,7 @@ check('saveEmail stashes the original draft exactly once', () => {
 
 check('the send path prefers the stashed original as generatedBody', () => {
     const src = read('netlify/functions/lead-generation.ts');
-    const idx = src.indexOf('recordOutboundMessage(db, thread.id');
+    const idx = landmark(src, 'recordOutboundMessage(db, thread.id');
     const block = src.slice(idx - 900, idx + 400);
     assert.ok(/draftOriginal/.test(block), 'generatedBody must be the AGENT text, not the human edit');
     assert.ok(
@@ -202,8 +203,8 @@ check('the send path prefers the stashed original as generatedBody', () => {
 
 check('a failed save clears the pending-edit flag', () => {
     const js = read('assistants.js');
-    const act = js.slice(js.indexOf('window._detailRqRecordAct'));
-    const scope = act.slice(0, act.indexOf('\n};'));
+    const act = js.slice(landmark(js, 'window._detailRqRecordAct'));
+    const scope = act.slice(0, landmark(act, '\n};'));
     const catchBlock = scope.slice(scope.lastIndexOf('} catch (e) {'));
     assert.ok(
         /_rqPendingEdit = null/.test(catchBlock),

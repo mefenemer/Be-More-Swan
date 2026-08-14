@@ -36,6 +36,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { needsPersonalInboxConfirmation, emailSourceLabel } from '../src/config/lead-email-kind';
 import { isEnrichProviderConfigured, lookupProviderContact } from '../src/lib/discovery-enrich-provider';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -145,8 +146,8 @@ check('every failure path returns null rather than throwing', () => {
 // ── 3. Waterfall ordering and the cap ────────────────────────────────────────
 
 check('the free scrape runs BEFORE any purchase', () => {
-    const i = WORKER.indexOf('async function enrichBatch');
-    const body = WORKER.slice(i, WORKER.indexOf('async function recordEnrichment'));
+    const i = landmark(WORKER, 'async function enrichBatch');
+    const body = WORKER.slice(i, landmark(WORKER, 'async function recordEnrichment'));
     const iScrape = body.indexOf('enrichLeadContact(');
     const iPaid = body.indexOf('lookupProviderContact(');
     assert.ok(iScrape !== -1 && iPaid !== -1, 'one of the two enrichment tiers is gone');

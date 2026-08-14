@@ -18,6 +18,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { crmDescription, crmHeaders, crmRow, splitName, websiteUrl, isCrmTarget, CRM_TARGETS, LEAD_SOURCE } from '../src/config/crm-export';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -156,8 +157,8 @@ check('no name means EMPTY cells, never a company name in the surname', () => {
     }
     const row = crmRow('salesforce', { ...FULL, firstName: '', lastName: '' });
     const h = crmHeaders('salesforce');
-    assert.equal(row[h.indexOf('Last Name')], '');
-    assert.equal(row[h.indexOf('Company')], 'Harrow Lane Bakery', 'the company must still be exported');
+    assert.equal(row[landmark(h, 'Last Name')], '');
+    assert.equal(row[landmark(h, 'Company')], 'Harrow Lane Bakery', 'the company must still be exported');
 });
 
 check('a bare domain becomes a browsable URL', () => {
@@ -171,7 +172,7 @@ check('a bare domain becomes a browsable URL', () => {
 console.log('\n──── the export is wired, and the website is not empty ────');
 
 const FN = read('netlify/functions/assistant-records.ts');
-const BRANCH = FN.slice(FN.indexOf('const crmTarget ='), FN.indexOf('// Spreadsheet fallback'));
+const BRANCH = FN.slice(landmark(FN, 'const crmTarget ='), landmark(FN, '// Spreadsheet fallback'));
 
 check('the website is read from discovered_leads, not only the record', () => {
     // THE failure this feature would otherwise ship with. `normaliseLeadCard` returns a closed
@@ -180,7 +181,7 @@ check('the website is read from discovered_leads, not only the record', () => {
         'nothing reads discovered_leads — the Website column would be empty on every discovery lead');
     assert.ok(/websiteUrl\(domain\)/.test(BRANCH), 'the domain never reaches the row');
     const card = read('src/lib/discovery-scoring.ts');
-    const shape = card.slice(card.indexOf('export interface LeadScoringCard'), card.indexOf('export interface ScoreResult'));
+    const shape = card.slice(landmark(card, 'export interface LeadScoringCard'), landmark(card, 'export interface ScoreResult'));
     assert.ok(!/\bdomain\b/.test(shape),
         'the scoring card now carries a domain — if so, the extra query may be avoidable, but check before removing it');
 });
@@ -195,7 +196,7 @@ check('it only applies to leads, and only when asked', () => {
         'the CRM shape must be opt-in and lead-only');
     // The generic export is what every other hub's Export CSV button uses. An unrecognised or
     // absent `crm` has to fall through to it untouched.
-    assert.ok(FN.indexOf("if (event.queryStringParameters?.format === 'csv') {") > FN.indexOf('const crmTarget ='),
+    assert.ok(landmark(FN, "if (event.queryStringParameters?.format === 'csv') {") > landmark(FN, 'const crmTarget ='),
         'the generic CSV branch is gone — every non-lead hub just lost its export');
 });
 
@@ -214,7 +215,7 @@ console.log('\n──── the offer is honest about the empty name columns ─
 
 check('the UI warns before the download, not after the failed import', () => {
     const hub = read('src/components/assistant-data-hub.js');
-    const block = hub.slice(hub.indexOf('data-hub-crm="hubspot"') - 400, hub.indexOf('data-hub-crm="salesforce"') + 600);
+    const block = hub.slice(landmark(hub, 'data-hub-crm="hubspot"') - 400, landmark(hub, 'data-hub-crm="salesforce"') + 600);
     assert.ok(/Salesforce needs a last name/.test(block),
         'the export must say why rows with no named contact will not import as Leads');
     assert.ok(/hub\.recordType === 'lead'/.test(hub), 'the CRM offer must not appear on non-lead hubs');

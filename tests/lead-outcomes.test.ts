@@ -21,6 +21,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { landmark } from './landmark';
 import {
     OUTCOMES, LOSS_REASONS, OUTCOME_FOR_EVENT, TERMINAL_EVENT_TYPES,
     LOSS_REASON_LABELS, OUTCOME_LABELS, EVENT_FOR_OUTCOME, OUTCOMES_REQUIRING_LOSS_REASON,
@@ -133,7 +134,7 @@ function recordEventCalls(src: string): string[] {
     while ((i = src.indexOf(marker, i)) !== -1) {
         // Skip the import, the definition and prose references ("recordEvent() is the only writer").
         const lineStart = src.lastIndexOf('\n', i) + 1;
-        const line = src.slice(lineStart, src.indexOf('\n', i));
+        const line = src.slice(lineStart, landmark(src, '\n', i));
         if (line.trimStart().startsWith('//') || line.trimStart().startsWith('*')) { i += marker.length; continue; }
 
         let depth = 0, end = -1;
@@ -170,9 +171,9 @@ for (const [file, expected] of Object.entries(EMIT_SITES)) {
             );
         });
         if (/\.\.\.ledgerBase/.test(src)) {
-            const base = src.slice(src.indexOf('const ledgerBase'));
+            const base = src.slice(landmark(src, 'const ledgerBase'));
             assert.ok(
-                /blueprintVersion/.test(base.slice(0, base.indexOf('};'))),
+                /blueprintVersion/.test(base.slice(0, landmark(base, '};'))),
                 'ledgerBase is spread into recordEvent calls but does not set blueprintVersion',
             );
         }
@@ -184,7 +185,7 @@ check('the blueprint-version lookup is never memoised at module scope', () => {
     // The cache must be created inside the factory. A `const cache = new Map()` at module level
     // would survive in a warm Lambda and keep stamping a version a recompile has already replaced —
     // silently corrupting the attribution this module exists to provide.
-    const beforeFactory = src.slice(0, src.indexOf('export function makeBlueprintVersionCache'));
+    const beforeFactory = src.slice(0, landmark(src, 'export function makeBlueprintVersionCache'));
     assert.ok(
         !/^\s*const\s+\w+\s*=\s*new Map/m.test(beforeFactory),
         'a module-level Map here outlives the request and would serve stale blueprint versions',
@@ -197,7 +198,7 @@ check('the blueprint-version lookup is never memoised at module scope', () => {
 
 check('set_outcome refuses a value on anything but a win', () => {
     const src = read('netlify/functions/lead-generation.ts');
-    const action = src.slice(src.indexOf("if (action === 'set_outcome')"));
+    const action = src.slice(landmark(src, "if (action === 'set_outcome')"));
     assert.ok(
         /outcome !== 'won'[\s\S]{0,200}A deal value can only be recorded on a won deal/.test(action),
         'a value on a lost deal would mix revenue earned with revenue missed in one aggregate',
@@ -206,7 +207,7 @@ check('set_outcome refuses a value on anything but a win', () => {
 
 check('set_outcome requires an explicit confirmation before overwriting an outcome', () => {
     const src = read('netlify/functions/lead-generation.ts');
-    const action = src.slice(src.indexOf("if (action === 'set_outcome')"));
+    const action = src.slice(landmark(src, "if (action === 'set_outcome')"));
     assert.ok(
         /confirmChange !== true/.test(action) && /409/.test(action),
         'the ledger is append-only, so a mis-click would leave one lead counted as both won and lost',
@@ -219,15 +220,15 @@ check('set_outcome requires an explicit confirmation before overwriting an outco
 
 check('recording an outcome halts any running cadence', () => {
     const src = read('netlify/functions/lead-generation.ts');
-    const action = src.slice(src.indexOf("if (action === 'set_outcome')"));
+    const action = src.slice(landmark(src, "if (action === 'set_outcome')"));
     assert.ok(
         /haltEnrolmentsForRecord\(/.test(action),
         'a decided deal that keeps receiving "just following up!" is the most visible failure here',
     );
     const seq = read('src/utils/outreach-sequences.ts');
-    const fn = seq.slice(seq.indexOf('export async function haltEnrolmentsForRecord'));
+    const fn = seq.slice(landmark(seq, 'export async function haltEnrolmentsForRecord'));
     assert.ok(
-        /haltEnrolment\(db, r, 'manual'/.test(fn.slice(0, fn.indexOf('\n}'))),
+        /haltEnrolment\(db, r, 'manual'/.test(fn.slice(0, landmark(fn, '\n}'))),
         'must route through haltEnrolment — it is what clears next_send_at, and a row whose state '
         + 'changed but whose timestamp did not is still claimable by the worker',
     );

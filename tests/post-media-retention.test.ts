@@ -26,6 +26,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { mayRun } from '../netlify/functions/content-retention';
 import { MEDIA_PENDING_STATUSES, mediaStillNeeded } from '../src/config/post-status';
+import { landmark } from './landmark';
 
 let passed = 0;
 let total = 0;
@@ -335,7 +336,7 @@ check('the reclaimer selects on the retention date, not on a status', () => {
 // propagateAssetStatuses unable to fire: one missed hop upstream and the asset is stranded for ever.
 check('the posted transition does not gate on the asset\'s current status', () => {
     const src = stripComments(read('src/utils/release-post-media.ts'));
-    const fn = src.slice(src.indexOf('export async function markPostMediaPosted'));
+    const fn = src.slice(landmark(src, 'export async function markPostMediaPosted'));
     assert.ok(fn.length > 0, 'markPostMediaPosted must exist');
     assert.ok(!/eq\(contentAssets\.status/.test(fn),
         'markPostMediaPosted must not require the asset to already hold a particular status — that is the exact gate that stopped propagateAssetStatuses ever firing');
@@ -349,7 +350,7 @@ check('the posted transition does not gate on the asset\'s current status', () =
 // platform's success would put a purge timer on a picture the next platform has yet to upload.
 check('a published post does not start the clock on media a sibling still needs', () => {
     const src = stripComments(read('src/utils/release-post-media.ts'));
-    const fn = src.slice(src.indexOf('export async function markPostMediaPosted'));
+    const fn = src.slice(landmark(src, 'export async function markPostMediaPosted'));
     assert.ok(/stillNeeded/.test(fn),
         'markPostMediaPosted must exclude assets that an unpublished post still references');
     assert.ok(/scheduled_post_assets/.test(fn) && /content_asset_ids|assetIdsLateral/.test(fn),

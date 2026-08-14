@@ -24,6 +24,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { deriveAssetStatus, type AssetUsage } from '../netlify/functions/content-assets';
 import { SCHEDULE_ACTIVE_STATUSES, SCHEDULE_INACTIVE_STATUSES, isScheduleActive } from '../src/config/post-status';
+import { landmark } from './landmark';
 
 let passed = 0, total = 0;
 function check(name: string, fn: () => void) {
@@ -177,7 +178,7 @@ function clientFn<T>(names: string[]): T {
         throw new Error(`unbalanced ${name}`);
     });
     // MEDIA_TYPES is a const the helpers close over; lift it too.
-    const consts = src.slice(src.indexOf('const MEDIA_TYPES = {'), src.indexOf('/** Which of MEDIA_TYPES'));
+    const consts = src.slice(landmark(src, 'const MEDIA_TYPES = {'), landmark(src, '/** Which of MEDIA_TYPES'));
     return new Function(`${consts}\n${bodies.join('\n')}\nreturn ${names[names.length - 1]};`)() as T;
 }
 

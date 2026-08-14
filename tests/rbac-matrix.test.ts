@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ADMIN_ROLES, hasPermission, permissionsForRole, isAdminRole } from '../src/utils/rbac';
+import { landmark } from './landmark';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -80,7 +81,7 @@ check('isAdminRole covers exactly the admin roles', () => {
 // so assert every key the nav references actually exists.
 check('every permission referenced by the admin.html nav exists in the matrix', () => {
     const html = readFileSync(join(root, 'admin.html'), 'utf8');
-    const navBlock = html.slice(html.indexOf('const ADMIN_CATS'), html.indexOf('function _getAdminRole'));
+    const navBlock = html.slice(landmark(html, 'const ADMIN_CATS'), landmark(html, 'function _getAdminRole'));
     assert.ok(navBlock.length > 0, 'could not locate the ADMIN_CATS block in admin.html');
 
     const referenced = [...navBlock.matchAll(/perm:\s*'([a-z_]+)'/g)].map((m) => m[1]);
@@ -94,7 +95,7 @@ check('every permission referenced by the admin.html nav exists in the matrix', 
 
 check('no nav child is orphaned — every child declares a perm or is explicitly open', () => {
     const html = readFileSync(join(root, 'admin.html'), 'utf8');
-    const navBlock = html.slice(html.indexOf('const ADMIN_CATS'), html.indexOf('function _getAdminRole'));
+    const navBlock = html.slice(landmark(html, 'const ADMIN_CATS'), landmark(html, 'function _getAdminRole'));
     const children = [...navBlock.matchAll(/\{\s*view:\s*'[a-z-]+'[^}]*\}/g)].map((m) => m[0]);
     assert.ok(children.length > 20, `expected many nav children, found ${children.length}`);
     for (const child of children) {

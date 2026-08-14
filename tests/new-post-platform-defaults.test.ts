@@ -14,6 +14,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { landmark } from './landmark';
 
 let passed = 0, total = 0;
 function check(name: string, fn: () => void) {
@@ -29,7 +30,7 @@ const gen = readFileSync(path.join(ROOT, 'netlify/functions/generate-post.ts'), 
 console.log('\nnew post platform defaults\n');
 
 check('the Create Post sheet preselects every connected platform', () => {
-    const block = ws.slice(ws.indexOf('gpUpdateConnectedPlatforms(_gpCap?.connectedPlatforms || [])'));
+    const block = ws.slice(landmark(ws, 'gpUpdateConnectedPlatforms(_gpCap?.connectedPlatforms || [])'));
     const body = block.slice(0, 1400);
     assert.match(body, /_gpSelectedPlatforms = all\.length \? all : \['instagram'\]/,
         'selecting only the first connected platform is how four accounts became one Instagram draft');
@@ -39,7 +40,7 @@ check('the Create Post sheet preselects every connected platform', () => {
 });
 
 check('the command bar asks for a fan-out, not one network', () => {
-    const block = ws.slice(ws.indexOf("if (d.type === 'delegate' && d.assistantId)"));
+    const block = ws.slice(landmark(ws, "if (d.type === 'delegate' && d.assistantId)"));
     const body = block.slice(0, 2200);
     assert.match(body, /platforms: platforms\.length \? platforms : undefined/,
         'sending `platform` alone stores a legacy single-platform job');
@@ -59,8 +60,8 @@ check('the seeding block keeps exactly one Instagram fallback', () => {
     // Scoped to the block that DECIDES the default, not the whole file: the module-level initial
     // value and the `[0] || 'instagram'` primary-platform fallback are both legitimate and are
     // overwritten on open. What must not come back is a literal used as a PRESELECTION.
-    const start = ws.indexOf('gpUpdateConnectedPlatforms(_gpCap?.connectedPlatforms || [])');
-    const block = ws.slice(start, ws.indexOf('gpRenderPlatformSelection();', start));
+    const start = landmark(ws, 'gpUpdateConnectedPlatforms(_gpCap?.connectedPlatforms || [])');
+    const block = ws.slice(start, landmark(ws, 'gpRenderPlatformSelection();', start));
     const hits = block.match(/'instagram'/g) || [];
     assert.strictEqual(hits.length, 1, 'one fallback, reachable only when nothing is connected');
     assert.match(block, /all\.length \? all : \['instagram'\]/, 'and it is the else branch, not the default');

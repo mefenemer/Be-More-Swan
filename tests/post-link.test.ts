@@ -17,6 +17,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { normalisePostLink, postLinkLine, composePostText, type PostLinkFields } from '../src/utils/post-link';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -195,7 +196,7 @@ check('the link step saves itself, since its rail step has no Save button', () =
     // and does not bring that button with it. Without a save on blur the echo described a line that
     // was never written, never previewed and never published.
     const html = readFileSync(path.join(import.meta.dirname, '..', 'workspace.html'), 'utf8');
-    const block = html.slice(html.indexOf('<div id="pce-link-block"'), html.indexOf('<!-- ── "Write with'));
+    const block = html.slice(landmark(html, '<div id="pce-link-block"'), landmark(html, '<!-- ── "Write with'));
     assert.match(block, /id="post-review-link-url"[\s\S]*?onblur="[^"]*_pceSaveLinkFields\(\)"/,
         'the link field must commit on blur');
     assert.match(block, /id="post-review-cta"[\s\S]*?onblur="[^"]*_pceSaveLinkFields\(\)"/,

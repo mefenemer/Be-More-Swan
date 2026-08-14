@@ -13,6 +13,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { landmark } from './landmark';
 
 let passed = 0, total = 0;
 function check(name: string, fn: () => void) {
@@ -124,13 +125,13 @@ check('paging is opt-in, so the other callers still get the whole list', () => {
     // _pceRefetchPostGroup is the one that matters: it refetches after every card save, and a
     // silently-paged response would stop updating posts outside the first page.
     const ws = readFileSync(path.join(ROOT, 'workspace.html'), 'utf8');
-    const refetch = ws.slice(ws.indexOf('async function _pceRefetchPostGroup('));
+    const refetch = ws.slice(landmark(ws, 'async function _pceRefetchPostGroup('));
     assert.ok(!/limit=/.test(refetch.slice(0, 500)), 'the editor refetch must NOT page');
 });
 
 check('the client offsets by groups and appends rather than replacing', () => {
     const ws = readFileSync(path.join(ROOT, 'workspace.html'), 'utf8');
-    const more = ws.slice(ws.indexOf('async function rqLoadMorePosts('));
+    const more = ws.slice(landmark(ws, 'async function rqLoadMorePosts('));
     assert.match(more.slice(0, 1200), /const offset = rqGroupSocialDrafts\(_rqLoadedPosts\)\.length/,
         'offsetting by rows would skip whole posts — see the test above');
     assert.match(more.slice(0, 1200), /_rqLoadedPosts = \[\.\.\._rqLoadedPosts, \.\.\.\(pj\.drafts \|\| \[\]\)\]/,
@@ -149,7 +150,7 @@ check('the pending badge reports the total, not the page', () => {
 // the moment you clicked Review — which is exactly how the bug was reported.
 check('the sidebar pill counts CARDS, not per-platform rows', () => {
     const ws = readFileSync(path.join(ROOT, 'workspace.html'), 'utf8');
-    const poll = ws.slice(ws.indexOf('async function refreshPendingBadge('));
+    const poll = ws.slice(landmark(ws, 'async function refreshPendingBadge('));
     const head = poll.slice(0, 1400);
     // The bug: drafts.length is one row PER PLATFORM, so a 4-platform post read as 4 in the sidebar
     // and 1 in the queue.
@@ -161,7 +162,7 @@ check('the sidebar pill counts CARDS, not per-platform rows', () => {
 
 check('the sidebar pill is not inflated by rows nothing renders', () => {
     const ws = readFileSync(path.join(ROOT, 'workspace.html'), 'utf8');
-    const poll = ws.slice(ws.indexOf('async function refreshPendingBadge('), ws.indexOf('// ── Review Queue ──'));
+    const poll = ws.slice(landmark(ws, 'async function refreshPendingBadge('), landmark(ws, '// ── Review Queue ──'));
     // get-pending-actions has no renderer left (rqLoadItems draws posts only), so counting it gave a
     // pill that could never be cleared — and that rqRenderGroups dropped on the first click anyway.
     assert.ok(!/get-pending-actions/.test(poll), 'the pill must count what its destination shows');
@@ -176,7 +177,7 @@ check('the sidebar pill is not inflated by rows nothing renders', () => {
 // and after the fix it dumped the entire queue with no paging. These pin the paged wiring.
 check('the detail Review tab requests a page, not the whole queue', () => {
     const js = readFileSync(path.join(ROOT, 'assistants.js'), 'utf8');
-    const render = js.slice(js.indexOf('async function _detailRqRenderGroups('));
+    const render = js.slice(landmark(js, 'async function _detailRqRenderGroups('));
     assert.match(render.slice(0, 1600), /limit=\$\{_DETAIL_RQ_PAGE_SIZE\}&offset=0/,
         'the first load must be paged, or a large queue re-presigns every asset at once');
     assert.match(render.slice(0, 4000), /container\.innerHTML = [\s\S]*\+ _detailRqMoreButton\(statusKey\)/, 'no Show-more button ⇒ pages past the first are unreachable');
@@ -184,7 +185,7 @@ check('the detail Review tab requests a page, not the whole queue', () => {
 
 check('the detail tab offsets by groups and appends, like the workspace queue', () => {
     const js = readFileSync(path.join(ROOT, 'assistants.js'), 'utf8');
-    const more = js.slice(js.indexOf('window._detailRqLoadMore ='));
+    const more = js.slice(landmark(js, 'window._detailRqLoadMore ='));
     assert.match(more.slice(0, 1200), /rqGroupSocialDrafts\(_detailRqLoadedPosts\) : _detailRqLoadedPosts\)\.length/,
         'offsetting by rows would skip whole posts across the group boundary');
     assert.match(more.slice(0, 1200), /_detailRqLoadedPosts = \[\.\.\._detailRqLoadedPosts, \.\.\.\(pj\.drafts \|\| \[\]\)\]/,

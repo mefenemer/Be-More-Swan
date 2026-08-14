@@ -34,6 +34,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { flattenQueries, buildSystemPrompt } from '../src/lib/discovery-query-gen';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -59,8 +60,8 @@ const SCHEMA = read('db/schema.ts');
 const DDL = read('db/discovery-approved-brief.sql');
 
 /** The approve_brief branch alone, so ordering claims can't match another action's code. */
-const APPROVE = API.slice(API.indexOf("if (action === 'approve_brief')"), API.indexOf("if (action === 'run_now')"));
-const GENERATE = API.slice(API.indexOf("if (action === 'generate_brief')"), API.indexOf("if (action === 'approve_brief')"));
+const APPROVE = API.slice(landmark(API, "if (action === 'approve_brief')"), landmark(API, "if (action === 'run_now')"));
+const GENERATE = API.slice(landmark(API, "if (action === 'generate_brief')"), landmark(API, "if (action === 'approve_brief')"));
 
 // ── 1. Cost-neutrality: the seeded cursor ────────────────────────────────────
 
@@ -176,7 +177,7 @@ check('the plan is editable, and edits are what gets sent', () => {
     assert.ok(/function collectQueries\(root\)/.test(UI), 'the edited plan is never read back from the DOM');
     assert.ok(/data-dc-query-input/.test(UI), 'the queries are not editable');
     assert.ok(/data-dc-remove/.test(UI) && /data-dc-add/.test(UI), 'queries cannot be removed or added');
-    assert.ok(/queries,\n/.test(UI.slice(UI.indexOf('approve_brief'))), 'the collected queries are not sent to approve_brief');
+    assert.ok(/queries,\n/.test(UI.slice(landmark(UI, 'approve_brief'))), 'the collected queries are not sent to approve_brief');
 });
 
 check('user-edited queries are sanitised server-side', () => {

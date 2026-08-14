@@ -22,6 +22,7 @@ import {
     isEventType, isTerminal, isLossReason, isActor, isOutcome,
 } from '../src/config/revenue-events';
 import { recordEvent, cycleDaysBetween } from '../src/utils/revenue-ledger';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void | Promise<void>): void | Promise<void> {
@@ -114,7 +115,7 @@ check('every OUTCOME appears in the SQL CHECK constraint', () => {
 });
 
 check('db/schema.ts check() constraints match the SQL (drizzle-kit push must not revert the DDL)', () => {
-    const block = schemaText.slice(schemaText.indexOf('export const revenueEvents'));
+    const block = schemaText.slice(landmark(schemaText, 'export const revenueEvents'));
     for (const a of ACTORS) {
         assert.ok(block.includes(`'${a}'`), `schema.ts actor check is missing '${a}'`);
     }
@@ -129,7 +130,7 @@ check('db/schema.ts check() constraints match the SQL (drizzle-kit push must not
 check('the partial outcome index is declared in BOTH schema.ts and the SQL', () => {
     assert.ok(/revenue_events_outcome_idx[\s\S]*?WHERE outcome IS NOT NULL/.test(sqlText),
         'SQL is missing the partial predicate — the index would cover every row and lose its point');
-    const block = schemaText.slice(schemaText.indexOf('export const revenueEvents'));
+    const block = schemaText.slice(landmark(schemaText, 'export const revenueEvents'));
     assert.ok(block.includes('revenue_events_outcome_idx') && block.includes('outcome IS NOT NULL'),
         'schema.ts is missing the partial predicate on revenue_events_outcome_idx');
 });

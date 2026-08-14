@@ -16,6 +16,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { readCadence } from '../src/config/posting-cadence';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void) { fn(); console.log(`  ✓ ${name}`); passed++; }
@@ -65,21 +66,21 @@ check('the gap-fill asks readCadence why there are no slots', () => {
 });
 
 check('only the unreadable case notifies', () => {
-    const bail = gapFill.slice(gapFill.indexOf('const slots = computeScheduleSlots'));
-    const block = bail.slice(0, bail.indexOf('// Resolve the latest blueprint'));
+    const bail = gapFill.slice(landmark(gapFill, 'const slots = computeScheduleSlots'));
+    const block = bail.slice(0, landmark(bail, '// Resolve the latest blueprint'));
     const notifyLine = block.split('\n').find(l => l.includes('notifyUnreadableCadence'));
     assert.ok(notifyLine, 'the unreadable-cadence notification is no longer sent');
     // It must sit inside the `kind === 'unrecognised'` branch, not before it.
     assert.ok(
-        block.indexOf("kind === 'unrecognised'") < block.indexOf('notifyUnreadableCadence('),
+        landmark(block, "kind === 'unrecognised'") < landmark(block, 'notifyUnreadableCadence('),
         'notifyUnreadableCadence is called outside the unrecognised branch — an on_demand user ' +
         'would be told their schedule is broken when they switched it off on purpose.',
     );
 });
 
 check('the notification is deduped, because the cron is hourly', () => {
-    const fn = gapFill.slice(gapFill.indexOf('async function notifyUnreadableCadence'));
-    const body = fn.slice(0, fn.indexOf('\n}'));
+    const fn = gapFill.slice(landmark(gapFill, 'async function notifyUnreadableCadence'));
+    const body = fn.slice(0, landmark(fn, '\n}'));
     assert.ok(
         /interval '3 days'/.test(body) && /autopilot_schedule_unreadable/.test(body),
         'the dedup window is gone — a broken cadence does not self-heal, so the user would be ' +
@@ -91,10 +92,10 @@ check('the notification is deduped, because the cron is hourly', () => {
 check('every reason the helper can return has a counter', () => {
     // The tally ignores unknown reasons (`skipped[result.reason] !== undefined`), so a reason
     // missing here is silently discarded and the counter reads healthy.
-    const union = gapFill.slice(gapFill.indexOf('reason?:'), gapFill.indexOf('}', gapFill.indexOf('reason?:')));
+    const union = gapFill.slice(landmark(gapFill, 'reason?:'), landmark(gapFill, '}', landmark(gapFill, 'reason?:')));
     const reasons = [...union.matchAll(/'([a-z_]+)'/g)].map(m => m[1]).filter(r => r !== 'ok');
     assert.ok(reasons.length >= 7, `expected the full reason union, parsed ${reasons.length}`);
-    const counters = cron.slice(cron.indexOf('const skipped'), cron.indexOf('const needsAttention'));
+    const counters = cron.slice(landmark(cron, 'const skipped'), landmark(cron, 'const needsAttention'));
     for (const r of reasons) {
         assert.ok(counters.includes(`${r}: 0`), `draft-horizon-fill has no counter for '${r}'`);
     }
@@ -126,8 +127,8 @@ check('both alerts land in "Action required"', () => {
 // tick, and a failed auto-compile leaves no blueprint at all. Both were counted and discarded.
 
 check('every permanent stop is an attention reason', () => {
-    const set = gapFill.slice(gapFill.indexOf('GAP_FILL_ATTENTION_REASONS'));
-    const block = set.slice(0, set.indexOf(']'));
+    const set = gapFill.slice(landmark(gapFill, 'GAP_FILL_ATTENTION_REASONS'));
+    const block = set.slice(0, landmark(set, ']'));
     for (const r of ['unrecognised_cadence', 'blocking_gaps', 'no_blueprint']) {
         assert.ok(block.includes(`'${r}'`), `${r} is not flagged for attention — it stops the ` +
             'assistant permanently and re-running the cron changes nothing.');
@@ -139,7 +140,7 @@ check('every permanent stop is an attention reason', () => {
 });
 
 check('blocking gaps notify the user', () => {
-    const i = gapFill.indexOf('const blockingGaps');
+    const i = landmark(gapFill, 'const blockingGaps');
     const block = gapFill.slice(i, i + 400);
     assert.ok(
         /notifyBlockedSetup\(/.test(block),
@@ -150,8 +151,8 @@ check('blocking gaps notify the user', () => {
 check('internal-owned gaps do not nag the user', () => {
     // 'Re-provision the assistant — hire-time brief never compiled' is ours. A notification the
     // user cannot act on is worse than none, so the notifier must bail when nothing is theirs.
-    const fn = gapFill.slice(gapFill.indexOf('async function notifyBlockedSetup'));
-    const body = fn.slice(0, fn.indexOf('\n}\n'));
+    const fn = gapFill.slice(landmark(gapFill, 'async function notifyBlockedSetup'));
+    const body = fn.slice(0, landmark(fn, '\n}\n'));
     assert.ok(
         /owner !== 'internal'/.test(body),
         'notifyBlockedSetup no longer filters out internal-owned gaps.',

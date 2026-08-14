@@ -31,6 +31,7 @@ import {
 } from '../src/config/account-graph';
 import { VECTOR_SOURCE_TYPES, isVectorSourceType } from '../src/config/vector-sources';
 import { normaliseAccountDomain, domainFromEmail } from '../src/utils/account-graph';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -54,8 +55,8 @@ check('gdpr-asset-purge filters vector_embeddings by source_type, not source_id 
     // sequences, so erasing workspace assets [1,2,3] also deleted kb_article 1 and inspo_item 2 —
     // including other organisations' rows — while leaving the erased user's own kb/inspo vectors
     // in place. Exactly backwards.
-    const block = purgeText.slice(purgeText.indexOf('.delete(vectorEmbeddings)'));
-    const stmt = block.slice(0, block.indexOf('.returning('));
+    const block = purgeText.slice(landmark(purgeText, '.delete(vectorEmbeddings)'));
+    const stmt = block.slice(0, landmark(block, '.returning('));
     assert.ok(
         stmt.includes('eq(vectorEmbeddings.sourceType'),
         'the delete must be scoped by source_type — without it this deletes other tenants\' rows',
@@ -77,10 +78,10 @@ check('every writer of vector_embeddings uses a declared source type', () => {
 check('an embedded memory row and its map row are written in ONE transaction', () => {
     // Split across two statements, a crash between them leaves a vector nothing can find later to
     // prove it was erased.
-    const fn = memoryText.slice(memoryText.indexOf('export async function writeMemories'));
+    const fn = memoryText.slice(landmark(memoryText, 'export async function writeMemories'));
     const txAt = fn.indexOf('db.transaction(');
-    const memInsertAt = fn.indexOf('tx.insert(accountMemory)');
-    const mapInsertAt = fn.indexOf('tx.insert(vectorEmbeddings)');
+    const memInsertAt = landmark(fn, 'tx.insert(accountMemory)');
+    const mapInsertAt = landmark(fn, 'tx.insert(vectorEmbeddings)');
     assert.ok(txAt > 0, 'writeMemories must use a transaction');
     assert.ok(memInsertAt > txAt, 'the memory insert must be inside the transaction');
     assert.ok(mapInsertAt > txAt, 'the map insert must be inside the SAME transaction');
@@ -88,16 +89,16 @@ check('an embedded memory row and its map row are written in ONE transaction', (
 
 check('the map row is written only when there is actually a vector', () => {
     // An unembedded row has no vector to register; a map row for it would claim a vector exists.
-    const fn = memoryText.slice(memoryText.indexOf('export async function writeMemories'));
+    const fn = memoryText.slice(landmark(memoryText, 'export async function writeMemories'));
     const guardAt = fn.indexOf('if (vector) {');
-    const mapAt = fn.indexOf('tx.insert(vectorEmbeddings)');
+    const mapAt = landmark(fn, 'tx.insert(vectorEmbeddings)');
     assert.ok(guardAt > 0 && guardAt < mapAt, 'the map insert must be guarded on the vector existing');
 });
 
 check('the embedding call happens OUTSIDE the transaction', () => {
     // A provider round trip inside a transaction pins a pooled Neon connection for its duration —
     // a slow provider becomes pool exhaustion for the whole app.
-    const fn = memoryText.slice(memoryText.indexOf('export async function writeMemories'));
+    const fn = memoryText.slice(landmark(memoryText, 'export async function writeMemories'));
     const embedAt = fn.indexOf('await embedTexts(');
     const txAt = fn.indexOf('db.transaction(');
     assert.ok(embedAt > 0 && txAt > 0, 'fixture: could not locate both calls');
@@ -105,9 +106,9 @@ check('the embedding call happens OUTSIDE the transaction', () => {
 });
 
 check('an embedding failure stores the row unembedded rather than losing it', () => {
-    const fn = memoryText.slice(memoryText.indexOf('export async function writeMemories'));
+    const fn = memoryText.slice(landmark(memoryText, 'export async function writeMemories'));
     const catchAt = fn.indexOf('} catch (err) {');
-    const nullAt = fn.indexOf('vectors = null');
+    const nullAt = landmark(fn, 'vectors = null');
     assert.ok(catchAt > 0, 'the embed call must be wrapped');
     assert.ok(
         nullAt > catchAt && nullAt - catchAt < 500,
@@ -125,7 +126,7 @@ check('the migration documents the pairing invariant as a runnable query', () =>
 // ── 3. Traversal termination ─────────────────────────────────────────────────
 
 check('the recursive CTE has BOTH a depth cap and a visited-path guard', () => {
-    const fn = graphText.slice(graphText.indexOf('export async function traverseGraph'));
+    const fn = graphText.slice(landmark(graphText, 'export async function traverseGraph'));
     assert.ok(fn.includes('WITH RECURSIVE'), 'traversal must be a recursive CTE');
     assert.ok(/w\.depth < \$\{depth\}/.test(fn), 'the depth cap is missing');
     assert.ok(
@@ -135,7 +136,7 @@ check('the recursive CTE has BOTH a depth cap and a visited-path guard', () => {
 });
 
 check('the depth argument cannot exceed the configured ceiling', () => {
-    const fn = graphText.slice(graphText.indexOf('export async function traverseGraph'));
+    const fn = graphText.slice(landmark(graphText, 'export async function traverseGraph'));
     assert.ok(
         fn.includes('Math.min(') && fn.includes('MAX_TRAVERSAL_DEPTH'),
         'a caller-supplied depth must be clamped, not trusted',
@@ -146,8 +147,8 @@ check('the depth argument cannot exceed the configured ceiling', () => {
 
 check('every hop re-asserts the organisation scope', () => {
     // One cross-org edge would otherwise walk straight out of this tenant's data.
-    const fn = graphText.slice(graphText.indexOf('export async function traverseGraph'));
-    const recursive = fn.slice(fn.indexOf('UNION ALL'));
+    const fn = graphText.slice(landmark(graphText, 'export async function traverseGraph'));
+    const recursive = fn.slice(landmark(fn, 'UNION ALL'));
     assert.ok(recursive.includes('n.organisation_id = ${organisationId}'), 'node scope missing on the recursive hop');
     assert.ok(recursive.includes('e.organisation_id = ${organisationId}'), 'edge scope missing on the recursive hop');
 });
@@ -155,7 +156,7 @@ check('every hop re-asserts the organisation scope', () => {
 check('the traversal follows edges in both directions', () => {
     // works_at points contact→account, so an outgoing-only walk from an account never finds its
     // own employees.
-    const fn = graphText.slice(graphText.indexOf('export async function traverseGraph'));
+    const fn = graphText.slice(landmark(graphText, 'export async function traverseGraph'));
     assert.ok(
         /e\.from_node_id = w\.id OR e\.to_node_id = w\.id/.test(fn),
         'the join must consider edges arriving as well as leaving',
@@ -163,7 +164,7 @@ check('the traversal follows edges in both directions', () => {
 });
 
 check('a self-edge is rejected in code AND by a constraint', () => {
-    const fn = graphText.slice(graphText.indexOf('export async function linkNodes'));
+    const fn = graphText.slice(landmark(graphText, 'export async function linkNodes'));
     assert.ok(fn.includes('fromNodeId === toNodeId'), 'linkNodes must reject a self-edge');
     assert.ok(sqlText.includes('account_edges_no_self_check'), 'the SQL must carry the constraint too');
     assert.ok(schemaText.includes('account_edges_no_self_check'), 'schema.ts must declare it or push reverts it');
@@ -202,10 +203,10 @@ check('free-mail domains never become account nodes', () => {
 });
 
 check('account identity uses ON CONFLICT, not a read-then-write race', () => {
-    const fn = graphText.slice(graphText.indexOf('export async function upsertAccountNode'));
+    const fn = graphText.slice(landmark(graphText, 'export async function upsertAccountNode'));
     const insertAt = fn.indexOf('.insert(accountNodes)');
-    const conflictAt = fn.indexOf('.onConflictDoNothing()');
-    const reReadAt = fn.indexOf('.select(');
+    const conflictAt = landmark(fn, '.onConflictDoNothing()');
+    const reReadAt = landmark(fn, '.select(');
     assert.ok(insertAt > 0 && conflictAt > insertAt, 'the insert must be conflict-tolerant');
     assert.ok(reReadAt > conflictAt, 'it must re-read the winner rather than returning null on conflict');
 });
@@ -280,20 +281,20 @@ check('ingestion idempotency is structural, with no marker column', () => {
 });
 
 check('memory writes are conflict-tolerant, so a replayed tick is a no-op', () => {
-    const fn = memoryText.slice(memoryText.indexOf('export async function writeMemories'));
+    const fn = memoryText.slice(landmark(memoryText, 'export async function writeMemories'));
     assert.ok(fn.includes('.onConflictDoNothing()'), 'a duplicate source row must be skipped, not thrown');
 });
 
 check('search embeds the query asymmetrically', () => {
     // Embedding a question as a document measurably degrades ranking on this model.
-    const fn = memoryText.slice(memoryText.indexOf('export async function searchMemory'));
+    const fn = memoryText.slice(landmark(memoryText, 'export async function searchMemory'));
     assert.ok(fn.includes("embedTexts([text], 'query')"), "the query must be embedded with inputType 'query'");
-    const write = memoryText.slice(memoryText.indexOf('export async function writeMemories'));
+    const write = memoryText.slice(landmark(memoryText, 'export async function writeMemories'));
     assert.ok(write.includes("'document'"), 'stored rows must be embedded as documents');
 });
 
 check('search falls back to full text rather than returning nothing', () => {
-    const fn = memoryText.slice(memoryText.indexOf('export async function searchMemory'));
+    const fn = memoryText.slice(landmark(memoryText, 'export async function searchMemory'));
     // This used to pin the literal `content_tsv @@ plainto_tsquery`. That call was the bug: both
     // safe parsers AND every content word, so recalling against a sentence needed all of its words
     // in one memory row and matched nothing (measured 2026-08-07 on the two real staging rows —

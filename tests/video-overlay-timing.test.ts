@@ -18,6 +18,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { overlayFrameRange } from '../src/lib/overlay-geometry';
+import { landmark } from './landmark';
 
 let passed = 0, total = 0;
 function check(name: string, fn: () => void) {
@@ -34,7 +35,7 @@ function extract(signature: string): string {
     const at = ws.indexOf(signature);
     assert.ok(at >= 0, `${signature} not found in workspace.html`);
     const rest = ws.slice(at);
-    return rest.slice(0, rest.indexOf('\n}\n') + 2);
+    return rest.slice(0, landmark(rest, '\n}\n') + 2);
 }
 
 // Run the reconcile with its two side-effects stubbed, and report what it did.

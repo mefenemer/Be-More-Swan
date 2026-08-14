@@ -14,6 +14,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { landmark } from './landmark';
 import {
     buildCampaignPerformance, emptyCampaignPerformance, type CampaignPerformanceCounts,
 } from '../src/utils/campaign-performance';
@@ -122,8 +123,8 @@ check('the endpoint takes no days parameter and applies no date filter', () => {
 check('the client overwrites the hardcoded "Last 30 days" note', () => {
     const client = read('assistants.js');
     const fn = client.slice(
-        client.indexOf('async function _loadCampaignMetrics'),
-        client.indexOf('async function _loadAssistantMetrics'),
+        landmark(client, 'async function _loadCampaignMetrics'),
+        landmark(client, 'async function _loadAssistantMetrics'),
     );
     assert.ok(fn.length > 0, '_loadCampaignMetrics not found');
     assert.ok(fn.includes('all time'), 'the period note still claims a 30-day window');
@@ -133,7 +134,7 @@ console.log('\n──── the wiring holds at both ends ────');
 
 check('the registry routes this role to the campaign endpoint', () => {
     const registry = read('src/components/assistant-dashboard-registry.js');
-    const entry = registry.slice(registry.indexOf('campaign_orchestrator: {'));
+    const entry = registry.slice(landmark(registry, 'campaign_orchestrator: {'));
     assert.match(entry.slice(0, 2000), /metricsSource: 'campaign'/, 'no metricsSource flag');
     const client = read('assistants.js');
     assert.ok(client.includes("source === 'campaign'"), 'the client does not read the flag');
@@ -163,8 +164,8 @@ check('a failure is reported as a failure, never as a zero', () => {
     assert.ok(!/catch[\s\S]{0,200}emptyCampaignPerformance/.test(endpoint), 'the catch degrades to an empty payload');
     const client = read('assistants.js');
     const fn = client.slice(
-        client.indexOf('async function _loadCampaignMetrics'),
-        client.indexOf('async function _loadAssistantMetrics'),
+        landmark(client, 'async function _loadCampaignMetrics'),
+        landmark(client, 'async function _loadAssistantMetrics'),
     );
     assert.ok(fn.includes("_setMetricsEmptyState('error')"), 'the client does not distinguish an error');
     assert.ok(fn.includes("_setMetricsEmptyState('campaign-no-data')"), 'no campaign-specific empty state');
@@ -183,8 +184,8 @@ check('card 3 no longer claims work is reallocated unattended', () => {
     // so the card could only ever have reported 0.
     const registry = read('src/components/assistant-dashboard-registry.js');
     const entry = registry.slice(
-        registry.indexOf('campaign_orchestrator: {'),
-        registry.indexOf('campaign_orchestrator: {') + 3000,
+        landmark(registry, 'campaign_orchestrator: {'),
+        landmark(registry, 'campaign_orchestrator: {') + 3000,
     );
     assert.ok(!entry.includes("label: 'Decisions Taken For You'"), 'the unimplemented claim is back');
     assert.ok(!/without waking you'/.test(entry), 'the unimplemented claim is back in the description');

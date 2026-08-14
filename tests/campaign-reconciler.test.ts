@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { verdictFromArtefactStatuses } from '../src/utils/campaign-reconciler';
 import { CAMPAIGN_ORDER_STATUSES, TERMINAL_ORDER_STATUSES } from '../src/config/campaign-vocab';
 import { SCHEDULE_ACTIVE_STATUSES, SCHEDULE_INACTIVE_STATUSES } from '../src/config/post-status';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -157,7 +158,7 @@ check('it never starts, resumes or re-budgets a campaign', () => {
 check('a paused campaign is never swept to finished', () => {
     // The sweep must select only live campaigns: pausing was a human decision with a recorded
     // reason, and finishing it here would erase that.
-    const sweep = reconcilerSrc.slice(reconcilerSrc.indexOf('async function sweepExpiredCampaigns'));
+    const sweep = reconcilerSrc.slice(landmark(reconcilerSrc, 'async function sweepExpiredCampaigns'));
     assert.ok(sweep.includes("['active', 'throttled']"), 'the sweep is not restricted to live campaigns');
     assert.ok(!sweep.includes("'paused'"), 'the sweep can reach a paused campaign');
 });
@@ -168,8 +169,8 @@ check('the only work it commissions is an order a human already approved', () =>
     const calls = [...reconcilerSrc.matchAll(/issueOrder\(/g)];
     assert.equal(calls.length, 1, `issueOrder is called ${calls.length} times; expected exactly 1`);
     const unblock = reconcilerSrc.slice(
-        reconcilerSrc.indexOf('async function unblockChain'),
-        reconcilerSrc.indexOf('async function settleOrder'),
+        landmark(reconcilerSrc, 'async function unblockChain'),
+        landmark(reconcilerSrc, 'async function settleOrder'),
     );
     assert.ok(unblock.includes('issueOrder('), 'issueOrder moved out of unblockChain');
     assert.ok(unblock.includes("eq(campaignOrders.status, 'blocked')"), 'unblock is not restricted to blocked orders');
@@ -182,8 +183,8 @@ check('it never calls placeOrder — a new order is a new decision', () => {
 
 check('a chain does not resume behind a campaign that stopped', () => {
     const unblock = reconcilerSrc.slice(
-        reconcilerSrc.indexOf('async function unblockChain'),
-        reconcilerSrc.indexOf('async function settleOrder'),
+        landmark(reconcilerSrc, 'async function unblockChain'),
+        landmark(reconcilerSrc, 'async function settleOrder'),
     );
     assert.ok(
         unblock.includes("campaign.status !== 'active'") && unblock.includes("campaign.status !== 'throttled'"),
@@ -194,7 +195,7 @@ check('a chain does not resume behind a campaign that stopped', () => {
 console.log('\n──── the ledger stays honest ────');
 
 check('a failed order refunds, and a rejected one does not', () => {
-    const settle = reconcilerSrc.slice(reconcilerSrc.indexOf('async function settleOrder'));
+    const settle = reconcilerSrc.slice(landmark(reconcilerSrc, 'async function settleOrder'));
     assert.ok(/amount:\s*-order\.costWorkItems/.test(settle), 'nothing refunds work items');
     // The refund must be gated on 'failed' specifically. Refunding a rejected order would hide
     // capacity the assistants genuinely consumed.

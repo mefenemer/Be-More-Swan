@@ -13,6 +13,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { landmark } from './landmark';
 
 let passed = 0, total = 0;
 function check(name: string, fn: () => void) {
@@ -28,8 +29,8 @@ const server = readFileSync(path.join(ROOT, 'netlify/functions/set-post-platform
 
 // The tab strip's renderer, isolated so a × somewhere else in the file cannot satisfy these.
 const tabs = ws.slice(
-    ws.indexOf('function _rqReviewRenderTabs()'),
-    ws.indexOf('\n/**\n * Why this platform cannot publish'),
+    landmark(ws, 'function _rqReviewRenderTabs()'),
+    landmark(ws, '\n/**\n * Why this platform cannot publish'),
 );
 
 console.log('\nplatform tab removal\n');
@@ -84,7 +85,7 @@ check('the removable statuses match the server\'s own list', () => {
 });
 
 check('the surviving set is derived from the group by ROW, not by platform', () => {
-    const fn = ws.slice(ws.indexOf('async function rqReviewRemovePlatform('), ws.indexOf('\n/**\n * Why this platform cannot publish'));
+    const fn = ws.slice(landmark(ws, 'async function rqReviewRemovePlatform('), landmark(ws, '\n/**\n * Why this platform cannot publish'));
     // Filtering on platform would take out every destination that platform has: closing an
     // Instagram Reel would silently delete the Instagram carousel sitting next to it.
     assert.match(fn, /group\.filter\(p => p\.id !== id && p\.platform\)/,
@@ -115,7 +116,7 @@ check('set-post-platforms is called from exactly one place', () => {
     // Everything it sends is a destination, never a bare platform id — the server keys its sibling
     // map on (platform, formatKey), so a string would land as "the format-less destination" and
     // delete a declared one to make it.
-    const helper = ws.slice(ws.indexOf('async function _pceApplyPlatforms('), ws.indexOf('async function _pceTogglePostPlatform('));
+    const helper = ws.slice(landmark(ws, 'async function _pceApplyPlatforms('), landmark(ws, 'async function _pceTogglePostPlatform('));
     assert.match(helper, /destinations: destinations\.map\(d => \(\{ platform: d\.platform, formatKey: d\.formatKey \?\? null \}\)\)/,
         'the request body must carry destinations');
 });
@@ -129,7 +130,7 @@ check('the picker and the endpoint agree on what a destination is', () => {
 });
 
 check('the busy flag clears before the reopen, not after', () => {
-    const fn = ws.slice(ws.indexOf('async function _pceApplyPlatforms('), ws.indexOf('async function _pceTogglePostPlatform('));
+    const fn = ws.slice(landmark(ws, 'async function _pceApplyPlatforms('), landmark(ws, 'async function _pceTogglePostPlatform('));
     const clears = fn.indexOf('_pcePlatformBusy = false');
     const reopens = fn.indexOf('await openPostReview(');
     assert.ok(clears > -1 && reopens > -1, 'both steps must be present');

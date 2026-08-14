@@ -20,6 +20,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { MEDIA_EDITABLE_STATUSES, isMediaEditable } from '../src/config/post-status';
+import { landmark } from './landmark';
 
 let passed = 0, total = 0;
 function check(name: string, fn: () => void) {
@@ -181,7 +182,7 @@ check('swapping the picture drops the text that was placed on the old one', () =
     assert.match(fn('src/utils/pexels.ts'), /imageOverlays: null,[\s\S]{0,120}overlayBaseAssetId: null/,
         'the stock picker must clear the overlay design and its base pin, like attach-draft-media');
     const ws = fn('workspace.html');
-    const thumb = ws.slice(ws.indexOf('function gpAiShowThumb('));
+    const thumb = ws.slice(landmark(ws, 'function gpAiShowThumb('));
     assert.match(thumb.slice(0, 4000), /p\.overlays = \[\]/,
         'the client mirrors the reset — if it stops, the server-side clear above is the surprise');
 });
@@ -238,7 +239,7 @@ check('an unbaked photo cannot be approved, whatever the client believes', () =>
 
 check('the client heals an unbaked post instead of reporting it', () => {
     const ws = fn('workspace.html');
-    const one = ws.slice(ws.indexOf('async function _rqApproveOne('));
+    const one = ws.slice(landmark(ws, 'async function _rqApproveOne('));
     const body = one.slice(0, one.indexOf('\nasync function ') === -1 ? one.length : one.indexOf('\nasync function '));
     assert.match(body, /OVERLAYS_NOT_BAKED/, 'the 409 must be recognised, not shown as a generic failure');
     assert.match(body, /gpApplyOverlaysBeforeApprove\(post\.id, \{ force: true \}\)/,
@@ -253,13 +254,13 @@ check('nothing-to-bake is answered without a round trip', () => {
     assert.match(ws, /function _pceNothingToBake\(/, 'the commit path must answer this from the cache');
     // Audio makes a still render as video (no platform takes a photo with sound), so a silent photo
     // with no text is the ONLY thing that may skip out early.
-    const helper = ws.slice(ws.indexOf('function _pceNothingToBake('));
+    const helper = ws.slice(landmark(ws, 'function _pceNothingToBake('));
     assert.match(helper.slice(0, 900), /hasAudio/, 'a photo with sound still needs a server render');
     assert.match(helper.slice(0, 900), /looksVideo/, 'a video still needs its Lambda render');
     assert.match(helper.slice(0, 900), /if \(!cached\) return false/, 'an unknown post must ask the server, as before');
 
     // The early bake must not fire for video, or every edit queues a paid Lambda render.
-    const sched = ws.slice(ws.indexOf('function _pceScheduleOverlayBake('));
+    const sched = ws.slice(landmark(ws, 'function _pceScheduleOverlayBake('));
     assert.match(sched.slice(0, 600), /if \(looksVideo\) return/,
         'baking on edit is for photos only — video would queue a render per keystroke-pause');
 });

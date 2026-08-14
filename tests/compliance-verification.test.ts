@@ -90,12 +90,13 @@ check('an unparseable entry in the results does not break the comparison', () =>
 // So the work lives in a `-background` worker (15-minute ceiling) and the request only starts it.
 import fs from 'node:fs';
 import path from 'node:path';
+import { landmark } from './landmark';
 const ROOT = path.join(__dirname, '..');
 const readSrc = (rel: string) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 
 check('a deadline also disables SDK retries, or it is not a deadline', () => {
     const gw = readSrc('src/lib/ai-gateway.ts');
-    const grounded = gw.slice(gw.indexOf('export async function gatewayGenerateGrounded'));
+    const grounded = gw.slice(landmark(gw, 'export async function gatewayGenerateGrounded'));
     // The measured 3x. `timeout` alone bounds an ATTEMPT; only maxRetries bounds the call.
     assert.match(grounded, /timeout: Math\.max\(MIN_CALL_MS, left\),[\s\S]{0,600}maxRetries: 0/,
         'a per-request timeout must be paired with maxRetries: 0 — the SDK retries timeouts twice, tripling the budget');

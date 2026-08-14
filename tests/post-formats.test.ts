@@ -20,6 +20,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { POST_FORMATS, formatSchedulable, formatBlockedReason, formatsForPlatform, defaultFormatFor, postFormatSpec } from '../src/config/post-formats';
+import { landmark } from './landmark';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -36,7 +37,7 @@ function clientFormats(): Array<{ k: string; p: string; a: string; min: number; 
     const js = readFileSync(new URL('../src/generated/platform-constants.js', import.meta.url), 'utf8');
     const start = js.indexOf('var POST_FORMATS = [');
     assert.ok(start > -1, 'POST_FORMATS missing from the generated constants — run: npm run gen:constants');
-    const end = js.indexOf('\n  ];', start);
+    const end = landmark(js, '\n  ];', start);
     return js.slice(start, end)
         .split('\n')
         .map(l => l.trim().replace(/,$/, ''))
