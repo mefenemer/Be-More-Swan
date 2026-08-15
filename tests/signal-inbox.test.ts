@@ -210,6 +210,36 @@ check('a found company is labelled by its LEAD state, not by the batch gate', ()
         'the row chip must render the lead state, not the handoff vocabulary');
 });
 
+check('the live count survives leaving the tab and coming back', () => {
+    // ⚠️ The bug this closes: schedulePoll() re-checks `offsetParent` and returns WITHOUT re-arming
+    // when the panel is off-screen. Leaving the Searches tab mid-run therefore killed the timer for
+    // good, and activate() used to return early on a second visit (`if (state.rendered) return`), so
+    // "View results (12)" sat at 12 while the run filed another forty. Only a page reload moved it.
+    const act = componentText.slice(landmark(componentText, 'activate() {'));
+    const body = act.slice(0, landmark(act, '\n    }'));
+    assert.ok(!/if \(state\.rendered\) return/.test(body),
+        'activate() must not early-return — it is called on EVERY tab activation, and returning is '
+        + 'what left the poll dead after a tab switch');
+    assert.ok(/load\(\)/.test(body),
+        'activate() must re-read: returning to a tab that has been away is exactly when the counts '
+        + 'are most stale, and load() is also what re-arms the poll');
+    // The guard itself is correct and must stay — polling a panel nobody is looking at spends
+    // function invocations to render nothing.
+    assert.ok(/offsetParent === null/.test(componentText),
+        'the off-screen guard is the reason activate() has to re-arm; do not remove it');
+});
+
+check('a running search polls fast enough for the count to look alive', () => {
+    const poll = componentText.slice(landmark(componentText, 'function schedulePoll('));
+    const body = poll.slice(0, landmark(poll, '\n  }'));
+    assert.ok(/advancing \? POLL_MS : POLL_STALLED_MS/.test(body),
+        'two cadences: a run that is filing companies should visibly climb, a run that has stopped '
+        + 'advancing should not be polled at the same rate for nothing');
+    assert.ok(/STALL_MS/.test(body),
+        'the "is it advancing" line must be the same one searchState() draws for "Paused between '
+        + 'steps" — the row and the poll must not disagree about whether anything is happening');
+});
+
 check('the results modal shows everything the search found', () => {
     // "Show filtered" existed to keep un-approvable rows out of a batch approve. With no approve
     // here, hiding cold companies by default would make this list disagree with the Leads tab it

@@ -1482,10 +1482,18 @@ function _rqRecordActions(r, statusKey) {
     const leadApprove = hasDraft ? 'Approve &amp; send email' : 'Approve lead';
     // Editing is offered while the draft can still change the outcome — i.e. before approval.
     const editDraft = hasDraft ? btn('Edit draft', 'editEmail', secondary) : '';
+    // The two "I'll handle the sending myself" routes, for a user who would rather send from their
+    // own inbox than let Approve do it. They live HERE, on the only card that shows the email
+    // itself, having moved off the Leads tab — that tab is for the lead record, and copying a
+    // message you cannot see is a blind action. Leads only: a ticket has no outreach email, and a
+    // meeting's mail is built at send time rather than stored as a draft to copy.
+    const selfSend = (isLead && hasDraft)
+        ? btn('Copy draft', 'copyEmail', secondary) + btn('Draft in Gmail', 'draftGmail', secondary)
+        : '';
     let buttons = '';
     if (statusKey === 'review') {
         buttons = isLead
-            ? btn(leadApprove, 'approve', primary) + editDraft + reject
+            ? btn(leadApprove, 'approve', primary) + editDraft + selfSend + reject
             : btn('Approve', 'approve', primary) + btn('Approve &amp; Schedule', 'showSchedule', secondary) + editDraft + reject;
     } else if (statusKey === 'approved') {
         buttons = isLead
@@ -1759,6 +1767,54 @@ window._detailRqRecordAct = async function (btn, action) {
         if (view) { view.classList.toggle('hidden', editing); view.style.display = editing ? 'none' : ''; }
         if (edit) { edit.classList.toggle('hidden', !editing); edit.style.display = editing ? '' : 'none'; }
         if (editing) card.querySelector('.rq-mail-body')?.focus();
+        return;
+    }
+
+    // ── The two "I'll send it myself" paths ──────────────────────────────────
+    // Both moved here from the Leads tab, which is for the lead RECORD: copying an email from a
+    // screen that never shows the email is a blind action, and having two homes for "push this
+    // draft into Gmail" is how a user ends up with two drafts and no idea which they edited.
+    // Both read the STORED draft — the same one Approve & send would send — so a copy taken after
+    // an edit is the edited text.
+    if (action === 'copyEmail' || action === 'draftGmail') {
+        const rec = _rqRecordsById.get(Number(card.getAttribute('data-rq-record')));
+        const found = rec && _rqDraft(rec);
+        if (!found) { showErr('Couldn’t load this draft — refresh and try again.'); return; }
+        const { draft } = found;
+        const original = btn.textContent;
+        if (action === 'copyEmail') {
+            try {
+                await navigator.clipboard.writeText(`Subject: ${draft.subject || ''}\n\n${draft.body}`);
+                btn.textContent = 'Copied ✓';
+                setTimeout(() => { btn.textContent = original; }, 2500);
+            } catch { showErr('Your browser blocked the copy — select the text above instead.'); }
+            return;
+        }
+        btn.disabled = true;
+        btn.textContent = 'Drafting…';
+        try {
+            const res = await fetch('/api/actions/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    actionType: 'gmail_create_draft',
+                    payload: {
+                        to: typeof draft.to === 'string' ? draft.to : (window.LeadRecipient?.resolve?.(rec.data) || null),
+                        subject: draft.subject ?? '',
+                        body: draft.body,
+                    },
+                }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || data.error) throw new Error(data.error || 'Could not create the Gmail draft.');
+            btn.textContent = 'Drafted in Gmail ✓';
+        } catch (err) {
+            btn.disabled = false;
+            btn.textContent = original;
+            // Naming Gmail matters: the usual cause is that no Google account is connected, and a
+            // bare "something went wrong" sends the user hunting through the wrong settings.
+            showErr(err.message || 'Could not create the Gmail draft — check your Google connection.');
+        }
         return;
     }
 

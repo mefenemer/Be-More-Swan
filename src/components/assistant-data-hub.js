@@ -901,13 +901,12 @@
           openOutcomeModal(record);
         },
       });
-      const draft = record.data?.outreachDraft;
-      if (draft && draft.body) {
-        buttons.push({ label: 'Copy outreach draft', async run(btn) {
-          await navigator.clipboard.writeText(`Subject: ${draft.subject || ''}\n\n${draft.body}`);
-          btn.textContent = 'Copied ✓';
-        }});
-      }
+      // ⚠️ No outreach-email actions on this tab, deliberately. "Copy outreach draft" used to sit
+      // here, beside "Draft Outreach in Gmail" inside the card above it — two ways to take the
+      // drafted email somewhere, on a screen that never showed the email's text. Reading, editing,
+      // copying, drafting into Gmail and sending all live in the REVIEW tab, on one card with the
+      // message in front of you. This tab is for the lead record: read it, progress its next step,
+      // enrich it, decide on it, delete it.
       // Approve — the TRIAGE decision: "this company is worth pursuing." It lives here because
       // this tab is where every lead is, in every state, with the Approval and Contact columns
       // beside it — the two facts the decision needs.
@@ -922,7 +921,10 @@
       // Offered for anything not already approved. Not hidden for rejected leads: reversing a
       // rejection is a legitimate correction, and the Approval cell states the result either way.
       if (record.approvalStatus !== 'approved') {
-        buttons.push({ label: 'Approve', async run(btn, status) {
+        // `primary`: the one decision this panel exists to take. Everything else here is a tool
+        // (edit it, copy the draft, log an outcome) — those are reached deliberately, this is the
+        // thing the reader arrived to do.
+        buttons.push({ label: 'Approve', primary: true, async run(btn, status) {
           const res = await fetch(API, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
@@ -931,7 +933,12 @@
           const data = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(data.error || 'Could not approve that lead.');
           record.approvalStatus = 'approved';
-          btn.textContent = 'Approved';
+          // Becomes a STATE, not a button that still looks pressable. It stayed enabled reading
+          // "Approved", so the obvious next thing to do with it was press it again — which re-sent
+          // the same approval. The chip below and the row's Approval cell carry the state; this
+          // just stops offering an action that has already been taken.
+          btn.textContent = 'Approved ✓';
+          btn.disabled = true;
           // Same two surfaces the reject path updates: the row's Approval cell and the banner on
           // the open record. refreshRow rewrites cells in place rather than re-rendering the
           // table, which would collapse the panel the user is still reading.
@@ -965,7 +972,9 @@
           const data = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(data.error || 'Could not reject that lead.');
           record.approvalStatus = 'rejected';
-          btn.textContent = 'Rejected';
+          // Same reasoning as Approve above: a decision already taken is a state, not an offer.
+          btn.textContent = 'Rejected ✓';
+          btn.disabled = true;
           // Both places the state is stated: the row's Approval cell, and the banner above the
           // open record. refreshRow rewrites the cells in place rather than re-rendering the
           // table, which would collapse the panel the user is still reading.
@@ -998,9 +1007,15 @@
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.textContent = b.label;
+      // Three weights, matching the rest of the app: the emerald fill for the one decision this
+      // panel exists to take, the white ghost for everything else, and the red ghost for Delete.
+      // Every button here was the same ghost, so a row reading "Edit · Record outcome · Copy
+      // outreach draft · Approve · Reject" offered five equal-looking choices and no way in.
       btn.className = b.danger
         ? 'px-3 py-1.5 bg-white border border-gray-200 text-red-600 hover:border-red-300 hover:bg-red-50 text-xs font-bold rounded-lg transition disabled:opacity-60 ml-auto'
-        : btnCls;
+        : b.primary
+          ? 'px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed'
+          : btnCls;
       btn.addEventListener('click', async () => {
         btn.disabled = true;
         try { await b.run(btn, status); }
@@ -1149,7 +1164,21 @@
     } else if (window.DisruptiveUIRegistry) {
       // Chat-produced records store the exact uiElement wire shape — re-render it
       // with the same card the transcript used.
-      body = window.DisruptiveUIRegistry.render(record.data);
+      //
+      // ⚠️ Both flags describe THIS TAB, and both are false for the same reason: the Leads tab is
+      // for the lead record — read it, progress its next step, enrich it, delete it — and every act
+      // on the outreach EMAIL belongs to the Review tab, where the full message is on screen.
+      //
+      //   sendsOnApproval: false — the Approve button below records the decision and sends nothing
+      //     (its own status line says so). The card's default is the chat/Review wording, which
+      //     told users approving would email a named individual automatically, above a button that
+      //     would not.
+      //   outreachActions: false — drops "Draft Outreach in Gmail". Pushing the draft into Gmail
+      //     from a screen that never shows the draft's text is a send-shaped action taken blind.
+      body = window.DisruptiveUIRegistry.render(record.data, {
+        sendsOnApproval: false,
+        outreachActions: false,
+      });
     }
     // A lead leads with where it stands: first the approval gate (pending / approved / rejected),
     // then a recorded deal outcome if there is one. Both above the card, so they read as facts
@@ -1173,7 +1202,14 @@
     const cols = state.hub.columns.map((c, i) => {
       let cell;
       if (c.key === 'status') {
-        cell = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200 whitespace-nowrap">${esc(cellValue(record, c.key))}</span>`;
+        // For a lead this column is the hot/warm/cold rating, and "warm" says nothing about how it
+        // was decided. The tooltip comes from the GENERATED mirror of the scoring rubric
+        // (window.LeadRating, built from RATING_BANDS in src/config/icp-profile.ts) so it states the
+        // same bands the model was given — never a hand-typed threshold, which is how three prompt
+        // copies drifted before that constant existed. Absent mirror → no tooltip, never a guess.
+        const ratingHelp = (window.LeadRating && typeof window.LeadRating.help === 'function')
+          ? window.LeadRating.help(record.status) : '';
+        cell = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200 whitespace-nowrap${ratingHelp ? ' cursor-help' : ''}"${ratingHelp ? ` title="${esc(ratingHelp)}"` : ''}>${esc(cellValue(record, c.key))}</span>`;
       } else if (c.key === 'approvalStatus') {
         // Coloured, unlike the neutral Rating chip beside it: this column exists to be SCANNED for
         // the amber ones. A record with no approval status renders the bare em-dash — a grey chip
@@ -1312,6 +1348,59 @@
   function focusRecord(recordId) {
     state.pendingFocusId = recordId == null ? null : Number(recordId);
     applyPendingFocus();
+  }
+
+  /**
+   * One record, in a modal — the entry point for surfaces that hold a record id but not the table.
+   * The Searches tab uses it: clicking a company in a search's results opens that lead here.
+   *
+   * Deliberately NOT focusRecord(): that expands the row in place, scrolls to it and flashes a RED
+   * ring, which is right for the notification it was built for ("this post failed to publish") and
+   * wrong as a general "show me this record" — a red highlight on a healthy lead reads as an error.
+   *
+   * The body is `detailPanel(record)`, the same node the expanded row builds, so the banners, the
+   * scoring card and every action button are the ones the Leads tab already renders. A second
+   * lead-detail renderer is how the two would come to disagree about what a lead can do.
+   */
+  async function openRecordModal(recordId) {
+    const id = Number(recordId);
+    if (!id || !state.hub) return;
+    // The tab may never have been opened, so the record cache can be empty or stale.
+    if (!state.records.some((r) => Number(r.id) === id)) {
+      try { await fetchRecords(); renderTable(); } catch { /* fall through to the not-found note */ }
+    }
+    const record = state.records.find((r) => Number(r.id) === id);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 bg-gray-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm';
+    overlay.innerHTML = `
+      <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+        <div class="flex items-start justify-between gap-4 p-5 border-b border-gray-100 shrink-0">
+          <div class="min-w-0">
+            <h3 class="text-lg font-bold text-gray-900">${esc(record ? record.title : 'Record')}</h3>
+            <p class="text-sm text-gray-500 mt-0.5">${esc(state.hub.label || '')}</p>
+          </div>
+          <button type="button" data-record-close class="text-gray-400 hover:text-gray-600 text-2xl leading-none cursor-pointer shrink-0">&times;</button>
+        </div>
+        <div class="overflow-y-auto" data-record-body></div>
+      </div>`;
+    const close = () => {
+      overlay.remove();
+      // The row underneath carries the same approval chip, and the panel's buttons only refresh a
+      // row that is rendered. Re-read once on close so a decision taken in here is visible in the
+      // list the user lands back on.
+      renderTable();
+    };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelector('[data-record-close]').addEventListener('click', close);
+
+    const body = overlay.querySelector('[data-record-body]');
+    if (record) {
+      body.appendChild(detailPanel(record));
+    } else {
+      body.innerHTML = '<p class="p-6 text-sm text-gray-500">That lead is no longer in this tab — it may have been deleted.</p>';
+    }
+    document.body.appendChild(overlay);
   }
 
   // Content Library toolbar — a "Create Post" button opens the same post-creation surface as
@@ -1909,5 +1998,5 @@
     }
   }
 
-  window.AssistantDataHub = { init, refresh, focusRecord };
+  window.AssistantDataHub = { init, refresh, focusRecord, openRecordModal };
 })();

@@ -10,7 +10,7 @@
  *     → Add a renderer for a uiElement.type. Later registrations win, so pages can
  *       override the built-in stubs.
  *
- *   window.DisruptiveUIRegistry.render(uiElement)
+ *   window.DisruptiveUIRegistry.render(uiElement, opts?)   // opts describes the SURFACE, not the data
  *     → Returns the mounted HTMLElement for a known type, or null for unknown/absent
  *       types (the chat falls back to text-only — an unrecognised card must never
  *       break a transcript). Renderer exceptions are caught and also return null.
@@ -42,12 +42,17 @@
     return renderers.has(type);
   }
 
-  function render(uiElement) {
+  /**
+   * `opts` describes the SURFACE, not the data — the same stored card renders in the chat
+   * transcript and inside a record's detail panel, and one of its sentences is only true on one of
+   * them. Renderers that do not care ignore it; see renderLeadScoringCard's `sendsOnApproval`.
+   */
+  function render(uiElement, opts) {
     if (!uiElement || typeof uiElement !== 'object' || typeof uiElement.type !== 'string') return null;
     const renderFn = renderers.get(uiElement.type);
     if (!renderFn) return null;
     try {
-      const el = renderFn(uiElement, escapeHtml);
+      const el = renderFn(uiElement, escapeHtml, opts || {});
       return el instanceof HTMLElement ? el : null;
     } catch (err) {
       console.error(`[DisruptiveUIRegistry] renderer for "${uiElement.type}" threw:`, err);
@@ -69,13 +74,41 @@
     cold: { chip: 'bg-gray-50 text-gray-500 border-gray-200', bar: 'bg-gray-400', label: 'Cold lead' },
   };
 
-  function renderLeadScoringCard(ui, esc) {
+  /**
+   * `opts.sendsOnApproval` — does pressing Approve, on the surface this card is sitting in, put the
+   * email in the post?
+   *
+   * ⚠️ It depends on the surface, and getting it wrong points a compliance warning at the wrong
+   * button. Approving in the REVIEW QUEUE calls send_outreach and the mail goes (assistants.js);
+   * approving in the LEADS TAB only records the decision, and that handler's own status line says
+   * "Nothing has been sent — the drafted email is waiting for you in the Review tab". This card was
+   * written for the first case and rendered unchanged in the second, so a user reading a lead in
+   * the Leads tab was told, directly above an Approve button, that approving would email a named
+   * individual automatically. Default true: chat and the Review Queue are where this card came
+   * from, and a surface that does send must never be the one that forgets to say so.
+   */
+  /**
+   * `opts.outreachActions` — may this card offer to DO something with the email?
+   *
+   * False on a surface whose job is the lead record rather than the message. The Leads tab is one:
+   * it exists to read a lead, progress its next step, enrich it or delete it, and every act on the
+   * outreach email — draft, copy, edit, send — belongs to the Review tab, where the full email is
+   * on screen to be read before any of them. Two places to push the same draft into Gmail is how a
+   * user ends up with two drafts and no idea which one they edited.
+   *
+   * The address and its provenance still render: those are facts about the lead (who was found,
+   * where it came from), not actions on the message.
+   */
+  function renderLeadScoringCard(ui, esc, opts) {
+    const sendsOnApproval = !opts || opts.sendsOnApproval !== false;
+    const outreachActions = !opts || opts.outreachActions !== false;
     const score = Math.max(0, Math.min(100, Number(ui.score) || 0));
     const rating = RATING_STYLES[ui.rating] || RATING_STYLES.cold;
     const reasons = Array.isArray(ui.reasons) ? ui.reasons.filter((r) => typeof r === 'string') : [];
 
-    // Outreach draft: only render the Gmail action when the LLM produced an email body.
-    const draft = (ui.outreachDraft && typeof ui.outreachDraft === 'object'
+    // Outreach draft: only render the Gmail action when the LLM produced an email body AND this
+    // surface deals in the email at all.
+    const draft = (outreachActions && ui.outreachDraft && typeof ui.outreachDraft === 'object'
       && typeof ui.outreachDraft.body === 'string' && ui.outreachDraft.body.trim())
       ? ui.outreachDraft : null;
 
@@ -125,7 +158,7 @@
 
       ${contactEmail ? `
         <div class="mt-4 pt-3 border-t border-gray-100">
-          <p class="text-xs font-bold text-gray-500 tracking-wider uppercase mb-1.5">Outreach will be sent to</p>
+          <p class="text-xs font-bold text-gray-500 tracking-wider uppercase mb-1.5">${sendsOnApproval ? 'Outreach will be sent to' : 'Outreach is addressed to'}</p>
           <p class="text-sm font-semibold text-gray-900 break-all">${esc(contactEmail)}</p>
           <p class="text-xs text-gray-500 mt-1">
             Found on ${foundOn ? esc(foundOn) : 'this company’s website'} — published by the company, not verified.
@@ -133,7 +166,9 @@
           ${isPersonalInbox ? `
             <div class="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
               <p class="text-xs font-bold text-amber-900">Personal inbox — check before approving</p>
-              <p class="text-xs text-amber-800 mt-0.5">This looks like a named individual rather than a general contact address. Approving sends the outreach email automatically.</p>
+              <p class="text-xs text-amber-800 mt-0.5">This looks like a named individual rather than a general contact address. ${sendsOnApproval
+                ? 'Approving sends the outreach email automatically.'
+                : 'Approving here records your decision only — the email goes out when you approve it in the Review tab.'}</p>
             </div>` : ''}
         </div>` : ''}
 

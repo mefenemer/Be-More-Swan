@@ -20,8 +20,26 @@
  * "cold" by chat, because one copy said 40-69 and the other did not, is indistinguishable from a
  * model being inconsistent — and would have been debugged as such.
  */
+export const RATING_BANDS = [
+    { rating: 'hot', min: 70, max: 100, meaning: 'strong profile fit + buying intent' },
+    { rating: 'warm', min: 40, max: 69, meaning: 'partial fit or unclear intent' },
+    { rating: 'cold', min: 0, max: 39, meaning: 'poor fit or no intent' },
+] as const;
+
+export type LeadRating = (typeof RATING_BANDS)[number]['rating'];
+
+/**
+ * ⚠️ BUILT from RATING_BANDS, not typed out beside it. The bands are now also shown to USERS — the
+ * hot/warm/cold chip in the Searches results explains itself on hover — and a hand-written tooltip
+ * would have been the fourth copy of a number that has already drifted once between prompts. The
+ * generated browser mirror (src/generated/platform-constants.js → window.LeadRating) comes from the
+ * same array, so the model's rubric and the user's explanation cannot disagree.
+ *
+ * tests/icp-snapshot.test.ts pins the rendered string, so a change here is visible in review rather
+ * than silently re-scoring every lead in the estate.
+ */
 export const SCORING_BANDS =
-    'Scoring bands: 70-100 = "hot" (strong profile fit + buying intent), 40-69 = "warm" (partial fit or unclear intent), 0-39 = "cold" (poor fit or no intent).';
+    `Scoring bands: ${RATING_BANDS.map((b) => `${b.min}-${b.max} = "${b.rating}" (${b.meaning})`).join(', ')}.`;
 
 /**
  * Render the profile block from an ICP snapshot (or, for chat, the raw onboarding answers — the

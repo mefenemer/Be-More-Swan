@@ -200,14 +200,18 @@ check('an empty lead Review column explains where the leads went', () => {
 // ── 5. Triage in the Leads tab does not send ─────────────────────────────────
 
 check('the Leads tab offers Approve alongside Reject', () => {
-    assert.ok(/label: 'Approve', async run/.test(HUB), 'the Approve triage action is gone');
+    // Matched loosely on the label: this button carries a `primary: true` flag now (it is the one
+    // decision the panel exists for, and five identical ghost buttons gave the reader no way in),
+    // and a landmark pinned to the exact argument order failed on a styling change that could not
+    // affect what the button does.
+    assert.ok(/label: 'Approve'/.test(HUB), 'the Approve triage action is gone');
     assert.ok(/record\.approvalStatus !== 'approved'/.test(HUB),
         'Approve should hide once a lead is already approved');
 });
 
 check('approving from the Leads tab PATCHes only, and never calls the sender', () => {
-    const start = landmark(HUB, "label: 'Approve', async run");
-    const block = HUB.slice(start, landmark(HUB, "label: 'Reject', async run"));
+    const start = landmark(HUB, "label: 'Approve'");
+    const block = HUB.slice(start, landmark(HUB, "label: 'Reject'", start));
     assert.ok(/approvalStatus: 'approved'/.test(block), 'the PATCH no longer sets approved');
     assert.ok(!/lead-generation/.test(block) && !/send_outreach/.test(block),
         'the Leads tab must NOT send — approving here is the targeting decision, not the email');

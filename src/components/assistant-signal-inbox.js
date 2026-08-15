@@ -54,9 +54,19 @@
 (function () {
   const API = '/.netlify/functions/signal-inbox';
   const DISCOVERY_API = '/.netlify/functions/discovery-campaigns';
-  /** How often to re-read while a run is in flight. Long enough not to hammer, short enough that
-   *  "Searching now" visibly becomes "found 12 companies" without the user reloading the page. */
-  const POLL_MS = 15000;
+  /**
+   * How often to re-read while a run is in flight.
+   *
+   * Two cadences, because a run has two very different tempos. While the worker is ADVANCING it
+   * files companies continuously, and the "View results (N)" count is the proof the search is
+   * working — at fifteen seconds that number moved rarely enough to read as stuck, which is the
+   * complaint this pair of constants answers. Once a run has stopped advancing (the on-demand drain
+   * gives up after twelve minutes and hands back to the ten-minute cron) there is nothing to see
+   * for minutes at a time, and polling fast would spend the user's function invocations to render
+   * the same numbers.
+   */
+  const POLL_MS = 6000;
+  const POLL_STALLED_MS = 30000;
 
   let state = {
     assistantId: null,
@@ -133,18 +143,46 @@
    * well it scored; this one says what has been decided about it, and nothing else.
    */
   const LEAD_CHIP = {
-    awaiting: 'bg-amber-50 text-amber-700 border-amber-200',
     approved: 'bg-green-50 text-green-700 border-green-100',
     rejected: 'bg-gray-100 text-gray-500 border-gray-200',
   };
   const LEAD_LABEL = {
-    awaiting: 'In Leads · awaiting you',
     approved: 'Approved',
     rejected: 'Rejected',
   };
   const ratingChip = (r) => r === 'hot' ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
     : r === 'warm' ? 'bg-amber-50 text-amber-700 border-amber-200'
     : 'bg-gray-100 text-gray-500 border-gray-200';
+
+  /**
+   * What "hot" / "warm" / "cold" actually mean, for the chip's tooltip.
+   *
+   * ⚠️ Read from the GENERATED mirror of the scoring rubric (src/generated/platform-constants.js →
+   * window.LeadRating, built from RATING_BANDS in src/config/icp-profile.ts), never typed here.
+   * Those thresholds have already drifted once between three prompt copies, and a tooltip quoting a
+   * band that differs from the one that produced the chip is that bug pointed at a user.
+   *
+   * Returns '' when the mirror has not loaded, which renders no tooltip at all. That is the right
+   * failure: a hardcoded fallback is exactly the fourth copy this avoids.
+   */
+  function ratingHelp(rating) {
+    return (window.LeadRating && typeof window.LeadRating.help === 'function')
+      ? window.LeadRating.help(rating) : '';
+  }
+
+  /**
+   * The house button styles, so a row cannot invent its own.
+   *
+   * Primary is the emerald fill used for the one action a screen is FOR; secondary is the white
+   * ghost with the emerald hover (the dominant variant across the app — the plain grey-hover ghost
+   * is the older, weaker one); danger is the same ghost that reddens. Every class here is already
+   * compiled into style.css, so none of this needs a Tailwind rebuild.
+   */
+  const BTN = {
+    primary: 'px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed',
+    secondary: 'px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed',
+    danger: 'px-3 py-1.5 bg-white border border-gray-200 text-gray-500 hover:text-red-600 hover:border-red-300 text-xs font-bold rounded-lg transition',
+  };
 
   /**
    * One company a search found — a RECORD of the find, not a decision to make.
@@ -159,18 +197,34 @@
    */
   function row(s) {
     const dim = s.handoffStatus === 'filtered' && s.leadState === 'rejected' ? 'opacity-70' : '';
+    const help = ratingHelp(s.rating);
+
+    // The company name opens its lead record. A signal with no assistantRecordId has not been
+    // mirrored yet (it is mid-run), so it renders as plain text rather than a control that would
+    // open nothing.
+    const title = s.assistantRecordId
+      ? `<button type="button" data-si-lead="${esc(s.assistantRecordId)}" title="Open this lead"
+           class="font-semibold text-gray-900 text-sm text-left hover:text-emerald-800 hover:underline cursor-pointer">${esc(s.title)}</button>`
+      : `<p class="font-semibold text-gray-900 text-sm">${esc(s.title)}</p>`;
+
+    // ⚠️ Only the DECIDED states get a chip. Every row here is a lead awaiting a decision — that is
+    // the ordinary case, stated once at the top of the modal — so an "In Leads · awaiting you" pill
+    // on each row was the same sentence repeated down the page, crowding out the two rows that are
+    // actually different. Absence now means "nothing decided yet", which is what a blank column
+    // should mean.
+    const decided = s.leadState === 'approved' || s.leadState === 'rejected';
     return `
       <div class="flex items-start gap-3 p-4 border-b border-gray-100 ${dim}">
         <div class="min-w-0 flex-1">
-          <p class="font-semibold text-gray-900 text-sm">${esc(s.title)}</p>
+          ${title}
           ${s.excerpt ? `<p class="text-xs text-gray-500 mt-0.5">${esc(s.excerpt)}</p>` : ''}
           ${s.reviewReason ? `<p class="text-xs text-amber-800 mt-1">${esc(s.reviewReason)}</p>` : ''}
         </div>
         <div class="shrink-0 w-20 text-right">
-          ${s.rating ? `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${ratingChip(s.rating)}">${esc(s.rating)}${s.confidence != null ? ' &middot; ' + esc(s.confidence) : ''}</span>` : ''}
+          ${s.rating ? `<span class="text-xs font-bold px-2 py-0.5 rounded-full border cursor-help ${ratingChip(s.rating)}"${help ? ` title="${esc(help)}"` : ''}>${esc(s.rating)}${s.confidence != null ? ' &middot; ' + esc(s.confidence) : ''}</span>` : ''}
         </div>
-        <div class="shrink-0 w-36 text-right">
-          <span class="text-xs font-bold px-2 py-0.5 rounded-full border ${LEAD_CHIP[s.leadState] || LEAD_CHIP.awaiting}">${esc(LEAD_LABEL[s.leadState] || LEAD_LABEL.awaiting)}</span>
+        <div class="shrink-0 w-24 text-right">
+          ${decided ? `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${LEAD_CHIP[s.leadState]}">${esc(LEAD_LABEL[s.leadState])}</span>` : ''}
         </div>
       </div>`;
   }
@@ -415,23 +469,33 @@
   // and rebuilding Tailwind for one divider churns unrelated classes across the whole sheet.
   function searchRow(s, last) {
     const st = searchState(s);
+    const rc = resultsCount(s.id);
+
+    // One emphasised action per row, and it is whichever thing the row is FOR right now. A search
+    // that has never run has exactly one useful control (start it); a search with results is a
+    // thing you open. Making both emerald would emphasise nothing, and making neither — which is
+    // what this row used to do — leaves a wall of identical white buttons with no way in.
+    const startIsPrimary = st.action === 'start';
     const btn = st.action === 'start'
-      ? `<button type="button" data-si-start="${s.id}" class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Start search</button>`
+      ? `<button type="button" data-si-start="${s.id}" class="${BTN.primary}">Start search</button>`
       : st.action === 'run'
-        ? `<button type="button" data-si-start="${s.id}" class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Run again</button>`
+        ? `<button type="button" data-si-start="${s.id}" class="${BTN.secondary}">Run again</button>`
         : '';
 
     // The results button. Disabled — not hidden — while a search has found nothing: a row with no
     // way to open its results reads as a broken control, where a disabled one with a reason reads
     // as a fact about the search.
-    const rc = resultsCount(s.id);
+    //
+    // The count is live: while a run is in flight the poll re-reads countsBySearch and re-renders
+    // this row, so it climbs on its own. The pulsing dot says that out loud — a number that changes
+    // only when you happen to look at it is indistinguishable from one that is stuck.
     const resultsBtn = rc.total === 0
       ? `<button type="button" disabled title="This search has not found anything yet"
-           class="px-3 py-1.5 bg-white border border-gray-200 text-gray-400 text-xs font-bold rounded-lg opacity-60 cursor-not-allowed">View results</button>`
-      : `<button type="button" data-si-results="${s.id}"
-           class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition">View results (${rc.total})</button>`;
+           class="${BTN.secondary} opacity-60 cursor-not-allowed">View results</button>`
+      : `<button type="button" data-si-results="${s.id}" aria-live="polite"
+           class="${startIsPrimary ? BTN.secondary : BTN.primary}">View results (${rc.total})${st.running
+             ? ' <span class="inline-block w-1.5 h-1.5 rounded-full bg-white animate-pulse align-middle"></span>' : ''}</button>`;
 
-    const ghost = 'px-2.5 py-1 bg-white border border-gray-200 text-gray-600 hover:border-gray-300 text-xs font-bold rounded-lg transition';
     return `
       <div class="p-4 ${last ? '' : 'border-b border-gray-100'}">
         <div class="flex items-start gap-3">
@@ -448,10 +512,10 @@
         <div class="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-100">
           ${resultsBtn}
           <span class="ml-auto flex flex-wrap items-center gap-2">
-            <button type="button" data-si-view="${s.id}" class="${ghost}">View</button>
-            <button type="button" data-si-edit="${s.id}" class="${ghost}">Edit</button>
-            <button type="button" data-si-schedule="${s.id}" class="${ghost}">Schedule</button>
-            <button type="button" data-si-archive="${s.id}" class="${ghost} text-gray-400 hover:text-red-600 hover:border-red-300">Archive</button>
+            <button type="button" data-si-view="${s.id}" class="${BTN.secondary}">View</button>
+            <button type="button" data-si-edit="${s.id}" class="${BTN.secondary}">Edit</button>
+            <button type="button" data-si-schedule="${s.id}" class="${BTN.secondary}">Schedule</button>
+            <button type="button" data-si-archive="${s.id}" class="${BTN.danger}">Archive</button>
           </span>
         </div>
       </div>`;
@@ -656,9 +720,31 @@
     h.querySelectorAll('[data-si-archive]').forEach((b) => b.addEventListener('click', () => manageSearch('archive', b, 'data-si-archive')));
   }
 
-  /** The results modal: paging, and nothing else — the list is a read-only record. */
+  /** The results modal: paging, and opening a lead. The list itself decides nothing. */
   function bindResults(b) {
     b.querySelector('[data-si-more]')?.addEventListener('click', () => loadResults({ append: true }));
+    b.querySelectorAll('[data-si-lead]').forEach((el) => el.addEventListener('click', () => openLead(el.getAttribute('data-si-lead'))));
+  }
+
+  /**
+   * A company in the results → its lead record.
+   *
+   * Three steps, in this order and for a reason. The results modal closes because it is a record of
+   * a search, and the user has just left that question behind. The Leads tab is activated because
+   * that is where leads are managed — approving from a modal floating over the Searches tab would
+   * update a table that is not on screen, and closing it would drop the user back somewhere that
+   * shows none of what they just did. The record modal then opens over the Leads table, so the
+   * decision they take is visible in the list underneath the moment they close it.
+   *
+   * The record itself is rendered by assistant-data-hub.js, which owns lead records — this one
+   * passes an id and gets out of the way.
+   */
+  function openLead(recordId) {
+    const id = Number(recordId);
+    if (!id) return;
+    closeResults();
+    window._activateMainTab?.('datahub');
+    window.AssistantDataHub?.openRecordModal?.(id);
   }
 
   /**
@@ -766,8 +852,15 @@
    */
   function schedulePoll() {
     if (state.pollTimer) { clearTimeout(state.pollTimer); state.pollTimer = null; }
-    const running = state.savedSearches.some((s) => s.latestJobStatus === 'queued' || s.latestJobStatus === 'processing');
-    if (!running) return;
+    const inFlight = state.savedSearches.filter((s) => s.latestJobStatus === 'queued' || s.latestJobStatus === 'processing');
+    if (!inFlight.length) return;
+    // Advancing = at least one in-flight run has moved within the stall window. searchState() draws
+    // the same line for its "Paused between steps" label, so the row and the poll agree about
+    // whether anything is actually happening.
+    const advancing = inFlight.some((s) => {
+      const moved = Date.parse(s.latestJobUpdatedAt || '');
+      return !moved || Date.now() - moved <= STALL_MS;
+    });
     // Never yank the list out from under someone reading it: a reload drops back to page one, so a
     // poll that fired after they had paged through would silently throw those pages away.
     if (state.pagedIn) return;
@@ -779,7 +872,7 @@
       // The modal is the surface actually being watched while a run is in flight — a poll that
       // refreshed only the row behind it would leave the open list of companies frozen.
       if (state.resultsOverlay) loadResults();
-    }, POLL_MS);
+    }, advancing ? POLL_MS : POLL_STALLED_MS);
   }
 
   /**
@@ -926,14 +1019,24 @@
       // Counts drive the tab badge, so fetch once on init even though the panel is lazy.
       load();
     },
-    /** Called on first activation of the tab. Cheap if init() already loaded. */
+    /**
+     * Called every time the tab is opened (assistants.js _activateMainTab).
+     *
+     * ⚠️ This used to return early once it had painted, and that froze the live count. The poll
+     * suppresses itself whenever the panel is off-screen — it re-reads `offsetParent` and returns
+     * WITHOUT re-arming — so leaving the Searches tab mid-run killed the timer for good, and coming
+     * back did nothing because `rendered` was already true. "View results (12)" then sat at 12
+     * while the run filed another forty, and only a page refresh moved it.
+     *
+     * Now it always re-reads and re-arms. Returning to a tab that has been away is precisely when
+     * the counts are most stale and the timer is most likely dead, and one list read is cheap.
+     */
     activate() {
-      if (state.rendered) return;
-      state.rendered = true;
-      render();
-      // init()'s load ran while this panel was hidden, so any poll it wanted was suppressed
-      // (offsetParent was null). Now the panel is on screen, arm it.
-      schedulePoll();
+      if (!state.rendered) {
+        state.rendered = true;
+        render();
+      }
+      load();
     },
     refresh: load,
   };

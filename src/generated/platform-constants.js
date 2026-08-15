@@ -371,4 +371,46 @@
      */
     needsConfirmation: needsPersonalInboxConfirmation,
   };
+
+  // ── Lead rating bands ──────────────────────────────────────────────────────
+  // The hot/warm/cold definition the SCORING PROMPT uses, mirrored so the UI can explain a chip
+  // without retyping the numbers. This is the copy that matters most to keep generated: the bands
+  // had already been pasted into three prompts and drifted, and a lead rated "warm" by discovery
+  // and "cold" by chat is indistinguishable from an inconsistent model. A tooltip claiming a
+  // different threshold from the one that produced the chip would be the same bug, aimed at a user.
+  var RATING_BANDS = [{"rating":"hot","min":70,"max":100,"meaning":"strong profile fit + buying intent"},{"rating":"warm","min":40,"max":69,"meaning":"partial fit or unclear intent"},{"rating":"cold","min":0,"max":39,"meaning":"poor fit or no intent"}];
+
+  window.LeadRating = {
+    /** [{ rating, min, max, meaning }] — highest band first, exactly as the prompt states them. */
+    bands: RATING_BANDS,
+
+    /** The band a raw 0-100 score falls in, or null when there is no score. */
+    bandFor: function (score) {
+      // ⚠️ Not a bare Number(): Number(null), Number('') and Number(false) are all 0, so an
+      // UNSCORED lead would come back "cold" — a real verdict invented out of missing data, which
+      // is the one thing the scoring rules forbid everywhere else in this system.
+      if (typeof score !== 'number' && !(typeof score === 'string' && score.trim() !== '')) return null;
+      var n = Number(score);
+      if (!isFinite(n)) return null;
+      for (var i = 0; i < RATING_BANDS.length; i++) {
+        if (n >= RATING_BANDS[i].min && n <= RATING_BANDS[i].max) return RATING_BANDS[i];
+      }
+      return null;
+    },
+
+    /**
+     * One sentence explaining a rating, for a tooltip. Empty string for an unknown rating, so a
+     * caller can put it straight into a title attribute without guarding.
+     */
+    help: function (rating) {
+      var band = null;
+      for (var i = 0; i < RATING_BANDS.length; i++) {
+        if (RATING_BANDS[i].rating === rating) band = RATING_BANDS[i];
+      }
+      if (!band) return '';
+      var name = band.rating.charAt(0).toUpperCase() + band.rating.slice(1);
+      return name + ': scored ' + band.min + '–' + band.max + ' out of 100 against the ideal '
+        + 'customer profile from your setup — ' + band.meaning.replace(' + ', ', and ') + '.';
+    },
+  };
 })();
