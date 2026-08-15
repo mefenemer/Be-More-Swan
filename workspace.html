@@ -5084,6 +5084,11 @@ function formatCurrency(amount, currency) {
      uses ChatSession above) instead of redirecting to assistant-chat.html. -->
 <script src="/src/components/assistant-chat-modal.js"></script>
 <script src="/src/components/spreadsheet-import.js"></script>
+<!-- "Record outcome" (won / lost / disqualified → lead-generation.ts set_outcome). Loaded BEFORE
+     its two callers: the Leads tab's expanded row (assistant-data-hub.js) and the Conversations
+     tab's thread view (assistant-lead-threads.js). Both open the same form on purpose — its rules
+     keep the revenue aggregates meaningful, and a second copy of them would drift. -->
+<script src="/src/components/lead-outcome-modal.js"></script>
 <script src="/src/components/assistant-data-hub.js"></script>
 <!-- Connections › "Synced actions" — this assistant's Integration Scenario Library recipes,
      scoped to the assistant + filtered to its role (integration-scenarios.ts). -->

@@ -68,11 +68,26 @@
   // When the LLM includes an outreachDraft, "Draft Outreach in Gmail" pushes it into
   // the user's Gmail Drafts via /api/actions/sync (gmail_create_draft) so they can
   // review and send it themselves.
-  const RATING_STYLES = {
-    hot: { chip: 'bg-emerald-50 text-emerald-800 border-emerald-200', bar: 'bg-emerald-700', label: 'Hot lead' },
-    warm: { chip: 'bg-amber-50 text-amber-800 border-amber-200', bar: 'bg-amber-500', label: 'Warm lead' },
-    cold: { chip: 'bg-gray-50 text-gray-500 border-gray-200', bar: 'bg-gray-400', label: 'Cold lead' },
-  };
+  /**
+   * The rating chip + score bar, from the GENERATED mirror (window.LeadRating.chips, built from
+   * src/config/lead-rating-chips.ts) — orange hot, yellow warm, blue cold.
+   *
+   * ⚠️ Not a local table any more. Three surfaces draw this chip (this card, the Searches result
+   * row, the Leads tab's Rating column) and each used to own its class strings, so the same rating
+   * was emerald on a card and neutral grey in the table.
+   *
+   * The neutral fallback covers both an unknown rating and a page that has not loaded the constants
+   * script. `cardLabel` is blank in that case, so the card renders no chip rather than inventing a
+   * band — this card is the one surface with no column heading to qualify the word.
+   */
+  function ratingStyle(rating) {
+    const c = (window.LeadRating && typeof window.LeadRating.chipFor === 'function')
+      ? window.LeadRating.chipFor(rating)
+      : null;
+    return c
+      ? { chip: c.cls, bar: c.bar, label: c.cardLabel }
+      : { chip: 'bg-gray-100 text-gray-500 border-gray-200', bar: 'bg-gray-400', label: '' };
+  }
 
   /**
    * `opts.sendsOnApproval` — does pressing Approve, on the surface this card is sitting in, put the
@@ -153,7 +168,10 @@
     const sendsOnApproval = !opts || opts.sendsOnApproval !== false;
     const outreachActions = !opts || opts.outreachActions !== false;
     const score = Math.max(0, Math.min(100, Number(ui.score) || 0));
-    const rating = RATING_STYLES[ui.rating] || RATING_STYLES.cold;
+    // ⚠️ Was `RATING_STYLES[ui.rating] || RATING_STYLES.cold` — an unrated lead was drawn as COLD,
+    // which is a verdict the scorer never reached. ratingStyle() returns the neutral chip with an
+    // empty label instead, and the chip below is omitted entirely when there is nothing to say.
+    const rating = ratingStyle(ui.rating);
     const reasons = Array.isArray(ui.reasons) ? ui.reasons.filter((r) => typeof r === 'string') : [];
 
     // Outreach draft: only render the Gmail action when the LLM produced an email body AND this
@@ -191,7 +209,7 @@
             <p class="font-bold text-gray-900 truncate">${esc(ui.leadName) || 'Unnamed lead'}</p>
           </div>
         </div>
-        <span class="text-xs font-bold px-2 py-0.5 rounded-full border shrink-0 ${rating.chip}">${rating.label}</span>
+        ${rating.label ? `<span class="text-xs font-bold px-2 py-0.5 rounded-full border shrink-0 ${rating.chip}">${rating.label}</span>` : ''}
       </div>
 
       <div class="flex items-center gap-3 mb-4">

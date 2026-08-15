@@ -17,8 +17,18 @@
  *   • list → POST lead-threads { action:'list', assistantId, state?, cursor? }
  *   • get  → POST lead-threads { action:'get',  assistantId, threadId }
  *
- * Read-only by design. Writes to a thread go through src/utils/lead-threads.ts, which is the only
- * writer of these tables — this screen must not become a second one.
+ * Read-only about the THREAD, by design. Writes to lead_threads / lead_messages go through
+ * src/utils/lead-threads.ts, which is the only writer of those tables — this screen must not become
+ * a second one. "Take over thread" / "pause agent" from the mockup are thread state changes and
+ * still belong with that writer, not here.
+ *
+ * ⚠️ There is now exactly ONE write from this screen, and it deliberately does not touch those
+ * tables: "Record outcome" (won / lost / disqualified) writes `dealOutcome` onto the LEAD record
+ * via lead-generation.ts `set_outcome`. It lives here because this is the screen holding the
+ * evidence for the decision — reading what the prospect said in one tab and recording what it
+ * meant in another is a split with no defence. The Leads tab keeps its own entry point: a lead
+ * with no address, or one worked entirely offline, has no thread, and those deals must still be
+ * closable. The form itself is src/components/lead-outcome-modal.js, shared by both.
  *
  * Styling reuses classes already compiled into style.css (no Tailwind rebuild — see the drift note
  * in the project conventions). All server values are escaped on render; treat them as untrusted.
@@ -126,6 +136,66 @@
 
   const chip = (cls, text) => `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${cls}">${esc(text)}</span>`;
 
+  // ── Deal outcome ───────────────────────────────────────────────────────────
+  // How the deal ENDED, which is a different axis from the thread state above it. A thread can be
+  // 'replied' and the deal won, lost or still running; a thread can be 'stalled' and the deal won
+  // on the phone. Neither column can be derived from the other, which is exactly why marking the
+  // outcome has to be an explicit act rather than something inferred from the last message.
+  const OUTCOME_CHIP = {
+    won: 'bg-green-50 text-green-700 border-green-100',
+    lost: 'bg-red-50 text-red-700 border-red-200',
+    disqualified: 'bg-gray-100 text-gray-500 border-gray-200',
+  };
+
+  /** The recorded outcome's display label, via the generated vocabulary. Empty when unrecorded. */
+  function outcomeLabel(outcome) {
+    const RC = window.RevenueConstants;
+    return (RC && outcome) ? RC.outcomeLabel(outcome) : '';
+  }
+
+  /**
+   * The strip that closes the lifecycle: what the deal came to, and the button to say so.
+   *
+   * ⚠️ Gated on `assistantRecordId`. `set_outcome` is keyed by the LEAD record, and a thread can
+   * exist without one — a record deleted after the conversation started leaves the thread behind
+   * (the FK is ON DELETE SET NULL). Offering the button there would open a form whose save can only
+   * 404, so it says why instead.
+   *
+   * ⚠️ Also gated on window.RevenueConstants, which carries the CHECK-constrained vocabulary. If
+   * the constants script has not loaded there is nothing honest to put in the picker.
+   */
+  function outcomeBar(thread) {
+    const recorded = thread.dealOutcome && thread.dealOutcome.outcome ? thread.dealOutcome : null;
+    const label = recorded ? outcomeLabel(recorded.outcome) : '';
+    const RC = window.RevenueConstants;
+
+    if (!thread.assistantRecordId) {
+      return `<div class="p-4 border-b border-gray-100 bg-gray-50">
+        <p class="text-xs text-gray-500">The lead this conversation belongs to has been deleted, so there is no outcome to record against it.</p>
+      </div>`;
+    }
+
+    // The reason line under a loss is the whole point of the closed vocabulary — it is what makes
+    // "why are we losing?" answerable — so it is shown rather than left inside the form.
+    const detail = recorded
+      ? [
+          recorded.lossReason && RC ? RC.lossReasonLabel(recorded.lossReason) : '',
+          recorded.valueGbp != null && recorded.valueGbp !== '' ? `£${esc(recorded.valueGbp)}` : '',
+        ].filter(Boolean).join(' · ')
+      : '';
+
+    return `
+      <div class="p-4 border-b border-gray-100 flex flex-wrap items-center gap-2">
+        ${recorded
+          ? `${chip(OUTCOME_CHIP[recorded.outcome] || OUTCOME_CHIP.disqualified, label)}
+             ${detail ? `<span class="text-xs text-gray-500">${detail}</span>` : ''}`
+          : '<p class="text-xs text-gray-500">No outcome recorded yet — mark it when this deal is done, either way.</p>'}
+        <button type="button" data-lt-outcome
+          class="ml-auto px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition"
+          >${recorded ? 'Change outcome' : 'Record outcome'}</button>
+      </div>`;
+  }
+
   // ── List view ──────────────────────────────────────────────────────────────
 
   function threadRow(t) {
@@ -143,6 +213,9 @@
         </div>
         <div class="shrink-0 w-32 text-right">
           ${t.classification ? chip(CLASS_CHIP[t.classification] || CLASS_CHIP.other, CLASS_LABEL[t.classification] || t.classification) : ''}
+          ${t.dealOutcome && t.dealOutcome.outcome
+            ? `<div class="mt-1">${chip(OUTCOME_CHIP[t.dealOutcome.outcome] || OUTCOME_CHIP.disqualified, outcomeLabel(t.dealOutcome.outcome))}</div>`
+            : ''}
         </div>
         <div class="shrink-0 w-32 text-right">
           ${chip(THREAD_CHIP[t.state] || THREAD_CHIP.closed, THREAD_LABEL[t.state] || t.state)}
@@ -378,6 +451,7 @@
           <div class="ml-auto">${chip(THREAD_CHIP[thread.state] || THREAD_CHIP.closed, THREAD_LABEL[thread.state] || thread.state)}</div>
         </div>
 
+        ${outcomeBar(thread)}
         ${cadenceBanner(enrolment)}
 
         ${messages.length
@@ -432,6 +506,29 @@
       state.showDiff[box.getAttribute('data-lt-diff')] = box.checked;
       render();
     }));
+    h.querySelector('[data-lt-outcome]')?.addEventListener('click', () => {
+      const t = state.open && state.open.thread;
+      if (!t || !t.assistantRecordId) return;
+      window.LeadOutcomeModal?.open({
+        assistantId: state.assistantId,
+        recordId: t.assistantRecordId,
+        title: t.title,
+        existing: t.dealOutcome || null,
+        // Patched in place rather than refetched. The save has already told us what was written,
+        // and a refetch would reset the thread view — collapsing the diffs the user had open and
+        // scrolling them away from the message they were reading when they decided the outcome.
+        //
+        // ⚠️ The LIST copy is updated too. It carries its own dealOutcome for the chip, and
+        // going back to a list still showing "no outcome" on a deal just closed reads as the save
+        // having failed.
+        onSaved: (dealOutcome) => {
+          t.dealOutcome = dealOutcome;
+          const row = state.threads.find((x) => x.id === t.id);
+          if (row) row.dealOutcome = dealOutcome;
+          render();
+        },
+      });
+    });
   }
 
   // ── Data ───────────────────────────────────────────────────────────────────

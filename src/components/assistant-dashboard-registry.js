@@ -374,10 +374,33 @@
       reviewQueue: {
         kind: 'records',
         recordType: 'lead',
+        // "Outreach", not the default "Review". For every other role this tab is a generic approval
+        // gate; here the approve button is literally labelled "Approve & send email" and pressing it
+        // puts a cold email in front of a stranger. "Review" understated that, and it is a large
+        // part of why this tab read as a duplicate of Leads — two tabs called something generic,
+        // showing the same rows. The label also makes the columns below cohere: pending → approved
+        // → awaiting reply → rejected is one story, and that story is about emails.
+        //
+        // ⚠️ Renaming this fails tests/lead-prompt-surfaces.test.ts until leadGeneratorSurfaces()
+        // in chat-orchestrator.ts names the tab too — the assistant tells users which tab to go to,
+        // and a stale name there sends them to a tab that does not exist.
+        label: 'Outreach',
         // Hedged on the send because it's conditional: a user who picked manual outreach during
         // onboarding (outreachMode 'none'), or who hasn't connected an inbox, gets the draft to
         // send themselves — send_outreach returns 'no_provider' / 'not_connected' and nothing goes out.
         subtitle: 'Leads awaiting your approval — read the drafted email on each one. Approving sends it from your connected inbox, if you have one, and sets a chase reminder.',
+        // Per-column label overrides, keyed by the column's `data-status`. Only the ones that differ
+        // from the shared lifecycle wording need to appear.
+        //
+        // ⚠️ "Scheduled" was an outright lie on this role. It reads as "an email is queued to go out
+        // later"; it means the OPPOSITE — the email has already gone, and `scheduled_for` is the
+        // chase reminder that appears on the Calendar. "Awaiting reply" states the true state, and
+        // deliberately reuses the wording of the Conversations tab's own filter chip so the two
+        // tabs describe one fact with one phrase.
+        //
+        // Post-backed queues keep "Scheduled", where it is correct — hence an override rather than
+        // an edit to the markup.
+        columnLabels: { scheduled: 'Awaiting reply' },
       },
       hubTab: {
         id: 'datahub',

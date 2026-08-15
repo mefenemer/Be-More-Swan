@@ -1015,6 +1015,31 @@ function _detailRqGroupSection(g, items, render, statusKey) {
 // Schedule, or Reject before anything acts on them. Lifecycle columns map to approval states.
 const _RQ_RECORD_STATE = { review: 'pending_approval', approved: 'approved', scheduled: 'scheduled', posted: null, archived: 'rejected' };
 
+// The DEFAULT label on each lifecycle column, matching what assistant-detail.html ships with.
+// A role overrides any of them through reviewQueue.columnLabels (see _applyDashboardRegistry); this
+// table is what every other role falls back to, and what a rename must be reset to when the user
+// switches from an overriding role to one without overrides.
+//
+// ⚠️ Keyed by `data-status`, which is what detailRqOpenStatus and _RQ_RECORD_STATE key off too.
+// The label is presentation only — renaming one must never touch these keys.
+const _RQ_COLUMN_LABELS = {
+    review: 'Review', approved: 'Approved', scheduled: 'Scheduled',
+    posted: 'Posted', attention: 'Needs attention', archived: 'Archived',
+};
+
+/**
+ * What a lifecycle column is called ON THE CURRENT ROLE — the override if there is one, else the
+ * shared default.
+ *
+ * Card copy points users at these columns by name ("it's in the … column"), and a hardcoded name
+ * in that copy goes stale the moment a role renames one, sending the user to a column that is not
+ * on their screen. Read it, never type it.
+ */
+function _rqColumnLabel(status) {
+    const overrides = (window._detailReviewQueue || {}).columnLabels || {};
+    return overrides[status] || _RQ_COLUMN_LABELS[status] || status;
+}
+
 // Records currently on screen, by id — see the merge note in _detailRqRenderRecords.
 const _rqRecordsById = new Map();
 
@@ -1567,7 +1592,7 @@ function _rqRecordActions(r, statusKey) {
                 const when = r.scheduledFor ? new Date(r.scheduledFor) : null;
                 note = `<p class="w-full text-[11px] text-gray-500">Sent from your connected inbox. `
                     + (when && !isNaN(when)
-                        ? `A chase reminder is set for ${_rqEsc(when.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }))} — it’s in the Scheduled tab and on the Calendar.`
+                        ? `A chase reminder is set for ${_rqEsc(when.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }))} — it’s in the ${_rqEsc(_rqColumnLabel('scheduled'))} column and on the Calendar.`
                         : 'Nothing further is scheduled for it.')
                     + `</p>`;
                 // Nothing to decide here any more, so the row offers the one thing still useful:
@@ -1592,8 +1617,10 @@ function _rqRecordActions(r, statusKey) {
     } else if (statusKey === 'scheduled') {
         if (isLead) {
             // ⚠️ This column is NOT a queue of pending sends, and for a lead it never was — the
-            // outreach has already gone. Said on the card because the column is called "Scheduled"
-            // everywhere else in the app, where it does mean "waiting to go out".
+            // outreach has already gone. The column is now labelled "Awaiting reply" on this role
+            // (reviewQueue.columnLabels) rather than the "Scheduled" it carries everywhere else,
+            // where the word does mean "waiting to go out". The line stays: the label says what the
+            // state IS, this says what the user should do about it, and that nothing auto-chases.
             note = `<p class="w-full text-[11px] text-gray-500">The outreach email has gone. This is your reminder to chase — nothing is sent automatically.</p>`;
         }
         buttons = btn(isLead ? 'Clear chase reminder' : 'Unschedule', 'unschedule', secondary);
@@ -1879,7 +1906,10 @@ async function _detailRqRenderRecords(statusKey) {
 
     container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Loading…</p>';
     if (!aid || !recordType) { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">No assistant selected.</p>'; return; }
-    if (approval === null) { container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">These records don’t have a published state — see the Approved and Scheduled columns.</p>'; return; }
+    // Names the columns as THIS role labels them — a role may have renamed either of them
+    // (reviewQueue.columnLabels), and copy pointing at a column the user cannot see is the same
+    // dead end as naming a tab that does not exist.
+    if (approval === null) { container.innerHTML = `<p class="text-sm text-gray-400 py-10 text-center">These records don’t have a published state — see the ${_rqEsc(_rqColumnLabel('approved'))} and ${_rqEsc(_rqColumnLabel('scheduled'))} columns.</p>`; return; }
     // ⚠️ A column this queue has no approval state for — 'attention', which is a failed PUBLISH and
     // belongs to posts. Its button is hidden for records queues, so this is only reachable by a
     // deep link, and it must not fall through: `approvalStatus=undefined` is not a valid filter, so
@@ -2251,7 +2281,10 @@ async function _rqSendLeadOutreach(recordId, opts) {
 
         if (sdata.sent) {
             const d = sdata.chaseDate ? new Date(sdata.chaseDate) : null;
-            return `Outreach emailed to ${sdata.to} — chase reminder set${d ? ` for ${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}. It’s in the Scheduled tab and on the Calendar.`;
+            // Names the column as THIS role labels it — the Lead Generator calls it "Awaiting
+            // reply", and a toast sending the user to a "Scheduled" tab they do not have is the
+            // same dead end as naming a tool that does not exist.
+            return `Outreach emailed to ${sdata.to} — chase reminder set${d ? ` for ${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}. It’s in the ${_rqColumnLabel('scheduled')} column and on the Calendar.`;
         }
 
         // ── No inbox to send from ────────────────────────────────────────────
@@ -3975,6 +4008,24 @@ function _applyDashboardRegistry(data) {
     setText('detail-rq-heading', rqLabel);
     const rqTabBtn = document.getElementById('maintab-btn-review-queue');
     if (rqTabBtn && rqTabBtn.firstChild && rqTabBtn.firstChild.nodeType === 3) rqTabBtn.firstChild.nodeValue = rqLabel + ' ';
+    // Lifecycle column labels. A role may rename any of them via reviewQueue.columnLabels, keyed by
+    // the column's `data-status` — the Lead Generator renames "Scheduled" to "Awaiting reply",
+    // because on that role the state means the email has ALREADY gone and what is scheduled is the
+    // chase reminder.
+    //
+    // ⚠️ Always assigned, never only-when-overridden: this page persists across assistant switches
+    // (workspace.html loadView reuses the view), so a label left over from the previously-viewed
+    // role would stick. `_RQ_COLUMN_LABELS` is the default every role falls back to.
+    //
+    // Only the leading TEXT NODE is rewritten — each button also holds a count badge span, and
+    // setting textContent would delete it. Same trap, and same fix, as the tab button above.
+    const rqColumnLabels = window._detailReviewQueue.columnLabels || {};
+    for (const [status, fallback] of Object.entries(_RQ_COLUMN_LABELS)) {
+        const colBtn = document.querySelector(`.detail-rq-col[data-status="${status}"]`);
+        if (!colBtn) continue;
+        const textNode = [...colBtn.childNodes].find((n) => n.nodeType === 3 && n.nodeValue.trim());
+        if (textNode) textNode.nodeValue = `${rqColumnLabels[status] || fallback}\n          `;
+    }
     const rqIsBlog = window._detailReviewQueue.source === 'blog_posts';
     // A role can override the subtitle from the registry (reviewQueue.subtitle) when the generic
     // copy would misdescribe what its Approve button actually does.

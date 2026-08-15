@@ -51,11 +51,16 @@
     queued: 'bg-amber-50 text-amber-800 border-amber-200',
     failed: 'bg-red-50 text-red-700 border-red-200',
   };
-  const RATING_CHIP = {
-    hot: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-    warm: 'bg-amber-50 text-amber-800 border-amber-200',
-    cold: 'bg-gray-50 text-gray-500 border-gray-200',
-  };
+  /**
+   * The score pill on a result row is coloured by its RATING — orange hot, yellow warm, blue cold —
+   * from the generated mirror (window.LeadRating.chips ← src/config/lead-rating-chips.ts).
+   *
+   * ⚠️ Was a local table here, and it disagreed with the Leads tab and the scoring card. Neutral
+   * grey when the rating is missing or the mirror has not loaded; an unrated result is not cold.
+   */
+  const ratingChip = (r) => ((window.LeadRating && typeof window.LeadRating.chipFor === 'function')
+    ? window.LeadRating.chipFor(r).cls
+    : 'bg-gray-100 text-gray-500 border-gray-200');
 
   /**
    * When this campaign next runs, in the viewer's timezone.
@@ -238,7 +243,7 @@
   }
 
   function leadRow(l) {
-    const chip = RATING_CHIP[l.rating] || RATING_CHIP.cold;
+    const chip = ratingChip(l.rating);
     const via = l.discoveredVia ? `<span class="text-gray-400"> · ${esc(l.discoveredVia.replace(/_/g, ' '))}</span>` : '';
     return `
       <li class="py-2">

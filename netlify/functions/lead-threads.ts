@@ -38,6 +38,27 @@ const PAGE_SIZE = 40;
 const EXCERPT_CHARS = 180;
 
 /**
+ * The deal outcome off a lead record's `data`, or null.
+ *
+ * ⚠️ Lifts ONE key rather than returning `data` wholesale. The rest of it — the outreach draft,
+ * the scoring rationale, the contact provenance — is nothing this screen renders, and this is the
+ * response that already has to be careful about what it selects (`reply_token` is never in it).
+ *
+ * Null is returned for all three of "nothing recorded yet", "no linked record" and "data is not an
+ * object", because the screen treats them identically: there is no outcome to show.
+ *
+ * ⚠️ This is the CURRENT outcome as stamped on the record, which is the latest one — correcting an
+ * outcome overwrites `data.dealOutcome` while APPENDING a second row to the revenue ledger. Any
+ * aggregate reading the ledger must take the latest terminal event per record itself.
+ */
+function dealOutcomeOf(data: unknown): Record<string, unknown> | null {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+    const outcome = (data as Record<string, unknown>).dealOutcome;
+    if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) return null;
+    return outcome as Record<string, unknown>;
+}
+
+/**
  * Composite cursor over (updatedAt, id) — the exact ORDER BY below.
  *
  * updatedAt is the right sort key because src/utils/lead-threads.ts stamps it on every message in
@@ -123,6 +144,10 @@ export default withLambda(async (event) => {
                     createdAt: leadThreads.createdAt,
                     assistantRecordId: leadThreads.assistantRecordId,
                     recordTitle: assistantRecords.title,
+                    // Same one key as `get` lifts (see dealOutcomeOf) — on the list it answers
+                    // "which of these are closed out?" without opening each one, which is the
+                    // question that makes a list of conversations navigable at all.
+                    recordData: assistantRecords.data,
                 })
                 .from(leadThreads)
                 .leftJoin(assistantRecords, eq(assistantRecords.id, leadThreads.assistantRecordId))
@@ -221,6 +246,7 @@ export default withLambda(async (event) => {
                         // a deleted record still has to be identifiable.
                         title: t.recordTitle || t.contactEmail || `Thread #${t.id}`,
                         assistantRecordId: t.assistantRecordId,
+                        dealOutcome: dealOutcomeOf(t.recordData),
                         messageCount: r?.messageCount ?? 0,
                         inboundCount: r?.inboundCount ?? 0,
                         lastExcerpt: r?.lastExcerpt ?? '',
@@ -261,6 +287,11 @@ export default withLambda(async (event) => {
                     createdAt: leadThreads.createdAt,
                     assistantRecordId: leadThreads.assistantRecordId,
                     recordTitle: assistantRecords.title,
+                    // For the "Record outcome" control on the thread. Only `dealOutcome` is lifted
+                    // out below — the rest of a lead's `data` (the outreach draft, the scoring
+                    // rationale, the contact provenance) has no business on this screen, and this
+                    // response is already the one that must not leak `reply_token`.
+                    recordData: assistantRecords.data,
                 })
                 .from(leadThreads)
                 .leftJoin(assistantRecords, eq(assistantRecords.id, leadThreads.assistantRecordId))
@@ -320,6 +351,11 @@ export default withLambda(async (event) => {
                     contactEmail: thread.contactEmail,
                     title: thread.recordTitle || thread.contactEmail || `Thread #${thread.id}`,
                     assistantRecordId: thread.assistantRecordId,
+                    // How this deal ended, if it has. Drives the "Record outcome" / "Change
+                    // outcome" control and the banner above it. Null covers three different
+                    // things, all of which mean the same to this screen: nothing recorded yet, no
+                    // linked record at all, and a `data` blob that isn't an object.
+                    dealOutcome: dealOutcomeOf(thread.recordData),
                     lastOutboundAt: thread.lastOutboundAt?.toISOString() ?? null,
                     lastInboundAt: thread.lastInboundAt?.toISOString() ?? null,
                     createdAt: thread.createdAt.toISOString(),

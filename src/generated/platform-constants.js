@@ -402,9 +402,30 @@
   // different threshold from the one that produced the chip would be the same bug, aimed at a user.
   var RATING_BANDS = [{"rating":"hot","min":70,"max":100,"meaning":"strong profile fit + buying intent"},{"rating":"warm","min":40,"max":69,"meaning":"partial fit or unclear intent"},{"rating":"cold","min":0,"max":39,"meaning":"poor fit or no intent"}];
 
+  // The chip COLOURS, from src/config/lead-rating-chips.ts. Three surfaces draw this chip — the
+  // Searches result row, the Leads tab's Rating column and the lead scoring card — and before this
+  // was shared they disagreed, so the same lead's rating looked like a different fact per tab.
+  var RATING_CHIPS = {"hot":{"label":"Hot","cardLabel":"Hot lead","cls":"bg-orange-50 text-orange-800 border-orange-200","bar":"bg-orange-600"},"warm":{"label":"Warm","cardLabel":"Warm lead","cls":"bg-yellow-50 text-yellow-700 border-yellow-200","bar":"bg-yellow-500"},"cold":{"label":"Cold","cardLabel":"Cold lead","cls":"bg-blue-50 text-blue-800 border-blue-200","bar":"bg-blue-500"}};
+  var RATING_CHIP_UNKNOWN = {"cls":"bg-gray-100 text-gray-500 border-gray-200","bar":"bg-gray-400"};
+
   window.LeadRating = {
     /** [{ rating, min, max, meaning }] — highest band first, exactly as the prompt states them. */
     bands: RATING_BANDS,
+
+    /** { hot|warm|cold: { label, cardLabel, cls, bar } } — the words and colours every surface uses. */
+    chips: RATING_CHIPS,
+
+    /**
+     * The chip for a rating, never null — an unknown or absent rating gets the neutral chip.
+     *
+     * ⚠️ Unrated is NOT cold. A CSV import and a pre-scoring record both arrive with no rating, and
+     * colouring them as the lowest band would state a verdict the scorer never reached.
+     */
+    chipFor: function (rating) {
+      var c = RATING_CHIPS[rating];
+      if (!c) return { label: '', cardLabel: '', cls: RATING_CHIP_UNKNOWN.cls, bar: RATING_CHIP_UNKNOWN.bar };
+      return c;
+    },
 
     /** The band a raw 0-100 score falls in, or null when there is no score. */
     bandFor: function (score) {

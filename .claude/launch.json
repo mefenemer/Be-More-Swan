@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-rating-chips",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/5cce4eb5-37d1-43c8-8e26-2cf2d57ec999/scratchpad/ratingharness/server.mjs"
+      ],
+      "port": 4320,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-outreach",
       "runtimeExecutable": "node",
       "runtimeArgs": [

@@ -305,4 +305,71 @@ check('changing the grouping opens everything again', () => {
     assert.match(clear, /state\.view\.collapsed\.clear\(\)/, 'and Clear must clear the folds too');
 });
 
+// ── The tab and its columns are named for what they DO ───────────────────────
+//
+// "Review" understated a tab whose approve button sends a cold email, and "Scheduled" said the
+// opposite of what that column means for a lead: the email has already gone, and what is scheduled
+// is the reminder to chase. Both are role overrides, because both words are correct elsewhere.
+
+console.log('\n──── the tab and its columns say what they are ────');
+
+const REGISTRY = read('src/components/assistant-dashboard-registry.js');
+const DETAIL_HTML = read('assistant-detail.html');
+const leadRegistry = REGISTRY.slice(landmark(REGISTRY, 'lead_qualifier: {'), landmark(REGISTRY, 'accounts_receivable_clerk: {'));
+
+check('the Lead Generator renames the tab, and the chat prompt agrees', () => {
+    const rq = leadRegistry.slice(landmark(leadRegistry, 'reviewQueue: {'));
+    const label = /label:\s*'([^']+)'/.exec(rq.slice(0, 1400));
+    assert.ok(label, 'lead_qualifier no longer overrides the review-queue tab label');
+    // Derived, never a literal: tests/lead-prompt-surfaces.test.ts already fails if the prompt
+    // omits a labelled surface, and pinning the word here as well would just be a third copy.
+    const prompt = read('netlify/functions/chat-orchestrator.ts');
+    assert.ok(prompt.includes(`"${label[1]}" tab`),
+        `the chat prompt must name the "${label[1]}" tab — an assistant that has not been told a `
+        + 'tab exists invents an explanation for it');
+});
+
+check('the Scheduled column is renamed for leads, and only for leads', () => {
+    const rq = leadRegistry.slice(landmark(leadRegistry, 'reviewQueue: {'));
+    assert.match(rq.slice(0, 2400), /columnLabels:\s*\{[^}]*scheduled:\s*'[^']+'/,
+        'lead_qualifier must override the Scheduled column — for a lead that state means the email '
+        + 'has ALREADY gone, and the shared word promises the opposite');
+    // The markup keeps "Scheduled": post queues genuinely do hold pending sends there. An edit to
+    // the HTML instead of an override would have renamed it for every role.
+    assert.match(DETAIL_HTML, /data-status="scheduled"[^>]*>Scheduled/,
+        'the shared markup must still ship the default label');
+});
+
+check('a column label is always assigned, so a rename cannot leak between roles', () => {
+    // The page persists across assistant switches (workspace.html loadView reuses the view), so a
+    // label applied only when an override exists would stick when the user opens a role without one.
+    const apply = SHELL.slice(landmark(SHELL, 'const rqColumnLabels ='), landmark(SHELL, 'const rqIsBlog'));
+    assert.match(apply, /_RQ_COLUMN_LABELS/,
+        'the loop must iterate the DEFAULTS, not the overrides — otherwise nothing resets');
+    assert.match(apply, /rqColumnLabels\[status\] \|\| fallback/,
+        'every column must be assigned its override or its default on every apply');
+    // textContent would delete the count badge that shares the button.
+    assert.match(apply, /nodeType === 3/,
+        'only the leading text node may be rewritten — the badge span lives in the same button');
+});
+
+check('every column in the markup has a default label to reset to', () => {
+    const statuses = [...DETAIL_HTML.matchAll(/class="detail-rq-col[^"]*"[\s\S]{0,200}?data-status="([a-z]+)"/g)]
+        .map((m) => m[1]);
+    assert.ok(statuses.length >= 5, `expected the lifecycle columns, found ${statuses.length}`);
+    const defaults = SHELL.slice(landmark(SHELL, 'const _RQ_COLUMN_LABELS = {'), landmark(SHELL, '\n};', landmark(SHELL, 'const _RQ_COLUMN_LABELS = {')));
+    const missing = [...new Set(statuses)].filter((s) => !new RegExp(`\\b${s}:`).test(defaults));
+    assert.deepStrictEqual(missing, [],
+        `_RQ_COLUMN_LABELS has no default for: ${missing.join(', ')} — a column missing from it keeps `
+        + 'whatever label the previously-viewed role left on it');
+});
+
+check('card copy names the column as the role labels it', () => {
+    // "it's in the Scheduled tab" was hardcoded next to a column the Lead Generator renames.
+    assert.match(SHELL, /function _rqColumnLabel\(/, 'the label resolver must exist');
+    assert.ok(!/in the Scheduled tab|the Approved and Scheduled columns/.test(SHELL),
+        'card copy still hardcodes a column name — it must read _rqColumnLabel(), or it points '
+        + 'users at a column that is not on their screen');
+});
+
 console.log(`\n${passed} checks passed.`);

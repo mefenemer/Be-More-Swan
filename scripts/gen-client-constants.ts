@@ -48,6 +48,7 @@ import {
 } from '../src/config/lead-email-kind';
 import { LEAD_OUTREACH_CHIPS, leadOutreachState } from '../src/config/lead-outreach-state';
 import { RATING_BANDS } from '../src/config/icp-profile';
+import { LEAD_RATING_CHIPS, LEAD_RATING_CHIP_UNKNOWN } from '../src/config/lead-rating-chips';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const OUTPUT_PATH = join(root, 'src', 'generated', 'platform-constants.js');
@@ -470,9 +471,30 @@ ${formatRows}
   // different threshold from the one that produced the chip would be the same bug, aimed at a user.
   var RATING_BANDS = ${JSON.stringify(RATING_BANDS)};
 
+  // The chip COLOURS, from src/config/lead-rating-chips.ts. Three surfaces draw this chip — the
+  // Searches result row, the Leads tab's Rating column and the lead scoring card — and before this
+  // was shared they disagreed, so the same lead's rating looked like a different fact per tab.
+  var RATING_CHIPS = ${JSON.stringify(LEAD_RATING_CHIPS)};
+  var RATING_CHIP_UNKNOWN = ${JSON.stringify(LEAD_RATING_CHIP_UNKNOWN)};
+
   window.LeadRating = {
     /** [{ rating, min, max, meaning }] — highest band first, exactly as the prompt states them. */
     bands: RATING_BANDS,
+
+    /** { hot|warm|cold: { label, cardLabel, cls, bar } } — the words and colours every surface uses. */
+    chips: RATING_CHIPS,
+
+    /**
+     * The chip for a rating, never null — an unknown or absent rating gets the neutral chip.
+     *
+     * ⚠️ Unrated is NOT cold. A CSV import and a pre-scoring record both arrive with no rating, and
+     * colouring them as the lowest band would state a verdict the scorer never reached.
+     */
+    chipFor: function (rating) {
+      var c = RATING_CHIPS[rating];
+      if (!c) return { label: '', cardLabel: '', cls: RATING_CHIP_UNKNOWN.cls, bar: RATING_CHIP_UNKNOWN.bar };
+      return c;
+    },
 
     /** The band a raw 0-100 score falls in, or null when there is no score. */
     bandFor: function (score) {

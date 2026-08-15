@@ -116,4 +116,72 @@ for (const file of ['src/components/assistant-signal-inbox.js', 'src/components/
     });
 }
 
+console.log('\n──── the chip COLOURS come from the same one place ────');
+
+check('the mirror carries a chip for every band, and nothing extra', () => {
+    const chips = (LeadRating as unknown as { chips: Record<string, { label: string; cardLabel: string; cls: string; bar: string }> }).chips;
+    assert.ok(chips, 'window.LeadRating.chips is missing — run npm run gen:constants');
+    assert.deepStrictEqual(
+        Object.keys(chips).sort(),
+        RATING_BANDS.map((b) => b.rating).sort(),
+        'the chip table and the scoring bands disagree about which ratings exist',
+    );
+    for (const band of RATING_BANDS) {
+        const c = chips[band.rating];
+        assert.ok(c.cls && c.bar && c.label && c.cardLabel, `${band.rating} is missing a label or a colour`);
+    }
+});
+
+check('the three bands are visually DISTINCT from each other', () => {
+    // The whole point of the request that produced this file: hot, warm and cold must not share a
+    // colour. They previously did in effect — cold and "no rating" were both grey.
+    const chips = (LeadRating as unknown as { chips: Record<string, { cls: string }> }).chips;
+    const seen = new Set(RATING_BANDS.map((b) => chips[b.rating].cls));
+    assert.strictEqual(seen.size, RATING_BANDS.length, 'two bands render the same chip colour');
+});
+
+check('an unrated lead is neutral, never coloured as a band', () => {
+    // A CSV import and a pre-scoring record carry no rating. Painting them with the lowest band's
+    // colour states a verdict the scorer never reached — which is what disruptive-ui-registry.js
+    // used to do with its `|| RATING_STYLES.cold` fallback.
+    const chipFor = (LeadRating as unknown as { chipFor: (r: unknown) => { label: string; cls: string } }).chipFor;
+    const chips = (LeadRating as unknown as { chips: Record<string, { cls: string }> }).chips;
+    for (const absent of ['', null, undefined, 'lukewarm']) {
+        const c = chipFor(absent);
+        assert.strictEqual(c.label, '', `an unknown rating (${String(absent)}) must not be labelled`);
+        for (const band of RATING_BANDS) {
+            assert.notStrictEqual(c.cls, chips[band.rating].cls,
+                `an unknown rating borrows the ${band.rating} colour`);
+        }
+    }
+});
+
+// Every surface that draws the chip. Adding one here without wiring it to the mirror is the drift
+// this whole file exists to stop — there were FOUR local colour tables before, and no two of them
+// agreed about what a hot lead looks like.
+const CHIP_SURFACES = [
+    'src/components/assistant-signal-inbox.js',
+    'src/components/assistant-data-hub.js',
+    'src/components/disruptive-ui-registry.js',
+    'src/components/assistant-discovery-campaigns.js',
+];
+
+for (const file of CHIP_SURFACES) {
+    check(`${file.split('/').pop()} takes its chip colour from window.LeadRating`, () => {
+        const src = read(file);
+        assert.ok(/window\.LeadRating\s*&&[\s\S]{0,120}chipFor/.test(src),
+            'the chip colour must come from window.LeadRating.chipFor, guarded for a missing mirror');
+        // The failure this pins: a local band → classes mapping reappearing. Both shapes the four
+        // old copies actually used are matched — the object literal (`hot: 'bg-…'`, `hot: { chip:
+        // 'bg-…' }`) and the ternary chain (`r === 'hot' ? 'bg-…'`). Checking only for the presence
+        // of chipFor would not catch a file that keeps it for one chip and hand-rolls another.
+        const LOCAL_TABLE = /\b(hot|warm|cold)\s*:\s*(\{[^}]*)?['"][^'"]*\b(bg|text|border)-[a-z]+-\d/;
+        const LOCAL_TERNARY = /['"](hot|warm|cold)['"][\s\S]{0,12}\?[\s\S]{0,20}['"][^'"]*\b(bg|text|border)-[a-z]+-\d/;
+        for (const pattern of [LOCAL_TABLE, LOCAL_TERNARY]) {
+            assert.ok(!pattern.test(src),
+                'a local rating→colour mapping has reappeared — read it from window.LeadRating instead');
+        }
+    });
+}
+
 console.log(`\n${passed} checks passed.`);

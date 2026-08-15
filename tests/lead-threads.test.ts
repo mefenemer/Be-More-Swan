@@ -358,7 +358,7 @@ check('every utility class the Conversations UI uses is already compiled into st
     // The chip palettes are class lists held in consts rather than written inline, so the attribute
     // scan above never sees them — they reach the DOM through `${cls}`. Named explicitly because
     // any "does this literal look like classes?" heuristic also matches the data-* selector names.
-    for (const mapName of ['THREAD_CHIP', 'CLASS_CHIP']) {
+    for (const mapName of ['THREAD_CHIP', 'CLASS_CHIP', 'OUTCOME_CHIP']) {
         const at = conversationsUiText.indexOf(`const ${mapName} = {`);
         assert.ok(at > -1, `${mapName} not found — update this check if the palettes were renamed`);
         const bodyEnd = landmark(conversationsUiText, '};', at);
@@ -375,6 +375,94 @@ check('the Signal Inbox is the DECLARED landing tab, not an accident of tab orde
     const leadBlock = registryText.slice(landmark(registryText, 'lead_qualifier: {'));
     assert.ok(/defaultMainTab:\s*'signals'/.test(leadBlock),
         "lead_qualifier must declare defaultMainTab: 'signals' rather than relying on the first-visible-tab fallback");
+});
+
+// ── 9. Closing the lifecycle from the conversation ───────────────────────────
+//
+// A deal ending was recordable only from the Leads tab, which meant reading what the prospect
+// actually said in one tab and recording what it meant in another. The thread now carries the same
+// control. Everything here defends the two ways that could go wrong: a second implementation of the
+// outcome rules, and this read-only screen quietly becoming a writer of the thread tables.
+
+console.log('\n──── the deal outcome can be recorded where the evidence is ────');
+
+const OUTCOME_MODAL = readFileSync(join(root, 'src/components/lead-outcome-modal.js'), 'utf8');
+const WORKSPACE = readFileSync(join(root, 'workspace.html'), 'utf8');
+
+check('both surfaces open ONE form — neither hand-rolls the outcome rules', () => {
+    for (const [name, src] of [
+        ['the Conversations tab', conversationsUiText],
+        ['the Leads tab', readFileSync(join(root, 'src/components/assistant-data-hub.js'), 'utf8')],
+    ] as const) {
+        assert.ok(/window\.LeadOutcomeModal\?\.open\(/.test(src),
+            `${name} must open the shared modal rather than building its own form`);
+        // The tells of a second copy: the picker, the conditional fields, or the 409 dance.
+        assert.ok(!/data-oc-outcomes|needsConfirmation/.test(src),
+            `${name} has re-implemented the outcome form — the rules it mirrors (a loss needs a `
+            + 'reason, only a win takes a value, a correction appends) must exist in one place');
+    }
+});
+
+check('the modal is loaded before the two components that call it', () => {
+    const modal = WORKSPACE.indexOf('/src/components/lead-outcome-modal.js');
+    assert.notStrictEqual(modal, -1, 'workspace.html never loads the shared outcome modal');
+    for (const dependent of ['assistant-data-hub.js', 'assistant-lead-threads.js']) {
+        const at = WORKSPACE.indexOf(`/src/components/${dependent}`);
+        assert.notStrictEqual(at, -1, `workspace.html no longer loads ${dependent}`);
+        assert.ok(modal < at, `${dependent} is loaded before the modal it opens`);
+    }
+});
+
+check('the outcome control is gated on there being a lead to record it against', () => {
+    // set_outcome is keyed by the LEAD record, and assistant_record_id is ON DELETE SET NULL — a
+    // thread outlives its record. Without this the button opens a form whose save can only 404.
+    const at = landmark(conversationsUiText, 'function outcomeBar(');
+    const body = conversationsUiText.slice(at, landmark(conversationsUiText, '\n  }', at));
+    assert.ok(/if \(!thread\.assistantRecordId\)/.test(body),
+        'outcomeBar must refuse to offer the button when the thread has no linked lead');
+    const handler = conversationsUiText.slice(landmark(conversationsUiText, "'[data-lt-outcome]'"));
+    assert.ok(/!t\.assistantRecordId\) return/.test(handler.slice(0, 400)),
+        'the click handler must also bail without a record id — the render gate alone is not the guard');
+});
+
+check('recording an outcome never writes the thread tables', () => {
+    // The one write this screen has must stay off lead_threads / lead_messages: src/utils/
+    // lead-threads.ts is their only writer, for the same reason recordEvent() is the only ledger
+    // writer. set_outcome writes assistant_records.data instead, which is why this is allowed.
+    assert.ok(/action: 'set_outcome'/.test(OUTCOME_MODAL),
+        'the modal must post set_outcome');
+    // Comment-stripped: the modal's header names assistant-lead-threads.js while EXPLAINING which
+    // of its two callers this is, and a scan counting comment text would fail on the explanation.
+    const code = codeOnly(OUTCOME_MODAL);
+    assert.ok(!/leadThreads|lead_messages|lead-threads/.test(code),
+        'the outcome path must not reach the thread tables');
+    assert.ok(/lead-generation/.test(code),
+        'the outcome path must go to lead-generation.ts set_outcome, which writes the LEAD record');
+    assert.ok(/read-only about the THREAD/i.test(conversationsUiText),
+        'the component header must still state the read-only invariant it is preserving — a later '
+        + 'reader seeing one write will otherwise take it as licence for the next');
+});
+
+check('the correction path is preserved, not simplified away', () => {
+    // The ledger is append-only: correcting an outcome appends a SECOND terminal row. The server
+    // 409s unless confirmed, and dropping that handling would make a correction look like a failure.
+    assert.ok(/res\.status === 409 && data\.needsConfirmation/.test(OUTCOME_MODAL),
+        'the modal must handle the 409 that guards a correction');
+    assert.ok(/confirmChange: true/.test(OUTCOME_MODAL),
+        'confirming a change must send confirmChange');
+});
+
+check('the API returns the outcome but not the rest of the lead record', () => {
+    // recordData is selected to reach dealOutcome. Returning the blob would put the outreach draft
+    // and contact provenance on a response that is already careful about what it selects.
+    assert.ok(/function dealOutcomeOf\(/.test(readApiText),
+        'lead-threads.ts must lift dealOutcome through a single helper');
+    assert.ok(!/recordData: t\.recordData|recordData: thread\.recordData/.test(readApiText),
+        'the raw record data blob must never be returned to the browser');
+    const responses = [...readApiText.matchAll(/dealOutcome: dealOutcomeOf\(/g)];
+    assert.strictEqual(responses.length, 2,
+        `both list and get must expose the outcome (found ${responses.length}) — a chip that only `
+        + 'appears once the thread is open cannot answer "which of these are closed out?"');
 });
 
 console.log(`\n${passed} checks passed.`);

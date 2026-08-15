@@ -156,9 +156,21 @@
     approved: 'Approved',
     rejected: 'Rejected',
   };
-  const ratingChip = (r) => r === 'hot' ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-    : r === 'warm' ? 'bg-amber-50 text-amber-700 border-amber-200'
-    : 'bg-gray-100 text-gray-500 border-gray-200';
+  /**
+   * The rating chip's colours — orange hot, yellow warm, blue cold.
+   *
+   * ⚠️ Read from the GENERATED mirror (window.LeadRating.chips, built from
+   * src/config/lead-rating-chips.ts), for the same reason ratingHelp() below reads the bands from
+   * there: this chip is drawn by three surfaces, and when each held its own class strings a hot
+   * lead was emerald here and neutral grey in the Leads tab — one fact, two appearances.
+   *
+   * Falls back to the neutral chip when the mirror has not loaded, which is also what an unrated
+   * lead gets. Deliberately not a hardcoded copy of the three colours: that is the fourth copy this
+   * exists to prevent.
+   */
+  const ratingChip = (r) => ((window.LeadRating && typeof window.LeadRating.chipFor === 'function')
+    ? window.LeadRating.chipFor(r).cls
+    : 'bg-gray-100 text-gray-500 border-gray-200');
 
   /**
    * What "hot" / "warm" / "cold" actually mean, for the chip's tooltip.
