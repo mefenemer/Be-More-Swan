@@ -218,8 +218,10 @@ check('approving from the Leads tab PATCHes only, and never calls the sender', (
     // "label: 'Approve'" (it offers Approve as the next-step button), and a slice starting there
     // swallows the whole action bar, including the "Look again" call to lead-generation. The
     // assertion then fails while the handler it names is perfectly correct.
+    // ⚠️ Sliced to the DELETE push. It used to end at "label: 'Reject'"; Reject left this tab on
+    // 2026-08-15 (Delete performs the rejection now), so Delete is the next push in the bar.
     const start = landmark(HUB, "buttons.push({ label: 'Approve'");
-    const block = HUB.slice(start, landmark(HUB, "label: 'Reject'", start));
+    const block = HUB.slice(start, landmark(HUB, "buttons.push({ label: 'Delete'", start));
     assert.ok(/approvalStatus: 'approved'/.test(block), 'the PATCH no longer sets approved');
     assert.ok(!/lead-generation/.test(block) && !/send_outreach/.test(block),
         'the Leads tab must NOT send — approving here is the targeting decision, not the email');

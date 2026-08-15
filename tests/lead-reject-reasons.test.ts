@@ -161,11 +161,14 @@ check('the reject strip does not claim the rejection teaches the assistant', () 
 // where a user actually reads a lead in full. It is a SECOND copy of the strip above — deliberately
 // duplicated, since the Review Queue's version anchors to a card that doesn't exist on that screen
 // — so the honesty rule has to be pinned in both places or it only holds in one.
-check('the Leads-tab reject strip makes the same limited promise', () => {
+// ⚠️ Retargeted 2026-08-15. The Leads tab's Reject button and its `rejectReasonStrip` are gone —
+// Delete performs the rejection now, and asks for the reason in ITS confirmation. The honesty rule
+// did not move with it by accident, so it is asserted against the strip that inherited the job.
+check('the Leads-tab delete strip makes the same limited promise', () => {
     const src = read('src/components/assistant-data-hub.js');
-    const start = src.indexOf('function rejectReasonStrip');
-    assert.ok(start !== -1, 'the Leads-tab strip is missing');
-    const fn = src.slice(start, landmark(src, 'function offerDomainExclusion'));
+    const start = src.indexOf('function deleteReasonStrip');
+    assert.ok(start !== -1, 'the Leads-tab reason strip is missing');
+    const fn = src.slice(start, landmark(src, '// ── Rejecting a lead'));
     const copy = fn.replace(/\/\/.*$/gm, '');
     for (const claim of [/teach/i, /learn/i, /next time/i, /improve/i]) {
         assert.ok(!claim.test(copy),
@@ -277,15 +280,26 @@ check('the reject-feedback read is scoped to the org and the assistant', () => {
 // Same reason as the Review Queue's ordering test, checked in the other file: the reason is an
 // annotation on a decision already made. If the strip were built BEFORE the PATCH resolved, a
 // failed reject would leave the user categorising a lead that is still pending.
-check('the Leads-tab strip is built only after the PATCH resolves', () => {
+// ⚠️ The Leads tab now asks BEFORE, not after. Its Reject button is gone and Delete owns the
+// capture, which confirms up front — so the property to defend flipped: instead of "no strip until
+// the write succeeds", it is "no write until the strip is answered", plus "a failed write leaves
+// the strip usable rather than pretending it worked".
+check('the Leads-tab strip is answered before anything is written', () => {
     const src = read('src/components/assistant-data-hub.js');
-    const start = src.indexOf("buttons.push({ label: 'Reject'");
-    assert.ok(start !== -1, 'the Leads-tab Reject button is missing');
+    const start = src.indexOf("buttons.push({ label: 'Delete'");
+    assert.ok(start !== -1, 'the Leads-tab Delete button is missing');
     const run = src.slice(start, landmark(src, '}});', start));
-    const throws = run.indexOf('throw new Error');
-    const strip = landmark(run, 'rejectReasonStrip(record)');
-    assert.ok(throws !== -1 && strip > throws,
-        'the strip must be appended after the !res.ok guard, so a failed reject shows no strip');
+    assert.ok(/state\.hub\.recordType === 'lead'/.test(run) && /deleteReasonStrip\(record\)/.test(run),
+        'pressing Delete on a lead must open the strip rather than deleting immediately');
+    assert.ok(/return;/.test(run.slice(0, landmark(run, 'await deleteRecord'))),
+        'the lead branch must return before the unconditional delete below it');
+
+    const strip = src.slice(landmark(src, 'function deleteReasonStrip'), landmark(src, '// ── Rejecting a lead'));
+    assert.ok(landmark(strip, 'strip.innerHTML') < landmark(strip, 'deleteRecord('),
+        'the delete runs before the confirmation is even drawn');
+    assert.ok(/b\.disabled = false/.test(strip),
+        'a failed delete must leave the buttons usable — a dead strip over an undeleted lead reads '
+        + 'as success');
 });
 
 check('the strip appears after the reject, never as a gate in front of it', () => {

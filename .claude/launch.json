@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-leadgen-2026",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/714db506-43ab-4283-b818-283f876e736f/scratchpad/leadharness/server.mjs"
+      ],
+      "port": 4331,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-lead-retention",
       "runtimeExecutable": "node",
       "runtimeArgs": [

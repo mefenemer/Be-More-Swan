@@ -333,26 +333,43 @@
     },
 
     lead_qualifier: {
+      // These four cards are fed by get-lead-performance, NOT by the shared
+      // get-assistant-performance the social roles use — that one reads post_insights, and this
+      // assistant publishes nothing, so it returned hasData:false for ever and the section told
+      // every Lead Generator user that "nothing has been published in the last 30 days". True,
+      // permanent, and about a different product. `metricsSource` is what routes it; a role
+      // without the flag keeps the social endpoint.
+      metricsSource: 'lead',
+      // ⚠️ The window is 90 days, not the 30 the social cards use — a B2B cycle runs weeks to
+      // months and a 30-day window reports zero closed deals for a healthy pipeline. The endpoint
+      // returns periodDays and the client prints it; never hardcode a period into this copy.
+      //
+      // Rewritten 2026-08-15. The four labels here used to be "Pipeline Volume / Quality Signal /
+      // Hours Reclaimed / Data Quality" — written before anything computed them, and two of them
+      // were unmeasurable in principle: nothing in the platform times a human doing this work by
+      // hand, so "Hours Reclaimed" could only ever have been an estimate presented as a
+      // measurement. Each card below is now one question in the standard lead funnel, and each is
+      // a figure the ledger genuinely holds.
       kpis: [
         {
           label: 'Pipeline Volume',
-          title: 'Leads Scored',
-          desc: 'Every inbound enquiry scored against your ideal customer profile.',
+          title: 'Qualified Leads',
+          desc: 'Leads this assistant found that you judged worth pursuing, against how many it sifted to get there.',
         },
         {
-          label: 'Quality Signal',
-          title: 'High-Value Prospects',
-          desc: 'Leads that matched your target industries and headcount — worth chasing first.',
+          label: 'Targeting Accuracy',
+          title: 'Qualification Rate',
+          desc: 'Of the leads you ruled on, the share you kept. Measured over decided leads only, so a review backlog never reads as bad targeting.',
         },
         {
-          label: 'Hours Reclaimed',
-          title: 'Time Saved',
-          desc: 'Manual research and triage hours this assistant has taken off your plate.',
+          label: 'Outreach Engagement',
+          title: 'Reply Rate',
+          desc: 'Prospects who wrote back, out of those actually emailed. Opt-outs are shown beside it — a reply rate means little without them.',
         },
         {
-          label: 'Data Quality',
-          title: 'CRM Enriched',
-          desc: 'Lead records updated with scores, firmographics and suggested next steps.',
+          label: 'Conversion',
+          title: 'Deals Won',
+          desc: 'Closed-won value from these leads, and how many of the prospects contacted became customers.',
         },
       ],
       modules: {

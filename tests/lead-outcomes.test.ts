@@ -117,7 +117,12 @@ const EMIT_SITES: Record<string, number> = {
     'src/utils/outreach-sequences.ts': 3,
     'netlify/functions/process-sequence-sends.ts': 1,
     'netlify/functions/inbound-email.ts': 2,
-    'netlify/functions/assistant-records.ts': 2,      // single approval gate / bulk reject
+    // Three: the single approval gate, the bulk reject, and DELETE — which since 2026-08-15 is
+    // itself a rejection (it marks the lead rejected and files it under Deleted instead of
+    // dropping the row), so it must write the same ledger event under the same wasDecided guard.
+    // A delete that skipped the event would silently lose every rejection made through the button
+    // most people reach for.
+    'netlify/functions/assistant-records.ts': 3,      // single approval gate / bulk reject / delete
     'netlify/functions/signal-inbox.ts': 1,
     'netlify/functions/lead-generation.ts': 4,      // score / dnc-override / outreach / set_outcome
     // Was 3. The `lead_enriched` emit left with `recordEnrichment`, which moved to

@@ -680,7 +680,7 @@ function _resizeBriefAutoGrow() {
 // stale set of nodes is matched. Delegation resolves the target at click time, so it
 // works regardless of when/whether init ran and survives any view re-injection.
 
-// Activate a main tab by name ('datahub' | 'goals' | 'workflow' | 'activity'). Exposed so other code
+// Activate a main tab by name ('datahub' | 'goals' | 'activity'). Exposed so other code
 // (deep-links, attention CTAs, child-tab clicks) can surface the right section.
 window._activateMainTab = function(name) {
     document.querySelectorAll('.main-tab-btn').forEach(b => b.classList.toggle('active-tab', b.dataset.maintab === name));
@@ -3774,18 +3774,11 @@ window._tuningRevisePost = async function() {
     window._closeTuningSession();
 };
 
-// ── Active Workflows dependency map (Epic 4.2) ────────────────────────────────
-// Orchestrations has no runtime consumer yet (see netlify/functions/orchestrations.ts),
-// so this card is disabled and just shows a "Coming soon" state (issue #147) instead of
-// fetching/rendering real orchestration_links or linking into the Orchestrations hub.
-
-window._renderActiveWorkflows = function(assistantId) {
-    const card = document.getElementById('active-workflows-card');
-    if (!card) return;
-    const aid = Number(assistantId || window._currentAssistantId);
-    if (!aid) return;
-    card.classList.remove('hidden');
-};
+// ── Active Workflows dependency map (Epic 4.2) — REMOVED 2026-08-15 ───────────
+// The card only ever un-hid itself to show "Coming soon": orchestrations.ts has no runtime
+// consumer, so there were never any orchestration_links to render. Its tab went with it
+// (assistant-detail.html). Bring both back in the commit that ships orchestration between
+// assistants — a card that cannot fill in is worse than an absent one.
 
 // Action-bar / Runbook entry: pick a recent post to tune (each row seeds a session by id).
 window._openTuningPicker = async function() {
@@ -5689,9 +5682,6 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
 
     // ── Review Queue tab — prefetch pending count so the badge shows without opening the tab ──
     _prefetchDetailRqBadge(assistantId);
-
-    // ── Epic 4.2 — Active Workflows dependency map (always shown; empty state when no links) ──
-    window._renderActiveWorkflows?.(assistantId);
 };
 
 async function _prefetchDetailRqBadge(assistantId) {
@@ -6560,6 +6550,14 @@ function _setMetricsEmptyState(mode) {
         if (body)  body.textContent  = 'Something went wrong fetching them. Refresh the page to try again — this doesn’t affect your posts or scheduling.';
         // The period note would imply we know what happened in that window. We don't.
         if (note) note.textContent = '';
+    } else if (mode === 'lead-no-data') {
+        // Distinct from 'no-data' for exactly the reason this whole path exists: this assistant
+        // publishes nothing, so "nothing has been published" is both confusing and PERMANENTLY
+        // true of it. What is actually missing is lead activity, and that is something the user can
+        // go and start.
+        if (title) title.textContent = 'No lead activity to measure yet';
+        if (body)  body.textContent  = 'These fill in as your assistant finds leads, you approve or turn them down, and outreach gets replies. Start or run a search on the Searches tab to get the first numbers in.';
+        if (note) note.textContent = '';
     } else if (mode === 'campaign-no-data') {
         // Distinct from 'no-data' on purpose. This assistant publishes nothing itself, so "nothing
         // has been published" would be both confusing and permanently true; what is actually
@@ -6659,6 +6657,106 @@ async function _loadCampaignMetrics(assistantId) {
     }
 }
 
+// ── Lead Generation Assistant KPI cards ──────────────────────────────────────
+// Same markup as every other role, different data source: get-lead-performance reads the revenue
+// ledger, because this assistant owns no posts and the shared endpoint (post_insights) reported
+// hasData:false for ever — leaving four labels above a panel saying "nothing has been published in
+// the last 30 days", which is a sentence about a Social Media Assistant. Routed here by
+// `metricsSource: 'lead'` in the dashboard registry.
+//
+// ⚠️ Every figure is a 90-DAY window, and the period note is overwritten from the server's own
+// `periodDays` rather than left at the markup's "Last 30 days". A lead pipeline read over 30 days
+// reports zero closed deals for a perfectly healthy quarter.
+async function _loadLeadMetrics(assistantId) {
+    const valEl   = (k) => document.getElementById(`metric-${k}-value`);
+    const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
+    const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
+
+    // The social card 4 carries an extra "low reach, high value" callout with no lead meaning.
+    // Cleared defensively: a role switch on a cached page would otherwise strand it under a
+    // conversion figure.
+    document.getElementById('metric-value-wins')?.classList.add('hidden');
+
+    // 0–1 fraction → "12.3%", null → "—". Never "0.0%" from a missing denominator: a rate with
+    // nothing underneath it is unknown, not zero, and the two must not look the same.
+    const pct = (v) => (v === null || v === undefined) ? '—' : `${(v * 100).toFixed(1)}%`;
+    const setDot = (k, state) => {
+        const el = dotEl(k);
+        if (!el) return;
+        el.className = 'w-2 h-2 rounded-full ' + (
+            state === 'up' ? 'bg-emerald-400' : state === 'down' ? 'bg-rose-400' : 'bg-gray-200'
+        );
+    };
+
+    try {
+        const res = await fetch(`/.netlify/functions/get-lead-performance?id=${assistantId}`);
+        if (!res.ok) { _setMetricsEmptyState('error'); return; }
+        const data = await res.json();
+
+        // Nothing has happened in the window. Four zeroes would read as an assistant that tried and
+        // failed rather than one that has not been given anything to do.
+        if (!data.hasData) { _setMetricsEmptyState('lead-no-data'); return; }
+
+        _setMetricsEmptyState('cards');
+        const note = document.getElementById('metrics-status-note');
+        if (note) note.textContent = `Last ${data.periodDays || 90} days`;
+
+        const m = data.metrics || {};
+        const t = data.trends || {};
+        const c = data.counts || {};
+        // A null rate is unknown; a zero rate is a real, measured zero and stays coloured-in muted
+        // rather than hidden — "0% of 40 leads kept" is the most useful number on the page.
+        const blank = (v) => v === null || v === undefined;
+
+        // Card 1 — Qualified Leads. A count, not a rate.
+        valEl('engagement').textContent = String(m.qualifiedLeads ?? 0);
+        _setKpiCard('engagement', { empty: !m.qualifiedLeads });
+        if (trendEl('engagement')) trendEl('engagement').textContent = t.qualifiedLeads || '—';
+        setDot('engagement', m.qualifiedLeads ? 'up' : 'none');
+
+        // Card 2 — Qualification Rate. Over DECIDED leads, so a review backlog cannot drag it down.
+        valEl('reach').textContent = pct(m.qualificationRate);
+        _setKpiCard('reach', {
+            empty: blank(m.qualificationRate),
+            // Below half means most of what the search returns is being thrown away — that is a
+            // targeting problem, and the card should say so in the only way it can.
+            tone: m.qualificationRate !== null && m.qualificationRate < 0.5 ? 'down' : 'brand',
+        });
+        if (trendEl('reach')) trendEl('reach').textContent = t.qualificationRate || '—';
+        if (!blank(m.qualificationRate)) setDot('reach', m.qualificationRate >= 0.5 ? 'up' : 'down');
+
+        // Card 3 — Reply Rate, over leads actually EMAILED. Its trend carries the opt-out count,
+        // which is the number that changes how a reply rate should be read.
+        valEl('ctr').textContent = pct(m.replyRate);
+        _setKpiCard('ctr', { empty: blank(m.replyRate) });
+        if (trendEl('ctr')) trendEl('ctr').textContent = t.replyRate || '—';
+        if (!blank(m.replyRate)) setDot('ctr', m.replyRate > 0 ? 'up' : 'none');
+
+        // Card 4 — Deals Won. Value leads when there is one; otherwise the count, because "£0"
+        // beside three won deals claims they were worth nothing rather than that nobody recorded
+        // a figure.
+        if (valEl('value')) {
+            const hasValue = m.wonValueGbp !== null && m.wonValueGbp !== undefined;
+            valEl('value').textContent = hasValue
+                ? `£${Number(m.wonValueGbp).toLocaleString('en-GB', { maximumFractionDigits: 0 })}`
+                : String(c.won ?? 0);
+            _setKpiCard('value', { empty: !hasValue && !c.won });
+            if (trendEl('value')) {
+                // The conversion rate rides the trend line rather than replacing the headline: a
+                // percentage with a denominator of four is not a headline.
+                trendEl('value').textContent = blank(m.conversionRate)
+                    ? (t.conversion || '—')
+                    : `${t.conversion} · ${pct(m.conversionRate)} of those contacted`;
+            }
+            setDot('value', c.won ? 'up' : 'none');
+        }
+    } catch {
+        // Network/parse failure. We don't know whether there is data, so say that rather than
+        // leaving four "—" cards that read as broken.
+        _setMetricsEmptyState('error');
+    }
+}
+
 async function _loadAssistantMetrics(assistantId, roleKey) {
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
@@ -6675,6 +6773,10 @@ async function _loadAssistantMetrics(assistantId, roleKey) {
     if (source === 'campaign') {
         _setMetricsEmptyState('pending');
         return _loadCampaignMetrics(assistantId);
+    }
+    if (source === 'lead') {
+        _setMetricsEmptyState('pending');
+        return _loadLeadMetrics(assistantId);
     }
 
     // Show the explanatory panel BEFORE the fetch, synchronously. The overwhelmingly likely answer

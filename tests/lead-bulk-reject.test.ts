@@ -89,20 +89,6 @@ check('the cap is shared with DELETE, and going over is a 400 rather than a trun
         'the reject and delete caps have diverged — they clear the same selection');
 });
 
-check('the client chunks to that cap rather than being 400ed by it', () => {
-    const fn = HUB.slice(landmark(HUB, 'async function rejectRecords'), landmark(HUB, 'function bulkRejectStrip'));
-    const clientChunk = Number((/const CHUNK = (\d+)/.exec(fn) || [])[1]);
-    const serverCap = Number((/const MAX_BULK = (\d+)/.exec(RECORDS) || [])[1]);
-    assert.ok(clientChunk > 0 && serverCap > 0, 'the chunk size or the server cap has gone');
-    assert.ok(clientChunk <= serverCap,
-        `the client sends ${clientChunk} at a time but the server accepts ${serverCap} — every bulk `
-        + 'reject over the cap would 400');
-    assert.ok(/credentials: 'same-origin'/.test(fn), 'the bulk PATCH lost its credentials — it would 401');
-    assert.ok(/approvalStatus: 'rejected'/.test(fn) && /reason \? \{ reason \}/.test(fn),
-        'the reason must reach the server on every chunk, or the evidence is banked for the first '
-        + 'chunk only');
-});
-
 console.log('\n──── the loop keeps every guard the single path has ────');
 
 check('every id is tenant-scoped, inside the loop', () => {
@@ -172,87 +158,112 @@ check('bad_contact is a real reason AND is withheld from targeting', () => {
         + 'enrichment, not in who was looked for.');
 });
 
-console.log('\n──── the client rejects, and says what it did ────');
+console.log('\n──── the CLIENT reaches the same outcome through Delete ────');
 
-check('the rows stay — that is the whole difference from delete', () => {
-    const fn = HUB.slice(landmark(HUB, 'async function rejectRecords'), landmark(HUB, 'function bulkRejectStrip'));
-    assert.ok(/r\.approvalStatus = 'rejected'/.test(fn),
-        'the table must patch the Approval chip in place. Removing the rows would tell the user '
-        + 'their leads were deleted.');
-    assert.ok(/state\.selected\.delete\(id\)/.test(fn),
-        'the selection must clear as rows are decided, or the bar still offers to act on them');
-    assert.ok(!/state\.records = state\.records\.filter/.test(fn),
-        'rejectRecords is dropping records from the table — reject keeps them, on purpose');
+// ⚠️ The bulk Reject BUTTON is gone (2026-08-15). Everything above still holds — the PATCH branch
+// is unchanged and still the right shape — but nothing on the Leads tab calls it any more, because
+// bulk DELETE now performs the rejection itself AND files the leads under Deleted. Two buttons on
+// one bar, the scarier-sounding one being the safer act, was a choice no user could make correctly.
+//
+// So the checks below moved from "the reject button does X" to "the thing that replaced it does X",
+// and the properties being defended are identical: the reason reaches every chunk, a re-found lead
+// stays rejected, and the confirmation states what a user cannot guess.
+
+check('bulk delete carries the reason to every chunk, and chunks to the shared cap', () => {
+    const fn = HUB.slice(landmark(HUB, 'async function deleteRecords'), landmark(HUB, '/** The confirmation for a bulk delete'));
+    const clientChunk = Number((/const CHUNK = (\d+)/.exec(fn) || [])[1]);
+    const serverCap = Number((/const MAX_BULK = (\d+)/.exec(RECORDS) || [])[1]);
+    assert.ok(clientChunk > 0 && serverCap > 0, 'the chunk size or the server cap has gone');
+    assert.ok(clientChunk <= serverCap,
+        `the client sends ${clientChunk} at a time but the server accepts ${serverCap} — every bulk `
+        + 'clear-out over the cap would 400');
+    assert.ok(/credentials: 'same-origin'/.test(fn), 'the bulk DELETE lost its credentials — it would 401');
+    assert.ok(/reason \? \{ ids: slice, reason \} : \{ ids: slice \}/.test(fn),
+        'the reason must reach the server on every chunk, or the evidence is banked for the first '
+        + 'chunk only');
 });
 
-check('a partial bulk reject reports what really happened', () => {
-    const fn = HUB.slice(landmark(HUB, 'async function rejectRecords'), landmark(HUB, 'function bulkRejectStrip'));
-    assert.ok(/rejected, then it stopped/.test(fn),
+check('a partial bulk clear-out reports what really happened', () => {
+    const fn = HUB.slice(landmark(HUB, 'async function deleteRecords'), landmark(HUB, '/** The confirmation for a bulk delete'));
+    assert.ok(/deleted, then it stopped/.test(fn),
         'a chunk failing after earlier chunks succeeded must not report a flat failure — those '
-        + 'leads really are rejected, and "it failed" invites a second press on a changed list');
-    assert.ok(/for \(const id of ids\.slice\(0, i\)\)/.test(fn),
-        'and the table must mark the rows that DID go through');
+        + 'leads really are gone, and "it failed" invites a second press on a changed list');
 });
 
-check('the confirmation asks once, for the whole selection, BEFORE anything is rejected', () => {
-    const strip = HUB.slice(landmark(HUB, 'function bulkRejectStrip'), landmark(HUB, '/** The confirmation for a bulk delete'));
+check('the confirmation asks once, for the whole selection, BEFORE anything is deleted', () => {
+    const strip = HUB.slice(landmark(HUB, 'function bulkDeleteStrip'), landmark(HUB, '// ── Who performs the suggested next step'));
     assert.ok(/RC\.leadRejectReasons/.test(strip),
         'the strip must offer the shared vocabulary — a retyped list drifts from the CHECK constraint');
-    assert.ok(/data-hub-bulkreject-plain/.test(strip),
-        'there must be a way to reject without a reason. Blocking the clear-out on a vocabulary '
-        + 'choice just pushes the user to Delete, which throws the evidence away entirely.');
-    assert.ok(/data-hub-bulkreject-cancel/.test(strip), 'a confirmation with no cancel is not a confirmation');
-    assert.ok(landmark(strip, 'strip.innerHTML') < landmark(strip, 'rejectRecords('),
-        'rejectRecords runs before the confirmation is even drawn');
+    assert.ok(/data-hub-bulk-plain/.test(strip),
+        'there must be a way to clear the queue without a reason. Blocking it on a vocabulary '
+        + 'choice buys worse answers, not better ones.');
+    assert.ok(/data-hub-bulk-cancel/.test(strip), 'a confirmation with no cancel is not a confirmation');
+    assert.ok(landmark(strip, 'strip.innerHTML') < landmark(strip, 'deleteRecords('),
+        'deleteRecords runs before the confirmation is even drawn');
 });
 
 check('the confirmation states the two things a user cannot guess', () => {
-    const strip = HUB.slice(landmark(HUB, 'function bulkRejectStrip'), landmark(HUB, '/** The confirmation for a bulk delete'));
-    assert.ok(/nothing is emailed/.test(strip),
+    const strip = HUB.slice(landmark(HUB, 'function bulkDeleteStrip'), landmark(HUB, '// ── Who performs the suggested next step'));
+    assert.ok(/Nothing is emailed/.test(strip),
         'the reader is one click from a bulk decision on a hundred leads — say that it sends nothing');
-    assert.ok(/it stays rejected rather than coming back for approval/.test(strip),
-        'the reason to prefer this over Delete is that a re-found lead stays rejected. If the copy '
-        + 'does not say it, the user has no way to know it.');
-    assert.ok(new RegExp(LEAD_REJECT_REASON_LABELS.bad_contact).test(strip),
-        'the strip must point at the honest reason for this clear-out by its real label');
+    assert.ok(/leaves them rejected instead of putting them back in front of you/.test(strip),
+        'the reason this is safe over a hundred rows is that a re-found lead stays rejected. If the '
+        + 'copy does not say it, the user has no way to know it.');
+    // ⚠️ Asserted as the CALL, not the literal string. The reject strip used to hardcode "No usable
+    // contact" in its prose, which would silently disagree with the chip beside it the day the
+    // label changed. Reading it back through leadRejectReasonLabel makes that impossible.
+    assert.ok(/leadRejectReasonLabel\('bad_contact'\)/.test(strip),
+        'the strip must point at the honest reason for an uncontactable clear-out, by its real label');
+    assert.ok(LEAD_REJECT_REASON_LABELS.bad_contact?.trim(),
+        'bad_contact has no label to render — the sentence would name an empty chip');
 });
 
-check('Reject is offered for leads only, and does not disturb the bar when it is absent', () => {
+check('the bulk bar is one action, and the Reject button is really gone', () => {
     const bar = HUB.slice(landmark(HUB, 'function paintSelectionBar'), landmark(HUB, 'function renderTable'));
-    assert.ok(/state\.hub\.recordType === 'lead'/.test(bar),
-        'the other five record types have no rejection vocabulary and no discovery to teach');
-    assert.ok(/reject\.style\.display/.test(bar),
-        '`hidden` loses to a class that sets display — pin the inline style too');
-    assert.ok(/Reject \$\{n\}/.test(bar),
+    assert.ok(/Delete \$\{n\}/.test(bar),
         'the button must carry the count: it is the last thing read before a hundred leads are decided');
+    assert.ok(!/data-hub-bulkreject/.test(HUB), 'the bulk Reject button survived');
+    assert.ok(!/function bulkRejectStrip/.test(HUB), 'bulkRejectStrip survived as dead code');
+    assert.ok(!/async function rejectRecords/.test(HUB), 'rejectRecords survived as dead code');
 
     const controls = HUB.slice(landmark(HUB, 'function controlsHtml'), landmark(HUB, 'function wireControls'));
     const wrapper = controls.slice(landmark(controls, 'ml-auto'));
-    assert.ok(/data-hub-bulkreject/.test(wrapper) && /data-hub-bulkdelete/.test(wrapper),
-        'ml-auto must ride the WRAPPER holding both buttons. On the first button it would drop '
-        + 'Delete back against the Clear-selection link the moment Reject is hidden.');
+    assert.ok(/data-hub-bulkdelete/.test(wrapper),
+        'ml-auto must ride the WRAPPER holding the action, so a second button added back beside it '
+        + 'does not push the first off the bar');
 });
 
-check('the two bulk confirmations cannot stack', () => {
+check('selecting everything does not require selecting something first', () => {
+    // The complaint that started this: "Select all" only ever lived INSIDE the bulk bar, and the
+    // bar is hidden until a row is already ticked. A select-all reachable only by hand-ticking one
+    // row is not a select-all.
+    const table = HUB.slice(landmark(HUB, 'function renderTable'), landmark(HUB, '// ── The Deleted section'));
+    assert.ok(/data-hub-selectall-head/.test(table),
+        'the table heading has no select-all checkbox — the only one left is inside the hidden bar');
     const wire = HUB.slice(landmark(HUB, 'function wireControls'), landmark(HUB, 'function paintRows'));
-    const opens = wire.split("strip.innerHTML = ''").length - 1;
-    assert.strictEqual(opens, 2,
-        'each bulk button must clear the shared strip host first. Two open confirmations above one '
-        + 'selection is how someone presses Delete believing they are confirming the Reject they '
-        + 'just asked for.');
+    assert.ok(/data-hub-selectall-head/.test(wire), 'the heading checkbox is never wired up');
+    assert.ok(/for \(const r of visibleRecords\(\)\) state\.selected\.add\(r\.id\)/.test(wire),
+        'it must take in every row matching the FILTERS. Stopping at the current page silently '
+        + 'leaves 112 of 137 behind after the user has said "select all".');
+
+    const bar = HUB.slice(landmark(HUB, 'function paintSelectionBar'), landmark(HUB, 'function renderTable'));
+    assert.ok(/head\.indeterminate/.test(bar),
+        'without the indeterminate leg the heading reads "all selected" over three ticked rows');
+    assert.ok(/Select all \$\{matching\}/.test(bar),
+        'the count must be stated — a bare tick in a heading gives no clue whether it means this '
+        + 'page or all 137');
 });
 
 console.log('\n──── no Tailwind rebuild ────');
 
-check('every class the reject strip uses is already compiled into style.css', () => {
+check('every class the bulk delete strip uses is already compiled into style.css', () => {
     // A rebuild churns unrelated selectors across the whole app.
     const escapeSel = (t: string) => t.replace(/([:[\].\/])/g, '\\$1');
-    const strip = HUB.slice(landmark(HUB, 'function bulkRejectStrip'), landmark(HUB, '/** The confirmation for a bulk delete'));
+    const strip = HUB.slice(landmark(HUB, 'function bulkDeleteStrip'), landmark(HUB, '// ── Who performs the suggested next step'));
     const tokens = new Set<string>();
     for (const m of strip.matchAll(/class="([^"]*)"/g)) {
         for (const raw of m[1].replace(/\$\{[^}]*\}/g, ' ').split(/\s+/)) if (raw) tokens.add(raw);
     }
-    // The chip palette and the strip's own className live in string literals, not class attributes.
     for (const m of strip.matchAll(/(?:const chip|strip\.className) = '([^']+)'/g)) {
         for (const raw of m[1].split(/\s+/)) if (raw) tokens.add(raw);
     }

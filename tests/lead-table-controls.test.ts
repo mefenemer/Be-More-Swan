@@ -183,8 +183,17 @@ check('the reason is asked once, for the whole selection, BEFORE anything is del
     assert.ok(/data-hub-bulk-plain/.test(strip),
         'there must be a way to delete without a reason; a destructive action is not a hostage negotiation');
     assert.ok(/data-hub-bulk-cancel/.test(strip), 'a confirmation with no cancel is not a confirmation');
-    assert.ok(/<strong>Reject<\/strong>/.test(strip),
-        'the strip must name Reject as the non-destructive alternative, exactly as the single-row one does');
+    // ⚠️ Was: "the strip must name Reject as the non-destructive alternative". Reject is gone from
+    // this tab (2026-08-15) because Delete now IS the non-destructive act. The confirmation's job
+    // moved with it: instead of pointing at a second button, it has to say where the leads go —
+    // which is the only thing standing between this and a user believing they destroyed 40 rows.
+    assert.ok(/<strong>Deleted<\/strong>/.test(strip),
+        'the bulk confirmation must name the Deleted section it files the leads into');
+    assert.ok(/marked rejected/.test(strip),
+        'and must say they are marked rejected — that is what stops a later search re-queueing them, '
+        + 'and it is the reason this is safe to press over a hundred rows');
+    assert.ok(!/<strong>Reject<\/strong>/.test(strip),
+        'the strip still points at a Reject button that no longer exists on this tab');
 
     // Ordering: the strip is built and shown; the delete only runs from a button inside it.
     const code = stripComments(strip);
@@ -296,7 +305,9 @@ check('the button presses the real control instead of repeating it', () => {
 });
 
 check('the footer is re-stated when a decision changes the answer', () => {
-    const approve = HUB.slice(landmark(HUB, "buttons.push({ label: 'Approve'"), landmark(HUB, "buttons.push({ label: 'Reject'"));
+    // ⚠️ Sliced to the DELETE push, not the Reject one — Reject left this tab on 2026-08-15 and
+    // Approve is now the last approval-gate button in the bar.
+    const approve = HUB.slice(landmark(HUB, "buttons.push({ label: 'Approve'"), landmark(HUB, "buttons.push({ label: 'Delete'"));
     assert.ok(/syncNextStepFooter\(/.test(approve),
         '"Approving clears this lead for outreach" is false the instant it has been approved');
 });

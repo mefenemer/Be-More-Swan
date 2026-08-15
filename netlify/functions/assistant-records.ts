@@ -18,6 +18,9 @@
 //         REJECTION ONLY — see the bulk branch for why nothing else may be set in bulk
 //  DELETE { id, reason? } | { ids: [...], reason? }         → remove one record, or up to
 //         MAX_BULK of them; `reason` banks the targeting evidence (leads only)
+//         ⚠️ A LEAD IS NOT DROPPED. It is marked rejected and stamped into the retained Deleted
+//         section (src/config/lead-retention.ts); every other record type really is deleted. See
+//         the block comment in the DELETE branch for why.
 //
 // `data` is the uiElement wire shape (disruptive-ui-registry.js) so the hub tab and the
 // chat transcript render records identically. Auth: aura_session + requireTenant; every
@@ -34,9 +37,13 @@ import { getBlueprintVersion } from '../../src/utils/blueprint-version';
 import { getIcpSnapshot } from '../../src/utils/icp-snapshot';
 import { enqueueLeadHandoff } from '../../src/utils/lead-handoff';
 import { recordLeadRejection } from '../../src/utils/lead-reject-feedback';
-import { LEAD_REJECT_REASONS, isLeadRejectReason } from '../../src/config/lead-reject-reasons';
+import {
+    DOMAIN_EXCLUSION_REASONS, LEAD_REJECT_REASONS, isLeadRejectReason,
+} from '../../src/config/lead-reject-reasons';
 import { LEAD_RECIPIENT_SQL_PATHS, LEAD_DRAFT_BODY_SQL_PATH } from '../../src/config/lead-recipient';
-import { RETENTION_DELETED_SQL_PATH } from '../../src/config/lead-retention';
+import {
+    RETENTION_DELETED_SQL_PATH, RETENTION_FIELD, RETENTION_REASON_USER_DELETE,
+} from '../../src/config/lead-retention';
 import { crmDescription, crmHeaders, crmRow, isCrmTarget, splitName, websiteUrl } from '../../src/config/crm-export';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -851,26 +858,20 @@ export default withLambda(async (event) => {
             let feedbackRecorded = false;
             let feedbackCount = 0;
             let notFound = 0;
+            // Single-lead path only: what the client needs to offer "stop this search finding
+            // them again". Resolved by recordLeadRejection, which is the only thing here that
+            // knows the lead's campaign and domain.
+            let excludeDomain: string | null = null;
+            let excludeCampaignId: number | null = null;
+            let canExcludeDomain = false;
 
             for (const id of ids) {
-                // ── Everything below runs BEFORE the delete, and that ordering is load-bearing ──
-                //
-                // `discovered_leads.assistant_record_id` is ON DELETE SET NULL (db/schema.ts), so the
-                // moment this record goes, the link back to its discovery row is gone with it. That is
-                // how a prod assistant ended up with 35 discovered leads all marked 'promoted' and only
-                // 14 still linked: 21 records were deleted by hand, and each one silently severed its
-                // own provenance while leaving the discovery row claiming it had been promoted.
-                //
-                // Two consequences, both fixed here:
-                //   1. recordLeadRejection() resolves provenance BY assistant_record_id, so a reason
-                //      captured after the delete could never find the lead, the campaign, or the domain.
-                //   2. The discovery row's status must move to its real terminal state. 'discarded' is
-                //      already in the CHECK constraint; leaving it at 'promoted' with a null link makes
-                //      the lifecycle vocabulary describe something that is no longer true.
                 const [existing] = await db.select({
                     id: assistantRecords.id,
                     recordType: assistantRecords.recordType,
                     aiAssistantId: assistantRecords.aiAssistantId,
+                    status: assistantRecords.status,
+                    approvalStatus: assistantRecords.approvalStatus,
                 }).from(assistantRecords)
                     .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
                     .limit(1);
@@ -884,7 +885,62 @@ export default withLambda(async (event) => {
                     continue;
                 }
 
+                // ── Deleting a LEAD does not delete the lead ─────────────────────────────────
+                //
+                // Changed 2026-08-15, at the user's request ("when I delete records I want these
+                // to be stored in a deleted area"), and it resolves a defect this handler used to
+                // carry rather than merely relocating rows.
+                //
+                // A hard delete destroyed the only record of the VERDICT: it severed
+                // `discovered_leads.assistant_record_id` (ON DELETE SET NULL), which is how a prod
+                // assistant ended up with 35 discovery rows marked 'promoted' and 14 still linked.
+                // The discovery row survived at 'discarded' so the SAME saved search would not
+                // re-find the company — but the dedupe index is per campaign (campaign_id, domain),
+                // so a SECOND search found it, scored it and drafted to it again.
+                //
+                // So a lead delete is now exactly a REJECTION plus a retention stamp:
+                //   • approval_status → 'rejected', so promoteOne's update path (which does not
+                //     touch approval_status) leaves a re-found lead rejected rather than queueing
+                //     it for approval again;
+                //   • data.retention.deletedAt + reason, which is what moves it out of the live
+                //     table and into the Deleted section (src/config/lead-retention.ts);
+                //   • the discovery row to 'discarded';
+                //   • the reason banked as targeting evidence.
+                //
+                // ⚠️ The ordering rule that used to govern this loop is GONE WITH THE DELETE — the
+                // record survives, so provenance stays resolvable and recordLeadRejection can run
+                // at any point. Reinstating a hard delete for leads reinstates the ordering trap
+                // along with it; don't do one without the other.
                 if (existing.recordType === 'lead') {
+                    // Link back to the discovery row when there is one. A hand-added lead has none,
+                    // so this is legitimately null rather than a lookup failure.
+                    const [link] = await db.select({ id: discoveredLeads.id })
+                        .from(discoveredLeads)
+                        .where(eq(discoveredLeads.assistantRecordId, existing.id))
+                        .limit(1);
+
+                    // Same guard as both reject paths: only a genuine transition writes a ledger
+                    // row, so deleting a lead that was already approved or already rejected cannot
+                    // inflate the rejection count the Strategy Agent clusters on.
+                    const wasDecided = LIVE_APPROVAL.has(existing.approvalStatus ?? '')
+                        || existing.approvalStatus === 'rejected';
+                    if (!wasDecided) {
+                        await recordEvent(db, 'lead_rejected', {
+                            organisationId: orgId,
+                            aiAssistantId: existing.aiAssistantId,
+                            discoveredLeadId: link?.id ?? null,
+                            assistantRecordId: existing.id,
+                            actor: 'user',
+                            actorUserId: userId,
+                            blueprintVersion: await getBlueprintVersion(db, existing.aiAssistantId),
+                            icpSnapshot: await getIcpSnapshot(db, {
+                                discoveredLeadId: link?.id ?? null,
+                                aiAssistantId: existing.aiAssistantId,
+                            }),
+                            payload: { from: existing.approvalStatus, to: 'rejected', rating: existing.status, via: 'delete' },
+                        });
+                    }
+
                     // Optional: deleting is a decision the user has already made, and a reason they
                     // decline to give must never block it. An unknown value is dropped by
                     // recordLeadRejection (closed vocabulary), which logs the offending value.
@@ -897,6 +953,21 @@ export default withLambda(async (event) => {
                             reason,
                         });
                         if (result.id !== null) { feedbackRecorded = true; feedbackCount++; }
+                        // The follow-up offer, single-record path only: over a bulk selection one
+                        // reason spans many domains and there is no single one to exclude.
+                        if (!bulk) {
+                            excludeDomain = result.domain;
+                            excludeCampaignId = result.campaignId;
+                            // Narrowed through the shared guard rather than cast: `reason` is
+                            // deliberately unvalidated on this path (an unknown value is dropped
+                            // by recordLeadRejection instead of blocking the delete), so this is
+                            // the first place that needs it to be a real vocabulary member.
+                            canExcludeDomain = result.id !== null
+                                && !!result.domain
+                                && !!result.campaignId
+                                && isLeadRejectReason(reason)
+                                && DOMAIN_EXCLUSION_REASONS.includes(reason);
+                        }
                     }
 
                     // Mark the discovery row discarded whether or not a reason was given — the state
@@ -907,8 +978,38 @@ export default withLambda(async (event) => {
                             eq(discoveredLeads.assistantRecordId, existing.id),
                             eq(discoveredLeads.organisationId, orgId),
                         ));
+
+                    // ⚠️ jsonb_set on the `retention` key ALONE, never a wholesale rewrite of
+                    // `data` — the same rule lead-retention-sweep.ts writes under. A lead's data
+                    // carries enrichAttemptedAt, dealOutcome, emailKind and the outreach draft, and
+                    // a read-modify-write here would race the enrichment worker.
+                    const [row] = await db.update(assistantRecords)
+                        .set({
+                            approvalStatus: 'rejected',
+                            scheduledFor: null,      // a rejected lead with a due date is a row the calendar still believes in
+                            updatedAt: new Date(),
+                            data: sql`jsonb_set(
+                                COALESCE(${assistantRecords.data}, '{}'::jsonb),
+                                '{${sql.raw(RETENTION_FIELD)}}',
+                                COALESCE(${assistantRecords.data} -> '${sql.raw(RETENTION_FIELD)}', '{}'::jsonb)
+                                    || jsonb_build_object('deletedAt', ${new Date().toISOString()}::text, 'reason', ${RETENTION_REASON_USER_DELETE}::text),
+                                true
+                            )`,
+                        })
+                        .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
+                        .returning({ id: assistantRecords.id });
+                    if (!row) {
+                        if (!bulk) return json(404, { error: 'Record not found.' });
+                        notFound++;
+                        continue;
+                    }
+                    deletedIds.push(row.id);
+                    continue;
                 }
 
+                // Every other record type — meetings, invoices, tickets, orders — really is
+                // dropped. None of them has a Deleted section to land in, and none of them teaches
+                // a search anything by surviving.
                 const [row] = await db.delete(assistantRecords)
                     .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
                     .returning({ id: assistantRecords.id });
@@ -927,7 +1028,13 @@ export default withLambda(async (event) => {
             // able to write.
             return bulk
                 ? json(200, { deleted: deletedIds, count: deletedIds.length, feedbackRecorded: feedbackCount, notFound })
-                : json(200, { deleted: deletedIds[0], feedbackRecorded });
+                : json(200, {
+                    deleted: deletedIds[0],
+                    feedbackRecorded,
+                    domain: excludeDomain,
+                    campaignId: excludeCampaignId,
+                    canExcludeDomain,
+                });
         }
 
         return { statusCode: 405, body: 'Method Not Allowed' };

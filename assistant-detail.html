@@ -656,7 +656,11 @@
       </button>
       <!-- ── Secondary tabs — role-gated, after the core three ── -->
       <button type="button" data-maintab="goals"         class="main-tab-btn">Goals</button>
-      <button type="button" data-maintab="workflow"      class="main-tab-btn">Workflow</button>
+      <!-- Workflow tab REMOVED 2026-08-15. Its only card was "Active Workflows", which has been a
+           disabled "Coming soon" panel since issue #147: orchestrations.ts has no runtime consumer,
+           so nothing could ever populate it. A permanent empty tab teaches users that tabs here can
+           be empty. Reinstate it in the commit that ships assistant-to-assistant orchestration —
+           the markup is in git, not in this file. -->
       <button type="button" data-maintab="activity"      class="main-tab-btn">Activity</button>
       <!-- Knowledge Base — support-only (kbTab, tier1_support_agent); manages the KB articles
            that ground the assistant's answers (assistant-knowledge-base.js → kb-articles.ts).
@@ -1954,25 +1958,7 @@
 
   </div><!-- /maintab-goals -->
 
-  <!-- ── MAIN TAB: Workflow ────────────────────────────────────────── -->
-  <div id="maintab-workflow" class="main-tab-content hidden">
-
-  <!-- Active Workflows (Epic 4.2) — Orchestrations has no runtime consumer yet (see netlify/functions/orchestrations.ts),
-       so this card is disabled and shows a "Coming soon" state rather than linking into the hub. -->
-  <div id="active-workflows-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6 hidden">
-    <div class="flex items-center justify-between gap-3 mb-4">
-      <div>
-        <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Active Workflows</h3>
-        <p class="text-xs text-gray-400 mt-1">How this assistant connects to the rest of your team.</p>
-      </div>
-      <button type="button" disabled class="shrink-0 text-xs font-bold text-gray-400 cursor-not-allowed">Manage in Orchestrations →</button>
-    </div>
-    <div id="active-workflows-list" class="space-y-2">
-      <p class="text-sm text-gray-400 text-center py-3">Coming soon</p>
-    </div>
-  </div>
-
-  </div><!-- /maintab-workflow -->
+  <!-- MAIN TAB: Workflow — removed 2026-08-15, see the tab strip above for why. -->
 
 
   <!-- tab-integrations removed — merged into tab-platforms as "Connections" -->

@@ -112,7 +112,10 @@ check('the Leads tab offers nothing that acts on the outreach email', () => {
     assert.ok(!/gmail_create_draft/.test(HUB),
         'the Leads tab must not push drafts into Gmail');
     // What it keeps: the lead-record actions.
-    for (const kept of ['Add an address', 'Look again', 'Record outcome', 'Approve', 'Reject', 'Delete']) {
+    // ⚠️ 'Reject' left this list on 2026-08-15 and its absence is now an ASSERTION of its own
+    // below. Delete performs the rejection (it marks the lead rejected, banks the reason and files
+    // it under Deleted), so the two buttons had become two names for one act.
+    for (const kept of ['Add an address', 'Look again', 'Record outcome', 'Approve', 'Delete']) {
         assert.ok(hub.includes(`'${kept}'`) || hub.includes(`: '${kept}'`) || new RegExp(`'${kept}`).test(hub),
             `the Leads tab lost "${kept}", which is a lead-record action and belongs here`);
     }
@@ -148,14 +151,28 @@ check('the copy and the send read the same stored draft', () => {
 
 console.log('\n──── a decision already taken is not an offer ────');
 
-check('Approve and Reject stop being pressable once pressed', () => {
-    for (const label of ['Approve', 'Reject']) {
+check('Approve stops being pressable once pressed', () => {
+    // Was 'Approve and Reject'. Reject is gone from this tab (2026-08-15) — see the check below.
+    for (const label of ['Approve']) {
         const branch = HUB.slice(landmark(HUB, `label: '${label}'`));
         const body = branch.slice(0, landmark(branch, '}});'));
         assert.match(body, /btn\.disabled = true;/,
             `the ${label} button stayed enabled after succeeding, so the obvious next thing to do `
             + 'with it was press it again — which re-sent the same decision');
     }
+});
+
+check('Reject is gone, and Delete carries what it did', () => {
+    // Asking a reader to choose between Reject and Delete, where the difference (one keeps the
+    // record and teaches the search, the other destroyed both) was invisible from the screen, was
+    // a decision no user could take correctly. The server changed instead.
+    const hub = HUB.slice(landmark(HUB, 'function detailActions('), landmark(HUB, '\n  // A post that failed to publish'));
+    assert.ok(!/buttons\.push\(\{ label: 'Reject'/.test(hub),
+        'the row action bar offers Reject beside Delete again');
+    assert.ok(/buttons\.push\(\{ label: 'Delete'/.test(hub), 'Delete has gone too — nothing decides a lead here');
+    // The Outreach tab's Approve / Reject is a DIFFERENT gate (approving there sends the drafted
+    // email) and must be untouched by this.
+    assert.match(SHELL, /_rqShowRejectReasonStrip/, "the Review Queue's own reject went with it — that one declines to SEND the drafted email and has no substitute");
 });
 
 check('the panel has exactly one emphasised action', () => {

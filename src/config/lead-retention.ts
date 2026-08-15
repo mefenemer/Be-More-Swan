@@ -12,13 +12,19 @@
 //
 // The obvious implementation is a hard DELETE, mirroring archive-cleanup.ts (which really does
 // drop rejected posts at 30 days). It is wrong here, for a reason that is specific to leads:
-// deleting the assistant_records row destroys the only record of the VERDICT. Today's manual
-// delete already shows the damage — it severs `discovered_leads.assistant_record_id` (ON DELETE
-// SET NULL), which is how one prod assistant ended up with 35 discovery rows marked 'promoted'
-// and 14 still linked. The discovery row survives at 'discarded', so the SAME saved search will
+// deleting the assistant_records row destroys the only record of the VERDICT. The manual delete
+// used to show the damage — it severed `discovered_leads.assistant_record_id` (ON DELETE SET
+// NULL), which is how one prod assistant ended up with 35 discovery rows marked 'promoted' and
+// 14 still linked. The discovery row survives at 'discarded', so the SAME saved search will
 // not re-find the company, but the dedupe index is per campaign (campaign_id, domain): a second
 // search finds it again, scores it again, and drafts to it again, because nothing left on the
 // record says "we looked at this company and it cannot or must not be contacted".
+//
+// ⚠️ SINCE 2026-08-15 THE MANUAL DELETE COMES HERE TOO. assistant-records.ts's DELETE no longer
+// drops a lead row: it marks the lead rejected, banks the reason, discards the discovery row and
+// stamps `deleted_by_user` below. So this section is not only the sweep's output — it is the
+// answer to "where did the lead I deleted go?", and it is the ONLY answer. Any future code that
+// reintroduces a hard delete for leads silently removes that answer.
 //
 // So the sweep moves the lead into a state that keeps saying that. Cheap to store, and it is the
 // only copy of a fact the scorer and the user both need.
@@ -81,6 +87,11 @@ export const RETENTION_DELETED_SQL_PATH = `{${RETENTION_FIELD},${RETENTION_DELET
  */
 export const RETENTION_REASONS = [
     'do_not_contact',
+    // The user pressed Delete. Added 2026-08-15, when Delete stopped destroying the row: a manual
+    // delete now lands a lead HERE rather than dropping it, which is what makes "where did that
+    // lead go?" answerable at all. It ranks second because an explicit human "get rid of this" is
+    // the strongest argument against the company short of a compliance flag.
+    'deleted_by_user',
     'rejected',
     'enrichment_failed',
     'not_contactable',
@@ -88,6 +99,15 @@ export const RETENTION_REASONS = [
 ] as const;
 
 export type RetentionReason = (typeof RETENTION_REASONS)[number];
+
+/**
+ * The reason a MANUAL delete stamps (assistant-records.ts, DELETE).
+ *
+ * Named rather than typed as a literal at the call site so the string exists once. The sweep's
+ * `retentionReasonFor()` can never return it — that function classifies leads that ran out of
+ * time, and this one is the only reason chosen by a person.
+ */
+export const RETENTION_REASON_USER_DELETE: RetentionReason = 'deleted_by_user';
 
 /**
  * What the Deleted section prints, per reason.
@@ -98,6 +118,7 @@ export type RetentionReason = (typeof RETENTION_REASONS)[number];
  */
 export const RETENTION_REASON_LABELS: Record<RetentionReason, string> = {
     do_not_contact: 'Must not be contacted',
+    deleted_by_user: 'You deleted this lead',
     rejected: 'You turned this lead down',
     enrichment_failed: 'No contact address could be found',
     not_contactable: 'Never had a contact address',
@@ -109,6 +130,10 @@ export const RETENTION_REASON_NOTES: Record<RetentionReason, string> = {
     do_not_contact:
         'This company was flagged as one we must never email — a competitor, an internal account, '
         + 'or someone who asked not to be contacted. Sending it back for enrichment will not clear that flag.',
+    deleted_by_user:
+        'You deleted this lead from your list. It is kept here, marked rejected, so a later search '
+        + 'that finds the same company again leaves it rejected instead of putting it back in front of you. '
+        + 'Sending it back for enrichment returns it to the pipeline.',
     rejected:
         'You rejected this lead, and 30 days passed without it being picked back up. '
         + 'Sending it back for enrichment returns it to the pipeline and starts the clock again.',
@@ -263,6 +288,7 @@ export const RETENTION_NOTICE =
 
 /** The same fact, one line, for the Deleted section's own header. */
 export const RETENTION_DELETED_NOTICE =
-    `Leads that sat in Outreach for ${LEAD_RETENTION_DAYS} days without a decision, or that were `
-    + 'rejected and never picked back up. They are kept so a later search does not surface the same '
-    + 'company as though it were new. Sending one back for enrichment returns it to the pipeline.';
+    'Leads you deleted, plus leads that sat in Outreach for '
+    + `${LEAD_RETENTION_DAYS} days without a decision or that were rejected and never picked back up. `
+    + 'They are kept so a later search does not surface the same company as though it were new. '
+    + 'Sending one back for enrichment returns it to the pipeline.';
