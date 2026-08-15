@@ -117,6 +117,10 @@ interface RouteContext {
     /** The bounded Inspo block (style profile + top-K exemplars) for this turn — only populated
      *  for routes with usesInspo. null/undefined (e.g. shadow handoff calls) injects nothing. */
     inspoBlock?: string | null;
+    /** A live count of THIS assistant's own lead records — only populated for routes with
+     *  usesLeadSnapshot. null/undefined injects nothing, and the prompt says so rather than
+     *  guessing. See buildLeadsSnapshot(). */
+    leadsSnapshot?: string | null;
 }
 
 interface AssistantRoute {
@@ -131,6 +135,10 @@ interface AssistantRoute {
      *  existed it did not: process-content-jobs injected Inspo and this route never did, so
      *  the same library shaped scheduled drafts and was invisible in chat. */
     usesInspo?: boolean;
+    /** When true the handler counts this assistant's lead records for this turn and passes the
+     *  summary into buildRolePrompt via rc.leadsSnapshot. See buildLeadsSnapshot() for why a
+     *  role that OWNS a records tab still could not see it. */
+    usesLeadSnapshot?: boolean;
     /** Role-specific prompt body. buildSystemPrompt() appends the hardened
      *  <strict_configuration> block to this before every API call. */
     buildRolePrompt(rc: RouteContext): string;
@@ -332,6 +340,124 @@ function leadGeneratorSurfaces(): string {
 - "Conversations" tab — what happened after a lead was approved: the outreach thread and any reply.
 
 FINDING NEW LEADS — when the user asks you to find leads, create a search, build a campaign, or go looking for customers: this is squarely your job and you must NEVER refuse it or send them to an outside lead-sourcing tool. Emit the discovery_campaign_proposal uiElement (shape 3 below). Write the "who to find" brief yourself, folding the ideal customer profile (industries, size, location, and the specific pain signals discussed) into that one description, since the form has no separate profile fields. Approving it SAVES the search — the user does not have to retype anything — but saves it as a draft that has not started: a run costs real money and reaches real strangers, so they start it themselves. Tell them exactly where: the search appears at the top of their Searches tab marked "Not started", with a "Start search" button beside it. Say that plainly in your reply and never claim the search is already running or that leads are already coming in. Frame it as you doing the work, because you are: the search you just wrote is what goes out and finds them.`;
+}
+
+// ── Lead Generator: what is actually IN the Leads tab, right now ──────────────
+//
+// ── The bug this fixes ───────────────────────────────────────────────────────
+// Asked "how many hot leads do I have", the product answered: "I don't have information about
+// 'hot leads' in a structured leads database." It was reading the account-graph memory panel,
+// which holds email correspondence and knows nothing about assistant_records — and the chat route
+// was no better off, because leadGeneratorSurfaces() above tells the assistant its Leads tab
+// EXISTS and nothing has ever told it what is in it. A role whose entire job is those records
+// could describe the tab, name its buttons, and not count a single row.
+//
+// So the counts are computed here and stated as fact. The same failure shape as chat never being
+// able to see scheduled posts: an assistant with no read of a surface does not say "I can't see
+// it" — it reaches for the nearest thing it can see and answers confidently from that.
+//
+// ── Scope is the whole point ─────────────────────────────────────────────────
+// ⚠️ organisation_id AND ai_assistant_id, both, on every count. The user's complaint was not only
+// that the answer was wrong: it named an entity they did not recognise. Nothing here may widen
+// beyond the caller's own organisation, and the prompt says outright that these numbers ARE the
+// user's own records so the model never reaches for a general-knowledge answer instead.
+//
+// ── Bounded ──────────────────────────────────────────────────────────────────
+// Counts are cheap and complete. The NAMES are a capped sample (LEAD_SNAPSHOT_NAMES), because a
+// workspace with 4,000 leads must not put 4,000 titles in a system prompt — the block says so
+// explicitly, so "list all my leads" is answered with "open the Leads tab", not with a truncated
+// list presented as complete.
+const LEAD_SNAPSHOT_NAMES = 20;
+
+type LeadCounts = {
+    total: number; hot: number; warm: number; cold: number; unrated: number;
+    pending: number; approved: number; contacted: number; rejected: number;
+    withEmail: number; won: number; lost: number;
+} & Record<string, unknown>;   // db.execute's row constraint
+
+async function buildLeadsSnapshot(
+    db: ReturnType<typeof getDb>, organisationId: number, aiAssistantId: number,
+): Promise<string | null> {
+    try {
+        // One aggregate rather than a row fetch: a Leads tab holding thousands of records must not
+        // be pulled into a Lambda to be counted.
+        const result = await db.execute<LeadCounts>(sql`
+            SELECT
+                count(*)::int AS total,
+                count(*) FILTER (WHERE lower(coalesce(status, '')) = 'hot')::int AS hot,
+                count(*) FILTER (WHERE lower(coalesce(status, '')) = 'warm')::int AS warm,
+                count(*) FILTER (WHERE lower(coalesce(status, '')) = 'cold')::int AS cold,
+                count(*) FILTER (WHERE lower(coalesce(status, '')) NOT IN ('hot', 'warm', 'cold'))::int AS unrated,
+                count(*) FILTER (WHERE approval_status = 'pending_approval')::int AS pending,
+                count(*) FILTER (WHERE approval_status = 'approved')::int AS approved,
+                count(*) FILTER (WHERE approval_status = 'scheduled')::int AS contacted,
+                count(*) FILTER (WHERE approval_status = 'rejected')::int AS rejected,
+                count(*) FILTER (WHERE btrim(coalesce(data->>'contactEmail', '')) <> '')::int AS "withEmail",
+                count(*) FILTER (WHERE data->'dealOutcome'->>'outcome' = 'won')::int AS won,
+                count(*) FILTER (WHERE data->'dealOutcome'->>'outcome' = 'lost')::int AS lost
+              FROM assistant_records
+             WHERE organisation_id = ${organisationId}
+               AND ai_assistant_id = ${aiAssistantId}
+               AND record_type = 'lead'
+        `);
+        const c = Array.from(result as unknown as LeadCounts[])[0];
+        if (!c || !c.total) {
+            // Stated rather than omitted. "You have no leads yet" is a real answer to "how many
+            // hot leads do I have"; silence here is what sends the model looking elsewhere.
+            return 'YOUR LEADS RIGHT NOW — this workspace\'s own records, counted at the moment this message was sent: there are no leads on file yet. Say exactly that if asked how many there are, and offer to set up a search rather than guessing at a number.';
+        }
+
+        // The names, newest first, hot before warm before cold — the order a user scanning their
+        // own tab would read them in.
+        const names = await db
+            .select({
+                title: assistantRecords.title,
+                status: assistantRecords.status,
+                approvalStatus: assistantRecords.approvalStatus,
+            })
+            .from(assistantRecords)
+            .where(and(
+                eq(assistantRecords.organisationId, organisationId),
+                eq(assistantRecords.aiAssistantId, aiAssistantId),
+                eq(assistantRecords.recordType, 'lead'),
+            ))
+            .orderBy(
+                sql`CASE lower(coalesce(${assistantRecords.status}, '')) WHEN 'hot' THEN 0 WHEN 'warm' THEN 1 WHEN 'cold' THEN 2 ELSE 3 END`,
+                desc(assistantRecords.updatedAt),
+            )
+            .limit(LEAD_SNAPSHOT_NAMES);
+
+        const APPROVAL_WORDS: Record<string, string> = {
+            pending_approval: 'awaiting your approval',
+            approved: 'approved, not yet emailed',
+            scheduled: 'emailed, follow-ups running',
+            rejected: 'rejected',
+        };
+        const list = names.map((n) => {
+            const rating = (n.status || 'unrated').toLowerCase();
+            const gate = APPROVAL_WORDS[n.approvalStatus ?? ''] ?? 'no approval state recorded';
+            return `- ${n.title} (${rating}, ${gate})`;
+        }).join('\n');
+
+        const truncated = c.total > names.length
+            ? `\nThese are the ${names.length} most recent of ${c.total}. The counts above cover all ${c.total}; this list does not. If the user wants the full list, or wants to filter, sort or group it, send them to the Leads tab — it does all three.`
+            : '';
+
+        return `YOUR LEADS RIGHT NOW — this workspace's own lead records, counted at the moment this message was sent. These numbers are FACT: when the user asks how many leads they have, how many are hot, or what is waiting on them, answer from here and never say you cannot see their leads, and never estimate.
+By rating: ${c.hot} hot, ${c.warm} warm, ${c.cold} cold${c.unrated ? `, ${c.unrated} not yet rated` : ''} — ${c.total} in total.
+By stage: ${c.pending} awaiting your approval, ${c.approved} approved but not yet emailed, ${c.contacted} already emailed, ${c.rejected} rejected.
+Contactable: ${c.withEmail} of ${c.total} have an email address on file — the rest cannot be emailed until one is added, whatever they scored.
+Closed: ${c.won} won, ${c.lost} lost.
+${list}${truncated}
+
+⚠️ These records belong to this business and this assistant alone. They are the ONLY leads you know anything about — do not describe, name or count any other organisation's records, and if a question needs a lead that is not listed above, say so and point at the Leads tab rather than inventing one.`;
+    } catch (err) {
+        // A snapshot is context, not the conversation. If the query fails the turn still goes
+        // ahead — the prompt simply has no counts, and its own instructions stop the model from
+        // filling that in with a guess.
+        console.error('[chat-orchestrator] leads snapshot failed (non-fatal)', err);
+        return null;
+    }
 }
 
 // ── Campaign Assistant: its own dashboard surfaces ───────────────────────────
@@ -929,6 +1055,8 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EITHER
     lead_qualifier: {
         model: DEFAULT_MODEL,
         maxTokens: 1024,
+        // The role that owns the Leads tab is the role that has to be able to count it.
+        usesLeadSnapshot: true,
         buildRolePrompt: (rc) => {
             // The block is rendered by src/config/icp-profile.ts, not written out here — the three
             // copies of it had already drifted apart, and chat and discovery disagreeing about the
@@ -944,6 +1072,12 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EITHER
                 `You have TWO jobs for this business: you FIND new leads (outbound discovery) and you SCORE the leads that reach you (inbound qualification). Never describe yourself as scoring-only — finding new customers is your job, not something the user has to go elsewhere for.
 
 ${leadGeneratorSurfaces()}
+
+${rc.leadsSnapshot
+    // Absent only when the count query failed, or on a shadow handoff call. Saying "I don't have
+    // that to hand" is the honest reply; the failure mode being prevented is the model answering
+    // the question anyway from whatever else is in its context.
+    ?? 'YOUR LEADS RIGHT NOW — unavailable for this turn: the lead counts could not be read. If the user asks how many leads they have, say you cannot see the count right now and point them at the Leads tab. Do NOT estimate, and do NOT answer from anything else in this conversation.'}
 
 Score every lead against the ideal customer profile below — a lead that matches it well scores high; one that misses it scores low, and your reasons must say which criteria it met or missed.
 
@@ -1567,6 +1701,14 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         ? await buildInspoBlock(db, { assistantId: session.aiAssistantId, organisationId: orgId, topic: message })
         : null;
 
+    // Counted per turn, not per session: a user who approves three leads in the Leads tab and then
+    // asks "how many are left?" must get the answer after those approvals, not the one that was
+    // true when the conversation opened. Cheap enough to be worth it — one aggregate plus a capped
+    // title list, both indexed on (organisation_id, ai_assistant_id, record_type).
+    const leadsSnapshot = route.usesLeadSnapshot
+        ? await buildLeadsSnapshot(db, orgId, session.aiAssistantId)
+        : null;
+
     const rolePrompt = route.buildRolePrompt({
         assistantName: assistantRow.name,
         jobRole: assistantRow.jobRole,
@@ -1576,6 +1718,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         knowledgeBase,
         mediaSources: assistantRow.mediaSources,
         inspoBlock,
+        leadsSnapshot,
     });
     const system = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,

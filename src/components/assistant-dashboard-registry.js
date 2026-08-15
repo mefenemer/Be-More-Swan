@@ -473,14 +473,13 @@
       // should see first. Stated explicitly rather than relying on _activateDefaultMainTab's
       // "first visible tab" fallback, which gave the right answer only by accident of tab order.
       defaultMainTab: 'signals',
-      // "Ask your memory" panel inside the Data Hub tab (assistant-memory-query.js →
-      // memory-query.ts). Phase 3 §5.5: natural-language questions answered from account_memory,
-      // account_edges and revenue_events, every claim cited back to the record it came from.
-      // Lead roles only — they are the roles that HAVE conversations to remember. The panel
-      // self-hides when the organisation has no memory yet, so enabling it early is harmless.
-      memoryPanel: {
-        label: 'Ask your memory',
-      },
+      // ⚠️ There is no `memoryPanel` key any more, and re-adding one wires up nothing — the
+      // component is deleted. It declared the "Ask your memory" panel that sat above this tab's
+      // table (Phase 3 §5.5): an account picker, a question box and an Ask button, answering from
+      // account_memory. Retired because a question box INSIDE the Leads tab reads as a search over
+      // the leads, and it could not see them — "how many hot leads do I have" got a truthful,
+      // useless answer about a store the user had never heard of. One door for questions (the
+      // header's Chat button), and the lead_qualifier prompt now carries the live record counts.
     },
 
     accounts_receivable_clerk: {

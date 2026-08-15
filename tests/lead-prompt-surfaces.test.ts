@@ -92,8 +92,11 @@ const EXEMPT: Record<string, string> = {
     // button until the server confirms it. Most tenants have no Strategy tab, so an assistant that
     // described one would be sending them to a tab that isn't on their screen.
     strategyTab: 'feature-gated (strategy_agent, default off) — not present for most tenants',
-    // Self-hides until the organisation has memory to query. A fresh workspace has no such panel.
-    memoryPanel: 'self-hides until the org has account memory — absent on a new workspace',
+    // `memoryPanel` was exempted here as "self-hides until the org has account memory". The panel
+    // is now deleted outright (see tests/memory-query.test.ts §5) rather than conditionally
+    // hidden, so there is no surface left to exempt. Removed rather than kept "just in case": the
+    // stale-exemption check below exists precisely to stop a dead entry silently excusing some
+    // future surface that reuses the key.
     // `primaryAction` was exempted here as "the button that opens this chat" — it was labelled
     // "Score New Leads" but only redirected to this page. The role no longer declares one at all
     // (scoring is automatic: discovery runs and CSV imports score on arrival, and the one manual
@@ -290,6 +293,75 @@ check('the card names the tab as the registry labels it', () => {
         `The proposal card must send users to the "${tabLabel}" tab, matching the registry label. `
         + 'The tab has been renamed once already; copy that still names the old one strands the user '
         + 'at the final step, holding an approved search they cannot find.');
+});
+
+console.log('\n──── the prompt can COUNT the tab it describes ────');
+
+// The prompt has always been able to describe the Leads tab and never able to read it. Asked "how
+// many hot leads do I have", the product answered "I don't have information about 'hot leads' in a
+// structured leads database" — true of the surface that answered (the account-graph memory panel,
+// now removed) and useless to someone staring at the tab. buildLeadsSnapshot() closes it, and
+// everything below defends the two properties that make the fix worth having: the numbers are the
+// CALLER'S, and a missing snapshot produces an admission rather than a guess.
+
+// Bounded by the next declaration, not by the comment above it — `orchestrator` has been
+// comment-stripped, so a comment anchor is an anchor that is not there.
+const snapshotFn = span(orchestrator, 'async function buildLeadsSnapshot', 'function campaignSurfaces', 'buildLeadsSnapshot()');
+
+check('the snapshot is scoped to the caller\'s organisation AND assistant', () => {
+    // Both, on both queries. The complaint that produced this feature was an answer naming an
+    // entity the user did not recognise, so a widened scope here is the exact regression.
+    const aggregate = span(snapshotFn, 'db.execute<LeadCounts>', 'const c =', 'the count aggregate');
+    assert.match(aggregate, /organisation_id = \$\{organisationId\}/,
+        'the aggregate is not organisation-scoped — it would count every tenant\'s leads');
+    assert.match(aggregate, /ai_assistant_id = \$\{aiAssistantId\}/,
+        'the aggregate is not assistant-scoped — one org\'s two lead assistants would report each other\'s rows');
+    assert.match(aggregate, /record_type = 'lead'/,
+        'the aggregate counts every record type, so meetings and invoices would be reported as leads');
+
+    const names = span(snapshotFn, 'const names = await db', '.limit(', 'the sample list query');
+    for (const scope of ['assistantRecords.organisationId, organisationId', 'assistantRecords.aiAssistantId, aiAssistantId']) {
+        assert.ok(names.includes(scope), `the name list is missing its scope: ${scope}`);
+    }
+});
+
+check('the block tells the model these are the ONLY leads it knows about', () => {
+    assert.match(snapshotFn, /ONLY leads you know anything about/,
+        'without this the model treats the counts as one source among several and blends them with '
+        + 'whatever else is in context — which is how another entity got named in the first place');
+    assert.match(snapshotFn, /do not describe, name or count any other organisation/i,
+        'the cross-tenant prohibition must be stated outright, not implied by the scoping');
+    assert.match(snapshotFn, /never say you cannot see their leads, and never estimate/,
+        'the model must be told the counts are authoritative — otherwise it hedges over real numbers');
+});
+
+check('the name list is capped, and says so', () => {
+    assert.match(snapshotFn, /LEAD_SNAPSHOT_NAMES/, 'the sample is unbounded — a big tab would blow the prompt');
+    assert.match(snapshotFn, /this list does not/,
+        'a truncated list presented as complete is worse than no list: "these are all your leads" '
+        + 'about 20 of 4,000 is a confident lie');
+});
+
+check('a failed snapshot degrades to an admission, never to a guess', () => {
+    assert.match(snapshotFn, /catch \(err\)/, 'the snapshot must not be able to fail the turn');
+    assert.match(snapshotFn, /return null/, 'a failure must return null rather than throwing');
+    // And the prompt has to do something honest with that null.
+    assert.match(leadRoute, /rc\.leadsSnapshot/, 'the role prompt never reads the snapshot');
+    assert.match(leadRoute, /Do NOT estimate/,
+        'the no-snapshot fallback must forbid estimating — "roughly a dozen" about someone\'s real '
+        + 'pipeline is the failure this whole block exists to prevent');
+});
+
+check('the snapshot is rebuilt every turn, and only for the role that owns the records', () => {
+    assert.match(leadRoute, /usesLeadSnapshot: true/, 'the lead route no longer opts in');
+    const handler = span(orchestrator, 'const leadsSnapshot = route.usesLeadSnapshot', 'const rolePrompt', 'the snapshot call site');
+    assert.match(handler, /buildLeadsSnapshot\(db, orgId, session\.aiAssistantId\)/,
+        'the call site must pass the SESSION\'s assistant and the resolved tenant — anything else '
+        + 'is a scope decided by the request body');
+    // Not cached on the session: approving leads in another tab and then asking "how many are
+    // left?" must reflect the approvals.
+    assert.ok(!/leadsSnapshot\s*=\s*session\./.test(orchestrator),
+        'the snapshot must not be read off the session — it would go stale the moment the user acts');
 });
 
 console.log(`\n${passed} checks passed.`);

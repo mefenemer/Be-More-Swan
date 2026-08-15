@@ -790,13 +790,18 @@
       </button>
     </div>
 
-    <!-- "Ask your memory" — the conversational surface over the account graph (Phase 3 §5.5,
-         assistant-memory-query.js → memory-query.ts). Deliberately ALONGSIDE the records table
-         below, never instead of it: users keep the table they know, and the change is that both
-         now read the same memory layer. Self-hides when the org has no memory yet, so it never
-         advertises a feature that cannot answer anything. -->
-    <div id="memory-query-host" class="hidden"></div>
-
+    <!-- An "Ask your memory" panel used to sit here (Phase 3 §5.5): an account picker, a question
+         box and an Ask button, answering from account_memory — the emails prospects have sent.
+         It is gone, and the reason is worth keeping. Users read a search box inside the Leads tab
+         as a search over their LEADS, and it was nothing of the kind: asked "how many hot leads do
+         I have", it answered honestly about the only store it could see ("no information about
+         hot leads in a structured leads database") and looked broken doing it. Two boxes that both
+         take a question, on one page, reading different halves of the data, is a maze.
+         There is now ONE place to ask this assistant anything — the Chat button in the header —
+         and the lead_qualifier chat prompt carries a live count of these very records
+         (leadsSnapshotBlock in chat-orchestrator.ts), so the question the panel could not answer
+         is answered there. netlify/functions/memory-query.ts is left in place: the account graph
+         still ingests, and nothing else calls it. -->
     <div id="datahub-toolbar"></div>
     <div id="datahub-table-host"></div>
   </div><!-- /maintab-datahub -->

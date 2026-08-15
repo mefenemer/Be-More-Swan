@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-leads-hub",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/9e236ec7-08d9-47ce-9163-69a6576dbf77/scratchpad/hubharness/server.mjs"
+      ],
+      "port": 4310,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-searches-manage",
       "runtimeExecutable": "node",
       "runtimeArgs": [

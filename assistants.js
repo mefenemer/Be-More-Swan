@@ -698,8 +698,6 @@ window._activateMainTab = function(name) {
     if (name === 'conversations') window.AssistantLeadThreads?.activate();
     // Strategy resolved its gate (and loaded) on init — activation only paints.
     if (name === 'strategy') window.AssistantStrategy?.activate();
-    // The memory panel loads lazily on first Data Hub activation, then repaints from state.
-    if (name === 'datahub') window.AssistantMemoryQuery?.activate();
     // Load the assistant-scoped review queue when the tab is first opened. detailRqOpenStatus
     // branches on window._detailReviewQueue.kind (posts vs records) internally.
     if (name === 'review-queue') {
@@ -3675,26 +3673,10 @@ function _applyDashboardRegistry(data) {
         toggle('maintab-btn-strategy', false);
     }
 
-    // "Ask your memory" panel inside the Data Hub tab (Phase 3 §5.5). init() only records the
-    // assistant id — the panel fetches nothing until the Data Hub tab is actually opened, because
-    // its context query touches account_memory on every workspace load otherwise.
-    if (cfg.memoryPanel) {
-        window.AssistantMemoryQuery?.init({ assistantId: data.id, cfg: cfg.memoryPanel });
-        // Data Hub is the MARKUP default, and _activateDefaultMainTab deliberately early-returns
-        // when the wanted tab is already active (so on-open hooks don't refetch). That means
-        // _activateMainTab('datahub') never fires on an ordinary load — activate here instead, or
-        // the panel would only ever appear after the user visited another tab and came back.
-        //
-        // Only when Data Hub is where we'll actually LAND, though. A role with its own
-        // defaultMainTab (lead_qualifier → 'signals') still has the Data Hub panel un-hidden at
-        // this point, because _activateDefaultMainTab hasn't run yet; activating on that would
-        // fire the account_memory context query on every load for a tab the user never opened.
-        const landsOnHub = !cfg.defaultMainTab || cfg.defaultMainTab === 'datahub';
-        const hubPanel = document.getElementById('maintab-datahub');
-        if (landsOnHub && hubPanel && !hubPanel.classList.contains('hidden')) {
-            window.AssistantMemoryQuery?.activate();
-        }
-    }
+    // The "Ask your memory" panel was initialised here, off cfg.memoryPanel. Both the registry key
+    // and the component are gone — see the note on the lead_qualifier block in
+    // assistant-dashboard-registry.js for why a second question box inside the Leads tab was worse
+    // than none.
 
     // Inspo tab — only the content roles (inspoTab: social_media_manager, blog_writer):
     // the styles/tones/ideas the assistant studies and applies to every draft.

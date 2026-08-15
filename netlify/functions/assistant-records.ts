@@ -8,7 +8,8 @@
 //  POST   { assistantId, recordType, records: [{ title, status?, data }, ...], source? }
 //         → bulk insert (CSV import) or single insert; upserts on (assistant, type, title)
 //  PATCH  { id, status?, data? }                            → update one record's lifecycle/state
-//  DELETE { id }                                            → remove one record
+//  DELETE { id, reason? } | { ids: [...], reason? }         → remove one record, or up to
+//         MAX_BULK_DELETE of them; `reason` banks the targeting evidence (leads only)
 //
 // `data` is the uiElement wire shape (disruptive-ui-registry.js) so the hub tab and the
 // chat transcript render records identically. Auth: aura_session + requireTenant; every
@@ -35,6 +36,11 @@ const SOURCES = new Set(['chat', 'csv_import', 'integration']);
 const MAX_BULK_RECORDS = 500;
 // Serialised size cap per record's data payload (client-supplied, treat as untrusted).
 const MAX_DATA_CHARS = 20_000;
+// Bulk-delete ceiling per request. Lower than the import ceiling on purpose: each id costs a
+// lookup, a discovery-row update and a delete — five round trips at 500 ids would sit close to the
+// function timeout, and a delete that times out half-done is the worst thing this endpoint can do.
+// The client chunks; going over is a 400, never a silent truncation.
+const MAX_BULK_DELETE = 100;
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -653,65 +659,112 @@ export default withLambda(async (event) => {
         }
 
         if (event.httpMethod === 'DELETE') {
-            let body: { id?: number; reason?: unknown };
+            let body: { id?: number; ids?: unknown; reason?: unknown };
             try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
-            const id = Number(body.id);
-            if (!Number.isInteger(id)) return json(400, { error: 'id is required.' });
 
-            // ── Everything below runs BEFORE the delete, and that ordering is load-bearing ──
+            // ── One record or many, through the SAME code ────────────────────────────────
+            // The Leads tab can now select rows and clear them in one go, which is how a user
+            // works through a search that came back mostly junk. That must not become a second
+            // delete implementation: everything below — the ownership check, the evidence write,
+            // the discovery-row status, and the ORDER of all three — is the whole value of this
+            // handler, and a bulk path that skipped any of it would silently destroy exactly the
+            // targeting signal the single path was built to keep. So `ids` is just a loop over the
+            // one-record body.
             //
-            // `discovered_leads.assistant_record_id` is ON DELETE SET NULL (db/schema.ts), so the
-            // moment this record goes, the link back to its discovery row is gone with it. That is
-            // how a prod assistant ended up with 35 discovered leads all marked 'promoted' and only
-            // 14 still linked: 21 records were deleted by hand, and each one silently severed its
-            // own provenance while leaving the discovery row claiming it had been promoted.
-            //
-            // Two consequences, both fixed here:
-            //   1. recordLeadRejection() resolves provenance BY assistant_record_id, so a reason
-            //      captured after the delete could never find the lead, the campaign, or the domain.
-            //   2. The discovery row's status must move to its real terminal state. 'discarded' is
-            //      already in the CHECK constraint; leaving it at 'promoted' with a null link makes
-            //      the lifecycle vocabulary describe something that is no longer true.
-            const [existing] = await db.select({
-                id: assistantRecords.id,
-                recordType: assistantRecords.recordType,
-                aiAssistantId: assistantRecords.aiAssistantId,
-            }).from(assistantRecords)
-                .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
-                .limit(1);
-            if (!existing) return json(404, { error: 'Record not found.' });
+            // Capped, and REFUSED rather than truncated past the cap. Silently deleting 200 of the
+            // 500 rows someone selected, and reporting success, is the worst available answer; the
+            // client chunks instead.
+            const idList = Array.isArray(body.ids)
+                ? [...new Set((body.ids as unknown[]).map(Number).filter((n) => Number.isInteger(n)))]
+                : [];
+            const bulk = Array.isArray(body.ids);
+            if (bulk && idList.length > MAX_BULK_DELETE) {
+                return json(400, { error: `Delete up to ${MAX_BULK_DELETE} records at a time.` });
+            }
+            const ids = bulk ? idList : (Number.isInteger(Number(body.id)) ? [Number(body.id)] : []);
+            if (!ids.length) return json(400, { error: 'id is required.' });
 
+            const deletedIds: number[] = [];
             let feedbackRecorded = false;
-            if (existing.recordType === 'lead') {
-                // Optional: deleting is a decision the user has already made, and a reason they
-                // decline to give must never block it. An unknown value is dropped by
-                // recordLeadRejection (closed vocabulary), which logs the offending value.
-                const reason = typeof body.reason === 'string' ? body.reason : '';
-                if (reason) {
-                    const result = await recordLeadRejection(db, {
-                        organisationId: orgId,
-                        aiAssistantId: existing.aiAssistantId,
-                        assistantRecordId: existing.id,
-                        reason,
-                    });
-                    feedbackRecorded = result.id !== null;
+            let feedbackCount = 0;
+            let notFound = 0;
+
+            for (const id of ids) {
+                // ── Everything below runs BEFORE the delete, and that ordering is load-bearing ──
+                //
+                // `discovered_leads.assistant_record_id` is ON DELETE SET NULL (db/schema.ts), so the
+                // moment this record goes, the link back to its discovery row is gone with it. That is
+                // how a prod assistant ended up with 35 discovered leads all marked 'promoted' and only
+                // 14 still linked: 21 records were deleted by hand, and each one silently severed its
+                // own provenance while leaving the discovery row claiming it had been promoted.
+                //
+                // Two consequences, both fixed here:
+                //   1. recordLeadRejection() resolves provenance BY assistant_record_id, so a reason
+                //      captured after the delete could never find the lead, the campaign, or the domain.
+                //   2. The discovery row's status must move to its real terminal state. 'discarded' is
+                //      already in the CHECK constraint; leaving it at 'promoted' with a null link makes
+                //      the lifecycle vocabulary describe something that is no longer true.
+                const [existing] = await db.select({
+                    id: assistantRecords.id,
+                    recordType: assistantRecords.recordType,
+                    aiAssistantId: assistantRecords.aiAssistantId,
+                }).from(assistantRecords)
+                    .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
+                    .limit(1);
+                // A single delete of something that is not yours (or is already gone) is a 404. In a
+                // bulk run it is counted and skipped: the other 49 rows the user selected are theirs,
+                // and failing all of them because one had already been deleted in another tab would be
+                // a worse answer than doing the work and saying what was missing.
+                if (!existing) {
+                    if (!bulk) return json(404, { error: 'Record not found.' });
+                    notFound++;
+                    continue;
                 }
 
-                // Mark the discovery row discarded whether or not a reason was given — the state
-                // is a fact about the row, not about how thoughtfully it was removed.
-                await db.update(discoveredLeads)
-                    .set({ status: 'discarded', updatedAt: new Date() })
-                    .where(and(
-                        eq(discoveredLeads.assistantRecordId, existing.id),
-                        eq(discoveredLeads.organisationId, orgId),
-                    ));
+                if (existing.recordType === 'lead') {
+                    // Optional: deleting is a decision the user has already made, and a reason they
+                    // decline to give must never block it. An unknown value is dropped by
+                    // recordLeadRejection (closed vocabulary), which logs the offending value.
+                    const reason = typeof body.reason === 'string' ? body.reason : '';
+                    if (reason) {
+                        const result = await recordLeadRejection(db, {
+                            organisationId: orgId,
+                            aiAssistantId: existing.aiAssistantId,
+                            assistantRecordId: existing.id,
+                            reason,
+                        });
+                        if (result.id !== null) { feedbackRecorded = true; feedbackCount++; }
+                    }
+
+                    // Mark the discovery row discarded whether or not a reason was given — the state
+                    // is a fact about the row, not about how thoughtfully it was removed.
+                    await db.update(discoveredLeads)
+                        .set({ status: 'discarded', updatedAt: new Date() })
+                        .where(and(
+                            eq(discoveredLeads.assistantRecordId, existing.id),
+                            eq(discoveredLeads.organisationId, orgId),
+                        ));
+                }
+
+                const [row] = await db.delete(assistantRecords)
+                    .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
+                    .returning({ id: assistantRecords.id });
+                if (!row) {
+                    if (!bulk) return json(404, { error: 'Record not found.' });
+                    notFound++;
+                    continue;
+                }
+                deletedIds.push(row.id);
             }
 
-            const [row] = await db.delete(assistantRecords)
-                .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
-                .returning({ id: assistantRecords.id });
-            if (!row) return json(404, { error: 'Record not found.' });
-            return json(200, { deleted: row.id, feedbackRecorded });
+            // `deleted` stays the single id on the single path — nothing in the app reads it, but
+            // the shape is the one the endpoint has always returned and there is no reason to
+            // churn it. The bulk path reports what actually happened, all three numbers, because
+            // "50 selected, 48 deleted, 2 were already gone" is a sentence the client has to be
+            // able to write.
+            return bulk
+                ? json(200, { deleted: deletedIds, count: deletedIds.length, feedbackRecorded: feedbackCount, notFound })
+                : json(200, { deleted: deletedIds[0], feedbackRecorded });
         }
 
         return { statusCode: 405, body: 'Method Not Allowed' };

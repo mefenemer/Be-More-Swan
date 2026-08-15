@@ -37,7 +37,10 @@ check('the Review Queue approve sends; the Leads tab approve does not', () => {
     // rather than wrong — but the two must be reasoned about together.
     assert.match(SHELL, /action: 'send_outreach', assistantId: window\._currentAssistantId, recordId: patch\.id/,
         'the Review Queue approve must still POST send_outreach');
-    const hubApprove = HUB.slice(landmark(HUB, "label: 'Approve'"));
+    // ⚠️ Anchored on the PUSH, not on the bare label. "label: 'Approve'" also occurs in
+    // nextStepGuidance(), which offers Approve as the next-step button — a slice starting there
+    // runs through half the file and stops asserting anything about this handler.
+    const hubApprove = HUB.slice(landmark(HUB, "buttons.push({ label: 'Approve'"));
     const body = hubApprove.slice(0, landmark(hubApprove, '}});'));
     assert.ok(!/send_outreach/.test(body),
         'the Leads tab approve must not send — the split is deliberate: judging a company is fast '

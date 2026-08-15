@@ -1,27 +1,38 @@
 // tests/memory-query.test.ts
-// Phase 3 §5.5 — the conversational query surface over the account graph.
+// Phase 3 §5.5 — the account-graph query endpoint, and the panel that used to front it.
+//
+// ── The panel is gone; the endpoint is not ───────────────────────────────────
+// "Ask your memory" mounted an account picker, a question box and an Ask button ABOVE the Leads
+// tab's records table. It has been removed. The reason is a design one and it is the half of this
+// file most worth keeping: a question box inside the Leads tab reads as a search over the leads,
+// and this endpoint cannot see them. Asked "how many hot leads do I have", it answered accurately
+// about account_memory — "no information about hot leads in a structured leads database" — and
+// looked broken doing it, because the user was looking at their leads while they read it. Asking
+// this assistant a question now has one door, the header's Chat button, whose prompt carries a
+// live count of the user's own lead records (chat-orchestrator.ts `leadsSnapshotBlock`).
+//
+// netlify/functions/memory-query.ts is deliberately LEFT IN PLACE — the account graph still
+// ingests, and this is the read side of it. Nothing in the app calls it today, which makes the
+// properties below matter MORE rather than less: an unreferenced endpoint is one nobody re-reads
+// before wiring it up again.
 //
 // This is the first feature in the revenue engine where THIRD-PARTY TEXT REACHES A MODEL PROMPT.
 // account_memory holds emails written by prospects, arriving through a public webhook, and this
-// function retrieves them straight into a system/user prompt. Four properties follow from that,
-// and each is asserted below:
+// function retrieves them straight into a system/user prompt. Three properties follow from that:
 //
 //   1. NO CONTEXT, NO MODEL CALL. An LLM asked "what do we know about Acme?" with nothing
 //      retrieved will invent a plausible answer. A confident fabrication about a real customer is
 //      worse than "nothing on file", so the empty path returns before the API call.
 //   2. RETRIEVED TEXT IS FRAMED AS DATA, and the handler has NO WRITES. The framing is the weak
 //      mitigation; "there is nothing this endpoint can do" is the strong one.
-//   3. CITATIONS ARE STRUCTURED, and a marker pointing at a source that does not exist must not
-//      render as a working control.
-//   4. EVERYTHING IS ESCAPED, and no model output or prospect text is ever interpolated into an
-//      inline handler.
+//   3. CITATIONS ARE STRUCTURED, so a claim can be traced back to the row it came from.
 //
-// No database and no network: the assertions are over the handler and component source, the same
-// technique the other Phase 2/3 suites use.
+// No database and no network: the assertions are over handler source, the same technique the other
+// Phase 2/3 suites use.
 // Run:  npx tsx tests/memory-query.test.ts
 
 import assert from 'node:assert';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { landmark } from './landmark';
@@ -34,12 +45,10 @@ function check(name: string, fn: () => void): void {
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const fnText = readFileSync(join(root, 'netlify/functions/memory-query.ts'), 'utf8');
-const uiText = readFileSync(join(root, 'src/components/assistant-memory-query.js'), 'utf8');
 const detailText = readFileSync(join(root, 'assistant-detail.html'), 'utf8');
 const workspaceText = readFileSync(join(root, 'workspace.html'), 'utf8');
 const assistantsText = readFileSync(join(root, 'assistants.js'), 'utf8');
 const registryText = readFileSync(join(root, 'src/components/assistant-dashboard-registry.js'), 'utf8');
-const cssText = readFileSync(join(root, 'style.css'), 'utf8');
 
 // ── 1. Anti-fabrication ──────────────────────────────────────────────────────
 
@@ -51,7 +60,7 @@ check('no retrieval hits means the model is never called', () => {
     // And it must actually return, not just log.
     const block = fnText.slice(emptyAt, emptyAt + 600);
     assert.ok(block.includes('return json(200'), 'the empty path must return, not fall through');
-    assert.ok(block.includes('empty: true'), 'the client needs to distinguish "no memory" from "no answer"');
+    assert.ok(block.includes('empty: true'), 'the caller needs to distinguish "no memory" from "no answer"');
 });
 
 check('the grounding rules forbid answering beyond the supplied sources', () => {
@@ -132,149 +141,58 @@ check('citations carry a stable back-reference to the source row', () => {
     }
 });
 
-check('a citation marker beyond the source count stays inert text', () => {
-    // The model can emit [7] with six sources. That must not render as a control that scrolls
-    // nowhere — a broken affordance reads as a broken product.
-    const fn = uiText.slice(landmark(uiText, 'function withCitationChips'));
-    assert.ok(fn.includes('num > maxN'), 'out-of-range citation numbers must be detected');
-    assert.ok(/return whole/.test(fn), 'an out-of-range marker must be returned unchanged as plain text');
-});
+// ── 5. The panel stays retired, or comes back WHOLE ──────────────────────────
+//
+// Five things wired that panel up, in four files. A half-restore is the failure worth catching:
+// a host div with no script renders nothing, a script with no registry key initialises nothing,
+// and either one is a silent dead end rather than an error. If the panel is ever wanted again,
+// restore all five and delete this block — do not un-comment one of them and hope.
 
-check('the citation regex can only ever capture digits', () => {
-    const fn = uiText.slice(landmark(uiText, 'function withCitationChips'));
-    const m = fn.match(/replace\((\/[^/]+\/g)/);
-    assert.ok(m, 'could not locate the citation regex');
-    assert.equal(m![1], '/\\[(\\d{1,2})\\]/g', 'the pattern must match digits only — it writes into an attribute');
-});
-
-// ── 5. XSS / untrusted rendering ─────────────────────────────────────────────
-
-check('escaping happens BEFORE citation chips are injected', () => {
-    // withCitationChips writes raw HTML. Running it before esc() would let an answer containing
-    // markup inject it; running it after means the only HTML added is our own.
+check('the component file is gone', () => {
     assert.ok(
-        uiText.includes('withCitationChips(esc(r.answer || \'\'), cites.length)'),
-        'the answer must be escaped first, then chipped',
+        !existsSync(join(root, 'src/components/assistant-memory-query.js')),
+        'assistant-memory-query.js is back. If that is deliberate, this whole section needs rewriting — '
+        + 'and the reason it was removed (a question box inside the Leads tab that cannot see the leads) '
+        + 'has to be answered, not just re-shipped.',
     );
 });
 
-check('no model output or prospect text reaches an inline handler', () => {
-    // The trap this avoids: a snippet containing a quote character breaking out of an onclick.
-    assert.ok(!/onclick="[^"]*\$\{/.test(uiText), 'a template value is being interpolated into an onclick');
-    assert.ok(uiText.includes('data-cite='), 'citation chips must use a data attribute');
-    assert.ok(uiText.includes('data-expand='), 'expand buttons must use a data attribute');
+check('nothing loads or mounts it', () => {
     assert.ok(
-        uiText.includes("el.addEventListener('click'"),
-        'actions must be bound by a delegated listener, not inline handlers',
+        !workspaceText.includes('assistant-memory-query.js'),
+        'workspace.html still loads the deleted component — that is a 404 on every workspace load',
+    );
+    assert.ok(
+        !detailText.includes('id="memory-query-host"'),
+        'the Data Hub tab still carries the panel mount, which nothing will ever fill',
     );
 });
 
-check('every server-supplied field is escaped on render', () => {
-    for (const field of ['c.snippet', 'c.accountLabel', 'n.label', 'r.reason', 'a.label']) {
-        const re = new RegExp(`esc\\(${field.replace('.', '\\.')}`);
-        assert.ok(re.test(uiText), `${field} is rendered without esc()`);
-    }
-    // The one numeric field written into an attribute must be coerced, not escaped.
-    assert.ok(uiText.includes('value="${Number(a.id)}"'), 'the account id must be coerced to a number');
+check('nothing declares or activates it', () => {
+    const leadBlock = registryText.slice(
+        landmark(registryText, 'lead_qualifier:'),
+        landmark(registryText, 'accounts_receivable_clerk:'),
+    );
+    // Scoped to code, not comments: the block deliberately explains why the key is absent, and a
+    // bare `includes` would match that explanation and fail on the documentation.
+    const code = leadBlock.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+    assert.ok(!code.includes('memoryPanel'), 'lead_qualifier still declares memoryPanel');
+    assert.ok(
+        !/window\.AssistantMemoryQuery/.test(assistantsText),
+        'assistants.js still calls the deleted component — optional chaining makes that a silent no-op, '
+        + 'which is exactly how a half-restore survives review',
+    );
 });
 
-// ── 6. Placement and wiring ──────────────────────────────────────────────────
-
-check('the panel sits ALONGSIDE the Data Hub table, not instead of it', () => {
-    // §5.5 is explicit: users keep the table they know.
-    const hostAt = detailText.indexOf('id="memory-query-host"');
-    const tableAt = landmark(detailText, 'id="datahub-table-host"');
+check('the Data Hub table is still the tab, and is still above nothing', () => {
+    // §5.5 shipped the panel ALONGSIDE the table, never instead of it. Removing the panel must not
+    // have taken the table with it.
     const hubAt = landmark(detailText, 'id="maintab-datahub"');
     const hubEndAt = landmark(detailText, '/maintab-datahub');
-    assert.ok(hostAt > 0, 'the host div is missing');
-    assert.ok(hostAt > hubAt && hostAt < hubEndAt, 'the panel must live inside the Data Hub tab');
-    assert.ok(tableAt > hostAt, 'the records table must still be present, below the panel');
-});
-
-check('the panel self-hides with both the class and the inline style', () => {
-    // `hidden` loses to any class that sets display, so the style must be pinned too.
-    const fn = uiText.slice(landmark(uiText, 'function render()'));
-    assert.ok(fn.includes("classList.add('hidden')"), 'the hidden class is not applied');
-    assert.ok(fn.includes("style.display = 'none'"), 'display must be pinned — `hidden` loses to inline-flex');
-    assert.ok(detailText.includes('id="memory-query-host" class="hidden"'), 'the host must start hidden');
-});
-
-check('the script is loaded and the registry enables it for lead roles', () => {
-    assert.ok(
-        workspaceText.includes('/src/components/assistant-memory-query.js'),
-        'the component script tag is missing from workspace.html',
-    );
-    const leadBlock = registryText.slice(landmark(registryText, 'lead_qualifier:'), landmark(registryText, 'accounts_receivable_clerk:'));
-    assert.ok(leadBlock.includes('memoryPanel'), 'lead_qualifier must enable the memory panel');
-});
-
-check('the panel activates on an ordinary load, not only after a tab switch', () => {
-    // _activateDefaultMainTab early-returns when Data Hub is already the active markup default,
-    // so relying on _activateMainTab('datahub') alone means the panel never appears until the
-    // user visits another tab and comes back.
-    assert.ok(
-        assistantsText.includes("if (name === 'datahub') window.AssistantMemoryQuery?.activate()"),
-        'the tab-switch activation is missing',
-    );
-    const initAt = assistantsText.indexOf('window.AssistantMemoryQuery?.init(');
-    assert.ok(initAt > 0, 'the panel is never initialised');
-    // Bounded by the NEXT registry block rather than a character count: the window is incidental
-    // to what's being asserted, and a fixed one fails on an added comment, which teaches you to
-    // delete comments instead of to keep the behaviour.
-    const after = assistantsText.slice(initAt);
-    const end = after.indexOf('const inspo = cfg.inspoTab');
-    const block = after.slice(0, end > 0 ? end : 1200);
-    assert.ok(
-        block.includes("getElementById('maintab-datahub')") && block.includes('activate()'),
-        'the initial-load activation path is missing',
-    );
-    // ...but ONLY when Data Hub is where the role actually lands. lead_qualifier declares
-    // defaultMainTab:'signals', and the Data Hub panel is still un-hidden at this point (the
-    // default tab is applied later), so an unconditional activate would fire the account_memory
-    // context query on every load for a tab that role's users never open.
-    assert.ok(
-        block.includes('landsOnHub') && block.includes('cfg.defaultMainTab'),
-        'the initial-load activation must be gated on Data Hub actually being the landing tab',
-    );
-});
-
-check('init does not fetch — the context query is lazy', () => {
-    // Otherwise every workspace load queries account_memory for roles that never open Data Hub.
-    const api = uiText.slice(landmark(uiText, 'window.AssistantMemoryQuery = {'));
-    const initBlock = api.slice(landmark(api, 'init('), landmark(api, 'activate()'));
-    assert.ok(!initBlock.includes('loadContext()'), 'init() must not fetch; activate() does');
-    assert.ok(api.includes('loadContext()'), 'activate() must load the context');
-});
-
-// ── 7. Honesty about degraded retrieval ──────────────────────────────────────
-
-check('unembedded rows are surfaced rather than silently degrading', () => {
-    // Without VOYAGE_API_KEY rows store unembedded and retrieval falls back to keyword matching.
-    // A system that works but answers worse should say so.
-    assert.ok(fnText.includes('unembedded'), 'the context action must report unembedded coverage');
-    assert.ok(uiText.includes('state.counts.unembedded'), 'the panel must surface it');
-    assert.ok(/not indexed for meaning/i.test(uiText), 'the warning must be in plain language');
-});
-
-// ── 8. Styling must not force a Tailwind rebuild ─────────────────────────────
-
-check('every utility class used is already compiled into style.css', () => {
-    // A rebuild churns unrelated selectors across the whole app. Tailwind escapes ':' '[' ']' '.'
-    // in compiled selectors, so the lookup has to use the escaped form.
-    const classAttrs = [...uiText.matchAll(/class="([^"]*)"/g)].map((m) => m[1]);
-    const tokens = new Set<string>();
-    for (const attr of classAttrs) {
-        for (const raw of attr.split(/\s+/)) {
-            // Skip template interpolations and empties — those are conditional strings, not tokens.
-            if (!raw || raw.includes('${')) continue;
-            tokens.add(raw);
-        }
-    }
-    assert.ok(tokens.size > 20, `expected a real class list, parsed ${tokens.size}`);
-
-    const escapeSel = (t: string) => t.replace(/([:[\].])/g, '\\$1');
-    const missing = [...tokens].filter((t) => !cssText.includes(escapeSel(t)));
-    assert.deepEqual(missing, [], `not compiled into style.css: ${missing.join(', ')}`);
+    const tableAt = landmark(detailText, 'id="datahub-table-host"');
+    const toolbarAt = landmark(detailText, 'id="datahub-toolbar"');
+    assert.ok(tableAt > hubAt && tableAt < hubEndAt, 'the records table has left the Data Hub tab');
+    assert.ok(toolbarAt < tableAt, 'the toolbar must still sit above the table');
 });
 
 console.log(`\n${passed} checks passed`);

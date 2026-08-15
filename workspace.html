@@ -5103,9 +5103,11 @@ function formatCurrency(amount, currency) {
      changes the agent proposes to how it targets and writes, with the evidence behind each one.
      Nothing applies until a human clicks Apply (strategy-proposals.ts). -->
 <script src="/src/components/assistant-strategy.js"></script>
-<!-- "Ask your memory" panel inside the Data Hub tab (Phase 3 §5.5) — natural-language questions
-     answered from account_memory + account_edges + revenue_events, with citations (memory-query.ts). -->
-<script src="/src/components/assistant-memory-query.js"></script>
+<!-- The "Ask your memory" panel (Phase 3 §5.5) was loaded here. It has been retired: it put a
+     second question box inside the Leads tab, over account_memory rather than over the leads, and
+     users reasonably read it as a search of the records in front of them. Asking this assistant
+     anything now has one door — the Chat button — and the lead prompt carries a live count of the
+     user's own lead records. See the note in assistant-detail.html's Data Hub tab. -->
 <!-- Knowledge Base tab (tier1_support_agent) — the support articles grounding the
      assistant's Resolved answers; articles live in kb_articles via kb-articles.ts. -->
 <script src="/src/components/assistant-knowledge-base.js"></script>

@@ -148,7 +148,17 @@
     return String(v);
   }
 
-  const state = { hub: null, assistantId: null, records: [], pendingFocusId: null };
+  const state = {
+    hub: null, assistantId: null, records: [], pendingFocusId: null,
+    // How the table is being READ right now — the filter/sort/group controls. Kept out of the
+    // record list so a refetch (which happens every time the tab is opened) leaves the user's
+    // view alone: coming back to a tab you had filtered to "Awaiting you" and finding it reset is
+    // the tab losing your place.
+    view: { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null },
+    // Ids ticked for a bulk action. A Set of record ids rather than DOM state, because rows are
+    // re-rendered on every filter keystroke and after every PATCH.
+    selected: new Set(),
+  };
 
   async function fetchRecords() {
     // Content Library (social/blog Data Hub) reads posts, not assistant_records.
@@ -764,6 +774,218 @@
     });
   }
 
+  // ── Clearing out a selection ────────────────────────────────────────────────
+  //
+  // Deleting one lead at a time is fine when there is one bad lead. A search that came back aimed
+  // at the wrong market returns forty, and the only way to clear them was to open, delete, and
+  // find your place again, forty times — which is how the Leads tab silently became somewhere
+  // people stopped tidying, and how storage kept growing on rows nobody wanted.
+  //
+  // ⚠️ The reason is asked ONCE, for the whole selection, and it is asked BEFORE anything is
+  // deleted — the same ordering rule and the same reason as deleteReasonStrip above
+  // (`discovered_leads.assistant_record_id` is ON DELETE SET NULL, so a reason collected after the
+  // fact can never find the lead it was about). One reason for forty leads is also the honest
+  // shape of the act: a user clearing a bad search is making ONE judgement about all of them, and
+  // that judgement is exactly what the targeting feedback wants to hear.
+
+  /** Delete a set of records in one pass, banking the reason against every one of them. */
+  async function deleteRecords(ids, reason) {
+    // Chunked to the server's MAX_BULK_DELETE. Going over is a 400 there rather than a silent
+    // truncation, so the split has to happen here — and it is sequential, because each chunk is
+    // already several round trips per id and firing them together would race the same tables.
+    const CHUNK = 100;
+    let deleted = 0;
+    let notFound = 0;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const slice = ids.slice(i, i + CHUNK);
+      const res = await fetch(API, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(reason ? { ids: slice, reason } : { ids: slice }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // Report the partial truthfully. Rows in earlier chunks really are gone, and telling the
+        // user "delete failed" would have them press it again on a list that has already changed.
+        state.records = state.records.filter((r) => !ids.slice(0, i).includes(r.id));
+        throw new Error(deleted
+          ? `${deleted} deleted, then it stopped: ${data.error || 'the rest could not be deleted.'}`
+          : (data.error || 'Could not delete those records.'));
+      }
+      deleted += Number(data.count) || 0;
+      notFound += Number(data.notFound) || 0;
+    }
+    const gone = new Set(ids);
+    state.records = state.records.filter((r) => !gone.has(r.id));
+    for (const id of ids) state.selected.delete(id);
+    renderTable();
+    return { deleted, notFound };
+  }
+
+  /** The confirmation for a bulk delete: what is about to go, and the chance to say why. */
+  function bulkDeleteStrip(ids) {
+    const RC = window.RevenueConstants;
+    const isLead = state.hub.recordType === 'lead';
+    const n = ids.length;
+    const noun = n === 1 ? 'record' : 'records';
+    const strip = document.createElement('div');
+    strip.className = 'mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2';
+    const reasons = (isLead && RC && Array.isArray(RC.leadRejectReasons)) ? RC.leadRejectReasons : [];
+    const chip = 'px-2 py-1 text-[11px] font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-red-300 hover:text-red-800 transition cursor-pointer';
+
+    strip.innerHTML = `
+      <p class="text-xs font-bold text-gray-800">Delete ${n} ${esc(noun)}?</p>
+      <p class="text-[11px] text-gray-600 mb-2">This removes them for good.${isLead
+        ? ' If the problem is that the search shouldn’t have found them, <strong>Reject</strong> keeps the records and tells future searches what to avoid.'
+        : ''}</p>
+      ${reasons.length ? `<div class="flex flex-wrap gap-1.5">
+        ${reasons.map((r) => `<button type="button" class="${chip}" data-hub-bulk-reason="${esc(r)}">${esc(RC.leadRejectReasonLabel(r))}</button>`).join('')}
+      </div>
+      <p class="text-[11px] text-gray-500 mt-1.5">Pick one reason for all ${n} — it is recorded against every one of them, and it is what teaches the search.</p>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-2">
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg bg-white border border-red-200 text-red-700 hover:bg-red-100 transition cursor-pointer" data-hub-bulk-plain>Delete without a reason</button>
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-500 hover:text-gray-700 transition cursor-pointer" data-hub-bulk-cancel>Cancel</button>
+      </div>
+      <p class="hidden text-[11px] font-semibold mt-1.5" data-hub-bulk-status></p>`;
+
+    const status = strip.querySelector('[data-hub-bulk-status]');
+    strip.querySelector('[data-hub-bulk-cancel]').addEventListener('click', () => strip.remove());
+
+    const go = async (reason) => {
+      strip.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+      status.classList.remove('hidden');
+      status.className = 'text-[11px] font-semibold text-gray-500 mt-1.5';
+      status.textContent = `Deleting ${n} ${noun}…`;
+      try {
+        const { deleted, notFound } = await deleteRecords(ids, reason);
+        // renderTable() has already replaced this strip's parent; the toast is what survives.
+        window.showToast?.(`Deleted ${deleted} ${deleted === 1 ? 'record' : 'records'}.`
+          + (notFound ? ` ${notFound} had already gone.` : '')
+          + (reason && isLead ? ' The reason was recorded against each one.' : ''));
+      } catch (err) {
+        strip.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+        status.className = 'text-[11px] font-semibold text-red-600 mt-1.5';
+        status.textContent = err.message || 'Could not delete those records.';
+      }
+    };
+
+    strip.addEventListener('click', (e) => {
+      const chosen = e.target.closest('[data-hub-bulk-reason]');
+      if (chosen) { go(chosen.getAttribute('data-hub-bulk-reason')); return; }
+      if (e.target.closest('[data-hub-bulk-plain]')) go(undefined);
+    });
+    return strip;
+  }
+
+  // ── Who performs the suggested next step ────────────────────────────────────
+  //
+  // The lead card's "Suggested next step" is a sentence the model wrote — "Email the head of ops",
+  // "Call them this week", "Check whether they still do this in-house". It rendered as an
+  // instruction with no subject, and a user could not tell whether it described work the assistant
+  // was about to do or work waiting on them. Both readings are true of different leads: an emailed
+  // lead really is chased for you, and everything else on that list is yours alone.
+  //
+  // ⚠️ Decided from the lead's STATE, never from the sentence. Regex-matching model prose to guess
+  // "is this an email step?" is a coin flip that reads as a rule, and getting it wrong here tells
+  // someone their assistant is handling a call it cannot make. The four facts below are the ones
+  // the platform actually acts on:
+  //
+  //   • `data.outreachSentAt`  — stamped by lead-generation.ts `send_outreach` on a CONFIRMED send,
+  //     alongside the follow-up enrolment. This is the only marker that means mail has left; the
+  //     'scheduled' approval status rides with it (it is the chase reminder) but is written in the
+  //     same statement, so the stamp is the honest thing to read.
+  //   • an address at all     — outreach is email-only, so a lead without one is inert whatever
+  //     else is true of it.
+  //   • the approval gate     — approving HERE records a targeting decision and sends nothing (see
+  //     the Approve handler below). The send lives in the Review tab.
+  //   • a recorded outcome    — a decided lead has no next step worth chasing.
+  //
+  // `action.key` is matched to a button in detailActions() by `data-hub-action`, so the next-step
+  // button and the action bar can never drift into doing two different things — it presses the
+  // real control. 'open-review' is the one exception: there is no such button, it switches tabs.
+  function nextStepGuidance(record) {
+    if (state.hub.recordType !== 'lead') return null;
+    const d = record.data || {};
+
+    const outcome = d.dealOutcome && d.dealOutcome.outcome;
+    if (outcome) {
+      const RC = window.RevenueConstants;
+      const label = RC ? RC.outcomeLabel(outcome) : String(outcome);
+      return { owner: 'closed', action: null,
+        note: `This lead is marked ${label}. Nothing further is sent, and any follow-ups have stopped.` };
+    }
+
+    if (record.approvalStatus === 'rejected') {
+      return { owner: 'closed', action: null,
+        note: 'This lead is rejected, so nothing will be sent. Approve it below if you want to pursue it after all.' };
+    }
+
+    if (d.outreachSentAt) {
+      return { owner: 'assistant', action: { key: 'record-outcome', label: 'Record outcome' },
+        note: 'The outreach email has gone and the follow-ups are handled for you. Anything else in that step — a call, a meeting, a look at their site — is yours.' };
+    }
+
+    if (!contactEmailOf(record)) {
+      return { owner: 'you', action: { key: 'add-address', label: 'Add an address' },
+        note: 'There is no email address on this lead, so nothing can be sent for you until you add one.' };
+    }
+
+    if (record.approvalStatus === 'approved') {
+      // Only offered when the tab switcher is actually there. assistant-data-hub also renders
+      // inside a modal from the Searches tab, where the page around it is the same one — but a
+      // button that silently does nothing is worse than no button, so it is gated on the function.
+      const canOpenReview = typeof window._activateMainTab === 'function';
+      return { owner: 'you', action: canOpenReview ? { key: 'open-review', label: 'Open Review' } : null,
+        note: 'Approved — but nothing has been sent yet. The drafted email is waiting for you in the Review tab.' };
+    }
+
+    return { owner: 'you', action: { key: 'approve', label: 'Approve' },
+      note: 'Approving clears this lead for outreach. The email itself goes out when you approve it in the Review tab.' };
+  }
+
+  /**
+   * Wire the card's next-step button to the control that already does the job.
+   *
+   * It PRESSES the action-bar button rather than repeating its fetch: the bar's handlers own the
+   * status line, the disabled state, the approval chip refresh and the reject/delete strips, and a
+   * second copy of any of that is a second place for them to disagree. The bar sits below the card
+   * in the same panel, so the click is also scrolled into view — the effect of pressing the
+   * next-step button is a sentence appearing further down the page.
+   */
+  /**
+   * Re-state who owns the next step, after a decision has changed the answer.
+   *
+   * Approving a lead makes "Approving clears this lead for outreach" false, and the panel around
+   * it is deliberately not rebuilt (that would collapse the record the user is reading and throw
+   * away the reject-reason strip that Reject appends underneath). So this swaps the one node whose
+   * sentence has gone stale — the same fix, and the same reason, as the approval chip beside it.
+   */
+  function syncNextStepFooter(panel, record) {
+    const host = panel && panel.querySelector('[data-next-step-footer]');
+    const build = window.DisruptiveUIRegistry && window.DisruptiveUIRegistry.nextStepFooterHtml;
+    if (!host || !build) return;
+    const html = build(nextStepGuidance(record));
+    if (html) host.outerHTML = html; else host.remove();
+  }
+
+  function wireNextStepAction(panel) {
+    panel.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-lead-next-step]');
+      if (!btn) return;
+      const key = btn.getAttribute('data-lead-next-step');
+      if (key === 'open-review') {
+        window._activateMainTab?.('review-queue');
+        return;
+      }
+      const target = panel.querySelector(`[data-hub-action="${key}"]`);
+      if (!target) return;                       // the state moved on — do nothing rather than lie
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.click();
+      btn.disabled = true;
+    });
+  }
+
   // Meetings: summary + a check-off-able action-item list persisted via PATCH
   // (data.tasks[i].done), instead of the read-only chat card.
   function meetingDetail(record) {
@@ -852,7 +1074,7 @@
       // remedy nobody would find from the sentence offering it. On a lead with no address this is
       // the only action that unblocks anything, so it leads the row and says what it does.
       if (!contactEmailOf(record)) {
-        buttons.push({ label: 'Add an address', async run(btn) {
+        buttons.push({ label: 'Add an address', key: 'add-address', async run(btn) {
           btn.disabled = false;
           openEditLeadModal(record, { focus: 'contactEmail' });
         }});
@@ -862,7 +1084,7 @@
       // the button would be a no-op dressed as an action: 'missed' and 'checking' are unstamped by
       // definition, and 'unchecked' is a cold lead the scraper skips on rating.
       if (contactState(record) === 'none') {
-        buttons.push({ label: 'Look again', async run(btn, status) {
+        buttons.push({ label: 'Look again', key: 'look-again', async run(btn, status) {
           const res = await fetch('/.netlify/functions/lead-generation', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -887,7 +1109,7 @@
           refreshRow(record);
         }});
       }
-      buttons.push({ label: 'Edit', async run(btn) {
+      buttons.push({ label: 'Edit', key: 'edit', async run(btn) {
         btn.disabled = false;           // opening a modal shouldn't leave the button stuck disabled
         openEditLeadModal(record);
       }});
@@ -896,6 +1118,7 @@
       // `not_icp` on an untouched lead is the cleanest targeting signal there is.
       buttons.push({
         label: record.data?.dealOutcome?.outcome ? 'Change outcome' : 'Record outcome',
+        key: 'record-outcome',
         async run(btn) {
           btn.disabled = false;
           openOutcomeModal(record);
@@ -924,7 +1147,7 @@
         // `primary`: the one decision this panel exists to take. Everything else here is a tool
         // (edit it, copy the draft, log an outcome) — those are reached deliberately, this is the
         // thing the reader arrived to do.
-        buttons.push({ label: 'Approve', primary: true, async run(btn, status) {
+        buttons.push({ label: 'Approve', primary: true, key: 'approve', async run(btn, status) {
           const res = await fetch(API, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
@@ -945,6 +1168,9 @@
           refreshRow(record);
           const chip = btn.closest('[data-hub-detail]')?.querySelector('[data-hub-approval]');
           if (chip) chip.innerHTML = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${APPROVAL_CHIP.approved.cls}">${esc(APPROVAL_CHIP.approved.label)}</span>`;
+          // Third surface stating the same fact: the next-step footer, whose sentence was about
+          // what approving WOULD do.
+          syncNextStepFooter(btn.closest('[data-hub-detail]'), record);
           // Say what did and did not happen. A user who has used the Review Queue has learned that
           // approving sends — leaving that unsaid here would let them believe mail went out.
           const LR = window.LeadRecipient;
@@ -963,7 +1189,7 @@
       // whose outreach has already gone out can still be the wrong kind of company to have found,
       // and that is exactly the fact the targeting feedback wants.
       if (record.approvalStatus !== 'rejected') {
-        buttons.push({ label: 'Reject', async run(btn, status) {
+        buttons.push({ label: 'Reject', key: 'reject', async run(btn, status) {
           const res = await fetch(API, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
@@ -981,6 +1207,7 @@
           refreshRow(record);
           const chip = btn.closest('[data-hub-detail]')?.querySelector('[data-hub-approval]');
           if (chip) chip.innerHTML = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${APPROVAL_CHIP.rejected.cls}">${esc(APPROVAL_CHIP.rejected.label)}</span>`;
+          syncNextStepFooter(btn.closest('[data-hub-detail]'), record);
           // Asked AFTER the rejection commits, never as a gate on it: the reason is an annotation
           // on a decision the user has already made, and blocking the reject behind it would only
           // buy worse answers from someone with nineteen more leads to get through.
@@ -991,7 +1218,7 @@
 
     // Deleting a LEAD asks why first — see deleteReasonStrip for why this one confirms up front
     // while Reject deliberately asks afterwards. Every other record type deletes as before.
-    buttons.push({ label: 'Delete', danger: true, async run(btn, status) {
+    buttons.push({ label: 'Delete', danger: true, key: 'delete', async run(btn, status) {
       if (state.hub.recordType === 'lead') {
         btn.disabled = false;   // the strip owns the action now; leave the button usable
         status.parentElement?.appendChild(deleteReasonStrip(record));
@@ -1007,6 +1234,9 @@
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.textContent = b.label;
+      // The handle nextStepGuidance()'s action button presses. Set here rather than per-push so a
+      // button that gains a key never has to remember to render it.
+      if (b.key) btn.setAttribute('data-hub-action', b.key);
       // Three weights, matching the rest of the app: the emerald fill for the one decision this
       // panel exists to take, the white ghost for everything else, and the red ghost for Delete.
       // Every button here was the same ghost, so a row reading "Edit · Record outcome · Copy
@@ -1175,9 +1405,13 @@
       //     would not.
       //   outreachActions: false — drops "Draft Outreach in Gmail". Pushing the draft into Gmail
       //     from a screen that never shows the draft's text is a send-shaped action taken blind.
+      //   nextStep: who performs the model's suggested next step, and the button that starts it.
+      //     Supplied only HERE — chat and the Review Queue render the same stored card and neither
+      //     holds the action bar the button presses, so neither may show one.
       body = window.DisruptiveUIRegistry.render(record.data, {
         sendsOnApproval: false,
         outreachActions: false,
+        nextStep: nextStepGuidance(record),
       });
     }
     // A lead leads with where it stands: first the approval gate (pending / approved / rejected),
@@ -1193,12 +1427,182 @@
     if (social) panel.appendChild(social);
     panel.appendChild(body || keyValueFallback(record.data));
     panel.appendChild(detailActions(record));
+    // Delegated, and attached after the bar exists: the next-step button presses a control in it.
+    if (state.hub.recordType === 'lead') wireNextStepAction(panel);
     return panel;
+  }
+
+  // ── Working the table: filter, sort, group, select ──────────────────────────
+  //
+  // The table rendered every record, in whatever order the API returned them, with no way to
+  // narrow it. That is fine at twelve rows and unusable at four hundred — and four hundred is what
+  // a couple of discovery runs produce. The three questions a user actually arrives with are
+  // "which ones need me?", "which are the best?" and "which are junk?", and all three are answers
+  // to filter / sort / group over the columns already on screen.
+  //
+  // ── Everything here works off the RENDERED value ────────────────────────────
+  // Filters, grouping and the search box all compare `cellValue(record, key)` — the exact string
+  // in the cell. It is the only definition that can't surprise anyone: a filter offering "Awaiting
+  // you" selects the rows that say "Awaiting you", and a column whose renderer changes takes its
+  // filter with it. Sorting is the one place that departs from it, and only where the rendered
+  // order would be wrong — see ORDERED_VALUES.
+  //
+  // ⚠️ Generic over hub.columns, not written for leads. The Ledger and the ticket hubs get the
+  // same controls from the same code, which is why nothing below names a lead-specific column.
+
+  /** Column display values that have a natural order the alphabet does not agree with. */
+  const ORDERED_VALUES = {
+    // Rating: the whole point of the column is that hot beats warm beats cold.
+    status: ['hot', 'warm', 'cold'],
+    // Approval: the order of the gate itself, so "sort by Approval" puts what needs you on top.
+    approvalStatus: ['Awaiting you', 'Approved', 'Chase set', 'Rejected'],
+    // Contact: most reachable first — that is what the column is asked.
+    contact: ['Role inbox', 'Named person', 'Checking…', 'Not attempted', 'Not checked', 'None found'],
+  };
+
+  /** A comparable for one cell: number where the column is numeric, rank where it is a vocabulary. */
+  function sortValue(record, key) {
+    if (key === 'updatedAt') {
+      const t = new Date(record.updatedAt).getTime();
+      return Number.isNaN(t) ? -Infinity : t;
+    }
+    const shown = cellValue(record, key);
+    const ordered = ORDERED_VALUES[key];
+    if (ordered) {
+      const i = ordered.findIndex((v) => v.toLowerCase() === String(shown).toLowerCase());
+      return i === -1 ? ordered.length : i;          // anything unrecognised sorts last, not first
+    }
+    // A column of numbers must sort 9 before 10. Only when EVERY value parses cleanly — a mixed
+    // column ("42", "n/a") would otherwise sort the words into one silent lump at the bottom.
+    const n = Number(shown);
+    if (shown !== '—' && shown !== '' && Number.isFinite(n)) return n;
+    return String(shown).toLowerCase();
+  }
+
+  function compareRecords(a, b, key, dir) {
+    const av = sortValue(a, key);
+    const bv = sortValue(b, key);
+    let out;
+    if (typeof av === 'number' && typeof bv === 'number') out = av - bv;
+    else out = String(av).localeCompare(String(bv), undefined, { numeric: true });
+    return dir === 'desc' ? -out : out;
+  }
+
+  /** Every distinct rendered value in a column, in sort order. Drives the per-column dropdowns. */
+  function distinctValues(key) {
+    const seen = new Set();
+    for (const r of state.records) seen.add(String(cellValue(r, key)));
+    return [...seen].sort((x, y) => {
+      const ordered = ORDERED_VALUES[key];
+      if (!ordered) return x.localeCompare(y, undefined, { numeric: true });
+      const rank = (v) => {
+        const i = ordered.findIndex((o) => o.toLowerCase() === v.toLowerCase());
+        return i === -1 ? ordered.length : i;
+      };
+      return rank(x) - rank(y) || x.localeCompare(y);
+    });
+  }
+
+  /**
+   * Which columns get a dropdown.
+   *
+   * A `<select>` is only an improvement over the search box while the list is short enough to read.
+   * "Lead" holds one distinct value per row and "Updated" nearly so — a four-hundred-option menu is
+   * a worse search box. Those columns are covered by the free-text box instead, which is why it
+   * exists alongside these. The ceiling is deliberately generous: a vocabulary of twenty is still
+   * a menu, and being able to pick one industry out of eighteen is exactly the ask.
+   */
+  const MAX_FILTER_OPTIONS = 20;
+
+  function filterableColumns() {
+    return state.hub.columns.filter((c) => {
+      // A column the user is CURRENTLY filtering on always keeps its dropdown, whatever the data
+      // has since become. Otherwise deleting the last row of a kind takes the control away and
+      // leaves the filter running invisibly, with no way to turn it off but Clear.
+      if (state.view.filters[c.key]) return true;
+      const n = distinctValues(c.key).length;
+      return n >= 2 && n <= MAX_FILTER_OPTIONS;
+    });
+  }
+
+  /** Does this record survive the search box and every per-column dropdown? */
+  function matchesView(record) {
+    const v = state.view;
+    const q = v.search.trim().toLowerCase();
+    if (q) {
+      const hay = state.hub.columns.map((c) => String(cellValue(record, c.key))).join('  ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    for (const [key, wanted] of Object.entries(v.filters)) {
+      if (!wanted) continue;
+      if (String(cellValue(record, key)) !== wanted) return false;
+    }
+    return true;
+  }
+
+  /** The records the table is currently showing, filtered then sorted. */
+  function visibleRecords() {
+    const list = state.records.filter(matchesView);
+    if (state.view.sortKey) {
+      list.sort((a, b) => compareRecords(a, b, state.view.sortKey, state.view.sortDir));
+    }
+    return list;
+  }
+
+  /**
+   * Group the visible rows, or return one unlabelled group.
+   *
+   * Grouping is offered on EVERY column, including the ones with no dropdown. Grouping by "Lead"
+   * gives one row per group, which is useless but harmless, and refusing it would mean explaining
+   * a rule nobody asked about. Group ORDER follows the current sort where one is set, so "group by
+   * Rating, sort by Score" reads the way it sounds.
+   */
+  function groupVisible(list) {
+    const key = state.view.groupKey;
+    if (!key) return [{ label: null, records: list }];
+    const groups = new Map();
+    for (const r of list) {
+      const label = String(cellValue(r, key));
+      if (!groups.has(label)) groups.set(label, []);
+      groups.get(label).push(r);
+    }
+    const ordered = [...groups.keys()].sort((x, y) => {
+      const vocab = ORDERED_VALUES[key];
+      if (!vocab) return x.localeCompare(y, undefined, { numeric: true });
+      const rank = (v) => {
+        const i = vocab.findIndex((o) => o.toLowerCase() === v.toLowerCase());
+        return i === -1 ? vocab.length : i;
+      };
+      return rank(x) - rank(y) || x.localeCompare(y);
+    });
+    return ordered.map((label) => ({ label, records: groups.get(label) }));
+  }
+
+  /** Selection is offered wherever DELETE works — that is every records hub, but not the library. */
+  function selectable() {
+    return state.hub.kind !== 'content_library';
+  }
+
+  /** Drop ids that are no longer on screen. Called after any refetch or filter change. */
+  function pruneSelection() {
+    if (!state.selected.size) return;
+    const live = new Set(visibleRecords().map((r) => r.id));
+    for (const id of [...state.selected]) if (!live.has(id)) state.selected.delete(id);
   }
 
   // ── Table ───────────────────────────────────────────────────────────────────
 
   function rowHtml(record) {
+    // Rendered from state.selected rather than left in the DOM, because refreshRow() rewrites a
+    // row's innerHTML after a PATCH — a checkbox that only existed as DOM state would silently
+    // clear itself the moment the user approved something.
+    const pick = selectable()
+      ? `<td class="pl-4 pr-1 py-3 w-8">
+           <input type="checkbox" data-hub-select="${record.id}" ${state.selected.has(record.id) ? 'checked' : ''}
+             aria-label="Select this row"
+             class="w-4 h-4 rounded border-gray-300 text-emerald-700 focus:ring-emerald-700 cursor-pointer align-middle">
+         </td>`
+      : '';
     const cols = state.hub.columns.map((c, i) => {
       let cell;
       if (c.key === 'status') {
@@ -1235,7 +1639,7 @@
       }
       return `<td class="px-4 py-3 ${i === 0 ? 'font-semibold text-gray-900' : 'text-gray-700'}">${cell}</td>`;
     }).join('');
-    return `${cols}
+    return `${pick}${cols}
       <td class="px-4 py-3 text-right">
         <svg class="w-4 h-4 text-gray-400 inline transition-transform" data-row-chevron fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
       </td>`;
@@ -1264,6 +1668,230 @@
     el.textContent = n ? `${state.hub.label} (${n})` : state.hub.label;
   }
 
+  /**
+   * The filter / sort / group strip, plus the selection bar.
+   *
+   * ⚠️ Rendered ONCE per record set, by renderTable(), and never from paintRows(). The search box
+   * lives in here: rebuilding this markup on every keystroke would blow away the input the user is
+   * typing into and take the caret with it. Changing a control repaints the ROWS
+   * (paintRows()), and the strip updates itself in place through the handles below.
+   */
+  function controlsHtml() {
+    const hub = state.hub;
+    const v = state.view;
+    const selectCls = 'px-2 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg bg-white text-gray-700 cursor-pointer focus:outline-none focus:border-emerald-400';
+    // ⚠️ The chosen value is unioned in even when NOTHING has it any more. Filter to "hot", delete
+    // every hot lead, and its option disappears from the list — the select then falls back to
+    // showing "All" while `state.view.filters` is still filtering on it, so the control reads
+    // "All" above a table reading "0 of 22". Keeping the dead option means the strip always says
+    // what the table is actually doing, and Clear is right there.
+    const filters = filterableColumns().map((c) => {
+      const chosen = v.filters[c.key];
+      const options = distinctValues(c.key);
+      if (chosen && !options.includes(chosen)) options.push(chosen);
+      return `
+      <label class="inline-flex items-center gap-1.5">
+        <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">${esc(c.label)}</span>
+        <select data-hub-filter="${esc(c.key)}" class="${selectCls}">
+          <option value="">All</option>
+          ${options.map((val) => `<option value="${esc(val)}"${chosen === val ? ' selected' : ''}>${esc(val)}</option>`).join('')}
+        </select>
+      </label>`;
+    }).join('');
+
+    return `
+      <div class="mb-3 flex flex-wrap items-center gap-3">
+        <input type="search" data-hub-search value="${esc(v.search)}"
+          placeholder="Search ${esc(hub.label.toLowerCase())}…"
+          class="px-3 py-1.5 text-sm border border-gray-200 rounded-lg w-full sm:w-64 focus:outline-none focus:border-emerald-400">
+        ${filters}
+        <label class="inline-flex items-center gap-1.5">
+          <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Group by</span>
+          <select data-hub-group class="${selectCls}">
+            <option value="">Nothing</option>
+            ${hub.columns.map((c) => `<option value="${esc(c.key)}"${v.groupKey === c.key ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}
+          </select>
+        </label>
+        <span class="text-xs text-gray-500 ml-auto" data-hub-count></span>
+        <button type="button" data-hub-clear
+          class="text-xs font-bold text-gray-500 hover:text-gray-800 underline cursor-pointer">Clear</button>
+      </div>
+      <!-- Sorting has no control of its own: the column headings ARE the control, which is where
+           everyone reaches for it first. No backticks in this comment — it sits in a template
+           literal. -->
+      <div class="hidden mb-3 flex-wrap items-center gap-3 px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50"
+           data-hub-bulkbar>
+        <span class="text-xs font-bold text-emerald-900" data-hub-bulkcount></span>
+        <button type="button" data-hub-selectall
+          class="text-xs font-bold text-emerald-800 hover:text-emerald-900 underline cursor-pointer"></button>
+        <button type="button" data-hub-selectnone
+          class="text-xs font-bold text-gray-500 hover:text-gray-800 underline cursor-pointer">Clear selection</button>
+        <button type="button" data-hub-bulkdelete
+          class="ml-auto px-3 py-1.5 bg-white border border-red-200 text-red-700 hover:bg-red-100 text-xs font-bold rounded-lg transition cursor-pointer"></button>
+      </div>
+      <div data-hub-bulkstrip></div>`;
+  }
+
+  function wireControls(host) {
+    const repaint = () => { pruneSelection(); paintRows(); };
+
+    const search = host.querySelector('[data-hub-search]');
+    if (search) {
+      search.addEventListener('input', () => { state.view.search = search.value; repaint(); });
+    }
+    host.querySelectorAll('[data-hub-filter]').forEach((sel) => {
+      sel.addEventListener('change', () => {
+        state.view.filters[sel.getAttribute('data-hub-filter')] = sel.value;
+        repaint();
+      });
+    });
+    const group = host.querySelector('[data-hub-group]');
+    if (group) group.addEventListener('change', () => { state.view.groupKey = group.value || null; paintRows(); });
+
+    host.querySelector('[data-hub-clear]')?.addEventListener('click', () => {
+      state.view.search = '';
+      state.view.filters = {};
+      state.view.groupKey = null;
+      state.view.sortKey = null;
+      state.selected.clear();
+      renderTable();                                  // the controls themselves have to reset too
+    });
+
+    // Sort: the headings. A second click flips the direction, a third clears it and puts the table
+    // back in the order the server sent — which is the only way back to "newest work first"
+    // without knowing that that is what the default was.
+    host.querySelectorAll('[data-hub-sort]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const key = btn.getAttribute('data-hub-sort');
+        const v = state.view;
+        if (v.sortKey !== key) { v.sortKey = key; v.sortDir = 'asc'; }
+        else if (v.sortDir === 'asc') v.sortDir = 'desc';
+        else { v.sortKey = null; v.sortDir = 'asc'; }
+        renderTable();                                // the arrow lives in the heading
+      });
+    });
+
+    // ── Selection ──────────────────────────────────────────────────────────────
+    host.querySelector('[data-hub-selectall]')?.addEventListener('click', () => {
+      for (const r of visibleRecords()) state.selected.add(r.id);
+      paintRows();
+    });
+    host.querySelector('[data-hub-selectnone]')?.addEventListener('click', () => {
+      state.selected.clear();
+      paintRows();
+    });
+    host.querySelector('[data-hub-bulkdelete]')?.addEventListener('click', () => {
+      const strip = host.querySelector('[data-hub-bulkstrip]');
+      if (!strip) return;
+      strip.innerHTML = '';
+      strip.appendChild(bulkDeleteStrip([...state.selected]));
+      strip.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  }
+
+  /**
+   * Repaint the rows for the current view. Cheap enough to run on every keystroke, and deliberately
+   * does NOT touch the controls above it (see controlsHtml).
+   */
+  function paintRows() {
+    const host = document.getElementById('datahub-table-host');
+    const tbody = host && host.querySelector('[data-hub-tbody]');
+    if (!tbody) return;
+    const hub = state.hub;
+    const list = visibleRecords();
+    const span = hub.columns.length + 1 + (selectable() ? 1 : 0);
+
+    tbody.innerHTML = '';
+    if (list.length === 0) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td colspan="${span}" class="px-4 py-8 text-center text-sm text-gray-500">
+        Nothing matches these filters. <button type="button" data-hub-clear-inline class="font-bold text-emerald-700 underline cursor-pointer">Clear them</button> to see all ${state.records.length}.
+      </td>`;
+      tr.querySelector('[data-hub-clear-inline]').addEventListener('click', () => {
+        host.querySelector('[data-hub-clear]')?.click();
+      });
+      tbody.appendChild(tr);
+    }
+
+    for (const group of groupVisible(list)) {
+      if (group.label !== null) {
+        const head = document.createElement('tr');
+        head.className = 'bg-gray-50';
+        head.innerHTML = `<td colspan="${span}" class="px-4 py-2 text-xs font-bold text-gray-600 uppercase tracking-wide">
+          ${esc(group.label)} <span class="text-gray-400 normal-case">· ${group.records.length}</span>
+        </td>`;
+        tbody.appendChild(head);
+      }
+      for (const record of group.records) {
+        const tr = document.createElement('tr');
+        tr.className = 'cursor-pointer hover:bg-gray-50 transition-colors';
+        tr.setAttribute('data-record-id', record.id);
+        tr.innerHTML = rowHtml(record);
+
+        const detailTr = document.createElement('tr');
+        detailTr.className = 'hidden';
+        const td = document.createElement('td');
+        td.colSpan = span;
+        td.className = 'p-0 border-t border-gray-100';
+        detailTr.appendChild(td);
+
+        tr.addEventListener('click', (e) => {
+          // Ticking a row is not opening it. Without this the checkbox expands the record too,
+          // and selecting twelve rows leaves twelve detail panels unfurled down the page.
+          const box = e.target.closest('[data-hub-select]');
+          if (box) {
+            if (box.checked) state.selected.add(record.id); else state.selected.delete(record.id);
+            paintSelectionBar();
+            return;
+          }
+          const open = !detailTr.classList.contains('hidden');
+          if (!open && !td.hasChildNodes()) td.appendChild(detailPanel(record));
+          detailTr.classList.toggle('hidden', open);
+          const chevron = tr.querySelector('[data-row-chevron]');
+          if (chevron) chevron.classList.toggle('rotate-180', !open);
+        });
+
+        tbody.appendChild(tr);
+        tbody.appendChild(detailTr);
+      }
+    }
+
+    const count = host.querySelector('[data-hub-count]');
+    if (count) {
+      count.textContent = list.length === state.records.length
+        ? `${state.records.length} ${state.records.length === 1 ? 'record' : 'records'}`
+        : `${list.length} of ${state.records.length}`;
+    }
+    paintSelectionBar();
+    applyPendingFocus();
+  }
+
+  /**
+   * The selection bar, in place.
+   *
+   * ⚠️ "Select all" means all the rows matching the current filters, and the button SAYS the
+   * number — a "select all" that quietly took in four hundred rows behind a filter showing twelve
+   * is how someone deletes their pipeline. The count on the delete button is the same number, so
+   * the last thing read before pressing it is how many records are about to go.
+   */
+  function paintSelectionBar() {
+    const host = document.getElementById('datahub-table-host');
+    const bar = host && host.querySelector('[data-hub-bulkbar]');
+    if (!bar) return;
+    const n = state.selected.size;
+    // `hidden` loses to a class that sets display, and this bar is a flex row — pin both.
+    bar.classList.toggle('hidden', n === 0);
+    bar.style.display = n === 0 ? 'none' : 'flex';
+    if (n === 0) return;
+
+    const matching = visibleRecords().length;
+    bar.querySelector('[data-hub-bulkcount]').textContent = `${n} selected`;
+    const all = bar.querySelector('[data-hub-selectall]');
+    all.textContent = `Select all ${matching} matching`;
+    all.style.display = n >= matching ? 'none' : '';
+    bar.querySelector('[data-hub-bulkdelete]').textContent = `Delete ${n}`;
+  }
+
   function renderTable() {
     updateTabCount();
     const host = document.getElementById('datahub-table-host');
@@ -1271,6 +1899,7 @@
     const hub = state.hub;
 
     if (state.records.length === 0) {
+      state.selected.clear();
       const emptyMsg = hub.kind === 'content_library'
         ? 'Posts this assistant drafts will appear here across their whole lifecycle — from draft through scheduled to published. Click Create Post above to write one yourself or generate one with AI.'
         : `Work your assistant produces in chat lands here automatically — or import a CSV to get started. ${esc(hub.importHint)}`;
@@ -1283,13 +1912,22 @@
       return;
     }
 
+    pruneSelection();
+    const v = state.view;
+    const arrow = (key) => (v.sortKey === key ? (v.sortDir === 'asc' ? ' ↑' : ' ↓') : '');
     host.innerHTML = `
+      ${controlsHtml()}
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead>
               <tr class="text-left text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">
-                ${hub.columns.map((c) => `<th class="px-4 py-3">${esc(c.label)}</th>`).join('')}
+                ${selectable() ? '<th class="pl-4 pr-1 py-3 w-8"></th>' : ''}
+                ${hub.columns.map((c) => `<th class="px-4 py-3">
+                  <button type="button" data-hub-sort="${esc(c.key)}"
+                    title="Sort by ${esc(c.label)}"
+                    class="uppercase tracking-wider font-bold ${v.sortKey === c.key ? 'text-emerald-700' : 'text-gray-500 hover:text-gray-800'} cursor-pointer">${esc(c.label)}${arrow(c.key)}</button>
+                </th>`).join('')}
                 <th class="px-4 py-3"></th>
               </tr>
             </thead>
@@ -1298,33 +1936,8 @@
         </div>
       </div>`;
 
-    const tbody = host.querySelector('[data-hub-tbody]');
-    for (const record of state.records) {
-      const tr = document.createElement('tr');
-      tr.className = 'cursor-pointer hover:bg-gray-50 transition-colors';
-      tr.setAttribute('data-record-id', record.id);
-      tr.innerHTML = rowHtml(record);
-
-      const detailTr = document.createElement('tr');
-      detailTr.className = 'hidden';
-      const td = document.createElement('td');
-      td.colSpan = hub.columns.length + 1;
-      td.className = 'p-0 border-t border-gray-100';
-      detailTr.appendChild(td);
-
-      tr.addEventListener('click', () => {
-        const open = !detailTr.classList.contains('hidden');
-        if (!open && !td.hasChildNodes()) td.appendChild(detailPanel(record));
-        detailTr.classList.toggle('hidden', open);
-        const chevron = tr.querySelector('[data-row-chevron]');
-        if (chevron) chevron.classList.toggle('rotate-180', !open);
-      });
-
-      tbody.appendChild(tr);
-      tbody.appendChild(detailTr);
-    }
-
-    applyPendingFocus();
+    wireControls(host);
+    paintRows();
   }
 
   // Deep link (Request 6): a "post failed to publish" notification names the post, so open its
@@ -1971,6 +2584,11 @@
     state.hub = hub;
     state.assistantId = assistantId;
     state.records = [];
+    // A different assistant is a different table: its columns, its vocabularies, and any row the
+    // user had ticked all belong to the one being left. refresh() deliberately does NOT do this —
+    // returning to a tab you had filtered should find it as you left it.
+    state.view = { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null };
+    state.selected.clear();
     renderToolbar();
     const host = document.getElementById('datahub-table-host');
     if (host) host.innerHTML = '<p class="text-sm text-gray-400">Loading…</p>';

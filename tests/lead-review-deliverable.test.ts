@@ -210,7 +210,11 @@ check('the Leads tab offers Approve alongside Reject', () => {
 });
 
 check('approving from the Leads tab PATCHes only, and never calls the sender', () => {
-    const start = landmark(HUB, "label: 'Approve'");
+    // ⚠️ Anchored on the PUSH, not on the bare label — nextStepGuidance() also carries
+    // "label: 'Approve'" (it offers Approve as the next-step button), and a slice starting there
+    // swallows the whole action bar, including the "Look again" call to lead-generation. The
+    // assertion then fails while the handler it names is perfectly correct.
+    const start = landmark(HUB, "buttons.push({ label: 'Approve'");
     const block = HUB.slice(start, landmark(HUB, "label: 'Reject'", start));
     assert.ok(/approvalStatus: 'approved'/.test(block), 'the PATCH no longer sets approved');
     assert.ok(!/lead-generation/.test(block) && !/send_outreach/.test(block),

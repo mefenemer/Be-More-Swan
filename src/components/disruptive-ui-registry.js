@@ -96,9 +96,59 @@
    * on screen to be read before any of them. Two places to push the same draft into Gmail is how a
    * user ends up with two drafts and no idea which one they edited.
    *
-   * The address and its provenance still render: those are facts about the lead (who was found,
-   * where it came from), not actions on the message.
+   * The address still renders: that is a fact about the lead (who was found), not an action on
+   * the message.
    */
+  /**
+   * `opts.nextStep` — who performs the suggested next step, and the one button that starts it.
+   *
+   * ── Why the card cannot work this out for itself ────────────────────────────
+   * `suggestedNextStep` is a free-text sentence from the model — "Email the head of ops about
+   * their Q4 rollout", "Call them", "Check whether they still run in-house". The card rendered it
+   * as an instruction with no subject, so nobody could tell whether it described something the
+   * assistant was about to do or something waiting on the user. Both readings were live: an
+   * approved, deliverable lead really does get its outreach sent and chased for you, and every
+   * other step in that list is yours alone.
+   *
+   * Deciding that from the SENTENCE would mean regex-matching prose from an LLM, which is guessing
+   * dressed as logic. It is decided from the lead's STATE instead — approval gate, address,
+   * outcome — by the surface that holds the record (assistant-data-hub.js `nextStepGuidance`), and
+   * this renderer only draws the verdict it is handed:
+   *
+   *   { owner: 'you' | 'assistant' | 'closed',
+   *     note: '<one sentence naming what the platform will and will not do>',
+   *     action: { key: '<host-defined>', label: '<button text>' } | null }
+   *
+   * ⚠️ The button carries `data-lead-next-step="<key>"` and NOTHING ELSE — no handler, no fetch.
+   * The host that supplied the guidance is the host that wires it, so a surface which cannot
+   * actually perform the action cannot accidentally render a button that pretends it can. Omit
+   * `opts.nextStep` (chat, the Review Queue) and the step renders exactly as it always did.
+   */
+  const NEXT_STEP_OWNER = {
+    you: { label: 'Yours to do', cls: 'bg-white text-emerald-800 border-emerald-300' },
+    // border-emerald-200, not -700: only the classes already compiled into style.css may be used
+    // here, and a Tailwind rebuild to gain one border colour churns unrelated selectors app-wide.
+    assistant: { label: 'Your assistant does this', cls: 'bg-emerald-700 text-white border-emerald-200' },
+    closed: { label: 'Nothing is happening', cls: 'bg-gray-100 text-gray-600 border-gray-300' },
+  };
+
+  function nextStepFooter(guidance, esc) {
+    const owner = guidance && NEXT_STEP_OWNER[guidance.owner];
+    if (!owner) return '';
+    const action = guidance.action && guidance.action.key && guidance.action.label ? guidance.action : null;
+    // `data-next-step-footer` is the handle the host re-renders through. Approving a lead changes
+    // who owns its next step — the sentence "approving clears this lead for outreach" is wrong the
+    // instant it has been approved — and the panel is not rebuilt around it, so the host swaps
+    // this node in place (assistant-data-hub.js syncNextStepFooter).
+    return `
+      <div data-next-step-footer class="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-emerald-200">
+        <span class="text-xs font-bold px-2 py-0.5 rounded-full border ${owner.cls}">${esc(owner.label)}</span>
+        ${guidance.note ? `<span class="text-xs text-emerald-800 flex-1 min-w-0">${esc(guidance.note)}</span>` : ''}
+        ${action ? `<button type="button" data-lead-next-step="${esc(action.key)}"
+          class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed ml-auto shrink-0">${esc(action.label)}</button>` : ''}
+      </div>`;
+  }
+
   function renderLeadScoringCard(ui, esc, opts) {
     const sendsOnApproval = !opts || opts.sendsOnApproval !== false;
     const outreachActions = !opts || opts.outreachActions !== false;
@@ -114,12 +164,21 @@
 
     // Enriched contact (process-discovery-jobs.ts `enriching` stage). Approving a
     // discovered lead AUTO-SENDS to this address, so the reviewer must be able to see
-    // it — and see that it was scraped, not supplied. 'personal' = a named individual's
-    // inbox rather than a generic role inbox: weaker footing for cold B2B outreach, so
-    // it's called out rather than shown identically to info@/enquiries@.
+    // it. 'personal' = a named individual's inbox rather than a generic role inbox:
+    // weaker footing for cold B2B outreach, so it's called out rather than shown
+    // identically to info@/enquiries@.
+    //
+    // ⚠️ WHERE the address came from is deliberately NOT rendered here any more. The line read
+    // "Found on <emailFoundOn> — published by the company, not verified", and on a paid-provider
+    // hit `emailFoundOn` is the provider's name, so the card announced "Found on hunter" to a user
+    // who has never heard of Hunter and cannot act on the fact. Naming our data supplier is
+    // plumbing; the decision it was supposed to inform ("is this a named individual?") is made by
+    // the personal-inbox warning below, which is kept. The provenance itself is NOT discarded —
+    // emailKind / emailSource still ride on the record and still drive
+    // needsPersonalInboxConfirmation at the send seam (src/config/lead-email-kind.ts), which is
+    // the gate that actually has to know.
     const contactEmail = typeof ui.contactEmail === 'string' && ui.contactEmail.trim() ? ui.contactEmail.trim() : null;
     const isPersonalInbox = contactEmail && ui.emailKind === 'personal';
-    const foundOn = typeof ui.emailFoundOn === 'string' ? ui.emailFoundOn : '';
 
     const el = document.createElement('div');
     el.className = 'bg-white border border-gray-200 rounded-xl shadow-sm p-5 max-w-md';
@@ -154,15 +213,13 @@
       ${ui.suggestedNextStep ? `
         <div class="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-900">
           <span class="font-bold">Suggested next step:</span> ${esc(ui.suggestedNextStep)}
+          ${nextStepFooter(opts && opts.nextStep, esc)}
         </div>` : ''}
 
       ${contactEmail ? `
         <div class="mt-4 pt-3 border-t border-gray-100">
           <p class="text-xs font-bold text-gray-500 tracking-wider uppercase mb-1.5">${sendsOnApproval ? 'Outreach will be sent to' : 'Outreach is addressed to'}</p>
           <p class="text-sm font-semibold text-gray-900 break-all">${esc(contactEmail)}</p>
-          <p class="text-xs text-gray-500 mt-1">
-            Found on ${foundOn ? esc(foundOn) : 'this company’s website'} — published by the company, not verified.
-          </p>
           ${isPersonalInbox ? `
             <div class="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
               <p class="text-xs font-bold text-amber-900">Personal inbox — check before approving</p>
@@ -1448,5 +1505,10 @@
   // Alias for callers/routes that use the PascalCase component name as the type key.
   register('UpgradeRequiredCard', renderUpgradeRequiredCard);
 
-  window.DisruptiveUIRegistry = { register, has, render, escapeHtml };
+  // `nextStepFooterHtml` is exported so the surface that decided the guidance can re-render it
+  // when the lead's state moves under it, without a second copy of the markup living there.
+  window.DisruptiveUIRegistry = {
+    register, has, render, escapeHtml,
+    nextStepFooterHtml: (guidance) => nextStepFooter(guidance, escapeHtml),
+  };
 })();
