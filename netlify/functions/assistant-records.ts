@@ -10,8 +10,10 @@
 //  POST   { assistantId, recordType, records: [{ title, status?, data }, ...], source? }
 //         → bulk insert (CSV import) or single insert; upserts on (assistant, type, title)
 //  PATCH  { id, status?, data? }                            → update one record's lifecycle/state
+//  PATCH  { ids: [...], approvalStatus: 'rejected', reason? } → reject up to MAX_BULK of them;
+//         REJECTION ONLY — see the bulk branch for why nothing else may be set in bulk
 //  DELETE { id, reason? } | { ids: [...], reason? }         → remove one record, or up to
-//         MAX_BULK_DELETE of them; `reason` banks the targeting evidence (leads only)
+//         MAX_BULK of them; `reason` banks the targeting evidence (leads only)
 //
 // `data` is the uiElement wire shape (disruptive-ui-registry.js) so the hub tab and the
 // chat transcript render records identically. Auth: aura_session + requireTenant; every
@@ -28,6 +30,7 @@ import { getBlueprintVersion } from '../../src/utils/blueprint-version';
 import { getIcpSnapshot } from '../../src/utils/icp-snapshot';
 import { enqueueLeadHandoff } from '../../src/utils/lead-handoff';
 import { recordLeadRejection } from '../../src/utils/lead-reject-feedback';
+import { LEAD_REJECT_REASONS, isLeadRejectReason } from '../../src/config/lead-reject-reasons';
 import { LEAD_RECIPIENT_SQL_PATHS, LEAD_DRAFT_BODY_SQL_PATH } from '../../src/config/lead-recipient';
 import { crmDescription, crmHeaders, crmRow, isCrmTarget, splitName, websiteUrl } from '../../src/config/crm-export';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -38,11 +41,15 @@ const SOURCES = new Set(['chat', 'csv_import', 'integration']);
 const MAX_BULK_RECORDS = 500;
 // Serialised size cap per record's data payload (client-supplied, treat as untrusted).
 const MAX_DATA_CHARS = 20_000;
-// Bulk-delete ceiling per request. Lower than the import ceiling on purpose: each id costs a
-// lookup, a discovery-row update and a delete — five round trips at 500 ids would sit close to the
-// function timeout, and a delete that times out half-done is the worst thing this endpoint can do.
-// The client chunks; going over is a 400, never a silent truncation.
-const MAX_BULK_DELETE = 100;
+// Bulk-write ceiling per request, shared by DELETE and by bulk REJECT. Lower than the import
+// ceiling on purpose: each id costs a lookup, a ledger write and an update — five round trips at
+// 500 ids would sit close to the function timeout, and a bulk write that times out half-done is the
+// worst thing this endpoint can do. The client chunks; going over is a 400, never a silent
+// truncation.
+//
+// ⚠️ ONE cap for both, deliberately. Two different limits on two ways of clearing the same
+// selection would be arbitrary to the user who just ticked 120 rows.
+const MAX_BULK = 100;
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -545,8 +552,114 @@ export default withLambda(async (event) => {
         }
 
         if (event.httpMethod === 'PATCH') {
-            let body: { id?: number; title?: unknown; status?: unknown; data?: unknown; approvalStatus?: unknown; scheduledFor?: unknown };
+            let body: { id?: number; ids?: unknown; title?: unknown; status?: unknown; data?: unknown; approvalStatus?: unknown; scheduledFor?: unknown; reason?: unknown };
             try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
+
+            // ── Bulk REJECT ─────────────────────────────────────────────────────────────
+            //
+            // Why this exists: a discovery run files EVERY scored company as pending_approval when
+            // the campaign requires review — hot, warm and cold alike (process-discovery-jobs.ts
+            // promoteOne). But the scorer writes no outreach draft for a cold lead and enrichment
+            // only scrapes hot/warm, so a cold lead enters a queue it can never leave. On one
+            // staging assistant that left 151 of 165 pending rows with no path forward.
+            //
+            // ⚠️ REJECTION ONLY, and the restriction is the point. Bulk title/status/data edits have
+            // no caller and would be a footgun over a hundred rows; approval in bulk would be worse
+            // still, because approving a lead SENDS its email. The only bulk transition offered is
+            // the one that is reversible and sends nothing.
+            //
+            // ⚠️ Reject, not delete. promoteOne's update path does not touch approval_status, so a
+            // REJECTED lead that a later run re-finds stays rejected — whereas a DELETED one comes
+            // back as pending_approval on the next run and the user clears it again forever.
+            //
+            // Like DELETE, `ids` is a loop over the single-record path rather than a second
+            // implementation: the ownership check, the ledger event and the evidence write are the
+            // whole value of this handler, and a bulk path that skipped any of them would silently
+            // destroy the targeting signal the single path exists to keep.
+            if (Array.isArray(body.ids)) {
+                const idList = [...new Set((body.ids as unknown[]).map(Number).filter((n) => Number.isInteger(n)))];
+                if (!idList.length) return json(400, { error: 'ids must contain at least one record id.' });
+                if (idList.length > MAX_BULK) {
+                    return json(400, { error: `Reject up to ${MAX_BULK} records at a time.` });
+                }
+                if (String(body.approvalStatus) !== 'rejected') {
+                    return json(400, { error: 'Only approvalStatus "rejected" can be set in bulk.' });
+                }
+                // Refuse rather than ignore. Silently dropping fields the caller sent is how a
+                // client ends up believing a bulk edit happened.
+                for (const field of ['title', 'status', 'data', 'scheduledFor'] as const) {
+                    if (body[field] !== undefined) {
+                        return json(400, { error: `${field} cannot be set in bulk — reject only.` });
+                    }
+                }
+                // Validated up front so a bad vocabulary value fails the whole request instead of
+                // rejecting a hundred leads and then declining to say why for each of them.
+                const rawReason = body.reason === undefined || body.reason === null ? '' : String(body.reason).trim().slice(0, 40);
+                if (rawReason && !isLeadRejectReason(rawReason)) {
+                    return json(400, { error: `reason must be one of: ${LEAD_REJECT_REASONS.join(', ')}.` });
+                }
+
+                let rejected = 0;
+                let notFound = 0;
+                let feedbackCount = 0;
+                for (const rid of idList) {
+                    const [prev] = await db.select({
+                        id: assistantRecords.id,
+                        recordType: assistantRecords.recordType,
+                        aiAssistantId: assistantRecords.aiAssistantId,
+                        status: assistantRecords.status,
+                        approvalStatus: assistantRecords.approvalStatus,
+                    }).from(assistantRecords)
+                        .where(and(eq(assistantRecords.id, rid), eq(assistantRecords.organisationId, orgId)))
+                        .limit(1);
+                    if (!prev) { notFound++; continue; }
+
+                    // Same guard as the single path: only a genuine transition writes a ledger row,
+                    // so re-rejecting an already-decided lead cannot inflate the rejection count the
+                    // Strategy Agent clusters on.
+                    const wasDecided = LIVE_APPROVAL.has(prev.approvalStatus ?? '') || prev.approvalStatus === 'rejected';
+                    if (prev.recordType === 'lead' && !wasDecided) {
+                        const [link] = await db.select({ id: discoveredLeads.id })
+                            .from(discoveredLeads)
+                            .where(eq(discoveredLeads.assistantRecordId, prev.id))
+                            .limit(1);
+                        await recordEvent(db, 'lead_rejected', {
+                            organisationId: orgId,
+                            aiAssistantId: prev.aiAssistantId,
+                            discoveredLeadId: link?.id ?? null,
+                            assistantRecordId: prev.id,
+                            actor: 'user',
+                            actorUserId: userId,
+                            blueprintVersion: await getBlueprintVersion(db, prev.aiAssistantId),
+                            icpSnapshot: await getIcpSnapshot(db, {
+                                discoveredLeadId: link?.id ?? null,
+                                aiAssistantId: prev.aiAssistantId,
+                            }),
+                            payload: { from: prev.approvalStatus, to: 'rejected', rating: prev.status },
+                        });
+                    }
+
+                    await db.update(assistantRecords)
+                        .set({ approvalStatus: 'rejected', scheduledFor: null, updatedAt: new Date() })
+                        .where(and(eq(assistantRecords.id, rid), eq(assistantRecords.organisationId, orgId)));
+                    rejected++;
+
+                    // Evidence, leads only — assistant_records is shared by six roles and a rejected
+                    // invoice says nothing about who a search should look for. Unlike DELETE this can
+                    // run AFTER the write: the record survives, so provenance is still resolvable.
+                    if (rawReason && prev.recordType === 'lead') {
+                        const result = await recordLeadRejection(db, {
+                            organisationId: orgId,
+                            aiAssistantId: prev.aiAssistantId,
+                            assistantRecordId: prev.id,
+                            reason: rawReason,
+                        });
+                        if (result.id !== null) feedbackCount++;
+                    }
+                }
+                return json(200, { rejected, notFound, feedbackCount });
+            }
+
             const id = Number(body.id);
             if (!Number.isInteger(id)) return json(400, { error: 'id is required.' });
 
@@ -691,8 +804,8 @@ export default withLambda(async (event) => {
                 ? [...new Set((body.ids as unknown[]).map(Number).filter((n) => Number.isInteger(n)))]
                 : [];
             const bulk = Array.isArray(body.ids);
-            if (bulk && idList.length > MAX_BULK_DELETE) {
-                return json(400, { error: `Delete up to ${MAX_BULK_DELETE} records at a time.` });
+            if (bulk && idList.length > MAX_BULK) {
+                return json(400, { error: `Delete up to ${MAX_BULK} records at a time.` });
             }
             const ids = bulk ? idList : (Number.isInteger(Number(body.id)) ? [Number(body.id)] : []);
             if (!ids.length) return json(400, { error: 'id is required.' });

@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-bulk-reject",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/19f19f4c-9514-4504-b3fd-09550a294147/scratchpad/rejectharness/server.mjs"
+      ],
+      "port": 4325,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-rating-chips",
       "runtimeExecutable": "node",
       "runtimeArgs": [

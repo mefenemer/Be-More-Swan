@@ -724,6 +724,116 @@
     return { deleted, notFound };
   }
 
+  /**
+   * Reject a set of leads in one pass, banking one reason against every one of them.
+   *
+   * ⚠️ Reject, NOT delete, is the right default for clearing a queue. `promoteOne` does not touch
+   * `approval_status` when a later run re-finds a company, so a rejected lead stays rejected —
+   * whereas a deleted one is re-created as `pending_approval` and has to be cleared again, forever.
+   * The record also survives, so its rejection evidence stays attributable.
+   *
+   * Chunked to the server's MAX_BULK for the same reason deleteRecords is: going over is a 400
+   * there rather than a silent truncation, and the chunks run sequentially because each id already
+   * costs several round trips.
+   */
+  async function rejectRecords(ids, reason) {
+    const CHUNK = 100;
+    let rejected = 0;
+    let notFound = 0;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const slice = ids.slice(i, i + CHUNK);
+      const res = await fetch(API, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ ids: slice, approvalStatus: 'rejected', ...(reason ? { reason } : {}) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // Report the partial truthfully — earlier chunks really are rejected, and "it failed"
+        // would have the user press it again on a list that has already changed underneath them.
+        for (const id of ids.slice(0, i)) {
+          const r = state.records.find((x) => x.id === id);
+          if (r) r.approvalStatus = 'rejected';
+        }
+        renderTable();
+        throw new Error(rejected
+          ? `${rejected} rejected, then it stopped: ${data.error || 'the rest could not be rejected.'}`
+          : (data.error || 'Could not reject those leads.'));
+      }
+      rejected += Number(data.rejected) || 0;
+      notFound += Number(data.notFound) || 0;
+    }
+    // Patched in place rather than refetched: the rows stay in the table (that is the difference
+    // from delete), so only their Approval chip changes.
+    for (const id of ids) {
+      const r = state.records.find((x) => x.id === id);
+      if (r) r.approvalStatus = 'rejected';
+      state.selected.delete(id);
+    }
+    renderTable();
+    return { rejected, notFound };
+  }
+
+  /**
+   * The confirmation for a bulk reject: what it will do, and the one reason for all of them.
+   *
+   * The reason is offered but never forced. A user clearing 150 unreachable leads is making one
+   * judgement about all of them, and that judgement is exactly what the targeting feedback wants —
+   * but blocking the clear-out on a vocabulary choice would just push them to Delete, which throws
+   * the evidence away entirely.
+   */
+  function bulkRejectStrip(ids) {
+    const RC = window.RevenueConstants;
+    const n = ids.length;
+    const noun = n === 1 ? 'lead' : 'leads';
+    const strip = document.createElement('div');
+    strip.className = 'mb-3 rounded-lg border border-gray-200 bg-white px-3 py-2';
+    const reasons = (RC && Array.isArray(RC.leadRejectReasons)) ? RC.leadRejectReasons : [];
+    const chip = 'px-2 py-1 text-[11px] font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 transition cursor-pointer';
+
+    strip.innerHTML = `
+      <p class="text-xs font-bold text-gray-800">Reject ${n} ${esc(noun)}?</p>
+      <p class="text-[11px] text-gray-600 mb-2">They stay in this tab, marked Rejected, and nothing is emailed. If a later search finds one of them again it stays rejected rather than coming back for approval.</p>
+      ${reasons.length ? `<div class="flex flex-wrap gap-1.5">
+        ${reasons.map((r) => `<button type="button" class="${chip}" data-hub-bulkreject-reason="${esc(r)}">${esc(RC.leadRejectReasonLabel(r))}</button>`).join('')}
+      </div>
+      <p class="text-[11px] text-gray-500 mt-1.5">Pick one reason for all ${n}. Clearing leads nobody could contact? <strong>No usable contact</strong> — it records the problem without telling the search to look somewhere else.</p>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-2">
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-gray-300 transition cursor-pointer" data-hub-bulkreject-plain>Reject without a reason</button>
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-500 hover:text-gray-700 transition cursor-pointer" data-hub-bulkreject-cancel>Cancel</button>
+      </div>
+      <p class="hidden text-[11px] font-semibold mt-1.5" data-hub-bulkreject-status></p>`;
+
+    const status = strip.querySelector('[data-hub-bulkreject-status]');
+    strip.querySelector('[data-hub-bulkreject-cancel]').addEventListener('click', () => strip.remove());
+
+    const go = async (reason) => {
+      strip.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+      status.classList.remove('hidden');
+      status.className = 'text-[11px] font-semibold text-gray-500 mt-1.5';
+      status.textContent = `Rejecting ${n} ${noun}…`;
+      try {
+        const res = await rejectRecords(ids, reason);
+        // renderTable() has already replaced this strip's parent; the toast is what survives.
+        window.showToast?.(`Rejected ${res.rejected} ${res.rejected === 1 ? 'lead' : 'leads'}.`
+          + (res.notFound ? ` ${res.notFound} had already gone.` : '')
+          + (reason ? ' The reason was recorded against each one.' : ''));
+      } catch (err) {
+        strip.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+        status.className = 'text-[11px] font-semibold text-red-600 mt-1.5';
+        status.textContent = err.message || 'Could not reject those leads.';
+      }
+    };
+
+    strip.addEventListener('click', (e) => {
+      const chosen = e.target.closest('[data-hub-bulkreject-reason]');
+      if (chosen) { go(chosen.getAttribute('data-hub-bulkreject-reason')); return; }
+      if (e.target.closest('[data-hub-bulkreject-plain]')) go(undefined);
+    });
+    return strip;
+  }
+
   /** The confirmation for a bulk delete: what is about to go, and the chance to say why. */
   function bulkDeleteStrip(ids) {
     const RC = window.RevenueConstants;
@@ -1669,8 +1779,20 @@
           class="text-xs font-bold text-emerald-800 hover:text-emerald-900 underline cursor-pointer"></button>
         <button type="button" data-hub-selectnone
           class="text-xs font-bold text-gray-500 hover:text-gray-800 underline cursor-pointer">Clear selection</button>
-        <button type="button" data-hub-bulkdelete
-          class="ml-auto px-3 py-1.5 bg-white border border-red-200 text-red-700 hover:bg-red-100 text-xs font-bold rounded-lg transition cursor-pointer"></button>
+        <!-- Reject sits BEFORE Delete and carries the primary-ish styling, because for a lead it is
+             almost always the right one: it keeps the record (so a later run that re-finds the
+             company does not queue it again) and it banks the targeting evidence. Delete throws
+             both away. Leads only — the other five record types have no rejection vocabulary and no
+             discovery to teach. -->
+        <!-- ml-auto rides the WRAPPER, not the first button: Reject is hidden for non-lead record
+             types, and hanging it off that button would drop Delete back against the Clear link the
+             moment it vanished. -->
+        <div class="ml-auto flex items-center gap-2">
+          <button type="button" data-hub-bulkreject
+            class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition cursor-pointer hidden"></button>
+          <button type="button" data-hub-bulkdelete
+            class="px-3 py-1.5 bg-white border border-red-200 text-red-700 hover:bg-red-100 text-xs font-bold rounded-lg transition cursor-pointer"></button>
+        </div>
       </div>
       <div data-hub-bulkstrip></div>`;
   }
@@ -1744,6 +1866,16 @@
     host.querySelector('[data-hub-selectnone]')?.addEventListener('click', () => {
       state.selected.clear();
       paintRows();
+    });
+    // Both bulk actions render into the SAME strip host, and each clears it first: two open
+    // confirmations stacked above one selection is how a user presses Delete believing they are
+    // confirming the Reject they just asked for.
+    host.querySelector('[data-hub-bulkreject]')?.addEventListener('click', () => {
+      const strip = host.querySelector('[data-hub-bulkstrip]');
+      if (!strip) return;
+      strip.innerHTML = '';
+      strip.appendChild(bulkRejectStrip([...state.selected]));
+      strip.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
     host.querySelector('[data-hub-bulkdelete]')?.addEventListener('click', () => {
       const strip = host.querySelector('[data-hub-bulkstrip]');
@@ -1895,6 +2027,13 @@
     const all = bar.querySelector('[data-hub-selectall]');
     all.textContent = `Select all ${matching} matching`;
     all.style.display = n >= matching ? 'none' : '';
+    // Reject is leads-only: the other five record types have no rejection vocabulary and no
+    // discovery to teach, so for them the bar is Delete alone exactly as it was.
+    const reject = bar.querySelector('[data-hub-bulkreject]');
+    const canReject = state.hub.recordType === 'lead';
+    reject.classList.toggle('hidden', !canReject);
+    reject.style.display = canReject ? '' : 'none';
+    reject.textContent = `Reject ${n}`;
     bar.querySelector('[data-hub-bulkdelete]').textContent = `Delete ${n}`;
   }
 

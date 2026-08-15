@@ -117,7 +117,7 @@ const EMIT_SITES: Record<string, number> = {
     'src/utils/outreach-sequences.ts': 3,
     'netlify/functions/process-sequence-sends.ts': 1,
     'netlify/functions/inbound-email.ts': 2,
-    'netlify/functions/assistant-records.ts': 1,
+    'netlify/functions/assistant-records.ts': 2,      // single approval gate / bulk reject
     'netlify/functions/signal-inbox.ts': 1,
     'netlify/functions/lead-generation.ts': 4,      // score / dnc-override / outreach / set_outcome
     'netlify/functions/process-discovery-jobs.ts': 3,

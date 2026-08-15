@@ -195,7 +195,8 @@ check('the reason is asked once, for the whole selection, BEFORE anything is del
 check('the client chunks to the server cap rather than being truncated by it', () => {
     const fn = HUB.slice(landmark(HUB, 'async function deleteRecords'), landmark(HUB, 'function bulkDeleteStrip'));
     const clientChunk = Number((/const CHUNK = (\d+)/.exec(fn) || [])[1]);
-    const serverCap = Number((/const MAX_BULK_DELETE = (\d+)/.exec(RECORDS) || [])[1]);
+    // ⚠️ `= ` in the pattern, so this cannot drift onto MAX_BULK_RECORDS (the 500-row import cap).
+    const serverCap = Number((/const MAX_BULK = (\d+)/.exec(RECORDS) || [])[1]);
     assert.ok(clientChunk > 0 && serverCap > 0, 'the chunk size or the server cap has gone');
     assert.ok(clientChunk <= serverCap,
         `the client sends ${clientChunk} at a time but the server accepts ${serverCap} — every bulk `
@@ -234,11 +235,11 @@ check('ids are a loop over the one-record body, not a second implementation', ()
 });
 
 check('going over the cap is refused, never silently truncated', () => {
-    assert.ok(/idList\.length > MAX_BULK_DELETE/.test(DELETE_BLOCK), 'the cap is not enforced');
-    assert.ok(/return json\(400, \{ error: `Delete up to \$\{MAX_BULK_DELETE\}/.test(DELETE_BLOCK),
+    assert.ok(/idList\.length > MAX_BULK/.test(DELETE_BLOCK), 'the cap is not enforced');
+    assert.ok(/return json\(400, \{ error: `Delete up to \$\{MAX_BULK\}/.test(DELETE_BLOCK),
         'over the cap must 400. Deleting 100 of the 500 someone selected and reporting success is '
         + 'the worst answer available.');
-    assert.ok(!/\.slice\(0, MAX_BULK_DELETE\)/.test(DELETE_BLOCK), 'the id list is being truncated to the cap');
+    assert.ok(!/\.slice\(0, MAX_BULK\)/.test(DELETE_BLOCK), 'the id list is being truncated to the cap');
 });
 
 check('a missing record still 404s on the single path, and is only counted on the bulk one', () => {
