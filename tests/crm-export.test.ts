@@ -214,11 +214,29 @@ check('the download is named for its target', () => {
 console.log('\n──── the offer is honest about the empty name columns ────');
 
 check('the UI warns before the download, not after the failed import', () => {
+    // The offer moved out of a permanent paragraph under the toolbar and into the Export modal
+    // (openExportModal), beside the buttons it describes — but the warning has to travel with it.
     const hub = read('src/components/assistant-data-hub.js');
-    const block = hub.slice(landmark(hub, 'data-hub-crm="hubspot"') - 400, landmark(hub, 'data-hub-crm="salesforce"') + 600);
+    const start = landmark(hub, 'function openExportModal(');
+    const block = hub.slice(start, landmark(hub, 'data-export-plain', start) + 2000);
+    assert.ok(/data-export-crm="hubspot"/.test(block) && /data-export-crm="salesforce"/.test(block),
+        'both CRM shapes must be offered from the export modal');
     assert.ok(/Salesforce needs a last name/.test(block),
         'the export must say why rows with no named contact will not import as Leads');
     assert.ok(/hub\.recordType === 'lead'/.test(hub), 'the CRM offer must not appear on non-lead hubs');
+});
+
+check('a non-lead hub still downloads on one click', () => {
+    // The modal exists because a lead export has three shapes and a live alternative. Every other
+    // hub has exactly one CSV, and putting a dialog in front of it would be a question with one
+    // answer — so the button must still go straight to the file there.
+    const hub = read('src/components/assistant-data-hub.js');
+    const handler = hub.slice(landmark(hub, "host.querySelector('[data-hub-export]')"));
+    const body = handler.slice(0, landmark(handler, '});'));
+    assert.ok(/recordType === 'lead'/.test(body) && /openExportModal\(\)/.test(body),
+        'lead hubs open the modal');
+    assert.ok(/downloadCsv\(null\)/.test(body),
+        'every other hub must download the generic CSV directly, with no modal in the way');
 });
 
 check('an unknown target is rejected', () => {

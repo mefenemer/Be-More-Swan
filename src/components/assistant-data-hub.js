@@ -1384,67 +1384,270 @@
           </button>
         </div>
       </div>
+      <!-- Two paragraphs of instructions used to sit here, under the toolbar: how to shape a CSV for
+           import, and how to get leads into a CRM. Both were permanent page furniture explaining
+           buttons most users press rarely, and the CRM one carried its own controls inline. Each has
+           moved inside the modal for the button it describes (openImportModal / openExportModal), so
+           the instructions arrive when the user is actually doing the thing. Only the status line
+           stays, because it reports on work in progress. No backticks in this comment — it is inside
+           a template literal. -->
       <p class="hidden -mt-3 mb-5 text-xs font-semibold" data-hub-status></p>
-      <p class="-mt-3 mb-5 text-xs text-gray-400">${esc(hub.importHint)} Suggested columns: ${hub.importColumns.map((c) => `<span class="font-semibold text-gray-500">${esc(c)}</span>`).join(', ')}.</p>
-      ${hub.recordType === 'lead' ? `
-      <!-- Phase 2 item 12. Offered as a sentence rather than a third button: this answers a question
-           ("can I get these into my CRM?") rather than naming an action, and the toolbar row above
-           already wraps awkwardly on a phone with three buttons in it. No backticks in this comment
-           — it is inside a template literal. -->
-      <p class="-mt-3 mb-5 text-xs text-gray-400">
-        Already using a CRM? Download this list shaped for
-        <button type="button" data-hub-crm="hubspot" class="font-bold text-emerald-700 hover:text-emerald-800 underline cursor-pointer">HubSpot</button>
-        or
-        <button type="button" data-hub-crm="salesforce" class="font-bold text-emerald-700 hover:text-emerald-800 underline cursor-pointer">Salesforce</button>
-        — the column headers match their import templates.
-        Leads found by a search usually have a company inbox rather than a named person, so the name
-        columns are often empty; Salesforce needs a last name to import a row as a Lead.
-      </p>` : ''}
     `;
 
     const fileInput = host.querySelector('[data-hub-file]');
     const importBtn = host.querySelector('[data-hub-import]');
     const status = host.querySelector('[data-hub-status]');
 
-    importBtn.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', async () => {
-      const file = fileInput.files && fileInput.files[0];
-      fileInput.value = '';
-      if (!file) return;
-      importBtn.disabled = true;
-      status.className = 'block -mt-3 mb-5 text-xs font-semibold text-gray-500';
-      status.textContent = 'Reading the file…';
-      try {
-        const result = await importCsv(file, status);
-        await fetchRecords();
-        renderTable();
-        status.textContent = `Imported ${result.inserted} new record${result.inserted === 1 ? '' : 's'}${result.updated ? ` and refreshed ${result.updated} existing` : ''}.`;
-        status.className = 'block -mt-3 mb-5 text-xs font-semibold text-emerald-700';
-      } catch (err) {
-        status.textContent = err.message || 'Import failed.';
-        status.className = 'block -mt-3 mb-5 text-xs font-semibold text-red-600';
-      } finally {
-        importBtn.disabled = false;
-      }
-    });
+    // The file input still lives in the toolbar (one hidden input, reused) but is now driven from
+    // inside the modal — the picker used to open on the very first click, before the user had been
+    // told what shape the file should be, which is precisely backwards for the one action here that
+    // cannot be undone by pressing something else.
+    importBtn.addEventListener('click', () => openImportModal(fileInput, importBtn, status));
 
     host.querySelector('[data-hub-export]').addEventListener('click', () => {
-      window.location.href = `${API}?assistantId=${state.assistantId}&recordType=${encodeURIComponent(hub.recordType)}&format=csv`;
-    });
-
-    // Same rows, CRM-shaped headers (Phase 2 item 12). `crm` is validated server-side against the
-    // known targets, so an unrecognised value falls through to the generic export rather than
-    // producing a file with no columns.
-    host.querySelectorAll('[data-hub-crm]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const target = btn.getAttribute('data-hub-crm');
-        window.location.href = `${API}?assistantId=${state.assistantId}&recordType=${encodeURIComponent(hub.recordType)}`
-          + `&format=csv&crm=${encodeURIComponent(target)}`;
-      });
+      // Leads get the modal: their export has three shapes and a live alternative (push straight to
+      // a CRM). Every other hub has exactly one CSV, and a modal in front of a single download is
+      // a click that asks a question with one answer.
+      if (hub.recordType === 'lead') { openExportModal(); return; }
+      downloadCsv(null);
     });
 
     const addBtn = host.querySelector('[data-hub-add]');
     if (addBtn) addBtn.addEventListener('click', () => openAddLeadModal(status));
+  }
+
+  // ── Import / Export modals ──────────────────────────────────────────────────
+  //
+  // Both exist because their instructions do. The toolbar carried two permanent paragraphs of grey
+  // text — how to shape a CSV, and how to get leads into a CRM — explaining buttons that are pressed
+  // rarely, to every user, on every visit. Moving each into the modal for the button it describes
+  // puts the explanation where the decision is made, and lets the CRM half carry the thing it was
+  // really asking for: a live connection, not a download.
+
+  /** One CSV download. `crm` shapes the headers for that importer; null is the generic export. */
+  function downloadCsv(crm) {
+    // Same-origin function URL, so the server's Content-Disposition drives the save. Assigning
+    // location rather than clicking a `download` link on purpose — see the cross-origin note in the
+    // project conventions.
+    window.location.href = `${API}?assistantId=${state.assistantId}`
+      + `&recordType=${encodeURIComponent(state.hub.recordType)}&format=csv`
+      + (crm ? `&crm=${encodeURIComponent(crm)}` : '');
+  }
+
+  /** A standalone modal, matching openAddLeadModal's shell. Returns the parts callers wire up. */
+  function hubModal({ title, subtitle, bodyHtml, maxWidth }) {
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 bg-gray-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm';
+    overlay.innerHTML = `
+      <div class="bg-white rounded-2xl shadow-xl w-full ${maxWidth || 'max-w-lg'} max-h-[90vh] flex flex-col">
+        <div class="flex items-start justify-between gap-4 p-5 border-b border-gray-100 shrink-0">
+          <div class="min-w-0">
+            <h3 class="text-lg font-bold text-gray-900">${esc(title)}</h3>
+            ${subtitle ? `<p class="text-sm text-gray-500 mt-0.5">${esc(subtitle)}</p>` : ''}
+          </div>
+          <button type="button" data-hubmodal-close class="text-gray-400 hover:text-gray-600 text-2xl leading-none cursor-pointer shrink-0">&times;</button>
+        </div>
+        <div class="p-5 overflow-y-auto space-y-4" data-hubmodal-body>${bodyHtml}</div>
+      </div>`;
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelectorAll('[data-hubmodal-close]').forEach((b) => b.addEventListener('click', close));
+    document.body.appendChild(overlay);
+    return { overlay, body: overlay.querySelector('[data-hubmodal-body]'), close };
+  }
+
+  /**
+   * Import CSV — the instructions first, the file picker second.
+   *
+   * `importHint` and `importColumns` come from the role registry, so this serves every data-hub role
+   * (leads, invoices, tickets, accounts) with its own wording rather than lead-specific copy.
+   */
+  function openImportModal(fileInput, importBtn, toolbarStatus) {
+    const hub = state.hub;
+    const { body, close } = hubModal({
+      title: 'Import from a CSV',
+      subtitle: 'Bring a list you already have into this tab.',
+      bodyHtml: `
+        <p class="text-sm text-gray-700">${esc(hub.importHint)}</p>
+        <div>
+          <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Suggested columns</p>
+          <div class="flex flex-wrap gap-1.5">
+            ${hub.importColumns.map((c) => `<span class="text-xs font-semibold px-2 py-1 rounded-lg border bg-gray-50 text-gray-600 border-gray-200">${esc(c)}</span>`).join('')}
+          </div>
+          <p class="text-[11px] text-gray-500 mt-1.5">Extra columns are kept on the record; missing ones are simply left blank. Nothing is invented to fill a gap.</p>
+        </div>
+        <p class="text-xs font-semibold hidden" data-import-status></p>
+        <div class="flex items-center justify-end gap-2 pt-1">
+          <button type="button" data-hubmodal-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 rounded-lg cursor-pointer">Cancel</button>
+          <button type="button" data-import-choose class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Choose a CSV file</button>
+        </div>`,
+    });
+    body.querySelectorAll('[data-hubmodal-close]').forEach((b) => b.addEventListener('click', close));
+
+    const modalStatus = body.querySelector('[data-import-status]');
+    const chooseBtn = body.querySelector('[data-import-choose]');
+    const say = (text, tone) => {
+      modalStatus.textContent = text;
+      modalStatus.className = `text-xs font-semibold ${tone === 'error' ? 'text-red-600' : tone === 'done' ? 'text-emerald-700' : 'text-gray-500'}`;
+    };
+
+    chooseBtn.addEventListener('click', () => fileInput.click());
+    // Assigned, never addEventListener: the input lives in the toolbar and outlives this modal, so
+    // a listener added per open would stack and re-import the same file once per modal ever opened.
+    fileInput.onchange = async () => {
+      const file = fileInput.files && fileInput.files[0];
+      fileInput.value = '';
+      if (!file) return;
+      chooseBtn.disabled = true;
+      importBtn.disabled = true;
+      say('Reading the file…');
+      try {
+        // importCsv writes its progress straight onto this element's textContent; say() has
+        // already put the neutral tone on it, and the class survives a textContent write.
+        const result = await importCsv(file, modalStatus);
+        await fetchRecords();
+        renderTable();
+        const done = `Imported ${result.inserted} new record${result.inserted === 1 ? '' : 's'}`
+          + `${result.updated ? ` and refreshed ${result.updated} existing` : ''}.`;
+        say(done, 'done');
+        chooseBtn.textContent = 'Import another file';
+        chooseBtn.disabled = false;
+        // Mirrored to the toolbar so the result survives closing the modal — the table has just
+        // changed underneath, and a user who closes on the toast is otherwise left guessing which
+        // rows are new.
+        toolbarStatus.textContent = done;
+        toolbarStatus.className = 'block -mt-3 mb-5 text-xs font-semibold text-emerald-700';
+      } catch (err) {
+        say(err.message || 'Import failed.', 'error');
+        chooseBtn.disabled = false;
+      } finally {
+        importBtn.disabled = false;
+      }
+    };
+  }
+
+  // ── Export / CRM ────────────────────────────────────────────────────────────
+
+  const INTEGRATIONS_API = '/api/integrations';
+
+  /**
+   * The lead-push recipes, from the same library the Connections tab renders
+   * (netlify/functions/integration-scenarios.ts). Filtered to `handoff_push` — the recipes that
+   * send a lead OUT to a CRM, which is the question this modal is answering — plus anything already
+   * active, so a recipe the user has switched on is never invisible here.
+   */
+  async function loadCrmRecipes() {
+    const res = await fetch(`${INTEGRATIONS_API}/scenarios?assistantId=${state.assistantId}`, { credentials: 'same-origin' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Could not read your connections.');
+    return (data.scenarios || []).filter((s) => s.scenarioType === 'handoff_push'
+      && (s.active || (s.tier !== 3 && s.status === 'available')));
+  }
+
+  function recipeRow(s, last) {
+    const on = s.active && s.active.isEnabled;
+    // Three states, three different next steps. Only the toggle acts inline: activating a recipe
+    // takes a field mapping, and that form already exists on the Connections tab
+    // (assistant-integrations.js). A second copy of it here would be two config surfaces over one
+    // active_scenarios row.
+    const cta = s.active
+      ? `<button type="button" data-recipe-toggle="${s.active.id}" data-enabled="${on ? '1' : '0'}"
+           class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-bold text-gray-700 cursor-pointer whitespace-nowrap">
+           <span class="w-1.5 h-1.5 rounded-full ${on ? 'bg-emerald-600' : 'bg-gray-400'}"></span>${on ? 'On' : 'Off'}</button>`
+      : (s.tier !== 2 && !s.connection && !s.connectionOptional)
+        ? `<a href="/api/oauth/${esc(s.providerKey)}/connect"
+             class="px-3 py-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-xs font-bold rounded-lg transition whitespace-nowrap">Connect ${esc(s.providerName)}</a>`
+        : `<button type="button" data-recipe-setup class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition whitespace-nowrap">Set it up</button>`;
+    return `
+      <div class="flex items-start gap-3 py-3 ${last ? '' : 'border-b border-gray-100'}">
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-semibold text-gray-900">${esc(s.title)}</p>
+          <p class="text-xs text-gray-500 mt-0.5">${esc(s.description)}</p>
+          ${s.active && !on ? '<p class="text-xs text-amber-700 mt-1">Switched off — nothing is being pushed.</p>' : ''}
+        </div>
+        <div class="shrink-0">${cta}</div>
+      </div>`;
+  }
+
+  function openExportModal() {
+    const { body, close } = hubModal({
+      title: 'Export your leads',
+      subtitle: 'Take them somewhere else, once or continuously.',
+      maxWidth: 'max-w-xl',
+      bodyHtml: `
+        <div class="border border-gray-200 rounded-xl p-4">
+          <p class="text-sm font-bold text-gray-900">As a spreadsheet</p>
+          <p class="text-xs text-gray-500 mt-0.5">Every lead in this tab, with its score, contact details and outreach draft.</p>
+          <button type="button" data-export-plain
+            class="mt-3 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition">Download CSV</button>
+        </div>
+
+        <div class="border border-gray-200 rounded-xl p-4">
+          <p class="text-sm font-bold text-gray-900">Shaped for your CRM</p>
+          <p class="text-xs text-gray-500 mt-0.5">The same leads, with column headers that match each importer&rsquo;s template, so the fields map themselves.</p>
+          <div class="flex flex-wrap items-center gap-2 mt-3">
+            <button type="button" data-export-crm="hubspot"
+              class="px-4 py-2 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-sm font-bold rounded-lg transition">HubSpot CSV</button>
+            <button type="button" data-export-crm="salesforce"
+              class="px-4 py-2 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-sm font-bold rounded-lg transition">Salesforce CSV</button>
+          </div>
+          <p class="text-xs text-gray-500 mt-2">Leads found by a search usually have a company inbox rather than a named person, so the name columns are often empty. Salesforce needs a last name to import a row as a Lead &mdash; those rows are companies, not people, and nothing invents a surname to get them through.</p>
+        </div>
+
+        <div class="border border-gray-200 rounded-xl p-4">
+          <p class="text-sm font-bold text-gray-900">Or send them across automatically</p>
+          <p class="text-xs text-gray-500 mt-0.5">Connect your CRM once and every lead you approve is pushed over with its score, summary and where it came from &mdash; no file, no re-import.</p>
+          <div class="mt-2" data-recipes><p class="text-xs text-gray-400 py-3">Checking your connections…</p></div>
+        </div>`,
+    });
+
+    body.querySelector('[data-export-plain]').addEventListener('click', () => downloadCsv(null));
+    body.querySelectorAll('[data-export-crm]').forEach((b) => {
+      b.addEventListener('click', () => downloadCsv(b.getAttribute('data-export-crm')));
+    });
+
+    const recipes = body.querySelector('[data-recipes]');
+    const wireRecipes = () => {
+      recipes.querySelectorAll('[data-recipe-setup]').forEach((b) => b.addEventListener('click', () => {
+        close();
+        // The Connections drawer owns activation (mapping fields, picking the connection). Opening
+        // it directly beats naming it in prose and leaving the user to find it.
+        window._openBriefDrawer?.('platforms');
+      }));
+      recipes.querySelectorAll('[data-recipe-toggle]').forEach((b) => b.addEventListener('click', async () => {
+        const next = b.getAttribute('data-enabled') !== '1';
+        b.disabled = true;
+        try {
+          const res = await fetch(`${INTEGRATIONS_API}/toggle`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ activeScenarioId: Number(b.getAttribute('data-recipe-toggle')), isEnabled: next }),
+          });
+          if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Could not change that.');
+          await renderRecipes();
+          // The Connections tab shows these same rows; re-read it so the two cannot disagree.
+          window.AssistantIntegrations?.refresh?.();
+        } catch (err) {
+          b.disabled = false;
+          window.showToast?.(err.message || 'Could not change that.', 'error');
+        }
+      }));
+    };
+    const renderRecipes = async () => {
+      try {
+        const list = await loadCrmRecipes();
+        recipes.innerHTML = list.length
+          ? list.map((s, i) => recipeRow(s, i === list.length - 1)).join('')
+          // The recipe catalogue is seeded by db:seed-catalog, a manual step per environment. An
+          // empty box would read as "your CRM is not supported"; this says which it is.
+          : '<p class="text-xs text-gray-500 py-3">No CRM push recipes are set up on this workspace yet. The CSV exports above work regardless.</p>';
+        wireRecipes();
+      } catch (err) {
+        recipes.innerHTML = `<p class="text-xs text-red-600 py-3">${esc(err.message)}</p>`;
+      }
+    };
+    renderRecipes();
   }
 
   // ── Manual "Add Lead" (lead hubs only) ──────────────────────────────────────
