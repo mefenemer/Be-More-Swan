@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-pagination",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/12c38afb-d497-4ff4-9d54-bc6c8e61864a/scratchpad/pagerharness/server.mjs"
+      ],
+      "port": 4312,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-leads-hub",
       "runtimeExecutable": "node",
       "runtimeArgs": [

@@ -742,8 +742,13 @@
         </button>
         <!-- Posts that tried to publish and stopped. 'failed' is not 'rejected', so Archived never
              showed them and no other column did either — they were reachable only from the calendar.
-             The Autopilot card's "N posts failed to publish" line deep-links here. -->
-        <button class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
+             The Autopilot card's "N posts failed to publish" line deep-links here.
+             ⚠️ POSTS ONLY. A record has no publish attempt to fail, and _RQ_RECORD_STATE has no
+             'attention' key — so on a records queue (Leads, Decisions, Inbox) this column asked the
+             server for approvalStatus=undefined, which is not a valid filter and therefore returned
+             EVERY record in the hub, rendered with no action buttons at all. _applyDashboardRegistry
+             hides it for those roles. -->
+        <button id="detail-rq-col-attention" class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
           data-status="attention" onclick="detailRqOpenStatus('attention', this)">Needs attention
           <span id="detail-rq-col-count-attention" class="ml-1 bg-red-100 text-red-700 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
         </button>

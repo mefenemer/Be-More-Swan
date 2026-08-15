@@ -81,6 +81,12 @@
     // read never overwrites them.
     resultCounts: { total: 0, ready: 0, needsReview: 0, promoted: 0, filtered: 0 },
     savedSearches: [],
+    // Which page of "Your searches" is on screen. Kept on state rather than derived per render, and
+    // deliberately NOT reset by load(): this tab re-reads itself on every activate() and on every
+    // poll tick while a run is in flight, and a page number that resets underneath the user is the
+    // same "lost my place" failure the filters were built to avoid. ListPager clamps it, so a page
+    // that stops existing (a search archived from page 3 of 3) lands on the last real page.
+    searchPage: 1,
     savedSearchId: null,
     resultsOverlay: null,
     hasSocialFeed: false,
@@ -521,15 +527,28 @@
       </div>`;
   }
 
+  /**
+   * How many searches are listed at once.
+   *
+   * Ten because a search row is tall — a state line, a reachability line and six controls — so ten
+   * is already a screen and a half. The count in the tab label ("Searches (34)") still states the
+   * whole inventory, so paging never hides how many there are.
+   */
+  const SEARCHES_PER_PAGE = 10;
+
   function searchesPanel() {
     if (!state.savedSearches.length) return '';
+    const pg = window.ListPager
+      ? window.ListPager.page(state.savedSearches, state.searchPage, SEARCHES_PER_PAGE)
+      : { items: state.savedSearches, pages: 1 };
     return `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm mb-4">
         <div class="p-4 border-b border-gray-100">
           <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">Your searches</p>
           <p class="text-xs text-gray-500 mt-1">Each search looks across the public web, scores what it finds against your profile, and files every company it finds as a lead in your <span class="font-semibold text-gray-700">Leads</span> tab &mdash; hot, warm or cold. Open a search&rsquo;s results to see what it found; decide who to pursue in the Leads tab.</p>
         </div>
-        ${state.savedSearches.map((s, i) => searchRow(s, i === state.savedSearches.length - 1)).join('')}
+        ${pg.items.map((s, i) => searchRow(s, i === pg.items.length - 1)).join('')}
+        ${window.ListPager ? window.ListPager.controlsHtml(pg, { attr: 'data-si-page', noun: 'searches' }) : ''}
       </div>`;
   }
 
@@ -593,6 +612,10 @@
     if (!h) return;
     h.innerHTML = view();
     bind(h);
+    // Delegated on the HOST, which survives every render — the panel's innerHTML is rewritten on
+    // each one, so a listener bound to the buttons themselves would have to be re-attached here and
+    // would silently stop working the first time a render was missed.
+    window.ListPager?.bind(h, 'data-si-page', (n) => { state.searchPage = n; render(); });
   }
 
   // ── The results modal ──────────────────────────────────────────────────────
@@ -1016,6 +1039,9 @@
       // after the first load.
       state.tabLabel = (cfg && cfg.label) || 'Searches';
       state.rendered = false;
+      // A different assistant is a different set of searches — the page number from the last one
+      // means nothing here. (load() deliberately leaves it alone; init() is the reset.)
+      state.searchPage = 1;
       // Counts drive the tab badge, so fetch once on init even though the panel is lazy.
       load();
     },

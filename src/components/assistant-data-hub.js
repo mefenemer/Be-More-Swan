@@ -154,7 +154,11 @@
     // record list so a refetch (which happens every time the tab is opened) leaves the user's
     // view alone: coming back to a tab you had filtered to "Awaiting you" and finding it reset is
     // the tab losing your place.
-    view: { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null },
+    // `page` rides with the rest of the view for the same reason: coming back to a tab you had
+    // paged into and landing on page one is the tab losing your place. It is reset by anything that
+    // changes WHICH rows are on screen (search, filter, group, sort, Clear) — staying on page 4 of a
+    // list that just became eleven rows shows an empty table under a full-looking filter strip.
+    view: { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null, page: 1 },
     // Ids ticked for a bulk action. A Set of record ids rather than DOM state, because rows are
     // re-rendered on every filter keystroke and after every PATCH.
     selected: new Set(),
@@ -1583,6 +1587,33 @@
     return state.hub.kind !== 'content_library';
   }
 
+  /**
+   * How many rows are on a page.
+   *
+   * Twenty-five rather than the ten the Review Queue uses: a table row is one line, and the whole
+   * point of this tab is scanning a column of chips for the ones that need work. Small enough that
+   * the browser is not laying out four hundred rows and four hundred (lazily built) detail panels,
+   * large enough that a normal week's leads are one page.
+   */
+  const ROWS_PER_PAGE = 25;
+
+  /**
+   * The page of `visibleRecords()` on screen.
+   *
+   * ⚠️ Paged in the BROWSER, over the already-filtered list — not by the server. Every control on
+   * this table (search, the per-column dropdowns, sort, group, "select all matching") compares the
+   * rendered cell across every record the hub holds; a server LIMIT would quietly redefine all of
+   * them as "…on this page", which is the failure mode where a filter says 3 and the truth is 40.
+   */
+  function pagedRecords(list) {
+    return window.ListPager
+      ? window.ListPager.page(list, state.view.page, ROWS_PER_PAGE)
+      : { items: list, page: 1, pages: 1, total: list.length, first: list.length ? 1 : 0, last: list.length };
+  }
+
+  /** Any change to WHICH rows are shown puts the reader back at the top of the new list. */
+  function resetPage() { state.view.page = 1; }
+
   /** Drop ids that are no longer on screen. Called after any refetch or filter change. */
   function pruneSelection() {
     if (!state.selected.size) return;
@@ -1733,7 +1764,7 @@
   }
 
   function wireControls(host) {
-    const repaint = () => { pruneSelection(); paintRows(); };
+    const repaint = () => { resetPage(); pruneSelection(); paintRows(); };
 
     const search = host.querySelector('[data-hub-search]');
     if (search) {
@@ -1746,16 +1777,28 @@
       });
     });
     const group = host.querySelector('[data-hub-group]');
-    if (group) group.addEventListener('change', () => { state.view.groupKey = group.value || null; paintRows(); });
+    if (group) group.addEventListener('change', () => { state.view.groupKey = group.value || null; resetPage(); paintRows(); });
 
     host.querySelector('[data-hub-clear]')?.addEventListener('click', () => {
       state.view.search = '';
       state.view.filters = {};
       state.view.groupKey = null;
       state.view.sortKey = null;
+      resetPage();
       state.selected.clear();
       renderTable();                                  // the controls themselves have to reset too
     });
+
+    // Paging. Delegated on the wrapper because paintRows rewrites its innerHTML on every keystroke;
+    // the wrapper itself is only rebuilt by renderTable, which re-runs this.
+    const pager = host.querySelector('[data-hub-pager]');
+    if (pager) {
+      window.ListPager?.bind(pager, 'data-hub-page', (n) => {
+        state.view.page = n;
+        paintRows();
+        host.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
 
     // Sort: the headings. A second click flips the direction, a third clears it and puts the table
     // back in the order the server sent — which is the only way back to "newest work first"
@@ -1767,6 +1810,7 @@
         if (v.sortKey !== key) { v.sortKey = key; v.sortDir = 'asc'; }
         else if (v.sortDir === 'asc') v.sortDir = 'desc';
         else { v.sortKey = null; v.sortDir = 'asc'; }
+        resetPage();                                  // a re-sorted list makes "page 4" meaningless
         renderTable();                                // the arrow lives in the heading
       });
     });
@@ -1813,7 +1857,11 @@
       tbody.appendChild(tr);
     }
 
-    for (const group of groupVisible(list)) {
+    // One page of the filtered list, then grouped — never the reverse. Grouping the page keeps the
+    // headings honest ("Hot · 12" counts the twelve on screen); paging each group separately would
+    // give every group its own page and no way to say which page you are on.
+    const pg = pagedRecords(list);
+    for (const group of groupVisible(pg.items)) {
       if (group.label !== null) {
         const head = document.createElement('tr');
         head.className = 'bg-gray-50';
@@ -1858,9 +1906,20 @@
 
     const count = host.querySelector('[data-hub-count]');
     if (count) {
+      // Still the FILTER's number, not the page's — "25 of 400" beside a filter that matched 137
+      // would read as the filter having matched 25.
       count.textContent = list.length === state.records.length
         ? `${state.records.length} ${state.records.length === 1 ? 'record' : 'records'}`
         : `${list.length} of ${state.records.length}`;
+    }
+    // The pager sits below the table and is repainted with the rows; its clicks are bound once, in
+    // wireControls, on the wrapper — which survives this rewrite.
+    const pager = host.querySelector('[data-hub-pager]');
+    if (pager) {
+      state.view.page = pg.page || 1;                 // clamped: the list may have shrunk under us
+      pager.innerHTML = window.ListPager
+        ? window.ListPager.controlsHtml(pg, { attr: 'data-hub-page', noun: state.hub.label.toLowerCase() })
+        : '';
     }
     paintSelectionBar();
     applyPendingFocus();
@@ -1934,6 +1993,8 @@
             <tbody class="divide-y divide-gray-100" data-hub-tbody></tbody>
           </table>
         </div>
+        <!-- Filled by paintRows; empty (and therefore invisible) while everything fits on one page. -->
+        <div data-hub-pager class="px-4"></div>
       </div>`;
 
     wireControls(host);
@@ -1948,7 +2009,17 @@
     const id = state.pendingFocusId;
     if (id == null) return;
     const tr = document.querySelector(`#datahub-table-host tr[data-record-id="${id}"]`);
-    if (!tr) return;                       // not in this hub's records — leave it pending
+    if (!tr) {
+      // The row may simply be on another page — a "post failed to publish" notification names a
+      // record, not a page, and landing on page one with no highlight looks like the deep link
+      // failed. Jump to whichever page holds it and let the repaint run this again; if it is not in
+      // this hub at all the focus stays pending, exactly as before.
+      const at = visibleRecords().findIndex((r) => Number(r.id) === Number(id));
+      if (at === -1) return;
+      const wanted = Math.floor(at / ROWS_PER_PAGE) + 1;
+      if (wanted !== state.view.page) { state.view.page = wanted; paintRows(); }
+      return;
+    }
     state.pendingFocusId = null;
     tr.click();                            // expands the detail panel (failure banner + actions)
     tr.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -2587,7 +2658,7 @@
     // A different assistant is a different table: its columns, its vocabularies, and any row the
     // user had ticked all belong to the one being left. refresh() deliberately does NOT do this —
     // returning to a tab you had filtered should find it as you left it.
-    state.view = { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null };
+    state.view = { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null, page: 1 };
     state.selected.clear();
     renderToolbar();
     const host = document.getElementById('datahub-table-host');

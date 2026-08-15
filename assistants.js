@@ -1018,6 +1018,26 @@ const _RQ_RECORD_STATE = { review: 'pending_approval', approved: 'approved', sch
 // Records currently on screen, by id — see the merge note in _detailRqRenderRecords.
 const _rqRecordsById = new Map();
 
+// ── Paging + collapse state for the records queue ────────────────────────────
+// Both exist for the same reason: a lead search files fifteen to sixty records at a time, and this
+// column rendered every one of them as a fully-expanded card — recipient, warnings, the whole
+// drafted email — so a reviewer scrolled several screens per lead looking for the next company name.
+//
+// The records are held here after the fetch so a page change repaints from memory. Re-fetching per
+// page would be a GET of the whole column to render ten of it, and the column's other numbers (the
+// tab badge, the Overview shortcut) are counted off this same array.
+let _rqRecordsLoaded = [];
+let _rqRecordsPage = 1;
+// The column the page number belongs to. Switching columns is a different list, so the page resets;
+// re-rendering the SAME column (which happens after every approve/reject) must keep it, or acting on
+// a card on page four throws the reviewer back to page one every time.
+let _rqRecordsPageKey = null;
+// Which cards the user has opened. Kept out of the DOM because every action re-renders the whole
+// column — including the two feedback strips, which are appended to the acted-on card and would be
+// injected into a collapsed body nobody can see.
+const _rqExpanded = new Set();
+const _RQ_RECORDS_PAGE_SIZE = 10;
+
 // Default chase reminder for an approved lead: 3 days out at 09:00 local, nudged off weekends.
 function _rqChaseDate() {
     const d = new Date();
@@ -1659,6 +1679,60 @@ function _rqRecipient(r, statusKey) {
     </div>`;
 }
 
+/**
+ * The one line a collapsed card gets to say what is waiting inside it.
+ *
+ * A lead's row in the Leads tab is scanned by its chips, so the collapsed card carries the same
+ * facts: the rating, and whether there is an address to send to. Both come from the SAME sources
+ * the expanded card uses — window.LeadRating for the band, window.LeadRecipient for the address —
+ * so a card that says "no address" cannot open onto a recipient line naming one.
+ *
+ * Deliberately not a copy of the Leads tab's five-state Contact column: this queue is already
+ * filtered to leads that have an address AND a draft, so the only distinction worth a chip here is
+ * the one that changes what Approve does — a named individual's inbox, which needs a second look.
+ */
+function _rqCardChips(r) {
+    const chips = [];
+    if (r.status) {
+        const help = (window.LeadRating && typeof window.LeadRating.help === 'function')
+            ? window.LeadRating.help(r.status) : '';
+        chips.push(`<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200${help ? ' cursor-help' : ''}"${help ? ` title="${_rqEsc(help)}"` : ''}>${_rqEsc(r.status)}</span>`);
+    }
+    if (r.recordType === 'lead') {
+        const d = r.data || {};
+        const LR = window.LeadRecipient;
+        const to = (LR && typeof LR.resolve === 'function') ? (LR.resolve(d) || '') : '';
+        const EK = window.LeadEmailKind;
+        const needsConfirm = to && EK && typeof EK.needsConfirmation === 'function'
+            ? EK.needsConfirmation(d.emailKind, d.emailSource)
+            : (!!to && d.emailKind === 'personal');
+        if (to && needsConfirm) {
+            chips.push(`<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-900 border border-amber-200" title="${_rqEsc(to)}">Check before sending</span>`);
+        } else if (to) {
+            chips.push(`<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200" title="${_rqEsc(to)}">Email ready</span>`);
+        } else {
+            chips.push(`<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">No address</span>`);
+        }
+    }
+    return chips.join('');
+}
+
+/**
+ * One record, collapsed to its company name.
+ *
+ * The change (2026-08-15): the outreach detail — recipient, warnings, the drafted email, the action
+ * buttons — now lives behind a click, exactly as a lead does in the Leads tab. Every card was fully
+ * expanded before, and with the draft preview open by default in the Review column a page of ten
+ * leads ran to several screens; finding the next company meant scrolling past an entire email.
+ *
+ * ⚠️ The collapse is a plain button + a hidden div, NOT a <details>. `_rqShowEditReasonStrip`
+ * anchors its feedback strip on the card's FIRST <details>, which is the drafted-email preview — a
+ * wrapping <details> would capture that query and post the question into the wrong element.
+ *
+ * Expansion is restored from `_rqExpanded` rather than defaulted, because every action re-renders
+ * the whole column: a card the reviewer had open (and just acted on) must come back open, or the
+ * edit/reject reason strips appear inside a body that is hidden.
+ */
 function _detailRqRecordCard(r, statusKey) {
     const found = _rqDraft(r);
     let snippet = _rqRecordSnippet(r);
@@ -1667,23 +1741,47 @@ function _detailRqRecordCard(r, statusKey) {
     const schedVerb = r.recordType === 'lead' ? 'chase by' : 'scheduled';
     const sched = r.scheduledFor ? ` · ${schedVerb} ${new Date(r.scheduledFor).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : '';
     const sync = r.recordType === 'meeting' ? _rqMeetingSync(r) : { summary: '', pills: '' };
-    return `<div class="py-4" data-rq-record="${r.id}">
-      <div class="min-w-0">
-        <p class="text-sm font-bold text-gray-900 truncate">${_rqEsc(r.title)}</p>
-        ${snippet ? `<p class="text-xs text-gray-500 mt-0.5 line-clamp-2">${_rqEsc(snippet)}</p>` : ''}
-        <div class="flex flex-wrap items-center gap-2 mt-2">
-          ${r.status ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">${_rqEsc(r.status)}</span>` : ''}
-          ${sync.summary}
-          ${sched ? `<span class="text-[11px] font-semibold text-yellow-700">${_rqEsc(sched)}</span>` : ''}
-        </div>
+    const open = _rqExpanded.has(r.id);
+    return `<div class="py-2" data-rq-record="${r.id}">
+      <button type="button" onclick="_rqToggleCard(this)" aria-expanded="${open ? 'true' : 'false'}"
+        class="w-full flex items-start gap-3 text-left py-2 cursor-pointer group">
+        <svg class="rq-card-chevron w-4 h-4 mt-0.5 shrink-0 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        <span class="min-w-0 flex-1">
+          <span class="block text-sm font-bold text-gray-900 truncate group-hover:text-emerald-800">${_rqEsc(r.title)}</span>
+          <span class="flex flex-wrap items-center gap-2 mt-1">
+            ${_rqCardChips(r)}
+            ${sync.summary}
+            ${sched ? `<span class="text-[11px] font-semibold text-yellow-700">${_rqEsc(sched)}</span>` : ''}
+          </span>
+        </span>
+      </button>
+      <div class="rq-card-body ${open ? '' : 'hidden'} pl-7 pb-2">
+        ${snippet ? `<p class="text-xs text-gray-500 line-clamp-2">${_rqEsc(snippet)}</p>` : ''}
         ${_rqRecipient(r, statusKey)}
         ${_rqAttendeeFix(r, statusKey)}
         ${_rqOutreachPreview(r, statusKey)}
         ${sync.pills}
+        ${_rqRecordActions(r, statusKey)}
       </div>
-      ${_rqRecordActions(r, statusKey)}
     </div>`;
 }
+
+/** Open/close one card, remembering it so the next re-render keeps it that way. */
+window._rqToggleCard = function (btn) {
+    const card = btn.closest('[data-rq-record]');
+    if (!card) return;
+    const body = card.querySelector('.rq-card-body');
+    if (!body) return;
+    const open = body.classList.contains('hidden');
+    // `hidden` loses to any class that sets display, and this body holds flex rows — pin the inline
+    // style too. See the same fix on the tab badges.
+    body.classList.toggle('hidden', !open);
+    body.style.display = open ? '' : 'none';
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    card.querySelector('.rq-card-chevron')?.classList.toggle('rotate-180', open);
+    const id = Number(card.getAttribute('data-rq-record'));
+    if (open) _rqExpanded.add(id); else _rqExpanded.delete(id);
+};
 
 async function _detailRqRenderRecords(statusKey) {
     const container = document.getElementById('detail-rq-groups');
@@ -1696,6 +1794,11 @@ async function _detailRqRenderRecords(statusKey) {
     container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Loading…</p>';
     if (!aid || !recordType) { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">No assistant selected.</p>'; return; }
     if (approval === null) { container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">These records don’t have a published state — see the Approved and Scheduled columns.</p>'; return; }
+    // ⚠️ A column this queue has no approval state for — 'attention', which is a failed PUBLISH and
+    // belongs to posts. Its button is hidden for records queues, so this is only reachable by a
+    // deep link, and it must not fall through: `approvalStatus=undefined` is not a valid filter, so
+    // the server would answer with every record of this type in no particular state.
+    if (approval === undefined) { container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Nothing to show here — these records are approved or rejected, never published, so they have no failures to fix.</p>'; return; }
 
     // Leads awaiting review are filtered to the ones that actually have an email to sign off —
     // a resolvable recipient AND a drafted body. Everything else stays in the Leads tab for
@@ -1717,19 +1820,55 @@ async function _detailRqRenderRecords(statusKey) {
     } catch { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">Failed to load.</p>'; return; }
 
     // Keep the Review column badge + tab badge + Overview shortcut in sync.
+    //
+    // ⚠️ Counted off the WHOLE column, never off the page rendered below. The paging added here is
+    // client-side precisely so these numbers keep describing the column: "10 awaiting review" on a
+    // queue of sixty is worse than no badge at all.
     if (statusKey === 'review') {
         const colBadge = document.getElementById('detail-rq-col-count-review');
         if (colBadge) { colBadge.textContent = records.length || ''; colBadge.classList.toggle('hidden', !records.length); }
         _setDetailRqTabBadge(records.length);
         window._setPendingReviewCount?.(records.length);
         window._updateOpSignals?.({ pendingReview: records.length });
+    } else {
+        // The other columns' badges were never populated for records queues at all
+        // (_detailRqRefreshColumnCounts returns early for them), so Approved / Scheduled / Archived
+        // sat blank however much was in them. The open column can at least state its own count.
+        const colBadge = document.getElementById('detail-rq-col-count-' + statusKey);
+        if (colBadge) { colBadge.textContent = records.length || ''; colBadge.classList.toggle('hidden', !records.length); }
     }
 
     // Keep the rendered records addressable by id: PATCH replaces `data` wholesale, so editing
     // the outreach draft has to send the record's OTHER data fields (score, rationale, emailKind,
     // …) back untouched or they're dropped.
+    //
+    // Every record of the column goes in, not just the page on screen — a card the user paged past
+    // and came back to must still resolve, and the map is the only copy the client keeps.
     _rqRecordsById.clear();
     for (const r of records) _rqRecordsById.set(r.id, r);
+
+    // A different column is a different list: its page number, and which of its cards were open,
+    // mean nothing here. Re-rendering the SAME column (which is what happens after every approve or
+    // reject) deliberately keeps both.
+    if (_rqRecordsPageKey !== statusKey) {
+        _rqRecordsPageKey = statusKey;
+        _rqRecordsPage = 1;
+        _rqExpanded.clear();
+    }
+    _rqRecordsLoaded = records;
+    _detailRqPaintRecords(statusKey, { deliverableOnly });
+}
+
+/**
+ * Draw one page of the already-fetched column.
+ *
+ * Split out of the render above so a page change repaints from `_rqRecordsLoaded` instead of
+ * re-reading the whole column from the server to show ten of it.
+ */
+function _detailRqPaintRecords(statusKey, opts) {
+    const container = document.getElementById('detail-rq-groups');
+    if (!container) return;
+    const records = _rqRecordsLoaded;
 
     // An empty lead Review column is the NORMAL state, not a broken one: outreach is email-only,
     // enrichment attempts hot/warm leads only and finds an address roughly one time in three, so
@@ -1737,13 +1876,32 @@ async function _detailRqRenderRecords(statusKey) {
     // beside a search that just filed fifteen leads reads as a bug — name where they went.
     const emptyMsg = statusKey !== 'review'
         ? 'Nothing here yet.'
-        : deliverableOnly
+        : (opts && opts.deliverableOnly)
             ? 'No emails waiting for you. Leads without a contact address can’t be emailed yet — they’re in the Leads tab.'
             : 'Nothing awaiting your review.';
 
-    container.innerHTML = records.length
-        ? `<div class="divide-y divide-gray-100">${records.map((r) => _detailRqRecordCard(r, statusKey)).join('')}</div>`
-        : `<p class="text-sm text-gray-400 py-10 text-center">${emptyMsg}</p>`;
+    if (!records.length) {
+        container.innerHTML = `<p class="text-sm text-gray-400 py-10 text-center">${emptyMsg}</p>`;
+        return;
+    }
+
+    const pg = window.ListPager
+        ? window.ListPager.page(records, _rqRecordsPage, _RQ_RECORDS_PAGE_SIZE)
+        : { items: records, pages: 1 };
+    // Clamped by the pager, so a column that shrank under the reviewer (they approved the last lead
+    // on page 4) lands on the last real page rather than rendering nothing.
+    _rqRecordsPage = pg.page || 1;
+    const noun = (window._detailReviewQueue || {}).recordType === 'lead' ? 'leads' : 'records';
+    container.innerHTML = `<div class="divide-y divide-gray-100">${pg.items.map((r) => _detailRqRecordCard(r, statusKey)).join('')}</div>`
+        + (window.ListPager ? window.ListPager.controlsHtml(pg, { attr: 'data-rq-page', noun }) : '');
+    // The container outlives every repaint, so one delegated listener covers every page of every
+    // column. `opts` is re-derived rather than captured: a page change must not resurrect the
+    // deliverable flag of a column the user has since left.
+    window.ListPager?.bind(container, 'data-rq-page', (n) => {
+        _rqRecordsPage = n;
+        _detailRqPaintRecords(_detailRqCurrentStatus, { deliverableOnly: (window._detailReviewQueue || {}).recordType === 'lead' && _detailRqCurrentStatus === 'review' });
+        container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
 }
 
 // Approve / reject / schedule a record from the Review Queue (PATCH assistant-records).
@@ -3483,6 +3641,12 @@ function _applyDashboardRegistry(data) {
     // Records queues have no post-generation button; blog re-points it at Blog Studio.
     toggleBtn('detail-rq-primary-btn', !rqIsRecords);
     toggle('detail-rq-col-posted', !rqIsRecords);
+    // 'Needs attention' is a POST state (a publish that failed). Records have no publish attempt,
+    // and _RQ_RECORD_STATE has no key for it — so on a records queue the column sent
+    // approvalStatus=undefined, which assistant-records.ts rejects as a filter and answers with
+    // EVERY record of that type. On the Lead Generator that meant the whole lead table rendered
+    // under "Needs attention", in no particular state, with no buttons on any card.
+    toggle('detail-rq-col-attention', !rqIsRecords);
     // 'approved' is only a real resting state for records queues. For posts, approve-post.ts moves
     // the post straight to 'scheduled' (approval IS the scheduling act), so the column would always
     // be empty — hide it rather than show a permanently blank tab.

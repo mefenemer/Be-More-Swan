@@ -5042,6 +5042,10 @@ function formatCurrency(amount, currency) {
      Genuinely loaded first: this comment claimed "Loaded FIRST" while sitting BELOW the five
      modules that read it, assistants.js among them. -->
 <script src="/src/generated/platform-constants.js"></script>
+<!-- Shared page control for the long lists in the assistant detail view (Searches, the records
+     Review Queue, the Data Hub table). Loaded beside platform-constants for the same reason: three
+     modules below read it, and a pager that arrives after the list it pages renders nothing. -->
+<script src="/src/components/list-pager.js"></script>
 <script src="/integrations.js"></script>
 <script src="/assets.js"></script>
 <script src="/notifications.js?v=20260711-notif-actor-popover"></script>
