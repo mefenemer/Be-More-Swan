@@ -46,6 +46,7 @@ import {
     ROLE_EMAIL_PREFIXES, roleOrPersonal, classifyEmailKind,
     EMAIL_SOURCE_LABELS, emailSourceLabel, needsPersonalInboxConfirmation,
 } from '../src/config/lead-email-kind';
+import { LEAD_OUTREACH_CHIPS, leadOutreachState } from '../src/config/lead-outreach-state';
 import { RATING_BANDS } from '../src/config/icp-profile';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -437,6 +438,28 @@ ${formatRows}
      * Keep identical to the server gate in lead-generation.ts — it is the same function.
      */
     needsConfirmation: needsPersonalInboxConfirmation,
+  };
+
+  // ── Lead outreach state ────────────────────────────────────────────────────
+  // From src/config/lead-outreach-state.ts. Mirrored rather than retyped because THREE surfaces
+  // state it — the Review tab's card chip, the Leads tab's Approval column and the banner on an
+  // open lead — and a lead reading "Email Sent" in one and "Approved" in another is the same lead
+  // described two ways. The predicate is one function so they cannot fork.
+  var LEAD_OUTREACH_CHIPS = ${JSON.stringify(LEAD_OUTREACH_CHIPS)};
+  var leadOutreachState = ${leadOutreachState.toString()};
+
+  window.LeadOutreach = {
+    /** { sent: { label, cls }, drafted: { label, cls } } — the words and colours every surface uses. */
+    chips: LEAD_OUTREACH_CHIPS,
+
+    /** 'sent' | 'drafted' | null for a lead's \`data\`. Null means nothing has happened to it yet. */
+    state: leadOutreachState,
+
+    /** The chip for a lead's \`data\`, or null. Saves every caller repeating the lookup. */
+    chipFor: function (data) {
+      var s = leadOutreachState(data);
+      return s ? LEAD_OUTREACH_CHIPS[s] : null;
+    },
   };
 
   // ── Lead rating bands ──────────────────────────────────────────────────────

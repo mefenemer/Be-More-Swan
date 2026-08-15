@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-outreach",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/dc0257ce-5c2c-4242-8429-62e3030fea22/scratchpad/outreachharness/server.mjs"
+      ],
+      "port": 4313,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-pagination",
       "runtimeExecutable": "node",
       "runtimeArgs": [

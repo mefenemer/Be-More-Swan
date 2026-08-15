@@ -141,7 +141,7 @@ export default withLambda(async (event) => {
         action?: string; assistantId?: number; ideaId?: number; recordId?: number;
         lead?: Record<string, unknown>; confirmPersonal?: boolean; reason?: string;
         outcome?: string; lossReason?: string; valueGbp?: number | string | null; confirmChange?: boolean;
-        editReason?: string;
+        editReason?: string; provider?: string;
     };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
@@ -957,7 +957,14 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
             }
 
             const chase = chaseDate();
-            const nextData = { ...data, outreachDraft: { to: recipient, subject, body: bodyText }, outreachSentAt: new Date().toISOString() };
+            // ⚠️ `outreachDraftedAt` is DROPPED here, not merged through. It is the "you have no
+            // inbox connected, here is the draft to send yourself" stamp, and a lead can carry it
+            // legitimately — declined the connect prompt on Monday, connected an inbox and sent on
+            // Tuesday. Left in place, the card would read "Email Drafted" beside an email that has
+            // demonstrably gone out. `leadOutreachState` already prefers the send, so this is the
+            // second of two guards, not the only one.
+            const { outreachDraftedAt: _wasDrafted, ...rest } = data;
+            const nextData = { ...rest, outreachDraft: { to: recipient, subject, body: bodyText }, outreachSentAt: new Date().toISOString() };
             await db.update(assistantRecords)
                 .set({ approvalStatus: 'scheduled', scheduledFor: chase, data: nextData, updatedAt: new Date() })
                 .where(eq(assistantRecords.id, recordId));
@@ -985,6 +992,30 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
             });
 
             return json(200, { sent: true, to: recipient, chaseDate: chase.toISOString() });
+        }
+
+        // ── Record which inbox this assistant sends outreach from ────────────────
+        // The counterpart to the "connect your email?" prompt the Review tab now shows when an
+        // approval could not send. Connecting the OAuth account is only half of it: send_outreach
+        // gates on the ONBOARDING ANSWER (`outreachEmailProvider`), so a user who onboarded with
+        // "no — I'll send outreach myself" and then connects Gmail would still never auto-send,
+        // and nothing on this screen would explain why.
+        //
+        // Deliberately NOT the generic update-assistant-context route, which REPLACES
+        // onboarding_context wholesale — a partial write from this screen would blank every other
+        // setup answer the assistant has. This merges one key.
+        //
+        // 'none' is accepted as well: a user turning auto-send back off should not have to find
+        // the Operational Setup form to do it.
+        if (action === 'set_outreach_provider') {
+            const wanted = str(body.provider, 20);
+            if (wanted !== 'google' && wanted !== 'microsoft' && wanted !== 'none') {
+                return json(400, { error: 'provider must be google, microsoft or none.' });
+            }
+            await db.update(aiAssistants)
+                .set({ onboardingContext: { ...onboarding, outreachEmailProvider: wanted }, updatedAt: new Date() })
+                .where(and(eq(aiAssistants.id, assistant.id), eq(aiAssistants.organisationId, orgId)));
+            return json(200, { provider: wanted });
         }
 
         // ── List this assistant's lead ideas ─────────────────────────────────────

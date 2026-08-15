@@ -1,5 +1,6 @@
-// Shared UI dialogs: the toast, and the styled stand-ins for the browser's alert(), confirm()
-// and prompt(). Every page that reports an error or asks a question loads this — before it existed
+// Shared UI dialogs: the toast, the styled stand-ins for the browser's alert(), confirm() and
+// prompt(), and `choiceModal` for a question with more than two answers.
+// Every page that reports an error or asks a question loads this — before it existed
 // these lived inside workspace.html, so any other page calling window.showToast?.() reported
 // NOTHING, and anything that had to ask fell back to the browser's own grey box.
 //
@@ -111,6 +112,63 @@ window.alertModal = function(message, opts = {}) {
       hideCancel: true,
       onCancel: () => resolve(),
     });
+  });
+};
+
+/**
+ * A question with more than two answers — the dialog `confirmModal` cannot be.
+ *
+ * `options` is `[{ value, label, description? }, …]`, rendered as a stacked list of buttons, and
+ * the promise resolves the chosen `value`. Backing out — the cancel button, Escape, or the
+ * backdrop — resolves null, so a caller reads it exactly like `confirmModal` returning false.
+ *
+ * Why it exists: "connect Gmail or Outlook, or neither?" is three answers, and squeezing it into a
+ * confirm makes one of the two real choices the CANCEL button — which Escape and a stray backdrop
+ * click would then pick on the user's behalf. `message`, labels and descriptions are innerHTML'd,
+ * so escape anything data-derived.
+ */
+window.choiceModal = function(message, options, opts = {}) {
+  return new Promise((resolve) => {
+    document.getElementById('aura-confirm-modal')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'aura-confirm-modal';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:11500;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);padding:1rem;';
+    const title = opts.title || 'Choose one';
+    const cancel = opts.cancelLabel || 'Cancel';
+    const btnCss = 'display:block;width:100%;box-sizing:border-box;text-align:left;cursor:pointer;background:#fff;border:1px solid #d1d5db;border-radius:.6rem;padding:.7rem .9rem;margin:0 0 .5rem;font-family:inherit;';
+    overlay.innerHTML = `
+    <div style="background:#fff;border-radius:1rem;max-width:26rem;width:100%;padding:1.5rem;box-shadow:0 20px 50px rgba(0,0,0,.25);">
+      <h3 style="font-size:1.05rem;font-weight:700;color:#111827;margin:0 0 .5rem;">${title}</h3>
+      ${message ? `<p style="font-size:.875rem;color:#4b5563;margin:0 0 .85rem;line-height:1.5;">${message}</p>` : ''}
+      <div id="achm-options">
+        ${(options || []).map((o, i) => `
+          <button type="button" data-achm-index="${i}" style="${btnCss}">
+            <span style="display:block;font-size:.875rem;font-weight:700;color:#111827;">${o.label}</span>
+            ${o.description ? `<span style="display:block;font-size:.8125rem;color:#6b7280;margin-top:.15rem;">${o.description}</span>` : ''}
+          </button>`).join('')}
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:.75rem;">
+        <button id="achm-cancel" style="cursor:pointer;font-size:.875rem;font-weight:600;color:#374151;background:#fff;border:1px solid #d1d5db;padding:.5rem .9rem;border-radius:.6rem;">${cancel}</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); done(null); } };
+    const done = (value) => {
+      document.removeEventListener('keydown', onKey, true);
+      overlay.remove();
+      resolve(value);
+    };
+    document.addEventListener('keydown', onKey, true);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) done(null); });
+    overlay.querySelector('#achm-cancel').addEventListener('click', () => done(null));
+    overlay.querySelector('#achm-options').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-achm-index]');
+      if (btn) done((options[Number(btn.getAttribute('data-achm-index'))] || {}).value ?? null);
+    });
+    // Cancel holds focus for the same reason it does on the confirm dialog: the answer under the
+    // return key should be the one that changes nothing.
+    overlay.querySelector('#achm-cancel').focus();
   });
 };
 

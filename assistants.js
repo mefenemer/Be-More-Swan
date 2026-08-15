@@ -1097,6 +1097,31 @@ function _rqDraft(r) {
     return { cfg, draft: d };
 }
 
+// ── "Did the email actually go?" ─────────────────────────────────────────────
+// `approvalStatus` cannot answer it: BOTH outcomes of approving a lead are approvals. With an inbox
+// connected the mail is sent; without one the draft is handed back for the user to send themselves.
+// The two stamps that separate them (`outreachSentAt`, written by send_outreach on a confirmed
+// send, and `outreachDraftedAt`, written when the user declines to connect an inbox) are read
+// through window.LeadOutreach — generated from src/config/lead-outreach-state.ts, so this chip and
+// the Leads tab's Approval column cannot name different states for the same lead.
+function _rqOutreachState(r) {
+    const OUT = window.LeadOutreach;
+    return (OUT && typeof OUT.state === 'function') ? OUT.state((r && r.data) || {}) : null;
+}
+
+/** The Email Sent / Email Drafted chip for a lead, or '' when neither has happened yet. */
+function _rqOutreachChip(r) {
+    const OUT = window.LeadOutreach;
+    const chip = (OUT && typeof OUT.chipFor === 'function') ? OUT.chipFor((r && r.data) || {}) : null;
+    if (!chip) return '';
+    const sentAt = (r.data || {}).outreachSentAt;
+    const when = sentAt ? new Date(sentAt) : null;
+    const title = when && !isNaN(when)
+        ? `Emailed ${when.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+        : 'Ready for you to send from your own inbox';
+    return `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border ${chip.cls}" title="${_rqEsc(title)}">${_rqEsc(chip.label)}</span>`;
+}
+
 // Full draft preview on the review card. The reviewer must be able to read the exact message
 // they're signing off — a truncated snippet gave no clue what "Approve" actually did — and the
 // `sends` line spells out whether approving dispatches it. Open by default in the Review column;
@@ -1109,7 +1134,20 @@ function _rqOutreachPreview(r, statusKey) {
     // recipients — the amber warning above the preview already states the real outcome, and
     // leaving both in place would have the card contradict itself.
     const noRecipients = r.recordType === 'meeting' && !_rqMeetingRecipients(r.data || {}).to.length;
-    const sendsLine = noRecipients ? '' : `<p class="text-[11px] text-gray-600 mb-2">${_rqEsc(cfg.sends)}</p>`;
+    // Both the heading and the `sends` line are written for a message still awaiting a decision
+    // ("read before approving", "sent as soon as you approve"). On a lead that has already been
+    // emailed — visible in Approved and Scheduled now that those columns hold sent leads — they
+    // describe a future that has happened, which reads as a second email about to go out.
+    const outreach = _rqOutreachState(r);
+    const heading = outreach === 'sent' ? 'The email that was sent'
+        : outreach === 'drafted' ? 'Your drafted email — ready for you to send'
+        : cfg.heading;
+    const sends = outreach === 'sent'
+        ? 'This is the message that went to the contact above. Nothing further is sent automatically.'
+        : outreach === 'drafted'
+            ? 'Nothing has been emailed. This is yours to send from your own inbox.'
+            : cfg.sends;
+    const sendsLine = noRecipients ? '' : `<p class="text-[11px] text-gray-600 mb-2">${_rqEsc(sends)}</p>`;
     const subject = draft.subject || '(no subject)';
     const input = 'w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500';
     const subjectView = cfg.noSubject ? '' : `<p class="text-[11px] text-gray-500">Subject</p>
@@ -1119,7 +1157,7 @@ function _rqOutreachPreview(r, statusKey) {
             <input type="text" class="rq-mail-subject ${input} mt-0.5" value="${_rqEsc(draft.subject || '')}">
           </label>`;
     return `<details class="mt-2 border border-gray-200 rounded-lg bg-gray-50"${statusKey === 'review' ? ' open' : ''}>
-      <summary class="cursor-pointer px-3 py-2 text-xs font-bold text-gray-700 select-none">${_rqEsc(cfg.heading)}</summary>
+      <summary class="cursor-pointer px-3 py-2 text-xs font-bold text-gray-700 select-none">${_rqEsc(heading)}</summary>
       <div class="px-3 pb-3 pt-1 border-t border-gray-200">
         ${sendsLine}
         <div class="rq-mail-view">
@@ -1509,20 +1547,61 @@ function _rqRecordActions(r, statusKey) {
         ? btn('Copy draft', 'copyEmail', secondary) + btn('Draft in Gmail', 'draftGmail', secondary)
         : '';
     let buttons = '';
+    // A line above the buttons, for the cards where the state is the point and there is little left
+    // to do — a lead whose email has gone out, or one waiting on an inbox connection.
+    let note = '';
     if (statusKey === 'review') {
         buttons = isLead
             ? btn(leadApprove, 'approve', primary) + editDraft + selfSend + reject
             : btn('Approve', 'approve', primary) + btn('Approve &amp; Schedule', 'showSchedule', secondary) + editDraft + reject;
     } else if (statusKey === 'approved') {
-        buttons = isLead
-            ? btn('Mark outreach sent', 'outreachSent', primary) + btn('Send back to review', 'review', secondary)
-            : btn('Schedule', 'showSchedule', primary) + btn('Send back to review', 'review', secondary);
+        if (isLead) {
+            // ⚠️ Keyed on the RECORD, not the column. The lead Approved column deliberately holds
+            // both approval states (see the fetch in _detailRqRenderRecords): a lead whose outreach
+            // sent is left 'scheduled' — that state is its chase reminder — and dropping it from
+            // Approved the instant the email went out made the user's own action look like a
+            // deletion. So the same column shows sent and unsent leads, and only the record knows
+            // which it is.
+            const out = _rqOutreachState(r);
+            if (out === 'sent') {
+                const when = r.scheduledFor ? new Date(r.scheduledFor) : null;
+                note = `<p class="w-full text-[11px] text-gray-500">Sent from your connected inbox. `
+                    + (when && !isNaN(when)
+                        ? `A chase reminder is set for ${_rqEsc(when.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }))} — it’s in the Scheduled tab and on the Calendar.`
+                        : 'Nothing further is scheduled for it.')
+                    + `</p>`;
+                // Nothing to decide here any more, so the row offers the one thing still useful:
+                // the text that went out. No "Mark outreach sent" — it already is — and no "Send
+                // back to review", which would offer to re-approve an email the recipient has.
+                buttons = hasDraft ? btn('Copy the email that was sent', 'copyEmail', secondary) : '';
+            } else {
+                // Approved, nothing emailed. Either no inbox is connected, or the user chose to
+                // send it themselves. Both need the same two routes out, and "Send email now" is
+                // what makes connecting an inbox afterwards actually finish the job.
+                if (out === 'drafted') {
+                    note = `<p class="w-full text-[11px] text-gray-500">Approved — nothing has been emailed. Copy the draft and send it from your own inbox, or connect one and send it from here.</p>`;
+                }
+                buttons = (hasDraft ? btn('Send email now', 'sendNow', primary) : '')
+                    + btn('Mark outreach sent', 'outreachSent', hasDraft ? secondary : primary)
+                    + (hasDraft ? btn('Copy draft', 'copyEmail', secondary) : '')
+                    + btn('Send back to review', 'review', secondary);
+            }
+        } else {
+            buttons = btn('Schedule', 'showSchedule', primary) + btn('Send back to review', 'review', secondary);
+        }
     } else if (statusKey === 'scheduled') {
+        if (isLead) {
+            // ⚠️ This column is NOT a queue of pending sends, and for a lead it never was — the
+            // outreach has already gone. Said on the card because the column is called "Scheduled"
+            // everywhere else in the app, where it does mean "waiting to go out".
+            note = `<p class="w-full text-[11px] text-gray-500">The outreach email has gone. This is your reminder to chase — nothing is sent automatically.</p>`;
+        }
         buttons = btn(isLead ? 'Clear chase reminder' : 'Unschedule', 'unschedule', secondary);
     } else if (statusKey === 'archived') {
         buttons = btn('Restore to review', 'review', secondary);
     }
     return `<div class="flex flex-wrap items-center gap-2 mt-3">
+        ${note}
         ${buttons}
         <div class="rq-sched-row hidden w-full flex items-center gap-2 mt-2">
           <input type="datetime-local" class="rq-sched-input border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
@@ -1700,13 +1779,20 @@ function _rqCardChips(r) {
     }
     if (r.recordType === 'lead') {
         const d = r.data || {};
+        // What has already HAPPENED to the outreach outranks whether it could be sent. Once an
+        // email has gone out, "Email ready" is not merely redundant — it reads as still-to-do, on
+        // the one card where the user most needs to know the mail has left. Same for a lead whose
+        // draft was handed back for manual sending. See src/config/lead-outreach-state.ts.
+        const outreach = _rqOutreachChip(r);
         const LR = window.LeadRecipient;
         const to = (LR && typeof LR.resolve === 'function') ? (LR.resolve(d) || '') : '';
         const EK = window.LeadEmailKind;
         const needsConfirm = to && EK && typeof EK.needsConfirmation === 'function'
             ? EK.needsConfirmation(d.emailKind, d.emailSource)
             : (!!to && d.emailKind === 'personal');
-        if (to && needsConfirm) {
+        if (outreach) {
+            chips.push(outreach);
+        } else if (to && needsConfirm) {
             chips.push(`<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-900 border border-amber-200" title="${_rqEsc(to)}">Check before sending</span>`);
         } else if (to) {
             chips.push(`<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200" title="${_rqEsc(to)}">Email ready</span>`);
@@ -1812,9 +1898,20 @@ async function _detailRqRenderRecords(statusKey) {
     // would lose it entirely.
     const deliverableOnly = recordType === 'lead' && statusKey === 'review';
 
+    // ⚠️ The lead Approved column asks for TWO states. Approving a lead whose email actually sends
+    // leaves the record 'scheduled' (lead-generation.ts `send_outreach`), because that state is the
+    // CHASE REMINDER — not a pending send. Filtering Approved to 'approved' alone therefore emptied
+    // it the moment an approval succeeded: the user pressed "Approve & send email" and the lead
+    // disappeared from the only column they were watching, which reads as having lost it.
+    //
+    // The lead is now in both columns, and each says a different true thing about it: Approved
+    // holds the decision (with an Email Sent / Email Drafted chip), Scheduled holds the reminder to
+    // chase. Every other queue and every other column is unchanged.
+    const approvalQuery = (recordType === 'lead' && statusKey === 'approved') ? 'approved,scheduled' : approval;
+
     let records = [];
     try {
-        const res = await fetch(`/.netlify/functions/assistant-records?assistantId=${aid}&recordType=${encodeURIComponent(recordType)}&approvalStatus=${approval}${deliverableOnly ? '&deliverable=1' : ''}`);
+        const res = await fetch(`/.netlify/functions/assistant-records?assistantId=${aid}&recordType=${encodeURIComponent(recordType)}&approvalStatus=${approvalQuery}${deliverableOnly ? '&deliverable=1' : ''}`);
         if (!res.ok) throw new Error();
         records = (await res.json()).records || [];
     } catch { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">Failed to load.</p>'; return; }
@@ -1904,6 +2001,306 @@ function _detailRqPaintRecords(statusKey, opts) {
     });
 }
 
+// ── Sending a lead's outreach, and the three ways it can fail to send ────────
+// Approving a lead is one decision with two legitimate endings: with an inbox connected the email
+// goes; without one the draft is handed back for the user to send themselves. Everything below
+// exists to make the second ending an outcome the user can act on rather than a silent nothing.
+
+/** Store which inbox this assistant sends outreach from. Merges one onboarding answer, server-side. */
+async function _rqSetOutreachProvider(provider) {
+    try {
+        const res = await fetch('/.netlify/functions/lead-generation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'set_outreach_provider', assistantId: window._currentAssistantId, provider }),
+        });
+        return res.ok;
+    } catch { return false; }
+}
+
+/**
+ * Mark a lead's email as handed back to the user to send.
+ *
+ * The counterpart stamp to `outreachSentAt`, and the thing that makes "Email Drafted" a real state
+ * rather than an absence. Written from the browser because the record's other `data` fields have to
+ * survive — the PATCH replaces `data` wholesale, exactly as saving an edited draft does.
+ */
+async function _rqStampOutreachDrafted(recordId) {
+    const rec = _rqRecordsById.get(recordId);
+    if (!rec) return false;
+    const data = { ...(rec.data || {}), outreachDraftedAt: new Date().toISOString() };
+    try {
+        const res = await fetch('/.netlify/functions/assistant-records', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: recordId, data }),
+        });
+        if (!res.ok) return false;
+        rec.data = data;
+        return true;
+    } catch { return false; }
+}
+
+/**
+ * "Nothing was emailed — here is the email, take it." Offered whenever a lead is approved and no
+ * send happened, because the alternative is a toast saying nothing went out and no route to the
+ * text that didn't.
+ */
+async function _rqOfferCopyDraft(recordId) {
+    const rec = _rqRecordsById.get(recordId);
+    const found = rec && _rqDraft(rec);
+    if (!found) return;
+    const { draft } = found;
+    const to = draft.to || (window.LeadRecipient?.resolve?.(rec.data) || '');
+    const copy = await window.confirmModal(
+        'Nothing has been emailed, so this one is yours to send.<br><br>'
+        + `<strong>To:</strong> ${_rqEsc(to || '—')}<br>`
+        + `<strong>Subject:</strong> ${_rqEsc(draft.subject || '(no subject)')}<br><br>`
+        + 'Copy it now and paste it into your email client?',
+        {
+            title: 'Copy the drafted email?',
+            confirmLabel: 'Copy the email',
+            cancelLabel: 'Not now',
+            confirmColor: '#047857',
+        },
+    );
+    if (!copy) return;
+    try {
+        await navigator.clipboard.writeText(`To: ${to}\nSubject: ${draft.subject || ''}\n\n${draft.body}`);
+        window.showToast?.('Copied — paste it into your email client.', { icon: '✅' });
+    } catch {
+        // The clipboard needs a recent user gesture and some browsers refuse it after a dialog.
+        // The draft is still on the card, so name where to get it by hand.
+        window.showToast?.('Your browser blocked the copy — open the lead and select the email text instead.', { icon: '⚠️' });
+    }
+}
+
+/**
+ * The lead was approved but there is no inbox to send from. Ask whether to connect one.
+ *
+ * Three real answers, which is why this is a `choiceModal` and not a confirm — squeezing "Gmail",
+ * "Outlook" and "neither" into two buttons makes one of the genuine choices the CANCEL button, and
+ * Escape would then pick it.
+ *
+ * Returns:
+ *   { retry: true }      — an account was already connected and the user switched auto-send on;
+ *                          the caller should send now.
+ *   { connecting: true } — the user has gone off to authorise an account. Nothing is stamped: the
+ *                          email is not "drafted for you to send", it is waiting on a connection.
+ *   { declined: true }   — they would rather send it themselves.
+ */
+async function _rqOfferOutreachConnect() {
+    const PROVIDERS = {
+        google: { key: 'gmail', brand: 'Google', label: 'Gmail / Google Workspace' },
+        microsoft: { key: 'outlook', brand: 'Microsoft', label: 'Outlook / Microsoft 365' },
+    };
+
+    // Asked FIRST, because "connect your email" is the wrong question for someone who already has
+    // Gmail connected and merely answered "I'll send outreach myself" at setup. For them the gate
+    // is the onboarding answer, not the connection, and offering to reconnect an account they
+    // already have would send them round a loop that changes nothing.
+    let live = {};
+    try {
+        const res = await fetch('/api/oauth/status');
+        if (res.ok) live = ((await res.json()) || {}).providers || {};
+    } catch { /* treated as nothing connected — the connect route is safe either way */ }
+    const ready = Object.keys(PROVIDERS).find((a) => live[PROVIDERS[a].key] && live[PROVIDERS[a].key].connected);
+
+    if (ready) {
+        const p = PROVIDERS[ready];
+        const yes = await window.confirmModal(
+            `Your ${window.escapeHtml(p.label)} account is connected, but this assistant is set to hand you the draft rather than send it.<br><br>`
+            + 'Send this one now, and do the same for the leads you approve from here on?',
+            {
+                title: 'Send from your connected inbox?',
+                confirmLabel: 'Yes, send it',
+                cancelLabel: 'No, I’ll send it myself',
+                confirmColor: '#047857',
+            },
+        );
+        if (!yes) return { declined: true };
+        if (await _rqSetOutreachProvider(ready)) return { retry: true };
+        // The answer didn't save, so a retry would come straight back here. Treat it as "not sent"
+        // rather than looping, and let the copy route do its job.
+        return { declined: true };
+    }
+
+    const choice = await window.choiceModal(
+        'Nothing has been emailed — this assistant has no inbox to send from.<br><br>'
+        + 'Connect one and it sends the outreach for every lead you approve. Or skip it and send the drafts yourself.',
+        [
+            { value: 'google', label: 'Connect Gmail / Google Workspace', description: 'Outreach sends from your Google account.' },
+            { value: 'microsoft', label: 'Connect Outlook / Microsoft 365', description: 'Work and school accounts may need your IT administrator to approve it.' },
+        ],
+        { title: 'Connect your email?', cancelLabel: 'No thanks — I’ll send it myself' },
+    );
+    if (!choice) return { declined: true };
+
+    const p = PROVIDERS[choice];
+    // Store the answer BEFORE sending them off to authorise. Connecting the account is only half of
+    // it: send_outreach gates on this onboarding answer, so an account connected while the answer
+    // still reads "I'll send outreach myself" would never auto-send anything, and nothing on this
+    // screen would explain why.
+    await _rqSetOutreachProvider(choice);
+    // A real link rather than window.open: this runs several awaits after the click that started
+    // it, and a popup opened without a live user gesture is blocked silently.
+    await window.alertModal(
+        `<a href="/api/oauth/${p.key}/connect" target="_blank" rel="noopener" style="display:inline-block;font-weight:700;color:#047857;">Connect ${window.escapeHtml(p.brand)} →</a>`
+        + '<br><br>Opens in a new tab. When you come back, press <strong>Send email now</strong> on this lead in the Approved tab — '
+        + 'and every lead you approve after that is emailed automatically.',
+        { title: `Connect ${p.brand}`, confirmLabel: 'Done' },
+    );
+    return { connecting: true };
+}
+
+/**
+ * Send a cleared lead's outreach email, and return the sentence describing what happened.
+ *
+ * Two ways in — approving in the Review column, and "Send email now" on an approved lead whose
+ * inbox was connected afterwards — and ONE copy of the flow, so the gates the server raises
+ * (do-not-contact, suppression, personal inbox) are answered the same way whichever route was
+ * taken. `approving` only changes the wording.
+ *
+ * Never throws. By the time this runs the lead is already approved, and a failure to send must not
+ * read as a failed approval.
+ */
+async function _rqSendLeadOutreach(recordId, opts) {
+    const approving = !(opts && opts.approving === false);
+    const allowConnect = !(opts && opts.allowConnect === false);
+    // "Lead approved — nothing sent…" on the approve path; a bare "Nothing sent…" when the lead was
+    // approved minutes ago and the user has just pressed Send.
+    const say = (rest) => (approving ? `Lead approved — ${rest}` : rest.charAt(0).toUpperCase() + rest.slice(1));
+    const plain = approving ? 'Lead approved.' : 'Nothing was sent.';
+
+    const postSend = (extra) => fetch('/.netlify/functions/lead-generation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            action: 'send_outreach', assistantId: window._currentAssistantId, recordId, ...(extra || {}),
+        }),
+    });
+
+    try {
+        let sres = await postSend();
+        let sdata = await sres.json().catch(() => ({}));
+
+        // Qualification says this lead must never be emailed. Usually correct, but it can
+        // mis-score a real prospect, so allow a deliberate override — two steps, not one:
+        // confirm the block is wrong, then type a reason. The reason is the audit trail
+        // (the server rejects anything under 10 characters), and the override is stored on
+        // the record so the sequence worker honours it too. Cancelling either step sends
+        // nothing. Deliberately more friction than the personal-inbox prompt below: that
+        // one asks "are you sure who", this one asks you to overrule a compliance verdict.
+        if (sres.ok && sdata.reason === 'do_not_contact') {
+            const proceed = await window.confirmModal(
+                `This lead is flagged do-not-contact:<br><br>${_rqEsc(sdata.detail || 'Flagged during qualification.')}<br><br>`
+                + 'That usually means an internal account, a competitor or an existing customer — and nothing has been sent.<br><br>'
+                + 'Override it and email this lead anyway?',
+                { title: 'Overrule the do-not-contact flag?', confirmLabel: 'Override and send', cancelLabel: 'Leave it alone' },
+            );
+            const why = proceed
+                ? await window.promptModal(
+                    'This is recorded against the lead, and it needs at least 10 characters.',
+                    { title: 'Why is this verdict wrong?', confirmLabel: 'Save and send', required: true, multiline: true },
+                )
+                : null;
+            if (why && why.trim().length >= 10) {
+                const ores = await fetch('/.netlify/functions/lead-generation', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'override_do_not_contact',
+                        assistantId: window._currentAssistantId,
+                        recordId,
+                        reason: why.trim(),
+                    }),
+                });
+                if (ores.ok) {
+                    sres = await postSend();
+                    sdata = await sres.json().catch(() => ({}));
+                } else {
+                    const oerr = await ores.json().catch(() => ({}));
+                    sdata = { sent: false, reason: 'do_not_contact', detail: oerr.error || 'The override could not be saved.' };
+                }
+            } else if (proceed) {
+                // Confirmed the override but gave no usable reason — treat as cancelled
+                // rather than silently sending, since the reason IS the authorisation.
+                sdata = { sent: false, reason: 'do_not_contact', detail: 'No reason given, so nothing was sent.' };
+            }
+        }
+
+        // The address was scraped from a named individual's inbox rather than a
+        // general one. Name it and make the user opt in before anything is sent —
+        // the server refuses to send until this comes back confirmed.
+        if (sres.ok && sdata.reason === 'personal_inbox_unconfirmed') {
+            const ok = await window.confirmModal(
+                `This lead’s only contact address looks like a personal inbox:<br><br><strong>${_rqEsc(sdata.to)}</strong><br><br>`
+                + 'It was found on the company’s website, not supplied by them, and it appears to belong to a named individual rather than a general enquiries address.<br><br>'
+                + 'Send the outreach email to this address?',
+                { title: 'Email a named individual?', confirmLabel: 'Yes, send it', cancelLabel: 'No, don’t send' },
+            );
+            if (ok) {
+                sres = await postSend({ confirmPersonal: true });
+                sdata = await sres.json().catch(() => ({}));
+            } else {
+                sdata = { sent: false, reason: 'personal_inbox_declined' };
+            }
+        }
+
+        if (!sres.ok) return plain;
+
+        if (sdata.sent) {
+            const d = sdata.chaseDate ? new Date(sdata.chaseDate) : null;
+            return `Outreach emailed to ${sdata.to} — chase reminder set${d ? ` for ${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}. It’s in the Scheduled tab and on the Calendar.`;
+        }
+
+        // ── No inbox to send from ────────────────────────────────────────────
+        // 'no_provider' — the setup answer says the user sends outreach themselves.
+        // 'not_connected' — they chose a provider and never authorised the account (or the token
+        // has since died). Both mean the same thing to the person looking at the screen: nothing
+        // was emailed and nobody told them how to change that. So both get the same offer.
+        if (allowConnect && (sdata.reason === 'no_provider' || sdata.reason === 'not_connected')) {
+            const outcome = await _rqOfferOutreachConnect();
+            // ⚠️ allowConnect:false on the retry. If the answer failed to save server-side the send
+            // would come back 'no_provider' again and re-open the same dialog, forever.
+            if (outcome.retry) return await _rqSendLeadOutreach(recordId, { approving, allowConnect: false });
+            if (outcome.connecting) {
+                return say('nothing sent yet. Finish connecting your inbox, then press “Send email now” on this lead.');
+            }
+            // Declined: this is now the user's email to send. Stamp it so the card, the Leads tab
+            // and the Approval column all read "Email Drafted" instead of a bare "Approved", then
+            // put the text in their hands.
+            await _rqStampOutreachDrafted(recordId);
+            await _rqOfferCopyDraft(recordId);
+            return say('nothing sent. The email is drafted and ready for you to send yourself.');
+        }
+
+        if (sdata.reason === 'personal_inbox_declined') {
+            return say('nothing sent. Use “Mark outreach sent” if you contact them another way.');
+        }
+        if (sdata.reason === 'no_recipient') {
+            return say('no email address on this lead, so nothing was sent.');
+        }
+        if (sdata.reason === 'do_not_contact') {
+            return say(`nothing sent. This lead is flagged do-not-contact: ${sdata.detail || 'flagged during qualification.'}`);
+        }
+        if (sdata.reason === 'generator_declined') {
+            // The drafter refused rather than writing something dishonest — usually because
+            // this lead's own scoring says "do not contact". Surface its reason; the
+            // alternative is a plain "Lead approved." that hides why no email went out.
+            return say(`no email sent. ${sdata.detail || 'The drafter declined to write to this lead.'}`);
+        }
+        if (sdata.reason === 'suppressed') {
+            return say('nothing sent. This company is on your suppression list.');
+        }
+        return plain;
+    } catch {
+        // A network failure on the send only. The lead is already approved, and saying so is more
+        // useful than an error about a step the user did not ask for by name.
+        return plain;
+    }
+}
+
 // Approve / reject / schedule a record from the Review Queue (PATCH assistant-records).
 window._detailRqRecordAct = async function (btn, action) {
     const card = btn.closest('[data-rq-record]');
@@ -1971,6 +2368,22 @@ window._detailRqRecordAct = async function (btn, action) {
             // bare "something went wrong" sends the user hunting through the wrong settings.
             showErr(err.message || 'Could not create the Gmail draft — check your Google connection.');
         }
+        return;
+    }
+
+    // Send the email for a lead that is ALREADY approved — the route back for someone who declined
+    // the connect offer, went and connected an inbox, and came back. No lifecycle change of its
+    // own: a successful send moves the record to its chase reminder server-side, exactly as
+    // approving with an inbox connected would have done.
+    if (action === 'sendNow') {
+        const id = Number(card.getAttribute('data-rq-record'));
+        const btns = card.querySelectorAll('button');
+        btns.forEach((b) => { b.disabled = true; });
+        window.showToast?.(await _rqSendLeadOutreach(id, { approving: false }));
+        await _detailRqRenderGroups(_detailRqCurrentStatus);
+        // The chase reminder it may have just booked belongs to the Calendar and the Leads tab too.
+        const calHost = document.getElementById('assistant-calendar-host');
+        if (calHost) calHost.dataset.ready = '';
         return;
     }
 
@@ -2052,6 +2465,16 @@ window._detailRqRecordAct = async function (btn, action) {
         chaseWhen = _rqChaseDate();
         patch.approvalStatus = 'scheduled';
         patch.scheduledFor = chaseWhen.toISOString();
+        // …and stamp it as contacted. Without this the card kept reading "Email Drafted" — or
+        // nothing at all — beside a lead the user had just told us they emailed by hand, and the
+        // sales-cycle clock (firstOutreachAt, which falls back to this stamp) never started.
+        // `outreachDraftedAt` is dropped for the same reason send_outreach drops it: an email that
+        // has gone is no longer one waiting to be sent.
+        const sentRec = _rqRecordsById.get(patch.id);
+        if (sentRec) {
+            const { outreachDraftedAt: _dropped, ...restData } = sentRec.data || {};
+            patch.data = { ...restData, outreachSentAt: new Date().toISOString() };
+        }
     }
     else if (action === 'reject') {
         // Campaign decisions do NOT go through the generic records PATCH. Their authoritative row
@@ -2075,7 +2498,18 @@ window._detailRqRecordAct = async function (btn, action) {
         const rec = _rqRecordsById.get(patch.id);
         _rqPendingReject = { recordId: patch.id, recordType: rec?.recordType, title: rec?.title };
     }
-    else if (action === 'review') patch.approvalStatus = 'pending_approval';
+    else if (action === 'review') {
+        patch.approvalStatus = 'pending_approval';
+        // Back in the queue means the email is unresolved again, so the "yours to send" stamp has
+        // to go — otherwise the card would sit in Review chipped "Email Drafted" above an Approve
+        // button, claiming a hand-off that is being taken back. `outreachSentAt` is deliberately
+        // NOT cleared: an email that went out went out, and that is the sales cycle's start date.
+        const backRec = _rqRecordsById.get(patch.id);
+        if (backRec && (backRec.data || {}).outreachDraftedAt) {
+            const { outreachDraftedAt: _cleared, ...restData } = backRec.data;
+            patch.data = restData;
+        }
+    }
     else if (action === 'unschedule') patch.approvalStatus = 'approved';
     else if (action === 'schedule') {
         const val = card.querySelector('.rq-sched-input')?.value;
@@ -2093,99 +2527,12 @@ window._detailRqRecordAct = async function (btn, action) {
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Update failed.');
 
         // Auto-send: when a LEAD is approved and the assistant has an email provider connected,
-        // send its outreach email. The backend returns { sent, reason } and, on send, moves the
-        // record to scheduled + chase reminder — so we just translate the outcome into a toast.
+        // send its outreach email. The whole flow — the compliance gates, the connect offer, the
+        // copy-the-draft fallback — lives in _rqSendLeadOutreach, because "Send email now" on an
+        // approved lead takes exactly the same path and the two must not be able to differ about
+        // what is allowed to go out.
         if (action === 'approve' && (window._detailReviewQueue || {}).recordType === 'lead') {
-            let toast = 'Lead approved.';
-            try {
-                const postSend = (confirmPersonal) => fetch('/.netlify/functions/lead-generation', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        action: 'send_outreach', assistantId: window._currentAssistantId, recordId: patch.id,
-                        ...(confirmPersonal ? { confirmPersonal: true } : {}),
-                    }),
-                });
-                let sres = await postSend(false);
-                let sdata = await sres.json().catch(() => ({}));
-
-                // Qualification says this lead must never be emailed. Usually correct, but it can
-                // mis-score a real prospect, so allow a deliberate override — two steps, not one:
-                // confirm the block is wrong, then type a reason. The reason is the audit trail
-                // (the server rejects anything under 10 characters), and the override is stored on
-                // the record so the sequence worker honours it too. Cancelling either step sends
-                // nothing. Deliberately more friction than the personal-inbox prompt below: that
-                // one asks "are you sure who", this one asks you to overrule a compliance verdict.
-                if (sres.ok && sdata.reason === 'do_not_contact') {
-                    const proceed = window.confirm(
-                        `This lead is flagged do-not-contact:\n\n${sdata.detail || 'Flagged during qualification.'}\n\n`
-                        + 'That usually means an internal account, a competitor or an existing customer — and nothing has been sent.\n\n'
-                        + 'Override it and email this lead anyway?'
-                    );
-                    const why = proceed
-                        ? window.prompt('Why is this verdict wrong? This is recorded against the lead (at least 10 characters).')
-                        : null;
-                    if (why && why.trim().length >= 10) {
-                        const ores = await fetch('/.netlify/functions/lead-generation', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                action: 'override_do_not_contact',
-                                assistantId: window._currentAssistantId,
-                                recordId: patch.id,
-                                reason: why.trim(),
-                            }),
-                        });
-                        if (ores.ok) {
-                            sres = await postSend(false);
-                            sdata = await sres.json().catch(() => ({}));
-                        } else {
-                            const oerr = await ores.json().catch(() => ({}));
-                            sdata = { sent: false, reason: 'do_not_contact', detail: oerr.error || 'The override could not be saved.' };
-                        }
-                    } else if (proceed) {
-                        // Confirmed the override but gave no usable reason — treat as cancelled
-                        // rather than silently sending, since the reason IS the authorisation.
-                        sdata = { sent: false, reason: 'do_not_contact', detail: 'No reason given, so nothing was sent.' };
-                    }
-                }
-
-                // The address was scraped from a named individual's inbox rather than a
-                // general one. Name it and make the user opt in before anything is sent —
-                // the server refuses to send until this comes back confirmed.
-                if (sres.ok && sdata.reason === 'personal_inbox_unconfirmed') {
-                    const ok = window.confirm(
-                        `This lead's only contact address looks like a personal inbox:\n\n${sdata.to}\n\n`
-                        + 'It was found on the company\'s website, not supplied by them, and it appears to belong to a named individual rather than a general enquiries address.\n\n'
-                        + 'Send the outreach email to this address?'
-                    );
-                    if (ok) {
-                        sres = await postSend(true);
-                        sdata = await sres.json().catch(() => ({}));
-                    } else {
-                        sdata = { sent: false, reason: 'personal_inbox_declined' };
-                    }
-                }
-
-                if (sres.ok && sdata.reason === 'personal_inbox_declined') {
-                    toast = 'Lead approved — nothing sent. Use “Mark outreach sent” if you contact them another way.';
-                } else if (sres.ok && sdata.sent) {
-                    const d = sdata.chaseDate ? new Date(sdata.chaseDate) : null;
-                    toast = `Outreach emailed to ${sdata.to} — chase reminder set${d ? ` for ${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}. See the Calendar.`;
-                } else if (sres.ok && sdata.reason === 'not_connected') {
-                    toast = 'Lead approved. Connect your Google account (Integrations) to auto-send outreach.';
-                } else if (sres.ok && sdata.reason === 'no_recipient') {
-                    toast = 'Lead approved — no email address on this lead, so nothing was sent.';
-                } else if (sres.ok && sdata.reason === 'do_not_contact') {
-                    toast = `Lead approved — nothing sent. This lead is flagged do-not-contact: ${sdata.detail || 'flagged during qualification.'}`;
-                } else if (sres.ok && sdata.reason === 'generator_declined') {
-                    // The drafter refused rather than writing something dishonest — usually because
-                    // this lead's own scoring says "do not contact". Surface its reason; the
-                    // alternative is a plain "Lead approved." that hides why no email went out.
-                    toast = `Lead approved — no email sent. ${sdata.detail || 'The drafter declined to write to this lead.'}`;
-                }
-                // reason 'no_provider' (user chose manual outreach) keeps the plain "Lead approved." toast.
-            } catch { /* network issue on send — the lead is still approved; keep the plain toast */ }
-            window.showToast?.(toast);
+            window.showToast?.(await _rqSendLeadOutreach(patch.id));
         } else {
             const toast = action === 'outreachSent'
                 ? `First outreach logged — chase reminder set for ${chaseWhen.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}. See the Calendar.`

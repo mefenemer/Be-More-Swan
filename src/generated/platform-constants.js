@@ -372,6 +372,28 @@
     needsConfirmation: needsPersonalInboxConfirmation,
   };
 
+  // ── Lead outreach state ────────────────────────────────────────────────────
+  // From src/config/lead-outreach-state.ts. Mirrored rather than retyped because THREE surfaces
+  // state it — the Review tab's card chip, the Leads tab's Approval column and the banner on an
+  // open lead — and a lead reading "Email Sent" in one and "Approved" in another is the same lead
+  // described two ways. The predicate is one function so they cannot fork.
+  var LEAD_OUTREACH_CHIPS = {"sent":{"label":"Email Sent","cls":"bg-green-50 text-green-700 border-green-100"},"drafted":{"label":"Email Drafted","cls":"bg-blue-50 text-blue-800 border-blue-200"}};
+  var leadOutreachState = function leadOutreachState(data){if(!data||typeof data!=="object"||Array.isArray(data))return null;const d=data;if(typeof d.outreachSentAt==="string"&&d.outreachSentAt.trim())return"sent";if(typeof d.outreachDraftedAt==="string"&&d.outreachDraftedAt.trim())return"drafted";return null};
+
+  window.LeadOutreach = {
+    /** { sent: { label, cls }, drafted: { label, cls } } — the words and colours every surface uses. */
+    chips: LEAD_OUTREACH_CHIPS,
+
+    /** 'sent' | 'drafted' | null for a lead's `data`. Null means nothing has happened to it yet. */
+    state: leadOutreachState,
+
+    /** The chip for a lead's `data`, or null. Saves every caller repeating the lookup. */
+    chipFor: function (data) {
+      var s = leadOutreachState(data);
+      return s ? LEAD_OUTREACH_CHIPS[s] : null;
+    },
+  };
+
   // ── Lead rating bands ──────────────────────────────────────────────────────
   // The hot/warm/cold definition the SCORING PROMPT uses, mirrored so the UI can explain a chip
   // without retyping the numbers. This is the copy that matters most to keep generated: the bands

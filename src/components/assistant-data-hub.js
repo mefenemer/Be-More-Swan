@@ -59,6 +59,37 @@
     rejected: { label: 'Rejected', short: 'Rejected', cls: 'bg-gray-100 text-gray-500 border-gray-200' },
   };
 
+  /**
+   * The chip a record's approval state should actually render — which, for a lead, is not always
+   * its approval state.
+   *
+   * `approved` and `scheduled` both mean "cleared", and neither answers the question a user asks
+   * of an approved lead: did the email go? Both outcomes are legitimate — sent from a connected
+   * inbox, or handed back as a draft when there isn't one — and until this existed they were the
+   * same two words on screen, so a lead nobody had emailed looked exactly like one that had.
+   *
+   * The states and their wording come from window.LeadOutreach (generated from
+   * src/config/lead-outreach-state.ts), which is the SAME source the Review tab's card chip reads.
+   * Retyping "Email Sent" here would be the drift this table already learned about the hard way
+   * with the rating bands.
+   *
+   * ⚠️ Anything added here must also be added to ORDERED_VALUES.approvalStatus — that vocabulary
+   * ranks the RENDERED label, so a label it doesn't know sorts every such row last.
+   */
+  function approvalChip(record) {
+    const base = APPROVAL_CHIP[record.approvalStatus];
+    if (!base) return null;
+    if (record.recordType !== 'lead') return base;
+    const OUT = window.LeadOutreach;
+    const out = (OUT && typeof OUT.state === 'function') ? OUT.state(record.data || {}) : null;
+    if (!out) return base;
+    const chip = OUT.chips[out];
+    // `label` is the banner's long form and `short` the cell's; here the state is already two words
+    // and reads correctly in both, so it is deliberately the same string rather than an invented
+    // longer one that would say the same thing differently in two places.
+    return { label: chip.label, short: chip.label, cls: chip.cls };
+  }
+
   // ── Can this lead actually be reached? ──────────────────────────────────────
   // Outreach is email-only, so a lead with no address cannot be worked at all — and until now it
   // sat in the list looking exactly like one that could. Measured reality: tier-1 enrichment hits
@@ -134,7 +165,7 @@
     if (key === 'title') return record.title;
     if (key === 'status') return record.status ?? '—';
     // Records predating the approval gate carry no status at all — an em-dash, never a guess.
-    if (key === 'approvalStatus') return APPROVAL_CHIP[record.approvalStatus]?.short ?? '—';
+    if (key === 'approvalStatus') return approvalChip(record)?.short ?? '—';
     if (key === 'contact') return CONTACT_CHIP[contactState(record)].short;
     if (key === 'updatedAt') return fmtDate(record.updatedAt);
     let v = record.data;
@@ -158,7 +189,10 @@
     // paged into and landing on page one is the tab losing your place. It is reset by anything that
     // changes WHICH rows are on screen (search, filter, group, sort, Clear) — staying on page 4 of a
     // list that just became eleven rows shows an empty table under a full-looking filter strip.
-    view: { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null, page: 1 },
+    // `collapsed` holds the group headings the user has folded shut. A Set, and part of the
+    // view rather than the DOM, for the same reason `selected` is: paintRows() rewrites every
+    // row on each keystroke, so a fold recorded in the markup would spring open as you typed.
+    view: { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null, page: 1, collapsed: new Set() },
     // Ids ticked for a bulk action. A Set of record ids rather than DOM state, because rows are
     // re-rendered on every filter keystroke and after every PATCH.
     selected: new Set(),
@@ -307,7 +341,7 @@
 
   /** The approval chip for a lead. `data-hub-approval` so a reject can swap it without a re-render. */
   function approvalBanner(record) {
-    const s = APPROVAL_CHIP[record.approvalStatus];
+    const s = approvalChip(record);
     const wrap = document.createElement('div');
     wrap.className = 'mb-3';
     wrap.setAttribute('data-hub-approval', '');
@@ -1459,7 +1493,11 @@
     // Rating: the whole point of the column is that hot beats warm beats cold.
     status: ['hot', 'warm', 'cold'],
     // Approval: the order of the gate itself, so "sort by Approval" puts what needs you on top.
-    approvalStatus: ['Awaiting you', 'Approved', 'Chase set', 'Rejected'],
+    // ⚠️ These are the RENDERED labels, and for a lead `approvalChip()` can substitute the outreach
+    // state for the approval state — so "Email Drafted" and "Email Sent" have to be ranked here or
+    // every lead that has been through an approval sorts last, in a lump, whatever it did.
+    // Ranked by what still wants the user: a drafted email is theirs to send, a sent one is not.
+    approvalStatus: ['Awaiting you', 'Approved', 'Email Drafted', 'Email Sent', 'Chase set', 'Rejected'],
     // Contact: most reachable first — that is what the column is asked.
     contact: ['Role inbox', 'Named person', 'Checking…', 'Not attempted', 'Not checked', 'None found'],
   };
@@ -1649,7 +1687,7 @@
         // Coloured, unlike the neutral Rating chip beside it: this column exists to be SCANNED for
         // the amber ones. A record with no approval status renders the bare em-dash — a grey chip
         // reading "—" would look like a fourth state.
-        const s = APPROVAL_CHIP[record.approvalStatus];
+        const s = approvalChip(record);
         cell = s
           ? `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${s.cls} whitespace-nowrap">${esc(s.short)}</span>`
           : '<span class="text-gray-400">—</span>';
@@ -1777,13 +1815,22 @@
       });
     });
     const group = host.querySelector('[data-hub-group]');
-    if (group) group.addEventListener('change', () => { state.view.groupKey = group.value || null; resetPage(); paintRows(); });
+    if (group) group.addEventListener('change', () => {
+      state.view.groupKey = group.value || null;
+      // Folds belong to the column they were made in: "Rejected" folded under Approval must not
+      // silently fold a Rating group that happens to share a label. A different grouping is a
+      // different set of headings, so it starts open.
+      state.view.collapsed.clear();
+      resetPage();
+      paintRows();
+    });
 
     host.querySelector('[data-hub-clear]')?.addEventListener('click', () => {
       state.view.search = '';
       state.view.filters = {};
       state.view.groupKey = null;
       state.view.sortKey = null;
+      state.view.collapsed.clear();
       resetPage();
       state.selected.clear();
       renderTable();                                  // the controls themselves have to reset too
@@ -1862,14 +1909,40 @@
     // give every group its own page and no way to say which page you are on.
     const pg = pagedRecords(list);
     for (const group of groupVisible(pg.items)) {
+      // A group is FOLDED by its label, not its index. Grouping by Approval and folding "Rejected"
+      // has to keep that group shut when the sort order moves it, when a filter shrinks it, and
+      // when the tab refetches — all of which reorder the array underneath it.
+      const collapsed = group.label !== null && state.view.collapsed.has(group.label);
       if (group.label !== null) {
         const head = document.createElement('tr');
         head.className = 'bg-gray-50';
-        head.innerHTML = `<td colspan="${span}" class="px-4 py-2 text-xs font-bold text-gray-600 uppercase tracking-wide">
-          ${esc(group.label)} <span class="text-gray-400 normal-case">· ${group.records.length}</span>
+        // The whole heading is the control, not a small chevron beside it: the heading is already
+        // the thing the eye lands on, and a 14px target in a table row is a miss waiting to happen.
+        // The chevron SWAPS PATH rather than rotating — the compiled stylesheet has `rotate-90` but
+        // no `-rotate-90`, and a chevron that turned the wrong way would point at the row above.
+        const chevron = collapsed ? 'M9 5l7 7-7 7' : 'M19 9l-7 7-7-7';
+        head.innerHTML = `<td colspan="${span}" class="p-0">
+          <button type="button" data-hub-group-toggle aria-expanded="${collapsed ? 'false' : 'true'}"
+            class="w-full flex items-center gap-2 px-4 py-2 text-left cursor-pointer hover:bg-gray-100 transition-colors">
+            <svg class="w-3.5 h-3.5 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${chevron}"/></svg>
+            <span class="text-xs font-bold text-gray-600 uppercase tracking-wide">${esc(group.label)} <span class="text-gray-400 normal-case">· ${group.records.length}</span></span>
+          </button>
         </td>`;
+        head.querySelector('[data-hub-group-toggle]').addEventListener('click', () => {
+          if (state.view.collapsed.has(group.label)) state.view.collapsed.delete(group.label);
+          else state.view.collapsed.add(group.label);
+          // Repaint rather than hide the rows in place: each row carries a sibling <tr> holding its
+          // (lazily built) detail panel, and toggling two <tr>s per row by hand is how one of them
+          // ends up visible on its own.
+          paintRows();
+        });
         tbody.appendChild(head);
       }
+      // ⚠️ Folded rows are not rendered at all, and that is deliberate: the count in the heading
+      // and everything above the table ("137 of 400", "Select all N matching") keeps counting the
+      // whole filtered set, because none of them has ever counted the DOM. Folding changes what is
+      // drawn, never what is selected, filtered or paged.
+      if (collapsed) continue;
       for (const record of group.records) {
         const tr = document.createElement('tr');
         tr.className = 'cursor-pointer hover:bg-gray-50 transition-colors';
@@ -2658,7 +2731,7 @@
     // A different assistant is a different table: its columns, its vocabularies, and any row the
     // user had ticked all belong to the one being left. refresh() deliberately does NOT do this —
     // returning to a tab you had filtered should find it as you left it.
-    state.view = { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null, page: 1 };
+    state.view = { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null, page: 1, collapsed: new Set() };
     state.selected.clear();
     renderToolbar();
     const host = document.getElementById('datahub-table-host');

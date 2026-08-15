@@ -35,8 +35,16 @@ console.log('\n──── the two approve paths really are different ───
 check('the Review Queue approve sends; the Leads tab approve does not', () => {
     // Pin the premise. If these ever converge, the surface-aware copy below becomes unnecessary
     // rather than wrong — but the two must be reasoned about together.
-    assert.match(SHELL, /action: 'send_outreach', assistantId: window\._currentAssistantId, recordId: patch\.id/,
-        'the Review Queue approve must still POST send_outreach');
+    // ⚠️ Re-anchored: the send flow moved out of the approve handler into _rqSendLeadOutreach, so
+    // that "Send email now" on an already-approved lead takes the identical path (same
+    // do-not-contact, suppression and personal-inbox gates). Both halves are asserted — the
+    // approve handler must still call it, and it must still be the thing that POSTs.
+    assert.match(SHELL, /action === 'approve' && \(window\._detailReviewQueue \|\| \{\}\)\.recordType === 'lead'/,
+        'the Review Queue approve must still branch on a lead');
+    assert.match(SHELL, /await _rqSendLeadOutreach\(patch\.id\)/,
+        'and it must still send that lead’s outreach');
+    assert.match(SHELL, /action: 'send_outreach', assistantId: window\._currentAssistantId, recordId,/,
+        'which is the one place that POSTs send_outreach');
     // ⚠️ Anchored on the PUSH, not on the bare label. "label: 'Approve'" also occurs in
     // nextStepGuidance(), which offers Approve as the next-step button — a slice starting there
     // runs through half the file and stops asserting anything about this handler.

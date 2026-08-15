@@ -2,9 +2,11 @@
 // Internal Data Hub API (Golden Rule 2) — CRUD for assistant_records, the tenant
 // work products behind the Data Hub tab on assistant-detail.html.
 //
-//  GET    ?assistantId=<id>&recordType=<type>[&approvalStatus=<s>][&deliverable=1][&format=csv]
+//  GET    ?assistantId=<id>&recordType=<type>[&approvalStatus=<s>[,<s>…]][&deliverable=1][&format=csv]
 //         → { records: [...] } or a CSV download. `deliverable=1` keeps only records that have
 //           both a resolvable recipient and a drafted body — see the block comment on the filter.
+//           `approvalStatus` takes a comma-separated list; the lead Approved column asks for
+//           `approved,scheduled` because a sent lead sits in the second state — see that filter.
 //  POST   { assistantId, recordType, records: [{ title, status?, data }, ...], source? }
 //         → bulk insert (CSV import) or single insert; upserts on (assistant, type, title)
 //  PATCH  { id, status?, data? }                            → update one record's lifecycle/state
@@ -277,8 +279,17 @@ export default withLambda(async (event) => {
 
             // Optional approval-gate filter — the Review Queue tab passes ?approvalStatus=pending_approval;
             // the Data Hub tab omits it (shows everything).
-            const approvalFilter = event.queryStringParameters?.approvalStatus;
+            //
+            // A COMMA-SEPARATED list is accepted, and the lead Review tab's Approved column uses it
+            // (`approved,scheduled`). Approving a lead whose email actually sends leaves the record
+            // 'scheduled' — that state is the CHASE REMINDER, not a pending send — so a single-state
+            // Approved column dropped every lead the moment its outreach went out: the one thing
+            // the user had just done made the lead vanish from the column they were watching.
+            // Unknown states are dropped rather than 400'd, so a stale client asking for a state
+            // that no longer exists gets an empty column instead of an error.
             const APPROVAL_STATES = new Set(['pending_approval', 'approved', 'scheduled', 'rejected']);
+            const approvalFilter = (event.queryStringParameters?.approvalStatus || '')
+                .split(',').map((s) => s.trim()).filter((s) => APPROVAL_STATES.has(s));
 
             // ── Optional deliverability filter (?deliverable=1) ──────────────────────────────
             // Stocks the lead Review Queue with the leads that actually have an email awaiting
@@ -325,7 +336,9 @@ export default withLambda(async (event) => {
                     eq(assistantRecords.organisationId, orgId),
                     eq(assistantRecords.aiAssistantId, assistantId),
                     eq(assistantRecords.recordType, recordType),
-                    ...(approvalFilter && APPROVAL_STATES.has(approvalFilter) ? [eq(assistantRecords.approvalStatus, approvalFilter)] : []),
+                    // ⚠️ `inArray`, never a raw sql`` with an interpolated array — drizzle renders a
+                    // JS array inside a template as a ROW constructor, and `= ANY((a,b))` is a 42809.
+                    ...(approvalFilter.length ? [inArray(assistantRecords.approvalStatus, approvalFilter)] : []),
                     ...(deliverableOnly ? [deliverableWhere] : []),
                 ))
                 .orderBy(desc(assistantRecords.updatedAt));
