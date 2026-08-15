@@ -784,6 +784,28 @@ node_bundler = "esbuild"
 [functions.archive-cleanup]
   schedule = "0 4 * * *"
 
+# Lead Generator retention: move leads that sat in Outreach ▸ Review or ▸ Archived for 30 days into
+# the retained "Deleted" state — 04:45 UTC daily, in the same part of the night as the other two
+# lifecycle sweeps (04:00 archive-cleanup, 04:30 purge-archived-assistants) so a bad night is one
+# stretch of log to read rather than three.
+#
+# ⚠️ Despite the name this sweep DELETES NOTHING. It stamps assistant_records.data.retention and
+# leaves every row, every link and every discovery record in place — see the function header for
+# why a hard delete is the wrong shape for a lead specifically.
+[functions.lead-retention-sweep]
+  schedule = "45 4 * * *"
+
+# Lead Generator deep enrichment: re-read leads whose intel has gone stale, so a rating is not
+# frozen at whatever the first search-result snippet said — 05:30 UTC daily.
+#
+# ⚠️ DEFAULT OFF (LEAD_ENRICH_SWEEP_ENABLED), and it is the ONLY cron here that spends money with
+# nobody watching: up to four searches plus a model call per lead. The schedule being present does
+# not start the spending; the env var does. Runs AFTER the retention sweep at 04:45 so a lead that
+# was going to be moved out of Outreach tonight is moved first, rather than being researched at
+# cost and then dropped an hour later.
+[functions.lead-enrichment-sweep]
+  schedule = "30 5 * * *"
+
 # US4: content_assets retention — purge the R2 objects of posted/rejected media past their window.
 # 05:00 UTC daily, AFTER archive-cleanup (04:00), because that job is what hands media over: it
 # releases a departing post's assets, and this one reclaims the bytes.

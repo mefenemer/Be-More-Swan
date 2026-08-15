@@ -404,9 +404,24 @@
       },
       hubTab: {
         id: 'datahub',
-        label: 'Leads',
+        // "Enrichment", not "Leads". The strip reads Searches → Enrichment → Outreach →
+        // Conversations, and each tab is now named for the WORK done on it rather than for the
+        // noun it contains — "Leads" sat between two verbs and was the only one that did not say
+        // what you go there to do.
+        //
+        // ⚠️ The tab is still the role's Data Hub, and it still holds every lead in every state.
+        // The name is a promise about what happens here, so the enrichment actions have to be
+        // real: "Send back for enrichment" runs an actual scrape + paid-lookup pass on the spot
+        // (lead-generation.ts `send_back_for_enrichment`), rather than clearing a stamp and
+        // waiting for a discovery run the way "Look again" does.
+        //
+        // ⚠️ Renaming this fails tests/lead-prompt-surfaces.test.ts until leadGeneratorSurfaces()
+        // in chat-orchestrator.ts names the tab too — the assistant tells users which tab to go
+        // to, and a stale name there sends them to a tab that does not exist. Same coupling the
+        // reviewQueue label above carries.
+        label: 'Enrichment',
         recordType: 'lead',
-        description: 'Every lead this assistant has scored — with its outreach draft — plus any lead lists you import.',
+        description: 'Every lead this assistant has scored — with its outreach draft — plus any lead lists you import. This is where a lead is enriched: contact details found, details corrected, and cold leads worked up into warm ones.',
         // Manual entry: the Data Hub shows an "Add Lead" button (assistant-data-hub.js) that
         // scores a single hand-typed lead via netlify/functions/lead-generation.ts (score_lead).
         manualAdd: true,
@@ -427,6 +442,15 @@
           { key: 'score', label: 'Score' },
           { key: 'status', label: 'Rating' },
           { key: 'suggestedNextStep', label: 'Next step' },
+          // The 30-day retention countdown (src/config/lead-retention.ts). SYNTHETIC, like
+          // `contact` above — there is no such field on the record; assistant-data-hub.js
+          // `retentionCell()` derives it from the approval state and the envelope's updatedAt.
+          //
+          // It sits immediately before Updated because the two are the same fact read in opposite
+          // directions: Updated is when the clock last restarted, Deletes in is what that means
+          // for this lead. Reading them side by side is what makes the countdown explicable
+          // rather than arbitrary.
+          { key: 'retention', label: 'Deletes in' },
           { key: 'updatedAt', label: 'Updated' },
         ],
         importHint: 'Upload a CSV of inbound leads — one row per lead. Exporting from Excel or Google Sheets? Use File → Download → CSV.',
@@ -438,7 +462,7 @@
       ideasReview: {
         label: 'Review Lead Ideas',
         title: 'Lead Ideas',
-        description: 'Ideas for where to find your next customers. Approve one and the Lead Generator finds matching companies, scores them into your Leads tab, and suggests the next best action for each.',
+        description: 'Ideas for where to find your next customers. Approve one and the Lead Generator finds matching companies, scores them into your Enrichment tab, and suggests the next best action for each.',
       },
       // "Find New Leads" (assistant-discovery-campaigns.js) — the outbound discovery engine:
       // author an Idea/Blueprint + cadence + guardrails; a background run searches the web,
@@ -724,5 +748,42 @@
     return REGISTRY[roleKey] || REGISTRY.social_media_manager;
   }
 
-  window.AssistantDashboardRegistry = { get, REGISTRY };
+  /**
+   * Write a tab button's label with its record count: "Enrichment (48)".
+   *
+   * ── Why this is one function and not four ────────────────────────────────
+   * The Lead Generator's four tabs had four different answers to "how many?", and the
+   * inconsistency read as four unrelated features rather than one funnel:
+   *   Searches      "Searches (12)" + an amber pill
+   *   Leads         "Leads (48)"
+   *   Outreach      no number at all — just an amber pill holding a DIFFERENT quantity
+   *                 (pending approvals, not the tab's contents)
+   *   Conversations nothing
+   *
+   * One rule now, and it separates two questions that were being answered in the same place:
+   *   • the PARENTHETICAL is inventory — what this tab holds. Always this function.
+   *   • the amber PILL is "needs you now" — a subset, and never the same number.
+   * The pill stays where each component sets it; only the parenthetical is centralised, because
+   * that is the part that has to look identical across tabs to read as one strip.
+   *
+   * `(0)` is suppressed on every tab, matching what Searches and the Data Hub already did
+   * independently: an empty tab says so in its own body, and a zero on the button reads as a
+   * counter that failed to load rather than an empty list.
+   *
+   * ⚠️ Callers pass the BASE label, never the current textContent. Reading the element back would
+   * re-wrap an already-wrapped label into "Enrichment (48) (49)" on the second call, and these are
+   * all called repeatedly — every refresh, every approve, every filter change.
+   *
+   * @param {string} elId       id of the <span> inside the tab button
+   * @param {string} baseLabel  the role's label for this tab, from the registry
+   * @param {number|null} count null/undefined leaves the bare label (the count is not known yet)
+   */
+  function setTabCount(elId, baseLabel, count) {
+    const el = document.getElementById(elId);
+    if (!el || !baseLabel) return;
+    const n = Number(count);
+    el.textContent = Number.isFinite(n) && n > 0 ? `${baseLabel} (${n})` : baseLabel;
+  }
+
+  window.AssistantDashboardRegistry = { get, REGISTRY, setTabCount };
 })();

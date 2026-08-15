@@ -346,7 +346,7 @@
     return `
       <div class="border border-gray-200 rounded-xl p-4">
         <p class="font-bold text-gray-900">Here’s what it will search</p>
-        <p class="text-xs text-gray-500 mt-0.5">These are the exact web searches. Edit or remove any that look wrong — each one costs a search, and a bad one fills your Leads tab with things you can’t sell to.</p>
+        <p class="text-xs text-gray-500 mt-0.5">These are the exact web searches. Edit or remove any that look wrong — each one costs a search, and a bad one fills your Enrichment tab with things you can’t sell to.</p>
         ${groups}
 
         <div class="mt-4 pt-3 border-t border-gray-100">
@@ -455,7 +455,7 @@
       });
       window.showToast?.(data.alreadyRunning
         ? 'A run is already in progress.'
-        : `Approved — running ${data.queryCount} search${data.queryCount === 1 ? '' : 'es'}. Leads appear in your Leads tab as they’re found.`);
+        : `Approved — running ${data.queryCount} search${data.queryCount === 1 ? '' : 'es'}. Leads appear in your Enrichment tab as they’re found.`);
       window._leadIdeasDidAddLeads = true;
       await refresh();
     } catch (err) {

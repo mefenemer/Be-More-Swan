@@ -120,7 +120,18 @@ const EMIT_SITES: Record<string, number> = {
     'netlify/functions/assistant-records.ts': 2,      // single approval gate / bulk reject
     'netlify/functions/signal-inbox.ts': 1,
     'netlify/functions/lead-generation.ts': 4,      // score / dnc-override / outreach / set_outcome
-    'netlify/functions/process-discovery-jobs.ts': 3,
+    // Was 3. The `lead_enriched` emit left with `recordEnrichment`, which moved to
+    // src/utils/lead-enrichment.ts so the worker and the on-demand "Send back for enrichment" path
+    // share one writer. The call itself is unchanged and still carries blueprintVersion — it is
+    // simply counted at its new address on the line below.
+    'netlify/functions/process-discovery-jobs.ts': 2,
+    // Two: `lead_enriched` when contact enrichment finds an address, and `lead_scored` again when
+    // deep enrichment MOVES a lead's rating. The second reuses the existing event type rather than
+    // adding one — db/revenue-events.sql is a manual apply and its CHECK constraint would reject a
+    // new value on any environment that had not been migrated. "How did this lead's score move
+    // over time?" is answered by ordering the lead_scored rows, which is what the Strategy Agent
+    // wants anyway; `rescore: true` in the payload distinguishes them.
+    'src/utils/lead-enrichment.ts': 2,
 };
 
 /**

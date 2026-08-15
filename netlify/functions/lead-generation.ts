@@ -17,6 +17,14 @@
 //          marks the idea 'approved', and returns the leads grouped by owner.
 //   POST { action: 'decline_idea',   assistantId, ideaId }
 //        → marks the idea 'declined'.
+//   POST { action: 'send_back_for_enrichment', assistantId, recordId }
+//        → the one way off the 30-day retention clock and out of the Deleted section: clears the
+//          retention verdict and the enrichment stamp, un-rejects the lead, and runs a real
+//          scrape + paid-lookup pass on the spot. See that branch for why it is not `look_again`.
+//   POST { action: 'enrich_lead', assistantId, recordId }
+//        → deep enrichment: research the company (buying signals, decision-makers, tech/size
+//          fingerprint) and RE-SCORE it on what turns up. The only path that can move a lead's
+//          rating. Spends real money per press — see that branch.
 //
 // LLM plumbing mirrors chat-orchestrator.ts (Anthropic SDK, ICP from onboardingContext,
 // direct assistant_records inserts) — so it is not bound by the RECORD_TYPES/SOURCES sets in
@@ -40,6 +48,7 @@ import { IntegrationError } from '../../src/utils/workspace-integrations';
 import { recordEvent, cycleDaysBetween } from '../../src/utils/revenue-ledger';
 import { getBlueprintVersion } from '../../src/utils/blueprint-version';
 import { makeIcpSnapshotCache } from '../../src/utils/icp-snapshot';
+import { enrichOneLead, deepEnrichLead } from '../../src/utils/lead-enrichment';
 import {
     OUTCOMES, LOSS_REASONS, EVENT_FOR_OUTCOME, OUTCOMES_REQUIRING_LOSS_REASON,
     isOutcome, isLossReason, type LossReason,
@@ -480,6 +489,250 @@ ${OUTREACH_SUBJECT_RULES}`;
                 .where(eq(assistantRecords.id, recordId));
 
             return json(200, { requeued: true, recordId });
+        }
+
+        // ── Send a lead back for enrichment ───────────────────────────────────────
+        //
+        // The one way out of the 30-day retention clock (src/config/lead-retention.ts), and the only
+        // way back out of the Deleted section once the sweep has moved a lead.
+        //
+        // ── How this differs from `look_again` above, and why both exist ─────────
+        // `look_again` clears a stamp and waits: enrichment happens inside a discovery job on the
+        // lead's own campaign, so the honest thing it can say is "the next run will read this site".
+        // That is useless to someone rescuing a lead from Deleted — the whole reason it landed there
+        // is that nothing came back for 30 days, and being told to wait for another run is the same
+        // dead end in a new coat.
+        //
+        // So this one ENRICHES ON THE SPOT: the same two tiers, the same writer, one lead, now
+        // (src/utils/lead-enrichment.ts). It also reaches leads `look_again` refuses outright — a
+        // CSV-imported or hand-added lead has no `discovered_leads` row, and `enrichBatch` selects
+        // from that table, so those leads had never been enriched by anything in the product's
+        // history. Here the domain can come off the record itself.
+        //
+        // ⚠️ Deliberately does NOT clear a `doNotContact` flag. That verdict is the one thing in the
+        // Deleted section that must survive a user deciding to pursue the company anyway; clearing
+        // it is `override_do_not_contact`, a separate, audited action that records who did it.
+        if (action === 'send_back_for_enrichment') {
+            const recordId = Number(body.recordId);
+            if (!Number.isInteger(recordId)) return json(400, { error: 'recordId is required.' });
+
+            const [rec] = await db
+                .select({
+                    id: assistantRecords.id,
+                    data: assistantRecords.data,
+                    approvalStatus: assistantRecords.approvalStatus,
+                })
+                .from(assistantRecords)
+                .where(and(
+                    eq(assistantRecords.id, recordId),
+                    eq(assistantRecords.organisationId, orgId),
+                    eq(assistantRecords.aiAssistantId, assistant.id),
+                    eq(assistantRecords.recordType, 'lead'),
+                ))
+                .limit(1);
+            if (!rec) return json(404, { error: 'Lead not found.' });
+
+            const data = (rec.data && typeof rec.data === 'object' && !Array.isArray(rec.data))
+                ? rec.data as Record<string, unknown> : {};
+
+            // The discovery row, when there is one — it holds the domain and the stamp that governs
+            // the worker's own eligibility, and both have to be cleared together or the lead reads
+            // as re-queued on one surface and untouched on the other.
+            const [lead] = await db
+                .select({ id: discoveredLeads.id, domain: discoveredLeads.domain })
+                .from(discoveredLeads)
+                .where(and(
+                    eq(discoveredLeads.assistantRecordId, recordId),
+                    eq(discoveredLeads.organisationId, orgId),
+                ))
+                .limit(1);
+
+            // Domain precedence: the discovery row first (normalised at insert — lowercased, no
+            // www, and it is the dedupe key), then whatever the record carries. A CSV import writes
+            // `website`; the Add-a-lead form writes the same key.
+            const recordSite = str(data.website as string, 300) || str((data.lead as Record<string, unknown> | undefined)?.website as string, 300);
+            const domain = lead?.domain || recordSite || null;
+
+            // Clear the stamps FIRST, so the pass below is not skipped by its own history and so a
+            // failure between here and the enrichment leaves the lead genuinely eligible rather
+            // than half-restored. `-` removes the key outright: setting it null would satisfy
+            // `IS NULL` in SQL but leave an explicit null to be carried around by every later merge.
+            if (lead) {
+                await db.update(discoveredLeads)
+                    .set({ signals: sql`COALESCE(${discoveredLeads.signals}, '{}'::jsonb) - 'enrichAttemptedAt'`, updatedAt: new Date() })
+                    .where(eq(discoveredLeads.id, lead.id));
+            }
+
+            // Three things in one write on the record:
+            //   • drop `enrichAttemptedAt` so the Contact column stops saying "we looked"
+            //   • drop the retention verdict (`deletedAt`, `reason`) so the lead leaves Deleted
+            //   • stamp `returnedAt`, which is the only durable evidence a human rescued this lead
+            //
+            // `jsonb_set` on the retention key rather than a read-modify-write of `data`: this row
+            // is written by the Review Queue, the Edit form, the enrichment pass immediately below
+            // and the sweep, and writing back the object read a moment ago would discard whichever
+            // of them committed in between.
+            await db.update(assistantRecords)
+                .set({
+                    data: sql`jsonb_set(
+                        COALESCE(${assistantRecords.data}, '{}'::jsonb) - 'enrichAttemptedAt',
+                        '{retention}',
+                        (COALESCE(${assistantRecords.data} -> 'retention', '{}'::jsonb) - 'deletedAt' - 'reason')
+                            || jsonb_build_object('returnedAt', ${new Date().toISOString()}::text),
+                        true
+                    )`,
+                    // A rejected lead coming back has to stop being rejected, or it re-enters the
+                    // Archived column and is swept again in 30 days having never been reconsidered.
+                    // Anything else keeps the state it had: an approved lead sent back for a better
+                    // address is still approved.
+                    ...(rec.approvalStatus === 'rejected' ? { approvalStatus: 'pending_approval' } : {}),
+                    // Restarts the 30-day clock — `updated_at` IS the clock (see lead-retention.ts).
+                    updatedAt: new Date(),
+                })
+                .where(eq(assistantRecords.id, recordId));
+
+            // No domain means nothing to read. The lead is still rescued — it has left Deleted and
+            // its clock has restarted, which is what the user asked for — but say plainly that no
+            // lookup happened, rather than reporting an enrichment that never ran.
+            if (!domain) {
+                return json(200, {
+                    returned: true, recordId, enriched: false, looked: false,
+                    message: 'Back in your pipeline. There is no website on file for this company, so nothing could be looked up — add an address by hand, or check the company details.',
+                });
+            }
+
+            const ledger = {
+                organisationId: orgId,
+                aiAssistantId: assistant.id,
+                blueprintVersion: await blueprintVersion(),
+                icpSnapshot: await icpSnapshot(recordId),
+            };
+
+            const outcome = await enrichOneLead(db, {
+                domain,
+                discoveredLeadId: lead?.id ?? null,
+                assistantRecordId: recordId,
+                ledger,
+            });
+
+            // ── The deep pass, on the same press ──
+            // A lead reaches the Deleted section because 30 days produced nothing, and the single
+            // most likely reason its rating was wrong is that the rating was formed from one thin
+            // SERP snippet before anything was known about the company. Finding an address for a
+            // lead nobody wants to email is only half a rescue; this is the half that can make it
+            // worth emailing.
+            //
+            // Runs AFTER the contact pass, deliberately: the re-scorer writes the outreach draft,
+            // and a draft written while we still had no address would be composed for a lead the
+            // user cannot act on.
+            const deep = await deepEnrichLead(db, {
+                assistantRecordId: recordId,
+                discoveredLeadId: lead?.id ?? null,
+                domain,
+                assistantName: assistant.name,
+                icp: onboarding,
+                ledger,
+            });
+
+            // Both halves get a sentence, because they answer different questions — "can we reach
+            // them now?" and "are they worth reaching?" — and a rescue that improved one but not
+            // the other must not read as a flat success or a flat failure.
+            const contactLine = outcome.found
+                ? `we found an address: ${outcome.email}`
+                : Object.keys(outcome.handles || {}).length
+                    ? 'we found no address, but we did find a social profile you can open yourself'
+                    : 'we read their site and found no address to write to';
+
+            return json(200, {
+                returned: true,
+                recordId,
+                enriched: outcome.found,
+                looked: true,
+                email: outcome.email,
+                handles: outcome.handles,
+                rescored: deep.changed,
+                previous: deep.previous,
+                next: deep.next,
+                signals: deep.signals,
+                people: deep.people,
+                message: `Back in your pipeline — ${contactLine}. ${deep.message}`,
+            });
+        }
+
+        // ── Deep enrichment: research a lead and re-score it on what turns up ─────
+        //
+        // The only thing in this product that can move a lead's TEMPERATURE. Contact enrichment
+        // changes whether we can reach a company; this changes whether it is worth reaching, which
+        // is what "convert the lead from cold to warm" actually requires.
+        //
+        // ⚠️ SPENDS MONEY on every press: up to four searches plus a model call. That is why it is
+        // a deliberate per-lead button and not something the tab does on load — and why there is
+        // no bulk version. A "research all my leads" control would be one click costing a few
+        // hundred searches, which is exactly the shape of spend that needs a human deciding per
+        // lead. The nightly cadence (lead-enrichment-sweep.ts) is the batched path, and it has its
+        // own operator-set ceiling.
+        if (action === 'enrich_lead') {
+            const recordId = Number(body.recordId);
+            if (!Number.isInteger(recordId)) return json(400, { error: 'recordId is required.' });
+
+            const [rec] = await db
+                .select({ id: assistantRecords.id, data: assistantRecords.data })
+                .from(assistantRecords)
+                .where(and(
+                    eq(assistantRecords.id, recordId),
+                    eq(assistantRecords.organisationId, orgId),
+                    eq(assistantRecords.aiAssistantId, assistant.id),
+                    eq(assistantRecords.recordType, 'lead'),
+                ))
+                .limit(1);
+            if (!rec) return json(404, { error: 'Lead not found.' });
+
+            const recData = (rec.data && typeof rec.data === 'object' && !Array.isArray(rec.data))
+                ? rec.data as Record<string, unknown> : {};
+
+            const [link] = await db
+                .select({ id: discoveredLeads.id, domain: discoveredLeads.domain })
+                .from(discoveredLeads)
+                .where(and(
+                    eq(discoveredLeads.assistantRecordId, recordId),
+                    eq(discoveredLeads.organisationId, orgId),
+                ))
+                .limit(1);
+
+            // Same precedence as send_back_for_enrichment: the discovery row's normalised domain
+            // first, then whatever the record itself carries, so imported and hand-added leads —
+            // which have no discovery row at all — are reachable here too.
+            const site = str(recData.website as string, 300)
+                || str((recData.lead as Record<string, unknown> | undefined)?.website as string, 300);
+            const domain = link?.domain || site || null;
+            if (!domain) {
+                return json(400, { error: 'No website is recorded for this company, so there is nothing to research. Add one with Edit first.' });
+            }
+
+            const outcome = await deepEnrichLead(db, {
+                assistantRecordId: recordId,
+                discoveredLeadId: link?.id ?? null,
+                domain,
+                assistantName: assistant.name,
+                icp: onboarding,
+                ledger: {
+                    organisationId: orgId,
+                    aiAssistantId: assistant.id,
+                    blueprintVersion: await blueprintVersion(),
+                    icpSnapshot: await icpSnapshot(recordId),
+                },
+            });
+
+            return json(200, {
+                enriched: outcome.ran,
+                changed: outcome.changed,
+                previous: outcome.previous,
+                next: outcome.next,
+                signals: outcome.signals,
+                people: outcome.people,
+                hooks: outcome.hooks,
+                message: outcome.message,
+            });
         }
 
         // ── Record the deal outcome for a lead (Phase 4.5) ────────────────────────
@@ -1130,7 +1383,7 @@ Return STRICT JSON only (no markdown), an array of exactly 3 objects:
                 jobId,
                 searchConfigured: isSearchConfigured(),
                 message: isSearchConfigured()
-                    ? 'Discovery run started — found leads will appear in your Leads tab for approval shortly.'
+                    ? 'Discovery run started — found leads will appear in your Enrichment tab for approval shortly.'
                     : 'Idea approved, but no web search provider is connected yet — connect one to start discovering real leads.',
             });
         }

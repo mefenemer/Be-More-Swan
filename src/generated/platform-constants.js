@@ -332,6 +332,65 @@
     isDeliverable: isLeadDeliverable,
   };
 
+  // ── Lead retention (the 30-day clock) ─────────────────────────────────────
+  // From src/config/lead-retention.ts, stringified — the REAL countdown, for the sharpest version
+  // of the reason the two blocks above are mirrored: this number sits beside a lead and tells the
+  // user how long they have to act before it is moved out of their pipeline automatically. A
+  // browser copy that drifted from the sweep would count down to the wrong day, and the user would
+  // find out by losing a lead on the day the screen said they had three left.
+  //
+  // The agreement is structural rather than careful: the clock is updated_at on both sides
+  // (there is no second stamp to fall out of step — see retentionClockStart's header), and every
+  // function below is the same source the server runs.
+  //
+  // Free variables (RETENTION_FIELD, RETENTION_DELETED_FIELD, LEAD_RETENTION_DAYS,
+  // isRetentionDeleted) resolve to the declarations directly above, so the names must match.
+  var LEAD_RETENTION_DAYS = 30;
+  var RETENTION_FIELD = "retention";
+  var RETENTION_DELETED_FIELD = "deletedAt";
+  var RETENTION_REASONS = ["do_not_contact","rejected","enrichment_failed","not_contactable","unreviewed"];
+  var isRetentionDeleted = function isRetentionDeleted(data){if(!data||typeof data!=="object")return false;const r=data[RETENTION_FIELD];if(!r||typeof r!=="object")return false;const at=r[RETENTION_DELETED_FIELD];return typeof at==="string"&&at.trim()!==""};
+  var retentionReasonOf = function retentionReasonOf(data){if(!isRetentionDeleted(data))return null;const r=data[RETENTION_FIELD];const reason=r.reason;return typeof reason==="string"&&RETENTION_REASONS.includes(reason)?reason:"unreviewed"};
+  var retentionClockStart = function retentionClockStart(updatedAtIso){return updatedAtIso&&updatedAtIso.trim()?updatedAtIso:null};
+  var retentionDaysRemaining = function retentionDaysRemaining(clockStartIso,now){if(!clockStartIso)return null;const started=Date.parse(clockStartIso);if(Number.isNaN(started))return null;const deadline=started+LEAD_RETENTION_DAYS*864e5;const remainingMs=deadline-(now?now.getTime():Date.now());if(remainingMs<=0)return 0;return Math.ceil(remainingMs/864e5)};
+  var retentionCountdownLabel = function retentionCountdownLabel(daysRemaining){if(daysRemaining===null)return"";if(daysRemaining===0)return"Due for deletion";if(daysRemaining===1)return"1 day left";return`${daysRemaining} days left`};
+  var retentionUrgency = function retentionUrgency(daysRemaining){if(daysRemaining===null)return"none";if(daysRemaining<=3)return"urgent";if(daysRemaining<=7)return"soon";return"low"};
+
+  window.LeadRetention = {
+    /** How long a lead may sit in Outreach ▸ Review or ▸ Archived before it is moved to Deleted. */
+    DAYS: LEAD_RETENTION_DAYS,
+
+    /** Has the sweep already moved this lead? Presence of deletedAt is the test. */
+    isDeleted: isRetentionDeleted,
+
+    /** Why it was moved — a RETENTION_REASONS key — or null if the lead is still live. */
+    reasonOf: retentionReasonOf,
+
+    /** What the Deleted section prints for each reason. */
+    REASON_LABELS: {"do_not_contact":"Must not be contacted","rejected":"You turned this lead down","enrichment_failed":"No contact address could be found","not_contactable":"Never had a contact address","unreviewed":"Waited 30 days without a decision"},
+    REASON_NOTES: {"do_not_contact":"This company was flagged as one we must never email — a competitor, an internal account, or someone who asked not to be contacted. Sending it back for enrichment will not clear that flag.","rejected":"You rejected this lead, and 30 days passed without it being picked back up. Sending it back for enrichment returns it to the pipeline and starts the clock again.","enrichment_failed":"We read this company’s website and found no address to write to. Sending it back for enrichment tries again, including the paid lookup if it is available.","not_contactable":"This lead never had a contact address and was never enriched — cold leads are skipped on rating. Sending it back for enrichment reads their site for the first time.","unreviewed":"A drafted email sat waiting for your approval for 30 days. Nothing was ever sent. Sending it back for enrichment refreshes what we know and returns it to the pipeline."},
+
+    /**
+     * Whole days left, from the record envelope's updatedAt. Null when there is nothing to read,
+     * so callers render nothing rather than "NaN days".
+     */
+    daysRemaining: function (updatedAtIso, now) {
+      return retentionDaysRemaining(retentionClockStart(updatedAtIso), now);
+    },
+
+    /** "3 days left" / "1 day left" / "Due for deletion" — the exact string every surface shows. */
+    countdownLabel: retentionCountdownLabel,
+
+    /** 'none' | 'low' | 'soon' | 'urgent' — how loudly the countdown should be drawn. */
+    urgency: retentionUrgency,
+
+    /** The standing notice above the Review and Archived columns. */
+    NOTICE: "Leads left here for 30 days are moved to Deleted automatically. Nothing is sent, and the move cannot be undone — but the lead is kept, with the reason it was dropped, in the Deleted section of the Enrichment tab. To stop the countdown on a lead, send it back for enrichment before it runs out.",
+
+    /** The Deleted section's own header line. */
+    DELETED_NOTICE: "Leads that sat in Outreach for 30 days without a decision, or that were rejected and never picked back up. They are kept so a later search does not surface the same company as though it were new. Sending one back for enrichment returns it to the pipeline.",
+  };
+
   // ── Lead email kind ───────────────────────────────────────────────────────
   // From src/config/lead-email-kind.ts, stringified — the REAL classifier, and it has to be, for a
   // sharper reason than the two above. The browser writes emailKind now: a user typing an address

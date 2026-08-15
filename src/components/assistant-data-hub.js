@@ -161,12 +161,47 @@
 
   // Resolve a hubTab column key against a record: envelope fields first, then a
   // dot-path into record.data. Arrays read as counts.
+  /**
+   * The retention countdown for one lead: how long before the sweep moves it to Deleted.
+   *
+   * ── Which leads are on a clock, and why the others read "—" ─────────────────
+   * Only the two states the sweep collects: `pending_approval` and `rejected`. An approved lead is
+   * being worked and a `scheduled` one has had its email SENT (that state is the chase reminder on
+   * this role, not a queued send) — neither is ever swept, so a countdown beside them would be a
+   * threat the system does not carry out. An em-dash, never a guess and never a blank.
+   *
+   * ⚠️ Every number and every word here comes from window.LeadRetention, which is generated from
+   * src/config/lead-retention.ts — the same source the nightly sweep runs. Computing "30 days from
+   * updatedAt" locally would be four lines and would be the one place this could drift, on a
+   * countdown whose whole job is to be trusted.
+   */
+  const RETENTION_URGENCY_CLS = {
+    urgent: 'bg-red-50 text-red-700 border-red-200',
+    soon: 'bg-amber-50 text-amber-800 border-amber-200',
+    low: 'bg-gray-100 text-gray-600 border-gray-200',
+  };
+
+  function retentionCell(record) {
+    const R = window.LeadRetention;
+    const swept = record.approvalStatus === 'pending_approval' || record.approvalStatus === 'rejected';
+    if (!R || !swept || R.isDeleted(record.data)) return { text: '—', html: '<span class="text-gray-400">—</span>' };
+    const days = R.daysRemaining(record.updatedAt);
+    const text = R.countdownLabel(days);
+    if (!text) return { text: '—', html: '<span class="text-gray-400">—</span>' };
+    const cls = RETENTION_URGENCY_CLS[R.urgency(days)] || RETENTION_URGENCY_CLS.low;
+    return {
+      text,
+      html: `<span class="text-xs font-bold px-2 py-0.5 rounded-full border whitespace-nowrap ${cls}">${esc(text)}</span>`,
+    };
+  }
+
   function cellValue(record, key) {
     if (key === 'title') return record.title;
     if (key === 'status') return record.status ?? '—';
     // Records predating the approval gate carry no status at all — an em-dash, never a guess.
     if (key === 'approvalStatus') return approvalChip(record)?.short ?? '—';
     if (key === 'contact') return CONTACT_CHIP[contactState(record)].short;
+    if (key === 'retention') return retentionCell(record).text;
     if (key === 'updatedAt') return fmtDate(record.updatedAt);
     let v = record.data;
     for (const part of String(key).split('.')) {
@@ -180,7 +215,25 @@
   }
 
   const state = {
-    hub: null, assistantId: null, records: [], pendingFocusId: null,
+    hub: null, assistantId: null, records: [], pendingFocusId: null, pendingFocusTone: null,
+    // Leads the 30-day retention sweep has moved (src/config/lead-retention.ts). A SEPARATE array
+    // from `records`, deliberately — see fetchDeletedRecords for why the two populations are never
+    // merged. Empty on every hub but the Lead Generator's.
+    deletedRecords: [],
+    // Is the Deleted section folded open? Collapsed by default: it is a graveyard, and a user
+    // arriving at the Enrichment tab is there for live leads. Part of the view state rather than
+    // the DOM for the same reason `collapsed` below is — the section is re-rendered on every
+    // refresh and a fold recorded in the markup would spring open.
+    deletedOpen: false,
+    // What the last "Send back for enrichment" actually achieved, kept as STATE so it survives the
+    // repaint that follows it: { title, message, enriched }.
+    //
+    // ⚠️ This exists because writing the outcome into the row was silently useless. Sending a lead
+    // back removes it from this section, so the refresh that follows re-renders the section
+    // WITHOUT that row — taking the sentence with it. The sentence is the entire point of the
+    // action: it is the only thing that says whether the enrichment pass found an address or
+    // found nothing, and "it vanished from the list" cannot distinguish those.
+    returnedNotice: null,
     // How the table is being READ right now — the filter/sort/group controls. Kept out of the
     // record list so a refetch (which happens every time the tab is opened) leaves the user's
     // view alone: coming back to a tab you had filtered to "Awaiting you" and finding it reset is
@@ -201,10 +254,44 @@
   async function fetchRecords() {
     // Content Library (social/blog Data Hub) reads posts, not assistant_records.
     if (state.hub.kind === 'content_library') { state.records = await fetchContentLibrary(); return; }
-    const res = await fetch(`${API}?assistantId=${state.assistantId}&recordType=${encodeURIComponent(state.hub.recordType)}`);
+    const type = encodeURIComponent(state.hub.recordType);
+    const res = await fetch(`${API}?assistantId=${state.assistantId}&recordType=${type}`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Could not load records.');
+    // ⚠️ LIVE records only. The endpoint defaults to ?retention=live, so leads the 30-day sweep
+    // has moved are NOT in here — they are fetched separately below and rendered in their own
+    // section. Keeping them out of `state.records` is what stops them appearing in the table, the
+    // filters, the group-by counts, the bulk-selection set and the tab count, all of which read
+    // this array and all of which describe leads the user can still act on.
     state.records = data.records || [];
+    await fetchDeletedRecords();
+  }
+
+  /**
+   * The Deleted section's rows: leads the retention sweep has moved (src/config/lead-retention.ts).
+   *
+   * Leads only, and fetched separately rather than filtered out of one big response, for two
+   * reasons. The graveyard grows without bound while the live list does not, so folding them into
+   * the same fetch would make every Enrichment tab load pay for every lead ever dropped. And
+   * `state.records` is read by nine other things (table, filters, groups, counts, selection,
+   * paging, CSV, deep-link focus); a single array holding two populations would need each of them
+   * to remember which one it meant.
+   *
+   * Never throws. The Deleted section is supplementary — a failure here must not take down the
+   * table of live leads beside it.
+   */
+  async function fetchDeletedRecords() {
+    state.deletedRecords = [];
+    if (state.hub.recordType !== 'lead') return;
+    try {
+      const type = encodeURIComponent(state.hub.recordType);
+      const res = await fetch(`${API}?assistantId=${state.assistantId}&recordType=${type}&retention=deleted`);
+      if (!res.ok) return;
+      const data = await res.json().catch(() => ({}));
+      state.deletedRecords = data.records || [];
+    } catch {
+      // Leave it empty; the section renders nothing rather than an error over live data.
+    }
   }
 
   // ── Content Library (kind: 'content_library') ───────────────────────────────
@@ -454,6 +541,96 @@
         ${links.join('')}
       </div>
       <p class="text-xs text-gray-500 mt-1.5">${esc(note)}</p>`;
+    return wrap;
+  }
+
+  // ── What deep enrichment found ─────────────────────────────────────────────
+  //
+  // Everything the research pass turned up, on the lead it turned up about: what changed and why,
+  // the signals with their sources, and who was named on the company's own pages.
+  //
+  // ── The rule this panel is built around ────────────────────────────────────
+  // EVERY CLAIM CARRIES ITS SOURCE LINK. A model summarising a headline is doing a useful job and
+  // is also the single most likely thing on this screen to be subtly wrong, so a user must always
+  // be one click from the article it read. Signals arrive pre-filtered to evidence URLs we actually
+  // supplied (discovery-scoring.ts) and people are dropped unless their name appears verbatim in
+  // the page text (lead-enrichment.ts `verifyPeople`) — this renderer is the last of three gates,
+  // not the only one, and it still refuses to draw a signal with no link.
+  const SIGNAL_DIRECTION = {
+    positive: { icon: '▲', cls: 'text-emerald-700' },
+    negative: { icon: '▼', cls: 'text-red-600' },
+    neutral: { icon: '•', cls: 'text-gray-500' },
+  };
+
+  function intelBanner(record) {
+    const d = record.data || {};
+    const intel = d.intel && typeof d.intel === 'object' ? d.intel : null;
+    if (!intel) return null;
+
+    const signals = (Array.isArray(intel.signals) ? intel.signals : []).filter((s) => s && s.summary && s.url);
+    const people = (Array.isArray(intel.people) ? intel.people : []).filter((p) => p && p.name);
+    const hooks = (Array.isArray(intel.hooks) ? intel.hooks : []).filter((h) => typeof h === 'string' && h.trim());
+    const platforms = Array.isArray(intel.platforms) ? intel.platforms : [];
+    const moved = intel.changeSummary && intel.previousRating;
+
+    // "We looked and found nothing" is a RESULT, and a useful one — it is the difference between a
+    // lead nobody has researched and one there is genuinely nothing to say about. Rendering nothing
+    // here would make the two look identical, which is the same mistake `enrichAttemptedAt` exists
+    // to correct on the Contact column.
+    if (!signals.length && !people.length && !hooks.length && !platforms.length) {
+      const wrap = document.createElement('div');
+      wrap.className = 'mb-4 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2';
+      wrap.innerHTML = `<p class="text-xs text-gray-600">Researched ${esc(fmtDate(intel.gatheredAt))} — nothing published about this company that would change its rating.</p>`;
+      return wrap;
+    }
+
+    const wrap = document.createElement('div');
+    wrap.className = 'mb-4 rounded-xl border border-gray-200 bg-white p-3';
+    wrap.innerHTML = `
+      <div class="flex flex-wrap items-center gap-2 mb-2">
+        <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Research</span>
+        <span class="text-xs text-gray-400">${esc(fmtDate(intel.gatheredAt))}</span>
+        ${moved
+          ? `<span class="text-xs font-bold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-800 border-emerald-200">${esc(intel.changeSummary)}</span>`
+          : ''}
+      </div>
+
+      ${signals.length ? `
+        <ul class="space-y-1.5 mb-3">
+          ${signals.map((s) => {
+            const dir = SIGNAL_DIRECTION[s.direction] || SIGNAL_DIRECTION.neutral;
+            return `<li class="flex items-start gap-2 text-sm">
+              <span class="${dir.cls} font-bold shrink-0 mt-0.5">${dir.icon}</span>
+              <span class="text-gray-700 min-w-0">${esc(s.summary)}
+                <a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer nofollow"
+                   class="text-emerald-700 hover:underline font-semibold whitespace-nowrap">source &#8599;</a>
+              </span>
+            </li>`;
+          }).join('')}
+        </ul>` : ''}
+
+      ${people.length ? `
+        <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">Named on their site</p>
+        <ul class="space-y-1 mb-3">
+          ${people.map((p) => `<li class="text-sm text-gray-700">
+            <span class="font-semibold">${esc(p.name)}</span>${p.title ? ` — ${esc(p.title)}` : ''}
+            ${p.sourceUrl ? `<a href="${esc(p.sourceUrl)}" target="_blank" rel="noopener noreferrer nofollow"
+                 class="text-emerald-700 hover:underline font-semibold text-xs whitespace-nowrap">page &#8599;</a>` : ''}
+          </li>`).join('')}
+        </ul>
+        <p class="text-xs text-gray-500 mb-3">Taken from the company's own pages. We have no email address for these people, and nothing here contacts them.</p>` : ''}
+
+      ${hooks.length ? `
+        <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">Openers</p>
+        <ul class="list-disc pl-4 space-y-0.5 mb-3">
+          ${hooks.map((h) => `<li class="text-sm text-gray-700">${esc(h)}</li>`).join('')}
+        </ul>` : ''}
+
+      ${platforms.length || intel.hasCareersPage ? `
+        <div class="flex flex-wrap items-center gap-1.5">
+          ${platforms.map((p) => `<span class="text-xs font-semibold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200">${esc(p)}</span>`).join('')}
+          ${intel.hasCareersPage ? '<span class="text-xs font-semibold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200">Careers page</span>' : ''}
+        </div>` : ''}`;
     return wrap;
   }
 
@@ -1120,6 +1297,56 @@
           refreshRow(record);
         }});
       }
+      // ── Research this lead ──
+      // The one control on this tab that can change a lead's RATING, and the reason the tab is
+      // called Enrichment. It researches the company — recent funding, hiring, expansion, press,
+      // who is named on their site, what their site is built with — and re-reads the score against
+      // what it finds (lead-generation.ts `enrich_lead`).
+      //
+      // ⚠️ Deliberately per-lead, and deliberately not offered in bulk. Every press spends real
+      // money on searches and a model call; a "research all" button would be one click costing a
+      // few hundred searches. The nightly cadence is the batched path and it has an operator cap.
+      //
+      // Offered on every lead including rejected ones: "was I wrong to turn this down?" is exactly
+      // the question this answers, and the evidence is what makes the answer worth anything.
+      buttons.push({
+        label: record.data?.intel ? 'Research again' : 'Research this lead',
+        key: 'enrich',
+        async run(btn, status) {
+          btn.textContent = 'Researching…';
+          status.textContent = 'Reading their site and searching for recent news — this takes a few seconds.';
+          status.className = 'text-xs font-semibold text-gray-600 w-full';
+          const res = await fetch('/.netlify/functions/lead-generation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ action: 'enrich_lead', assistantId: state.assistantId, recordId: record.id }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            btn.textContent = 'Research this lead';
+            throw new Error(data.error || 'Could not research that lead.');
+          }
+          btn.textContent = 'Researched ✓';
+          // The server's own sentence. It is the only thing that knows whether the rating actually
+          // moved, and a generic "Done" over a lead that came back unchanged would imply progress
+          // that did not happen — the same failure the send-back message exists to avoid.
+          status.textContent = data.message || 'Done.';
+          status.className = `text-xs font-semibold w-full ${data.changed ? 'text-emerald-700' : 'text-gray-600'}`;
+          // Refresh so the new rating, reasons, draft and the Research panel all appear. The panel
+          // is rebuilt from the server rather than patched: this pass rewrites four fields on the
+          // record and patching them one by one is four chances to miss one.
+          //
+          // ⚠️ Re-open the row afterwards. The refresh re-renders the table, which COLLAPSES the
+          // panel the user is reading and takes the status line above with it — so without this the
+          // whole visible result of pressing the button is a row quietly changing colour somewhere
+          // in a list. The re-opened panel carries the same news in a durable form: the Research
+          // banner's "cold 41 → hot 88" chip is stored on the record, where the status line was not.
+          state.pendingFocusId = record.id;
+          state.pendingFocusTone = 'neutral';
+          await refresh();
+        },
+      });
       buttons.push({ label: 'Edit', key: 'edit', async run(btn) {
         btn.disabled = false;           // opening a modal shouldn't leave the button stuck disabled
         openEditLeadModal(record);
@@ -1436,6 +1663,11 @@
     // as one more stored value.
     const social = state.hub.recordType === 'lead' ? socialBanner(record) : null;
     if (social) panel.appendChild(social);
+    // What the research pass found, above the scoring card rather than inside it. The card states
+    // the verdict; this states the evidence the verdict was reached from, and evidence that sits
+    // below the conclusion it produced is evidence nobody reads.
+    const intel = state.hub.recordType === 'lead' ? intelBanner(record) : null;
+    if (intel) panel.appendChild(intel);
     panel.appendChild(body || keyValueFallback(record.data));
     panel.appendChild(detailActions(record));
     // Delegated, and attached after the bar exists: the next-step button presses a control in it.
@@ -1480,6 +1712,19 @@
     if (key === 'updatedAt') {
       const t = new Date(record.updatedAt).getTime();
       return Number.isNaN(t) ? -Infinity : t;
+    }
+    // The retention countdown sorts by DAYS, never by its label. "10 days left" and "2 days left"
+    // compare as strings to 10 < 2 even under numeric collation, because the collator sees "1"
+    // before "2" at the first differing character of two multi-token strings — so ascending order
+    // would have buried the leads about to be deleted in the middle of the column. Ascending is
+    // the useful direction here (most urgent first), and leads that are not on a clock at all sort
+    // last rather than first: they are not "safe for ∞ days", they are simply not in this race.
+    if (key === 'retention') {
+      const R = window.LeadRetention;
+      const swept = record.approvalStatus === 'pending_approval' || record.approvalStatus === 'rejected';
+      if (!R || !swept || R.isDeleted(record.data)) return Infinity;
+      const days = R.daysRemaining(record.updatedAt);
+      return days === null ? Infinity : days;
     }
     const shown = cellValue(record, key);
     const ordered = ORDERED_VALUES[key];
@@ -1529,8 +1774,21 @@
    */
   const MAX_FILTER_OPTIONS = 20;
 
+  /**
+   * Columns that never get a dropdown, whatever their cardinality.
+   *
+   * `retention` is a CONTINUOUS quantity wearing a label. Its distinct values are "1 day left",
+   * "2 days left" … up to thirty, so the generic rule below would offer a menu of consecutive
+   * countdowns and ask the user to pick exactly one of them — a filter nobody wants, which then
+   * silently vanishes as soon as the account holds more than twenty leads spread across more than
+   * twenty days. Sorting is the control that actually serves this column (most urgent first), and
+   * it is wired above.
+   */
+  const NEVER_FILTERABLE = new Set(['retention']);
+
   function filterableColumns() {
     return state.hub.columns.filter((c) => {
+      if (NEVER_FILTERABLE.has(c.key)) return false;
       // A column the user is CURRENTLY filtering on always keeps its dropdown, whatever the data
       // has since become. Otherwise deleting the last row of a kind takes the control away and
       // leaves the filter running invisibly, with no way to turn it off but Clear.
@@ -1687,6 +1945,15 @@
         // dead end the chip had before, one click further in.
         const tip = email || [s.why, socialHint(record)].filter(Boolean).join(' ') || '';
         cell = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${s.cls} whitespace-nowrap"${tip ? ` title="${esc(tip)}"` : ''}>${esc(s.short)}</span>`;
+      } else if (c.key === 'retention') {
+        // The 30-day countdown. Coloured by urgency rather than by state — this is the one column
+        // whose job is to be noticed BEFORE it matters, because what it counts down to cannot be
+        // undone. retentionCell() already escaped its own text.
+        const r = retentionCell(record);
+        const tip = r.text === '—'
+          ? 'Only leads awaiting a decision or turned down are on the clock. This one is not.'
+          : (window.LeadRetention ? window.LeadRetention.NOTICE : '');
+        cell = tip ? `<span title="${esc(tip)}">${r.html}</span>` : r.html;
       } else {
         cell = esc(cellValue(record, c.key));
       }
@@ -1715,10 +1982,18 @@
    * already says so in the table body, and a zero on the tab reads as a broken counter.
    */
   function updateTabCount() {
-    const el = document.getElementById('datahub-tab-label');
-    if (!el || !state.hub || state.hub.kind === 'content_library') return;
-    const n = state.records.length;
-    el.textContent = n ? `${state.hub.label} (${n})` : state.hub.label;
+    if (!state.hub || state.hub.kind === 'content_library') return;
+    // Shared formatter so this tab and the other three in the lead funnel print the count
+    // identically — see setTabCount in assistant-dashboard-registry.js.
+    //
+    // ⚠️ Counts LIVE records only. `state.records` is what the table holds, and the table no
+    // longer holds leads the retention sweep has moved (the API defaults to ?retention=live), so
+    // the Deleted section's rows are deliberately outside this number. A tab reading
+    // "Enrichment (61)" over a table showing 48 rows plus a collapsed graveyard would be a count
+    // that describes nothing the user can see.
+    window.AssistantDashboardRegistry?.setTabCount(
+      'datahub-tab-label', state.hub.label, state.records.length,
+    );
   }
 
   /**
@@ -2048,12 +2323,18 @@
       const emptyMsg = hub.kind === 'content_library'
         ? 'Posts this assistant drafts will appear here across their whole lifecycle — from draft through scheduled to published. Click Create Post above to write one yourself or generate one with AI.'
         : `Work your assistant produces in chat lands here automatically — or import a CSV to get started. ${esc(hub.importHint)}`;
+      // ⚠️ The Deleted section is appended here too. An account whose every live lead has aged out
+      // has an EMPTY table and a full graveyard, and that is exactly the moment the section has to
+      // be reachable — leaving it off this branch would mean the only way to recover those leads
+      // disappeared at the moment they all needed recovering.
       host.innerHTML = `
         <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-10 text-center">
           <p class="text-4xl mb-3">🗂️</p>
           <p class="font-bold text-gray-900 mb-1">Nothing in ${esc(hub.label)} yet</p>
           <p class="text-sm text-gray-500 max-w-md mx-auto">${emptyMsg}</p>
-        </div>`;
+        </div>
+        ${deletedSectionHtml()}`;
+      wireDeletedSection(host);
       return;
     }
 
@@ -2081,10 +2362,165 @@
         </div>
         <!-- Filled by paintRows; empty (and therefore invisible) while everything fits on one page. -->
         <div data-hub-pager class="px-4"></div>
-      </div>`;
+      </div>
+      ${deletedSectionHtml()}`;
 
     wireControls(host);
+    wireDeletedSection(host);
     paintRows();
+  }
+
+  // ── The Deleted section ────────────────────────────────────────────────────
+  //
+  // Leads the 30-day sweep has moved out of Outreach (netlify/functions/lead-retention-sweep.ts).
+  //
+  // ── Why they are kept at all ────────────────────────────────────────────────
+  // A hard delete destroys the only record of the VERDICT. The discovery row survives at
+  // 'discarded' so the SAME saved search will not re-find the company — but the dedupe index is
+  // per campaign (campaign_id, domain), so a SECOND search finds it, scores it and drafts to it
+  // again, with nothing anywhere saying "we looked at this company and it cannot, or must not, be
+  // contacted". Keeping the row is what stops the product re-discovering its own rejects.
+  //
+  // ── Why it is a section here and not a tab ──────────────────────────────────
+  // It is not a stage of the funnel and nobody works it daily. It belongs where a user goes when
+  // they think "where did that lead go?", which is the tab that holds the leads. Collapsed by
+  // default for the same reason.
+
+  function deletedSectionHtml() {
+    const rows = state.deletedRecords || [];
+    const R = window.LeadRetention;
+    if (state.hub.recordType !== 'lead' || !R) return '';
+    // The outcome of the last send-back outlives the row it came from — and outlives an empty
+    // list, which is the state a user reaches by rescuing the last lead in here. Rendering the
+    // section for the notice alone is the difference between "it worked, here is what we found"
+    // and the section silently disappearing.
+    const notice = state.returnedNotice;
+    if (!rows.length && !notice) return '';
+    // The send-back handler sets `deletedOpen` itself, so a reported outcome is always on screen
+    // without this having to force the fold open on every later render.
+    const open = state.deletedOpen;
+    const noticeHtml = notice
+      ? `<div class="mx-4 mb-3 rounded-xl border px-3 py-2 ${notice.enriched
+            ? 'border-emerald-200 bg-emerald-50' : 'border-gray-200 bg-gray-50'}">
+           <p class="text-xs font-bold ${notice.enriched ? 'text-emerald-800' : 'text-gray-700'}">${esc(notice.title)}</p>
+           <p class="text-xs ${notice.enriched ? 'text-emerald-800' : 'text-gray-600'} mt-0.5">${esc(notice.message)}</p>
+         </div>`
+      : '';
+
+    const body = rows.map((r) => {
+      const reason = R.reasonOf(r.data) || 'unreviewed';
+      const label = R.REASON_LABELS[reason] || 'Dropped';
+      const note = R.REASON_NOTES[reason] || '';
+      // A do-not-contact lead is the one case where sending it back is close to pointless — the
+      // flag survives and the send seam will still refuse. The button stays (enrichment can still
+      // correct the record, and the flag has its own audited override elsewhere) but it must not
+      // be the confident emerald primary that the other rows carry.
+      const dnc = reason === 'do_not_contact';
+      return `
+        <div class="px-4 py-3 border-t border-gray-100 flex flex-wrap items-start gap-3" data-deleted-row="${r.id}">
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-2">
+              <p class="font-semibold text-gray-900 truncate">${esc(r.title || 'Unnamed lead')}</p>
+              <span class="text-xs font-bold px-2 py-0.5 rounded-full border whitespace-nowrap ${
+                dnc ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-100 text-gray-600 border-gray-200'
+              }">${esc(label)}</span>
+            </div>
+            <p class="text-xs text-gray-500 mt-1">${esc(note)}</p>
+            <p class="hidden mt-2 text-xs font-semibold" data-deleted-status></p>
+          </div>
+          <button type="button" data-deleted-return="${r.id}"
+            class="px-3 py-1.5 ${dnc
+              ? 'bg-white border border-gray-200 text-gray-700 hover:border-emerald-300'
+              : 'bg-emerald-700 hover:bg-emerald-800 text-white'} text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0">
+            Send back for enrichment
+          </button>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm mt-6 overflow-hidden">
+        <button type="button" data-deleted-toggle
+          class="w-full flex items-center gap-2 px-4 py-3 text-left cursor-pointer group">
+          <svg class="w-4 h-4 text-gray-400 transition-transform ${open ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+          <span class="text-sm font-bold text-gray-900 group-hover:text-emerald-700">Deleted</span>
+          <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">${rows.length}</span>
+        </button>
+        <div class="${open ? '' : 'hidden'}" data-deleted-body>
+          <p class="px-4 pb-3 text-xs text-gray-500">${esc(R.DELETED_NOTICE)}</p>
+          ${noticeHtml}
+          ${rows.length ? body : '<p class="px-4 pb-4 text-xs text-gray-400">Nothing else has been dropped.</p>'}
+        </div>
+      </div>`;
+  }
+
+  function wireDeletedSection(host) {
+    const toggle = host.querySelector('[data-deleted-toggle]');
+    if (toggle) {
+      toggle.addEventListener('click', () => {
+        state.deletedOpen = !state.deletedOpen;
+        // Folding the section shut is the user saying they are done with the last outcome. Without
+        // this the notice would sit there for the rest of the session, re-appearing every time the
+        // section was re-opened, long after it stopped being news.
+        if (!state.deletedOpen) state.returnedNotice = null;
+        const body = host.querySelector('[data-deleted-body]');
+        // `hidden` loses to any class that sets display, and this body holds flex rows — pin the
+        // inline style too. Same trap the tab badges and the Review Queue cards carry.
+        if (body) {
+          body.classList.toggle('hidden', !state.deletedOpen);
+          body.style.display = state.deletedOpen ? '' : 'none';
+        }
+        toggle.querySelector('svg')?.classList.toggle('rotate-90', state.deletedOpen);
+      });
+    }
+
+    host.querySelectorAll('[data-deleted-return]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = Number(btn.getAttribute('data-deleted-return'));
+        const row = btn.closest('[data-deleted-row]');
+        const status = row?.querySelector('[data-deleted-status]');
+        btn.disabled = true;
+        btn.textContent = 'Enriching…';
+        try {
+          const res = await fetch('/.netlify/functions/lead-generation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+              action: 'send_back_for_enrichment',
+              assistantId: state.assistantId,
+              recordId: id,
+            }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || 'Could not send that lead back.');
+          // The server's own sentence, not a generic success: it is the only thing that knows
+          // whether an address was actually found, and "Done ✓" over a lead that is still
+          // uncontactable is the lie this whole action exists to stop telling.
+          //
+          // Held as STATE, not written into the row. The refresh below re-renders this section
+          // without this lead in it — a message written into the row would be destroyed by the
+          // very repaint that proves the action worked.
+          state.returnedNotice = {
+            title: row?.querySelector('p.font-semibold')?.textContent?.trim() || 'Lead sent back for enrichment',
+            message: data.message || 'Back in your pipeline.',
+            enriched: !!data.enriched,
+          };
+          state.deletedOpen = true;      // the outcome must be on screen, not behind a fold
+          // Refetch rather than splicing the row out locally: the lead has re-entered the live
+          // table (un-rejected, possibly now carrying an address), so the table, the filters, the
+          // counts and the tab number all have to show it.
+          await refresh();
+        } catch (err) {
+          btn.disabled = false;
+          btn.textContent = 'Send back for enrichment';
+          if (status) {
+            status.textContent = err.message || 'Something went wrong.';
+            status.className = 'mt-2 text-xs font-semibold text-red-600';
+            status.classList.remove('hidden');
+          }
+        }
+      });
+    });
   }
 
   // Deep link (Request 6): a "post failed to publish" notification names the post, so open its
@@ -2106,17 +2542,29 @@
       if (wanted !== state.view.page) { state.view.page = wanted; paintRows(); }
       return;
     }
+    const tone = state.pendingFocusTone;
     state.pendingFocusId = null;
+    state.pendingFocusTone = null;
     tr.click();                            // expands the detail panel (failure banner + actions)
     tr.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    tr.classList.add('ring-2', 'ring-inset', 'ring-red-400', 'bg-red-50');
-    setTimeout(() => tr.classList.remove('ring-2', 'ring-inset', 'ring-red-400', 'bg-red-50'), 4000);
+    // ⚠️ Two tones, because this is now used for two opposite things. The RED ring belongs to the
+    // notification it was built for ("this post failed to publish"). Re-opening a row after the
+    // user researched it is a success, and a red flash on a lead that just went from cold to hot
+    // reads as an error report.
+    const ring = tone === 'neutral'
+      ? ['ring-2', 'ring-inset', 'ring-emerald-400', 'bg-emerald-50']
+      : ['ring-2', 'ring-inset', 'ring-red-400', 'bg-red-50'];
+    tr.classList.add(...ring);
+    setTimeout(() => tr.classList.remove(...ring), 4000);
   }
 
   // Called before/after the Data Hub tab is opened. If the table is already on screen the focus
   // applies immediately; otherwise it's picked up by the next renderTable().
-  function focusRecord(recordId) {
+  //
+  // `tone: 'neutral'` for a focus that is reporting success rather than a problem.
+  function focusRecord(recordId, opts) {
     state.pendingFocusId = recordId == null ? null : Number(recordId);
+    state.pendingFocusTone = (opts && opts.tone) || null;
     applyPendingFocus();
   }
 
@@ -2746,6 +3194,11 @@
     // returning to a tab you had filtered should find it as you left it.
     state.view = { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null, page: 1, collapsed: new Set() };
     state.selected.clear();
+    // Same reasoning as the view reset above: a different assistant is a different table, and both
+    // the graveyard and the last send-back outcome belong to the one being left.
+    state.deletedRecords = [];
+    state.deletedOpen = false;
+    state.returnedNotice = null;
     renderToolbar();
     const host = document.getElementById('datahub-table-host');
     if (host) host.innerHTML = '<p class="text-sm text-gray-400">Loading…</p>';

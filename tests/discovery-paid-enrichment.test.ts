@@ -60,6 +60,11 @@ function stripComments(src: string): string {
 }
 
 const WORKER = stripComments(read('netlify/functions/process-discovery-jobs.ts'));
+// The persistence half of enrichment — `recordEnrichment`, which writes the paidLookupAt stamp the
+// cap counts — moved to src/utils/lead-enrichment.ts so the on-demand "Send back for enrichment"
+// path and the worker share one writer. The waterfall ORDERING below still belongs to the worker;
+// only the stamp checks follow the function to its new home.
+const ENRICH = stripComments(read('src/utils/lead-enrichment.ts'));
 const PROVIDER = stripComments(read('src/lib/discovery-enrich-provider.ts'));
 const SEND = stripComments(read('netlify/functions/lead-generation.ts'));
 const INBOX = stripComments(read('netlify/functions/signal-inbox.ts'));
@@ -147,7 +152,7 @@ check('every failure path returns null rather than throwing', () => {
 
 check('the free scrape runs BEFORE any purchase', () => {
     const i = landmark(WORKER, 'async function enrichBatch');
-    const body = WORKER.slice(i, landmark(WORKER, 'async function recordEnrichment'));
+    const body = WORKER.slice(i, landmark(WORKER, 'async function publishSignals'));
     const iScrape = body.indexOf('enrichLeadContact(');
     const iPaid = body.indexOf('lookupProviderContact(');
     assert.ok(iScrape !== -1 && iPaid !== -1, 'one of the two enrichment tiers is gone');
@@ -171,7 +176,7 @@ check('the cap is allocated BEFORE the concurrent map', () => {
 });
 
 check('the cap counts ATTEMPTS, so a miss costs a slot', () => {
-    assert.ok(/if \(paidAttempted\) stamp\.paidLookupAt/.test(WORKER),
+    assert.ok(/if \(paidAttempted\) stamp\.paidLookupAt/.test(ENRICH),
         'the attempt stamp is gone — the cap would count hits and let misses run free');
     assert.ok(/signals ->> 'paidLookupAt' IS NOT NULL/.test(WORKER),
         'the spent-so-far query no longer counts attempts');

@@ -31,7 +31,15 @@ const FN = read('netlify/functions/lead-generation.ts');
 const HUB = read('src/components/assistant-data-hub.js');
 const WORKER = read('netlify/functions/process-discovery-jobs.ts');
 
-const ACTION = FN.slice(landmark(FN, "if (action === 'look_again')"), landmark(FN, "if (action === 'set_outcome')"));
+// ⚠️ The end anchor is the action that IMMEDIATELY follows look_again, not some later one. It was
+// `set_outcome`, and `send_back_for_enrichment` was then added between the two — which silently
+// widened this span to cover both actions. The count below went from 2 to 4 and the failure read as
+// look_again having grown a duplicate write, when nothing about look_again had changed at all.
+// Anchor spans on their true neighbour, and re-check this line when an action is inserted here.
+const ACTION = FN.slice(
+    landmark(FN, "if (action === 'look_again')"),
+    landmark(FN, "if (action === 'send_back_for_enrichment')"),
+);
 
 console.log('\n──── it clears the stamp the WORKER reads ────');
 

@@ -25,6 +25,7 @@ import { generateQueries, type DiscoveryStrategy } from '../../src/lib/discovery
 import { scoreCandidates, type ScoreCandidate } from '../../src/lib/discovery-scoring';
 import { search, isSearchConfigured, normaliseDomain, fetchSiteIdentity, SearchNotConfiguredError } from '../../src/lib/discovery-search';
 import { enrichLeadContact } from '../../src/lib/discovery-enrich';
+import { recordEnrichment } from '../../src/utils/lead-enrichment';
 import {
     isEnrichProviderConfigured, lookupProviderContact, ENRICH_COST_GBP_PER_LOOKUP,
 } from '../../src/lib/discovery-enrich-provider';
@@ -624,94 +625,12 @@ async function publishSignals(db: Db, job: JobRow): Promise<void> {
     }
 }
 
-/**
- * Persist one enrichment outcome. Always stamps `enrichAttemptedAt` (so a miss isn't
- * retried forever) and mirrors that stamp — plus, on a hit, the address — onto the linked
- * assistant_record, so lead-generation.ts `send_outreach` resolves `data.contactEmail` with no
- * change there and the Leads tab can say which leads have actually been looked at.
- *
- * `socialHandles` rides the SAME merge as the address, deliberately. A handle is worth most on the
- * leads where the email search MISSED — "no published address, here is their LinkedIn" — so it must
- * survive the miss path, which the existing `stamp` object already does. It is written only when a
- * profile was actually found; an empty object would make `socialHandles` present-but-useless and
- * every UI check would then have to test the object's size rather than its existence.
- */
-async function recordEnrichment(
-    db: Db, leadId: number, assistantRecordId: number | null,
-    found: { contact: { email: string; kind: string; source: string; foundOn: string } | null; handles: Record<string, string> },
-    ledger?: { organisationId: number; aiAssistantId: number; blueprintVersion?: string | null; icpSnapshot?: Record<string, unknown> | null },
-    paidAttempted = false,
-): Promise<void> {
-    const hit = found.contact;
-    const handles = found.handles ?? {};
-    const stamp: Record<string, unknown> = { enrichAttemptedAt: new Date().toISOString() };
-    // ⚠️ Written on a MISS as well as a hit, and that is the point: this stamp is what the
-    // per-run cap counts, so it has to record money SPENT rather than addresses found. It also
-    // stops a later slice paying a second time for a domain the provider already had nothing for.
-    if (paidAttempted) stamp.paidLookupAt = new Date().toISOString();
-    if (hit) {
-        stamp.emailKind = hit.kind;        // 'role' | 'personal' — personal needs a closer look
-        stamp.emailSource = hit.source;    // 'scrape' | 'provider' — drives the personal-inbox gate
-        stamp.emailFoundOn = hit.foundOn;  // provenance for the Review Queue
-    }
-    if (Object.keys(handles).length > 0) stamp.socialHandles = handles;
-
-    await db.update(discoveredLeads)
-        .set({
-            ...(hit ? { contactEmail: hit.email } : {}),
-            // Merge into signals rather than replacing — it already holds the SERP snippet.
-            signals: sql`COALESCE(${discoveredLeads.signals}, '{}'::jsonb) || ${JSON.stringify(stamp)}::jsonb`,
-            updatedAt: new Date(),
-        })
-        .where(eq(discoveredLeads.id, leadId));
-
-    // Revenue ledger: only a HIT is an enrichment event. A miss is not a fact about the lead worth
-    // aggregating — it is a fact about our scraper — and emitting it would make "enrichment rate"
-    // read as 100% of attempts. `emailKind` rides along because the personal-inbox gate keys off it,
-    // so the ledger can later answer whether role addresses convert better than personal ones.
-    //
-    // ⚠️ A handles-only outcome emits NOTHING, on purpose. `lead_enriched` is the metric for "this
-    // lead became contactable by the machine", and a social profile does not make one contactable —
-    // no code path in this platform can send to it. Counting it would inflate the one number that
-    // says whether tier-1 enrichment is worth its fetches.
-    if (hit && ledger) {
-        await recordEvent(db, 'lead_enriched', {
-            organisationId: ledger.organisationId,
-            aiAssistantId: ledger.aiAssistantId,
-            discoveredLeadId: leadId,
-            assistantRecordId,
-            actor: 'agent',
-            blueprintVersion: ledger.blueprintVersion ?? null,
-            icpSnapshot: ledger.icpSnapshot ?? null,
-            payload: { emailKind: hit.kind, emailSource: hit.source },
-        });
-    }
-
-    if (!assistantRecordId) return;
-
-    // Same merge on the mirrored record's scoring card, so the Review Queue and the
-    // outreach send both see the address.
-    //
-    // ⚠️ The ATTEMPT stamp crosses over on a MISS too — `stamp` already carries
-    // `enrichAttemptedAt` either way. Without it the Leads tab could not tell "we looked and this
-    // company publishes no address" from "nobody has looked yet", and those are different facts
-    // with different remedies: the first sends the user off to find an address by hand, the second
-    // says the lead scored cold and it is the TARGETING that needs fixing. The Contact column
-    // (assistant-data-hub.js `contactState`) reads exactly this key.
-    //
-    // Deliberately unlike the revenue ledger above, which stays hit-only. That measures our
-    // scraper's hit RATE; counting misses there would report every attempt as a success. Mirroring
-    // state onto the record the UI reads is a different job from emitting a fact to aggregate.
-    await db.update(assistantRecords)
-        .set({
-            data: sql`COALESCE(${assistantRecords.data}, '{}'::jsonb) || ${JSON.stringify({
-                ...stamp,
-                ...(hit ? { contactEmail: hit.email } : {}),
-            })}::jsonb`,
-            updatedAt: new Date(),
-        })
-        .where(eq(assistantRecords.id, assistantRecordId));
-}
+// `recordEnrichment` used to live here — it is now src/utils/lead-enrichment.ts, imported above.
+// It moved when "Send back for enrichment" gained the ability to enrich a single lead outside any
+// job: copying the persistence would have made a second writer of `enrichAttemptedAt`,
+// `contactEmail`, `emailKind`, `emailSource` and `socialHandles` across two tables that must
+// agree. One writer, per the notify.ts rule. The behaviour is unchanged — the function moved
+// whole, gaining only a nullable `leadId` for leads that have no discovery row at all.
 
 /** Upsert one qualified lead into assistant_records on (org, assistant, 'lead', title). */
 /** Returns the assistant_records id the lead was mirrored onto — the ledger links its events to it. */

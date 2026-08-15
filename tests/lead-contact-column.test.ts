@@ -42,6 +42,12 @@ const read = (p: string) => readFileSync(join(root, p), 'utf8');
 const HUB = read('src/components/assistant-data-hub.js');
 const REGISTRY = read('src/components/assistant-dashboard-registry.js');
 const WORKER = read('netlify/functions/process-discovery-jobs.ts');
+// `recordEnrichment` moved out of the worker into src/utils/lead-enrichment.ts when the Deleted
+// section's "Send back for enrichment" gained the ability to enrich one lead outside any discovery
+// job. Copying it would have made a second writer of enrichAttemptedAt / contactEmail / emailKind
+// across two tables that must agree — so it is shared, and the two checks below follow it there.
+// The behaviour they guard is unchanged; only its address is.
+const ENRICH = read('src/utils/lead-enrichment.ts');
 
 /** Lift `contactState` + `contactEmailOf` out of the IIFE and run them for real. */
 function loadContactState(): (r: Record<string, unknown>) => string {
@@ -120,9 +126,9 @@ check('the attempt stamp is mirrored onto the record on a MISS, not just a hit',
     // This is what makes "None found" mean "we looked". recordEnrichment used to return early on a
     // miss (`if (!hit || !assistantRecordId) return`), so the stamp never reached the table the
     // Leads tab reads and the column could not tell a miss from a pending attempt.
-    const start = WORKER.indexOf('async function recordEnrichment');
+    const start = ENRICH.indexOf('export async function recordEnrichment');
     assert.ok(start !== -1, 'recordEnrichment() is gone');
-    const fn = WORKER.slice(start, landmark(WORKER, '\n}', start));
+    const fn = ENRICH.slice(start, landmark(ENRICH, '\n}', start));
     const guard = fn.slice(landmark(fn, 'if (!'), landmark(fn, 'assistantRecords)', landmark(fn, 'if (!')));
     assert.ok(!/!hit\s*\|\|/.test(guard),
         'the assistant_records mirror is hit-only again — every miss stops reaching the Leads tab, '
@@ -134,8 +140,8 @@ check('the attempt stamp is mirrored onto the record on a MISS, not just a hit',
 check('the revenue ledger stays hit-only, unlike the mirror', () => {
     // Different jobs: the mirror is UI state, the ledger measures our scraper's hit RATE. Counting
     // misses there would report every attempt as a success.
-    const start = landmark(WORKER, 'async function recordEnrichment');
-    const fn = WORKER.slice(start, landmark(WORKER, '\n}', start));
+    const start = landmark(ENRICH, 'export async function recordEnrichment');
+    const fn = ENRICH.slice(start, landmark(ENRICH, '\n}', start));
     assert.ok(/if \(hit && ledger\)/.test(fn),
         'lead_enriched must only be emitted on a hit');
 });

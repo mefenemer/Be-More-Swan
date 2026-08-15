@@ -2,11 +2,15 @@
 // Internal Data Hub API (Golden Rule 2) — CRUD for assistant_records, the tenant
 // work products behind the Data Hub tab on assistant-detail.html.
 //
-//  GET    ?assistantId=<id>&recordType=<type>[&approvalStatus=<s>[,<s>…]][&deliverable=1][&format=csv]
+//  GET    ?assistantId=<id>&recordType=<type>[&approvalStatus=<s>[,<s>…]][&deliverable=1]
+//                                            [&retention=live|deleted|all][&format=csv]
 //         → { records: [...] } or a CSV download. `deliverable=1` keeps only records that have
 //           both a resolvable recipient and a drafted body — see the block comment on the filter.
 //           `approvalStatus` takes a comma-separated list; the lead Approved column asks for
 //           `approved,scheduled` because a sent lead sits in the second state — see that filter.
+//           `retention` selects across the 30-day sweep (src/config/lead-retention.ts): 'live'
+//           is the DEFAULT and hides leads the sweep has moved to Deleted, 'deleted' is the
+//           Deleted section itself, 'all' is both — see the block comment on that filter.
 //  POST   { assistantId, recordType, records: [{ title, status?, data }, ...], source? }
 //         → bulk insert (CSV import) or single insert; upserts on (assistant, type, title)
 //  PATCH  { id, status?, data? }                            → update one record's lifecycle/state
@@ -32,6 +36,7 @@ import { enqueueLeadHandoff } from '../../src/utils/lead-handoff';
 import { recordLeadRejection } from '../../src/utils/lead-reject-feedback';
 import { LEAD_REJECT_REASONS, isLeadRejectReason } from '../../src/config/lead-reject-reasons';
 import { LEAD_RECIPIENT_SQL_PATHS, LEAD_DRAFT_BODY_SQL_PATH } from '../../src/config/lead-recipient';
+import { RETENTION_DELETED_SQL_PATH } from '../../src/config/lead-retention';
 import { crmDescription, crmHeaders, crmRow, isCrmTarget, splitName, websiteUrl } from '../../src/config/crm-export';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -325,6 +330,33 @@ export default withLambda(async (event) => {
             const deliverableWhere = sql`COALESCE(${recipientSql}) IS NOT NULL
                 AND ${sql.raw(`NULLIF(BTRIM(data #>> '${LEAD_DRAFT_BODY_SQL_PATH}'), '')`)} IS NOT NULL`;
 
+            // ── Retention filter (?retention=live|deleted|all) ───────────────────────────────
+            // Which side of the 30-day sweep to read (src/config/lead-retention.ts). A lead the
+            // sweep has moved carries `data.retention.deletedAt` and belongs in exactly one place:
+            // the Deleted section of the Enrichment tab.
+            //
+            // ⚠️ 'live' is the DEFAULT, and that default is the whole point of the parameter. Every
+            // existing caller — the Enrichment table, all four Outreach columns, the CSV export,
+            // the chat prompt's lead counts — asked a question about leads the user can still act
+            // on, and none of them knew this state was coming. Defaulting to 'all' would leave a
+            // moved lead sitting in the Review column it was just swept out of, which is the one
+            // outcome that would make the sweep look broken. Callers that want the graveyard have
+            // to say so.
+            //
+            // Deliberately NOT folded into `approvalStatus`. Retention is orthogonal to the
+            // approval gate — a moved lead keeps the status it had ('rejected' or
+            // 'pending_approval'), because "rejected, then dropped" and "never reviewed, then
+            // dropped" are different facts and the Deleted section shows both.
+            const RETENTION_MODES = new Set(['live', 'deleted', 'all']);
+            const retentionParam = String(event.queryStringParameters?.retention || 'live');
+            const retentionMode = RETENTION_MODES.has(retentionParam) ? retentionParam : 'live';
+            const deletedAtSql = sql.raw(`NULLIF(BTRIM(data #>> '${RETENTION_DELETED_SQL_PATH}'), '')`);
+            const retentionWhere = retentionMode === 'live'
+                ? sql`${deletedAtSql} IS NULL`
+                : retentionMode === 'deleted'
+                    ? sql`${deletedAtSql} IS NOT NULL`
+                    : null;
+
             const records = await db
                 .select({
                     id: assistantRecords.id,
@@ -347,6 +379,11 @@ export default withLambda(async (event) => {
                     // JS array inside a template as a ROW constructor, and `= ANY((a,b))` is a 42809.
                     ...(approvalFilter.length ? [inArray(assistantRecords.approvalStatus, approvalFilter)] : []),
                     ...(deliverableOnly ? [deliverableWhere] : []),
+                    // Only ever applied to leads. The retention sweep is a lead concept and no
+                    // other record type carries the stamp, so on a Ledger or Tickets hub the
+                    // predicate would be a `data #>> '{retention,deletedAt}' IS NULL` that is true
+                    // for every row — correct, but a jsonb read per row for nothing.
+                    ...(retentionWhere && recordType === 'lead' ? [retentionWhere] : []),
                 ))
                 .orderBy(desc(assistantRecords.updatedAt));
 

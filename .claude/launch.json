@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-lead-retention",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/0a2a0c06-1691-444f-8d83-1ec3f4d7ef46/scratchpad/retharness/server.mjs"
+      ],
+      "port": 4327,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-bulk-reject",
       "runtimeExecutable": "node",
       "runtimeArgs": [

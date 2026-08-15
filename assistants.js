@@ -858,12 +858,81 @@ document.addEventListener('bms:notifications-arrived', () => {
     window.detailRqRefresh?.();
 });
 
+/**
+ * Every column's count on a RECORDS queue (Leads, Ledger, Tickets, Inbox), plus the tab's own
+ * total.
+ *
+ * ── Why this exists ──────────────────────────────────────────────────────────
+ * `_detailRqRefreshColumnCounts` below returns early for records queues, so their badges were only
+ * ever set by `_detailRqRenderRecords` — which knows about the column the user is LOOKING at and
+ * nothing else. Every other column sat blank however much was in it, so a lead moving from Review
+ * to Approved left the only number on screen and arrived somewhere that gave no sign of having
+ * gained anything.
+ *
+ * One request, not one per column. `?approvalStatus=a,b,c` already accepts a list and the response
+ * carries each record's own status, so the split happens here rather than in four round-trips.
+ *
+ * ⚠️ The Review column is counted with `deliverable=1`, matching what that column actually renders
+ * (leads with an address AND a drafted body). Counting it any other way would put a number on the
+ * button that the list underneath contradicts — which is the specific bug that made this queue
+ * read as a duplicate of the Enrichment tab.
+ */
+async function _detailRqRefreshRecordCounts() {
+    const aid = window._currentAssistantId;
+    const rq = window._detailReviewQueue || {};
+    if (!aid || rq.kind !== 'records' || !rq.recordType) return;
+    const type = encodeURIComponent(rq.recordType);
+    const isLead = rq.recordType === 'lead';
+
+    const url = (qs) => `/.netlify/functions/assistant-records?assistantId=${aid}&recordType=${type}&${qs}`;
+    try {
+        // Two calls, because they ask genuinely different questions of the same rows: the first is
+        // the deliverable slice that stocks Review, the second is everything else. Merging them
+        // would mean re-deriving deliverability in the browser, and that predicate has one home
+        // (src/config/lead-recipient.ts → the server's ?deliverable=1).
+        const [reviewRes, restRes] = await Promise.all([
+            fetch(url(`approvalStatus=pending_approval${isLead ? '&deliverable=1' : ''}`)),
+            fetch(url('approvalStatus=approved,scheduled,rejected')),
+        ]);
+        if (!reviewRes.ok || !restRes.ok) return;
+        const reviewRecords = (await reviewRes.json()).records || [];
+        const restRecords = (await restRes.json()).records || [];
+
+        // Mirrors _RQ_RECORD_STATE, and the lead Approved column's two-state quirk with it: an
+        // approved lead whose email actually sent rests at 'scheduled', because that state is the
+        // CHASE REMINDER rather than a pending send. It therefore counts in BOTH columns, exactly
+        // as it appears in both.
+        const rejected = restRecords.filter(r => r.approvalStatus === 'rejected').length;
+        const scheduled = restRecords.filter(r => r.approvalStatus === 'scheduled').length;
+        const approved = isLead
+            ? restRecords.filter(r => r.approvalStatus === 'approved' || r.approvalStatus === 'scheduled').length
+            : restRecords.filter(r => r.approvalStatus === 'approved').length;
+
+        _detailRqSetColumnBadge('review', reviewRecords.length);
+        _detailRqSetColumnBadge('approved', approved);
+        _detailRqSetColumnBadge('scheduled', scheduled);
+        _detailRqSetColumnBadge('archived', rejected);
+
+        // The tab's own parenthetical: what this tab HOLDS, across its columns. Deliberately not
+        // the pending count — that is the amber pill's job, and having the two show the same
+        // number would waste one of them. Deliberately not `approved + scheduled` either: that
+        // double-counts a sent lead, which is right for two columns describing it two ways and
+        // wrong for a single total.
+        const total = reviewRecords.length + restRecords.length;
+        window.AssistantDashboardRegistry?.setTabCount('review-queue-tab-label', rq.label || 'Review', total);
+    } catch {
+        // Counts are ambient. A failure here must never disturb the column the user is reading.
+    }
+}
+
 window._detailRqRefreshColumnCounts = async function() {
     const aid = window._currentAssistantId;
     if (!aid) return;
-    // Records and blog queues have their own data sources; their counts are set by those renderers.
+    // Records queues have every column counted in one place — see _detailRqRefreshRecordCounts,
+    // which also sets the tab's own total. Blog queues still count from their own renderer.
     const rq = window._detailReviewQueue || {};
-    if (rq.kind === 'records' || rq.source === 'blog_posts') return;
+    if (rq.kind === 'records') return _detailRqRefreshRecordCounts();
+    if (rq.source === 'blog_posts') return;
     // Only count columns that are actually on screen (Approved is hidden for posts queues).
     const visible = Object.keys(_DETAIL_RQ_COLUMNS).filter(k => {
         const btn = document.querySelector(`.detail-rq-col[data-status="${k}"]`);
@@ -1846,6 +1915,35 @@ function _rqCardChips(r) {
  * the whole column: a card the reviewer had open (and just acted on) must come back open, or the
  * edit/reject reason strips appear inside a body that is hidden.
  */
+/**
+ * The per-lead countdown chip: how many days before the sweep moves this one to Deleted.
+ *
+ * The column banner states the RULE; this states what the rule means for the lead in front of you.
+ * Both are needed — a banner alone cannot tell you that this particular lead has two days left,
+ * and a chip alone never explains what it is counting down to.
+ *
+ * ⚠️ Same two columns as the banner, and for the same reason: Review and Archived are the only
+ * states the sweep collects. Rendered from the generated mirror (window.LeadRetention) so the
+ * number here, the number in the Enrichment table's "Deletes in" column and the night the sweep
+ * actually runs are one calculation rather than three.
+ */
+function _rqRetentionChip(r, statusKey) {
+    const R = window.LeadRetention;
+    if (!R || r.recordType !== 'lead') return '';
+    if (statusKey !== 'review' && statusKey !== 'archived') return '';
+    const days = R.daysRemaining(r.updatedAt);
+    const text = R.countdownLabel(days);
+    if (!text) return '';
+    const urgency = R.urgency(days);
+    const cls = urgency === 'urgent'
+        ? 'bg-red-50 text-red-700 border-red-200'
+        : urgency === 'soon'
+            ? 'bg-amber-50 text-amber-800 border-amber-200'
+            : 'bg-gray-100 text-gray-600 border-gray-200';
+    return `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap ${cls}"
+        title="${_rqEsc(R.NOTICE)}">${_rqEsc(text)}</span>`;
+}
+
 function _detailRqRecordCard(r, statusKey) {
     const found = _rqDraft(r);
     let snippet = _rqRecordSnippet(r);
@@ -1863,6 +1961,7 @@ function _detailRqRecordCard(r, statusKey) {
           <span class="block text-sm font-bold text-gray-900 truncate group-hover:text-emerald-800">${_rqEsc(r.title)}</span>
           <span class="flex flex-wrap items-center gap-2 mt-1">
             ${_rqCardChips(r)}
+            ${_rqRetentionChip(r, statusKey)}
             ${sync.summary}
             ${sched ? `<span class="text-[11px] font-semibold text-yellow-700">${_rqEsc(sched)}</span>` : ''}
           </span>
@@ -2004,11 +2103,32 @@ function _detailRqPaintRecords(statusKey, opts) {
     const emptyMsg = statusKey !== 'review'
         ? 'Nothing here yet.'
         : (opts && opts.deliverableOnly)
-            ? 'No emails waiting for you. Leads without a contact address can’t be emailed yet — they’re in the Leads tab.'
+            ? 'No emails waiting for you. Leads without a contact address can’t be emailed yet — they’re in the Enrichment tab.'
             : 'Nothing awaiting your review.';
 
+    // The 30-day retention notice, above the two columns the sweep actually collects.
+    //
+    // ⚠️ Review and Archived ONLY. Approved and Awaiting-reply leads are never swept — on this role
+    // "Awaiting reply" means the email has already GONE — and a notice about automatic deletion
+    // over a column that is not on a clock would be a threat the system does not carry out.
+    //
+    // Shown even when the column is empty, and above the empty state rather than below it: a user
+    // whose Review column is empty TODAY is exactly the user who needs to know why it might be
+    // empty next month. The wording is the generated one (window.LeadRetention.NOTICE) so this
+    // banner, the table column's tooltip and the Deleted section cannot describe three different
+    // rules.
+    const _R = window.LeadRetention;
+    const _onClock = (statusKey === 'review' || statusKey === 'archived')
+        && (window._detailReviewQueue || {}).recordType === 'lead' && _R;
+    const noticeHtml = _onClock
+        ? `<div class="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 my-3">
+             <span class="text-sm leading-none mt-0.5">⏳</span>
+             <p class="text-xs text-amber-900">${_rqEsc(_R.NOTICE)}</p>
+           </div>`
+        : '';
+
     if (!records.length) {
-        container.innerHTML = `<p class="text-sm text-gray-400 py-10 text-center">${emptyMsg}</p>`;
+        container.innerHTML = noticeHtml + `<p class="text-sm text-gray-400 py-10 text-center">${emptyMsg}</p>`;
         return;
     }
 
@@ -2019,7 +2139,8 @@ function _detailRqPaintRecords(statusKey, opts) {
     // on page 4) lands on the last real page rather than rendering nothing.
     _rqRecordsPage = pg.page || 1;
     const noun = (window._detailReviewQueue || {}).recordType === 'lead' ? 'leads' : 'records';
-    container.innerHTML = `<div class="divide-y divide-gray-100">${pg.items.map((r) => _detailRqRecordCard(r, statusKey)).join('')}</div>`
+    container.innerHTML = noticeHtml
+        + `<div class="divide-y divide-gray-100">${pg.items.map((r) => _detailRqRecordCard(r, statusKey)).join('')}</div>`
         + (window.ListPager ? window.ListPager.controlsHtml(pg, { attr: 'data-rq-page', noun }) : '');
     // The container outlives every repaint, so one delegated listener covers every page of every
     // column. `opts` is re-derived rather than captured: a page change must not resurrect the
@@ -3519,7 +3640,7 @@ window._renderLeadRejectionEvidence = async function(assistantId) {
     show();
     if (!payload.reasons.length) {
         host.innerHTML = `
-          <p class="text-sm text-gray-500">Nothing recorded yet. When you reject a lead in the Review Queue or the Leads tab, the reason you pick is filed here.</p>`;
+          <p class="text-sm text-gray-500">Nothing recorded yet. When you reject a lead in the Outreach tab or the Enrichment tab, the reason you pick is filed here.</p>`;
         return;
     }
 
@@ -4002,12 +4123,15 @@ function _applyDashboardRegistry(data) {
     // Review Queue tab header/columns adapt to the queue kind. Records queues (data-hub roles)
     // approve/schedule records — there's no "Posted" state and no post-generation button here.
     const rqIsRecords = window._detailReviewQueue.kind === 'records';
-    // Per-role tab label override (e.g. meeting note-taker → "Inbox"); defaults to "Review".
-    // The tab button's badge span must survive, so only its leading text node is rewritten.
+    // Per-role tab label override (Lead Generator → "Outreach", meeting note-taker → "Inbox");
+    // defaults to "Review". The label has its own span, so this no longer has to pick the button's
+    // leading text node out from under the count badge beside it.
+    //
+    // The plain label lands here; _detailRqRefreshRecordCounts re-writes it with the count once
+    // the numbers arrive, the same way the Data Hub and Searches tabs do.
     const rqLabel = window._detailReviewQueue.label || 'Review';
     setText('detail-rq-heading', rqLabel);
-    const rqTabBtn = document.getElementById('maintab-btn-review-queue');
-    if (rqTabBtn && rqTabBtn.firstChild && rqTabBtn.firstChild.nodeType === 3) rqTabBtn.firstChild.nodeValue = rqLabel + ' ';
+    setText('review-queue-tab-label', rqLabel);
     // Lifecycle column labels. A role may rename any of them via reviewQueue.columnLabels, keyed by
     // the column's `data-status` — the Lead Generator renames "Scheduled" to "Awaiting reply",
     // because on that role the state means the email has ALREADY gone and what is scheduled is the

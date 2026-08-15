@@ -40,6 +40,10 @@
     assistantId: null,
     threads: [],
     counts: { total: 0, open: 0, replied: 0, stalled: 0, closed: 0 },
+    // The role's label for this tab, from the registry (conversationsTab.label). Held here rather
+    // than read back off the button, because the button's text carries the record count once one
+    // has landed and re-wrapping it would give "Conversations (12) (12)".
+    tabLabel: 'Conversations',
     stateFilter: null,
     nextCursor: null,
     // Non-null when a thread is open: { thread, messages, enrolment }.
@@ -533,6 +537,24 @@
 
   // ── Data ───────────────────────────────────────────────────────────────────
 
+  /**
+   * The tab button: how many conversations exist.
+   *
+   * ⚠️ `counts.total` is the count for the CURRENT state filter's superset, not for the page on
+   * screen — `state.threads` is one cursor page and would report "20" on an account with sixty.
+   * The server sends the totals precisely so the filter chips can be labelled without paging, and
+   * the tab reads the same number the "All" chip does.
+   *
+   * No amber pill here, deliberately. The natural candidate is `counts.replied` — a stranger has
+   * written back and nobody has looked — but this tab has no "mark as seen", so the pill could
+   * only ever be cleared by the conversation being closed. A permanent badge is a broken badge.
+   */
+  function updateTab() {
+    window.AssistantDashboardRegistry?.setTabCount(
+      'conversations-tab-label', state.tabLabel, state.counts && state.counts.total,
+    );
+  }
+
   async function load(opts) {
     const append = !!(opts && opts.append);
     state.loading = true;
@@ -546,6 +568,7 @@
       state.threads = append ? state.threads.concat(data.threads || []) : (data.threads || []);
       state.counts = data.counts || state.counts;
       state.nextCursor = data.nextCursor || null;
+      updateTab();
     } catch (err) {
       // lead_threads / sequence_enrolments are MANUAL applies (db/lead-threads.sql,
       // db/outreach-sequences.sql). Name that rather than showing a generic failure.
@@ -579,22 +602,43 @@
   // ── Public API ─────────────────────────────────────────────────────────────
 
   window.AssistantLeadThreads = {
-    init({ assistantId }) {
+    init({ assistantId, cfg }) {
       state.assistantId = assistantId;
       state.rendered = false;
       state.threads = [];
       state.open = null;
       state.openId = null;
-    },
-    /**
-     * Called on first activation of the tab. Unlike the Signal Inbox this does NOT prefetch on
-     * init — no tab badge depends on the counts, so a user who never opens the tab should never
-     * pay for the query.
-     */
-    activate() {
-      if (state.rendered) return;
+      if (cfg && cfg.label) state.tabLabel = cfg.label;
+      // ⚠️ This DOES prefetch now, and the comment that used to sit below said the opposite for a
+      // good reason: "no tab badge depends on the counts, so a user who never opens the tab should
+      // never pay for the query". A count on the button is exactly such a dependency, and it is
+      // the point — Conversations was the one tab in the funnel with no number on it, so the tab
+      // gave no indication that anything had ever replied.
+      //
+      // The cost is one list query per assistant-detail page load. `activate()` reuses this
+      // result rather than fetching again, so opening the tab is now free where it used to cost
+      // the query — the spend moved rather than doubled.
       state.rendered = true;
       load();
+    },
+    /**
+     * Called on first activation of the tab. init() has normally loaded already, so the usual
+     * outcome here is a repaint or nothing at all.
+     *
+     * ⚠️ The empty-host check is load-bearing now that init() prefetches. init() runs during
+     * _applyDashboardRegistry, and its render() writes into `lead-threads-host`; if that fetch
+     * resolved before the panel existed, the paint went nowhere and `rendered` was already true —
+     * which, with a bare `if (state.rendered) return`, left the tab permanently blank. Repainting
+     * from state costs nothing and cannot produce that.
+     */
+    activate() {
+      if (!state.rendered) {
+        state.rendered = true;
+        load();
+        return;
+      }
+      const h = host();
+      if (h && !h.innerHTML.trim()) render();
     },
     refresh: load,
   };

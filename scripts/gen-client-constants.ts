@@ -47,6 +47,12 @@ import {
     EMAIL_SOURCE_LABELS, emailSourceLabel, needsPersonalInboxConfirmation,
 } from '../src/config/lead-email-kind';
 import { LEAD_OUTREACH_CHIPS, leadOutreachState } from '../src/config/lead-outreach-state';
+import {
+    LEAD_RETENTION_DAYS, RETENTION_FIELD, RETENTION_DELETED_FIELD, RETENTION_REASONS,
+    RETENTION_REASON_LABELS, RETENTION_REASON_NOTES, RETENTION_NOTICE, RETENTION_DELETED_NOTICE,
+    isRetentionDeleted, retentionReasonOf, retentionClockStart,
+    retentionDaysRemaining, retentionCountdownLabel, retentionUrgency,
+} from '../src/config/lead-retention';
 import { RATING_BANDS } from '../src/config/icp-profile';
 import { LEAD_RATING_CHIPS, LEAD_RATING_CHIP_UNKNOWN } from '../src/config/lead-rating-chips';
 
@@ -399,6 +405,65 @@ ${formatRows}
      * keep it identical to the server's ?deliverable=1 filter or the badge and the list disagree.
      */
     isDeliverable: isLeadDeliverable,
+  };
+
+  // ── Lead retention (the 30-day clock) ─────────────────────────────────────
+  // From src/config/lead-retention.ts, stringified — the REAL countdown, for the sharpest version
+  // of the reason the two blocks above are mirrored: this number sits beside a lead and tells the
+  // user how long they have to act before it is moved out of their pipeline automatically. A
+  // browser copy that drifted from the sweep would count down to the wrong day, and the user would
+  // find out by losing a lead on the day the screen said they had three left.
+  //
+  // The agreement is structural rather than careful: the clock is updated_at on both sides
+  // (there is no second stamp to fall out of step — see retentionClockStart's header), and every
+  // function below is the same source the server runs.
+  //
+  // Free variables (RETENTION_FIELD, RETENTION_DELETED_FIELD, LEAD_RETENTION_DAYS,
+  // isRetentionDeleted) resolve to the declarations directly above, so the names must match.
+  var LEAD_RETENTION_DAYS = ${JSON.stringify(LEAD_RETENTION_DAYS)};
+  var RETENTION_FIELD = ${JSON.stringify(RETENTION_FIELD)};
+  var RETENTION_DELETED_FIELD = ${JSON.stringify(RETENTION_DELETED_FIELD)};
+  var RETENTION_REASONS = ${JSON.stringify(RETENTION_REASONS)};
+  var isRetentionDeleted = ${isRetentionDeleted.toString()};
+  var retentionReasonOf = ${retentionReasonOf.toString()};
+  var retentionClockStart = ${retentionClockStart.toString()};
+  var retentionDaysRemaining = ${retentionDaysRemaining.toString()};
+  var retentionCountdownLabel = ${retentionCountdownLabel.toString()};
+  var retentionUrgency = ${retentionUrgency.toString()};
+
+  window.LeadRetention = {
+    /** How long a lead may sit in Outreach ▸ Review or ▸ Archived before it is moved to Deleted. */
+    DAYS: LEAD_RETENTION_DAYS,
+
+    /** Has the sweep already moved this lead? Presence of deletedAt is the test. */
+    isDeleted: isRetentionDeleted,
+
+    /** Why it was moved — a RETENTION_REASONS key — or null if the lead is still live. */
+    reasonOf: retentionReasonOf,
+
+    /** What the Deleted section prints for each reason. */
+    REASON_LABELS: ${JSON.stringify(RETENTION_REASON_LABELS)},
+    REASON_NOTES: ${JSON.stringify(RETENTION_REASON_NOTES)},
+
+    /**
+     * Whole days left, from the record envelope's updatedAt. Null when there is nothing to read,
+     * so callers render nothing rather than "NaN days".
+     */
+    daysRemaining: function (updatedAtIso, now) {
+      return retentionDaysRemaining(retentionClockStart(updatedAtIso), now);
+    },
+
+    /** "3 days left" / "1 day left" / "Due for deletion" — the exact string every surface shows. */
+    countdownLabel: retentionCountdownLabel,
+
+    /** 'none' | 'low' | 'soon' | 'urgent' — how loudly the countdown should be drawn. */
+    urgency: retentionUrgency,
+
+    /** The standing notice above the Review and Archived columns. */
+    NOTICE: ${JSON.stringify(RETENTION_NOTICE)},
+
+    /** The Deleted section's own header line. */
+    DELETED_NOTICE: ${JSON.stringify(RETENTION_DELETED_NOTICE)},
   };
 
   // ── Lead email kind ───────────────────────────────────────────────────────

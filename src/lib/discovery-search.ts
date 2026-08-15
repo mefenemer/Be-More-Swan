@@ -32,6 +32,17 @@ export interface SearchResult {
     url: string;
     snippet: string;
     domain: string | null;   // normalised: lowercased, no leading www., no path
+    /**
+     * The publication date the provider reported, verbatim and unparsed ("14 Aug 2026",
+     * "3 days ago"), or null when it reported none.
+     *
+     * Kept as the provider's own string rather than normalised to a timestamp, because it is
+     * EVIDENCE shown to a human next to the headline it belongs to — and a "3 days ago" resolved
+     * into an absolute date at fetch time becomes a lie the moment it is stored. The buying-signal
+     * sweep (src/lib/lead-intel.ts) is the only consumer, and recency there is enforced by the
+     * query's own date restriction, not by parsing this.
+     */
+    date: string | null;
 }
 
 export interface SearchResponse {
@@ -75,11 +86,14 @@ export function normaliseDomain(input: string | null | undefined): string | null
  * @param opts.limit max results to return (default 10)
  * @throws SearchNotConfiguredError when no provider is wired
  */
-export async function search(query: string, opts: { limit?: number } = {}): Promise<SearchResponse> {
+export async function search(
+    query: string,
+    opts: { limit?: number; recency?: 'year' | 'month' } = {},
+): Promise<SearchResponse> {
     if (!isSearchConfigured()) throw new SearchNotConfiguredError();
     const limit = Math.max(1, Math.min(opts.limit ?? 10, 20));
 
-    if (PROVIDER === 'serper') return searchSerper(query, limit);
+    if (PROVIDER === 'serper') return searchSerper(query, limit, opts.recency);
     throw new SearchNotConfiguredError(`Unknown DISCOVERY_SEARCH_PROVIDER "${PROVIDER}".`);
 }
 
@@ -159,11 +173,15 @@ export async function fetchPageText(url: string): Promise<string> {
 
 // ── Serper.dev provider ──────────────────────────────────────────────────────
 
-async function searchSerper(query: string, limit: number): Promise<SearchResponse> {
+async function searchSerper(query: string, limit: number, recency?: 'year' | 'month'): Promise<SearchResponse> {
+    // `tbs` is Google's own date restriction, passed through by Serper. Used by the buying-signal
+    // sweep, where a funding round from 2019 is not a buying signal — it is history, and feeding it
+    // to the re-scorer as though it were news is how a lead gets promoted for nothing.
+    const tbs = recency === 'month' ? 'qdr:m' : recency === 'year' ? 'qdr:y' : undefined;
     const res = await fetch(SERPER_ENDPOINT, {
         method: 'POST',
         headers: { 'X-API-KEY': SERPER_API_KEY as string, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ q: query, num: limit }),
+        body: JSON.stringify({ q: query, num: limit, ...(tbs ? { tbs } : {}) }),
     });
     if (!res.ok) {
         const detail = await res.text().catch(() => '');
@@ -178,6 +196,7 @@ async function searchSerper(query: string, limit: number): Promise<SearchRespons
             url,
             snippet: typeof r.snippet === 'string' ? r.snippet : '',
             domain: normaliseDomain(url),
+            date: typeof r.date === 'string' && r.date.trim() ? r.date.trim() : null,
         };
     });
     return { results, costGbp: COST_GBP_PER_CALL };

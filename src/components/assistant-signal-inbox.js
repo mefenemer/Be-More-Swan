@@ -995,15 +995,16 @@
    * led nowhere. It now counts SEARCHES that cannot progress without the user: a draft nobody has
    * started (it has searched nothing and spent nothing) and a search whose last run failed.
    *
-   * `(0)` is suppressed: a bare "Searches" reads as an empty tab, where "Searches (0)" reads as a
-   * counter that failed to load.
+   * `(0)` is suppressed (by the shared formatter): a bare "Searches" reads as an empty tab, where
+   * "Searches (0)" reads as a counter that failed to load.
    */
   function updateTab() {
-    const label = document.getElementById('signals-tab-label');
-    if (label) {
-      const searches = state.savedSearches.length;
-      label.textContent = searches ? `${state.tabLabel} (${searches})` : state.tabLabel;
-    }
+    // The parenthetical comes from the shared formatter so all four lead tabs agree on it —
+    // this tab and the Data Hub had grown the same "(N)" convention separately, and Outreach and
+    // Conversations had never grown one at all. See setTabCount's header.
+    window.AssistantDashboardRegistry?.setTabCount(
+      'signals-tab-label', state.tabLabel, state.savedSearches.length,
+    );
 
     const el = document.getElementById('signals-attention-badge');
     if (!el) return;

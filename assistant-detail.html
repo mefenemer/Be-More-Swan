@@ -608,7 +608,13 @@
       </button>
       <!-- Review Queue — items awaiting the human's approval (posts pending_approval, or records
            with approval_status='pending_approval'). The core human-in-the-loop gate. -->
-      <button type="button" id="maintab-btn-review-queue" data-maintab="review-queue" class="main-tab-btn">Review
+      <!-- The label is a SPAN, not a bare text node. It used to be the latter, and both the role
+           rename ("Review" → "Outreach" / "Inbox") and the record count had to reach in and rewrite
+           `firstChild.nodeValue` to avoid deleting the badge beside it — a hack that had already
+           been copy-pasted onto the lifecycle column buttons below. A span makes both writers
+           ordinary setText/setTabCount calls and leaves the badge alone by construction. -->
+      <button type="button" id="maintab-btn-review-queue" data-maintab="review-queue" class="main-tab-btn">
+        <span id="review-queue-tab-label">Review</span>
         <span id="detail-rq-pending-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
       <!-- Conversations — lead roles only (conversationsTab: lead_qualifier). What happened AFTER
