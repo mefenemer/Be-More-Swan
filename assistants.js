@@ -5649,8 +5649,22 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     _fetchAndRenderFollowerCounts();
 
     // ── Recent Activity ───────────────────────────────────────────
+    // TWO feeds behind one renderer. The default (get-assistant-activity) reads the content
+    // tables: generation jobs, scheduled posts, post ideas, media jobs. A role that publishes
+    // nothing writes to none of them, so for the Lead Generator that endpoint answered "no
+    // activity" in every timeframe while the assistant was in fact discovering, scoring, emailing
+    // and closing leads all week — a permanently empty tab under a heading promising a history.
+    //
+    // `activitySource: 'lead'` (assistant-dashboard-registry.js) routes to get-lead-activity.ts,
+    // which projects the revenue ledger + task runs into the SAME item shape. Only the URL changes;
+    // everything below this line is shared, and must stay that way — a second activity renderer is
+    // how the two feeds start disagreeing about what "Needs attention" means.
     const activityList = document.getElementById('recent-activity-list');
     if (activityList) {
+        const _activityCfg = window.AssistantDashboardRegistry?.get(currentData.roleKey) || {};
+        const _activityUrl = _activityCfg.activitySource === 'lead'
+            ? '/.netlify/functions/get-lead-activity'
+            : '/.netlify/functions/get-assistant-activity';
         const loadActivity = async (timeframe = '1d') => {
         // update button styles
         document.querySelectorAll('.activity-tf-btn').forEach(btn => {
@@ -5659,7 +5673,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         });
         activityList.innerHTML = '<div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading activity…</div>';
         try {
-            const res = await fetch(`/.netlify/functions/get-assistant-activity?id=${assistantId}&timeframe=${timeframe}`);
+            const res = await fetch(`${_activityUrl}?id=${assistantId}&timeframe=${timeframe}`);
             if (res.ok) {
                 const { logs, activeJobCount } = await res.json();
                 // Feed the operational status pill (Epic 1 AC1.1.2): mid-flight jobs → "Executing Task".

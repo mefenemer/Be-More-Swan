@@ -10,6 +10,10 @@
 //        → { ok, sent, enrolment }        — bring the next chaser forward to now
 //   POST { action: 'stop_follow_ups', assistantId, threadId }
 //        → { ok, enrolment }              — stop the cadence, permanently
+//   POST { action: 'calendar', assistantId, from?, to? }
+//        → { followUps: PendingFollowUp[] } — the chasers DUE in a window, for the Calendar tab
+//   POST { action: 'reschedule_follow_up', assistantId, threadId, nextSendAt }
+//        → { ok, enrolment }              — move the next chaser; the past is refused
 //
 // ── Read-only ABOUT THE THREAD, deliberately ──────────────────────────────────
 // Everything that WRITES lead_threads / lead_messages has exactly one owner: src/utils/lead-threads.ts,
@@ -28,7 +32,7 @@
 // surface that renders a thread. Outreach could be sent, replied to, classified and halted and a
 // user could see none of it. That is what this reads back.
 
-import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lt, lte, or, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     aiAssistants, assistantRecords, leadMessages, leadThreads, sequenceEnrolments, users,
@@ -126,7 +130,10 @@ export default withLambda(async (event) => {
     if ('error' in ctx) return ctx.error;
     const { organisationId: orgId } = ctx;
 
-    let body: { action?: string; assistantId?: number; threadId?: number; state?: string; cursor?: string };
+    let body: {
+        action?: string; assistantId?: number; threadId?: number; state?: string; cursor?: string;
+        from?: string; to?: string; nextSendAt?: string;
+    };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
     const action = String(body.action || 'list');
@@ -305,6 +312,150 @@ export default withLambda(async (event) => {
                         } : null,
                     };
                 }),
+            });
+        }
+
+        // ── calendar ──────────────────────────────────────────────────────────
+        // Every follow-up this assistant is going to SEND in a date window — the Calendar tab's
+        // pending-outreach chips.
+        //
+        // ⚠️ This is a different fact from the chips the calendar already drew. Those come from
+        // assistant_records (`approval_status='scheduled'`), and for a lead `scheduled_for` is the
+        // CHASE REMINDER: the opening email has already gone out and the date is a prompt for a
+        // human. Nothing sends on it. The rows below are the opposite — `next_send_at` IS the
+        // worker's queue (process-sequence-sends.ts claims on it), so each one is an email that
+        // will actually be delivered on that date unless something stops it.
+        //
+        // Active enrolments only, and only ones with a date. A halted/completed row has
+        // next_send_at NULL by invariant, so the state filter is belt-and-braces against a row
+        // that broke it — a terminal enrolment drawn on a calendar is a send that is never coming.
+        if (action === 'calendar') {
+            const from = body.from ? new Date(String(body.from)) : null;
+            const to = body.to ? new Date(String(body.to)) : null;
+            if ((from && isNaN(from.getTime())) || (to && isNaN(to.getTime()))) {
+                return json(400, { error: 'from/to must be valid dates.' });
+            }
+
+            const rows = await db
+                .select({
+                    enrolmentId: sequenceEnrolments.id,
+                    threadId: sequenceEnrolments.leadThreadId,
+                    assistantRecordId: sequenceEnrolments.assistantRecordId,
+                    contactEmail: sequenceEnrolments.contactEmail,
+                    lastStepSent: sequenceEnrolments.lastStepSent,
+                    nextSendAt: sequenceEnrolments.nextSendAt,
+                    threadState: leadThreads.state,
+                    threadContactEmail: leadThreads.contactEmail,
+                    recordTitle: assistantRecords.title,
+                })
+                .from(sequenceEnrolments)
+                // ⚠️ INNER join to the thread. The ASSISTANT scope lives there, the same reason
+                // nudge/stop join it rather than reading the enrolment alone.
+                .innerJoin(leadThreads, eq(leadThreads.id, sequenceEnrolments.leadThreadId))
+                .leftJoin(assistantRecords, eq(assistantRecords.id, sequenceEnrolments.assistantRecordId))
+                .where(and(
+                    eq(sequenceEnrolments.organisationId, orgId),
+                    eq(leadThreads.aiAssistantId, assistantId),
+                    eq(sequenceEnrolments.state, 'active'),
+                    sql`${sequenceEnrolments.nextSendAt} IS NOT NULL`,
+                    ...(from ? [gte(sequenceEnrolments.nextSendAt, from)] : []),
+                    ...(to ? [lte(sequenceEnrolments.nextSendAt, to)] : []),
+                ))
+                .orderBy(sequenceEnrolments.nextSendAt);
+
+            return json(200, {
+                followUps: rows.map((r) => ({
+                    enrolmentId: r.enrolmentId,
+                    threadId: r.threadId,
+                    assistantRecordId: r.assistantRecordId,
+                    // Same fallback chain the list action uses: a thread whose record was deleted
+                    // still has to be identifiable on the grid.
+                    title: r.recordTitle || r.contactEmail || r.threadContactEmail || `Thread #${r.threadId}`,
+                    contactEmail: r.contactEmail || r.threadContactEmail,
+                    // The step this send WILL be, not the one already sent. The user is looking at
+                    // a future email; numbering it by what has gone is off by one on every chip.
+                    nextStep: (r.lastStepSent ?? 0) + 1,
+                    lastStepSent: r.lastStepSent ?? 0,
+                    nextSendAt: r.nextSendAt?.toISOString() ?? null,
+                    // The worker refuses to send into a thread that is no longer 'open'. A chip for
+                    // one of those is drawn, but drawn as blocked rather than as a pending send.
+                    threadState: r.threadState,
+                })),
+            });
+        }
+
+        // ── reschedule_follow_up ──────────────────────────────────────────────
+        // Move the next chaser to another moment — the Calendar tab's drag-and-drop.
+        //
+        // The mirror image of `nudge`, which is the same one-column write pinned to now(). Every
+        // safety gate stays exactly where it was: this only says WHEN the worker should next look
+        // at this row, and the worker re-checks the reply halt, suppression, do-not-contact, the
+        // per-org daily ceiling and the step ceiling when it gets there. Moving a date can
+        // therefore never cause a send that would otherwise have been refused.
+        //
+        // ⚠️ The past is refused server-side, not only in the UI. `next_send_at` is a due-date
+        // queue — a date behind now() means "send on the next tick", so accepting one would quietly
+        // turn a mis-drop into an immediate cold email. The client shows the same rule as a dialog
+        // before it ever gets here; this is what makes the rule true rather than merely displayed.
+        if (action === 'reschedule_follow_up') {
+            const threadId = Number(body.threadId);
+            if (!Number.isInteger(threadId) || threadId <= 0) {
+                return json(400, { error: 'A threadId is required.' });
+            }
+            const when = body.nextSendAt ? new Date(String(body.nextSendAt)) : null;
+            if (!when || isNaN(when.getTime())) {
+                return json(400, { error: 'nextSendAt (a valid date) is required.' });
+            }
+            // A minute of slack, so a drop onto today at a time that has just ticked past is not
+            // rejected for being a few seconds old.
+            if (when.getTime() < Date.now() - 60_000) {
+                return json(400, {
+                    error: 'A follow-up email cannot be scheduled in the past.',
+                    code: 'PAST_DATE',
+                });
+            }
+
+            const [row] = await db
+                .select({
+                    enrolmentId: sequenceEnrolments.id,
+                    enrolmentState: sequenceEnrolments.state,
+                    lastStepSent: sequenceEnrolments.lastStepSent,
+                    threadState: leadThreads.state,
+                })
+                .from(leadThreads)
+                .leftJoin(sequenceEnrolments, eq(sequenceEnrolments.leadThreadId, leadThreads.id))
+                .where(and(
+                    eq(leadThreads.id, threadId),
+                    eq(leadThreads.organisationId, orgId),
+                    eq(leadThreads.aiAssistantId, assistantId),
+                ))
+                .limit(1);
+
+            if (!row) return json(404, { error: 'Conversation not found.' });
+            if (!row.enrolmentId) {
+                return json(409, {
+                    error: 'There is no follow-up sequence on this conversation.',
+                    code: 'NOT_ENROLLED',
+                });
+            }
+            if (row.enrolmentState !== 'active') {
+                return json(409, {
+                    error: 'Follow-ups on this conversation have stopped, so there is no next one to move.',
+                    code: 'NOT_ACTIVE',
+                });
+            }
+
+            await db.update(sequenceEnrolments)
+                .set({ nextSendAt: when, updatedAt: new Date() })
+                .where(eq(sequenceEnrolments.id, row.enrolmentId));
+
+            return json(200, {
+                ok: true,
+                enrolment: {
+                    state: row.enrolmentState,
+                    lastStepSent: row.lastStepSent ?? 0,
+                    nextSendAt: when.toISOString(),
+                },
             });
         }
 

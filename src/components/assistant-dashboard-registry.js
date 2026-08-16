@@ -31,6 +31,13 @@
  *                //     hasReviewCadence        → Profile ▸ Notifications ▸ Review-alert cadence card
  *                //     hasContentPublishing    → Profile ▸ Notifications ▸ "Content & Publishing"
  *                //                               preference (post/draft alerts — social-only)
+ *                //     hasLeadOutreach         → Calendar tab also draws the PENDING follow-up
+ *                //                               emails (sequence_enrolments), draggable to
+ *                //                               reschedule the send. lead roles only.
+ *   cfg.activitySource // → OPTIONAL. Which feed the Activity tab reads. Omitted → the content
+ *                //   feed (get-assistant-activity). 'lead' → get-lead-activity.ts (the revenue
+ *                //   ledger + task runs), for roles whose work never touches a content table.
+ *                //   Both return the same item shape, so only the URL differs.
  *   cfg.roiSource // → OPTIONAL. Where the hero's Effort/Money Saved strip gets its figures.
  *                //   Omitted → the post-based get-assistant-metrics path, gated by
  *                //   modules.hasImpactRoi. 'lead' → get-lead-roi.ts (the revenue ledger). The two
@@ -385,7 +392,24 @@
         hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
         hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
         hasContentPublishing: false,
+        // ⊕ The Calendar tab also draws this role's PENDING OUTREACH — the follow-up emails the
+        // cadence is going to send (sequence_enrolments.next_send_at, via lead-threads.ts
+        // `calendar`). Opt-in, because this is the only role with a send queue that is not
+        // scheduled_posts: everything else on a records-role calendar is a reminder or a
+        // completed run, and neither is a thing the product is about to do to a third party.
+        //
+        // ⚠️ Distinct from the yellow 🗓 record chips, which are ALSO on this calendar and mean
+        // very nearly the opposite — a lead's `scheduled_for` is the chase reminder left behind
+        // AFTER its email went out. See calendar.js on _recordChip vs _followUpChip.
+        hasLeadOutreach: true,
       },
+      // ⊕ The Activity tab's source. Omitted → get-assistant-activity, which reads content
+      // generation jobs, scheduled posts, post ideas and media jobs: all four are tables this role
+      // never writes to, so the tab read "No activity yet" in every timeframe for an assistant
+      // that had spent the week finding, scoring, emailing and closing leads. 'lead' routes it to
+      // get-lead-activity.ts (the revenue ledger + task runs) — the same routing the KPI grid does
+      // via `metricsSource`, and the same wire shape, so the renderer is unchanged.
+      activitySource: 'lead',
       // ⊕ The hero's "Effort Saved / Money Saved" strip, fed by get-lead-roi.ts (the revenue
       // ledger + the platform's own time multipliers + the user's hourly rate) rather than by
       // get-assistant-metrics.

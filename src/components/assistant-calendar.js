@@ -49,6 +49,15 @@
     return (cfg?.modules || {}).hasPostingSchedule !== false;
   }
 
+  // Does this role have PENDING OUTREACH to draw — follow-up emails the cadence is going to send?
+  // Opt-IN (`=== true`), the opposite default from publishesContent above, and deliberately so:
+  // an unknown roleKey resolves to social_media_manager, and inheriting a lead's send queue is a
+  // far worse default than inheriting a platform filter. See modules.hasLeadOutreach.
+  function hasLeadOutreach() {
+    const cfg = window.AssistantDashboardRegistry?.get(state.roleKey);
+    return (cfg?.modules || {}).hasLeadOutreach === true;
+  }
+
   async function show() {
     const host = document.getElementById(HOST_ID);
     if (!host || state.assistantId == null) return;
@@ -66,6 +75,7 @@
         await window.initCalendar({
           assistantId: state.assistantId,
           publishesContent: publishesContent(),
+          leadOutreach: hasLeadOutreach(),
         });
       }
     } catch (err) {

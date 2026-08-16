@@ -5145,9 +5145,14 @@ function formatCurrency(amount, currency) {
 <script src="/src/public/marked-bms-directives.js"></script>
 <script src="/src/components/markdown-editor.js"></script>
 <script src="/src/components/blog-studio-modal.js"></script>
-<script src="/calendar.js?v=20260731-nav-reload"></script>
+<!-- Chip detail modal for the Calendar tab's lead work (a chase reminder, or a pending follow-up
+     email). Must load BEFORE calendar.js is USED, not before it is parsed — calendar.js only
+     looks the component up inside a click handler — but keeping it above avoids the question. -->
+<script src="/src/components/lead-calendar-modal.js"></script>
+<script src="/calendar.js?v=20260816-lead-outreach"></script>
 <!-- Per-assistant Calendar tab on assistant-detail.html — reuses calendar.js rendering
-     scoped to the current assistant (scheduled posts + records with scheduled_for + task runs). -->
+     scoped to the current assistant (scheduled posts + records with scheduled_for + task runs,
+     plus the pending outreach emails on the lead roles). -->
 <script src="/src/components/assistant-calendar.js"></script>
 <!-- My Content tab (social_media_manager, blog_writer) — reuses the org-wide content
      library (my-content.html + my-content.js, already loaded above) as a tab on the two

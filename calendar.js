@@ -182,6 +182,20 @@ let _publishesContent = true;
 // Scheduled Data Hub records (leads/invoices/tickets/… with approval_status='scheduled') for the
 // locked assistant — only fetched in the assistant Calendar tab, rendered as timeline chips.
 let _scheduledRecords = [];
+// ── Pending outreach (lead roles only) ───────────────────────────────────────
+// The follow-up emails this assistant's cadence is GOING TO SEND — sequence_enrolments.next_send_at
+// via lead-threads.ts `calendar`. Switched on per role by modules.hasLeadOutreach.
+//
+// ⚠️ Read this next to _scheduledRecords above, because on a Lead Generator's calendar the two sit
+// side by side and mean nearly opposite things:
+//   • a RECORD chip (🗓, yellow) is a lead whose outreach has ALREADY gone out. `scheduled_for` is
+//     the chase reminder left behind for a human. Nothing sends on that date.
+//   • a FOLLOW-UP chip (✉, indigo) is an email that WILL be delivered on that date, by the worker,
+//     to a third party, unless a reply/suppression/do-not-contact gate stops it first.
+// That distinction is the whole reason the past-date rule exists on one and not the other, and it
+// is why they are separate arrays rather than one merged "scheduled things" list.
+let _followUps = [];
+let _leadOutreach = false;
 
 // Stable colour palette assigned to assistants by load order (inline styles → no Tailwind
 // arbitrary-class compile issues). Null/unknown assistant → neutral grey.
@@ -210,15 +224,21 @@ function _matchesPlatformFilter(platform) {
 // opts.publishesContent (optional, default true) — false for roles that publish nothing, which
 // removes the platform filter and rewrites the status legend. Only meaningful alongside
 // assistantId: the global page always spans publishing and non-publishing assistants at once.
+// opts.leadOutreach (optional, default false) — true for the lead roles, which adds the pending
+// follow-up email chips and their drag-to-reschedule. Opt-in; see _followUps.
 window.initCalendar = async function (opts = {}) {
     if (opts.assistantId != null) {
         _assistantFilter = String(opts.assistantId);
         _lockedAssistant = true;
         _publishesContent = opts.publishesContent !== false;
+        _leadOutreach = opts.leadOutreach === true;
     } else {
         _assistantFilter = 'all';
         _lockedAssistant = false;
         _publishesContent = true;
+        // The global Content Calendar spans every assistant and has no single lead context to
+        // reschedule against, so pending outreach stays off there.
+        _leadOutreach = false;
     }
     _renderStatusLegend();
     document.getElementById('cal-btn-prev')?.addEventListener('click', _navPrev);
@@ -301,7 +321,7 @@ async function _loadAndRender() {
 
         // null = "no definitive answer" (a 500, say) — leave the previous value alone rather than
         // blanking the grid on a transient failure. [] is a real, empty answer.
-        let posts = null, activities = null, assistants = null, blogPosts = null, records = [];
+        let posts = null, activities = null, assistants = null, blogPosts = null, records = [], followUps = [];
 
         if (postsRes.ok) {
             posts = (await postsRes.json()).posts || [];
@@ -327,6 +347,27 @@ async function _loadAndRender() {
             } catch { records = []; }
         }
 
+        // Lead roles only: the follow-up emails due in this range. Swallowed on failure like the
+        // records fetch above — an un-migrated environment (sequence_enrolments arrives with a
+        // manual db/outreach-sequences.sql) answers 503, and a calendar that renders everything
+        // else is better than one that renders nothing.
+        if (_leadOutreach && _lockedAssistant && _assistantFilter !== 'all') {
+            try {
+                const fr = await fetch('/.netlify/functions/lead-threads', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        action: 'calendar',
+                        assistantId: Number(_assistantFilter),
+                        from: from.toISOString(),
+                        to: to.toISOString(),
+                    }),
+                });
+                followUps = fr.ok ? ((await fr.json()).followUps || []) : [];
+            } catch { followUps = []; }
+        }
+
         if (token !== _loadToken) return;   // superseded by a newer navigation
 
         if (posts) _posts = posts;
@@ -334,6 +375,7 @@ async function _loadAndRender() {
         if (assistants) _assistants = assistants;
         if (blogPosts) _blogPosts = blogPosts;
         _scheduledRecords = records;
+        _followUps = followUps;
     } catch (e) { console.warn('Calendar load error:', e); }
     if (token !== _loadToken) return;
     // Always (re)populate the toolbar controls — the calendar.html fragment (and its fresh
@@ -403,11 +445,18 @@ function _renderStatusLegend() {
     if (!strip) return;
     const item = (marker, label) =>
         `<span class="inline-flex items-center gap-1.5 text-xs text-gray-500">${marker} ${label}</span>`;
+    // The pending-outreach marker, lead roles only. It is listed FIRST because it is the only
+    // thing on this grid that will act on a third party by itself — the reminder and the completed
+    // run are both records of what a person did or has to do.
+    const outreachItem = _leadOutreach
+        ? item('<span class="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>', 'Email to be sent')
+        : '';
     strip.innerHTML = _publishesContent
         ? item('<span class="text-emerald-600 font-extrabold">✓</span>', 'Posted (live)') +
           item('<span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>', 'Scheduled') +
           item('<span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>', 'Overdue')
-        : item('<span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>', 'Scheduled') +
+        : outreachItem +
+          item('<span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>', _leadOutreach ? 'Chase reminder' : 'Scheduled') +
           item('<span class="text-gray-500 font-extrabold">✓</span>', 'Completed');
 }
 
@@ -489,7 +538,10 @@ function _renderMonth() {
         const dayActs = _activitiesOnDate(date);
         const dayBlogs = _blogPostsOnDate(date);
         const dayRecords = _scheduledRecordsOnDate(date);
-        html += `<div class="space-y-1">${dayGroups.map(g => _postChip(g, 'month')).join('')}${dayBlogs.map(_blogChip).join('')}${dayRecords.map(r => _recordChip(r, 'month')).join('')}${dayActs.map(a => _activityChip(a, 'month')).join('')}</div>`;
+        const dayFollowUps = _followUpsOnDate(date);
+        // Pending outreach sits ABOVE the reminders and the completed runs: it is the only entry
+        // in the cell that is going to do something on its own.
+        html += `<div class="space-y-1">${dayGroups.map(g => _postChip(g, 'month')).join('')}${dayBlogs.map(_blogChip).join('')}${dayFollowUps.map(f => _followUpChip(f, 'month')).join('')}${dayRecords.map(r => _recordChip(r, 'month')).join('')}${dayActs.map(a => _activityChip(a, 'month')).join('')}</div>`;
         html += `</div>`;
     }
 
@@ -523,7 +575,7 @@ function _renderWeek() {
             ondragover="window._calDragOver(event, '${dateKey}')"
             ondragleave="window._calDragLeave(event)"
             ondrop="window._calDrop(event, '${dateKey}')">
-            ${dayGroups.map(g => _postChip(g, 'week')).join('')}${_blogPostsOnDate(d).map(_blogChip).join('')}${_scheduledRecordsOnDate(d).map(r => _recordChip(r, 'week')).join('')}${_activitiesOnDate(d).map(a => _activityChip(a, 'week')).join('')}
+            ${dayGroups.map(g => _postChip(g, 'week')).join('')}${_blogPostsOnDate(d).map(_blogChip).join('')}${_followUpsOnDate(d).map(f => _followUpChip(f, 'week')).join('')}${_scheduledRecordsOnDate(d).map(r => _recordChip(r, 'week')).join('')}${_activitiesOnDate(d).map(a => _activityChip(a, 'week')).join('')}
         </div>`;
     }
     html += `</div>`;
@@ -574,6 +626,9 @@ function _renderList() {
         // Scheduled Data Hub records are approval_status='scheduled', so they only
         // belong under the "All" and "Scheduled" filters.
         let records = (_listFilter === 'all' || _listFilter === 'scheduled') ? _scheduledRecordsOnDate(date) : [];
+        // Pending follow-ups belong under "All" and "Scheduled" for the same reason records do —
+        // they are future work, never a published or failed thing.
+        let followUps = (_listFilter === 'all' || _listFilter === 'scheduled') ? _followUpsOnDate(date) : [];
         if (allowedStatuses) {
             // Filter INSIDE each cross-post group, then drop groups the filter emptied — a post
             // whose Instagram sibling failed still belongs under "Needs Attention", showing only
@@ -586,7 +641,9 @@ function _renderList() {
                 .filter(Boolean);
             blogs = blogs.filter(p => allowedStatuses.has(p.status));
         }
-        if (postGroups.length > 0 || blogs.length > 0 || records.length > 0) days.push({ date, postGroups, blogs, records });
+        if (postGroups.length > 0 || blogs.length > 0 || records.length > 0 || followUps.length > 0) {
+            days.push({ date, postGroups, blogs, records, followUps });
+        }
     }
 
     if (days.length === 0) {
@@ -598,7 +655,7 @@ function _renderList() {
     }
 
     html += `<div class="max-w-3xl mx-auto px-4 py-6 space-y-8">`;
-    days.forEach(({ date, postGroups, blogs, records }) => {
+    days.forEach(({ date, postGroups, blogs, records, followUps }) => {
         const today = new Date(); today.setHours(0,0,0,0);
         const isToday = _dateKey(date) === _dateKey(today);
         html += `<div>
@@ -609,7 +666,7 @@ function _renderList() {
                 </span>
                 <div class="flex-1 h-px bg-gray-200"></div>
             </div>
-            <div class="space-y-2">${postGroups.map(g => _listRow(g)).join('')}${(blogs || []).map(_blogChip).join('')}${(records || []).map(_listRecordRow).join('')}</div>
+            <div class="space-y-2">${postGroups.map(g => _listRow(g)).join('')}${(blogs || []).map(_blogChip).join('')}${(followUps || []).map(_listFollowUpRow).join('')}${(records || []).map(_listRecordRow).join('')}</div>
         </div>`;
     });
     html += `</div>`;
@@ -833,29 +890,109 @@ function _scheduledRecordsOnDate(date) {
     const key = _dateKey(date);
     return _scheduledRecords.filter(r => r.scheduledFor && _dateKey(new Date(r.scheduledFor)) === key);
 }
+// Clicking opens the item's detail (LeadCalendarModal); dragging moves its due date. Both were
+// added in the same change and for the same reason: this chip was previously inert with a comment
+// saying "records open from the Data Hub", which asked the user to leave the calendar, find the
+// right tab and search for a row by name to answer "what IS this?".
 function _recordChip(rec, viewType) {
     const color = _assistantColor(_assistantFilter === 'all' ? null : Number(_assistantFilter));
     const time = new Date(rec.scheduledFor).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    // "Chase reminder" only for the lead roles, where that is what scheduled_for provably is
+    // (lead-generation.ts stamps it after a send). Every other records role uses the generic word,
+    // because their scheduled_for means whatever their own flow put there.
+    const kindWord = _leadOutreach ? 'chase reminder' : 'scheduled';
     return `<div
-        class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-yellow-50 text-left w-full select-none"
+        onclick="window._calOpenRecord(${rec.id})"
+        draggable="true"
+        ondragstart="window._calDragStart(event, { kind: 'record', id: ${rec.id} })"
+        data-cal-record-id="${rec.id}"
+        class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-yellow-50 hover:bg-yellow-100 cursor-pointer transition text-left w-full select-none"
         style="border-left:3px solid ${color}"
-        title="${_escHtml(rec.title || '')} — scheduled ${time} · ${_escHtml(rec.recordType || '')}">
+        title="${_escHtml(rec.title || '')} — ${kindWord} ${time} · ${_escHtml(rec.recordType || '')}">
         <span class="w-1.5 h-1.5 rounded-full shrink-0 bg-yellow-500"></span>
         <div class="flex-1 min-w-0">
             <p class="text-[11px] font-semibold text-gray-600 truncate">🗓 ${_escHtml(rec.title || rec.recordType || 'Scheduled')}</p>
-            ${viewType === 'week' ? `<p class="text-[10px] text-gray-400 truncate leading-tight">${time} · scheduled</p>` : ''}
+            ${viewType === 'week' ? `<p class="text-[10px] text-gray-400 truncate leading-tight">${time} · ${kindWord}</p>` : ''}
         </div>
+    </div>`;
+}
+
+// ── Pending outreach (lead roles) ────────────────────────────────────────────
+// One chip per follow-up email the cadence is going to send. Indigo and ✉, deliberately unlike
+// the yellow 🗓 reminder beside it: a user who cannot tell these two apart at a glance cannot tell
+// "you owe this lead a call" from "we are emailing this stranger on Thursday".
+function _followUpsOnDate(date) {
+    const key = _dateKey(date);
+    return _followUps.filter(f => f.nextSendAt && _dateKey(new Date(f.nextSendAt)) === key);
+}
+
+// The worker refuses to send into a thread that is no longer 'open' — Phase 2a's reply detection
+// acting as 2b's stop condition. A chip for one of those is still drawn (the row IS due, and
+// hiding it would make the follow-up look cancelled when the enrolment is still active), but drawn
+// greyed and NOT draggable: moving the date of a send that is going to be refused is busywork.
+function _followUpBlocked(f) {
+    return f.threadState && f.threadState !== 'open';
+}
+
+function _followUpChip(f, viewType) {
+    const time = new Date(f.nextSendAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    const blocked = _followUpBlocked(f);
+    const label = `Follow-up #${f.nextStep}`;
+    const tone = blocked
+        ? { bg: 'bg-gray-50 hover:bg-gray-100', dot: 'bg-gray-400', text: 'text-gray-500', edge: '#9ca3af' }
+        : { bg: 'bg-indigo-50 hover:bg-indigo-100', dot: 'bg-indigo-500', text: 'text-indigo-700', edge: '#6366f1' };
+    const title = blocked
+        ? `${f.title || ''} — ${label} due ${time}, on hold: they have replied`
+        : `${f.title || ''} — ${label} sends ${time}`;
+    return `<div
+        onclick="window._calOpenFollowUp(${f.threadId})"
+        ${blocked ? '' : `draggable="true" ondragstart="window._calDragStart(event, { kind: 'followup', id: ${f.threadId} })"`}
+        data-cal-followup-thread="${f.threadId}"
+        class="flex items-center gap-1.5 px-2 py-1 rounded-lg ${tone.bg} cursor-pointer transition text-left w-full select-none"
+        style="border-left:3px solid ${tone.edge}"
+        title="${_escHtml(title)}">
+        <span class="w-1.5 h-1.5 rounded-full shrink-0 ${tone.dot}"></span>
+        <div class="flex-1 min-w-0">
+            <p class="text-[11px] font-bold ${tone.text} truncate">✉ ${time}${blocked ? ' · on hold' : ''}</p>
+            <p class="text-[11px] text-gray-500 truncate leading-tight">${_escHtml((f.title || 'Lead').substring(0, 40))}</p>
+        </div>
+    </div>`;
+}
+
+// Full-width list-view row for a pending follow-up. Mirrors _listRecordRow's shape so the two
+// read as one list, tinted to match its own chip.
+function _listFollowUpRow(f) {
+    const time = new Date(f.nextSendAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    const blocked = _followUpBlocked(f);
+    const shell = blocked
+        ? 'bg-gray-50 border-gray-200'
+        : 'bg-indigo-50 border-indigo-200 hover:border-indigo-300';
+    return `<div onclick="window._calOpenFollowUp(${f.threadId})"
+        class="flex items-start gap-4 ${shell} border rounded-xl px-5 py-4 cursor-pointer transition"
+        style="border-left:3px solid ${blocked ? '#9ca3af' : '#6366f1'}">
+        <span class="w-9 h-9 rounded-full ${blocked ? 'bg-gray-100' : 'bg-indigo-100'} flex items-center justify-center text-base shrink-0">✉</span>
+        <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+                <span class="text-sm font-extrabold text-gray-900 truncate">${_escHtml(f.title || 'Lead')}</span>
+                <span class="text-xs font-bold text-gray-400">${time}</span>
+            </div>
+            <p class="text-xs text-gray-500">Follow-up #${f.nextStep}${f.contactEmail ? ` · ${_escHtml(f.contactEmail)}` : ''}</p>
+        </div>
+        <span class="text-xs font-bold px-2.5 py-1 rounded-full border shrink-0 mt-1 ${
+            blocked ? 'bg-gray-100 text-gray-500 border-gray-300' : 'bg-indigo-100 text-indigo-700 border-indigo-300'
+        }">${blocked ? 'On hold' : 'Sending'}</span>
     </div>`;
 }
 
 // Scheduled Data Hub record as a full-width list row (assistant Calendar list view).
 // Mirrors _listRow's layout but tinted yellow like _recordChip so it reads as
-// "scheduled work", not a social post. Non-interactive — records open from the Data Hub.
+// "scheduled work", not a social post. Opens the same detail modal the chip does.
 function _listRecordRow(rec) {
     const color = _assistantColor(_assistantFilter === 'all' ? null : Number(_assistantFilter));
     const time = new Date(rec.scheduledFor).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     return `<div
-        class="flex items-start gap-4 bg-yellow-50 border border-yellow-200 rounded-xl px-5 py-4"
+        onclick="window._calOpenRecord(${rec.id})"
+        class="flex items-start gap-4 bg-yellow-50 border border-yellow-200 hover:border-yellow-300 rounded-xl px-5 py-4 cursor-pointer transition"
         style="border-left:3px solid ${color}">
         <span class="w-9 h-9 rounded-full bg-yellow-100 flex items-center justify-center text-base shrink-0">🗓</span>
         <div class="flex-1 min-w-0">
@@ -865,7 +1002,7 @@ function _listRecordRow(rec) {
             </div>
             ${rec.recordType ? `<p class="text-xs text-gray-500 capitalize">${_escHtml(rec.recordType)}</p>` : ''}
         </div>
-        <span class="text-xs font-bold px-2.5 py-1 rounded-full border bg-yellow-100 text-yellow-700 border-yellow-300 shrink-0 mt-1">Scheduled</span>
+        <span class="text-xs font-bold px-2.5 py-1 rounded-full border bg-yellow-100 text-yellow-700 border-yellow-300 shrink-0 mt-1">${_leadOutreach ? 'Chase reminder' : 'Scheduled'}</span>
     </div>`;
 }
 
@@ -951,6 +1088,37 @@ window._calOpenPost = async function (postId) {
     await window.openPostReview(postId);
 };
 
+// ── Opening a record / follow-up chip ────────────────────────────────────────
+// Both hand off to LeadCalendarModal (src/components/lead-calendar-modal.js), which owns the
+// layout and does its own fetching — the calendar knows which thing was clicked and nothing more.
+// A missing component degrades to a toast rather than a dead chip: this file is also loaded by the
+// global Content Calendar page, where the modal is present, but the guard costs nothing and the
+// failure it covers (a script that 404'd) is otherwise silent.
+window._calOpenRecord = function (recordId) {
+    if (!window.LeadCalendarModal) { window.showToast?.('Details are not available on this page.'); return; }
+    window.LeadCalendarModal.open({
+        kind: 'record',
+        recordId,
+        assistantId: Number(_assistantFilter),
+        onChanged: () => { void _loadAndRender(); },
+    });
+};
+
+window._calOpenFollowUp = function (threadId) {
+    if (!window.LeadCalendarModal) { window.showToast?.('Details are not available on this page.'); return; }
+    const f = _followUps.find(x => x.threadId === threadId) || null;
+    window.LeadCalendarModal.open({
+        kind: 'followup',
+        threadId,
+        // The chip's own row, passed through so the modal can name the step and the due date
+        // before its fetches land — the calendar already holds both.
+        followUp: f,
+        recordId: f ? f.assistantRecordId : null,
+        assistantId: Number(_assistantFilter),
+        onChanged: () => { void _loadAndRender(); },
+    });
+};
+
 // The editor saves through its own endpoints, so the calendar's copy of a post goes stale the
 // moment someone edits, approves, reschedules or rejects one. workspace.html calls this when the
 // editor closes; reloading the range also drops anything that is no longer schedule-active (a post
@@ -962,8 +1130,22 @@ window._calRefreshAfterEdit = async function () {
 };
 
 // ── Drag & Drop rescheduling ──────────────────────────────────────
-window._calDragStart = function (e, postId) {
-    _dragPostId = postId;
+// THREE kinds of thing are draggable on this grid and they move three different columns:
+//   post     → scheduled_posts.publish_date   (confirm modal, then PATCH per cross-post sibling)
+//   record   → assistant_records.scheduled_for (a chase reminder / due date — moves immediately)
+//   followup → sequence_enrolments.next_send_at (a real send — moves immediately, past refused)
+//
+// `_dragItem` is the general form; `_dragPostId` is kept as-is because the post path already reads
+// it in several places and rewriting that flow was not what this change is for.
+let _dragItem = null;
+
+// A drag whose source is a post is called with a bare id (the post chips predate this and pass
+// `${post.id}`); everything else passes { kind, id }. Normalising here rather than at each call
+// site keeps the post chip's signature untouched.
+window._calDragStart = function (e, arg) {
+    const item = (arg && typeof arg === 'object') ? arg : { kind: 'post', id: arg };
+    _dragItem = item;
+    _dragPostId = item.kind === 'post' ? item.id : null;
     e.dataTransfer.effectAllowed = 'move';
     e.target.classList.add('opacity-50');
     setTimeout(() => e.target.classList.add('opacity-50'), 0);
@@ -980,9 +1162,37 @@ window._calDragLeave = function (e) {
     e.currentTarget.classList.remove('ring-2', 'ring-emerald-400', 'ring-inset');
 };
 
+// Is this date key strictly before today? Compared at DAY granularity, deliberately: a chip
+// dropped on today keeps its own time of day, and that time may already have passed — which is
+// fine for a reminder and is caught server-side for a send (lead-threads.ts refuses anything more
+// than a minute old). Comparing at minute granularity here would instead reject a legitimate drop
+// onto today for reasons the user cannot see on a month grid.
+function _isPastDateKey(dateKey) {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const [y, m, d] = dateKey.split('-').map(Number);
+    return new Date(y, m - 1, d) < today;
+}
+
+// The date a dropped chip lands on, keeping its original time of day.
+function _dropTarget(dateKey, originalIso) {
+    const [y, m, d] = dateKey.split('-').map(Number);
+    const original = new Date(originalIso);
+    return new Date(y, m - 1, d, original.getHours(), original.getMinutes());
+}
+
+function _dayLabel(date) {
+    return date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
 window._calDrop = function (e, dateKey) {
     e.preventDefault();
     e.currentTarget.classList.remove('ring-2', 'ring-emerald-400', 'ring-inset');
+
+    const item = _dragItem;
+    if (item && item.kind === 'followup') { _dragItem = null; void _dropFollowUp(item.id, dateKey); return; }
+    if (item && item.kind === 'record')   { _dragItem = null; void _dropRecord(item.id, dateKey); return; }
+    _dragItem = null;
+
     if (!_dragPostId) return;
 
     const post = _posts.find(p => p.id === _dragPostId);
@@ -1044,9 +1254,101 @@ window._calConfirmReschedule = async function () {
     } catch (e) { window.showToast?.('Reschedule failed. Please try again.', { icon: '⚠️' }); }
 };
 
+// ── Dropping a pending follow-up ─────────────────────────────────────────────
+// The past is refused, and the dialog is the point of the refusal rather than a nicety: dropping
+// an email onto last Tuesday would otherwise mean "send it on the next worker tick", i.e. NOW, to
+// a stranger, as the silent consequence of a mis-aimed drag. The server enforces the same rule
+// (lead-threads.ts `reschedule_follow_up`, code PAST_DATE) — this is the half that explains it.
+//
+// "Put it back" is a re-render, not an undo: nothing has been written at the point the guard
+// fires, so the chip has never actually left the day it is drawn on.
+async function _dropFollowUp(threadId, dateKey) {
+    const f = _followUps.find(x => x.threadId === threadId);
+    if (!f) return;
+
+    if (_isPastDateKey(dateKey)) {
+        const [y, m, d] = dateKey.split('-').map(Number);
+        await (window.alertModal
+            ? window.alertModal(
+                `An email can't be sent in the past. <strong>${_escHtml(f.title || 'This follow-up')}</strong> `
+                + `stays where it was, on ${_escHtml(_dayLabel(new Date(f.nextSendAt)))}.`,
+                { title: `Can't move it to ${_dayLabel(new Date(y, m - 1, d))}` })
+            : Promise.resolve(window.showToast?.('An email cannot be sent in the past.', { icon: '⚠️' })));
+        _render();   // snap the chip back
+        return;
+    }
+
+    const newDate = _dropTarget(dateKey, f.nextSendAt);
+    if (_dateKey(new Date(f.nextSendAt)) === dateKey) return;   // same day, nothing to do
+
+    try {
+        const res = await fetch('/.netlify/functions/lead-threads', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+                action: 'reschedule_follow_up',
+                assistantId: Number(_assistantFilter),
+                threadId,
+                nextSendAt: newDate.toISOString(),
+            }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not move that follow-up.');
+        window.showToast?.(`Follow-up to ${f.title || 'this lead'} moved to ${_dayLabel(newDate)}.`);
+    } catch (err) {
+        window.showToast?.(err.message || 'Could not move that follow-up.', { icon: '⚠️' });
+    }
+    await _loadAndRender();
+}
+
+// ── Dropping a scheduled record (a chase reminder) ───────────────────────────
+// Same past-date rule, different wording. A reminder in the past is not dangerous the way a send
+// is — nothing fires — it is simply a prompt you can never act on in time, so it is refused for
+// consistency and explained honestly rather than borrowed from the email copy.
+async function _dropRecord(recordId, dateKey) {
+    const rec = _scheduledRecords.find(r => r.id === recordId);
+    if (!rec) return;
+
+    if (_isPastDateKey(dateKey)) {
+        const [y, m, d] = dateKey.split('-').map(Number);
+        const noun = _leadOutreach ? 'A chase reminder' : 'A reminder';
+        await (window.alertModal
+            ? window.alertModal(
+                `${noun} can't be set in the past. <strong>${_escHtml(rec.title || 'This item')}</strong> `
+                + `stays where it was, on ${_escHtml(_dayLabel(new Date(rec.scheduledFor)))}.`,
+                { title: `Can't move it to ${_dayLabel(new Date(y, m - 1, d))}` })
+            : Promise.resolve(window.showToast?.('That date has already passed.', { icon: '⚠️' })));
+        _render();
+        return;
+    }
+
+    const newDate = _dropTarget(dateKey, rec.scheduledFor);
+    if (_dateKey(new Date(rec.scheduledFor)) === dateKey) return;
+
+    try {
+        // Date only — no approvalStatus. See the assistant-records PATCH branch for why this is a
+        // separate shape from the Review Queue's "Approve & Schedule".
+        const res = await fetch('/.netlify/functions/assistant-records', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ id: recordId, scheduledFor: newDate.toISOString() }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not move that item.');
+        window.showToast?.(`${rec.title || 'Item'} moved to ${_dayLabel(newDate)}.`);
+    } catch (err) {
+        window.showToast?.(err.message || 'Could not move that item.', { icon: '⚠️' });
+    }
+    await _loadAndRender();
+}
+
 function _attachDragDrop() {
-    // After DOM render, add dragend listeners to chips to clean up opacity
-    document.querySelectorAll('[data-post-id]').forEach(el => {
+    // After DOM render, add dragend listeners to chips to clean up opacity. Covers all three
+    // draggable kinds — a record or follow-up chip left at 50% after a cancelled drag looks
+    // exactly like one that is mid-save.
+    document.querySelectorAll('[data-post-id], [data-cal-record-id], [data-cal-followup-thread]').forEach(el => {
         el.addEventListener('dragend', () => {
             el.classList.remove('opacity-50');
         });

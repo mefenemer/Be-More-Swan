@@ -11,9 +11,17 @@
 //           `retention` selects across the 30-day sweep (src/config/lead-retention.ts): 'live'
 //           is the DEFAULT and hides leads the sweep has moved to Deleted, 'deleted' is the
 //           Deleted section itself, 'all' is both — see the block comment on that filter.
+//  GET    ?assistantId=<id>&recordId=<id>
+//         → { record } — ONE record with its full `data`. The Calendar tab's chip detail modal
+//           reads this: the `scheduled=1` feed below deliberately ships no `data` (a month of
+//           scoring cards and outreach drafts, to render a one-line chip), so the modal fetches
+//           the row it is actually opening.
 //  POST   { assistantId, recordType, records: [{ title, status?, data }, ...], source? }
 //         → bulk insert (CSV import) or single insert; upserts on (assistant, type, title)
 //  PATCH  { id, status?, data? }                            → update one record's lifecycle/state
+//  PATCH  { id, scheduledFor }                              → move a scheduled record's due date
+//         WITHOUT touching the approval gate — the Calendar tab's drag-to-reschedule. See the
+//         branch for why this is not the same call as `approvalStatus: 'scheduled'`.
 //  PATCH  { ids: [...], approvalStatus: 'rejected', reason? } → reject up to MAX_BULK of them;
 //         REJECTION ONLY — see the bulk branch for why nothing else may be set in bulk
 //  DELETE { id, reason? } | { ids: [...], reason? }         → remove one record, or up to
@@ -290,6 +298,44 @@ export default withLambda(async (event) => {
                     ))
                     .orderBy(desc(assistantRecords.scheduledFor));
                 return json(200, { records: scheduled });
+            }
+
+            // ── One record, in full ──────────────────────────────────────────────────────────
+            // The Calendar tab draws a chip from the `scheduled=1` feed above, which carries five
+            // columns and no `data` on purpose. Opening that chip needs the whole row — the scoring
+            // card, the contact, the outreach draft — and needs it for exactly ONE record, so this
+            // is a per-id read rather than a fatter list. No recordType: the caller has an id from
+            // a feed that spans every type, and demanding the type back would be asking it to
+            // repeat something the server already knows.
+            const recordIdParam = event.queryStringParameters?.recordId;
+            if (recordIdParam !== undefined) {
+                const recordId = Number(recordIdParam);
+                if (!Number.isInteger(recordId)) return json(400, { error: 'recordId must be an integer.' });
+                if (!(await ownsAssistant(assistantId))) return json(404, { error: 'Assistant not found.' });
+                const [one] = await db
+                    .select({
+                        id: assistantRecords.id,
+                        recordType: assistantRecords.recordType,
+                        title: assistantRecords.title,
+                        status: assistantRecords.status,
+                        approvalStatus: assistantRecords.approvalStatus,
+                        scheduledFor: assistantRecords.scheduledFor,
+                        source: assistantRecords.source,
+                        data: assistantRecords.data,
+                        createdAt: assistantRecords.createdAt,
+                        updatedAt: assistantRecords.updatedAt,
+                    })
+                    .from(assistantRecords)
+                    // Scoped by assistant as well as org: the id came from one assistant's calendar,
+                    // and an org-only check would let a chip id from a sibling assistant resolve.
+                    .where(and(
+                        eq(assistantRecords.id, recordId),
+                        eq(assistantRecords.organisationId, orgId),
+                        eq(assistantRecords.aiAssistantId, assistantId),
+                    ))
+                    .limit(1);
+                if (!one) return json(404, { error: 'Record not found.' });
+                return json(200, { record: one });
             }
 
             const recordType = String(event.queryStringParameters?.recordType || '');
@@ -721,6 +767,30 @@ export default withLambda(async (event) => {
                 if (JSON.stringify(body.data).length > MAX_DATA_CHARS) return json(400, { error: 'data payload too large.' });
                 patch.data = body.data;
             }
+            // ── Move the due date, and ONLY the due date ──────────────────────────────────────
+            // Dragging a chip on the Calendar tab to another day. Deliberately a separate shape
+            // from `approvalStatus: 'scheduled'` + scheduledFor below, which is the Review Queue's
+            // "Approve & Schedule" — that path is a GATE TRANSITION and carries a handoff push and
+            // a revenue-ledger write with it. Both are correctly suppressed for a record already
+            // live, so re-sending it would have worked; but a reschedule that routes through the
+            // approval branch is one `wasDecided` regression away from firing an approval event
+            // every time someone drags a chip, and the ledger is append-only.
+            //
+            // Guarded to records that are ALREADY scheduled: a due date on a pending or rejected
+            // record is a date nothing reads, and the calendar can only ever drag a chip it drew
+            // from the scheduled feed. `null` clears it.
+            let dueDateOnly = false;
+            if (body.scheduledFor !== undefined && body.approvalStatus === undefined) {
+                if (body.scheduledFor === null) {
+                    patch.scheduledFor = null;
+                } else {
+                    const when = new Date(String(body.scheduledFor));
+                    if (isNaN(when.getTime())) return json(400, { error: 'scheduledFor must be a valid date, or null.' });
+                    patch.scheduledFor = when;
+                }
+                dueDateOnly = true;
+            }
+
             // Approval-gate transitions (Review Queue): approve / reject / schedule. Scheduling a
             // record requires a scheduled_for and implies approval (so "Approve & Schedule" is one PATCH).
             // When a record FIRST goes live we fire the Integration Scenario Library handoff push —
@@ -800,7 +870,14 @@ export default withLambda(async (event) => {
 
             const [row] = await db.update(assistantRecords)
                 .set(patch)
-                .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
+                .where(and(
+                    eq(assistantRecords.id, id),
+                    eq(assistantRecords.organisationId, orgId),
+                    // The due-date-only guard, enforced in the WHERE rather than as a pre-read:
+                    // no row matches when the record is not scheduled, and the 404 below is then
+                    // the honest answer ("there is no scheduled record with that id to move").
+                    ...(dueDateOnly ? [eq(assistantRecords.approvalStatus, 'scheduled')] : []),
+                ))
                 .returning({
                     id: assistantRecords.id,
                     title: assistantRecords.title,
@@ -809,7 +886,11 @@ export default withLambda(async (event) => {
                     scheduledFor: assistantRecords.scheduledFor,
                     updatedAt: assistantRecords.updatedAt,
                 });
-            if (!row) return json(404, { error: 'Record not found.' });
+            if (!row) {
+                return json(404, dueDateOnly
+                    ? { error: 'That item is no longer scheduled, so its date could not be moved.', code: 'NOT_SCHEDULED' }
+                    : { error: 'Record not found.' });
+            }
 
             // Fire the outbound handoff after the approval commits. Uses the latest data (the
             // PATCH may have edited it in the same request).
