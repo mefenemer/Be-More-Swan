@@ -562,6 +562,35 @@
     neutral: { icon: '•', cls: 'text-gray-500' },
   };
 
+  /**
+   * The user's own notes about this lead.
+   *
+   * ⚠️ Nothing rendered `data.notes` before this. The Edit lead form has written the field since it
+   * shipped, so the product invited people to record what they knew about a lead and then never
+   * showed it back to them — on any screen, at any stage. A field that can only be written into is
+   * indistinguishable from one that discards what you type.
+   *
+   * Rendered ABOVE the scoring card with the other banners, not inside the field list: these are
+   * the one part of a lead record a human wrote, and burying them among scraped values is what
+   * would make them easy to miss again.
+   */
+  // Always returns a node, EMPTY AND HIDDEN when there are no notes yet, rather than returning null
+  // the way the other banners do. Saving the first note then has somewhere to put it — it fills and
+  // reveals this node in place, instead of working out where among the banners a new element should
+  // be inserted into a panel that must not be re-rendered underneath the reader.
+  function notesBanner(record) {
+    const notes = typeof (record.data || {}).notes === 'string' ? record.data.notes.trim() : '';
+    const wrap = document.createElement('div');
+    wrap.className = 'mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3';
+    wrap.setAttribute('data-lead-notes-banner', '');
+    wrap.innerHTML = `
+      <p class="text-xs font-bold text-amber-700 uppercase tracking-wide mb-1">Your notes</p>
+      <p class="text-xs text-amber-900 whitespace-pre-line" data-lead-notes>${esc(notes)}</p>`;
+    // `hidden` loses to any class that sets display; pin the inline style too, as everywhere else.
+    if (!notes) { wrap.classList.add('hidden'); wrap.style.display = 'none'; }
+    return wrap;
+  }
+
   function intelBanner(record) {
     const d = record.data || {};
     const intel = d.intel && typeof d.intel === 'object' ? d.intel : null;
@@ -987,6 +1016,73 @@
   // `action.key` is matched to a button in detailActions() by `data-hub-action`, so the next-step
   // button and the action bar can never drift into doing two different things — it presses the
   // real control. 'open-review' is the one exception: there is no such button, it switches tabs.
+  /** The Outreach/Review tab as THIS role names it — a sentence must never send someone to a tab
+   *  they cannot see. `_detailReviewQueue` is the same registry config that labelled the button. */
+  function reviewTabLabel() {
+    return (window._detailReviewQueue || {}).label || 'Review';
+  }
+
+  /** Ditto for Conversations. The span carries setTabCount's " (12)"; a badge is not a tab name. */
+  function conversationsTabLabel() {
+    const el = document.getElementById('conversations-tab-label');
+    const raw = el ? el.textContent.trim() : '';
+    return raw.replace(/\s*\(\d+\)\s*$/, '') || 'Conversations';
+  }
+
+  /** Whether the Conversations tab is actually on screen and reachable. Lead roles only, and
+   *  `_activateMainTab` is absent when this hub renders inside the Searches tab's modal. */
+  function conversationsTabAvailable() {
+    const btn = document.querySelector('.main-tab-btn[data-maintab="conversations"]');
+    return !!(btn && !btn.classList.contains('hidden') && typeof window._activateMainTab === 'function');
+  }
+
+  /**
+   * Has this lead already been through the approval gate?
+   *
+   * ⚠️ `approvalStatus === 'approved'` is NOT the whole answer, and testing it alone put an Approve
+   * button on leads whose email had already been sent. A successful send leaves the record
+   * 'scheduled' — that state is the CHASE REMINDER, not a pending send (lead-generation.ts
+   * `send_outreach`, and "Mark outreach sent" does the same) — so every contacted lead read as
+   * un-approved and was offered a button to clear it for outreach that had already gone out.
+   *
+   * The two states together are what "approved" means for a lead, exactly as the Outreach tab's
+   * Approved column asks for both (`approvalStatus=approved,scheduled`). `outreachSentAt` is the
+   * third arm for the same reason it is the honest marker everywhere else: whatever the column
+   * says, an email that has left cannot be un-sent by approving it.
+   *
+   * ⚠️ Rejected is deliberately NOT past the gate. Reversing a rejection is a legitimate
+   * correction, and the Approval cell states the result either way.
+   *
+   * ⚠️ Read by nextStepGuidance() AND detailActions(), and it must stay that way. The footer
+   * PRESSES the bar's button, so a rule that hides Approve in one and promotes it in the other
+   * leaves a button that does nothing — see [[next-step-footer-owns-the-button]].
+   */
+  function isPastApprovalGate(record) {
+    const s = record.approvalStatus;
+    if (s === 'approved' || s === 'scheduled') return true;
+    return !!(record.data || {}).outreachSentAt;
+  }
+
+  /**
+   * Does this lead have a conversation thread to record its outcome against?
+   *
+   * A thread is minted by lead-generation.ts `openLeadThread`, immediately before a real send —
+   * so a lead WE emailed always has one, and it is the surface that owns the outcome (the same
+   * shared modal, on the screen that also holds the reply). Everything else does not:
+   *
+   *   • never contacted        — no send, no thread. Disqualifying it is still a real outcome, and
+   *     `not_icp` on an untouched lead is the cleanest targeting signal there is.
+   *   • "Mark outreach sent"   — the user contacted them some other way. That path stamps
+   *     `outreachSentVia: 'manual'` and mints NOTHING, so the lead never reaches Conversations.
+   *   • stamped before `outreachSentVia` existed — genuinely ambiguous. Treated as thread-less on
+   *     purpose: a duplicate button is a nuisance, a lead whose outcome can be recorded NOWHERE is
+   *     a dead end, and only one of those is worth risking.
+   */
+  function hasConversationThread(record) {
+    const via = (record.data || {}).outreachSentVia;
+    return via === 'google' || via === 'microsoft';
+  }
+
   function nextStepGuidance(record) {
     if (state.hub.recordType !== 'lead') return null;
     const d = record.data || {};
@@ -1005,6 +1101,22 @@
     }
 
     if (d.outreachSentAt) {
+      // A lead we emailed has a thread, and the thread owns its outcome — that screen holds the
+      // reply the outcome is a judgement about, where this one holds the company record. So the
+      // next step here is to GO there, not to record it in a second place.
+      if (hasConversationThread(record) && conversationsTabAvailable()) {
+        const conv = conversationsTabLabel();
+        return { owner: 'assistant', action: { key: 'open-conversations', label: `Open ${conv}` },
+          note: `The outreach email has gone and the follow-ups are handled for you. Anything else in that step — a call, a meeting, a look at their site — is yours, and you record how it ends on the conversation in ${conv}.` };
+      }
+      // No thread means we did not send it — see hasConversationThread. On the "Mark outreach sent"
+      // path that is literally true of the follow-ups too: `enrolInSequence` runs only on a
+      // confirmed send, so telling this user their chases are handled would promise a cadence that
+      // was never enrolled. The owner chip goes with it: nothing here is the assistant's to do.
+      if (d.outreachSentVia === 'manual') {
+        return { owner: 'you', action: { key: 'record-outcome', label: 'Record outcome' },
+          note: 'You marked this lead as contacted yourself. Nothing was emailed from here and no follow-ups are scheduled, so chasing it is yours — record how it ends when you know.' };
+      }
       return { owner: 'assistant', action: { key: 'record-outcome', label: 'Record outcome' },
         note: 'The outreach email has gone and the follow-ups are handled for you. Anything else in that step — a call, a meeting, a look at their site — is yours.' };
     }
@@ -1014,17 +1126,28 @@
         note: 'There is no email address on this lead, so nothing can be sent for you until you add one.' };
     }
 
-    if (record.approvalStatus === 'approved') {
+    if (isPastApprovalGate(record)) {
       // Only offered when the tab switcher is actually there. assistant-data-hub also renders
       // inside a modal from the Searches tab, where the page around it is the same one — but a
       // button that silently does nothing is worse than no button, so it is gated on the function.
       const canOpenReview = typeof window._activateMainTab === 'function';
-      return { owner: 'you', action: canOpenReview ? { key: 'open-review', label: 'Open Review' } : null,
-        note: 'Approved — but nothing has been sent yet. The drafted email is waiting for you in the Review tab.' };
+      const rq = reviewTabLabel();
+      return { owner: 'you', action: canOpenReview ? { key: 'open-review', label: `Open ${rq}` } : null,
+        note: `Approved — but nothing has been sent yet. The drafted email is waiting for you in the ${rq} tab.` };
+    }
+
+    // Research before approving. This is the one control on this tab that can change a lead's
+    // RATING — it reads their site and recent news and re-scores against what it finds — so on a
+    // lead nobody has looked at yet it is genuinely the next step, and the approve decision below
+    // is better for having waited for it. Offered only while there is no `intel`: once the research
+    // has run, re-running it is a tool on the bar, not the thing to do next.
+    if (!d.intel) {
+      return { owner: 'you', action: { key: 'enrich', label: 'Research this lead' },
+        note: 'Nothing has been researched on this company yet. Researching reads their site and recent news and re-scores the lead, so your approve decision rests on more than the first pass.' };
     }
 
     return { owner: 'you', action: { key: 'approve', label: 'Approve' },
-      note: 'Approving clears this lead for outreach. The email itself goes out when you approve it in the Review tab.' };
+      note: `Approving clears this lead for outreach. The email itself goes out when you approve it in the ${reviewTabLabel()} tab.` };
   }
 
   /**
@@ -1059,6 +1182,10 @@
       const key = btn.getAttribute('data-lead-next-step');
       if (key === 'open-review') {
         window._activateMainTab?.('review-queue');
+        return;
+      }
+      if (key === 'open-conversations') {
+        window._activateMainTab?.('conversations');
         return;
       }
       const target = panel.querySelector(`[data-hub-action="${key}"]`);
@@ -1117,7 +1244,10 @@
   }
 
   // Per-type action row under the expanded detail.
-  function detailActions(record) {
+  //
+  // `opts.hasNextStepFooter` — whether the card above actually drew a next-step footer. It decides
+  // whether this bar may hide the button that footer promotes; see the loop at the bottom.
+  function detailActions(record, opts) {
     const bar = document.createElement('div');
     bar.className = 'flex flex-wrap items-center gap-2 mt-4 pt-3 border-t border-gray-100';
     const btnCls = 'px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed';
@@ -1246,17 +1376,57 @@
         btn.disabled = false;           // opening a modal shouldn't leave the button stuck disabled
         openEditLeadModal(record);
       }});
-      // The only way anything in this product records a won/lost deal. Offered on every lead, not
-      // just contacted ones: disqualifying a lead you never emailed is a real, useful outcome —
-      // `not_icp` on an untouched lead is the cleanest targeting signal there is.
+      // Notes — offered on EVERY lead in EVERY state, with no gate at all. That is the point: the
+      // thing a user wants to write down ("they said call back in March", "wrong contact, ask for
+      // Dave") arrives at whatever stage the lead happens to be at, and a note you can only take
+      // while a lead sits in one particular column is a note you will not take.
       buttons.push({
-        label: record.data?.dealOutcome?.outcome ? 'Change outcome' : 'Record outcome',
-        key: 'record-outcome',
+        label: record.data?.notes ? 'Notes' : 'Add a note',
+        key: 'notes',
         async run(btn) {
           btn.disabled = false;
-          openOutcomeModal(record);
+          window.LeadNotesModal?.open({
+            assistantId: state.assistantId,
+            recordId: record.id,
+            title: record.title,
+            existing: record.data?.notes || '',
+            onSaved(notes) {
+              // Patch the ONE node that has gone stale rather than re-rendering: the panel around
+              // this is deliberately not rebuilt (that would collapse the record the user is
+              // reading), the same reason the approval chip and next-step footer are swapped in
+              // place after a decision.
+              record.data = { ...(record.data || {}), notes };
+              const panel = btn.closest('[data-hub-detail]');
+              const banner = panel && panel.querySelector('[data-lead-notes-banner]');
+              if (banner) {
+                banner.querySelector('[data-lead-notes]').textContent = notes;
+                banner.classList.remove('hidden');
+                banner.style.display = '';
+              }
+              btn.textContent = 'Notes';
+              refreshRow(record);
+            },
+          });
         },
       });
+      // Recording a won/lost deal belongs to the CONVERSATION once there is one: that screen shows
+      // the reply the verdict is a judgement about, and this one shows the company record. Both
+      // wrote through the same shared modal, so the button here was a second door onto a decision
+      // that has an obvious home — on a tab whose whole job is enriching and triaging leads.
+      //
+      // Kept for leads with no thread, which Conversations never shows and which would otherwise
+      // have no way to record an outcome at all: leads never contacted, and leads the user
+      // contacted by hand. See hasConversationThread.
+      if (!hasConversationThread(record) || !conversationsTabAvailable()) {
+        buttons.push({
+          label: record.data?.dealOutcome?.outcome ? 'Change outcome' : 'Record outcome',
+          key: 'record-outcome',
+          async run(btn) {
+            btn.disabled = false;
+            openOutcomeModal(record);
+          },
+        });
+      }
       // ⚠️ No outreach-email actions on this tab, deliberately. "Copy outreach draft" used to sit
       // here, beside "Draft Outreach in Gmail" inside the card above it — two ways to take the
       // drafted email somewhere, on a screen that never showed the email's text. Reading, editing,
@@ -1274,9 +1444,14 @@
       // acts apart is the whole point of the split: judging a company is fast and high-volume,
       // judging an email is slow and low-volume, and one button cannot be both.
       //
-      // Offered for anything not already approved. Not hidden for rejected leads: reversing a
+      // Offered for anything not already through the gate — which includes SENT leads, whose
+      // record rests at 'scheduled' rather than 'approved'. Testing 'approved' alone put an
+      // "Approve" button on every lead whose email had already gone out, offering to clear it for
+      // an outreach the recipient had already received. Not hidden for rejected leads: reversing a
       // rejection is a legitimate correction, and the Approval cell states the result either way.
-      if (record.approvalStatus !== 'approved') {
+      // See isPastApprovalGate — nextStepGuidance reads the SAME rule, or the footer promotes a
+      // button this bar no longer draws.
+      if (!isPastApprovalGate(record)) {
         // `primary`: the one decision this panel exists to take. Everything else here is a tool
         // (edit it, copy the draft, log an outcome) — those are reached deliberately, this is the
         // thing the reader arrived to do.
@@ -1338,6 +1513,30 @@
     const status = document.createElement('p');
     status.className = 'text-xs text-gray-400 w-full';
 
+    // ── Exactly one button per action ───────────────────────────────────────────
+    //
+    // The next-step footer PRESSES a button in this bar rather than repeating its fetch, which is
+    // what keeps the status line, the disabled state and the approval-chip refresh in one place.
+    // The side effect was two identical buttons in one panel: an emerald "Approve" in the footer
+    // and an emerald "Approve" here, four inches apart, doing the same thing. A reader cannot tell
+    // two same-labelled buttons apart except by pressing one, and the whole point of the footer is
+    // to say which single thing to do next.
+    //
+    // So the footer OWNS the promoted action's button and this bar hides its copy. The handler and
+    // its status line still live here — the hidden button is what the footer clicks — so nothing
+    // about the flow moves, only which copy is on screen. Everything the footer did not promote
+    // stays visible here as a tool.
+    //
+    // ⚠️ `hidden` alone loses to any class that sets display, and these are flex children — pin the
+    // inline style too, the same fix the tab badges carry.
+    //
+    // ⚠️ ONLY when the footer was actually drawn. The card above is not guaranteed to exist: a lead
+    // whose `data` carries no recognised uiElement type falls back to a plain key/value list, which
+    // has no footer at all. Hiding the promoted button on one of those would leave the action with
+    // no button anywhere in the panel — Approve, on a tab whose whole job is approving leads.
+    const promoted = (opts && opts.hasNextStepFooter) ? nextStepGuidance(record) : null;
+    const promotedKey = promoted && promoted.action ? promoted.action.key : null;
+
     for (const b of buttons) {
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -1345,6 +1544,10 @@
       // The handle nextStepGuidance()'s action button presses. Set here rather than per-push so a
       // button that gains a key never has to remember to render it.
       if (b.key) btn.setAttribute('data-hub-action', b.key);
+      if (b.key && b.key === promotedKey) {
+        btn.classList.add('hidden');
+        btn.style.display = 'none';
+      }
       // Three weights, matching the rest of the app: the emerald fill for the one decision this
       // panel exists to take, the white ghost for everything else, and the red ghost for Delete.
       // Every button here was the same ghost, so a row reading "Edit · Record outcome · Copy
@@ -1538,8 +1741,17 @@
     // below the conclusion it produced is evidence nobody reads.
     const intel = state.hub.recordType === 'lead' ? intelBanner(record) : null;
     if (intel) panel.appendChild(intel);
-    panel.appendChild(body || keyValueFallback(record.data));
-    panel.appendChild(detailActions(record));
+    // Last of the banners, so it sits closest to the card: what a human wrote about this lead
+    // outranks what was scraped about it, and the Notes button below writes here. Appended even
+    // when empty — see notesBanner.
+    if (state.hub.recordType === 'lead') panel.appendChild(notesBanner(record));
+    const rendered = body || keyValueFallback(record.data);
+    panel.appendChild(rendered);
+    // Asked of the DOM that was actually produced, not of the guidance that was passed in: the card
+    // may have declined to render, or fallen back to the key/value list, and only the result knows.
+    panel.appendChild(detailActions(record, {
+      hasNextStepFooter: !!rendered.querySelector?.('[data-next-step-footer]'),
+    }));
     // Delegated, and attached after the bar exists: the next-step button presses a control in it.
     if (state.hub.recordType === 'lead') wireNextStepAction(panel);
     return panel;

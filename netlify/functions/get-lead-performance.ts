@@ -103,6 +103,7 @@ export default withLambda(async (event) => {
                 count(*) FILTER (WHERE outcome = 'lost')::int                                  AS lost,
                 count(*) FILTER (WHERE outcome = 'disqualified')::int                          AS disqualified,
                 sum(value_gbp) FILTER (WHERE outcome = 'won')                                  AS won_value
+              FROM ev
         `);
 
         // No ledger rows at all in the window. The aggregate returns a row of zeroes rather than
@@ -128,14 +129,36 @@ export default withLambda(async (event) => {
 
         return json(buildLeadPerformance(counts));
     } catch (err) {
+        // ⚠️ READ err.cause, NOT err.message. drizzle rethrows every query failure as
+        // "Failed query: WITH ev AS (…)" — the real Postgres error (and its SQLSTATE) is on
+        // `cause`. This function shipped reading `message` alone, which meant the
+        // not-migrated branch below could never match and EVERY failure became a 500 that the
+        // card grid renders as "Performance metrics couldn't be loaded". Same trap as
+        // raw-sql-date-param-trap, which cost three wrong diagnoses.
+        const cause = (err as { cause?: unknown })?.cause;
+        const msg = [
+            err instanceof Error ? err.message : '',
+            cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : '',
+        ].join(' ');
+
         // Not migrated yet (revenue_events is a manual apply — db/revenue-events.sql). An honest
         // empty beats a 500 that renders as "couldn't be loaded" on an account that simply has no
         // ledger table yet.
-        const msg = err instanceof Error ? err.message : '';
-        if (msg.includes('does not exist') && (msg.includes('relation') || msg.includes('column'))) {
+        //
+        // ⚠️ 42P01 (undefined_TABLE) ONLY — deliberately NOT 42703 (undefined_COLUMN), which the
+        // first draft of this fix also swallowed. A missing table is an environment state this
+        // repo really produces, because db/*.sql is applied by hand. A missing COLUMN is almost
+        // always a bug in the query above, and swallowing it would have turned the exact defect
+        // that caused this incident (a CTE with no FROM → 42703) into a silent "No lead activity
+        // to measure yet" — a wrong answer, quietly, instead of a loud one. A query bug must stay
+        // visible; only the migration gap gets to degrade gracefully.
+        const code = (cause as { code?: string })?.code;
+        if (code === '42P01' || (msg.includes('does not exist') && msg.includes('relation'))) {
+            console.error('[get-lead-performance] revenue_events not present, returning empty:', msg);
             return json(emptyLeadPerformance());
         }
-        console.error('[get-lead-performance]', err);
+        // Log the CAUSE explicitly — logging `err` alone prints the useless wrapper.
+        console.error('[get-lead-performance]', msg, err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Failed to load performance.' }) };
     }
 });

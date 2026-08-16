@@ -150,7 +150,7 @@ export default withLambda(async (event) => {
         action?: string; assistantId?: number; ideaId?: number; recordId?: number;
         lead?: Record<string, unknown>; confirmPersonal?: boolean; reason?: string;
         outcome?: string; lossReason?: string; valueGbp?: number | string | null; confirmChange?: boolean;
-        editReason?: string; provider?: string;
+        editReason?: string; provider?: string; note?: string;
     };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
@@ -735,6 +735,56 @@ ${OUTREACH_SUBJECT_RULES}`;
             });
         }
 
+        // ── Append a note to a lead ───────────────────────────────────────────────
+        // `data.notes` has existed since the Edit lead form shipped and was WRITE-ONLY: no surface
+        // in the product ever rendered it, so a user could type a note, save it, and never see it
+        // again. It is now readable on the lead record and on the Outreach card, and this is how
+        // both of them write to it.
+        //
+        // ⚠️ A server action rather than the generic records PATCH, which replaces `data` WHOLESALE.
+        // Every caller would otherwise have to send the lead's score, rationale, intel, emailKind,
+        // outreachDraft and the rest back untouched to add one line of text — and the Outreach card
+        // and the thread view do not all hold a complete copy of `data` to send. Merging here means
+        // a note can never cost a lead its research.
+        //
+        // APPENDED, never overwritten, newest first. These are contemporaneous notes about a real
+        // conversation; a box that silently replaced yesterday's note with today's would destroy
+        // the one thing notes are for. Editing the whole blob is still possible via Edit lead.
+        if (action === 'add_note') {
+            const recordId = Number(body.recordId);
+            if (!Number.isInteger(recordId)) return json(400, { error: 'recordId is required.' });
+
+            const note = str(body.note, 2000);
+            if (!note) return json(400, { error: 'A note cannot be empty.' });
+
+            const [rec] = await db
+                .select({ id: assistantRecords.id, data: assistantRecords.data })
+                .from(assistantRecords)
+                .where(and(
+                    eq(assistantRecords.id, recordId),
+                    eq(assistantRecords.organisationId, orgId),
+                    eq(assistantRecords.aiAssistantId, assistant.id),
+                    eq(assistantRecords.recordType, 'lead'),
+                ))
+                .limit(1);
+            if (!rec) return json(404, { error: 'Lead not found.' });
+
+            const data = (rec.data && typeof rec.data === 'object' && !Array.isArray(rec.data))
+                ? rec.data as Record<string, unknown> : {};
+            const previous = typeof data.notes === 'string' ? data.notes.trim() : '';
+            // Dated on the server, in the same en-GB form the rest of the product uses. A note whose
+            // date came from the browser clock would be the one field on the record a user could
+            // date wrongly without trying.
+            const stamp = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+            const notes = `${stamp} — ${note}${previous ? `\n\n${previous}` : ''}`;
+
+            await db.update(assistantRecords)
+                .set({ data: { ...data, notes }, updatedAt: new Date() })
+                .where(eq(assistantRecords.id, recordId));
+
+            return json(200, { notes });
+        }
+
         // ── Record the deal outcome for a lead (Phase 4.5) ────────────────────────
         // The keystone the Strategy Agent is built on: until this action existed, NOTHING in the
         // codebase could emit a terminal event, so `revenue_events.outcome` was NULL on every row
@@ -1217,7 +1267,18 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
             // demonstrably gone out. `leadOutreachState` already prefers the send, so this is the
             // second of two guards, not the only one.
             const { outreachDraftedAt: _wasDrafted, ...rest } = data;
-            const nextData = { ...rest, outreachDraft: { to: recipient, subject, body: bodyText }, outreachSentAt: new Date().toISOString() };
+            // `outreachSentVia` records WHO sent it, and exists because `outreachSentAt` alone
+            // cannot answer that. Two paths stamp that timestamp — this one, on a send we performed
+            // and the provider acknowledged, and "Mark outreach sent" in the Review Queue, which is
+            // the user telling us they contacted the lead some other way. The Approved column drew
+            // both identically and told the second one "Sent from your connected inbox", which is
+            // a claim about OUR system doing something it never did.
+            const nextData = {
+                ...rest,
+                outreachDraft: { to: recipient, subject, body: bodyText },
+                outreachSentAt: new Date().toISOString(),
+                outreachSentVia: provider,
+            };
             await db.update(assistantRecords)
                 .set({ approvalStatus: 'scheduled', scheduledFor: chase, data: nextData, updatedAt: new Date() })
                 .where(eq(assistantRecords.id, recordId));

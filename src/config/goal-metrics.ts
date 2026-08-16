@@ -366,7 +366,7 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         direction: 'increase',
         objective: 'outcome',
         roles: ['lead_qualifier'],
-        description: 'Leads that converted to a won state in your Be More Swan workspace.',
+        description: 'Leads your assistant qualified and you cleared for outreach — the Approved and Awaiting reply columns of the Outreach tab.',
         available: true,
         realism: { maxDailyDelta: 1000, maxDailyGrowthPct: 1 },
     },

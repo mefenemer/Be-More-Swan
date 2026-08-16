@@ -232,7 +232,15 @@
         <div class="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-900">
           <span class="font-bold">Suggested next step:</span> ${esc(ui.suggestedNextStep)}
           ${nextStepFooter(opts && opts.nextStep, esc)}
-        </div>` : ''}
+        </div>`
+        // ⚠️ The footer was nested INSIDE this box, so it existed only on leads whose model output
+        // happened to include a `suggestedNextStep` sentence. Everything the footer carries — who
+        // owns the next step, and the button that starts it — silently vanished on every lead
+        // without one, which is not a property of the lead, just of what the drafter wrote. The
+        // host also hides the action-bar button the footer promotes, so on those leads the action
+        // had nowhere left to be pressed from. Rendered standalone when there is no sentence: it
+        // already carries its own top border and reads as a strip.
+        : nextStepFooter(opts && opts.nextStep, esc)}
 
       ${contactEmail ? `
         <div class="mt-4 pt-3 border-t border-gray-100">

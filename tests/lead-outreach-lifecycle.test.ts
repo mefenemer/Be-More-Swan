@@ -148,11 +148,29 @@ check('a successful send is what books the reminder, server-side', () => {
 });
 
 check('logging outreach sent by hand stamps it the same way', () => {
-    const branch = SHELL.slice(landmark(SHELL, "else if (action === 'outreachSent') {")).slice(0, 1200);
+    // ⚠️ Bounded by the NEXT branch, not by a character count. This read `.slice(0, 1200)`, which
+    // silently made the test a limit on how much prose the branch may carry: adding a comment
+    // above the stamp pushed the stamp out of the window and failed a check about code that had
+    // not changed. The next `else if` is where the branch actually ends.
+    const outreachSent = SHELL.slice(landmark(SHELL, "else if (action === 'outreachSent') {"));
+    const branch = outreachSent.slice(0, landmark(outreachSent, "else if (action === 'reject') {"));
     assert.match(branch, /outreachSentAt: new Date\(\)\.toISOString\(\)/,
         '"Mark outreach sent" must stamp the record, or the card keeps claiming the email is still '
         + 'waiting and the sales-cycle clock never starts');
     assert.match(branch, /outreachDraftedAt: _dropped/, 'and clear the drafted stamp for the same reason the send does');
+    assert.match(branch, /outreachSentVia: 'manual'/,
+        'and mark WHO sent it. This writes the same stamp a real send writes, so without the marker '
+        + 'the Approved column reports a hand-sent lead as "Sent from your connected inbox" — our '
+        + 'system taking credit for a send it never performed, naming a connection that may not exist');
+});
+
+check('a real send records the provider, so the two are told apart', () => {
+    const stamp = LEADGEN.slice(landmark(LEADGEN, 'const { outreachDraftedAt: _wasDrafted, ...rest } = data;'));
+    const branch = stamp.slice(0, landmark(stamp, "await recordEvent(db, 'outreach_sent'"));
+    assert.match(branch, /outreachSentVia: provider/,
+        'the send path must stamp the provider it actually sent through. `outreachSentAt` alone '
+        + 'cannot answer "did WE send this?", and every sentence the Approved column and the draft '
+        + 'preview write about a sent lead depends on the answer');
 });
 
 console.log('\n──── no inbox: offer one, and hand back the draft ────');

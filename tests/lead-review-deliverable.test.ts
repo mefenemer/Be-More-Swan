@@ -209,8 +209,12 @@ check('the Leads tab offers Approve alongside Reject', () => {
     // and a landmark pinned to the exact argument order failed on a styling change that could not
     // affect what the button does.
     assert.ok(/label: 'Approve'/.test(HUB), 'the Approve triage action is gone');
-    assert.ok(/record\.approvalStatus !== 'approved'/.test(HUB),
-        'Approve should hide once a lead is already approved');
+    // The gate was `record.approvalStatus !== 'approved'`, which missed SENT leads: a successful
+    // send rests at 'scheduled', so every contacted lead was still offered Approve. The rule now
+    // lives in isPastApprovalGate() so the footer and the bar cannot apply different versions of
+    // it — see tests/lead-panel-actions.test.ts, which pins what the gate itself accepts.
+    assert.ok(/if \(!isPastApprovalGate\(record\)\) \{/.test(HUB),
+        'Approve should hide once a lead is already through the approval gate');
 });
 
 check('approving from the Leads tab PATCHes only, and never calls the sender', () => {

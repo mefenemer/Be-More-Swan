@@ -5089,6 +5089,10 @@ function formatCurrency(amount, currency) {
      tab's thread view (assistant-lead-threads.js). Both open the same form on purpose — its rules
      keep the revenue aggregates meaningful, and a second copy of them would drift. -->
 <script src="/src/components/lead-outcome-modal.js"></script>
+<!-- "Notes" (→ lead-generation.ts add_note). Same reason as the outcome modal above: loaded ahead
+     of its callers — the Enrichment tab's expanded row (assistant-data-hub.js) and the Outreach
+     card (assistants.js) — and shared so both append through one implementation. -->
+<script src="/src/components/lead-notes-modal.js"></script>
 <script src="/src/components/assistant-data-hub.js"></script>
 <!-- Connections › "Synced actions" — this assistant's Integration Scenario Library recipes,
      scoped to the assistant + filtered to its role (integration-scenarios.ts). -->

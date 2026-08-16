@@ -20,7 +20,7 @@ import { and, eq, sql, inArray, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     goals, goalTelemetry, aiAssistants, systemConnections,
-    scheduledPosts, leads, plans, masterPlans, assistantRecords, blogPosts,
+    scheduledPosts, plans, masterPlans, assistantRecords, blogPosts,
 } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { getSecret } from '../../src/utils/vault';
@@ -415,14 +415,21 @@ async function fetchMetric(
             if (!token) return { value: null, disconnected: true };
             return fetchIgProfileViews(igConn.externalUserId, token);
         }
-        case 'qualified_leads': {
-            // "Qualified" = leads that progressed to a won/converted state for this workspace.
-            const [row] = await db
-                .select({ v: sql<number>`count(*)::int` })
-                .from(leads)
-                .where(and(eq(leads.organisationId, goal.organisationId), eq(leads.status, 'converted')));
-            return { value: Number(row?.v ?? 0), disconnected: false };
-        }
+        case 'qualified_leads':
+            // "Qualified" = leads this assistant cleared for outreach — the Approved and Awaiting
+            // reply columns of the Outreach tab, which is where a user looking at this goal counts
+            // from. Both states, because an approved lead whose email actually sent rests at
+            // 'scheduled' (that state is its chase reminder, see lead-generation.ts `send_outreach`)
+            // and dropping it the moment it was contacted would make the number fall as the
+            // assistant succeeded.
+            //
+            // ⚠️ This counted `leads` — Be More Swan's OWN trial/upgrade pipeline (db/schema.ts:135),
+            // filtered to status 'converted', a value nothing in the Lead Generator ever writes. A
+            // tenant's Lead Generator leads live in assistant_records, so the goal read 0 forever
+            // however many leads the assistant qualified, and no error anywhere said why. The two
+            // tables share a name and nothing else; the schema calls the collision out at
+            // db/schema.ts:3273.
+            return countRecords(db, goal, 'lead', sql`approval_status IN ('approved', 'scheduled')`);
         case 'content_published': {
             const [row] = await db
                 .select({ v: sql<number>`count(*)::int` })

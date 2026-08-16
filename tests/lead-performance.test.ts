@@ -173,6 +173,41 @@ check('engagement counts are DISTINCT leads, not ledger rows', () => {
     }
 });
 
+check('every CTE the query defines is actually selected FROM', () => {
+    // ⚠️ THIS FILE SHIPPED WITHOUT THIS CHECK AND THE QUERY WAS BROKEN.
+    // The outer SELECT had no `FROM ev`, so `count(DISTINCT lead_key)` referenced a column that
+    // was not in scope. Postgres answered "column lead_key does not exist", drizzle rethrew it as
+    // "Failed query: …", and the card grid rendered "Performance metrics couldn't be loaded" on
+    // production. Every other check in this file passed throughout: they assert the FILTER
+    // expressions, the scoping and the parsing, and NONE of them looks at whether the query has a
+    // FROM clause at all. A source scan sees what it is told to look for.
+    const q = FN.slice(landmark(FN, 'WITH ev AS ('));
+    for (const [, name] of q.matchAll(/WITH\s+(\w+)\s+AS\s*\(/g)) {
+        assert.ok(new RegExp(`(FROM|JOIN)\\s+${name}\\b`).test(q),
+            `the "${name}" CTE is defined and never selected from — its columns are out of scope in `
+            + 'the outer query, and Postgres will reject it at run time, not at deploy time');
+    }
+});
+
+check('the not-migrated fallback reads err.cause, not err.message', () => {
+    // drizzle rethrows EVERY query failure as "Failed query: …" and hangs the real Postgres error
+    // (with its SQLSTATE) off `cause`. A fallback that greps `message` can therefore never match,
+    // so every failure becomes a 500 — which the card grid shows as "couldn't be loaded". That is
+    // exactly what happened here, and it is the same trap raw-sql-date-param-trap documents.
+    const cat = FN.slice(landmark(FN, '} catch (err) {'));
+    assert.match(cat, /\.cause/,
+        'the catch never inspects err.cause, so the missing-relation branch below it is dead code');
+    assert.ok(/'42P01'/.test(cat),
+        'match on SQLSTATE — undefined_table is stable where the English message is not');
+    // ⚠️ undefined_COLUMN must NOT be swallowed. A missing table is a migration state; a missing
+    // column is a bug in the query, and the defect that caused this incident (a CTE with no FROM)
+    // raised exactly 42703. Swallowing it would have reported "No lead activity to measure yet"
+    // over a broken query — a wrong answer instead of a loud one.
+    assert.ok(!/'42703'/.test(cat),
+        'the catch swallows undefined_column, which hides query bugs behind an empty-state panel');
+    assert.match(cat, /emptyLeadPerformance\(\)/, 'and it must still fall back to the empty payload');
+});
+
 check('a lead with no discovery row still counts as itself', () => {
     // CSV-imported and hand-added leads have no discovered_lead_id. Keying on it alone would
     // collapse every one of them into a single NULL bucket.
@@ -199,6 +234,9 @@ check('an unmigrated ledger is an empty card set, not a 500', () => {
     // db/revenue-events.sql is a MANUAL apply in this repo, so an environment without it must not
     // turn the whole Overview into an error panel.
     assert.match(FN, /does not exist/, 'the missing-relation fallback has gone');
+    assert.ok(!/msg\.includes\('column'\)/.test(FN),
+        'the English-message branch must not match a missing COLUMN either — same reason as the '
+        + 'SQLSTATE check above');
     assert.match(FN, /emptyLeadPerformance\(\)/, 'and it must fall back to the empty payload');
 });
 

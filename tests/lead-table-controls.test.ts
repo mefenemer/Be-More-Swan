@@ -287,7 +287,9 @@ check('the assistant is only credited with what it actually does', () => {
     assert.ok(/is yours/.test(assistantBranch),
         'even on a sent lead the note must say the rest of the step belongs to the user — the '
         + 'platform sends email and nothing else');
-    assert.ok(/approvalStatus === 'approved'/.test(fn) && /nothing has been sent yet/i.test(fn),
+    // `isPastApprovalGate(record)`, not a bare `approvalStatus === 'approved'`: a sent lead rests
+    // at 'scheduled', and both states mean "already approved" for this branch.
+    assert.ok(/isPastApprovalGate\(record\)/.test(fn) && /nothing has been sent yet/i.test(fn),
         'approving in the Leads tab sends nothing, and the footer must say so — the Review tab is '
         + 'where the email goes out');
 });

@@ -765,9 +765,22 @@ function _activateDefaultMainTab() {
 function _setDetailRqTabBadge(count) {
     const el = document.getElementById('detail-rq-pending-badge');
     if (!el) return;
-    el.textContent = count || '';
-    el.classList.toggle('hidden', !count);
-    el.style.display = count ? '' : 'none';
+    // ⚠️ Records queues get NO pill, because they are the only ones that also carry a parenthetical.
+    // "Outreach (23) 12" put two different quantities on one button — 23 records across the tab's
+    // four columns, 12 of them awaiting review — with nothing on screen saying which was which, so
+    // the honest reading was that one of them was wrong. The parenthetical states what the tab
+    // HOLDS (_detailRqRefreshRecordCounts) and the Review column's own amber badge states what
+    // needs the user; between them the pill said nothing a second time, in the one place where it
+    // could be mistaken for a correction of the number beside it.
+    //
+    // Posts queues keep it: nothing sets a parenthetical for them, so the pill is their only count.
+    // The other callers of this function — window._setPendingReviewCount and _updateOpSignals —
+    // are untouched; they feed the Autopilot card, not this button.
+    const isRecordsQueue = (window._detailReviewQueue || {}).kind === 'records';
+    const shown = isRecordsQueue ? 0 : count;
+    el.textContent = shown || '';
+    el.classList.toggle('hidden', !shown);
+    el.style.display = shown ? '' : 'none';
 }
 
 // Every column maps to a `status` value get-social-drafts understands. Two of these are FAMILIES
@@ -1233,14 +1246,22 @@ function _rqOutreachPreview(r, statusKey) {
     // emailed — visible in Approved and Scheduled now that those columns hold sent leads — they
     // describe a future that has happened, which reads as a second email about to go out.
     const outreach = _rqOutreachState(r);
-    const heading = outreach === 'sent' ? 'The email that was sent'
+    // ⚠️ 'sent' splits two ways, and the difference is whether WE sent it. A lead marked contacted
+    // by hand ("Mark outreach sent", `outreachSentVia: 'manual'`) carries the same stamp as a real
+    // send, so this panel called our unsent draft "the message that went to the contact above" —
+    // asserting the recipient has text they may never have been shown. See the Approved column note.
+    const sentManually = outreach === 'sent' && (r.data || {}).outreachSentVia === 'manual';
+    const heading = sentManually ? 'The drafted email'
+        : outreach === 'sent' ? 'The email that was sent'
         : outreach === 'drafted' ? 'Your drafted email — ready for you to send'
         : cfg.heading;
-    const sends = outreach === 'sent'
-        ? 'This is the message that went to the contact above. Nothing further is sent automatically.'
-        : outreach === 'drafted'
-            ? 'Nothing has been emailed. This is yours to send from your own inbox.'
-            : cfg.sends;
+    const sends = sentManually
+        ? 'You marked this lead as contacted yourself, so this draft was never emailed from here.'
+        : outreach === 'sent'
+            ? 'This is the message that went to the contact above. Nothing further is sent automatically.'
+            : outreach === 'drafted'
+                ? 'Nothing has been emailed. This is yours to send from your own inbox.'
+                : cfg.sends;
     const sendsLine = noRecipients ? '' : `<p class="text-[11px] text-gray-600 mb-2">${_rqEsc(sends)}</p>`;
     const subject = draft.subject || '(no subject)';
     const input = 'w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500';
@@ -1640,13 +1661,18 @@ function _rqRecordActions(r, statusKey) {
     const selfSend = (isLead && hasDraft)
         ? btn('Copy draft', 'copyEmail', secondary) + btn('Draft in Gmail', 'draftGmail', secondary)
         : '';
+    // Notes — every lead, in every column, with no gate at all. The thing a user wants to write
+    // down ("they called back", "wrong contact, ask for Dave") arrives at whatever stage the lead
+    // happens to be at, and a note you can only take from one column is a note that does not get
+    // taken. Placed before `reject`, which carries `ml-auto` and must stay the rightmost control.
+    const notesBtn = isLead ? btn(r.data && r.data.notes ? 'Notes' : 'Add a note', 'notes', secondary) : '';
     let buttons = '';
     // A line above the buttons, for the cards where the state is the point and there is little left
     // to do — a lead whose email has gone out, or one waiting on an inbox connection.
     let note = '';
     if (statusKey === 'review') {
         buttons = isLead
-            ? btn(leadApprove, 'approve', primary) + editDraft + selfSend + reject
+            ? btn(leadApprove, 'approve', primary) + editDraft + selfSend + notesBtn + reject
             : btn('Approve', 'approve', primary) + btn('Approve &amp; Schedule', 'showSchedule', secondary) + editDraft + reject;
     } else if (statusKey === 'approved') {
         if (isLead) {
@@ -1659,7 +1685,21 @@ function _rqRecordActions(r, statusKey) {
             const out = _rqOutreachState(r);
             if (out === 'sent') {
                 const when = r.scheduledFor ? new Date(r.scheduledFor) : null;
-                note = `<p class="w-full text-[11px] text-gray-500">Sent from your connected inbox. `
+                // ⚠️ Only claim the inbox when WE sent it. `outreachSentAt` has two writers — a
+                // confirmed Gmail/Outlook send (lead-generation.ts stamps `outreachSentVia` with
+                // the provider) and "Mark outreach sent" below, where the user is telling us they
+                // made contact some other way ('manual'). Both landed on this line, so a lead the
+                // user emailed by hand — or phoned — was reported back to them as having been sent
+                // from a connected inbox, which is our system taking credit for an act it never
+                // performed and naming a connection that may not exist.
+                //
+                // Records stamped before `outreachSentVia` existed carry neither value. They get
+                // the neutral sentence: the outreach has gone, and we do not know by which route.
+                const via = (r.data || {}).outreachSentVia;
+                const howItWent = via === 'manual' ? 'You marked this one as contacted yourself — nothing was emailed from here. '
+                    : via ? 'Sent from your connected inbox. '
+                        : 'The outreach email has gone. ';
+                note = `<p class="w-full text-[11px] text-gray-500">${howItWent}`
                     + (when && !isNaN(when)
                         ? `A chase reminder is set for ${_rqEsc(when.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }))} — it’s in the ${_rqEsc(_rqColumnLabel('scheduled'))} column and on the Calendar.`
                         : 'Nothing further is scheduled for it.')
@@ -1667,7 +1707,11 @@ function _rqRecordActions(r, statusKey) {
                 // Nothing to decide here any more, so the row offers the one thing still useful:
                 // the text that went out. No "Mark outreach sent" — it already is — and no "Send
                 // back to review", which would offer to re-approve an email the recipient has.
-                buttons = hasDraft ? btn('Copy the email that was sent', 'copyEmail', secondary) : '';
+                //
+                // On the manual path the draft is NOT "the email that was sent" — we never sent it
+                // and the user may have written something else entirely — so it is offered as what
+                // it actually is.
+                buttons = (hasDraft ? btn(via === 'manual' ? 'Copy the drafted email' : 'Copy the email that was sent', 'copyEmail', secondary) : '') + notesBtn;
             } else {
                 // Approved, nothing emailed. Either no inbox is connected, or the user chose to
                 // send it themselves. Both need the same two routes out, and "Send email now" is
@@ -1678,7 +1722,8 @@ function _rqRecordActions(r, statusKey) {
                 buttons = (hasDraft ? btn('Send email now', 'sendNow', primary) : '')
                     + btn('Mark outreach sent', 'outreachSent', hasDraft ? secondary : primary)
                     + (hasDraft ? btn('Copy draft', 'copyEmail', secondary) : '')
-                    + btn('Send back to review', 'review', secondary);
+                    + btn('Send back to review', 'review', secondary)
+                    + notesBtn;
             }
         } else {
             buttons = btn('Schedule', 'showSchedule', primary) + btn('Send back to review', 'review', secondary);
@@ -1692,9 +1737,9 @@ function _rqRecordActions(r, statusKey) {
             // state IS, this says what the user should do about it, and that nothing auto-chases.
             note = `<p class="w-full text-[11px] text-gray-500">The outreach email has gone. This is your reminder to chase — nothing is sent automatically.</p>`;
         }
-        buttons = btn(isLead ? 'Clear chase reminder' : 'Unschedule', 'unschedule', secondary);
+        buttons = btn(isLead ? 'Clear chase reminder' : 'Unschedule', 'unschedule', secondary) + notesBtn;
     } else if (statusKey === 'archived') {
-        buttons = btn('Restore to review', 'review', secondary);
+        buttons = btn('Restore to review', 'review', secondary) + notesBtn;
     }
     return `<div class="flex flex-wrap items-center gap-2 mt-3">
         ${note}
@@ -1944,6 +1989,25 @@ function _rqRetentionChip(r, statusKey) {
         title="${_rqEsc(R.NOTICE)}">${_rqEsc(text)}</span>`;
 }
 
+/**
+ * The user's own notes about a lead, on the Outreach card.
+ *
+ * Rendered on every column, and always present in the markup even when empty — the Notes button
+ * below fills THIS node after a save rather than re-rendering the card, which would collapse the
+ * card the user has open (the same reason the Enrichment panel patches its banner in place).
+ *
+ * Leads only: `data.notes` is a lead field, and the Decisions and Inbox queues that share this card
+ * have no equivalent.
+ */
+function _rqLeadNotes(r) {
+    if (r.recordType !== 'lead') return '';
+    const notes = typeof (r.data || {}).notes === 'string' ? r.data.notes.trim() : '';
+    return `<div class="rq-lead-notes mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2${notes ? '' : ' hidden'}"${notes ? '' : ' style="display:none"'}>
+        <p class="text-[11px] font-bold text-amber-700 uppercase tracking-wide mb-0.5">Your notes</p>
+        <p class="text-[11px] text-amber-900 whitespace-pre-line rq-lead-notes-text">${_rqEsc(notes)}</p>
+      </div>`;
+}
+
 function _detailRqRecordCard(r, statusKey) {
     const found = _rqDraft(r);
     let snippet = _rqRecordSnippet(r);
@@ -1973,6 +2037,7 @@ function _detailRqRecordCard(r, statusKey) {
         ${_rqAttendeeFix(r, statusKey)}
         ${_rqOutreachPreview(r, statusKey)}
         ${sync.pills}
+        ${_rqLeadNotes(r)}
         ${_rqRecordActions(r, statusKey)}
       </div>
     </div>`;
@@ -2127,6 +2192,27 @@ function _detailRqPaintRecords(statusKey, opts) {
            </div>`
         : '';
 
+    // ── Why the column counts add up to more than the tab total ──────────────────
+    //
+    // A lead whose outreach actually sent sits in BOTH of these columns on purpose: Approved holds
+    // the decision, Awaiting reply holds the chase reminder, and each states a different true thing
+    // about it (see the approvalQuery comment in _detailRqRenderRecords). The consequence is that
+    // the four column badges sum to MORE than the tab's own total — 26 against 23 on a tab holding
+    // three sent leads — and nothing on screen accounted for the gap, so the only available reading
+    // was that one of the two numbers was broken.
+    //
+    // Stated on the two columns that overlap, rather than beside the total: this is the fact that
+    // explains the arithmetic, and it is only true of these leads. Suppressed when the column holds
+    // none of them, where it would explain a discrepancy that is not there.
+    const _overlap = (window._detailReviewQueue || {}).recordType === 'lead'
+        && (statusKey === 'approved' || statusKey === 'scheduled')
+        && records.some((r) => (r.data || {}).outreachSentAt);
+    const overlapHtml = _overlap
+        ? `<p class="text-[11px] text-gray-500 mt-3 mb-1">Leads whose email has gone appear in both
+             ${_rqEsc(_rqColumnLabel('approved'))} and ${_rqEsc(_rqColumnLabel('scheduled'))} — one holds the decision,
+             the other the chase reminder — so these columns add up to more than the tab’s own total.</p>`
+        : '';
+
     if (!records.length) {
         container.innerHTML = noticeHtml + `<p class="text-sm text-gray-400 py-10 text-center">${emptyMsg}</p>`;
         return;
@@ -2139,7 +2225,7 @@ function _detailRqPaintRecords(statusKey, opts) {
     // on page 4) lands on the last real page rather than rendering nothing.
     _rqRecordsPage = pg.page || 1;
     const noun = (window._detailReviewQueue || {}).recordType === 'lead' ? 'leads' : 'records';
-    container.innerHTML = noticeHtml
+    container.innerHTML = noticeHtml + overlapHtml
         + `<div class="divide-y divide-gray-100">${pg.items.map((r) => _detailRqRecordCard(r, statusKey)).join('')}</div>`
         + (window.ListPager ? window.ListPager.controlsHtml(pg, { attr: 'data-rq-page', noun }) : '');
     // The container outlives every repaint, so one delegated listener covers every page of every
@@ -2465,6 +2551,33 @@ window._detailRqRecordAct = async function (btn, action) {
 
     if (action === 'showSchedule') { card.querySelector('.rq-sched-row')?.classList.remove('hidden'); return; }
 
+    // Notes. Handled before the PATCH machinery below because it is not an approval act at all —
+    // it writes through lead-generation.ts `add_note`, which MERGES the note into the record's
+    // data server-side. Deliberately not this function's PATCH, which replaces `data` wholesale:
+    // this card does not hold a complete copy of a lead's data to send back, so a note taken here
+    // would have cost the lead its score, rationale, intel and outreach draft.
+    if (action === 'notes') {
+        const rec = _rqRecordsById.get(Number(card.getAttribute('data-rq-record')));
+        if (!rec) return;
+        window.LeadNotesModal?.open({
+            assistantId: window._currentAssistantId,
+            recordId: rec.id,
+            title: rec.title,
+            existing: (rec.data || {}).notes || '',
+            onSaved(notes) {
+                // Patch the card in place. Re-rendering the column would collapse the card the user
+                // is reading — the same reason _rqExpanded exists.
+                rec.data = { ...(rec.data || {}), notes };
+                const box = card.querySelector('.rq-lead-notes');
+                const text = card.querySelector('.rq-lead-notes-text');
+                if (text) text.textContent = notes;
+                if (box) { box.classList.remove('hidden'); box.style.display = ''; }
+                btn.textContent = 'Notes';
+            },
+        });
+        return;
+    }
+
     // Swap the email preview between read and edit mode. `hidden` loses to some display rules
     // here, so toggle the inline style too — see [[hidden-class-loses-to-inline-flex]].
     if (action === 'editEmail' || action === 'cancelEmail') {
@@ -2624,10 +2737,13 @@ window._detailRqRecordAct = async function (btn, action) {
         // sales-cycle clock (firstOutreachAt, which falls back to this stamp) never started.
         // `outreachDraftedAt` is dropped for the same reason send_outreach drops it: an email that
         // has gone is no longer one waiting to be sent.
+        // ⚠️ `outreachSentVia: 'manual'` rides with the stamp. It is the same stamp a real send
+        // writes, so without it the Approved column claimed this lead went "from your connected
+        // inbox" — a send WE never performed. See _rqRecordActions.
         const sentRec = _rqRecordsById.get(patch.id);
         if (sentRec) {
             const { outreachDraftedAt: _dropped, ...restData } = sentRec.data || {};
-            patch.data = { ...restData, outreachSentAt: new Date().toISOString() };
+            patch.data = { ...restData, outreachSentAt: new Date().toISOString(), outreachSentVia: 'manual' };
         }
     }
     else if (action === 'reject') {
