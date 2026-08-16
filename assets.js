@@ -352,6 +352,23 @@ window.initBrandAssets = function() {
     // ── Auto-save helpers (no save buttons on this page) ──────────────────────
     const val = (id) => document.getElementById(id)?.value.trim() || '';
     const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+
+    /**
+     * Show the "no postal address" warning under the outreach address field when it is empty.
+     * Called on load and on every edit, so the amber block clears the moment they type one in
+     * rather than lingering until the next page load.
+     *
+     * Sets style.display as well as the `hidden` class — several utility classes in this codebase
+     * out-specify `hidden`, and a warning that is supposed to disappear but does not reads as a
+     * broken save.
+     */
+    function togglePostalAddressWarning(value) {
+        const el = document.getElementById('bp-postal-address-warning');
+        if (!el) return;
+        const missing = !String(value ?? '').trim();
+        el.classList.toggle('hidden', !missing);
+        el.style.display = missing ? '' : 'none';
+    }
     function setStatus(id, msg, kind) {
         const el = document.getElementById(id);
         if (!el) return;
@@ -386,6 +403,7 @@ window.initBrandAssets = function() {
                     businessName,
                     industry:            val('bp-input-industry'),
                     websiteUrl:          val('bp-input-website'),
+                    outreachPostalAddress: val('bp-input-postal-address'),
                     socialLinks:         readOtherLinks(),
                     socialHandles:       collectSocialHandles(),
                     businessDescription: val('bp-input-description'),
@@ -542,6 +560,7 @@ window.initBrandAssets = function() {
                         set('bp-input-name', profile.businessName);
                         set('bp-input-industry', profile.industry);
                         set('bp-input-website', profile.websiteUrl);
+                        set('bp-input-postal-address', profile.outreachPostalAddress);
                         setOtherLinks(profile.socialLinks);
                         fillSocialHandles(profile.socialHandles);
                         set('bp-input-description', profile.businessDescription);
@@ -550,6 +569,13 @@ window.initBrandAssets = function() {
                     }
                 }
             } catch { /* non-fatal */ }
+            // OUTSIDE the `if (profile)` guard, deliberately. This warning is the only place a
+            // tenant learns their outreach is going out short of a legally required element
+            // (send_outreach logs it server-side but does not block). An org with no profile row
+            // at all has no address either — the case most in need of the warning — so gating it
+            // on a profile existing would hide it from exactly the wrong people. Reads the input,
+            // which is empty unless the block above filled it.
+            togglePostalAddressWarning(val('bp-input-postal-address'));
             // Guarantee one empty row even when the profile fetch fails or is empty.
             if (!otherLinkRows().length) setOtherLinks('');
             const bpEl = document.getElementById('bp-input-name');
@@ -583,8 +609,11 @@ window.initBrandAssets = function() {
 
         // Wire debounced auto-save on every field.
         const bpSave = debounce(saveBusinessProfile, 700);
-        ['bp-input-name','bp-input-industry','bp-input-website','bp-input-description','bp-input-audience']
+        ['bp-input-name','bp-input-industry','bp-input-website','bp-input-postal-address','bp-input-description','bp-input-audience']
             .forEach(id => document.getElementById(id)?.addEventListener('input', bpSave));
+        // Clear the compliance warning as soon as an address is typed, not on the next load.
+        document.getElementById('bp-input-postal-address')
+            ?.addEventListener('input', (e) => togglePostalAddressWarning(e.target.value));
         // "Other links" is a list of rows rather than one input — same auto-save.
         wireOtherLinks(bpSave);
         // Per-platform social handle inputs share the same auto-save.

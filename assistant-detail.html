@@ -278,10 +278,14 @@
              runs hourly at best and once a day on the entry tier. Without this button a figure the
              user knows to be wrong is indistinguishable from a broken feature, and there is nothing
              they can do about either. Wired in _renderGoalProgressCard (assistants.js) →
-             refresh-goal.ts, which re-measures every goal on this assistant on the spot. -->
+             refresh-goal.ts, which re-measures every goal on this assistant on the spot.
+             ⚠️ Ships `hidden` on purpose: _wireGoalRefreshButton assigns the onclick ONLY once there
+             is an assistant id and a non-empty _goalsCache, and reveals it in the same breath. Drop
+             the class and the button is visible-but-dead during the skeleton, on a detail page opened
+             with no ?id, and whenever the goals fetch fails — the silent no-op it exists to end. -->
         <button type="button" id="btn-refresh-goals"
           title="Re-measure these goals now instead of waiting for the next background check"
-          class="text-xs font-bold text-gray-500 hover:text-gray-800 underline underline-offset-2 cursor-pointer transition-colors">Check again now</button>
+          class="hidden text-xs font-bold text-gray-500 hover:text-gray-800 underline underline-offset-2 cursor-pointer transition-colors">Check again now</button>
         <button type="button" onclick="window._activateMainTab && window._activateMainTab('goals')"
           class="text-xs font-bold text-emerald-700 hover:text-emerald-800 underline underline-offset-2 cursor-pointer transition-colors">Manage goals</button>
       </div>

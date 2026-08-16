@@ -234,41 +234,27 @@
       },
       {
         title: 'Operational set-up',
-        description: 'How your Lead Generator runs day to day — when it scores leads, where they come from, and where the good ones go.',
+        description: 'How your Lead Generator sends the outreach you approve.',
         operational: true,
+        // ⚠️ THREE QUESTIONS WERE REMOVED HERE — do not reinstate without wiring them first.
+        //   leadIntake        'Where do new leads arrive?'
+        //   qualifyTrigger    'When should it qualify leads?'
+        //   qualifiedRouting  'Where should qualified leads go?'
+        //
+        // None was ever read by code — each key appeared only in this file. But an unread answer
+        // here is not inert: buildSystemPrompt() in chat-orchestrator.ts dumps EVERY non-empty
+        // onboarding_context key into <strict_configuration> under "You MUST obey these rules at
+        // all times", so chat was being ordered to honour an intake path, a scoring trigger and a
+        // routing rule that nothing implements. Two of leadIntake's own options (web_form,
+        // shared_inbox) had no ingest behind them at all.
+        //
+        // What actually governs each of these, for anyone tempted to re-add them:
+        //   intake    — outbound discovery (process-discovery-jobs.ts), plus the chat/csv_import/
+        //               integration SOURCES set in assistant-records.ts. Nothing "arrives".
+        //   trigger   — scoring happens at discovery time and on demand via enrich_lead; the real
+        //               schedule is per-search, in search_schedules.
+        //   routing   — fixed by the product: qualified leads land in the Outreach tab.
         fields: [
-          {
-            key: 'leadIntake',
-            label: 'Where do new leads arrive?',
-            type: 'dropdown',
-            required: true,
-            placeholder: 'Choose a source…',
-            options: [
-              { value: 'web_form', label: 'Web form' },
-              { value: 'shared_inbox', label: 'Shared inbox' },
-              { value: 'crm', label: 'CRM' },
-              { value: 'manual', label: 'Manual entry' },
-            ],
-          },
-          {
-            key: 'qualifyTrigger',
-            label: 'When should it qualify leads?',
-            type: 'radio',
-            required: true,
-            options: [
-              { value: 'on_arrival', label: 'Instantly on arrival', description: 'Every new lead is scored the moment it lands.' },
-              { value: 'scheduled', label: 'Scheduled batches', description: 'Leads are scored together on a regular schedule.' },
-              { value: 'on_demand', label: 'On demand', description: 'It scores leads only when I ask.' },
-            ],
-          },
-          {
-            key: 'qualifiedRouting',
-            label: 'Where should qualified leads go?',
-            type: 'text',
-            required: false,
-            placeholder: 'e.g. Notify sales@company.com, tag as Hot',
-            helpText: 'What should happen to a lead once it passes qualification.',
-          },
           {
             // Read by the outreach-send flow: when set to google/microsoft AND that provider is
             // connected, approving a lead sends its outreach email from the user's own inbox.

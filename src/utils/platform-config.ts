@@ -126,10 +126,45 @@ export async function setPlatformConfig(key: string, value: unknown, updatedBy?:
 }
 
 // ── Gamification config accessors (with safe defaults if the row is missing) ──
-export interface TimeMultipliers { leads_generated: number; content_drafted: number; tasks_completed: number; }
+// Minutes of human time each unit of assistant work is deemed to replace. Consumed ONLY through
+// src/utils/roi-activity.ts, which owns the mapping from an activity source to a key here — do not
+// multiply by one of these at a call site, or the dashboard and the assistant page drift apart.
+//
+// ⚠️ Adding a key is safe; RENAMING one is not. getTimeMultipliers() spreads the stored
+// platform_config row over these defaults, so an env whose row predates a new key silently picks up
+// the default (intended), but an env whose row still carries an OLD key would keep overriding a
+// field nothing reads any more (silent, and it looks like the admin override stopped working).
+export interface TimeMultipliers {
+    leads_generated: number;
+    content_drafted: number;
+    tasks_completed: number;
+    // Added when the ROI cards were repointed off the `leads` table onto assistant_records —
+    // until then every assistant except the Social Media Manager contributed exactly zero.
+    blog_drafted: number;
+    meeting_summarised: number;
+    invoice_processed: number;
+    ticket_handled: number;
+    record_enriched: number;
+    campaign_managed: number;
+}
 export interface Milestones { leads_for_token: number; hours_for_beta: number; }
 
-export const DEFAULT_TIME_MULTIPLIERS: TimeMultipliers = { leads_generated: 3, content_drafted: 5, tasks_completed: 2 };
+// The six new figures are ESTIMATES, deliberately conservative, and admin-tunable at runtime via
+// the gamification.time_multipliers platform_config row — they are relative weights in a headline
+// "hours saved" claim shown to a paying customer, not measurements. A blog post outweighs a social
+// post because it is long-form research + drafting; a campaign decision is weighted as review time,
+// not as the whole campaign.
+export const DEFAULT_TIME_MULTIPLIERS: TimeMultipliers = {
+    leads_generated: 3,
+    content_drafted: 5,
+    tasks_completed: 2,
+    blog_drafted: 25,
+    meeting_summarised: 15,
+    invoice_processed: 5,
+    ticket_handled: 8,
+    record_enriched: 3,
+    campaign_managed: 10,
+};
 export const DEFAULT_MILESTONES: Milestones = { leads_for_token: 100, hours_for_beta: 50 };
 
 export async function getTimeMultipliers(): Promise<TimeMultipliers> {

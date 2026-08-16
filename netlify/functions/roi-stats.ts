@@ -5,10 +5,11 @@
 //   → { taskCount, hoursSaved, gbpSaved, planCostGbp, multiplier, period }
 
 import { HandlerEvent } from '@netlify/functions';
-import { eq, ne, and, gte, count, desc, sql, inArray } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, userProfiles, taskRuns, scheduledPosts, leads, plans, masterPlans, notifications } from '../../db/schema';
+import { userProfiles, plans, masterPlans, notifications } from '../../db/schema';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
+import { activeAssistantIds, countRoiActivity } from '../../src/utils/roi-activity';
 import { createNotification } from '../../src/utils/notify';
 import { requireSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
@@ -42,114 +43,28 @@ export default withLambda(async (event: HandlerEvent) => {
         const org = await resolveActiveOrg(db, userId, session.activeOrganisationId);
         const organisationId = org?.organisationId ?? null;
 
-        // This is the dashboard's aggregate ("overriding") ROI card, so it must only
-        // sum work done by ACTIVE assistants — an archived assistant's historical task
-        // runs / drafted posts must not keep inflating the org total after it's been
-        // retired. 'active' == not archived, matching assistant-capabilities.ts and the
-        // My Assistants visible-list filter. task_runs and scheduled_posts both carry an
-        // assistantId (nullable — set null on hard-delete), so we scope those counts to
-        // these ids; leads have no assistantId, so they can only be gated on whether the
-        // org has any active assistant at all (see leadCount below).
-        const activeAssistants = organisationId ? await db
-            .select({ id: aiAssistants.id })
-            .from(aiAssistants)
-            .where(and(
-                eq(aiAssistants.organisationId, organisationId),
-                ne(aiAssistants.lifecycleStatus, 'archived'),
-            )) : [];
-        const activeAssistantIds = activeAssistants.map(a => a.id);
-        const hasActiveAssistant = activeAssistantIds.length > 0;
-
-        // Issue #132 (follow-up) / issue #149: the reporter saw this widget go from
-        // "0" to completely blank after the coalesce/leads changes below landed — i.e.
-        // one of these queries started throwing, which turned the whole response into a
-        // 500 (the frontend leaves the tiles in their loading-skeleton state on any
-        // non-200 response). Whatever the exact trigger, a single activity source
-        // failing must never blank the entire widget again, so each count is now
-        // isolated and defaults to 0 on error instead of aborting the request.
-        const safeCount = async (query: Promise<{ count: number }[]>): Promise<number> => {
-            try {
-                const [row] = await query;
-                return Number(row?.count ?? 0);
-            } catch (err) {
-                console.error('roi-stats: activity count query failed, defaulting to 0', err);
-                return 0;
-            }
-        };
-
-        // SC6: Count completed task runs and drafted/scheduled posts in the period.
-        // Real assistant work (e.g. the social media assistant) is recorded in
-        // scheduled_posts — task_runs alone is near-always empty for that flow, which
-        // is why this widget previously showed zero despite an assistant being active
-        // (see get-assistant-metrics.ts, which already reads from scheduled_posts).
+        // This is the dashboard's aggregate ROI card, so it sums the work of EVERY active
+        // assistant — 'active' == not archived, so a retired assistant's history stops
+        // inflating the org total but a paused one keeps the work it already did.
         //
-        // Issue #110 (follow-up): task_runs are windowed on COALESCE(completed_at,
-        // created_at), not created_at alone — a run created before the period boundary
-        // but only completing after it (the normal case right after a week/month rolls
-        // over) was being dropped entirely, zeroing out this widget even with completed
-        // work in the window. dashboard-heatmap.ts already uses this same COALESCE for
-        // task_runs; this brings the ROI hero in line with it.
-        //
-        // The comparand must be an ISO string, not a Date: a raw sql`` fragment has no
-        // column type, so drizzle passes a Date through to postgres-js unserialized and
-        // the bind step throws ERR_INVALID_ARG_TYPE (500 on every call).
-        // SC1: minutes saved per item — admin-configurable via gamification.time_multipliers,
-        // shared with the dashboard "Hours Saved" widget (get-time-saved.ts) so both views
-        // stay consistent. Task runs, drafted posts, and generated leads each use their own multiplier.
+        // What counts, and why it is not defined here: src/utils/roi-activity.ts. This used
+        // to hand-roll three counts, one of which read the `leads` table — Be More Swan's OWN
+        // sales pipeline, not the tenant's — while every assistant that files its output to
+        // assistant_records (Lead Generator, Meeting Note Taker, Campaign Orchestrator, the
+        // ticket/invoice roles) contributed exactly zero. That is what "the card isn't
+        // aggregating from all active assistants" looked like from the dashboard.
+        const assistantIds = await activeAssistantIds(db, organisationId);
+
+        // SC1: minutes saved per item — admin-configurable via gamification.time_multipliers.
+        // Fetched once and threaded through both countRoiActivity calls below.
         const mult = await getTimeMultipliers();
 
-        // Activity totals over an arbitrary window. Factored out because the monthly
-        // break-even milestone below has to keep evaluating on a calendar-month window
-        // even when the caller asked for 'all' — which is now the dashboard's default,
-        // so a month-only milestone check would otherwise almost never run again.
-        const countActivity = async (windowStart: Date) => {
-            const taskRunCount = organisationId && hasActiveAssistant ? await safeCount(db
-                .select({ count: count() })
-                .from(taskRuns)
-                .where(and(
-                    eq(taskRuns.organisationId, organisationId),
-                    inArray(taskRuns.assistantId, activeAssistantIds),
-                    eq(taskRuns.status, 'completed'),
-                    gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, windowStart.toISOString())
-                ))) : 0;
-
-            const postCount = organisationId && hasActiveAssistant ? await safeCount(db
-                .select({ count: count() })
-                .from(scheduledPosts)
-                .where(and(
-                    eq(scheduledPosts.organisationId, organisationId),
-                    inArray(scheduledPosts.assistantId, activeAssistantIds),
-                    gte(scheduledPosts.createdAt, windowStart)
-                ))) : 0;
-
-            // Leads generated in the period — get-time-saved.ts already counts these towards
-            // "Hours Saved"; omitting them here meant an org whose assistant work is mostly lead
-            // generation (no task_runs, no scheduled_posts yet) saw 0 hours/£/tasks on this
-            // widget despite real, non-zero activity on the modal it's supposed to agree with.
-            // `leads` has no assistantId, so it can't be scoped to specific active assistants;
-            // gate it on the org having at least one active assistant so an org whose assistants
-            // are all archived reports zero here too (rather than surfacing orphaned lead activity).
-            const leadCount = organisationId && hasActiveAssistant ? await safeCount(db
-                .select({ count: count() })
-                .from(leads)
-                .where(and(
-                    eq(leads.organisationId, organisationId),
-                    gte(leads.createdAt, windowStart)
-                ))) : 0;
-
-            const completedTasks = Number(taskRunCount) + Number(postCount) + Number(leadCount);
-            const totalMinutes = Number(taskRunCount) * mult.tasks_completed
-                + Number(postCount) * mult.content_drafted
-                + Number(leadCount) * mult.leads_generated;
-
-            return {
-                completedTasks,
-                totalMinutes,
-                avgTaskDurationMinutes: completedTasks > 0 ? totalMinutes / completedTasks : mult.tasks_completed,
-                // SC1: hours saved = total minutes / 60
-                hoursSaved: parseFloat((totalMinutes / 60).toFixed(1)),
-            };
-        };
+        // Factored out because the monthly break-even milestone below has to keep evaluating on
+        // a calendar-month window even when the caller asked for 'all' — which is the dashboard's
+        // default, so a month-only milestone check would otherwise almost never run again.
+        const countActivity = (windowStart: Date) => countRoiActivity(db, {
+            organisationId, assistantIds, windowStart, multipliers: mult,
+        });
 
         const windowStats = await countActivity(periodStart);
         const { completedTasks, hoursSaved } = windowStats;
@@ -251,6 +166,14 @@ export default withLambda(async (event: HandlerEvent) => {
                 tasksToBreakEven,
                 multiplierPeriod: 'month',
                 hourlyRateSet: hourlyRate !== null,
+                // Which assistants and which activity sources produced the figures above, so the
+                // tiles can be reconciled against the "tasks behind this" modal without a second
+                // definition of the same sum living in the client.
+                assistantsCounted: assistantIds.length,
+                sources: windowStats.breakdown,
+                // True when a source query failed and was defaulted to 0 rather than 500ing the
+                // whole widget — the numbers are then a floor, not a total.
+                partial: windowStats.degraded,
             }),
         };
     } catch (err) {

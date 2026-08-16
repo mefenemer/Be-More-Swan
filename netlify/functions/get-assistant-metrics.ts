@@ -4,12 +4,13 @@
 // plus hours saved and GBP saved based on the user's configured hourly rate.
 
 import { Handler } from '@netlify/functions';
-import { and, eq, ne, gte, sql, count, type SQL } from 'drizzle-orm';
+import { and, eq, sql, type SQL } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, scheduledPosts, taskRuns, userProfiles, leads } from '../../db/schema';
+import { aiAssistants, scheduledPosts, userProfiles } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import type { PostStatus } from '../../src/config/post-status';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
+import { countRoiActivity } from '../../src/utils/roi-activity';
 import { parseRoiPeriod, roiPeriodStart } from '../../src/utils/roi-period';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -80,25 +81,6 @@ export default withLambda(async (event) => {
         const period = parseRoiPeriod(event.queryStringParameters?.period);
         const periodStart = roiPeriodStart(period);
 
-        // Issue #110 (follow-up): roi-stats.ts (dashboard) sums leads generated org-wide
-        // into its hero figure, because the `leads` table has no assistantId to attribute
-        // rows to a specific assistant. That's fine for the org total, but left this
-        // per-assistant endpoint permanently short of the dashboard by however many leads
-        // came in during the period — even for an org with a single assistant, where the
-        // org total and this assistant's total should be identical. Since attribution is
-        // only unambiguous when there's exactly one assistant in the org, count leads here
-        // too, but only when that holds.
-        // Count only ACTIVE (non-archived) assistants, so lead attribution here matches
-        // get-assistants.ts (the cards) and roi-stats.ts (the dashboard ROI hero), which
-        // all scope to active assistants. 'active' == not archived.
-        const [assistantCountRow] = await withTenant(orgId, (tx) =>
-            tx.select({ c: count() }).from(aiAssistants).where(and(
-                eq(aiAssistants.organisationId, orgId),
-                ne(aiAssistants.lifecycleStatus, 'archived'),
-            ))
-        );
-        const isOnlyAssistantInOrg = Number(assistantCountRow?.c ?? 0) === 1;
-
         // ── Two different questions, deliberately two different queries ──────────────────────────
         // A cross-post is one scheduled_posts row PER PLATFORM sharing a crosspost_group_id.
         //
@@ -133,7 +115,14 @@ export default withLambda(async (event) => {
             needsAttention: groupedCount(sql`${scheduledPosts.status} in (${quoted(ATTENTION_STATUSES)})`, 'needsAttention'),
         }).from(scheduledPosts).where(postScope);
 
-        const [postRows, profileRow, mult, [{ postsInPeriod }], [{ taskRunsInPeriod }], [{ leadsInPeriod }]] = await Promise.all([
+        // This assistant's own ROI slice, counted by the SAME module the dashboard hero uses —
+        // scoped to this one id instead of every active assistant in the org. That is what makes
+        // the dashboard total actually equal the sum of the assistant pages; previously this
+        // endpoint priced only posts + task runs, plus an org-wide `leads` count folded in when
+        // the org had exactly one assistant (a workaround for `leads` having no assistant column
+        // at all — it is Be More Swan's own sales pipeline, not the tenant's, and is no longer
+        // counted anywhere). See src/utils/roi-activity.ts.
+        const [postRows, profileRow, mult, activity] = await Promise.all([
             db.select({
                 status: scheduledPosts.status,
                 platform: scheduledPosts.platform,
@@ -150,33 +139,11 @@ export default withLambda(async (event) => {
 
             getTimeMultipliers(),
 
-            db.select({ postsInPeriod: count() })
-              .from(scheduledPosts)
-              .where(and(
-                  eq(scheduledPosts.assistantId, aId),
-                  eq(scheduledPosts.organisationId, orgId),
-                  gte(scheduledPosts.createdAt, periodStart)
-              )),
-
-            // Issue #110 (follow-up): window on COALESCE(completed_at, created_at) —
-            // see roi-stats.ts for why filtering on created_at alone can zero this out.
-            db.select({ taskRunsInPeriod: count() })
-              .from(taskRuns)
-              .where(and(
-                  eq(taskRuns.assistantId, aId),
-                  eq(taskRuns.organisationId, orgId),
-                  eq(taskRuns.status, 'completed'),
-                  gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, periodStart.toISOString())
-              )),
-
-            // Org-wide, since `leads` has no assistantId — only meaningful to fold in when
-            // this is the org's sole assistant (see isOnlyAssistantInOrg above).
-            db.select({ leadsInPeriod: count() })
-              .from(leads)
-              .where(and(
-                  eq(leads.organisationId, orgId),
-                  gte(leads.createdAt, periodStart)
-              )),
+            countRoiActivity(db, {
+                organisationId: orgId,
+                assistantIds: [aId],
+                windowStart: periodStart,
+            }),
         ]);
 
         const prefs = (profileRow[0]?.preferences as Record<string, any>) || {};
@@ -203,13 +170,9 @@ export default withLambda(async (event) => {
         const totalAwaitingReview = Number(totalsRow?.awaitingReview ?? 0);
         const totalNeedsAttention = Number(totalsRow?.needsAttention ?? 0);
 
-        // Same formula as roi-stats.ts (posts × content_drafted + completed task runs ×
-        // tasks_completed + leads × leads_generated) so a single-assistant org sees
-        // identical hero figures on both pages. Leads only count in when unambiguous.
-        const totalMinutesInPeriod = Number(postsInPeriod) * mult.content_drafted
-            + Number(taskRunsInPeriod) * mult.tasks_completed
-            + (isOnlyAssistantInOrg ? Number(leadsInPeriod) * mult.leads_generated : 0);
-        const hoursSaved = parseFloat((totalMinutesInPeriod / 60).toFixed(1));
+        // Literally the same code path as roi-stats.ts, so a single-assistant org sees identical
+        // figures on both pages by construction rather than by two formulas being kept in step.
+        const hoursSaved = activity.hoursSaved;
         const gbpSaved = hourlyRateGbp ? parseFloat((hoursSaved * hourlyRateGbp).toFixed(2)) : null;
 
         return {

@@ -28,7 +28,7 @@ export interface OutlookSendResult {
 export async function sendOutlookMessage(
     db: Db,
     organisationId: number,
-    msg: { to: string; subject: string; body: string; replyTo?: string },
+    msg: { to: string; subject: string; body: string; replyTo?: string; listUnsubscribe?: string },
 ): Promise<OutlookSendResult> {
     // Strip CR/LF for parity with the Gmail path — Graph is JSON so header smuggling isn't
     // possible the same way, but a newline in a recipient is malformed input regardless.
@@ -50,6 +50,17 @@ export async function sendOutlookMessage(
                 // Per-thread inbound alias, so a reply routes back to THIS conversation rather
                 // than to the sender's own mailbox where nothing would observe it.
                 ...(msg.replyTo ? { replyTo: [{ emailAddress: { address: msg.replyTo.replace(/[\r\n]+/g, ' ').trim() } }] } : {}),
+                // RFC 2369/8058. Graph exposes custom headers only through internetMessageHeaders,
+                // and ONLY for names beginning `x-` or listed as allowed — List-Unsubscribe and
+                // List-Unsubscribe-Post are both accepted. Values are CR/LF-stripped for parity
+                // with the Gmail path even though Graph is JSON: a newline here is malformed input
+                // regardless of whether this particular transport could be injected through.
+                ...(msg.listUnsubscribe ? {
+                    internetMessageHeaders: [
+                        { name: 'List-Unsubscribe', value: msg.listUnsubscribe.replace(/[\r\n]+/g, ' ').trim() },
+                        { name: 'List-Unsubscribe-Post', value: 'List-Unsubscribe=One-Click' },
+                    ],
+                } : {}),
             },
             // Keep a copy in the user's Sent Items — outreach should be visible in their own
             // mailbox, both so they can follow up in context and so nothing we send is hidden.

@@ -21,7 +21,16 @@
   <script src="./explainers.js?v=20260701-media-sources" defer></script>
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
-  <link rel="manifest" href="/favicon/manifest.json">
+  <!-- The APP manifest, not favicon/manifest.json (which is only an icon set — no start_url, no
+       display mode, so a browser will not offer to install it and iOS will never deliver a push).
+       Installing this is what unlocks Web Push on iOS. -->
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Be More Swan">
+  <!-- Registers /sw.js and keeps this browser's push subscription in sync. Not deferred behind
+       anything: it is self-contained and exposes window.SwanPush for the settings UI. -->
+  <script src="/push-client.js" defer></script>
 </head>
 <body class="bg-gray-50 text-gray-900 font-sans antialiased min-h-screen overflow-x-hidden">
 
@@ -4052,6 +4061,65 @@ function formatCurrency(amount, currency) {
           </span>
         </td>`;
 
+      // ── Push enablement state ───────────────────────────────────────────────
+      // The Push column is stored preference only; nothing arrives until this browser has OS
+      // permission AND a registered subscription. Without this card a user flips Push on, sees a
+      // green toggle, receives nothing, and reasonably concludes the feature is broken.
+      async function _renderPushCard() {
+        const card = document.getElementById('push-enable-card');
+        const desc = document.getElementById('push-enable-desc');
+        const btn  = document.getElementById('push-enable-btn');
+        if (!card || !desc || !btn || !window.SwanPush) return;
+
+        const s = await window.SwanPush.status();
+        card.classList.remove('hidden');
+        card.style.display = '';
+        btn.classList.add('hidden');
+        btn.style.display = 'none';
+
+        const showBtn = (label) => {
+          btn.textContent = label;
+          btn.classList.remove('hidden');
+          btn.style.display = '';
+        };
+
+        if (!s.supported) {
+          // Each reason gets its own copy. "Not supported" is the wrong thing to tell an iPhone
+          // user in Safari — iOS does support Web Push, but only once the app is on the Home
+          // Screen, and that is an action they can take right now.
+          const REASONS = {
+            ios_needs_install: 'Add Be More Swan to your Home Screen (Share → Add to Home Screen), then reopen it from there to turn on push notifications. iOS only delivers them to installed apps.',
+            not_configured:    'Push notifications aren\'t switched on for this environment yet.',
+            no_service_worker: 'This browser doesn\'t support the background service push notifications need.',
+            no_push_manager:   'This browser doesn\'t support push notifications.',
+            no_notification_api: 'This browser doesn\'t support notifications.',
+          };
+          desc.textContent = REASONS[s.reason] || 'Push notifications aren\'t available in this browser.';
+          return;
+        }
+        if (s.subscribed) {
+          desc.textContent = 'Enabled on this device. Choose which alerts reach your lock screen using the Push column below.';
+          showBtn('Turn off');
+          btn.onclick = async () => { await window.SwanPush.disable(); _renderPushCard(); };
+          return;
+        }
+        if (s.permission === 'denied') {
+          // requestPermission() cannot re-prompt after a denial — only the browser's own site
+          // settings can undo it, so offering a button here would be a button that does nothing.
+          desc.textContent = 'You blocked notifications for this site. Re-allow them in your browser\'s site settings, then reload this page.';
+          return;
+        }
+        desc.textContent = 'Get alerts on your lock screen, even when Be More Swan is closed. Nothing is sent until you choose categories in the Push column below.';
+        showBtn('Enable');
+        btn.onclick = async () => {
+          btn.disabled = true;
+          await window.SwanPush.enable();   // must run inside the click — browsers reject an unprompted permission request
+          btn.disabled = false;
+          _renderPushCard();
+        };
+      }
+      _renderPushCard();
+
       try {
         const res = await fetch('/.netlify/functions/notification-preferences');
         if (!res.ok) throw new Error('Load failed');
@@ -4074,6 +4142,7 @@ function formatCurrency(amount, currency) {
               </td>
               ${switchCell(cat.key, 'inApp', cat.inApp.value, cat.inApp.locked)}
               ${switchCell(cat.key, 'email', cat.email.value, cat.email.locked)}
+              ${switchCell(cat.key, 'push', cat.push?.value ?? false, false)}
               ${cat.sms.available ? switchCell(cat.key, 'sms', false, false) : lockedChannelCell()}
               ${cat.whatsapp.available ? switchCell(cat.key, 'whatsapp', false, false) : lockedChannelCell()}
             </tr>`;
@@ -4913,7 +4982,7 @@ function formatCurrency(amount, currency) {
       : '<p class="text-sm text-gray-400 text-center py-6">No tasks counted yet — your assistants will start clocking these up as they work.</p>';
     if (body && d.tasksTruncated) body.insertAdjacentHTML('beforeend',
       `<p class="text-xs text-gray-400 text-center pt-3">Showing the ${tasks.length} most recent of ${d.taskCount} counted actions.</p>`);
-    if (footer) footer.innerHTML = `These are <strong>examples</strong> of the completed actions your assistants perform — such as drafts published, tasks finished, and leads generated. Only the activities <strong>relevant to each assistant's role</strong> are counted, each valued at its time-saved equivalent (set by your plan). Total: <strong>${d.hoursSaved ?? 0} hours saved</strong>.`;
+    if (footer) footer.innerHTML = `These are <strong>examples</strong> of the completed actions your assistants perform — posts and blogs drafted, leads generated, meetings summarised, tickets and invoices handled, campaigns prepared, and tasks finished. Every <strong>active assistant</strong> contributes, and only the activities <strong>relevant to each assistant's role</strong> are counted, each valued at its time-saved equivalent (set by your plan). Total: <strong>${d.hoursSaved ?? 0} hours saved</strong>.`;
     modal.classList.remove('hidden');
     const close = () => modal.classList.add('hidden');
     document.getElementById('savings-modal-close').onclick = close;

@@ -28,7 +28,7 @@ export interface GmailSendResult { id: string; threadId?: string }
 export async function sendGmailMessage(
     db: Db,
     organisationId: number,
-    msg: { to: string; subject: string; body: string; replyTo?: string },
+    msg: { to: string; subject: string; body: string; replyTo?: string; listUnsubscribe?: string },
 ): Promise<GmailSendResult> {
     // Strip CR/LF so field values can never smuggle extra MIME headers.
     const to = msg.to.replace(/[\r\n]+/g, ' ').trim();
@@ -38,6 +38,10 @@ export async function sendGmailMessage(
     // header value — this one is generated, not user input, but the invariant belongs at the
     // boundary rather than resting on where today's callers happen to get it from.
     const replyTo = msg.replyTo ? msg.replyTo.replace(/[\r\n]+/g, ' ').trim() : '';
+    // RFC 2369/8058 — "<https://…/lead-unsubscribe?t=…>", built by src/config/outreach-footer.ts.
+    // Same CR/LF strip: this is the one header value derived from a URL, and header injection here
+    // would let a crafted token forge arbitrary MIME headers on the tenant's own mailbox.
+    const listUnsubscribe = msg.listUnsubscribe ? msg.listUnsubscribe.replace(/[\r\n]+/g, ' ').trim() : '';
     if (!to) throw new Error('A recipient address is required to send.');
 
     const { accessToken } = await getFreshAccessToken(db, organisationId, 'gmail');
@@ -45,6 +49,14 @@ export async function sendGmailMessage(
     const mime = [
         `To: ${to}`,
         ...(replyTo ? [`Reply-To: ${replyTo}`] : []),
+        // List-Unsubscribe-Post is only meaningful alongside List-Unsubscribe, and its value is
+        // fixed by RFC 8058. Emitting the pair is what makes Gmail and Yahoo render a native
+        // one-click unsubscribe control; the visible footer line is separate and still required,
+        // since a header alone is not a "clear and conspicuous" mechanism under CAN-SPAM.
+        ...(listUnsubscribe ? [
+            `List-Unsubscribe: ${listUnsubscribe}`,
+            'List-Unsubscribe-Post: List-Unsubscribe=One-Click',
+        ] : []),
         `Subject: ${encodeMimeHeader(subject)}`,
         'MIME-Version: 1.0',
         'Content-Type: text/plain; charset="UTF-8"',

@@ -6,9 +6,22 @@
 // For the account settings UI we group those into a small set of human-readable
 // PREFERENCE categories — one row per category — each controllable per channel.
 //
-// Channels: In-App and Email are user-toggleable (unless locked). SMS and WhatsApp
-// are higher-tier only and rendered greyed-out — there is no per-category storage
-// for them yet (see CHANNEL_AVAILABILITY).
+// Channels: In-App, Email and Push are user-toggleable (Push is never locked — see
+// below). SMS and WhatsApp are higher-tier only and rendered greyed-out — there is no
+// per-category storage for them yet (see CHANNEL_AVAILABILITY).
+//
+// PUSH is Web Push through the PWA's Service Worker: a lock-screen alert on Android and
+// iOS with no App Store presence. Two properties make it different from the other two,
+// and both are deliberate:
+//   • NO push category is ever locked. inApp and email lock the essential rows because a
+//     user must not be able to miss a security or billing alert, and those channels are
+//     passive — an unread bell item or an email costs nothing. A lock-screen buzz is not
+//     passive, and a critical alert the user cannot silence is how an app gets its
+//     notification permission revoked wholesale, which would lose them the alerts we
+//     locked ON to guarantee. Locking here would be self-defeating.
+//   • Defaults are TIGHTER than in-app. A bell that lists everything is useful; a phone
+//     that buzzes for everything gets muted. Only rows a user would want to be
+//     interrupted for default ON.
 //
 // A category is "locked" on a channel when the alert is essential (account/security
 // and billing) — the toggle is shown but disabled and the value is forced ON. This
@@ -18,7 +31,7 @@
 // and user_profiles.in_app_preferences. Keys for the previously-existing email
 // categories are preserved so stored preferences carry over unchanged.
 
-export type PrefChannel = 'inApp' | 'email';
+export type PrefChannel = 'inApp' | 'email' | 'push';
 
 // Where a category's toggles are surfaced:
 //   'account'   → Account Settings › Notification Preferences (BMS customer-level alerts)
@@ -40,11 +53,34 @@ export interface PrefCategory {
     types: string[];   // raw notification `type`s this category governs
     inApp: ChannelRule;
     email: ChannelRule;
+    /**
+     * Web Push. Optional so adding the channel did not require touching all twelve category
+     * literals at once — but read it through pushRule(), never directly, so an omitted entry
+     * resolves to a defined default instead of `undefined`.
+     */
+    push?: ChannelRule;
 }
 
 const LOCKED_ON: ChannelRule = { locked: true, default: true };
 const ON: ChannelRule = { locked: false, default: true };
 const OFF: ChannelRule = { locked: false, default: false };
+
+// Push equivalents. Never locked — see the header note on why locking a lock-screen alert is
+// self-defeating. PUSH_ON is for rows worth interrupting someone for; PUSH_OFF is opt-in.
+const PUSH_ON: ChannelRule = { locked: false, default: true };
+const PUSH_OFF: ChannelRule = { locked: false, default: false };
+
+/**
+ * The push rule for a category, defaulting to OFF when the category has not declared one.
+ *
+ * Defaulting to OFF rather than to the inApp rule is the safe direction: a new category added
+ * without thinking about push produces silence, not an unexpected buzz on every user's phone —
+ * and a channel that surprises people gets its permission revoked at the OS level, which is not
+ * recoverable from inside the product.
+ */
+export function pushRule(cat: PrefCategory): ChannelRule {
+    return cat.push ?? PUSH_OFF;
+}
 
 // Order here is the display order in the matrix (locked/critical rows first).
 export const PREF_CATEGORIES: PrefCategory[] = [
@@ -53,6 +89,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         label: 'Account & Security',
         description: 'Sign-in alerts, security warnings, and account/organisation changes.',
         scope: 'account',
+        push: PUSH_ON,  // a security alert is the canonical reason to buzz a phone
         inApp: LOCKED_ON, email: LOCKED_ON,
         types: [
             'security', 'agent_anomaly', 'account_update', 'authorization_code',
@@ -65,6 +102,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         label: 'Billing & Subscription',
         description: 'Payment receipts, failed payments, and plan changes.',
         scope: 'account',
+        push: PUSH_ON,  // a failed payment suspends the account — worth an interruption
         inApp: LOCKED_ON, email: LOCKED_ON,
         types: [
             'billing_payment_failed', 'missing_stripe_sub', 'stripe_cancelled_but_db_active',
@@ -92,6 +130,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         // Email is inert today: nothing sends an admin_message email, and the type is
         // deliberately absent from EMAIL_FALLBACK_TYPES. The row is here so the channel has a
         // sane stored default if that ever changes.
+        push: PUSH_ON,  // a human typed this to one named user; never automated, never bulk
         inApp: LOCKED_ON, email: ON,
         types: ['admin_message'],
     },
@@ -100,6 +139,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         label: 'Invoices',
         description: 'A new invoice is available to download.',
         scope: 'account',
+        push: PUSH_OFF,  // an invoice can wait for the next time they open the app
         inApp: ON, email: ON,
         types: ['invoice_ready'],
     },
@@ -108,6 +148,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         label: 'Approvals & Reviews',
         description: 'Posts and actions waiting for your approval, and risk reviews.',
         scope: 'assistant',
+        push: PUSH_ON,  // work is BLOCKED on the user answering — the one thing they need pulling out of their day for
         inApp: ON, email: ON,
         types: [
             'hitl_approval_required', 'review_red_urgency', 'risk_assessment_submitted',
@@ -143,14 +184,37 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         label: 'Assistant Tasks & Summaries',
         description: 'Completed work, wins, and on-demand reports from your assistants.',
         scope: 'assistant',
+        push: PUSH_OFF,  // a steady drip of completed work; the bell is the right home for it
         inApp: ON, email: ON,
-        types: ['assistant_task', 'assistant_ready', 'assistant_kickoff_complete'],
+        types: [
+            'assistant_task', 'assistant_ready', 'assistant_kickoff_complete',
+            // A finished saved-search run: "your search found 14 companies to review". Joined
+            // 2026-08-16, having shipped unmapped — so it fell through to FALLBACK_CATEGORY
+            // ('product_updates') and anyone who muted product announcements silently stopped
+            // hearing that their discovery runs had produced anything. Exactly the failure the
+            // campaign_decision_pending note below `approvals` describes, and there is no delivery
+            // receipt anywhere in this system that would have surfaced it.
+            //
+            // Here rather than in `approvals` because nothing is PARKED: `approvals` is work
+            // waiting on the user's answer (a draft blocked, a proposal pending), whereas a
+            // completed run reporting what it found is a summary — this category's own words,
+            // "completed work, wins, and reports". The user can act on it, but nothing waits.
+            //
+            // ⚠️ Safe to put in a scope:'assistant' category ONLY because publishSignals() in
+            // process-discovery-jobs.ts passes metadata.assistantId, which the BEFORE INSERT
+            // trigger stamps onto notifications.assistant_id. That id is what the per-assistant
+            // override keys on; without it this row would resolve to the workspace-wide value,
+            // which has no UI, and would have become permanently ON — strictly worse than the
+            // wrong bucket. Don't drop it from that call site.
+            'search_signals_published',
+        ],
     },
     {
         key: 'content_calendar',
         label: 'Content & Publishing',
         description: 'Draft status, publishing confirmations, and failed/missed posts.',
         scope: 'assistant',
+        push: PUSH_OFF,  // high volume for a publishing assistant — this is what would get the app muted
         inApp: ON, email: ON,
         types: [
             'post_published', 'post_revised', 'post_draft_ready', 'post_generation_queued',
@@ -169,6 +233,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         label: 'Connections & Integrations',
         description: 'Connected accounts, reconnection prompts, and integration alerts.',
         scope: 'assistant',
+        push: PUSH_ON,  // a lapsed token silently stops the assistant working until it is fixed
         inApp: ON, email: ON,
         types: [
             'social_oauth_revoked', 'instagram_token_refresh_failed', 'instagram_rate_limited',
@@ -180,6 +245,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         label: 'Onboarding',
         description: 'Setup reminders and your welcome / setup-complete milestones.',
         scope: 'account',
+        push: PUSH_OFF,  // a nudge, not an emergency
         inApp: ON, email: ON,
         types: ['welcome', 'onboarding_prompt', 'onboarding_incomplete', 'setup_complete'],
     },
@@ -188,6 +254,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         label: 'New Role Availability',
         description: "Alerts when a waitlisted assistant role becomes available.",
         scope: 'account', // catalogue/waitlist-level, not tied to a hired assistant
+        push: PUSH_OFF,  // matches the historical opt-in default on the other channels
         inApp: OFF, email: OFF, // preserves the historical notify_availability default (off)
         types: ['new_role_availability'],
     },
@@ -196,6 +263,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         label: 'Issues & Feature Requests',
         description: 'Updates on issues you reported and feature requests you submitted or backed.',
         scope: 'account',
+        push: PUSH_OFF,  // informational follow-ups
         inApp: ON, email: ON,
         types: ['issue_update', 'feature_status_change', 'feature_released'],
     },
@@ -204,6 +272,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         label: 'Product, Milestones & Support',
         description: 'Milestones, referrals, support replies, and product announcements.',
         scope: 'account',
+        push: PUSH_OFF,  // announcements must never be a reason someone mutes the app
         inApp: ON, email: ON,
         types: ['milestone', 'milestone_unlock', 'referral_reward', 'ticket_created', 'ticket_reply', 'system'],
     },
@@ -283,7 +352,9 @@ export function overrideFor(
 
 function channelEnabled(prefs: PrefMap, type: string, channel: PrefChannel): boolean {
     const cat = categoryForType(type);
-    const rule = cat[channel];
+    // pushRule(), not cat.push — an omitted push entry must resolve to a defined default rather
+    // than blowing up on `undefined.locked`.
+    const rule = channel === 'push' ? pushRule(cat) : cat[channel];
     if (rule.locked) return true; // essential — always delivered
     const stored = prefs?.[cat.key];
     return typeof stored === 'boolean' ? stored : rule.default;
@@ -294,7 +365,8 @@ function channelEnabledFor(
     assistantId: number | string | null | undefined, type: string, channel: PrefChannel,
 ): boolean {
     const cat = categoryForType(type);
-    if (cat[channel].locked) return true;
+    const rule = channel === 'push' ? pushRule(cat) : cat[channel];
+    if (rule.locked) return true;
     if (cat.scope === 'assistant') {
         const o = overrideFor(overrides, assistantId, cat.key, channel);
         if (o !== undefined) return o;
@@ -310,6 +382,10 @@ export const isInAppEnabled = (inAppPrefs: PrefMap, type: string): boolean =>
 export const isEmailEnabled = (emailPrefs: PrefMap, type: string): boolean =>
     channelEnabled(emailPrefs, type, 'email');
 
+/** Should a Web Push alert of this notification type be sent to this user's devices? */
+export const isPushEnabled = (pushPrefs: PrefMap, type: string): boolean =>
+    channelEnabled(pushPrefs, type, 'push');
+
 /** In-app gate honouring a per-assistant override when the row is assistant-attributed. */
 export const isInAppEnabledFor = (
     inAppPrefs: PrefMap, overrides: AssistantOverrideMap,
@@ -322,9 +398,17 @@ export const isEmailEnabledFor = (
     assistantId: number | string | null | undefined, type: string,
 ): boolean => channelEnabledFor(emailPrefs, overrides, assistantId, type, 'email');
 
+/** Push gate honouring a per-assistant override when the row is assistant-attributed. */
+export const isPushEnabledFor = (
+    pushPrefs: PrefMap, overrides: AssistantOverrideMap,
+    assistantId: number | string | null | undefined, type: string,
+): boolean => channelEnabledFor(pushPrefs, overrides, assistantId, type, 'push');
+
 /** Default preference map for one channel (used for new/incomplete profiles). */
 export function buildDefaults(channel: PrefChannel): Record<string, boolean> {
-    return Object.fromEntries(PREF_CATEGORIES.map(c => [c.key, c[channel].default]));
+    return Object.fromEntries(PREF_CATEGORIES.map(
+        c => [c.key, (channel === 'push' ? pushRule(c) : c[channel]).default],
+    ));
 }
 
 // Effective in-app preference map: category defaults overlaid with the user's stored
@@ -342,4 +426,8 @@ export function resolveInAppPrefs(
 
 // SMS / WhatsApp are not yet deliverable — higher-tier roadmap. Flip these (and add
 // per-category storage) when the tier entitlement + delivery providers land.
-export const CHANNEL_AVAILABILITY = { inApp: true, email: true, sms: false, whatsapp: false } as const;
+// `push` is available as a CHANNEL wherever the browser supports it — the per-user gate is the
+// OS permission plus at least one live push_subscriptions row, not a plan entitlement. SMS and
+// WhatsApp remain higher-tier roadmap; flip those (and add per-category storage) when the tier
+// entitlement and delivery providers land.
+export const CHANNEL_AVAILABILITY = { inApp: true, email: true, push: true, sms: false, whatsapp: false } as const;

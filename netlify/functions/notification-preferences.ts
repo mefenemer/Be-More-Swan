@@ -27,7 +27,7 @@ import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { userProfiles, aiAssistants, masterAssistants } from '../../db/schema';
 import {
-    PREF_CATEGORIES, buildDefaults, resolveInAppPrefs, overrideFor, CHANNEL_AVAILABILITY,
+    PREF_CATEGORIES, buildDefaults, resolveInAppPrefs, overrideFor, CHANNEL_AVAILABILITY, pushRule,
     assistantCategoryAppliesToRole, isPublishingOnlyCategory,
     type PrefChannel, type AssistantOverrideMap,
 } from '../../src/utils/notification-prefs';
@@ -49,23 +49,28 @@ type PrefMap = Record<string, boolean>;
 // assistant_notif_prefs (db/notifications-assistant-scope.sql) columns haven't been
 // migrated yet, selecting them throws — fall back progressively so GET still works.
 async function loadPrefs(db: ReturnType<typeof getDb>, userId: number): Promise<{
-    email: PrefMap | null; inApp: PrefMap | null; assistantPrefs: AssistantOverrideMap;
-    legacyAvailability: boolean | null; inAppColumn: boolean; assistantColumn: boolean;
+    email: PrefMap | null; inApp: PrefMap | null; push: PrefMap | null;
+    assistantPrefs: AssistantOverrideMap;
+    legacyAvailability: boolean | null;
+    inAppColumn: boolean; assistantColumn: boolean; pushColumn: boolean;
 }> {
     try {
         const [p] = await db.select({
             email: userProfiles.emailPreferences,
             inApp: userProfiles.inAppPreferences,
+            push: userProfiles.pushPreferences,
             assistantPrefs: userProfiles.assistantNotifPrefs,
             notifyAvailability: userProfiles.notifyAvailability,
         }).from(userProfiles).where(eq(userProfiles.userId, userId)).limit(1);
         return {
             email: (p?.email as PrefMap) ?? null,
             inApp: (p?.inApp as PrefMap) ?? null,
+            push: (p?.push as PrefMap) ?? null,
             assistantPrefs: (p?.assistantPrefs as AssistantOverrideMap) ?? null,
             legacyAvailability: p?.notifyAvailability ?? null,
             inAppColumn: true,
             assistantColumn: true,
+            pushColumn: true,
         };
     } catch { /* fall through */ }
     try {
@@ -77,10 +82,12 @@ async function loadPrefs(db: ReturnType<typeof getDb>, userId: number): Promise<
         return {
             email: (p?.email as PrefMap) ?? null,
             inApp: (p?.inApp as PrefMap) ?? null,
+            push: null,
             assistantPrefs: null,
             legacyAvailability: p?.notifyAvailability ?? null,
             inAppColumn: true,
             assistantColumn: false,
+            pushColumn: false,
         };
     } catch {
         const [p] = await db.select({
@@ -90,10 +97,12 @@ async function loadPrefs(db: ReturnType<typeof getDb>, userId: number): Promise<
         return {
             email: (p?.email as PrefMap) ?? null,
             inApp: null,
+            push: null,
             assistantPrefs: null,
             legacyAvailability: p?.notifyAvailability ?? null,
             inAppColumn: false,
             assistantColumn: false,
+            pushColumn: false,
         };
     }
 }
@@ -110,9 +119,10 @@ export default withLambda(async (event) => {
 
     // ── GET ─────────────────────────────────────────────────────────────────────
     if (event.httpMethod === 'GET') {
-        const { email, inApp, assistantPrefs, legacyAvailability } = await loadPrefs(db, userId);
+        const { email, inApp, push, assistantPrefs, legacyAvailability } = await loadPrefs(db, userId);
         const emailVals: PrefMap = { ...buildDefaults('email'), ...(email ?? {}) };
         const inAppVals = resolveInAppPrefs(inApp, legacyAvailability);
+        const pushVals: PrefMap = { ...buildDefaults('push'), ...(push ?? {}) };
 
         // ?assistantId=N → assistant-scope rows resolve that assistant's overrides.
         const rawAid = event.queryStringParameters?.assistantId;
@@ -126,17 +136,23 @@ export default withLambda(async (event) => {
                 scope: cat.scope,
                 inApp: { value: cat.inApp.locked ? true : !!inAppVals[cat.key], locked: cat.inApp.locked },
                 email: { value: cat.email.locked ? true : !!emailVals[cat.key], locked: cat.email.locked },
+                // No push category is ever locked (see the header note in notification-prefs.ts),
+                // so `locked` is always false here — emitted anyway so the three channels share
+                // one shape and the client renders them through the same switch cell.
+                push: { value: !!pushVals[cat.key], locked: pushRule(cat).locked },
                 sms: { available: CHANNEL_AVAILABILITY.sms },
                 whatsapp: { available: CHANNEL_AVAILABILITY.whatsapp },
             };
             if (!assistantId || cat.scope !== 'assistant') return base;
             const oInApp = overrideFor(assistantPrefs, assistantId, cat.key, 'inApp');
             const oEmail = overrideFor(assistantPrefs, assistantId, cat.key, 'email');
+            const oPush = overrideFor(assistantPrefs, assistantId, cat.key, 'push');
             return {
                 ...base,
                 inApp: { ...base.inApp, value: oInApp ?? base.inApp.value },
                 email: { ...base.email, value: oEmail ?? base.email.value },
-                overridden: { inApp: oInApp !== undefined, email: oEmail !== undefined },
+                push: { ...base.push, value: oPush ?? base.push.value },
+                overridden: { inApp: oInApp !== undefined, email: oEmail !== undefined, push: oPush !== undefined },
             };
         });
 
@@ -145,6 +161,7 @@ export default withLambda(async (event) => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 categories,
+                pushAvailable: CHANNEL_AVAILABILITY.push,
                 smsAvailable: CHANNEL_AVAILABILITY.sms,
                 whatsappAvailable: CHANNEL_AVAILABILITY.whatsapp,
             }),
@@ -182,8 +199,8 @@ export default withLambda(async (event) => {
                 delete overrides[aid];
             } else {
                 const ch = body.channel as PrefChannel | undefined;
-                if (ch !== 'inApp' && ch !== 'email') {
-                    return { statusCode: 400, body: JSON.stringify({ error: "channel must be 'inApp' or 'email'." }) };
+                if (ch !== 'inApp' && ch !== 'email' && ch !== 'push') {
+                    return { statusCode: 400, body: JSON.stringify({ error: "channel must be 'inApp', 'email' or 'push'." }) };
                 }
                 const cat = PREF_CATEGORIES.find(c => c.key === body.key);
                 if (!cat) return { statusCode: 400, body: JSON.stringify({ error: `Unknown preference key: ${body.key}` }) };
@@ -232,8 +249,8 @@ export default withLambda(async (event) => {
     }
 
     const channel = body.channel as PrefChannel | undefined;
-    if (channel !== 'inApp' && channel !== 'email') {
-        return { statusCode: 400, body: JSON.stringify({ error: "channel must be 'inApp' or 'email'. SMS/WhatsApp are not yet available." }) };
+    if (channel !== 'inApp' && channel !== 'email' && channel !== 'push') {
+        return { statusCode: 400, body: JSON.stringify({ error: "channel must be 'inApp', 'email' or 'push'. SMS/WhatsApp are not yet available." }) };
     }
 
     // Collect the requested changes as { key: value }.
@@ -250,23 +267,31 @@ export default withLambda(async (event) => {
     for (const k of Object.keys(changes)) {
         const cat = PREF_CATEGORIES.find(c => c.key === k);
         if (!cat) return { statusCode: 400, body: JSON.stringify({ error: `Unknown preference key: ${k}` }) };
-        if (cat[channel].locked) {
+        if ((channel === 'push' ? pushRule(cat) : cat[channel]).locked) {
             return { statusCode: 422, body: JSON.stringify({ error: `${cat.label} is required and cannot be changed.`, code: 'PREFERENCE_LOCKED' }) };
         }
     }
 
     try {
-        const { email, inApp, legacyAvailability } = await loadPrefs(db, userId);
+        const { email, inApp, push, legacyAvailability } = await loadPrefs(db, userId);
         const current: PrefMap = channel === 'inApp'
             ? resolveInAppPrefs(inApp, legacyAvailability)
+            : channel === 'push'
+            ? { ...buildDefaults('push'), ...(push ?? {}) }
             : { ...buildDefaults('email'), ...(email ?? {}) };
 
         const updated: PrefMap = { ...current, ...changes };
-        // Never persist a value that contradicts a locked rule.
-        for (const cat of PREF_CATEGORIES) if (cat[channel].locked) updated[cat.key] = true;
+        // Never persist a value that contradicts a locked rule. No push category is locked, so
+        // this is a no-op on that channel — kept uniform rather than special-cased.
+        for (const cat of PREF_CATEGORIES) {
+            if ((channel === 'push' ? pushRule(cat) : cat[channel]).locked) updated[cat.key] = true;
+        }
 
+        const column = channel === 'inApp' ? 'inAppPreferences'
+            : channel === 'push' ? 'pushPreferences'
+            : 'emailPreferences';
         await db.update(userProfiles)
-            .set({ [channel === 'inApp' ? 'inAppPreferences' : 'emailPreferences']: updated, updatedAt: new Date() } as any)
+            .set({ [column]: updated, updatedAt: new Date() } as any)
             .where(eq(userProfiles.userId, userId));
 
         return {
@@ -279,6 +304,10 @@ export default withLambda(async (event) => {
         console.error('[notification-preferences] save failed:', err);
         if (channel === 'inApp') {
             return { statusCode: 503, body: JSON.stringify({ error: 'In-app preferences are not available yet. Please try again shortly.', code: 'INAPP_PREFS_UNAVAILABLE' }) };
+        }
+        // Same shape as the in-app case: most likely db/push-notifications.sql is not applied yet.
+        if (channel === 'push') {
+            return { statusCode: 503, body: JSON.stringify({ error: 'Push preferences are not available yet. Please try again shortly.', code: 'PUSH_PREFS_UNAVAILABLE' }) };
         }
         return { statusCode: 500, body: JSON.stringify({ error: 'Could not save preference.' }) };
     }

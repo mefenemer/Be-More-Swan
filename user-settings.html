@@ -155,6 +155,22 @@
                 <h3 class="text-lg font-bold text-gray-900">Notification Preferences</h3>
                 <p class="text-sm text-gray-500">Choose how you're notified about your Be More Swan account. Some essential account &amp; billing alerts are always on and can't be turned off. Notifications about your assistants' work (approvals, content, connections) are managed in each assistant's <span class="font-semibold text-gray-600">Assistant Profile</span>.</p>
             </div>
+            <!-- Push enablement. The Push column below is inert until this browser has been
+                 granted permission AND registered a subscription, so the state has to be visible
+                 here — otherwise a user flips a Push toggle on, nothing ever arrives, and the
+                 product looks broken rather than un-permissioned. Populated by _renderPushCard()
+                 in workspace.html. -->
+            <div id="push-enable-card" class="hidden px-6 py-4 border-b border-gray-100 bg-indigo-50/40">
+                <div class="flex items-start gap-3">
+                    <div class="text-xl leading-none mt-0.5" aria-hidden="true">🔔</div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm font-bold text-gray-900">Push notifications on this device</p>
+                        <p id="push-enable-desc" class="text-xs text-gray-500 mt-0.5 leading-snug"></p>
+                    </div>
+                    <button id="push-enable-btn" type="button"
+                        class="hidden shrink-0 px-4 py-2 rounded-xl text-sm font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition"></button>
+                </div>
+            </div>
             <div id="notif-prefs-loading" class="p-6 text-sm text-gray-400">Loading preferences…</div>
             <div id="notif-prefs-wrap" class="hidden overflow-x-auto">
                 <table class="w-full text-left border-collapse" style="min-width:640px">
@@ -163,6 +179,7 @@
                             <th class="px-6 py-3 font-bold">Notification</th>
                             <th class="px-3 py-3 text-center font-bold">In&nbsp;App</th>
                             <th class="px-3 py-3 text-center font-bold">Email</th>
+                            <th class="px-3 py-3 text-center font-bold">Push</th>
                             <th class="px-3 py-3 text-center font-bold">
                                 <span class="block">SMS</span>
                                 <span class="inline-block mt-0.5 text-[9px] font-bold bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded-full border border-gray-200 normal-case" style="letter-spacing:normal">Higher plans</span>

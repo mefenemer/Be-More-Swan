@@ -11,9 +11,13 @@
 // to all-time, and a permanently month-scoped modal would contradict it.
 
 import { Handler } from '@netlify/functions';
-import { and, eq, gte, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, ne, notInArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { leads, scheduledPosts, taskRuns, aiAssistants } from '../../db/schema';
+import { assistantRecords, blogPosts, scheduledPosts, taskRuns, aiAssistants } from '../../db/schema';
+import {
+    activeAssistantIds, COUNTED_RECORD_TYPES_LIST, DISCARDED_BLOG_STATUSES,
+    DISCARDED_POST_STATUSES, RECORD_TYPE_MULTIPLIER, REJECTED,
+} from '../../src/utils/roi-activity';
 import { requireTenant } from '../../src/utils/tenant';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
 import { evaluateMilestones } from '../../src/utils/gamification';
@@ -26,6 +30,21 @@ const json = (statusCode: number, body: unknown) => ({
 
 const PLATFORM_NAMES: Record<string, string> = { instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X' };
 const platformName = (p?: string | null): string => (p && PLATFORM_NAMES[p.toLowerCase()]) || p || 'social';
+
+/**
+ * Per-ITEM phrasing for the modal's list ("Lead generated — Acme Ltd"), as opposed to the
+ * per-SOURCE headings in roi-activity.ts RECORD_TYPE_LABEL ("Leads generated"). Two maps because
+ * one row and a column heading do not read the same way; both are keyed on the same record types.
+ */
+const RECORD_ITEM_LABEL: Record<string, string> = {
+    lead: 'Lead generated',
+    enrichment: 'Record enriched',
+    meeting: 'Meeting summarised',
+    invoice: 'Invoice processed',
+    ticket: 'Ticket handled',
+    campaign_order: 'Campaign order prepared',
+    campaign_decision: 'Campaign decision drafted',
+};
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return json(405, { error: 'Method Not Allowed' });
@@ -45,26 +64,63 @@ export default withLambda(async (event) => {
         : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     const mult = await getTimeMultipliers();
 
-    const [leadRows, postRows, taskRows, assistants] = await Promise.all([
-        db.select({ id: leads.id, name: leads.name, company: leads.company, createdAt: leads.createdAt })
-            .from(leads)
-            .where(and(eq(leads.organisationId, orgId), gte(leads.createdAt, monthStart))),
-        db.select({ id: scheduledPosts.id, assistantId: scheduledPosts.assistantId, platform: scheduledPosts.platform, caption: scheduledPosts.caption, createdAt: scheduledPosts.createdAt })
-            .from(scheduledPosts)
-            .where(and(eq(scheduledPosts.organisationId, orgId), gte(scheduledPosts.createdAt, monthStart))),
-        // Issue #110 (follow-up): window on COALESCE(completed_at, created_at) — a run
-        // created last month but only completing this month was otherwise dropped,
-        // zeroing this tile out right after a month/week boundary despite real activity.
-        db.select({ id: taskRuns.id, assistantId: taskRuns.assistantId, completedAt: taskRuns.completedAt, createdAt: taskRuns.createdAt })
-            .from(taskRuns)
-            .where(and(eq(taskRuns.organisationId, orgId), eq(taskRuns.status, 'completed'), gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, monthStart.toISOString()))),
-        db.select({ id: aiAssistants.id, name: aiAssistants.name, role: aiAssistants.aiAssistantJobRole })
-            .from(aiAssistants).where(eq(aiAssistants.organisationId, orgId)),
-    ]);
+    // Scope every source to the org's ACTIVE assistants, exactly as the hero tile does. This
+    // endpoint used to select org-wide with no assistant predicate at all, and to count the
+    // `leads` table — Be More Swan's own sales pipeline — as "Lead Generation", so the modal
+    // itemised rows that no assistant produced. See src/utils/roi-activity.ts for the full note.
+    const assistantIds = await activeAssistantIds(db, orgId);
+    const assistants = await db
+        .select({ id: aiAssistants.id, name: aiAssistants.name, role: aiAssistants.aiAssistantJobRole })
+        .from(aiAssistants).where(eq(aiAssistants.organisationId, orgId));
 
-    const leadsCount = leadRows.length;
+    // No active assistants ⇒ nothing to itemise. Returning early also keeps the inArray() calls
+    // below off an empty list, which drizzle renders as `in ()` — a syntax error, not an empty set.
+    const [postRows, taskRows, blogRows, recordRows] = assistantIds.length === 0
+        ? [[], [], [], []] as [any[], any[], any[], any[]]
+        : await Promise.all([
+            db.select({ id: scheduledPosts.id, assistantId: scheduledPosts.assistantId, platform: scheduledPosts.platform, caption: scheduledPosts.caption, createdAt: scheduledPosts.createdAt })
+                .from(scheduledPosts)
+                .where(and(
+                    eq(scheduledPosts.organisationId, orgId),
+                    inArray(scheduledPosts.assistantId, assistantIds),
+                    notInArray(scheduledPosts.status, DISCARDED_POST_STATUSES),
+                    gte(scheduledPosts.createdAt, monthStart),
+                )),
+            // Issue #110 (follow-up): window on COALESCE(completed_at, created_at) — a run
+            // created last month but only completing this month was otherwise dropped,
+            // zeroing this tile out right after a month/week boundary despite real activity.
+            db.select({ id: taskRuns.id, assistantId: taskRuns.assistantId, completedAt: taskRuns.completedAt, createdAt: taskRuns.createdAt })
+                .from(taskRuns)
+                .where(and(
+                    eq(taskRuns.organisationId, orgId),
+                    inArray(taskRuns.assistantId, assistantIds),
+                    eq(taskRuns.status, 'completed'),
+                    gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, monthStart.toISOString()),
+                )),
+            db.select({ id: blogPosts.id, assistantId: blogPosts.assistantId, title: blogPosts.title, createdAt: blogPosts.createdAt })
+                .from(blogPosts)
+                .where(and(
+                    eq(blogPosts.organisationId, orgId),
+                    inArray(blogPosts.assistantId, assistantIds),
+                    notInArray(blogPosts.status, DISCARDED_BLOG_STATUSES),
+                    gte(blogPosts.createdAt, monthStart),
+                )),
+            // The rest of the product: leads, meetings, tickets, invoices, enrichments and
+            // campaign records all live here, each carrying a NOT NULL ai_assistant_id — which is
+            // what makes a genuine per-assistant aggregate possible.
+            db.select({ id: assistantRecords.id, assistantId: assistantRecords.aiAssistantId, recordType: assistantRecords.recordType, title: assistantRecords.title, createdAt: assistantRecords.createdAt })
+                .from(assistantRecords)
+                .where(and(
+                    eq(assistantRecords.organisationId, orgId),
+                    inArray(assistantRecords.aiAssistantId, assistantIds),
+                    inArray(assistantRecords.recordType, [...COUNTED_RECORD_TYPES_LIST]),
+                    ne(assistantRecords.approvalStatus, REJECTED),
+                    gte(assistantRecords.createdAt, monthStart),
+                )),
+        ]);
 
-    // Per-assistant minutes from drafts + completed tasks.
+    // Per-assistant minutes. Every source is attributable now, so the breakdown is one line per
+    // assistant with no org-level "unattributed" bucket left over.
     const nameById = new Map(assistants.map(a => [a.id, a.name || a.role || 'Assistant']));
     const minutesByAssistant = new Map<number, number>();
     const addMinutes = (id: number | null, mins: number) => {
@@ -73,27 +129,37 @@ export default withLambda(async (event) => {
     };
     postRows.forEach(r => addMinutes(r.assistantId, mult.content_drafted));
     taskRows.forEach(r => addMinutes(r.assistantId, mult.tasks_completed));
+    blogRows.forEach(r => addMinutes(r.assistantId, mult.blog_drafted));
+    const recordMinutes = (recordType: string): number => {
+        const key = RECORD_TYPE_MULTIPLIER[recordType];
+        return key ? mult[key] : 0;
+    };
+    recordRows.forEach(r => addMinutes(r.assistantId, recordMinutes(r.recordType)));
 
     const breakdown: { label: string; hours: number }[] = [];
-    // Leads roll up to an org-level line (the leads table has no assistant attribution).
-    const leadMinutes = leadsCount * mult.leads_generated;
-    if (leadMinutes > 0) breakdown.push({ label: 'Lead Generation', hours: round1(leadMinutes / 60) });
     for (const [id, mins] of minutesByAssistant.entries()) {
         breakdown.push({ label: nameById.get(id) ?? `Assistant #${id}`, hours: round1(mins / 60) });
     }
     breakdown.sort((a, b) => b.hours - a.hours);
 
-    const totalMinutes = leadMinutes + Array.from(minutesByAssistant.values()).reduce((s, m) => s + m, 0);
+    const totalMinutes = Array.from(minutesByAssistant.values()).reduce((s, m) => s + m, 0);
 
     // Itemised list behind the savings number — drives the "what tasks count?" modal (#3).
     // One row per actual completed item (not aggregated by assistant), so the count on the
     // tile always matches what the modal actually lists out.
     const tasks: { label: string; assistant: string | null; hours: number; at: Date }[] = [];
-    leadRows.forEach(l => tasks.push({
-        label: `Lead generated${l.company ? ` — ${l.company}` : l.name ? ` — ${l.name}` : ''}`,
-        assistant: null,
-        hours: round1(mult.leads_generated / 60),
-        at: l.createdAt,
+    const named = (id: number | null) => (id != null ? (nameById.get(id) ?? `Assistant #${id}`) : null);
+    recordRows.forEach(r => tasks.push({
+        label: `${RECORD_ITEM_LABEL[r.recordType] ?? 'Record handled'}${r.title ? ` — ${String(r.title).slice(0, 80)}` : ''}`,
+        assistant: named(r.assistantId),
+        hours: round1(recordMinutes(r.recordType) / 60),
+        at: r.createdAt,
+    }));
+    blogRows.forEach(b => tasks.push({
+        label: `Blog post written${b.title ? ` — ${String(b.title).slice(0, 80)}` : ''}`,
+        assistant: named(b.assistantId),
+        hours: round1(mult.blog_drafted / 60),
+        at: b.createdAt,
     }));
     postRows.forEach(p => tasks.push({
         label: `${platformName(p.platform)} post drafted${p.caption ? `: "${p.caption.slice(0, 60)}${p.caption.length > 60 ? '…' : ''}"` : ''}`,

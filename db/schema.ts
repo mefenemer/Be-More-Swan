@@ -48,6 +48,12 @@ export const organisations = pgTable('organisations', {
   // (Legal/tax/registered-address details live in `billingInformation`, not here.)
   industry: text('industry'),
   businessDescription: text('business_description'),
+  // The sender's physical postal address, rendered in the compliance footer of every cold outreach
+  // email (CAN-SPAM and CASL both require one). Per-ORG and separate from billingInformation on
+  // purpose: that is per-USER and typically the card-holder's home address, which must never be
+  // published to prospects. Requires db/lead-outreach-unsubscribe.sql. See
+  // src/config/outreach-footer.ts.
+  outreachPostalAddress: text('outreach_postal_address'),
   // Business-domain org grouping (#2). business_domain = the org owner's non-public email
   // host (null for public providers). allow_domain_join = owner opt-in: new signups with a
   // matching domain join this org instead of creating their own. domain_verified is reserved
@@ -398,6 +404,12 @@ export const userProfiles = pgTable("user_profiles", {
   // payment_confirmation) are forced true in the application layer regardless of
   // stored value. Supersedes the legacy notify_wins/billing/availability columns.
   inAppPreferences: jsonb("in_app_preferences"),
+  // Web Push (PWA lock-screen alerts) delivery preferences — same category keys and same
+  // Record<string, boolean> shape as the two above, so the three channels stay symmetrical.
+  // Missing key = category default. Unlike inApp/email, NO push category is locked: an OS-level
+  // alert the user cannot turn off is hostile, and they can revoke the browser permission anyway.
+  // Requires db/push-notifications.sql. See src/utils/notification-prefs.ts.
+  pushPreferences: jsonb("push_preferences"),
   // Per-assistant overrides of the notification matrix (assistant-scoped categories only).
   // Shape: { [assistantId]: { [categoryKey]: { inApp?: bool, email?: bool } } }. Missing key
   // at any level = use the workspace-wide preference above. Resolution in
@@ -457,6 +469,32 @@ export const notifications = pgTable("notifications", {
 }, (t) => [
   // US-DB-1.1.1: Notification inbox query — userId + isRead + createdAt
   index("notifications_user_read_idx").on(t.userId, t.isRead, t.createdAt),
+]);
+
+// Web Push subscriptions — one row per BROWSER/DEVICE, not per user: the same person subscribes
+// from a phone, a laptop and a tablet, each with its own endpoint and keys. `endpoint` is the
+// natural key (re-subscribing on a device returns the same URL), so the subscribe path upserts on
+// it rather than growing a row per page load. Requires db/push-notifications.sql.
+// Send path + pruning: src/utils/web-push.ts.
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: serial().primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  endpoint: text("endpoint").notNull(),
+  // RFC 8291 encryption material — a payload cannot be encrypted for this subscriber without both.
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  userAgent: text("user_agent"),
+  // Set when the push service reports the subscription dead (404/410). Rows are retired, not
+  // deleted, so "why did this user stop getting alerts" stays answerable; the send path skips
+  // any row with a non-null value here.
+  expiredAt: timestamp("expired_at"),
+  lastSuccessAt: timestamp("last_success_at"),
+  failureCount: integer("failure_count").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  unique("push_subscriptions_endpoint_unique").on(t.endpoint),
+  index("push_subscriptions_user_idx").on(t.userId),
 ]);
 
 // US-ONB-2.1.2: Notification log — deduplicates timed onboarding emails
@@ -804,7 +842,9 @@ export const leadOptOuts = pgTable("lead_opt_outs", {
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
   email: text("email").notNull(),                            // normalised lowercase, address grain
   reason: text("reason").notNull().default("reply_opt_out"),
-  source: text("source").notNull().default("reply"),         // 'reply' | 'manual' | 'bounce'
+  // 'reply' (opt_out.ts matched their words) | 'manual' | 'bounce' | 'link' (they clicked the
+  // unsubscribe link or their mail client fired the RFC 8058 one-click POST).
+  source: text("source").notNull().default("reply"),
   // SET NULL, not CASCADE: deleting a thread must not delete the evidence someone asked us to stop.
   leadThreadId: integer("lead_thread_id").references((): any => leadThreads.id, { onDelete: "set null" }),
   matchedRule: text("matched_rule"),
@@ -813,7 +853,11 @@ export const leadOptOuts = pgTable("lead_opt_outs", {
 }, (t) => [
   unique("lead_opt_outs_org_email_unique").on(t.organisationId, t.email),
   index("lead_opt_outs_org_email_idx").on(t.organisationId, t.email),
-  check("lead_opt_outs_source_check", sql`${t.source} IN ('reply','manual','bounce')`),
+  // ⚠️ Mirror of the live constraint. db/lead-outreach-unsubscribe.sql widens it to include
+  // 'link' via DROP + ADD (a guarded ADD is a no-op against the existing narrower one). If this
+  // line and the DDL ever disagree, `drizzle-kit push` silently reverts the DB to whichever this
+  // says — and an unrecorded opt-out means the prospect keeps being emailed.
+  check("lead_opt_outs_source_check", sql`${t.source} IN ('reply','manual','bounce','link')`),
 ]);
 
 // Outbound scenario job queue — mirrors discovery_jobs. A BMS trigger fires, one row is

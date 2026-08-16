@@ -3154,7 +3154,7 @@ async function _initAssistantNotifPrefs() {
 
         const toggleHtml = (cat, channel, on) => `
             <label class="flex items-center gap-2">
-              <span class="text-xs font-semibold text-gray-500">${channel === 'inApp' ? 'In app' : 'Email'}</span>
+              <span class="text-xs font-semibold text-gray-500">${({ inApp: 'In app', email: 'Email', push: 'Push' })[channel] || channel}</span>
               <button type="button" data-notif-cat="${cat.key}" data-notif-channel="${channel}"
                 class="${on ? 'bg-emerald-500' : 'bg-gray-300'} relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
                 role="switch" aria-checked="${on ? 'true' : 'false'}">
@@ -3163,7 +3163,7 @@ async function _initAssistantNotifPrefs() {
             </label>`;
 
         listEl.innerHTML = rows.map(cat => {
-            const custom = !!(cat.overridden && (cat.overridden.inApp || cat.overridden.email));
+            const custom = !!(cat.overridden && (cat.overridden.inApp || cat.overridden.email || cat.overridden.push));
             return `
             <div class="py-4 first:pt-0 last:pb-0" data-notif-row="${cat.key}">
               <div class="flex items-center gap-2 flex-wrap">
@@ -3174,6 +3174,7 @@ async function _initAssistantNotifPrefs() {
               <div class="flex items-center gap-6 mt-2">
                 ${toggleHtml(cat, 'inApp', !!cat.inApp.value)}
                 ${toggleHtml(cat, 'email', !!cat.email.value)}
+                ${toggleHtml(cat, 'push', !!(cat.push && cat.push.value))}
                 <button type="button" data-reset-cat="${cat.key}"
                   class="${custom ? '' : 'hidden '}text-xs font-semibold text-gray-400 hover:text-emerald-700 underline decoration-dotted cursor-pointer">Reset to workspace default</button>
               </div>
@@ -3192,7 +3193,7 @@ async function _initAssistantNotifPrefs() {
                 if (resetBtn) {
                     const key = resetBtn.getAttribute('data-reset-cat');
                     try {
-                        await Promise.all(['inApp', 'email'].map(channel =>
+                        await Promise.all(['inApp', 'email', 'push'].map(channel =>
                             fetch('/.netlify/functions/notification-preferences', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },

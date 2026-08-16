@@ -1,9 +1,10 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, gte, sql, count, inArray } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, contentGenerationJobs, goals, masterAssistants, scheduledPosts, taskRuns, userProfiles, leads } from '../../db/schema';
+import { aiAssistants, contentGenerationJobs, goals, masterAssistants, scheduledPosts, userProfiles } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
+import { countRoiActivityByAssistant } from '../../src/utils/roi-activity';
 import { parseRoiPeriod, roiPeriodStart } from '../../src/utils/roi-period';
 import { summariseGoals, pickHeadlineGoal, type GoalSummary } from '../../src/utils/goal-summary';
 import { getGoalMetric } from '../../src/config/goal-metrics';
@@ -42,22 +43,18 @@ export default withLambda(async (event) => {
 
         const assistantIds = assistants.map(a => a.id);
 
-        // Issue #110: the "~Xh saved / £Y ROI" figures on these cards must match the
-        // assistant detail page's Impact & ROI tab (get-assistant-metrics.ts) — same
-        // period window, same formula (posts + completed task runs + org leads when this
-        // is the org's sole assistant), not the old all-time posts-only estimate.
+        // Issue #110: the "~Xh saved / £Y ROI" figures on these cards must match the assistant
+        // detail page's Impact & ROI tab (get-assistant-metrics.ts) and the dashboard hero
+        // (roi-stats.ts). All three now count through src/utils/roi-activity.ts, so they agree by
+        // construction rather than by three copies of one formula being kept in step — which they
+        // were not: each priced only posts + task runs, plus an org-wide `leads` count (Be More
+        // Swan's own sales pipeline, not the tenant's) folded in when the org had a single
+        // assistant. Every assistant filing its work to assistant_records scored zero.
         const period = parseRoiPeriod(event.queryStringParameters?.period);
         const periodStart = roiPeriodStart(period);
-        // Org leads (which have no assistantId) are only attributable to a card when the org
-        // has a single assistant — but count only ACTIVE (non-archived) assistants here, so
-        // that an org with one active assistant plus retired ones still attributes leads, and
-        // stays consistent with the dashboard ROI hero (roi-stats.ts), which likewise scopes
-        // its aggregate to active assistants. 'active' == not archived.
-        const activeAssistantCount = assistants.filter(a => a.lifecycleStatus !== 'archived').length;
-        const isOnlyAssistantInOrg = activeAssistantCount === 1;
 
         // Run goals + post metrics + hourly rate in parallel
-        const [goalRows, postRows, activeJobRows, profileRow, mult, postsInPeriodRows, taskRunsInPeriodRows, [{ leadsInPeriod }]] = await Promise.all([
+        const [goalRows, postRows, activeJobRows, profileRow, mult, roiByAssistant] = await Promise.all([
             // SMART Goals AC2.1.1 — the goal block on the dashboard / My Assistants card.
             //
             // Selects the ROWS rather than a GROUP BY tally. The card shows one headline goal with a
@@ -120,41 +117,15 @@ export default withLambda(async (event) => {
 
             getTimeMultipliers(),
 
-            // Posts drafted in the period, per assistant — same window as get-assistant-metrics.ts.
-            assistantIds.length > 0
-                ? db.select({ assistantId: scheduledPosts.assistantId, c: sql<number>`count(*)::int` })
-                    .from(scheduledPosts)
-                    .where(and(
-                        eq(scheduledPosts.organisationId, orgId),
-                        inArray(scheduledPosts.assistantId, assistantIds),
-                        gte(scheduledPosts.createdAt, periodStart),
-                    ))
-                    .groupBy(scheduledPosts.assistantId)
-                : Promise.resolve([] as { assistantId: number | null; c: number }[]),
-
-            // Completed task runs in the period, per assistant — windowed on
-            // COALESCE(completed_at, created_at), same as get-assistant-metrics.ts.
-            assistantIds.length > 0
-                ? db.select({ assistantId: taskRuns.assistantId, c: sql<number>`count(*)::int` })
-                    .from(taskRuns)
-                    .where(and(
-                        eq(taskRuns.organisationId, orgId),
-                        inArray(taskRuns.assistantId, assistantIds),
-                        eq(taskRuns.status, 'completed'),
-                        gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, periodStart.toISOString()),
-                    ))
-                    .groupBy(taskRuns.assistantId)
-                : Promise.resolve([] as { assistantId: number | null; c: number }[]),
-
-            // Org-wide leads in the period — `leads` has no assistantId, so this is only
-            // folded into a card's total when the org has exactly one assistant (see
-            // isOnlyAssistantInOrg above and get-assistant-metrics.ts for the same rule).
-            db.select({ leadsInPeriod: count() })
-                .from(leads)
-                .where(and(
-                    eq(leads.organisationId, orgId),
-                    gte(leads.createdAt, periodStart),
-                )),
+            // Every activity source, grouped per assistant, in four queries regardless of how
+            // many assistants this org has. Includes archived ones: a card is rendered for them
+            // and should still show the work they did before retirement — it is the org-level
+            // AGGREGATE (roi-stats.ts) that excludes archived assistants, not the individual card.
+            countRoiActivityByAssistant(db, {
+                organisationId: orgId,
+                assistantIds,
+                windowStart: periodStart,
+            }),
         ]);
 
         // --- Goals summary + headline goal ---
@@ -243,17 +214,6 @@ export default withLambda(async (event) => {
             activeJobCount.set(r.assistantId, r.c);
         }
 
-        const postsInPeriod = new Map<number, number>();
-        for (const r of postsInPeriodRows) {
-            if (r.assistantId == null) continue;
-            postsInPeriod.set(r.assistantId, r.c);
-        }
-        const taskRunsInPeriod = new Map<number, number>();
-        for (const r of taskRunsInPeriodRows) {
-            if (r.assistantId == null) continue;
-            taskRunsInPeriod.set(r.assistantId, r.c);
-        }
-
         // --- Hourly rate & ROI ---
         const prefs = (profileRow[0]?.preferences as Record<string, any>) || {};
         const hourlyRateGbp = prefs.hourlyRateGbp ? parseFloat(String(prefs.hourlyRateGbp)) : null;
@@ -262,13 +222,9 @@ export default withLambda(async (event) => {
         const withMetrics = assistants.map(a => {
             const pm = postMetrics.get(a.id) || { totalCreated: 0, totalScheduled: 0, totalPublished: 0, byPlatform: {} };
 
-            // Same formula/window as get-assistant-metrics.ts (posts + completed task runs +
-            // org leads when this is the org's sole assistant) so the dashboard/My Assistants
-            // cards always agree with the assistant detail page's Impact & ROI tab.
-            const totalMinutesInPeriod = (postsInPeriod.get(a.id) || 0) * mult.content_drafted
-                + (taskRunsInPeriod.get(a.id) || 0) * mult.tasks_completed
-                + (isOnlyAssistantInOrg ? Number(leadsInPeriod) * mult.leads_generated : 0);
-            const hoursSaved = parseFloat((totalMinutesInPeriod / 60).toFixed(1));
+            // Same module, same window as get-assistant-metrics.ts and roi-stats.ts, so this card
+            // agrees with the assistant detail page's Impact & ROI tab and sums into the hero.
+            const hoursSaved = roiByAssistant.get(a.id)?.hoursSaved ?? 0;
             const gbpSaved = hourlyRateGbp ? parseFloat((hoursSaved * hourlyRateGbp).toFixed(2)) : null;
             return {
                 ...a,

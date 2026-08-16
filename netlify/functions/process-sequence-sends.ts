@@ -32,7 +32,8 @@ import { and, eq, lte, sql } from 'drizzle-orm';
 import Anthropic from '@anthropic-ai/sdk';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
-import { aiAssistants, assistantRecords, leadMessages, leadThreads, sequenceEnrolments } from '../../db/schema';
+import { aiAssistants, assistantRecords, leadMessages, leadThreads, organisations, sequenceEnrolments } from '../../db/schema';
+import { appendOutreachFooter, buildOutreachFooter } from '../../src/config/outreach-footer';
 import { sendGmailMessage } from '../../src/utils/gmail';
 import { sendOutlookMessage } from '../../src/utils/outlook';
 import { IntegrationError } from '../../src/utils/workspace-integrations';
@@ -380,12 +381,29 @@ async function processEnrolment(
         return 'halted';
     }
 
+    // Every follow-up carries the footer too, not just the opener. A cadence step is a separate
+    // commercial email and each one independently needs its own opt-out route — and in practice a
+    // step-3 chase is the message someone is most likely to want to stop.
+    const [orgRow] = await db
+        .select({ name: organisations.name, postalAddress: organisations.outreachPostalAddress })
+        .from(organisations)
+        .where(eq(organisations.id, row.organisation_id))
+        .limit(1);
+    const footer = buildOutreachFooter({
+        senderName: orgRow?.name ?? assistant.name ?? '',
+        postalAddress: orgRow?.postalAddress,
+        replyToken: thread?.replyToken,
+    });
+
     try {
         const outgoing = {
             to: recipient,
             subject: draft.subject,
-            body: draft.body,
+            // As in lead-generation.ts, the STORED message below keeps the un-footered body — the
+            // transcript is what the assistant wrote, not the boilerplate wrapped around it.
+            body: appendOutreachFooter(draft.body, footer),
             ...(thread ? { replyTo: replyAddress(thread.replyToken) } : {}),
+            ...(footer.listUnsubscribe ? { listUnsubscribe: footer.listUnsubscribe } : {}),
         };
         if (assistant.provider === 'microsoft') await sendOutlookMessage(db, row.organisation_id, outgoing);
         else await sendGmailMessage(db, row.organisation_id, outgoing);

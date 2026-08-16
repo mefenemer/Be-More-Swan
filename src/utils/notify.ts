@@ -29,11 +29,13 @@
 // It is not an oversight — see the comment there for why an admin typing to one user has no
 // template to key on, and why it is deliberately kept narrow rather than generalised.
 
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { notifications, notificationTemplates } from '../../db/schema';
+import { notifications, notificationTemplates, userProfiles } from '../../db/schema';
 import { escapeHtml, renderMergeVars, type MergeContext } from './email-template';
 import { getNotificationDefault } from './notification-templates-catalog';
+import { isPushEnabledFor } from './notification-prefs';
+import { isPushConfigured, sendPushToUser } from './web-push';
 
 /**
  * Minimal structural type for a drizzle handle. Accepts both the top-level db from getDb()
@@ -145,12 +147,90 @@ export async function createNotification(
         }
         if (!tpl.isActive) return false; // admin switched this notification off
 
-        await db.insert(notifications).values(buildRow(tpl, opts.userId, opts));
+        const row = buildRow(tpl, opts.userId, opts);
+        await db.insert(notifications).values(row);
+        // Third channel. Deliberately AFTER the insert and deliberately not awaited into the
+        // return value: the in-app row is the source of truth, and a push that fails must never
+        // turn a successfully-recorded notification into a reported failure.
+        void deliverPush(db, [opts.userId], row);
         return true;
     } catch (err: any) {
         console.warn(`[notify] insert failed for "${templateKey}" (non-blocking):`, err?.message || err);
         return false;
     }
+}
+
+/**
+ * Fan a written notification out to the Web Push channel.
+ *
+ * ── Why the gating lives here and not at the call sites ─────────────────────────────────────────
+ * 106 call sites write notifications. Asking each to decide whether to also push would guarantee
+ * drift, and the in-app/email channels already learned that lesson — this module is the ONE write
+ * path precisely so a channel can be added in one place. A call site that knows nothing about push
+ * gets correct push behaviour for free.
+ *
+ * Preference resolution mirrors the email fallback: the per-category push preference, honouring a
+ * per-assistant override when the row is assistant-attributed. Push is never locked, so unlike
+ * inApp/email a user really can turn every category off — which is the point.
+ *
+ * Never throws, never blocks. A user with no subscriptions costs one indexed query.
+ */
+async function deliverPush(db: Inserter, userIds: number[], row: ReturnType<typeof buildRow>): Promise<void> {
+    try {
+        // Cheapest possible exit: environments without VAPID keys skip the query entirely, which
+        // is every environment until push is switched on.
+        if (!isPushConfigured()) return;
+
+        const anyDb = db as any;
+        if (typeof anyDb.select !== 'function') return; // a transaction shape we cannot read from
+
+        const profiles = await anyDb
+            .select({
+                userId: userProfiles.userId,
+                pushPrefs: userProfiles.pushPreferences,
+                assistantPrefs: userProfiles.assistantNotifPrefs,
+            })
+            .from(userProfiles)
+            .where(inArray(userProfiles.userId, userIds));
+
+        // A user with no profile row has never set a preference, so the category defaults apply —
+        // resolved by passing null, exactly as isEmailEnabledFor does.
+        const byUser = new Map<number, { pushPrefs: any; assistantPrefs: any }>(
+            profiles.map((p: any) => [p.userId, { pushPrefs: p.pushPrefs, assistantPrefs: p.assistantPrefs }]),
+        );
+
+        await Promise.all(userIds.map(async (userId) => {
+            const p = byUser.get(userId);
+            if (!isPushEnabledFor(p?.pushPrefs ?? null, p?.assistantPrefs ?? null, row.assistantId ?? null, row.type)) {
+                return;
+            }
+            await sendPushToUser(anyDb, userId, {
+                title: stripMarkup(row.title),
+                body: stripMarkup(row.message ?? ''),
+                url: '/workspace.html?view=notifications',
+                notificationId: undefined,
+            });
+        }));
+    } catch (err: any) {
+        // Includes the pre-migration case (no push_preferences column / no push_subscriptions
+        // table). Warn, never throw — the notification itself already landed.
+        console.warn('[notify] push delivery skipped (non-blocking):', err?.message || err);
+    }
+}
+
+/**
+ * Template copy may contain the inline markup admins are allowed to use (b/strong/em/i/u/br/span —
+ * see the escaping contract at the top of this file). The in-app feed renders that through a
+ * sanitiser; an OS notification is plain text and would show the tags literally, so strip them.
+ */
+function stripMarkup(s: string): string {
+    return String(s ?? '')
+        .replace(/<br\s*\/?>/gi, ' ')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 /**
@@ -177,6 +257,10 @@ export async function createNotifications(
         for (let i = 0; i < rows.length; i += 100) {
             await db.insert(notifications).values(rows.slice(i, i + 100));
         }
+        // Every row in a fan-out shares one template, so title/message/type/assistantId are
+        // identical — one representative row carries all the push needs, and preferences are
+        // still resolved per user inside deliverPush.
+        if (rows.length) void deliverPush(db, userIds, rows[0]);
         return rows.length;
     } catch (err: any) {
         console.warn(`[notify] fan-out failed for "${templateKey}" (non-blocking):`, err?.message || err);

@@ -63,6 +63,11 @@ export default withLambda(async (event) => {
                 industry:            organisations.industry,
                 businessDescription: organisations.businessDescription,
                 websiteUrl:          organisations.websiteUrl,
+                // Rendered in the compliance footer of every cold outreach email
+                // (src/config/outreach-footer.ts). CAN-SPAM and CASL both require a physical
+                // postal address; without it the footer still carries the opt-out link but the
+                // email is short of an element both regimes treat as mandatory.
+                outreachPostalAddress: organisations.outreachPostalAddress,
                 socialLinks:         organisations.socialLinks,
                 socialHandles:       organisations.socialHandles,
                 targetAudience:      organisations.targetAudience,
@@ -122,6 +127,7 @@ export default withLambda(async (event) => {
             industry:            clip(body.industry, 120),
             businessDescription: clip(body.businessDescription, 2000),
             websiteUrl:          clip(body.websiteUrl, 500),
+            outreachPostalAddress: clip(body.outreachPostalAddress, 500),
             socialLinks:         clip(body.socialLinks, 1000),
             socialHandles:       cleanHandles(body.socialHandles),
             targetAudience:      clip(body.targetAudience, 1000),
@@ -135,6 +141,7 @@ export default withLambda(async (event) => {
                 industry:            organisations.industry,
                 businessDescription: organisations.businessDescription,
                 websiteUrl:          organisations.websiteUrl,
+                outreachPostalAddress: organisations.outreachPostalAddress,
                 socialLinks:         organisations.socialLinks,
                 socialHandles:       organisations.socialHandles,
                 targetAudience:      organisations.targetAudience,

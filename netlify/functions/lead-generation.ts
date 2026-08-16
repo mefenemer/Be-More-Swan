@@ -36,7 +36,7 @@ import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, asc, count, desc, eq, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, assistantRecords, discoveredLeads, leadRejectFeedback, masterAssistants, revenueEvents } from '../../db/schema';
+import { aiAssistants, assistantRecords, discoveredLeads, leadRejectFeedback, masterAssistants, organisations, revenueEvents } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { createDiscoveryRun } from '../../src/utils/discovery';
@@ -54,6 +54,7 @@ import {
     isOutcome, isLossReason, type LossReason,
 } from '../../src/config/revenue-events';
 import { EDIT_REASONS, isEditReason } from '../../src/config/template-feedback';
+import { appendOutreachFooter, buildOutreachFooter } from '../../src/config/outreach-footer';
 import { needsPersonalInboxConfirmation } from '../../src/config/lead-email-kind';
 import { EXCLUDE_PROFILE_DNC_RULE, EXCLUDE_PROFILE_RULE, SCORING_BANDS, icpBlock } from '../../src/config/icp-profile';
 import { recordTemplateEdit } from '../../src/utils/template-feedback';
@@ -1215,8 +1216,43 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
                 contactEmail: recipient,
             });
 
+            // Compliance footer — the opt-out mechanism, the sender's identity and their postal
+            // address. Appended HERE, after both the model draft and any reviewer edit, because
+            // neither survives being asked to carry a legal notice: the model paraphrases or drops
+            // it, and a reviewer rewriting the draft deletes it without knowing what it was.
+            // See src/config/outreach-footer.ts.
+            //
+            // ⚠️ `bodyText` above is also what gets stored as `outreachDraft` and passed to
+            // recordOutboundMessage below — deliberately WITHOUT the footer. The thread transcript
+            // and the template-feedback loop are about what the assistant wrote; stamping an
+            // identical boilerplate block onto every stored message would add nothing to either and
+            // would make an edited draft harder to tell from an unedited one.
+            const [orgRow] = await db
+                .select({ name: organisations.name, postalAddress: organisations.outreachPostalAddress })
+                .from(organisations)
+                .where(eq(organisations.id, orgId))
+                .limit(1);
+            const footer = buildOutreachFooter({
+                senderName: orgRow?.name ?? assistant.name,
+                postalAddress: orgRow?.postalAddress,
+                replyToken: thread?.replyToken,
+            });
+            if (!footer.hasPostalAddress) {
+                // Not a hard block: making this fatal would take every existing tenant's outreach
+                // offline the moment this deploys, for a field none of them has been asked for yet.
+                // Logged so the gap is visible rather than silent — see the Business Information
+                // page, where the field is surfaced with the same warning.
+                console.warn(`[lead-generation] outreach sent without a postal address (org ${orgId}) — CAN-SPAM/CASL require one`);
+            }
+
             try {
-                const outgoing = { to: recipient, subject, body: bodyText, ...(thread ? { replyTo: replyAddress(thread.replyToken) } : {}) };
+                const outgoing = {
+                    to: recipient,
+                    subject,
+                    body: appendOutreachFooter(bodyText, footer),
+                    ...(thread ? { replyTo: replyAddress(thread.replyToken) } : {}),
+                    ...(footer.listUnsubscribe ? { listUnsubscribe: footer.listUnsubscribe } : {}),
+                };
                 if (provider === 'microsoft') await sendOutlookMessage(db, orgId, outgoing);
                 else await sendGmailMessage(db, orgId, outgoing);
             } catch (e) {
