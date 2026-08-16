@@ -4320,6 +4320,19 @@ function _applyDashboardRegistry(data) {
         if (impactOn) { delete node.dataset.roleHidden; }
         else { node.dataset.roleHidden = '1'; node.classList.add('hidden'); }
     }
+    // A role with its OWN ROI source (registry `roiSource`, e.g. the Lead Generator's ledger-backed
+    // figures) gets the strip back — and only the strip. The platform breakdown beside it stays
+    // role-hidden above, because that one really is about posts.
+    //
+    // ⚠️ The dataset flag has to be cleared, not just the class: _fetchAndRenderAssistantMetrics
+    // re-checks `roleHidden` after its await and would re-hide the strip underneath us.
+    const roiStripNode = document.getElementById('detail-roi-strip');
+    if (roiStripNode && cfg.roiSource) {
+        delete roiStripNode.dataset.roleHidden;
+        roiStripNode.dataset.roiSource = cfg.roiSource;
+    } else if (roiStripNode) {
+        delete roiStripNode.dataset.roiSource;
+    }
     // Profile ▸ Creative Brief — the marketing cards (objective/CTA, audience/voice/pillars,
     // reference style) and the Sales Context playbook. Business Information & the AI-disclosure
     // cards stay for every role, so the tab itself is never hidden.
@@ -5838,6 +5851,100 @@ async function _prefetchDetailRqBadge(assistantId) {
 // "fixed" by defaulting to month — which only moved the cliff, and it then
 // happened for real on the morning of 1 August. The dashboard hero was corrected
 // the same way; see the matching comment in dashboard-content.html.
+/**
+ * The hero's Effort Saved / Money Saved strip for a role whose ROI is NOT post-based — today that
+ * is the Lead Generator (registry `roiSource: 'lead'` → get-lead-roi.ts, over the revenue ledger).
+ *
+ * ── Why this role gets the strip at all ──────────────────────────────────────
+ * It is the assistant sold hardest on "cheaper than hiring someone", and it was the only one with
+ * nothing on screen saying what it had saved: the post-based endpoint's formula is structurally
+ * zero for an assistant that publishes nothing, so the registry hid the strip and the question went
+ * unanswered. The ledger can answer it — every lead researched, contact tracked down, email written
+ * and reply triaged is already a row in revenue_events.
+ *
+ * ── The honesty rules, and they are not optional ─────────────────────────────
+ *  • The caption says ESTIMATE, on screen, not in a tooltip. Nothing in the platform times a human
+ *    doing this by hand; this is a costing at the platform's configured rate card. That distinction
+ *    is exactly why "Hours Reclaimed" was struck off this role's four KPI cards, and printing this
+ *    without the word would re-import the problem one card to the left.
+ *  • The workings are one hover away — how many of each kind of work, and the minutes allowed for
+ *    each. A number nobody can check is a number nobody should believe.
+ *  • Money is blank, never £0, when no hourly rate is set. "£0" beside forty hours reads as a
+ *    verdict on the assistant rather than a blank field in Settings.
+ */
+async function _fetchAndRenderLeadRoi(assistantId, period = 'all') {
+    const roiStrip = document.getElementById('detail-roi-strip');
+    if (!roiStrip || roiStrip.dataset.roleHidden === '1') return;
+    const el = id => document.getElementById(id);
+
+    // The period toggle. Bound before the fetch so the control is live even if the request is slow,
+    // and re-entering through this same function keeps the lead branch (the strip's dataset flag is
+    // what routes it, and that is set once by _applyDashboardRegistry).
+    roiStrip.querySelectorAll('.metrics-period-btn').forEach(btn => {
+        const active = btn.dataset.period === period;
+        btn.className = `metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition ${active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`;
+        btn.setAttribute('aria-selected', String(active));
+        btn.onclick = active ? null : () => _fetchAndRenderLeadRoi(assistantId, btn.dataset.period);
+    });
+
+    try {
+        const res = await fetch(`/.netlify/functions/get-lead-roi?id=${assistantId}&period=${period}`);
+        if (!res.ok) return;
+        const d = await res.json();
+        if (roiStrip.dataset.roleHidden === '1') return;   // role switched while we were awaiting
+
+        // Nothing measured yet. Keeping the strip hidden — rather than showing "~0h" — is the same
+        // rule the post-based path follows: a brand-new assistant has not failed at anything.
+        if (!d.hasData) { roiStrip.classList.add('hidden'); return; }
+        roiStrip.classList.remove('hidden');
+
+        const periodLabel = d.periodLabel || 'all time';
+        const note = el('metrics-period-note');
+        if (note) {
+            note.textContent = `Estimated effort & money saved ${periodLabel}`;
+            note.title = `An estimate of the work this assistant did for you ${periodLabel}, costed at your hourly rate. Nothing here is a stopwatch reading — hover the figures to see the workings.`;
+        }
+
+        // "Effort Saved", not "Time Saved": this assistant does not save you drafting time, it
+        // saves you the research, the writing and the chasing. The label is per-role for that
+        // reason (see the id on it in assistant-detail.html).
+        const label = el('metrics-hours-label');
+        if (label) label.textContent = 'Effort Saved';
+
+        // The workings, as a tooltip on both figures: "12 companies researched × 3 min".
+        const workings = (d.breakdown || [])
+            .map(b => `${b.count} ${b.label} × ${b.minutesEach} min`)
+            .join('\n');
+
+        const hours = el('metrics-hours-saved');
+        if (hours) {
+            hours.textContent = `~${d.hoursSaved}h`;
+            hours.title = workings ? `Estimated, at the platform's standard rate card:\n${workings}` : '';
+        }
+        const hoursNote = el('metrics-hours-note');
+        if (hoursNote) {
+            hoursNote.textContent = `Estimated across ${d.items} ${d.items === 1 ? 'job' : 'jobs'} done for you`;
+        }
+
+        const gbp = el('metrics-gbp-saved');
+        const roiNote = el('metrics-roi-note');
+        if (d.gbpSaved !== null && d.gbpSaved !== undefined) {
+            if (gbp) {
+                gbp.textContent = `£${Number(d.gbpSaved).toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+                gbp.title = workings ? `Estimated hours at your configured hourly rate:\n${workings}` : '';
+            }
+            if (roiNote) roiNote.textContent = 'At your configured hourly rate';
+        } else {
+            if (gbp) { gbp.textContent = '—'; gbp.title = ''; }
+            // Blank, never £0 — see the header note.
+            if (roiNote) roiNote.innerHTML = `<a href="#" onclick="loadView && loadView('account'); return false" class="text-emerald-600 hover:underline">Set your hourly rate</a> to see this`;
+        }
+    } catch {
+        // Supplementary chrome on an always-rendered hero — a failure leaves the strip as it was
+        // rather than replacing real figures with an error.
+    }
+}
+
 async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
     // Issue: the "Content by platform" breakdown moved into the Autopilot card. `card` now points at
     // that relocated block (#autopilot-platform-breakdown); the Created/Scheduled/Published totals it
@@ -5847,6 +5954,13 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
     // strip of their own. The hero is always on screen, so the strip has to be shown and hidden
     // explicitly here rather than riding on the card's own hidden class the way it used to.
     const roiStrip = document.getElementById('detail-roi-strip');
+    // A role with its own ROI source answers a different endpoint entirely, and must branch BEFORE
+    // the `card` guard below — that guard returns early for exactly the roles this serves (the
+    // platform breakdown is role-hidden for every non-posting role), so putting this after it would
+    // mean the strip never filled.
+    if (roiStrip && roiStrip.dataset.roiSource === 'lead') {
+        return _fetchAndRenderLeadRoi(assistantId, period);
+    }
     if (!card) return;
     // Non-social roles have no post-based ROI — the registry marks both role-hidden; respect it.
     if (card.dataset.roleHidden === '1') return;
@@ -5905,7 +6019,13 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
             attention.classList.toggle('hidden', !n);
         }
 
+        // Reset the heading explicitly. The Lead Generator's branch rewrites it to "Effort Saved",
+        // and this page is reused across assistants without a reload — leaving it would put that
+        // heading over a post-drafting figure.
+        const hoursLabel = el('metrics-hours-label');
+        if (hoursLabel) hoursLabel.textContent = 'Time Saved';
         el('metrics-hours-saved').textContent = `~${d.hoursSaved}h`;
+        el('metrics-hours-saved').title = '';
         if (d.minutesPerPost != null) el('metrics-hours-note').textContent = `Based on ~${d.minutesPerPost} min per post`;
 
         if (d.gbpSaved !== null) {
@@ -7555,12 +7675,63 @@ async function _fetchAndRenderGoals(assistantId) {
  * header bar shows the same one, so the card leads with it rather than with whatever order the API
  * happened to return.
  */
+/**
+ * "Check again now" — re-measure this assistant's goals on the spot.
+ *
+ * ⚠️ The button exists because `goals.latest_value` is a CACHE, not a live reading. It moves only
+ * when poll-goal-telemetry sweeps: hourly at best, daily on the entry tier, and on staging (a
+ * Netlify branch deploy, where scheduled functions never fire) only when an external scheduler
+ * pokes run-goal-telemetry. That was tolerable until a metric turned out to be measuring the wrong
+ * thing — `qualified_leads` counted Be More Swan's own trial pipeline and read 0 forever — because
+ * fixing the query changed nothing on screen until the next sweep, and the person looking at the
+ * wrong number had no way to tell a stale cache from a broken feature.
+ *
+ * Bound fresh on every render (the card's innerHTML is rewritten wholesale, but this button lives
+ * in the static header ABOVE it, so the handler is assigned rather than added — re-adding a
+ * listener on each repaint would fire the request N times on the Nth press).
+ */
+function _wireGoalRefreshButton() {
+    const btn = document.getElementById('btn-refresh-goals');
+    if (!btn) return;
+    // Nothing to re-measure, and nothing loaded yet, are both "don't offer it".
+    const on = !!_goalsAssistantId && _goalsCache.length > 0;
+    btn.classList.toggle('hidden', !on);
+    if (!on) return;
+
+    btn.onclick = async () => {
+        if (btn.disabled) return;
+        const original = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Checking…';
+        try {
+            const res = await fetch('/.netlify/functions/refresh-goal', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ assistantId: _goalsAssistantId }),
+            });
+            if (!res.ok) throw new Error('refresh failed');
+            // Refetch rather than patching from the response: _goalsCache feeds the Goals tab too,
+            // and the two surfaces must not be able to disagree about the same goal.
+            await _fetchAndRenderGoals(_goalsAssistantId);
+            btn.textContent = 'Up to date';
+            setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2500);
+        } catch {
+            // Say what failed. "Check again now" silently doing nothing is the exact experience
+            // this button was added to end.
+            btn.textContent = 'Could not check — try again';
+            setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 3000);
+        }
+    };
+}
+
 function _renderGoalProgressCard() {
     const body = document.getElementById('goal-progress-body');
     if (!body) return;
     _endCardLoading('goal-progress-panel');
 
     _renderGoalFreshnessNote();
+    _wireGoalRefreshButton();
 
     if (!_goalsCache.length) {
         // Two different truths: "you have no goals" invites a goal, "we couldn't load them" must not.

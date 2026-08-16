@@ -31,6 +31,10 @@
  *                //     hasReviewCadence        → Profile ▸ Notifications ▸ Review-alert cadence card
  *                //     hasContentPublishing    → Profile ▸ Notifications ▸ "Content & Publishing"
  *                //                               preference (post/draft alerts — social-only)
+ *   cfg.roiSource // → OPTIONAL. Where the hero's Effort/Money Saved strip gets its figures.
+ *                //   Omitted → the post-based get-assistant-metrics path, gated by
+ *                //   modules.hasImpactRoi. 'lead' → get-lead-roi.ts (the revenue ledger). The two
+ *                //   are separate switches on purpose; see the note on lead_qualifier.
  *   cfg.primaryAction // → OPTIONAL. The workspace tab's primary button { label, kind }. kind:
  *                //   'generate_post' opens the post sheet (social); 'chat' opens the assistant's
  *                //   chat intake (Data Hub roles). Omit it for a role with no single "do the
@@ -373,11 +377,31 @@
         },
       ],
       modules: {
+        // hasImpactRoi stays FALSE and must. It gates the POST-based ROI pair fed by
+        // get-assistant-metrics, whose formula is posts × content_drafted (+ task runs, + the
+        // wrong `leads` table) — structurally zero for an assistant that publishes nothing.
+        // The strip is still shown for this role, from a different source: see `roiSource` below.
         hasPostingSchedule: false, hasSocialStrategy: false,
         hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
         hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
         hasContentPublishing: false,
       },
+      // ⊕ The hero's "Effort Saved / Money Saved" strip, fed by get-lead-roi.ts (the revenue
+      // ledger + the platform's own time multipliers + the user's hourly rate) rather than by
+      // get-assistant-metrics.
+      //
+      // ⚠️ This is a SECOND, independent switch from modules.hasImpactRoi, and both are needed.
+      // hasImpactRoi=false keeps the post-based fetch and the "Content by platform" breakdown away
+      // from a role that has neither; roiSource='lead' re-reveals the strip alone and points it at
+      // the endpoint that can actually answer for this role. Setting hasImpactRoi=true instead
+      // would fetch the post endpoint, get zeroes, and hide the strip again — which is exactly the
+      // state this key exists to end. See _applyDashboardRegistry / _fetchAndRenderAssistantMetrics.
+      //
+      // ⚠️ The figure is an ESTIMATE at the platform's configured rate card, and the strip says so
+      // in its own caption. That distinction is why "Hours Reclaimed" was struck off the four KPI
+      // cards below and this is still fair: the KPI grid prints measurements, this prints a costing
+      // that shows its workings on hover.
+      roiSource: 'lead',
       // No primaryAction — deliberately. It read "Score New Leads", which promised an action it
       // could not perform: `kind: 'chat'` only redirects to the chat page. Scoring is not a thing
       // the user triggers here anyway — discovery runs score what they find (dispatch-discovery-runs

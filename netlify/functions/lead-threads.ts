@@ -2,16 +2,26 @@
 // The Conversations read API — the human-facing surface over Phase 2's lead_threads /
 // lead_messages (docs/lead-generator-revenue-engine-plan.md §5.1-5.2).
 //
-//   POST { action: 'list', assistantId, state?, cursor? }
+//   POST { action: 'list',   assistantId, state?, cursor? }
 //        → { threads: ThreadSummary[], counts, nextCursor }
-//   POST { action: 'get',  assistantId, threadId }
+//   POST { action: 'get',    assistantId, threadId }
 //        → { thread, messages: Message[], enrolment }
+//   POST { action: 'nudge',  assistantId, threadId }
+//        → { ok, sent, enrolment }        — bring the next chaser forward to now
+//   POST { action: 'stop_follow_ups', assistantId, threadId }
+//        → { ok, enrolment }              — stop the cadence, permanently
 //
-// ── Read-only, deliberately ───────────────────────────────────────────────────
-// Everything that WRITES a thread already has exactly one owner: src/utils/lead-threads.ts, for
-// the same reason recordEvent() is the only ledger writer. This function does not take that on —
-// it projects what those writers recorded. "Take over thread" / "pause agent" from the mockup are
-// state changes and belong with the writer, not here.
+// ── Read-only ABOUT THE THREAD, deliberately ──────────────────────────────────
+// Everything that WRITES lead_threads / lead_messages has exactly one owner: src/utils/lead-threads.ts,
+// for the same reason recordEvent() is the only ledger writer. That has not changed, and this
+// function must not become a second writer of those tables — it projects what they recorded.
+//
+// The two actions added above write `sequence_enrolments`, which is a DIFFERENT table with a
+// different owner (src/utils/outreach-sequences.ts), and they go through that owner's helpers
+// rather than issuing their own UPDATEs. They are here because of a gap users hit immediately:
+// the follow-up cadence was entirely automatic with no handle on it anywhere in the product, so
+// "where do chaser emails come from?" and "they told me to stop by phone" had no answer and no
+// control. A worker that can only be waited on is not a feature the user has.
 //
 // ── The gap this closes ───────────────────────────────────────────────────────
 // Phase 2a shipped the reply path and Phase 2b the sequence engine, both server-side, with NO
@@ -25,14 +35,25 @@ import {
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { haltReasonLabel } from '../../src/config/outreach-sequences';
+import { haltEnrolment } from '../../src/utils/outreach-sequences';
+import { drainSequenceSends } from './process-sequence-sends';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-/** One page of threads. Threads are far lower-volume than signals, so this is generous. */
-const PAGE_SIZE = 40;
+/**
+ * One page of threads. Threads are far lower-volume than signals, so this is generous.
+ *
+ * ⚠️ Raised from 40 to 200 when the Conversations tab gained client-side filtering, sorting and
+ * grouping. Those controls compare the RENDERED cell across every conversation the client holds —
+ * so a small server page silently redefines "filter to Replied" as "filter to Replied among the
+ * forty most recent", which is the failure mode where the strip says 3 and the truth is 40. The
+ * client drains the cursor to a cap of its own and says so when it hits it; this size just makes
+ * that drain one request instead of five.
+ */
+const PAGE_SIZE = 200;
 
 /** Excerpt length for the list view. Full bodies are only ever pulled by `get`. */
 const EXCERPT_CHARS = 180;
@@ -56,6 +77,21 @@ function dealOutcomeOf(data: unknown): Record<string, unknown> | null {
     const outcome = (data as Record<string, unknown>).dealOutcome;
     if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) return null;
     return outcome as Record<string, unknown>;
+}
+
+/**
+ * The lead's running notes off its record `data`, or ''.
+ *
+ * Lifted for the same reason `dealOutcome` is, and with the same restraint — one key, never the
+ * whole blob. The Conversations tab is where a user learns the things notes are FOR ("they rang
+ * back", "wrong contact, try the founder"), and until this shipped the only way to write one down
+ * was to leave the conversation and find the lead on another tab. lead-generation.ts `add_note`
+ * appends; this only reads what it stored, so the two cannot disagree about the format.
+ */
+function notesOf(data: unknown): string {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return '';
+    const notes = (data as Record<string, unknown>).notes;
+    return typeof notes === 'string' ? notes : '';
 }
 
 /**
@@ -247,6 +283,9 @@ export default withLambda(async (event) => {
                         title: t.recordTitle || t.contactEmail || `Thread #${t.id}`,
                         assistantRecordId: t.assistantRecordId,
                         dealOutcome: dealOutcomeOf(t.recordData),
+                        // The list carries the notes too, so opening a row can offer "Add note"
+                        // (and show what is already there) without a second round trip per row.
+                        notes: notesOf(t.recordData),
                         messageCount: r?.messageCount ?? 0,
                         inboundCount: r?.inboundCount ?? 0,
                         lastExcerpt: r?.lastExcerpt ?? '',
@@ -356,6 +395,7 @@ export default withLambda(async (event) => {
                     // things, all of which mean the same to this screen: nothing recorded yet, no
                     // linked record at all, and a `data` blob that isn't an object.
                     dealOutcome: dealOutcomeOf(thread.recordData),
+                    notes: notesOf(thread.recordData),
                     lastOutboundAt: thread.lastOutboundAt?.toISOString() ?? null,
                     lastInboundAt: thread.lastInboundAt?.toISOString() ?? null,
                     createdAt: thread.createdAt.toISOString(),
@@ -385,6 +425,134 @@ export default withLambda(async (event) => {
                     lastStepSent: enrolment.lastStepSent,
                     nextSendAt: enrolment.nextSendAt?.toISOString() ?? null,
                     lastError: enrolment.lastError,
+                } : null,
+            });
+        }
+
+        // ── nudge / stop_follow_ups ───────────────────────────────────────────
+        // Both act on the thread's sequence enrolment, so they share the lookup.
+        if (action === 'nudge' || action === 'stop_follow_ups') {
+            const threadId = Number(body.threadId);
+            if (!Number.isInteger(threadId) || threadId <= 0) {
+                return json(400, { error: 'A threadId is required.' });
+            }
+
+            // ⚠️ The thread is joined in rather than the enrolment read on its own. sequence_enrolments
+            // carries an organisation_id, but the ASSISTANT scope lives on the thread — without the
+            // join, a threadId belonging to another of this org's assistants would be actionable
+            // from a page that is not showing it.
+            const [row] = await db
+                .select({
+                    enrolmentId: sequenceEnrolments.id,
+                    enrolmentState: sequenceEnrolments.state,
+                    lastStepSent: sequenceEnrolments.lastStepSent,
+                    assistantRecordId: sequenceEnrolments.assistantRecordId,
+                    discoveredLeadId: sequenceEnrolments.discoveredLeadId,
+                    threadState: leadThreads.state,
+                    contactEmail: leadThreads.contactEmail,
+                })
+                .from(leadThreads)
+                .leftJoin(sequenceEnrolments, eq(sequenceEnrolments.leadThreadId, leadThreads.id))
+                .where(and(
+                    eq(leadThreads.id, threadId),
+                    eq(leadThreads.organisationId, orgId),
+                    eq(leadThreads.aiAssistantId, assistantId),
+                ))
+                .limit(1);
+
+            if (!row) return json(404, { error: 'Conversation not found.' });
+            if (!row.enrolmentId) {
+                // No cadence was ever started on this conversation — a lead emailed manually, or one
+                // whose enrolment was never created. Saying so beats a generic failure: there is
+                // nothing broken and nothing to retry.
+                return json(409, {
+                    error: 'There is no follow-up sequence on this conversation.',
+                    code: 'NOT_ENROLLED',
+                });
+            }
+
+            const ref = {
+                id: row.enrolmentId,
+                organisationId: orgId,
+                aiAssistantId: assistantId,
+                assistantRecordId: row.assistantRecordId ?? null,
+                discoveredLeadId: row.discoveredLeadId ?? null,
+                lastStepSent: row.lastStepSent ?? 0,
+            };
+
+            if (action === 'stop_follow_ups') {
+                if (row.enrolmentState !== 'active') {
+                    return json(409, { error: 'Follow-ups on this conversation have already stopped.', code: 'NOT_ACTIVE' });
+                }
+                // 'manual' is the closed vocabulary's own key for "a human stopped it", and
+                // haltEnrolment writes the sequence_halted ledger row with actor 'user'. Never
+                // invent a reason string here — the CHECK constraint would reject the row and the
+                // halt would be lost, leaving an active enrolment that keeps sending.
+                const ok = await haltEnrolment(db, ref, 'manual', null);
+                if (!ok) return json(502, { error: 'Could not stop the follow-ups — please try again.' });
+                return json(200, { ok: true, enrolment: { state: 'halted', haltReason: 'manual', haltReasonLabel: haltReasonLabel('manual'), lastStepSent: ref.lastStepSent, nextSendAt: null } });
+            }
+
+            // ── nudge ─────────────────────────────────────────────────────────
+            if (row.enrolmentState !== 'active') {
+                return json(409, { error: 'Follow-ups on this conversation have stopped, so there is no next one to send.', code: 'NOT_ACTIVE' });
+            }
+            // The worker refuses to send into a thread that is no longer 'open' (that is Phase 2a's
+            // reply detection acting as 2b's stop condition). Checking here too means the user gets
+            // the REASON rather than a button that appears to do nothing.
+            if (row.threadState !== 'open') {
+                return json(409, { error: 'They have already replied — follow-ups stop once a conversation is live.', code: 'NOT_OPEN' });
+            }
+
+            // Bring the next step forward. This is the ONLY thing this action changes: every
+            // safety gate the cadence has — the claim lease, the per-(thread,step) idempotency
+            // check, the reply halt, the suppression check, the per-org daily ceiling and the
+            // per-enrolment step ceiling — is enforced by the worker below, on this row, exactly as
+            // it would be on a scheduled tick. A "send now" that bypassed those would be a way to
+            // email a suppressed domain by clicking twice.
+            await db.update(sequenceEnrolments)
+                .set({ nextSendAt: new Date(), updatedAt: new Date() })
+                .where(eq(sequenceEnrolments.id, row.enrolmentId));
+
+            // Run the worker inline and AWAIT it. An un-awaited trigger is how jobs get stranded in
+            // this codebase; and the whole point of the button is that the user finds out what
+            // happened while they are still looking at the screen. The drain carries its own wall-
+            // clock budget, and anything it does not reach keeps its place for the hourly cron.
+            let sent = 0;
+            try {
+                ({ sent } = await drainSequenceSends());
+            } catch (e) {
+                // The row is already due, so the cron will still get it. Report the honest
+                // "queued, not sent" rather than failing a request whose write succeeded.
+                console.warn('[lead-threads] inline sequence drain failed after nudge', e);
+            }
+
+            const [after] = await db
+                .select({
+                    state: sequenceEnrolments.state,
+                    haltReason: sequenceEnrolments.haltReason,
+                    lastStepSent: sequenceEnrolments.lastStepSent,
+                    nextSendAt: sequenceEnrolments.nextSendAt,
+                    lastError: sequenceEnrolments.lastError,
+                })
+                .from(sequenceEnrolments)
+                .where(eq(sequenceEnrolments.id, row.enrolmentId))
+                .limit(1);
+
+            // `sent` counts the whole drain, not just this enrolment — the honest signal that OUR
+            // follow-up went out is that the step counter moved.
+            const advanced = (after?.lastStepSent ?? 0) > (row.lastStepSent ?? 0);
+            return json(200, {
+                ok: true,
+                sent: advanced,
+                drainSent: sent,
+                enrolment: after ? {
+                    state: after.state,
+                    haltReason: after.haltReason,
+                    haltReasonLabel: haltReasonLabel(after.haltReason),
+                    lastStepSent: after.lastStepSent,
+                    nextSendAt: after.nextSendAt?.toISOString() ?? null,
+                    lastError: after.lastError,
                 } : null,
             });
         }

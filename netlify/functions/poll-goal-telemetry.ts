@@ -135,7 +135,7 @@ async function fetchXFollowers(token: string): Promise<FetchResult> {
     return { value: null, disconnected: false };
 }
 
-type LiConn = { id: number; vaultRefKey: string | null; metadata: any };
+export type LiConn = { id: number; vaultRefKey: string | null; metadata: any };
 
 // ── LinkedIn GET with the same 429-backoff + auth handling as the IG path ───────
 async function liFetch(url: string, token: string): Promise<{ ok: boolean; disconnected: boolean; body: any }> {
@@ -339,7 +339,7 @@ async function tokenForConn(db: any, conn: { vaultRefKey: string | null } | null
     return (secret?.token as string | undefined) ?? null;
 }
 
-type SocialConn = { id: number; externalUserId: string | null; vaultRefKey: string | null; metadata: any };
+export type SocialConn = { id: number; externalUserId: string | null; vaultRefKey: string | null; metadata: any };
 
 async function fetchMetric(
     db: any,
@@ -527,6 +527,115 @@ async function handleManualGoal(db: any, goal: any, lastTelemetryAt: Date | null
     return true;
 }
 
+/** What one goal's poll did. `skipped` means the tier cadence has not elapsed yet. */
+export type PollOutcome = 'polled' | 'skipped' | 'disconnected' | 'awaiting_update' | 'unmeasured';
+
+export interface PollOneOptions {
+    /** Every active social connection for the goal's org, keyed by service name. */
+    conns: { byService: Map<string, SocialConn>; li: LiConn | null };
+    /** How long between polls for this org's tier, in ms. Ignored when `force` is set. */
+    cadenceMs: number;
+    now?: Date;
+    /**
+     * Poll regardless of the cadence throttle.
+     *
+     * Set by the on-demand path (refresh-goal.ts), and by nothing else. The throttle exists to stop
+     * an hourly cron hammering third-party APIs for every workspace; it is not a correctness rule,
+     * and it must not be what stands between a user and an obviously-stale figure on their screen.
+     */
+    force?: boolean;
+}
+
+/**
+ * Fetch, record and re-grade ONE goal. Extracted from the sweep below so the same code path serves
+ * the cron and the user-facing "check again now" button.
+ *
+ * ⚠️ Factored out for a specific failure this codebase has already had. `qualified_leads` measured
+ * the wrong table for weeks (it counted Be More Swan's own `leads` pipeline, filtered to a status
+ * nothing in the Lead Generator writes, so it read 0 forever). When the query was fixed, every
+ * affected goal STAYED at 0 — because `goals.latest_value` only moves when this runs, and this runs
+ * at most once per tier cadence, and on staging only when an external scheduler pokes
+ * run-goal-telemetry. A fix to a metric that a user cannot make take effect is not, from where they
+ * are sitting, a fix. This is the seam that lets them.
+ */
+export async function pollOneGoal(db: any, goal: any, opts: PollOneOptions): Promise<PollOutcome> {
+    const now = opts.now ?? new Date();
+
+    const lastAt = await db
+        .select({ recordedAt: goalTelemetry.recordedAt })
+        .from(goalTelemetry)
+        .where(eq(goalTelemetry.goalId, goal.id))
+        .orderBy(desc(goalTelemetry.recordedAt))
+        .limit(1);
+    const lastTelemetryAt: Date | null = lastAt[0]?.recordedAt ?? null;
+
+    // User-reported metric: nothing to fetch, and neither the tier cadence nor the disconnected
+    // path below applies. Handled entirely by its own branch.
+    if (isManualMetric(goal.metricKey)) {
+        return (await handleManualGoal(db, goal, lastTelemetryAt, now)) ? 'awaiting_update' : 'skipped';
+    }
+
+    // Throttle by tier cadence — unless the caller is a human asking for this one goal now.
+    if (!opts.force && lastTelemetryAt && now.getTime() - lastTelemetryAt.getTime() < opts.cadenceMs) {
+        return 'skipped';
+    }
+
+    const { value, disconnected } = await fetchMetric(db, goal, opts.conns);
+
+    if (value != null) {
+        const startValue = goal.startValue == null ? value : Number(goal.startValue);
+        await db.insert(goalTelemetry).values({
+            goalId: goal.id, organisationId: goal.organisationId, metricValue: String(value), source: 'poll',
+        });
+        const progress = computeGoalProgress({
+            startValue,
+            latestValue: value,
+            targetValue: Number(goal.targetValue),
+            createdAt: goal.createdAt,
+            targetDate: goal.targetDate,
+            direction: getGoalMetric(goal.metricKey)?.direction ?? 'increase',
+            lastTelemetryAt: now,           // we just recorded a fresh point
+            now,
+        });
+        await db.update(goals).set({
+            latestValue: String(value),
+            startValue: String(startValue),
+            status: progress.status,
+            statusUpdatedAt: now,
+            updatedAt: now,
+        }).where(eq(goals.id, goal.id));
+        // A STATUS CHANGE has to reach the drafting prompt: blueprint section 12 escalates its
+        // directive when a goal is at_risk/off_track, and generation reads the PERSISTED
+        // blueprint (job.blueprint_id), not the live goals table. Recompile only on a genuine
+        // transition — recompiling on every poll would churn a blueprint row per goal per hour.
+        if (progress.status !== goal.status) {
+            await recompileForGoalStatus(goal.assistantId, goal.status, progress.status);
+        }
+        return 'polled';
+    }
+
+    // Couldn't fetch. If the connection is gone AND data is already stale, flag + alert (AC4.3.2/3).
+    const staleCutoff = RUN_RATE_THRESHOLDS.staleDataHours * 3600_000;
+    const isStale = !lastTelemetryAt || (now.getTime() - lastTelemetryAt.getTime() > staleCutoff);
+    if (disconnected && isStale && goal.status !== 'data_disconnected') {
+        await db.update(goals).set({ status: 'data_disconnected', statusUpdatedAt: now, updatedAt: now }).where(eq(goals.id, goal.id));
+        await recompileForGoalStatus(goal.assistantId, goal.status, 'data_disconnected');
+        const metric = getGoalMetric(goal.metricKey);
+        const integration = connectionDisplayName(metric?.connectionService) ?? 'your data source';
+        if (goal.createdByUserId) {
+            await createNotification(db, 'goal_data_disconnected', {
+                userId: goal.createdByUserId,
+                context: { integration: { name: integration } },
+            });
+        }
+        return 'disconnected';
+    }
+    // Nothing came back and nothing is provably broken — a transient miss, or a metric this
+    // workspace simply has no figure for yet. Distinguished from 'skipped' so the on-demand caller
+    // can tell "we looked and got nothing" from "we didn't look".
+    return 'unmeasured';
+}
+
 export async function pollGoalTelemetry(): Promise<{ goals: number; polled: number; skipped: number; disconnected: number; awaitingUpdate: number }> {
     const db = getDb();
     const now = new Date();
@@ -583,81 +692,19 @@ export async function pollGoalTelemetry(): Promise<{ goals: number; polled: numb
     let polled = 0, disconnectedCount = 0, skipped = 0, awaitingUpdate = 0;
 
     await Promise.allSettled(activeGoals.map(async (goal) => {
-        const cadenceMs = pollCadenceHours(tierByOrg.get(goal.organisationId)) * 3600_000;
-        const lastAt = await db
-            .select({ recordedAt: goalTelemetry.recordedAt })
-            .from(goalTelemetry)
-            .where(eq(goalTelemetry.goalId, goal.id))
-            .orderBy(desc(goalTelemetry.recordedAt))
-            .limit(1);
-        const lastTelemetryAt: Date | null = lastAt[0]?.recordedAt ?? null;
-
-        // User-reported metric: nothing to fetch, and neither the tier cadence nor the disconnected
-        // path below applies. Handled entirely by its own branch.
-        if (isManualMetric(goal.metricKey)) {
-            if (await handleManualGoal(db, goal, lastTelemetryAt, now)) awaitingUpdate++;
-            else skipped++;
-            return;
-        }
-
-        // Throttle by tier cadence.
-        if (lastTelemetryAt && now.getTime() - lastTelemetryAt.getTime() < cadenceMs) { skipped++; return; }
-
         const byService = connByOrg.get(goal.organisationId) ?? new Map<string, SocialConn>();
-        const { value, disconnected } = await fetchMetric(db, goal, {
-            byService,
-            li: (byService.get('linkedin') as LiConn | undefined) ?? null,
+        const outcome = await pollOneGoal(db, goal, {
+            cadenceMs: pollCadenceHours(tierByOrg.get(goal.organisationId)) * 3600_000,
+            conns: { byService, li: (byService.get('linkedin') as LiConn | undefined) ?? null },
+            now,
         });
-
-        if (value != null) {
-            const startValue = goal.startValue == null ? value : Number(goal.startValue);
-            await db.insert(goalTelemetry).values({
-                goalId: goal.id, organisationId: goal.organisationId, metricValue: String(value), source: 'poll',
-            });
-            const progress = computeGoalProgress({
-                startValue,
-                latestValue: value,
-                targetValue: Number(goal.targetValue),
-                createdAt: goal.createdAt,
-                targetDate: goal.targetDate,
-                direction: getGoalMetric(goal.metricKey)?.direction ?? 'increase',
-                lastTelemetryAt: now,           // we just recorded a fresh point
-                now,
-            });
-            await db.update(goals).set({
-                latestValue: String(value),
-                startValue: String(startValue),
-                status: progress.status,
-                statusUpdatedAt: now,
-                updatedAt: now,
-            }).where(eq(goals.id, goal.id));
-            // A STATUS CHANGE has to reach the drafting prompt: blueprint section 12 escalates its
-            // directive when a goal is at_risk/off_track, and generation reads the PERSISTED
-            // blueprint (job.blueprint_id), not the live goals table. Recompile only on a genuine
-            // transition — recompiling on every poll would churn a blueprint row per goal per hour.
-            if (progress.status !== goal.status) {
-                await recompileForGoalStatus(goal.assistantId, goal.status, progress.status);
-            }
-            polled++;
-            return;
-        }
-
-        // Couldn't fetch. If the connection is gone AND data is already stale, flag + alert (AC4.3.2/3).
-        const staleCutoff = RUN_RATE_THRESHOLDS.staleDataHours * 3600_000;
-        const isStale = !lastTelemetryAt || (now.getTime() - lastTelemetryAt.getTime() > staleCutoff);
-        if (disconnected && isStale && goal.status !== 'data_disconnected') {
-            await db.update(goals).set({ status: 'data_disconnected', statusUpdatedAt: now, updatedAt: now }).where(eq(goals.id, goal.id));
-            await recompileForGoalStatus(goal.assistantId, goal.status, 'data_disconnected');
-            disconnectedCount++;
-            const metric = getGoalMetric(goal.metricKey);
-            const integration = connectionDisplayName(metric?.connectionService) ?? 'your data source';
-            if (goal.createdByUserId) {
-                await createNotification(db, 'goal_data_disconnected', {
-                    userId: goal.createdByUserId,
-                    context: { integration: { name: integration } },
-                });
-            }
-        }
+        if (outcome === 'polled') polled++;
+        else if (outcome === 'disconnected') disconnectedCount++;
+        else if (outcome === 'awaiting_update') awaitingUpdate++;
+        // 'skipped' and 'unmeasured' both mean "no new figure", and the run counters have only ever
+        // reported one bucket for that. Kept together rather than adding a fifth number nothing
+        // reads.
+        else skipped++;
     }));
 
     return { goals: activeGoals.length, polled, skipped, disconnected: disconnectedCount, awaitingUpdate };

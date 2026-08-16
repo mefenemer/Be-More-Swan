@@ -206,7 +206,10 @@
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <div class="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2">
-          <p class="text-[11px] font-bold text-emerald-600 uppercase tracking-wide">Time Saved</p>
+          <!-- The heading is id'd because it is not the same claim on every role: a Social Media
+               Manager saves drafting TIME, a Lead Generator saves the EFFORT of research, writing
+               and chasing. _fetchAndRenderAssistantMetrics rewrites it per roiSource. -->
+          <p class="text-[11px] font-bold text-emerald-600 uppercase tracking-wide" id="metrics-hours-label">Time Saved</p>
           <p class="text-2xl font-black text-emerald-700 leading-tight" id="metrics-hours-saved">—</p>
           <p class="text-[11px] text-emerald-500 leading-tight" id="metrics-hours-note">Based on ~30 min per post</p>
         </div>
@@ -270,8 +273,18 @@
   <div id="goal-progress-card" class="mb-8" style="order:-2">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Goal Progress</h3>
-      <button type="button" onclick="window._activateMainTab && window._activateMainTab('goals')"
-        class="text-xs font-bold text-emerald-700 hover:text-emerald-800 underline underline-offset-2 cursor-pointer transition-colors">Manage goals</button>
+      <div class="flex items-center gap-3">
+        <!-- "Check again now" — goals.latest_value is a CACHE, refreshed by a background sweep that
+             runs hourly at best and once a day on the entry tier. Without this button a figure the
+             user knows to be wrong is indistinguishable from a broken feature, and there is nothing
+             they can do about either. Wired in _renderGoalProgressCard (assistants.js) →
+             refresh-goal.ts, which re-measures every goal on this assistant on the spot. -->
+        <button type="button" id="btn-refresh-goals"
+          title="Re-measure these goals now instead of waiting for the next background check"
+          class="text-xs font-bold text-gray-500 hover:text-gray-800 underline underline-offset-2 cursor-pointer transition-colors">Check again now</button>
+        <button type="button" onclick="window._activateMainTab && window._activateMainTab('goals')"
+          class="text-xs font-bold text-emerald-700 hover:text-emerald-800 underline underline-offset-2 cursor-pointer transition-colors">Manage goals</button>
+      </div>
     </div>
     <!-- The loading skeleton is applied to this inner panel, not to #goal-progress-card: the overlay
          is inset:0 with a rounded-2xl radius, so on the outer wrapper it would veil the section

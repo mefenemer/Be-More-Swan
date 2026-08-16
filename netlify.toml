@@ -743,6 +743,15 @@ node_bundler = "esbuild"
 [functions.chat-orchestrator]
   timeout = 26
 
+# Conversations tab. `list` and `get` are cheap reads, but the "Send the next chase now" action
+# runs the outreach-sequence worker INLINE and awaits it — one LLM call to draft the follow-up plus
+# one mail-API call to send it, inside the worker's own 20s wall-clock budget (WORKER_BUDGET_MS).
+# At the default timeout the send would be cut off mid-flight and the user told nothing happened
+# while an email went out anyway. Raised to Netlify's synchronous maximum, which sits above that
+# budget on purpose so the worker stops itself cleanly rather than being killed.
+[functions.lead-threads]
+  timeout = 26
+
 # US-SMM-3.2.2: Nightly Meta/Instagram token refresh — 02:00 UTC every day
 [functions.refresh-meta-tokens]
   schedule = "0 2 * * *"

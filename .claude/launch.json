@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-leadgen-conv-2026",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/c762a8af-b545-4923-9553-88ba34aab338/scratchpad/leadharness/server.mjs"
+      ],
+      "port": 4340,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-enrichment-panel",
       "runtimeExecutable": "node",
       "runtimeArgs": [

@@ -237,11 +237,31 @@ check('the read API never serialises a reply token', () => {
         'the Conversations UI must never receive or render a reply token');
 });
 
-check('the read API is read-only — the writer stays singular', () => {
-    for (const verb of ['db.insert(', 'db.update(', 'db.delete(']) {
+check('the read API never writes the thread tables — that writer stays singular', () => {
+    // ⚠️ This check used to forbid db.insert/db.update/db.delete OUTRIGHT, and the rule it was
+    // guarding was narrower than the check: src/utils/lead-threads.ts is the only writer of
+    // lead_threads and lead_messages, for the same reason recordEvent() is the only ledger writer.
+    //
+    // The Conversations tab gained two cadence controls ("Send the next one now", "Stop
+    // follow-ups"), and those write `sequence_enrolments` — a DIFFERENT table, owned by
+    // src/utils/outreach-sequences.ts. The blanket ban would have been satisfied by moving the same
+    // write somewhere less obvious, which protects nothing. So the assertion now says what was
+    // always meant: nothing in this file may insert or delete at all, and the one permitted UPDATE
+    // target is sequence_enrolments.
+    for (const verb of ['db.insert(', 'db.delete(']) {
         assert.ok(!readApiText.includes(verb),
             `lead-threads.ts (function) must not call ${verb} — src/utils/lead-threads.ts is the only writer`);
     }
+    for (const m of readApiText.matchAll(/db\s*\n?\s*\.update\(([A-Za-z]+)\)/g)) {
+        assert.strictEqual(m[1], 'sequenceEnrolments',
+            `lead-threads.ts may only update sequenceEnrolments, never ${m[1]} — lead_threads and `
+            + 'lead_messages have exactly one writer, and it is src/utils/lead-threads.ts');
+    }
+    // The halt goes through the sequence table's own owner rather than a hand-rolled UPDATE. That
+    // helper writes the sequence_halted ledger row and clears next_send_at in the same act; a local
+    // UPDATE would drop both and leave a "stopped" cadence that still had a due timestamp on it.
+    assert.ok(/haltEnrolment\(db,/.test(readApiText),
+        'stopping a cadence must call haltEnrolment, not update the row here');
 });
 
 check('every Conversations query is organisation-scoped', () => {
@@ -416,13 +436,17 @@ check('the modal is loaded before the two components that call it', () => {
 check('the outcome control is gated on there being a lead to record it against', () => {
     // set_outcome is keyed by the LEAD record, and assistant_record_id is ON DELETE SET NULL — a
     // thread outlives its record. Without this the button opens a form whose save can only 404.
-    const at = landmark(conversationsUiText, 'function outcomeBar(');
+    // ⚠️ `outcomeBar` became `actionBar` when the tab gained Add-note beside Record-outcome. Both
+    // buttons are keyed by the same lead record and share the same gate, so the guard covers both.
+    const at = landmark(conversationsUiText, 'function actionBar(');
     const body = conversationsUiText.slice(at, landmark(conversationsUiText, '\n  }', at));
-    assert.ok(/if \(!thread\.assistantRecordId\)/.test(body),
-        'outcomeBar must refuse to offer the button when the thread has no linked lead');
-    const handler = conversationsUiText.slice(landmark(conversationsUiText, "'[data-lt-outcome]'"));
-    assert.ok(/!t\.assistantRecordId\) return/.test(handler.slice(0, 400)),
-        'the click handler must also bail without a record id — the render gate alone is not the guard');
+    assert.ok(/if \(!t\.assistantRecordId\)/.test(body),
+        'actionBar must refuse to offer the buttons when the thread has no linked lead');
+    for (const control of ['[data-lt-outcome]', '[data-lt-note]']) {
+        const handler = conversationsUiText.slice(landmark(conversationsUiText, `'${control}'`));
+        assert.ok(/!t\.assistantRecordId\) return/.test(handler.slice(0, 400)),
+            `the ${control} handler must also bail without a record id — the render gate alone is not the guard`);
+    }
 });
 
 check('recording an outcome never writes the thread tables', () => {
@@ -438,9 +462,10 @@ check('recording an outcome never writes the thread tables', () => {
         'the outcome path must not reach the thread tables');
     assert.ok(/lead-generation/.test(code),
         'the outcome path must go to lead-generation.ts set_outcome, which writes the LEAD record');
-    assert.ok(/read-only about the THREAD/i.test(conversationsUiText),
-        'the component header must still state the read-only invariant it is preserving — a later '
-        + 'reader seeing one write will otherwise take it as licence for the next');
+    assert.ok(/not a writer of lead_threads \/ lead_messages/i.test(conversationsUiText),
+        'the component header must still state the invariant it is preserving — this screen now has '
+        + 'several writes, and a later reader seeing them will otherwise take them as licence to '
+        + 'write the thread tables too');
 });
 
 check('the correction path is preserved, not simplified away', () => {
