@@ -71,6 +71,21 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'billing_alert' THEN 'suggested_action'
     WHEN 'action_rejected' THEN 'suggested_action'
     WHEN 'action_expired' THEN 'suggested_action'
+    -- Added 2026-08-16, closing a drift between this CASE and TYPE_CATEGORY that had reached
+    -- thirteen types. Each of these was already suggested_action in notification-actions.ts and
+    -- fell to the ELSE here, so the DB stamped 'informational' while the code said otherwise —
+    -- and because the client reads the STORED column for styling/sort (notifications.js `catOf`)
+    -- while the server counts action items from the CODE map (kindOf), every one of them appeared
+    -- in the Action-required count while rendering as a low-priority informational notice.
+    WHEN 'x_token_refresh_failed' THEN 'suggested_action'
+    WHEN 'linkedin_token_refresh_failed' THEN 'suggested_action'
+    WHEN 'facebook_token_refresh_failed' THEN 'suggested_action'
+    WHEN 'autopilot_schedule_unreadable' THEN 'suggested_action'
+    WHEN 'autopilot_setup_blocked' THEN 'suggested_action'
+    WHEN 'blog_content_decay' THEN 'suggested_action'
+    WHEN 'assistant_archived' THEN 'suggested_action'  -- Issue #191 — 14-day reinstate window
+    WHEN 'strategy_proposal_pending' THEN 'suggested_action'
+    WHEN 'campaign_decision_pending' THEN 'suggested_action'
     -- state_change
     WHEN 'goal_autonomous_adjustment' THEN 'state_change'  -- SMART Goals AC3.3.3
     WHEN 'billing_renewed' THEN 'state_change'
@@ -85,6 +100,8 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'post_published' THEN 'state_change'
     WHEN 'post_revised' THEN 'state_change'
     WHEN 'post_draft_ready' THEN 'state_change'
+    WHEN 'blog_draft_ready' THEN 'state_change'  -- Blog Autopilot's long-form equivalent
+    WHEN 'assistant_reinstated' THEN 'state_change'  -- Issue #191 follow-up — reinstate took effect
     WHEN 'post_generation_queued' THEN 'state_change'
     WHEN 'provisioning_complete' THEN 'state_change'
     WHEN 'profile_sync_complete' THEN 'state_change'
@@ -99,6 +116,7 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'assistant_ready' THEN 'state_change'
     WHEN 'assistant_kickoff_complete' THEN 'state_change'  -- Issue #115 — Kick Off Meeting confirmed
     WHEN 'feature_status_change' THEN 'state_change'  -- Feature Requests US06 — a backed request moved status
+    WHEN 'search_signals_published' THEN 'state_change'  -- a saved search finished with companies to review
     -- celebratory
     WHEN 'setup_complete' THEN 'celebratory'
     WHEN 'milestone_unlock' THEN 'celebratory'
@@ -161,6 +179,15 @@ SET category       = notification_category_for_type(type),
     is_dismissible = (notification_category_for_type(type) <> 'critical_action')
 WHERE type IN (
     'workspace_access_request', 'domain_join_request', 'content_library_empty',
-    'assistant_kickoff_complete', 'feature_status_change', 'feature_released'
+    'assistant_kickoff_complete', 'feature_status_change', 'feature_released',
+    -- Added 2026-08-16. Every row of these types ever written was stamped 'informational',
+    -- because each was absent from the CASE above. The nine suggested_action ones are the
+    -- consequential half: they were being counted as action items by the server while rendering
+    -- and sorting as informational in the client.
+    'search_signals_published',
+    'x_token_refresh_failed', 'linkedin_token_refresh_failed', 'facebook_token_refresh_failed',
+    'autopilot_schedule_unreadable', 'autopilot_setup_blocked', 'blog_content_decay',
+    'assistant_archived', 'strategy_proposal_pending', 'campaign_decision_pending',
+    'blog_draft_ready', 'assistant_reinstated'
   )
   AND category IS DISTINCT FROM notification_category_for_type(type);

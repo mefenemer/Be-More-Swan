@@ -119,7 +119,7 @@ export default withLambda(async (event) => {
 
     // ── GET ─────────────────────────────────────────────────────────────────────
     if (event.httpMethod === 'GET') {
-        const { email, inApp, push, assistantPrefs, legacyAvailability } = await loadPrefs(db, userId);
+        const { email, inApp, push, assistantPrefs, legacyAvailability, pushColumn } = await loadPrefs(db, userId);
         const emailVals: PrefMap = { ...buildDefaults('email'), ...(email ?? {}) };
         const inAppVals = resolveInAppPrefs(inApp, legacyAvailability);
         const pushVals: PrefMap = { ...buildDefaults('push'), ...(push ?? {}) };
@@ -139,7 +139,10 @@ export default withLambda(async (event) => {
                 // No push category is ever locked (see the header note in notification-prefs.ts),
                 // so `locked` is always false here — emitted anyway so the three channels share
                 // one shape and the client renders them through the same switch cell.
-                push: { value: !!pushVals[cat.key], locked: pushRule(cat).locked },
+                // `available` reflects only whether push_preferences is migrated — it is NOT the
+                // per-user gate. That is the browser permission plus a live push_subscriptions
+                // row, which only the client can know.
+                push: { value: !!pushVals[cat.key], locked: pushRule(cat).locked, available: pushColumn },
                 sms: { available: CHANNEL_AVAILABILITY.sms },
                 whatsapp: { available: CHANNEL_AVAILABILITY.whatsapp },
             };
@@ -161,7 +164,7 @@ export default withLambda(async (event) => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 categories,
-                pushAvailable: CHANNEL_AVAILABILITY.push,
+                pushAvailable: pushColumn,
                 smsAvailable: CHANNEL_AVAILABILITY.sms,
                 whatsappAvailable: CHANNEL_AVAILABILITY.whatsapp,
             }),
@@ -305,8 +308,8 @@ export default withLambda(async (event) => {
         if (channel === 'inApp') {
             return { statusCode: 503, body: JSON.stringify({ error: 'In-app preferences are not available yet. Please try again shortly.', code: 'INAPP_PREFS_UNAVAILABLE' }) };
         }
-        // Same shape as the in-app case: most likely db/push-notifications.sql is not applied yet.
         if (channel === 'push') {
+            // Almost certainly db/push-notifications.sql not applied on this environment.
             return { statusCode: 503, body: JSON.stringify({ error: 'Push preferences are not available yet. Please try again shortly.', code: 'PUSH_PREFS_UNAVAILABLE' }) };
         }
         return { statusCode: 500, body: JSON.stringify({ error: 'Could not save preference.' }) };

@@ -197,7 +197,11 @@
             </div>
             <div id="notif-prefs-legend" class="hidden px-6 py-3 text-xs text-gray-400 border-t border-gray-100 flex flex-wrap items-center gap-2">
                 <span class="inline-flex items-center text-[10px] font-bold bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full border border-gray-200">Required</span>
-                <span>Essential account &amp; billing alerts can't be turned off. SMS and WhatsApp delivery is coming to higher plans.</span>
+                <!-- The qualifier matters: the Required badge is derived from the In App / Email
+                     rules, but NO push category is locked (see src/utils/notification-prefs.ts).
+                     Without saying so, a Required row sits next to a freely switchable Push toggle
+                     and the legend reads as a bug. -->
+                <span>Essential account &amp; billing alerts can't be turned off for In&nbsp;App or Email. Push is always optional — you choose what reaches your lock screen. SMS and WhatsApp delivery is coming to higher plans.</span>
             </div>
             <div id="notif-prefs-save-banner" class="hidden px-6 py-3 bg-emerald-50 border-t border-emerald-100 flex items-center gap-2 text-sm text-emerald-700 font-semibold">
                 <svg class="w-4 h-4 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>

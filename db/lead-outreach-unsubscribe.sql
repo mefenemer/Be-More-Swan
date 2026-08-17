@@ -20,8 +20,15 @@
 -- constraint stays narrow — the exact trap that made halt_reason look deployed when it was not.
 -- The insert would then raise a check violation, the opt-out would go unrecorded, and the prospect
 -- would keep being emailed. DROP then ADD.
+-- Guarded on the TABLE existing too: db/lead-opt-outs.sql is a separate migration, and on an
+-- environment that never received it the bare ALTER below would abort the whole script — taking
+-- the unrelated organisations/push changes down with it.
 DO $$
 BEGIN
+  IF to_regclass('public.lead_opt_outs') IS NULL THEN
+    RAISE NOTICE 'lead_opt_outs does not exist — apply db/lead-opt-outs.sql first, then re-run this.';
+    RETURN;
+  END IF;
   IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'lead_opt_outs_source_check') THEN
     ALTER TABLE lead_opt_outs DROP CONSTRAINT lead_opt_outs_source_check;
   END IF;

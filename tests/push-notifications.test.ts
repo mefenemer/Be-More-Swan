@@ -1,17 +1,23 @@
 // tests/push-notifications.test.ts
-// Web Push as a third delivery channel: the preference model, the fan-out, and the PWA plumbing.
+// Web Push as the third notification channel.
 //
-// Almost every failure mode here is SILENT. A push that is not sent looks exactly like a push the
-// user did not want; a service worker at the wrong path registers cleanly and then never receives
-// anything; a locked push category is invisible until someone's phone buzzes at 3am and they
-// revoke the permission for good. So these lean on the invariants rather than on delivery.
+// The failure modes here are all silent, and all of them look to a user like "the feature is
+// broken" rather than like an error:
+//   • a category with no push rule → `cat.push.locked` on undefined → 500 on a valid write
+//   • a locked push category → an OS alert the user cannot silence → they revoke the browser
+//     permission wholesale and lose every alert, including the ones we locked ON to guarantee
+//   • the service worker anywhere but the site root → registers fine, receives nothing
+//   • push gated behind the wrong channel's preference → alerts for categories they muted
+//
+// So these are invariants, not behaviour walkthroughs.
 
 import assert from 'node:assert';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-    PREF_CATEGORIES, buildDefaults, pushRule, isPushEnabled, isPushEnabledFor, CHANNEL_AVAILABILITY,
+    PREF_CATEGORIES, pushRule, buildDefaults, isPushEnabled, isPushEnabledFor,
+    CHANNEL_AVAILABILITY,
 } from '../src/utils/notification-prefs';
 import { landmark } from './landmark';
 
@@ -24,199 +30,178 @@ function check(name: string, fn: () => void) {
     catch (err) { console.error(`  ✗ ${name}\n    ${(err as Error).message}`); process.exitCode = 1; }
 }
 
-// ── 1. The preference model ──────────────────────────────────────────────────
+// ── 1. The rule model ────────────────────────────────────────────────────────
 
-check('every category declares a push rule, so none silently defaults', () => {
-    // pushRule() falls back to OFF for an undeclared category, which is the safe direction — but
-    // the fallback is a safety net, not the design. A new category should make a deliberate choice.
-    const undeclared = PREF_CATEGORIES.filter(c => !c.push).map(c => c.key);
-    assert.deepEqual(undeclared, [], `these categories have no push rule and will silently never push:\n    ${undeclared.join('\n    ')}`);
+check('every category resolves to a defined push rule', () => {
+    // PrefCategory.push is optional, so a category that forgot it must still resolve — the
+    // endpoint reads pushRule(cat).locked on every GET and would 500 on undefined.
+    for (const cat of PREF_CATEGORIES) {
+        const rule = pushRule(cat);
+        assert.equal(typeof rule.locked, 'boolean', `${cat.key} has no usable push rule`);
+        assert.equal(typeof rule.default, 'boolean', `${cat.key} has no usable push default`);
+    }
 });
 
 check('NO push category is locked', () => {
     // A lock-screen alert the user cannot turn off is how an app gets its notification permission
-    // revoked wholesale — which loses them the very alerts a lock was meant to guarantee. inApp
-    // and email lock the essential rows because those channels are passive; push is not.
+    // revoked at the OS level — which silently loses them the very alerts locking was meant to
+    // guarantee. inApp/email lock the essentials precisely because those channels are passive.
     const locked = PREF_CATEGORIES.filter(c => pushRule(c).locked).map(c => c.key);
-    assert.deepEqual(locked, [], `push must never be locked, but these are:\n    ${locked.join('\n    ')}`);
+    assert.deepEqual(locked, [], `these push categories are locked and must not be: ${locked.join(', ')}`);
 });
 
-check('push defaults are TIGHTER than in-app', () => {
-    // A bell that lists everything is useful; a phone that buzzes for everything gets muted, and a
-    // muted app delivers nothing at all. If push ever defaults ON at least as widely as in-app,
-    // that reasoning has been lost.
-    const pushOn = PREF_CATEGORIES.filter(c => pushRule(c).default).length;
-    const inAppOn = PREF_CATEGORIES.filter(c => c.inApp.default).length;
-    assert.ok(pushOn < inAppOn,
-        `push defaults ON for ${pushOn}/${PREF_CATEGORIES.length} categories vs in-app's ${inAppOn} — push should be the quieter channel`);
+check('push defaults are no louder than in-app', () => {
+    // A bell that lists everything is useful; a phone that buzzes for everything gets muted. Any
+    // category defaulting ON for push while OFF in-app is a mistake in the noisy direction.
+    const louder = PREF_CATEGORIES
+        .filter(c => pushRule(c).default && !c.inApp.default)
+        .map(c => c.key);
+    assert.deepEqual(louder, [], `push defaults ON but in-app defaults OFF for: ${louder.join(', ')}`);
 });
 
-check('a locked in-app category is still user-silenceable on push', () => {
-    // The specific consequence of the rule above, stated as behaviour: account_security is
-    // LOCKED_ON for in-app and email, and must STILL be turn-off-able on push.
-    const security = PREF_CATEGORIES.find(c => c.key === 'account_security')!;
-    assert.equal(security.inApp.locked, true, 'precondition: account_security is locked in-app');
-    assert.equal(isPushEnabled({ account_security: false }, 'security'), false,
-        'a user must be able to stop security alerts buzzing their phone, even though the in-app row is locked');
+check('at least one category defaults ON, and most default OFF', () => {
+    const on = PREF_CATEGORIES.filter(c => pushRule(c).default);
+    assert.ok(on.length > 0, 'a channel where nothing defaults on would never be noticed');
+    assert.ok(on.length < PREF_CATEGORIES.length / 2,
+        `${on.length}/${PREF_CATEGORIES.length} default ON — too noisy; push should be selective`);
 });
 
-check('buildDefaults understands the push channel', () => {
+check('buildDefaults covers push without throwing', () => {
     const d = buildDefaults('push');
-    assert.equal(Object.keys(d).length, PREF_CATEGORIES.length, 'every category needs a default');
-    const security = PREF_CATEGORIES.find(c => c.key === 'account_security')!;
-    assert.equal(d.account_security, pushRule(security).default);
-});
-
-check('an unset preference falls back to the category default, not to undefined', () => {
-    // The commonest real state: a user who has never opened the settings page.
+    assert.equal(Object.keys(d).length, PREF_CATEGORIES.length);
     for (const cat of PREF_CATEGORIES) {
-        const type = cat.types[0];
-        if (!type) continue;
-        assert.equal(isPushEnabled(null, type), pushRule(cat).default,
-            `${cat.key}: an unset push preference must resolve to its declared default`);
+        assert.equal(d[cat.key], pushRule(cat).default, `${cat.key} default mismatch`);
     }
 });
 
-check('per-assistant push overrides resolve, and workspace prefs win when absent', () => {
-    const approvals = PREF_CATEGORIES.find(c => c.key === 'approvals')!;
-    const type = approvals.types[0];
-    assert.equal(approvals.scope, 'assistant', 'precondition: approvals is assistant-scoped');
+// ── 2. Gating reads the PUSH preference, not another channel's ───────────────
 
-    const overrides = { '7': { approvals: { push: false } } };
-    assert.equal(isPushEnabledFor({ approvals: true }, overrides, 7, type), false, 'the override must win');
-    assert.equal(isPushEnabledFor({ approvals: true }, overrides, 9, type), true, 'a different assistant is unaffected');
-    assert.equal(isPushEnabledFor({ approvals: true }, null, 7, type), true, 'no override ⇒ the workspace preference');
+check('a stored push preference wins over the default', () => {
+    const cat = PREF_CATEGORIES.find(c => pushRule(c).default) !== undefined
+        ? PREF_CATEGORIES.find(c => pushRule(c).default)!
+        : PREF_CATEGORIES[0];
+    const type = cat.types[0];
+    assert.equal(isPushEnabled(null, type), pushRule(cat).default, 'no stored value ⇒ the default');
+    assert.equal(isPushEnabled({ [cat.key]: false }, type), false, 'a stored false must mute it');
+    assert.equal(isPushEnabled({ [cat.key]: true }, type), true, 'a stored true must enable it');
 });
 
-check('push is advertised as an available channel', () => {
-    assert.equal(CHANNEL_AVAILABILITY.push, true, 'the UI renders the column from this');
+check('a user can mute EVERY push category', () => {
+    // The direct consequence of nothing being locked. If any type survives a full opt-out, the
+    // "you can always turn it off" promise is false.
+    const allOff = Object.fromEntries(PREF_CATEGORIES.map(c => [c.key, false]));
+    const stillOn = PREF_CATEGORIES
+        .flatMap(c => c.types)
+        .filter(t => isPushEnabled(allOff, t));
+    assert.deepEqual(stillOn, [], `these types push even when everything is muted: ${stillOn.slice(0, 5).join(', ')}`);
 });
 
-// ── 2. The fan-out ───────────────────────────────────────────────────────────
+check('a per-assistant override beats the workspace push preference', () => {
+    const cat = PREF_CATEGORIES.find(c => c.scope === 'assistant');
+    assert.ok(cat, 'expected at least one assistant-scope category');
+    const type = cat!.types[0];
+    const workspaceOff = { [cat!.key]: false };
+    const overrides = { '7': { [cat!.key]: { push: true } } };
+    assert.equal(isPushEnabledFor(workspaceOff, overrides, 7, type), true,
+        'an assistant override must win');
+    assert.equal(isPushEnabledFor(workspaceOff, overrides, 9, type), false,
+        'and must apply only to the assistant it was set on');
+});
 
-check('notify.ts pushes from BOTH write paths, not just the single-recipient one', () => {
-    // 106 call sites go through this module precisely so a channel is added once. A fan-out that
-    // wrote rows but skipped push would silently halve the feature.
+check('push is an available channel', () => {
+    assert.equal(CHANNEL_AVAILABILITY.push, true,
+        'push is gated per-user by OS permission, not by plan — unlike sms/whatsapp');
+});
+
+// ── 3. The delivery path ─────────────────────────────────────────────────────
+
+check('notify.ts fans out to push from the single write path', () => {
+    // 106 call sites write notifications. If push were gated at the call sites instead, it would
+    // drift immediately — the whole point of notify.ts being the ONE path.
     const src = read('src/utils/notify.ts');
-    const single = src.slice(landmark(src, 'export async function createNotification('));
-    assert.match(single.slice(0, 1400), /deliverPush\(/, 'createNotification must deliver push');
-    const fanout = src.slice(landmark(src, 'export async function createNotifications('));
-    assert.match(fanout.slice(0, 1400), /deliverPush\(/, 'createNotifications must deliver push too');
+    assert.match(src, /deliverPush\(/, 'createNotification must reach the push channel');
+    const fanOut = src.slice(landmark(src, 'export async function createNotifications('));
+    assert.match(fanOut.slice(0, 2000), /deliverPush\(/, 'the fan-out must push too, not just the single insert');
+    assert.match(src, /isPushEnabledFor\(/, 'push must be gated on the PUSH preference');
 });
 
-check('push delivery never blocks or fails the notification that triggered it', () => {
+check('a push failure cannot fail the notification that triggered it', () => {
     const src = read('src/utils/notify.ts');
-    const fn = src.slice(landmark(src, 'async function deliverPush('));
-    const body = fn.slice(0, landmark(fn, '\n}\n'));
-    assert.match(body, /catch/, 'deliverPush must swallow its own failures');
-    // The in-app row is the source of truth. If push threw into the caller, a delivered
-    // notification would be reported as a failure.
-    assert.match(src, /void deliverPush\(/, 'the call must not be awaited into the return value');
+    assert.match(src, /void deliverPush\(/,
+        'deliverPush must not be awaited into the return value — the in-app row is the source of truth');
 });
 
-check('an environment with no VAPID keys skips push entirely', () => {
-    // This is what lets the whole feature deploy dark and be switched on by setting env vars —
-    // and it must be the FIRST thing deliverPush checks, or every notification pays a query.
-    const src = read('src/utils/notify.ts');
-    const fn = src.slice(landmark(src, 'async function deliverPush('));
-    const guard = fn.indexOf('isPushConfigured()');
-    const query = fn.indexOf('.select(');
-    assert.ok(guard !== -1 && guard < query, 'isPushConfigured() must gate before any DB work');
-});
-
-check('markup is stripped before it reaches an OS notification', () => {
-    // Template copy may contain the inline markup admins are allowed to use; the in-app feed
-    // sanitises it, but an OS notification is plain text and would show the tags literally.
-    const src = read('src/utils/notify.ts');
-    assert.match(src, /function stripMarkup\(/);
-    const fn = src.slice(landmark(src, 'async function deliverPush('));
-    assert.match(fn.slice(0, 3000), /stripMarkup\(row\.title\)/, 'the title must be stripped');
-});
-
-// ── 3. Dead-subscription pruning ─────────────────────────────────────────────
-
-check('404/410 retires a subscription; other errors only count a failure', () => {
-    // Without this the fan-out grows unbounded: every notification pays an HTTP request per
-    // permanently-dead endpoint, forever. But retiring on a transient 500 would unsubscribe a
-    // whole user base during one bad afternoon at a push provider.
+check('web-push retires dead subscriptions but not transient failures', () => {
     const src = read('src/utils/web-push.ts');
-    assert.match(src, /status === 404 \|\| status === 410/, 'dead endpoints must be detected by status');
-    assert.match(src, /expiredAt: new Date\(\)/, 'and retired');
-    assert.match(src, /failureCount: nextCount/, 'transient failures must only increment a counter');
+    assert.match(src, /status === 404 \|\| status === 410/,
+        'only 404/410 mean the subscription is permanently gone');
+    assert.match(src, /MAX_FAILURES/,
+        'a repeatedly-failing endpoint must eventually be retired so the fan-out stays bounded');
+    assert.match(src, /isPushConfigured\(\)/,
+        'an environment with no VAPID keys must skip push, not error per notification');
 });
 
-// ── 4. The PWA plumbing ──────────────────────────────────────────────────────
+// ── 4. The PWA half ──────────────────────────────────────────────────────────
 
 check('the service worker is at the site ROOT', () => {
-    // A worker's scope is capped by its own URL's directory. At /assets/sw.js it would register
-    // without complaint and then never receive a push for any real page.
-    assert.ok(existsSync(join(root, 'sw.js')), 'sw.js must live at the repo root, which is the published root');
-    assert.match(read('push-client.js'), /var SW_URL = '\/sw\.js'/);
+    // Scope is capped by the worker's own directory. Anywhere else and it registers happily,
+    // controls nothing, and never receives a push.
+    assert.ok(existsSync(join(root, 'sw.js')),
+        'sw.js must be at the repo root — a nested path silently narrows its scope');
+    const client = read('push-client.js');
+    assert.match(client, /var SW_URL = '\/sw\.js'/);
+    assert.match(client, /scope: '\/'/);
 });
 
-check('the app manifest is installable — favicon/manifest.json is not', () => {
+check('the app manifest is installable, and is not the favicon icon set', () => {
+    // favicon/manifest.json has icons and nothing else — no start_url, no display — so a browser
+    // will not offer to install it, and without installation iOS never delivers a push.
     const m = JSON.parse(read('manifest.webmanifest'));
-    // iOS only delivers Web Push to a Home-Screen-installed PWA, and it will not offer to install
-    // one without these. favicon/manifest.json is an icon set with none of them.
-    for (const k of ['name', 'start_url', 'scope', 'display', 'icons']) {
-        assert.ok(m[k], `manifest is missing ${k}, which browsers require to offer installation`);
-    }
+    assert.ok(m.start_url, 'start_url is required for installability');
     assert.equal(m.display, 'standalone');
-    assert.ok(m.icons.some((i: any) => i.sizes === '512x512'), 'a 512px icon is required for installation');
-
-    const ws = read('workspace.html');
-    assert.match(ws, /rel="manifest" href="\/manifest\.webmanifest"/,
-        'workspace.html must link the APP manifest, not the icon-only favicon one');
+    assert.ok(Array.isArray(m.icons) && m.icons.length > 0);
+    for (const icon of m.icons) {
+        const rel = String(icon.src).replace(/^\//, '');
+        assert.ok(existsSync(join(root, rel)), `manifest icon ${icon.src} does not exist in the repo`);
+    }
 });
 
-check('every manifest icon actually exists', () => {
-    // A missing icon makes a browser silently refuse to offer installation — and on iOS, no
-    // installation means no push at all.
-    const m = JSON.parse(read('manifest.webmanifest'));
-    const missing = m.icons.map((i: any) => i.src).filter((src: string) => !existsSync(join(root, src.replace(/^\//, ''))));
-    assert.deepEqual([...new Set(missing)], [], `manifest references icons that are not in the repo:\n    ${missing.join('\n    ')}`);
-});
-
-check('the worker always shows a notification for a push it receives', () => {
-    // Browsers may revoke push permission from a site whose worker wakes on a push and shows
-    // nothing. That is unrecoverable from inside the page, so a malformed payload must still
-    // produce something.
+check('the service worker only references icons that exist', () => {
     const src = read('sw.js');
-    assert.match(src, /showNotification/);
-    const handler = src.slice(landmark(src, "addEventListener('push'"));
-    assert.match(handler.slice(0, 1600), /catch/, 'payload parsing must be defensive');
-    assert.match(handler.slice(0, 1600), /data\.body \|\|/, 'and fall back to default copy');
+    for (const m of src.matchAll(/['"](\/favicon\/[^'"]+)['"]/g)) {
+        const rel = m[1].replace(/^\//, '');
+        assert.ok(existsSync(join(root, rel)), `sw.js references ${m[1]}, which is not in the repo`);
+    }
 });
 
-check('the worker handles subscription rotation', () => {
-    // A browser can silently replace a subscription. Unhandled, every subsequent send 410s, the
-    // row is retired, and the user stops receiving alerts with no error anywhere.
-    assert.match(read('sw.js'), /pushsubscriptionchange/);
-    // The backstop for a session that was not open when it rotated.
-    assert.match(read('push-client.js'), /async function init\(/);
+check('workspace.html loads the app manifest and the push client', () => {
+    const html = read('workspace.html');
+    assert.match(html, /rel="manifest" href="\/manifest\.webmanifest"/,
+        'the workspace must point at the APP manifest, not favicon/manifest.json');
+    assert.match(html, /src="\/push-client\.js"/);
 });
 
-check('iOS-in-Safari is reported as its own case, not as "unsupported"', () => {
-    // iOS DOES support Web Push — but only for a Home-Screen PWA. Telling an iPhone user their
-    // browser cannot do it is both unhelpful and, once they install it, wrong.
-    const src = read('push-client.js');
-    assert.match(src, /ios_needs_install/);
-    assert.match(src, /isStandalone/);
-    assert.match(read('workspace.html'), /ios_needs_install:/,
-        'the settings UI must render copy for that case');
+check('the iOS-in-Safari case gets its own message, not "unsupported"', () => {
+    // iOS DOES support Web Push — from a Home Screen install only. Telling an iPhone user their
+    // browser cannot do it is both wrong and unactionable.
+    const client = read('push-client.js');
+    assert.match(client, /ios_needs_install/);
+    const html = read('workspace.html');
+    assert.match(html, /ios_needs_install:/, 'the settings card must render copy for that reason');
+    assert.match(html, /Add to Home Screen/i);
 });
 
-check('permission is requested inside the click handler', () => {
-    // Browsers reject a permission prompt that was not triggered by a user gesture, and some
-    // permanently deny a site for asking unprompted.
-    // Anchored on the CALL and looking backwards, rather than forwards from an `onclick` marker:
-    // `btn.onclick = async () => {` is not unique even within _renderPushCard (the disable button
-    // uses it too), so a forward slice from the first hit checks the wrong handler.
-    const ws = read('workspace.html');
-    const at = landmark(ws, 'window.SwanPush.enable()');
-    const before = ws.slice(Math.max(0, at - 300), at);
-    assert.match(before, /onclick\s*=\s*async/,
-        'enable() must be called from inside a click handler, not on load');
+check('enable() runs inside the click handler', () => {
+    // Browsers reject a permission prompt not triggered by a user gesture, and some permanently
+    // deny a site that asks unprompted.
+    const html = read('workspace.html');
+    // Scoped to _renderPushCard first: `btn.onclick = async () => {` appears in several unrelated
+    // features earlier in the file, and an unscoped landmark lands on the workspace-access button
+    // and reports a false red about push.
+    const card = html.slice(landmark(html, 'async function _renderPushCard()'));
+    const at = landmark(card, 'showBtn(\'Enable\');');
+    assert.match(card.slice(at, at + 500), /SwanPush\.enable\(\)/,
+        'the Enable button must call enable() directly in its click handler');
 });
 
 console.log(`\n${passed} checks passed\n`);

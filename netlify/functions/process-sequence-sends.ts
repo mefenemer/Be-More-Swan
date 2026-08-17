@@ -33,7 +33,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { aiAssistants, assistantRecords, leadMessages, leadThreads, organisations, sequenceEnrolments } from '../../db/schema';
-import { appendOutreachFooter, buildOutreachFooter } from '../../src/config/outreach-footer';
+import { appendOutreachFooter, buildOutreachFooter, isUsablePostalAddress } from '../../src/config/outreach-footer';
 import { sendGmailMessage } from '../../src/utils/gmail';
 import { sendOutlookMessage } from '../../src/utils/outlook';
 import { IntegrationError } from '../../src/utils/workspace-integrations';
@@ -389,6 +389,19 @@ async function processEnrolment(
         .from(organisations)
         .where(eq(organisations.id, row.organisation_id))
         .limit(1);
+    // Same hard gate as the opener (send_outreach): no postal address, no send. A follow-up is an
+    // independent commercial email and needs the address just as much as step 1 did.
+    //
+    // ⚠️ SKIP, not halt — and not just to avoid touching the halt_reason CHECK constraint. A
+    // missing address is a fixable configuration gap, not a verdict about this lead: halting would
+    // permanently kill every in-flight cadence over a field the user can fill in in ten seconds,
+    // and halts are not resumable. Skipping retries on the next tick, so the sequence picks up by
+    // itself once the address is saved. Same reasoning as the suppression-lookup skip above.
+    if (!isUsablePostalAddress(orgRow?.postalAddress)) {
+        console.warn(`[process-sequence-sends] deferring enrolment ${ref.id}: org ${row.organisation_id} has no usable postal address`);
+        return 'skipped';
+    }
+
     const footer = buildOutreachFooter({
         senderName: orgRow?.name ?? assistant.name ?? '',
         postalAddress: orgRow?.postalAddress,

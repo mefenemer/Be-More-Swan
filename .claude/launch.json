@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-push-prefs",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4360",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/e055d26b-58fa-491b-b7e3-b4dec3f46d94/scratchpad/pushharness"
+      ],
+      "port": 4360,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-leadgen-calendar",
       "runtimeExecutable": "node",
       "runtimeArgs": [

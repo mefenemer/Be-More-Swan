@@ -16,7 +16,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { appendOutreachFooter, buildOutreachFooter, unsubscribeUrl } from '../src/config/outreach-footer';
+import { appendOutreachFooter, buildOutreachFooter, isUsablePostalAddress, unsubscribeUrl } from '../src/config/outreach-footer';
 import { landmark } from './landmark';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -57,6 +57,63 @@ check('the fallback instruction is one detectOptOut actually matches', async () 
     assert.ok(wordMatch, 'the fallback should name a specific word');
     assert.equal(detectOptOut(wordMatch![1]).optedOut, true,
         `opt-out.ts must recognise "${wordMatch![1]}" — the footer tells prospects to send it`);
+});
+
+// ── 1b. The postal-address gate ──────────────────────────────────────────────
+// CAN-SPAM and CASL both require a physical address in every commercial email, so a send without
+// one is blocked outright. Enforced while there are no live Lead Generators in production — the
+// only moment a required field costs nothing to introduce.
+
+check('isUsablePostalAddress rejects the values that satisfy a non-empty check', () => {
+    // The whole point of validating beyond "not empty": a required field answered with "UK" passes
+    // a presence test and satisfies no regulator.
+    for (const bad of ['', '   ', 'UK', 'n/a', 'N/A', 'none', 'United Kingdom', 'Manchester', '12']) {
+        assert.equal(isUsablePostalAddress(bad), false, `"${bad}" must not count as an address`);
+    }
+    for (const good of [
+        '12 High Street, Manchester, M1 2AB, United Kingdom',
+        'Unit 4, 12 High Street, Manchester M1 2AB',
+        '1600 Pennsylvania Avenue NW, Washington, DC 20500',
+    ]) {
+        assert.equal(isUsablePostalAddress(good), true, `"${good}" must count as an address`);
+    }
+});
+
+check('the browser mirror of the validator agrees with the server', () => {
+    // assets.js reimplements this for the settings form — it cannot import TS. If the two drift so
+    // the form is LOOSER, the field saves green and outreach silently stops with the reason only
+    // in a function log, which is the worst failure this feature can produce.
+    const js = read('assets.js');
+    const at = landmark(js, 'function isUsablePostalAddress(value)');
+    const body = js.slice(at, at + 500);
+    assert.match(body, /v\.length < 10/, 'length floor must match the server');
+    assert.match(body, /\/\\d\/\.test\(v\)/, 'digit requirement must match the server');
+    assert.match(body, />= 3/, 'word-count floor must match the server');
+});
+
+check('both send paths refuse to send without a usable address', () => {
+    const opener = read('netlify/functions/lead-generation.ts');
+    assert.match(opener, /reason: 'no_postal_address'/,
+        'send_outreach must block, not warn — a warning nobody reads is not compliance');
+    // Before the draft: a blocked send should cost no Anthropic call and mint no lead_thread.
+    assert.ok(
+        landmark(opener, 'isUsablePostalAddress(orgRow?.postalAddress)') < landmark(opener, 'Mint the thread'),
+        'the gate must run before the thread is opened and the draft generated',
+    );
+
+    const worker = read('netlify/functions/process-sequence-sends.ts');
+    const at = landmark(worker, 'isUsablePostalAddress(orgRow?.postalAddress)');
+    const block = worker.slice(at, at + 400);
+    // SKIP, not halt: a missing address is a fixable config gap, and halts are not resumable.
+    assert.match(block, /return 'skipped'/,
+        'a follow-up must DEFER on a missing address, never halt — halting kills the cadence permanently');
+    assert.ok(!/haltEnrolment/.test(block), 'must not halt the enrolment for a fixable setting');
+});
+
+check('the blocked send is explained in the UI', () => {
+    const js = read('assistants.js');
+    assert.match(js, /sdata\.reason === 'no_postal_address'/,
+        'an unexplained non-send reads as a bug; this one is fixable by the user in one step');
 });
 
 check('the sender is identified, and the postal address is reported when missing', () => {

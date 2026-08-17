@@ -30,6 +30,25 @@
 
 const BASE_URL = (process.env.BASE_URL || 'https://bemoreswan.com').replace(/\/+$/, '');
 
+/**
+ * Is this a plausible postal address?
+ *
+ * Deliberately weak — this cannot verify an address exists, and pretending otherwise would mean
+ * rejecting valid ones. What it DOES catch is the failure this gate exists to prevent: a required
+ * field satisfied with "UK" or "n/a", which passes a non-empty check and satisfies no regulator.
+ * A real address has a building/street number and more than one word.
+ *
+ * Shared by the send gate and the settings UI so a value the form accepts can never be one the
+ * sender rejects — a field that saves green and then silently blocks outreach is worse than no
+ * validation at all.
+ */
+export function isUsablePostalAddress(value: string | null | undefined): boolean {
+    const v = String(value ?? '').trim();
+    if (v.length < 10) return false;
+    if (!/\d/.test(v)) return false;               // no building number or postcode
+    return v.split(/\s+/).filter(Boolean).length >= 3;
+}
+
 /** The public unsubscribe endpoint for a thread. */
 export function unsubscribeUrl(replyToken: string): string {
     return `${BASE_URL}/.netlify/functions/lead-unsubscribe?t=${encodeURIComponent(replyToken)}`;

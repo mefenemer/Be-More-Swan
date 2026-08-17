@@ -362,12 +362,33 @@ window.initBrandAssets = function() {
      * out-specify `hidden`, and a warning that is supposed to disappear but does not reads as a
      * broken save.
      */
+    /**
+     * Mirror of isUsablePostalAddress() in src/config/outreach-footer.ts, which is what the send
+     * gate actually enforces.
+     *
+     * ⚠️ These two must agree. A form that accepts "UK" and a sender that rejects it produces the
+     * worst possible outcome: the field saves, the warning clears, and outreach silently stops with
+     * the explanation buried in a function log. If you change one, change both.
+     */
+    function isUsablePostalAddress(value) {
+        const v = String(value ?? '').trim();
+        if (v.length < 10) return false;
+        if (!/\d/.test(v)) return false;                       // no building number or postcode
+        return v.split(/\s+/).filter(Boolean).length >= 3;
+    }
+
     function togglePostalAddressWarning(value) {
         const el = document.getElementById('bp-postal-address-warning');
         if (!el) return;
-        const missing = !String(value ?? '').trim();
-        el.classList.toggle('hidden', !missing);
-        el.style.display = missing ? '' : 'none';
+        const bad = !isUsablePostalAddress(value);
+        el.classList.toggle('hidden', !bad);
+        el.style.display = bad ? '' : 'none';
+        // Distinguish "you haven't filled this in" from "what you typed won't satisfy the check",
+        // otherwise someone who entered "UK" sees a warning that looks like it just didn't save.
+        const empty = !String(value ?? '').trim();
+        el.textContent = empty
+            ? "Your Lead Generator can't send outreach until you add a postal address here. Anti-spam law requires one in every marketing email."
+            : "That doesn't look like a full postal address — include the street number and postcode. Outreach stays paused until it does.";
     }
     function setStatus(id, msg, kind) {
         const el = document.getElementById(id);

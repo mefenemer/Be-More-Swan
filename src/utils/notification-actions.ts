@@ -56,6 +56,14 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     security: 'critical_action', agent_anomaly: 'critical_action',
     // SMART Goals AC4.3.3 — telemetry connection lost; user must re-authenticate to keep tracking.
     goal_data_disconnected: 'critical_action',
+    // ⚠️ NOTHING EMITS THESE TWO. They exist in db/notifications-categorization.sql and nowhere
+    // else in the codebase — no call site, and no row in PREF_CATEGORIES. Mirrored here anyway
+    // (2026-08-16) at the values the SQL already assigns, so the two maps agree by construction
+    // and the parity test in tests/notification-prefs.test.ts has no exception list to rot.
+    // Deleting them from the SQL was the alternative; that discards whoever's intent for a trial
+    // flow, and a dead entry costs nothing. If a trial feature does ship, give them a
+    // PREF_CATEGORIES home too — unmapped there means they fall to 'product_updates'.
+    trial_expired: 'critical_action', trial_expiring_soon: 'suggested_action',
     // suggested_action — important, do-something, dismissible
     onboarding_prompt: 'suggested_action', onboarding_incomplete: 'suggested_action',
     hitl_approval_required: 'suggested_action', review_red_urgency: 'suggested_action',
@@ -121,6 +129,22 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     account_update: 'state_change', assistant_task: 'state_change', assistant_ready: 'state_change',
     // Issue #115 — Kick Off Meeting confirmed: assistant moved to actively working.
     assistant_kickoff_complete: 'state_change',
+    // A saved search finished and has companies waiting to be reviewed. Shipped uncategorised, so
+    // it fell to the 'informational' default and sorted below every other assistant update.
+    //
+    // state_change, NOT suggested_action, and the line between them is whether something is BLOCKED
+    // or EXPIRES. Everything in suggested_action is broken (post_publish_failed), parked
+    // (hitl_approval_required) or lapsing (strategy_proposal_pending, campaign_decision_pending).
+    // A completed run is none of those: the companies sit in the Searches tab indefinitely and
+    // nothing degrades if they are read next week. This is the same call post_draft_ready and
+    // blog_draft_ready already make — "your assistant finished something, go look" is a
+    // confirmation, not an action item — and it keeps the "Action required" tab meaning
+    // genuinely blocked, which is the only thing that makes that tab worth opening.
+    //
+    // Its three siblings in the `assistant_tasks` preference category (assistant_task,
+    // assistant_ready, assistant_kickoff_complete) are all state_change too; see
+    // src/utils/notification-prefs.ts, where this type was mapped on the same day.
+    search_signals_published: 'state_change',
     // Issue #191 follow-up — confirms a reinstate actually took effect.
     assistant_reinstated: 'state_change',
     goal_autonomous_adjustment: 'state_change', // SMART Goals AC3.3.3 — autonomous brief change FYI

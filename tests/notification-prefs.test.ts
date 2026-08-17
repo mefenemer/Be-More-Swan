@@ -13,6 +13,8 @@
 // Pure logic — no DB required.
 
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
     PREF_CATEGORIES, categoryForType, isInAppEnabled, isEmailEnabled,
     isInAppEnabledFor, isEmailEnabledFor, overrideFor,
@@ -206,6 +208,58 @@ check('the two pending-decision types ask for an action, and are dismissible', (
     // which is undismissible and would pin an unkillable banner for a suggestion.
     assert.equal(categoryOf('campaign_decision_pending'), 'suggested_action');
     assert.equal(categoryOf('strategy_proposal_pending'), 'suggested_action');
+});
+
+check('TYPE_CATEGORY and the SQL CASE agree on every type', () => {
+    // THE forcing function. These two maps are hand-maintained mirrors of one contract, and by
+    // 2026-08-16 they had drifted on thirteen types — nine of them suggested_action in code but
+    // stamped 'informational' by the trigger, including strategy_proposal_pending and
+    // campaign_decision_pending, whose own comments in notification-actions.ts explain why that
+    // bucket is wrong for them.
+    //
+    // It drifted silently because nothing reads both. The server derives the Action-required tab
+    // from the CODE map (kindOf), while the client styles and sorts from the STORED column
+    // (notifications.js `catOf`) — so a mismatch shows up as an action item rendered as a grey
+    // informational notice at the bottom of the list, which reads as a styling quirk rather than
+    // two sources of truth disagreeing.
+    //
+    // Absence from either side means 'informational' (the TS `?? 'informational'` and the SQL
+    // ELSE), so comparing EFFECTIVE values is what matters — a type need not be listed twice,
+    // it just has to resolve the same way on both sides.
+    const sql = readFileSync(join(import.meta.dirname, '../db/notifications-categorization.sql'), 'utf8');
+    const sqlMap = new Map<string, string>();
+    for (const m of sql.matchAll(/WHEN '([a-z0-9_]+)' THEN '([a-z_]+)'/g)) sqlMap.set(m[1], m[2]);
+
+    // ⚠️ Guard the extraction before trusting it. A regex that silently matches nothing would make
+    // every assertion below vacuously true and this test would "pass" while the maps rot.
+    assert.ok(sqlMap.size > 50, `parsed only ${sqlMap.size} WHEN clauses — the SQL format changed`);
+    assert.equal(sqlMap.get('billing_payment_failed'), 'critical_action', 'sanity: known mapping parsed');
+
+    for (const [type, sqlCat] of sqlMap) {
+        assert.equal(categoryOf(type), sqlCat,
+            `${type}: TYPE_CATEGORY says '${categoryOf(type)}', the SQL CASE says '${sqlCat}'`);
+    }
+});
+
+check('every type routed to assistant_tasks has a notification category', () => {
+    // The same guard as approvals/content_calendar, added 2026-08-16 with search_signals_published.
+    // That type had shipped absent from BOTH maps at once: unmapped in notification-prefs.ts it fell
+    // to 'product_updates', so muting product announcements silently killed it, and unmapped in
+    // TYPE_CATEGORY it fell to 'informational', so it sorted below every other assistant update.
+    // Neither failure is visible from the feed — there is no delivery receipt anywhere in this
+    // system — so the only place to catch the next one is here.
+    const cat = PREF_CATEGORIES.find(c => c.key === 'assistant_tasks')!;
+    for (const type of cat.types) {
+        assert.notEqual(categoryOf(type), 'informational',
+            `${type} is uncategorised in TYPE_CATEGORY — it will default to 'informational'`);
+    }
+});
+
+check('a finished saved search is a confirmation, not an action item', () => {
+    // state_change keeps it in Updates. suggested_action would put "your search found 14 companies"
+    // in Action required beside genuinely blocked work (a failed publish, a lapsing proposal) —
+    // nothing here is blocked or expiring, and a tab that fills with FYIs stops being worth opening.
+    assert.equal(categoryOf('search_signals_published'), 'state_change');
 });
 
 check('every type routed to content_calendar has a notification category', () => {

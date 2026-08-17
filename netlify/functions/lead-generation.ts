@@ -54,7 +54,7 @@ import {
     isOutcome, isLossReason, type LossReason,
 } from '../../src/config/revenue-events';
 import { EDIT_REASONS, isEditReason } from '../../src/config/template-feedback';
-import { appendOutreachFooter, buildOutreachFooter } from '../../src/config/outreach-footer';
+import { appendOutreachFooter, buildOutreachFooter, isUsablePostalAddress } from '../../src/config/outreach-footer';
 import { needsPersonalInboxConfirmation } from '../../src/config/lead-email-kind';
 import { EXCLUDE_PROFILE_DNC_RULE, EXCLUDE_PROFILE_RULE, SCORING_BANDS, icpBlock } from '../../src/config/icp-profile';
 import { recordTemplateEdit } from '../../src/utils/template-feedback';
@@ -1166,6 +1166,38 @@ ${OUTREACH_SUBJECT_RULES}`;
                 return json(200, { sent: false, reason: 'personal_inbox_unconfirmed', to: recipient });
             }
 
+            const [orgRow] = await db
+                .select({ name: organisations.name, postalAddress: organisations.outreachPostalAddress })
+                .from(organisations)
+                .where(eq(organisations.id, orgId))
+                .limit(1);
+            // ── Postal-address gate ──────────────────────────────────────────
+            // CAN-SPAM (US) and CASL (Canada) both require a physical postal address in every
+            // commercial email. A cold email without one is non-compliant the moment it reaches
+            // either country, and nothing about a prospect's address tells us where they are — a
+            // .com says nothing — so the address is required for every send, not inferred per
+            // recipient.
+            //
+            // HARD block, deliberately. This was a soft warning when it shipped, on the reasoning
+            // that failing outright would take existing tenants' Lead Generators offline for a
+            // field they had never been shown. There are no live Lead Generators in production, so
+            // that cost is zero and the warning bought nothing but a compliance gap nobody would
+            // see. Enforcing before anyone depends on it is the cheapest this will ever be.
+            //
+            // Sits with the other pre-send gates rather than down beside the footer it feeds: this
+            // is the cheapest check of the set, and running it here means a blocked send costs no
+            // Anthropic call for a draft nobody will read and mints no lead_thread for a
+            // conversation that never starts.
+            if (!isUsablePostalAddress(orgRow?.postalAddress)) {
+                return json(200, {
+                    sent: false,
+                    reason: 'no_postal_address',
+                    detail: 'Add your business postal address in Business Information — anti-spam law requires one in every outreach email.',
+                    to: recipient,
+                });
+            }
+
+
             // Use the stored draft if present; otherwise generate one from the lead's details.
             let subject = str(draft?.subject as string, 300);
             let bodyText = str(draft?.body as string, 4000);
@@ -1227,23 +1259,11 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
             // and the template-feedback loop are about what the assistant wrote; stamping an
             // identical boilerplate block onto every stored message would add nothing to either and
             // would make an edited draft harder to tell from an unedited one.
-            const [orgRow] = await db
-                .select({ name: organisations.name, postalAddress: organisations.outreachPostalAddress })
-                .from(organisations)
-                .where(eq(organisations.id, orgId))
-                .limit(1);
             const footer = buildOutreachFooter({
                 senderName: orgRow?.name ?? assistant.name,
                 postalAddress: orgRow?.postalAddress,
                 replyToken: thread?.replyToken,
             });
-            if (!footer.hasPostalAddress) {
-                // Not a hard block: making this fatal would take every existing tenant's outreach
-                // offline the moment this deploys, for a field none of them has been asked for yet.
-                // Logged so the gap is visible rather than silent — see the Business Information
-                // page, where the field is surfaced with the same warning.
-                console.warn(`[lead-generation] outreach sent without a postal address (org ${orgId}) — CAN-SPAM/CASL require one`);
-            }
 
             try {
                 const outgoing = {

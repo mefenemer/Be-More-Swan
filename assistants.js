@@ -2533,6 +2533,12 @@ async function _rqSendLeadOutreach(recordId, opts) {
         if (sdata.reason === 'suppressed') {
             return say('nothing sent. This company is on your suppression list.');
         }
+        if (sdata.reason === 'no_postal_address') {
+            // The only non-send reason the user can clear themselves in one step, so it names the
+            // page rather than just the problem. Everything else here is about the LEAD; this is
+            // about their own setup, and a bare "nothing sent" would read as a bug.
+            return say(`nothing sent. ${sdata.detail || 'Add your business postal address in Business Information.'}`);
+        }
         return plain;
     } catch {
         // A network failure on the send only. The lead is already approved, and saying so is more
