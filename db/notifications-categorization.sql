@@ -86,6 +86,17 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'assistant_archived' THEN 'suggested_action'  -- Issue #191 — 14-day reinstate window
     WHEN 'strategy_proposal_pending' THEN 'suggested_action'
     WHEN 'campaign_decision_pending' THEN 'suggested_action'
+    -- Added 2026-08-17 WITH the code change that emits them, not after it. These are the exact shape
+    -- the 2026-08-16 note above describes: a new type that the code maps to suggested_action and this
+    -- CASE does not falls to the ELSE, so the row is stamped 'informational' — the insert succeeds,
+    -- the CHECK is satisfied, and the notification simply arrives at the bottom of the bell rendered
+    -- as a low-priority notice while the server counts it as an action item.
+    --
+    -- ⚠️ For 'lead_reply_received' that failure is the whole feature: a prospect writing back is the
+    -- most time-critical event in the Lead Generator, and mis-stamping it produces precisely the
+    -- silence the notification was built to end.
+    WHEN 'lead_reply_received' THEN 'suggested_action'   -- a prospect replied to outreach
+    WHEN 'leads_expiring_soon' THEN 'suggested_action'   -- leads about to leave the Outreach queue
     -- state_change
     WHEN 'goal_autonomous_adjustment' THEN 'state_change'  -- SMART Goals AC3.3.3
     WHEN 'billing_renewed' THEN 'state_change'
