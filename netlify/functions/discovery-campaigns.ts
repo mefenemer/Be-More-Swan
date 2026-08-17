@@ -30,7 +30,10 @@ import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, discoveryCampaigns, discoveryGuardrails, discoverySchedules, discoveryJobs, discoveredLeads } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
-import { createDiscoveryRun } from '../../src/utils/discovery';
+import { activeCampaignCapacity, campaignCapacityMessage, createDiscoveryRun } from '../../src/utils/discovery';
+import {
+    clampGuardrail, MAX_LEADS_PER_MONTH_CEILING, MAX_LEADS_PER_RUN_CEILING,
+} from '../../src/config/discovery-limits';
 import { triggerDiscoveryDrain } from '../../src/utils/trigger-drain';
 import { isSearchConfigured, normaliseDomain } from '../../src/lib/discovery-search';
 import {
@@ -146,6 +149,20 @@ export default withLambda(async (event) => {
             }
         }
 
+        // Per-org ceiling on RUNNING searches. Checked only for a real start: a draft spends nothing
+        // and must always be creatable, or a tenant at the cap cannot even write down the next idea.
+        if (!asDraft) {
+            const capacity = await activeCampaignCapacity(db, orgId);
+            if (!capacity.ok) {
+                return json(409, {
+                    error: campaignCapacityMessage(capacity.limit),
+                    code: 'CAMPAIGN_LIMIT',
+                    active: capacity.active,
+                    limit: capacity.limit,
+                });
+            }
+        }
+
         const result = await createDiscoveryRun({
             db, organisationId: orgId, userId, aiAssistantId: assistantId,
             // Optional: the Signal Inbox filters by this, falling back to a truncated idea.
@@ -159,8 +176,18 @@ export default withLambda(async (event) => {
             // the table default (£2.00), not to a chat proposal or a form. It was accepted here
             // once, and a model duly invented "Max £50 per run" onto an approval card.
             guardrails: {
-                ...(typeof guardrails.maxLeadsPerRun === 'number' ? { maxLeadsPerRun: guardrails.maxLeadsPerRun } : {}),
-                ...(typeof guardrails.maxLeadsPerMonth === 'number' ? { maxLeadsPerMonth: guardrails.maxLeadsPerMonth } : {}),
+                // ⚠️ CLAMPED, not just type-checked. These two are the only volume fields a caller
+                // can set, and until now `typeof x === 'number'` was the whole validation — so the
+                // ceiling on a tenant's own discovery was whatever the request body said. See
+                // src/config/discovery-limits.ts. Undefined means "keep the table default".
+                ...(() => {
+                    const perRun = clampGuardrail(guardrails.maxLeadsPerRun, MAX_LEADS_PER_RUN_CEILING);
+                    return perRun === undefined ? {} : { maxLeadsPerRun: perRun };
+                })(),
+                ...(() => {
+                    const perMonth = clampGuardrail(guardrails.maxLeadsPerMonth, MAX_LEADS_PER_MONTH_CEILING);
+                    return perMonth === undefined ? {} : { maxLeadsPerMonth: perMonth };
+                })(),
                 ...(Array.isArray(guardrails.negativeKeywords) ? { negativeKeywords: (guardrails.negativeKeywords as unknown[]).filter((x): x is string => typeof x === 'string') } : {}),
                 ...(Array.isArray(guardrails.excludedDomains) ? { excludedDomains: (guardrails.excludedDomains as unknown[]).filter((x): x is string => typeof x === 'string') } : {}),
                 ...(typeof guardrails.requireHumanApproval === 'boolean' ? { requireHumanApproval: guardrails.requireHumanApproval } : {}),
@@ -444,6 +471,21 @@ export default withLambda(async (event) => {
         const flat = flattenQueries(queries);
         if (flat.length === 0) return json(400, { error: 'A search plan needs at least one query.' });
 
+        // Approving a brief PROMOTES a draft, so it is one of the three doors into 'active' and has
+        // to answer to the same per-org ceiling. Refused before the brief is stored: saving the plan
+        // and then declining to run it would leave the user with a campaign that looks started.
+        if (campaign.status === 'draft') {
+            const capacity = await activeCampaignCapacity(db, orgId);
+            if (!capacity.ok) {
+                return json(409, {
+                    error: campaignCapacityMessage(capacity.limit),
+                    code: 'CAMPAIGN_LIMIT',
+                    active: capacity.active,
+                    limit: capacity.limit,
+                });
+            }
+        }
+
         await db.update(discoveryCampaigns)
             .set({
                 approvedBrief: {
@@ -501,6 +543,17 @@ export default withLambda(async (event) => {
         // promotes: resurrecting a deliberately 'paused' campaign here would undo a human's
         // decision, and the UI disables Run now for paused anyway.
         if (campaign.status === 'draft') {
+            // The third door into 'active' — same ceiling, same refusal, checked before the promotion
+            // rather than after the job is enqueued.
+            const capacity = await activeCampaignCapacity(db, orgId);
+            if (!capacity.ok) {
+                return json(409, {
+                    error: campaignCapacityMessage(capacity.limit),
+                    code: 'CAMPAIGN_LIMIT',
+                    active: capacity.active,
+                    limit: capacity.limit,
+                });
+            }
             await db.update(discoveryCampaigns)
                 .set({ status: 'active', updatedAt: new Date() })
                 .where(eq(discoveryCampaigns.id, campaignId));
@@ -679,7 +732,12 @@ export default withLambda(async (event) => {
         if (g) {
             const patch: Record<string, unknown> = { updatedAt: new Date() };
             // maxCostGbpPerRun is not editable — see the create branch above.
-            if (typeof g.maxLeadsPerRun === 'number') patch.maxLeadsPerRun = g.maxLeadsPerRun;
+            // Clamped on the way in, exactly as on create: the edit modal is the other door to the
+            // same column, and a limit that can only be raised through Edit is not a limit.
+            const perRun = clampGuardrail(g.maxLeadsPerRun, MAX_LEADS_PER_RUN_CEILING);
+            if (perRun !== undefined) patch.maxLeadsPerRun = perRun;
+            const perMonth = clampGuardrail(g.maxLeadsPerMonth, MAX_LEADS_PER_MONTH_CEILING);
+            if (perMonth !== undefined) patch.maxLeadsPerMonth = perMonth;
             if (Array.isArray(g.negativeKeywords)) patch.negativeKeywords = (g.negativeKeywords as unknown[]).filter((x): x is string => typeof x === 'string');
             // Accepted here so a blocked domain can be REVIEWED and removed. The column and the
             // run-time filter both existed already; only this branch was missing, which made

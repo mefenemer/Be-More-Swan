@@ -103,6 +103,9 @@ const EVENT_META: Record<string, { icon: string; status: ActivityStatus; label: 
             return `Read a reply${who(p)}${c ? ` — ${c.replace(/_/g, ' ')}` : ''}.`;
         },
     },
+    // "You replied", not "sent an email" — this row exists to be distinguishable from the
+    // assistant's own sends sitting either side of it in the same feed.
+    manual_reply_sent: { icon: 'edit', status: 'success', label: (p) => `You replied${to(p)}.` },
     opt_out_received: { icon: 'shield', status: 'info', label: (p) => `A prospect asked not to be contacted${who(p)} — added to your suppression list.` },
     sequence_enrolled: { icon: 'calendar', status: 'info', label: (p) => `Started the follow-up sequence${who(p)}.` },
     sequence_halted: {

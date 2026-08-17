@@ -27,12 +27,13 @@
 
 import { and, eq, inArray, or, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { assistantRecords, adminAuditLog } from '../../db/schema';
+import { aiAssistants, assistantRecords, adminAuditLog } from '../../db/schema';
 import {
-    LEAD_RETENTION_DAYS, RETENTION_FIELD, RETENTION_DELETED_SQL_PATH,
+    LEAD_RETENTION_DAYS, LEAD_RETENTION_WARN_DAYS, RETENTION_FIELD, RETENTION_DELETED_SQL_PATH,
     retentionReasonFor, type RetentionReason,
 } from '../../src/config/lead-retention';
 import { resolveLeadRecipient } from '../../src/config/lead-recipient';
+import { createNotification } from '../../src/utils/notify';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /**
@@ -133,15 +134,98 @@ async function markDeleted(db: Db, ids: number[], reason: RetentionReason, at: D
         .where(inArray(assistantRecords.id, ids));
 }
 
-export default withLambda(async () => {
+/**
+ * Warn about leads that are ABOUT to be collected — one digest per assistant, never one per lead.
+ *
+ * ⚠️ Runs on every sweep, including the ones that move nothing: "nothing expired tonight" and
+ * "nothing is about to expire" are different facts, and the second is the one worth a notification.
+ * The old early return meant a quiet night sent no warning either, which is precisely the night
+ * before a busy one.
+ *
+ * Best-effort throughout. A failure here must not stop the sweep — the sweep is the thing that keeps
+ * the retention promise, and a notification is a courtesy attached to it.
+ */
+async function warnBeforeSweep(db: Db, now: Date): Promise<number> {
+    let warned = 0;
+    try {
+        // The window is (deadline − WARN_DAYS, deadline]: leads whose clock started between the two
+        // cutoffs. Excludes anything already past the deadline — those are being moved by this same
+        // run, and "3 days left" beside a lead in the Deleted section would be a lie by one night.
+        const soonFrom = new Date(now.getTime() - LEAD_RETENTION_DAYS * 86400000);
+        const soonTo = new Date(now.getTime() - (LEAD_RETENTION_DAYS - LEAD_RETENTION_WARN_DAYS) * 86400000);
+
+        const rows = await db
+            .select({
+                aiAssistantId: assistantRecords.aiAssistantId,
+                n: sql<number>`count(*)::int`,
+            })
+            .from(assistantRecords)
+            .where(and(
+                eq(assistantRecords.recordType, 'lead'),
+                or(
+                    eq(assistantRecords.approvalStatus, 'pending_approval'),
+                    eq(assistantRecords.approvalStatus, 'rejected'),
+                ),
+                sql`${clockSql} >= ${soonFrom}`,
+                sql`${clockSql} < ${soonTo}`,
+                notAlreadyDeleted,
+            ))
+            .groupBy(assistantRecords.aiAssistantId);
+
+        for (const row of rows) {
+            if (!row.aiAssistantId || !row.n) continue;
+            // The assistant's owner is the recipient, as everywhere else in this role. Its name is
+            // read at the same time so the copy can address the right assistant by the name the user
+            // gave it rather than by the role's generic label.
+            const [owner] = await db
+                .select({ userId: aiAssistants.userId, name: aiAssistants.name })
+                .from(aiAssistants)
+                .where(eq(aiAssistants.id, row.aiAssistantId))
+                .limit(1);
+            if (!owner?.userId) continue;
+
+            await createNotification(db, 'leads_expiring_soon', {
+                userId: owner.userId,
+                context: {
+                    assistant: { name: owner.name || 'Your Lead Generator' },
+                    lead: {
+                        // Resolved noun phrases: the merge engine has no plural rules, by convention.
+                        count: row.n === 1 ? '1 lead' : `${row.n} leads`,
+                        days: LEAD_RETENTION_WARN_DAYS === 1 ? 'a day' : `${LEAD_RETENTION_WARN_DAYS} days`,
+                    },
+                },
+                // assistantId is what the per-assistant preference override keys on — see the note
+                // beside this type in src/utils/notification-prefs.ts.
+                metadata: { assistantId: row.aiAssistantId, expiringCount: row.n },
+            });
+            warned += 1;
+        }
+    } catch (err) {
+        console.error('[lead-retention] expiry warning failed (sweep continues):', err);
+    }
+    return warned;
+}
+
+/**
+ * The sweep itself, exported so the staging trigger can run it over HTTP.
+ *
+ * ⚠️ Netlify fires scheduled functions on the PRODUCTION deploy only, so before this was extractable
+ * the retention sweep had never run anywhere but prod — its first automated execution would have
+ * been against every tenant's pipeline at once. Same reason drainDiscoveryJobs and
+ * ingestAccountMemory are exported from their workers. See run-lead-sweeps.ts.
+ */
+export async function sweepLeadRetention(): Promise<{ moved: number; warned: number; byReason: Record<string, number> }> {
     const db = getDb();
     const now = new Date();
     const cutoff = new Date(now.getTime() - LEAD_RETENTION_DAYS * 24 * 60 * 60 * 1000);
 
+    // Before the move, and unconditionally — see the note on warnBeforeSweep.
+    const warned = await warnBeforeSweep(db, now);
+
     const expired = await collect(db, cutoff);
     if (!expired.length) {
-        console.log('[lead-retention] nothing past its window');
-        return { statusCode: 200, body: JSON.stringify({ moved: 0 }) };
+        console.log(`[lead-retention] nothing past its window (warned ${warned} assistant(s) about leads expiring soon)`);
+        return { moved: 0, warned, byReason: {} };
     }
 
     // Group by reason so the update runs once per reason rather than once per lead. Resolving the
@@ -190,6 +274,11 @@ export default withLambda(async () => {
         },
     });
 
-    console.log(`[lead-retention] moved ${expired.length} lead(s) to Deleted`, perReason);
-    return { statusCode: 200, body: JSON.stringify({ moved: expired.length, byReason: perReason }) };
+    console.log(`[lead-retention] moved ${expired.length} lead(s) to Deleted (warned ${warned} assistant(s))`, perReason);
+    return { moved: expired.length, warned, byReason: perReason };
+}
+
+export default withLambda(async () => {
+    const result = await sweepLeadRetention();
+    return { statusCode: 200, body: JSON.stringify(result) };
 });

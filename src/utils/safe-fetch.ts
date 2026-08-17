@@ -199,7 +199,7 @@ interface HopResult {
 function requestOnce(
     url: URL,
     addresses: Array<{ address: string; family: number }>,
-    opts: { maxBytes: number; deadline: number },
+    opts: { maxBytes: number; deadline: number; userAgent: string },
 ): Promise<HopResult> {
     return new Promise((resolve, reject) => {
         const lookup: LookupFunction = (_hostname, _options, callback) => {
@@ -229,7 +229,13 @@ function requestOnce(
                 headers: {
                     // Honest identification — a scraper that lies about who it is is one we
                     // shouldn't be running on a customer's behalf.
-                    'User-Agent': 'Be More Swan Inspo Bot (+https://bemoreswan.com)',
+                    //
+                    // ⚠️ Per-caller, because "honest" also means SPECIFIC. Every caller of this helper
+                    // used to introduce itself as the Inspo Bot, including lead enrichment reading a
+                    // prospect's contact page — so a site owner who looked us up in their logs was
+                    // told the wrong thing about why we were there, and had no way to distinguish the
+                    // two behaviours if they wanted to allow one and block the other.
+                    'User-Agent': opts.userAgent,
                     'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8',
                     // Identity encoding keeps the byte cap meaningful: a compressed body could
                     // sit under the cap on the wire and explode into a zip bomb once decoded.
@@ -288,6 +294,19 @@ function requestOnce(
     });
 }
 
+/**
+ * The identities this crawler may present, one per behaviour.
+ *
+ * Each names what we are doing and points at a page a site owner can read, which is the whole
+ * contract a well-behaved crawler offers: you can tell who we are, why we came, and how to stop us.
+ */
+export const USER_AGENTS = {
+    /** Reading a URL a USER pasted into the product (Inspo, brand kit, blog import). */
+    inspo: 'Be More Swan Inspo Bot (+https://bemoreswan.com)',
+    /** Lead enrichment: reading a prospect's own site for a published contact address. */
+    leadDiscovery: 'BeMoreSwan-LeadDiscovery/1.0 (+https://bemoreswan.com)',
+} as const;
+
 export interface SafeFetchResult {
     finalUrl: string;
     contentType: string;
@@ -300,11 +319,20 @@ export interface SafeFetchResult {
  */
 export async function safeFetchText(
     rawUrl: string,
-    opts: { maxBytes?: number; timeoutMs?: number; maxRedirects?: number } = {},
+    opts: {
+        maxBytes?: number; timeoutMs?: number; maxRedirects?: number;
+        /**
+         * How this fetch introduces itself. Defaults to the Inspo Bot for the callers that were
+         * here first; every new caller should pass its own from USER_AGENTS below rather than
+         * inheriting a name that describes someone else's job.
+         */
+        userAgent?: string;
+    } = {},
 ): Promise<SafeFetchResult> {
     const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
     const maxRedirects = opts.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
     const deadline = Date.now() + (opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    const userAgent = opts.userAgent ?? USER_AGENTS.inspo;
 
     let url = parseAndValidateUrl(rawUrl);
 
@@ -312,7 +340,7 @@ export async function safeFetchText(
         // Re-validated on EVERY hop — a public URL redirecting to 169.254.169.254 is the
         // textbook bypass, and only checking hop 0 would walk straight into it.
         const addresses = await resolveToPublicAddresses(url.hostname);
-        const res = await requestOnce(url, addresses, { maxBytes, deadline });
+        const res = await requestOnce(url, addresses, { maxBytes, deadline, userAgent });
 
         if (res.location) {
             let next: URL;

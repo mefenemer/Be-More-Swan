@@ -7,6 +7,7 @@ import { createNotification, createNotifications } from '../../src/utils/notify'
 import { sendEmail, buildAnnualRenewalEmail, buildDunningEmail } from '../../src/utils/email';
 import { resolveActionNotifications, PAYMENT_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { recordCardFingerprint } from '../../src/utils/billing-fingerprint';
+import { sendNewSubscriberAlert } from '../../src/utils/founder-alerts';
 import { grantXCredits } from '../../src/utils/ai-credits';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -232,6 +233,23 @@ export default withLambda(async (event) => {
             console.warn('[stripe-webhook] checkout.session referral token grant failed (non-blocking):', refErr);
         }
 
+        // ── Founder alert — a new subscriber just paid ────────────────
+        // Last thing before the 200: it never throws, but keeping it after the
+        // activation work means a slow Resend call can't delay the plan record.
+        await sendNewSubscriberAlert({
+            db,
+            userId:               userIdInt,
+            organisationId:       orgIdInt,
+            planName,
+            masterPlanId:         masterPlanIdInt,
+            amountPence,
+            currency:             session.currency || 'gbp',
+            billingCycle,
+            stripeCustomerId,
+            stripeSubscriptionId,
+            source:               'checkout.session.completed',
+        });
+
         return { statusCode: 200, body: JSON.stringify({ received: true, activated: true }) };
     }
 
@@ -403,6 +421,21 @@ export default withLambda(async (event) => {
         } catch (refErr) {
             console.warn('[stripe-webhook] Referral token grant failed (non-blocking):', refErr);
         }
+
+        // ── Founder alert — a new subscriber just paid ────────────────
+        await sendNewSubscriberAlert({
+            db,
+            userId:               userIdInt,
+            organisationId:       orgIdInt || null,
+            planName,
+            masterPlanId:         masterPlanIdInt,
+            amountPence:          pi.amount || 0,
+            currency:             pi.currency || 'gbp',
+            billingCycle,
+            stripeCustomerId,
+            stripeSubscriptionId: createdStripeSubscriptionId,
+            source:               'payment_intent.succeeded',
+        });
     }
 
     // ── invoice.upcoming — renewal due in ~3 days ─────────────────

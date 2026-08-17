@@ -39,7 +39,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants, assistantRecords, discoveredLeads, leadRejectFeedback, masterAssistants, organisations, revenueEvents } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
-import { createDiscoveryRun } from '../../src/utils/discovery';
+import { activeCampaignCapacity, campaignCapacityMessage, createDiscoveryRun } from '../../src/utils/discovery';
 import { triggerDiscoveryDrain } from '../../src/utils/trigger-drain';
 import { isSearchConfigured } from '../../src/lib/discovery-search';
 import { sendGmailMessage } from '../../src/utils/gmail';
@@ -1237,6 +1237,11 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
             }
             if (!subject) subject = `Quick note for ${rec.title}`;
 
+            // Whether a follow-up cadence was started by this send. Declared out here because the
+            // enrolment happens inside the post-send bookkeeping block below but is reported in the
+            // response — see the note at the enrolInSequence call.
+            let enrolmentId: number | null = null;
+
             // Mint the thread + its inbound alias BEFORE sending, so the Reply-To we advertise is
             // one we can actually resolve. If the thread write fails we send without a Reply-To
             // rather than not sending — losing reply tracking is recoverable, a lead who never
@@ -1303,10 +1308,15 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
 
                 // Enrol in the follow-up cadence (Phase 2b). A consequence of having ACTUALLY
                 // emailed someone, never a separate UI action — so it cannot run for a lead that
-                // was never contacted, and the approval click that authorised this send is the
-                // consent for the cadence that follows. Best-effort: an enrolment that fails to
-                // write means no follow-ups, not a failed send.
-                await enrolInSequence(db, {
+                // was never contacted. Best-effort: an enrolment that fails to write means no
+                // follow-ups, not a failed send.
+                //
+                // ⚠️ The approval click is no longer treated as blanket consent for the sequence:
+                // enrolInSequence now returns null when the assistant's `outreachFollowUps` setup
+                // answer is 'none'. The result is REPORTED BACK so the toast can say which of the
+                // two things just happened — one email, or the first of up to four. A user told
+                // "chase reminder set" while three more emails were queued had no way to know.
+                enrolmentId = await enrolInSequence(db, {
                     organisationId: orgId,
                     aiAssistantId: assistant.id,
                     leadThreadId: thread.id,
@@ -1361,7 +1371,49 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
                 },
             });
 
-            return json(200, { sent: true, to: recipient, chaseDate: chase.toISOString() });
+            // `followUps` is what the toast reads. Three honest states, not two: 'started' (a cadence
+            // is now running), 'none' (this assistant is set to one email only) and — when the
+            // enrolment write itself failed — also 'none', because from the user's point of view no
+            // follow-ups are coming and that is the fact that matters. The failure is already logged
+            // by the helper.
+            // ⚠️ Kept on ONE line: tests/lead-outreach-lifecycle.test.ts anchors on the literal
+            // `return json(200, { sent: true` to find this branch, and a reformat that splits it
+            // silently empties the slice the assertions read (a stale landmark returns nothing rather
+            // than failing loudly).
+            return json(200, { sent: true, to: recipient, chaseDate: chase.toISOString(), followUps: enrolmentId ? 'started' : 'none' });
+        }
+
+        // ── Can this assistant actually send anything? (the pre-flight) ──────────
+        //
+        // Every gate in `send_outreach` is enforced server-side and reported honestly — but only ONCE
+        // THE USER HAS PRESSED APPROVE. Two of them are properties of the workspace rather than of the
+        // lead, so they fail identically on the first lead and on the hundredth:
+        //
+        //   • no postal address → a HARD block on every send (CAN-SPAM/CASL). Measured on production
+        //     the day this was written: zero organisations had one, so the first outreach email any
+        //     tenant tried to send was guaranteed to fail.
+        //   • no connected mailbox → the draft is handed back to send by hand, which is a legitimate
+        //     setup but not one a user should discover by pressing a button labelled "Approve & send".
+        //
+        // So the Outreach tab asks first. Deliberately a READ with no side effects, and deliberately
+        // reusing `isUsablePostalAddress` rather than testing for emptiness — the client cannot import
+        // TypeScript, and a browser-side "is it filled in?" check would pass on "UK" while the server
+        // blocked the send. One judge.
+        if (action === 'outreach_readiness') {
+            const [orgRow] = await db
+                .select({ postalAddress: organisations.outreachPostalAddress })
+                .from(organisations)
+                .where(eq(organisations.id, orgId))
+                .limit(1);
+
+            const provider = str(onboarding.outreachEmailProvider, 40);
+            return json(200, {
+                postalAddress: isUsablePostalAddress(orgRow?.postalAddress),
+                provider: provider === 'google' || provider === 'microsoft' ? provider : 'none',
+                // Reported so the tab can state what approving will actually set off, from the same
+                // answer enrolInSequence reads rather than from a second guess about the default.
+                followUps: String(onboarding.outreachFollowUps ?? '') === 'none' ? 'none' : 'automatic',
+            });
         }
 
         // ── Record which inbox this assistant sends outreach from ────────────────
@@ -1470,6 +1522,21 @@ Return STRICT JSON only (no markdown), an array of exactly 3 objects:
             const parts = [d.title, d.demographic, d.industrySector, d.companySizeBand, d.rationale]
                 .map((v) => (typeof v === 'string' ? v.trim() : '')).filter(Boolean);
             const ideaText = parts.join(' — ') || String(idea.title);
+
+            // The fourth door into an active search (the other three are in discovery-campaigns.ts),
+            // and the only one a MODEL can push on the user's behalf — approving an idea starts a real
+            // run. Same per-org ceiling. Reported as a 200 with `runStarted: false` rather than an
+            // error: the idea approval itself is a legitimate act and the status line below has to
+            // stay truthful about what did and did not happen.
+            const capacity = await activeCampaignCapacity(db, orgId);
+            if (!capacity.ok) {
+                return json(200, {
+                    ideaId: idea.id,
+                    runStarted: false,
+                    reason: 'campaign_limit',
+                    message: campaignCapacityMessage(capacity.limit),
+                });
+            }
 
             const { campaignId, jobId } = await createDiscoveryRun({
                 db, organisationId: orgId, userId, aiAssistantId: assistant.id,

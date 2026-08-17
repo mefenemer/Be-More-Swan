@@ -145,17 +145,28 @@ function onboardingOf(raw: unknown): Record<string, unknown> {
     return {};
 }
 
-export default withLambda(async () => {
+/**
+ * The sweep itself, exported so the staging trigger can run it over HTTP (run-lead-sweeps.ts).
+ *
+ * ⚠️ Netlify fires scheduled functions on the PRODUCTION deploy only, so until this was extractable
+ * the deep-enrichment sweep had never run outside prod — and it is the one job in this role that
+ * spends money per lead with nobody watching. Being able to exercise it against staging first is the
+ * point. Same shape as drainDiscoveryJobs / ingestAccountMemory.
+ *
+ * Returns a `skipped` reason rather than throwing when either switch is off: the two env gates
+ * (LEAD_ENRICH_SWEEP_ENABLED, a configured search provider) are normal states, not failures.
+ */
+export async function sweepLeadEnrichment(): Promise<Record<string, unknown>> {
     if (!ENABLED) {
         console.log('[lead-enrich-sweep] disabled (LEAD_ENRICH_SWEEP_ENABLED is not "true")');
-        return { statusCode: 200, body: JSON.stringify({ skipped: 'disabled' }) };
+        return { skipped: 'disabled' };
     }
     // A run with no search provider would still make a model call per lead over an empty evidence
     // set — paying to be told nothing changed. gatherLeadIntel would return only the site
     // fingerprint, which on its own is not grounds for re-rating anyone.
     if (!isSearchConfigured()) {
         console.log('[lead-enrich-sweep] no search provider configured — nothing to gather');
-        return { statusCode: 200, body: JSON.stringify({ skipped: 'no_search_provider' }) };
+        return { skipped: 'no_search_provider' };
     }
 
     const db = getDb();
@@ -165,7 +176,7 @@ export default withLambda(async () => {
     const candidates = await collectCandidates(db, staleBefore);
     if (!candidates.length) {
         console.log('[lead-enrich-sweep] nothing stale enough to re-read');
-        return { statusCode: 200, body: JSON.stringify({ enriched: 0 }) };
+        return { enriched: 0 };
     }
 
     let ran = 0;
@@ -236,5 +247,10 @@ export default withLambda(async () => {
     });
 
     console.log(`[lead-enrich-sweep] re-read ${ran} lead(s), ${changed} rating(s) changed, £${costGbp.toFixed(3)}`);
-    return { statusCode: 200, body: JSON.stringify({ enriched: ran, ratingsChanged: changed, costGbp }) };
+    return { enriched: ran, ratingsChanged: changed, costGbp };
+}
+
+export default withLambda(async () => {
+    const result = await sweepLeadEnrichment();
+    return { statusCode: 200, body: JSON.stringify(result) };
 });

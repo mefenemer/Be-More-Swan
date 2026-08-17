@@ -95,6 +95,16 @@
     rowNotice: {},
 
     showDiff: {},        // messageId → bool, for "show changes vs template"
+    // threadId → the reply draft being typed, so a repaint (a note saved on the same row, a
+    // background refresh) cannot discard half-written text. Kept out of the DOM for the same
+    // reason state.view is: paintRows() rewrites every row.
+    replyDraft: {},
+    replySending: {},    // threadId → true while a reply is in flight
+    replyError: {},      // threadId → why the last reply did not go (the draft is kept)
+    replyNotice: {},     // threadId → "Sent to …", cleared on the next attempt
+    // Set from the reply notification's deep link (window._assistantDetailFocusThreadId), consumed
+    // once by paintRows so a later repaint cannot re-scroll the page.
+    focusThreadId: null,
     loading: false,
     error: null,
     rendered: false,
@@ -587,7 +597,7 @@
     if (!e) {
       return `<div class="p-4 border-b border-gray-100 bg-gray-50">
         <p class="text-xs text-gray-600"><span class="font-bold">No follow-ups on this one.</span>
-          The opening email went out, but no chase sequence was started — so nothing further will be sent unless you send it yourself.</p>
+          The opening email went out, but no chase sequence was started — so nothing further goes out on its own. Write the next message yourself below.</p>
       </div>`;
     }
 
@@ -619,7 +629,7 @@
       </p>
       ${e.lastError ? `<p class="text-xs text-gray-500 mt-1">Last error: ${esc(e.lastError)}</p>` : ''}
       <p class="text-[11px] ${good ? 'text-emerald-700' : 'text-amber-700'} mt-1">
-        Nothing further will be sent automatically. Anything more is yours to send, and worth writing down here as a note.</p>
+        Nothing further will be sent automatically — from here the conversation is yours. Reply below and it goes from your own mailbox, into this thread.</p>
     </div>`;
   }
 
@@ -697,7 +707,60 @@
         : `<div class="p-6 text-center">
              <p class="text-sm font-semibold text-gray-900">Nothing recorded on this conversation</p>
              <p class="text-xs text-gray-500 mt-1">The thread exists but no message was written to it &mdash; check the function logs for lead-threads warnings.</p>
-           </div>`}`;
+           </div>`}
+      ${composer(t, loaded)}`;
+  }
+
+  /**
+   * Write and send a reply, in the thread.
+   *
+   * ── Why this is here at all ────────────────────────────────────────────────
+   * Until this shipped, the warmest lead in the pipeline was the one thing the product could not act
+   * on: a prospect's reply could be read here and answered only from the user's own inbox, outside
+   * the thread — so the transcript ended at "they replied", the next chaser was drafted with no idea
+   * what the human had already said, and the tab's own copy had to tell people to go elsewhere.
+   *
+   * ⚠️ Deliberately NOT a drafting surface. There is no "write it for me" button: the whole reason a
+   * reply needs a human is that the prospect asked something specific, and a model answer to a real
+   * question from a real stranger is the highest-risk message this system could send. The assistant
+   * writes cold openers and chasers, where the content is ours; a reply is a conversation.
+   *
+   * The draft lives in state.replyDraft, not in the DOM — paintRows() rewrites every row on any
+   * repaint (a note saved, a nudge sent, the list refreshed), and half-typed text must survive that.
+   */
+  function composer(t, loaded) {
+    const sending = !!state.replySending[t.id];
+    const draft = state.replyDraft[t.id] || '';
+    const to = loaded.thread && loaded.thread.contactEmail;
+
+    // No address, nothing to reply to. Says which of the two it is rather than showing a box whose
+    // Send can only fail.
+    if (!to) {
+      return `<div class="p-4 border-t border-gray-100 bg-gray-50">
+        <p class="text-xs text-gray-500">No email address is recorded on this conversation, so there is nothing to reply to.</p>
+      </div>`;
+    }
+
+    const notice = state.replyNotice && state.replyNotice[t.id];
+    const err = state.replyError && state.replyError[t.id];
+
+    return `<div class="p-4 border-t border-gray-100 bg-gray-50">
+      <div class="flex items-baseline justify-between gap-3 flex-wrap">
+        <p class="text-xs font-bold text-gray-700">Reply to ${esc(to)}</p>
+        <p class="text-[11px] text-gray-400">Sent from your connected mailbox. Their answer comes back here.</p>
+      </div>
+      <textarea data-lt-reply="${t.id}" rows="4" maxlength="8000" ${sending ? 'disabled' : ''}
+        placeholder="Write your reply&hellip;"
+        class="mt-2 w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 outline-none transition disabled:opacity-60">${esc(draft)}</textarea>
+      <div class="flex items-center gap-2 mt-2 flex-wrap">
+        <button type="button" data-lt-send-reply="${t.id}" ${sending || !draft.trim() ? 'disabled' : ''}
+          class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          ${sending ? 'Sending&hellip;' : 'Send reply'}</button>
+        <span class="text-[11px] text-gray-400">Your opt-out footer and postal address are added automatically.</span>
+      </div>
+      ${err ? `<p class="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">${esc(err)}</p>` : ''}
+      ${notice ? `<p class="mt-2 text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">${esc(notice)}</p>` : ''}
+    </div>`;
   }
 
   // ── Controls ───────────────────────────────────────────────────────────────
@@ -770,7 +833,8 @@
       <div class="mb-4">
         <p class="text-sm text-gray-600">
           Every prospect your assistant has emailed, and what happened next. Chasers are written and sent from your own connected mailbox
-          and stop the moment someone replies &mdash; open a conversation to send the next one early, stop them, add a note, or record how the deal ended.
+          and stop the moment someone replies &mdash; open a conversation to reply in your own words, send the next chaser early, stop them,
+          add a note, or record how the deal ended.
         </p>
       </div>
 
@@ -892,6 +956,17 @@
 
         tbody.appendChild(tr);
         tbody.appendChild(detailTr);
+
+        // Deep link from the "a prospect replied" notification (notifications.js sets the global).
+        // Consumed once — a repaint after a note or a nudge must not yank the page back here, and the
+        // row stays open on its own from state.open after the first pass.
+        if (state.focusThreadId === t.id) {
+          state.focusThreadId = null;
+          if (!wasOpen) toggleRow(t, tr, detailTr, td);
+          // After the row's own paint, or the browser scrolls to a collapsed row and the panel
+          // opens below the fold.
+          setTimeout(() => tr.scrollIntoView({ block: 'center', behavior: 'smooth' }), 60);
+        }
       }
     }
 
@@ -1030,6 +1105,26 @@
       });
     });
 
+    // ── Reply composer ──────────────────────────────────────────────────────
+    // `input` rather than `change`: the Send button is disabled while the box is empty, so it has to
+    // enable as the first character is typed, not when focus leaves. Toggled directly rather than by
+    // repainting — a repaint per keystroke would take the caret with it.
+    const replyBox = td.querySelector('[data-lt-reply]');
+    if (replyBox) {
+      replyBox.addEventListener('input', (e) => {
+        e.stopPropagation();
+        state.replyDraft[t.id] = replyBox.value;
+        const send = td.querySelector('[data-lt-send-reply]');
+        if (send) send.disabled = !replyBox.value.trim() || !!state.replySending[t.id];
+      });
+      // Cmd/Ctrl+Enter sends. A plain Enter must stay a newline — this is a paragraph of prose to a
+      // stranger, and a send-on-Enter box would fire off half-written sentences.
+      replyBox.addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); sendReply(t); }
+      });
+    }
+    td.querySelector('[data-lt-send-reply]')?.addEventListener('click', () => sendReply(t));
+
     td.querySelector('[data-lt-nudge]')?.addEventListener('click', () => runCadenceAction(t, 'nudge'));
     td.querySelector('[data-lt-stop]')?.addEventListener('click', () => runCadenceAction(t, 'stop_follow_ups'));
   }
@@ -1071,6 +1166,51 @@
       state.rowError[t.id] = err.message || 'That did not work.';
     } finally {
       delete state.busy[t.id];
+      repaintDetail(t);
+    }
+  }
+
+  /**
+   * Send a written reply to the prospect.
+   *
+   * ⚠️ Reports the SERVER's outcome, exactly like runCadenceAction above. `reply` answers 200 with
+   * `sent:false` and a reason for every legitimate non-send — no mailbox connected, the address has
+   * opted out, no postal address on file, the OAuth token needs reauthorising — and each of those is
+   * something the user can act on. A composer that cleared the box and said "Sent" on all of them
+   * would lose the text AND the reason.
+   *
+   * The draft is kept on failure and cleared only on a confirmed send.
+   */
+  async function sendReply(t) {
+    const draft = (state.replyDraft[t.id] || '').trim();
+    if (!draft || state.replySending[t.id]) return;
+
+    state.replySending[t.id] = true;
+    state.replyError = state.replyError || {};
+    state.replyNotice = state.replyNotice || {};
+    delete state.replyError[t.id];
+    delete state.replyNotice[t.id];
+    repaintDetail(t);
+
+    try {
+      const data = await call('reply', { threadId: t.id, replyBody: draft });
+      if (data.sent) {
+        delete state.replyDraft[t.id];
+        state.replyNotice[t.id] = data.message || 'Reply sent.';
+        // The sent message exists only in the database — refetch this one conversation so it appears
+        // in the transcript above the box the user just typed into.
+        try {
+          const fresh = await call('get', { threadId: t.id });
+          state.open[t.id] = { thread: fresh.thread, messages: fresh.messages || [], enrolment: fresh.enrolment || null };
+        } catch { /* the notice is still true; the message appears on the next open */ }
+      } else {
+        // Non-send with a reason. Keep the draft — the user's words are the expensive part.
+        state.replyError[t.id] = data.message || 'Nothing was sent.';
+      }
+    } catch (err) {
+      state.replyError[t.id] = err.message || 'Could not send that reply.';
+    } finally {
+      delete state.replySending[t.id];
       repaintDetail(t);
     }
   }
@@ -1222,6 +1362,16 @@
       state.rowError = {};
       state.rowNotice = {};
       state.busy = {};
+      state.replyDraft = {};
+      state.replySending = {};
+      state.replyError = {};
+      state.replyNotice = {};
+      // Read here rather than in activate(): init() runs during _applyDashboardRegistry and starts
+      // the fetch, so the id has to be in state before the rows it targets are painted. Cleared off
+      // the window immediately — a stale global would re-open this thread on the next assistant the
+      // user visits.
+      state.focusThreadId = Number(window._assistantDetailFocusThreadId) || null;
+      window._assistantDetailFocusThreadId = null;
       state.view = { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null, page: 1, collapsed: new Set() };
       if (cfg && cfg.label) state.tabLabel = cfg.label;
       // ⚠️ This DOES prefetch, and the comment that used to sit below said the opposite for a good

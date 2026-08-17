@@ -15,7 +15,8 @@ import { HandlerEvent } from '@netlify/functions';
 import Busboy from 'busboy';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { leads, leadReplies, leadOptOuts, leadThreads } from '../../db/schema';
+import { aiAssistants, assistantRecords, leads, leadReplies, leadOptOuts, leadThreads } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { detectOptOut } from '../../src/config/opt-out';
 import { lookupContact, promoteContactType } from '../../src/utils/contact-type';
 import { parseReplyToken, recipientFromParsePayload } from '../../src/utils/reply-address';
@@ -230,6 +231,69 @@ export default withLambda(async (event: HandlerEvent) => {
                 icpSnapshot,
                 payload: { threadId: thread.id, messageId, flaggedSpam, sequencesHalted: haltedCount },
             });
+
+            // ── Tell the tenant ──────────────────────────────────────────────
+            // Everything above is bookkeeping the user cannot see. Until this existed the reply was
+            // recorded perfectly and reported to nobody — the whole loop ended in a 200 and a log
+            // line, and a prospect who wrote back on Monday could sit unanswered indefinitely.
+            //
+            // Deliberately AFTER the ledger write and inside its own try: a notification failure must
+            // not lose the reply, and the reply is already durable by this point.
+            //
+            // ⚠️ NOT sent for an opt-out. "Unsubscribe me" is a reply, but treating it as one would
+            // push a lock-screen alert inviting the user to go and answer someone who just asked to
+            // be left alone. The thread is closed above; the Conversations tab states it.
+            if (!optOut.optedOut) {
+                try {
+                    // Two lookups, one purpose: who to tell, and what to call the company. The
+                    // assistant's owner is the recipient other assistant-scoped notifications use;
+                    // the lead record's title is the only human-readable name for the prospect.
+                    const [owner] = await db
+                        .select({ userId: aiAssistants.userId, name: aiAssistants.name })
+                        .from(aiAssistants)
+                        .where(eq(aiAssistants.id, thread.aiAssistantId))
+                        .limit(1);
+
+                    let company = '';
+                    if (thread.assistantRecordId) {
+                        const [rec] = await db
+                            .select({ title: assistantRecords.title })
+                            .from(assistantRecords)
+                            .where(eq(assistantRecords.id, thread.assistantRecordId))
+                            .limit(1);
+                        company = (rec?.title || '').trim();
+                    }
+                    // Never the address itself — that is third-party personal data, and a
+                    // notification is the least contained surface in the product (bell, email
+                    // fallback, lock screen). The domain is the compromise: enough to recognise
+                    // the company, no named individual.
+                    if (!company) {
+                        const domain = senderEmail.split('@')[1] || '';
+                        company = domain ? `Someone at ${domain}` : 'A prospect';
+                    }
+
+                    if (owner?.userId) {
+                        await createNotification(db, 'lead_reply_received', {
+                            userId: owner.userId,
+                            context: {
+                                assistant: { name: owner.name || 'your Lead Generator' },
+                                lead: { company },
+                            },
+                            // assistantId is load-bearing, not decoration: the BEFORE INSERT trigger
+                            // stamps it onto notifications.assistant_id, which is what the
+                            // per-assistant preference override keys on. Drop it and this alert
+                            // becomes permanently on with no toggle anywhere.
+                            metadata: {
+                                assistantId: thread.aiAssistantId,
+                                threadId: thread.id,
+                                recordId: thread.assistantRecordId,
+                            },
+                        });
+                    }
+                } catch (err) {
+                    console.error('[inbound-email] reply recorded but notification failed:', err);
+                }
+            }
 
             console.log('[inbound-email] recorded lead reply', JSON.stringify({ threadId: thread.id, messageId, haltedCount }));
             return { statusCode: 200, body: 'Lead reply recorded.' };

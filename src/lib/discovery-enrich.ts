@@ -16,7 +16,8 @@
 // these domains come from search results, i.e. attacker-influenceable input.
 
 import * as cheerio from 'cheerio';
-import { safeFetchText } from '../utils/safe-fetch';
+import { safeFetchText, USER_AGENTS } from '../utils/safe-fetch';
+import { robotsAllows } from './robots';
 import { roleOrPersonal, type EmailKind } from '../config/lead-email-kind';
 
 /** Where a contact address came from, and how much trust it earns. Re-exported for existing callers. */
@@ -317,9 +318,27 @@ export async function enrichLeadContact(domain: string | null): Promise<Enrichme
         if (remaining <= 0) break;
 
         const url = `https://${host}${path}`;
+
+        // ── The robots.txt courtesy check ────────────────────────────────────
+        // We are reading a stranger's site on our own schedule; robots.txt is the one channel they
+        // have for saying "not this", and nothing here read it. Cached per host for the process, so
+        // this costs ONE extra request per prospect rather than one per path — and it fails OPEN, so a
+        // site with no robots.txt (the common case) or an unreachable one is unaffected. See
+        // src/lib/robots.ts for the subset of the standard implemented and why it biases to fetching.
+        if (!(await robotsAllows(host, path || '/'))) {
+            continue;
+        }
+
         let body: string;
         try {
-            ({ body } = await safeFetchText(url, { timeoutMs: Math.min(FETCH_TIMEOUT_MS, remaining), maxBytes: MAX_BYTES }));
+            ({ body } = await safeFetchText(url, {
+                timeoutMs: Math.min(FETCH_TIMEOUT_MS, remaining),
+                maxBytes: MAX_BYTES,
+                // Identify as the LEAD crawler, not as the Inspo Bot. This fetch is a different act
+                // from reading a link a user pasted in, and a site owner reading their logs deserves
+                // to be told which one we are doing.
+                userAgent: USER_AGENTS.leadDiscovery,
+            }));
         } catch {
             // Dead path, blocked host, timeout — try the next candidate.
             continue;

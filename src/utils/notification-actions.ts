@@ -114,6 +114,13 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     // types fall back to 'informational', which would file "your campaign needs a decision" under
     // Updates rather than Action required — the same mistake blog_draft_ready documents below.
     campaign_decision_pending: 'suggested_action',
+    // A prospect replied. suggested_action by the same test the state_change note below states: this
+    // is PARKED work that DECAYS — a warm reply loses value by the day, and nothing else in the
+    // product will answer it. It is not a completed run reporting what it found.
+    lead_reply_received: 'suggested_action',
+    // Leads that will leave the Outreach queue on the retention clock. LAPSING, by definition —
+    // the whole point of the notification is the deadline.
+    leads_expiring_soon: 'suggested_action',
     // state_change — completed / changed confirmations
     billing_renewed: 'state_change', billing_payment_received: 'state_change', payment_confirmation: 'state_change',
     plan_upgraded: 'state_change', downgrade_scheduled: 'state_change', downgrade_cancelled: 'state_change',

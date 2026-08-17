@@ -233,6 +233,25 @@ window.NotifKit = (function () {
                 window.routeToAssistantDetail?.(meta.assistantId);
             } };
         }
+        // A prospect replied. The reply lives on ONE screen — its assistant's Conversations tab —
+        // and no global page can show it, so without this the generic fallback below drops the user
+        // on the dashboard to go and find the warmest lead they have. Opens the thread directly
+        // where we know which one it was.
+        if (notif.type === 'lead_reply_received' && meta.assistantId) {
+            return { label: 'Read the reply', run: () => {
+                window._assistantDetailInitialTab = 'conversations';
+                if (meta.threadId) window._assistantDetailFocusThreadId = meta.threadId;
+                window.routeToAssistantDetail?.(meta.assistantId);
+            } };
+        }
+        // Leads about to lapse off the retention clock — the Outreach tab is where the decision is
+        // made, so send them there rather than to the Enrichment table they will end up in.
+        if (notif.type === 'leads_expiring_soon' && meta.assistantId) {
+            return { label: 'Review leads', run: () => {
+                window._assistantDetailInitialTab = 'review-queue';
+                window.routeToAssistantDetail?.(meta.assistantId);
+            } };
+        }
         if ((notif.type === 'post_draft_ready' || notif.type === 'ai_review') && meta.postId) {
             return { label: 'Review draft', run: () => window.loadView?.('review-queue', { postId: meta.postId }) };
         }

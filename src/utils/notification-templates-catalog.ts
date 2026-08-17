@@ -182,6 +182,51 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        // A PROSPECT wrote back (Phase 2a reply ingest, netlify/functions/inbound-email.ts).
+        //
+        // ⚠️ This is the one notification in the lead pipeline that is genuinely time-critical, and
+        // it shipped with nothing at all: the reply was recorded, the cadence halted and the ledger
+        // written, and the only way to find out was to happen to open the Conversations tab. A warm
+        // reply left unanswered for a week is the most expensive silence this product can produce,
+        // which is why it sits in `approvals` (push ON) rather than beside the run summaries.
+        //
+        // Names the company, never the prospect's address: the address is third-party personal data
+        // and a notification row is the least controlled place in the product to put it (it is
+        // rendered in the bell, emailed by the fallback, and pushed to a lock screen).
+        templateKey: 'lead_reply_received',
+        name: 'A prospect replied to outreach',
+        category: 'Assistants',
+        type: 'lead_reply_received',
+        title: '{{lead.company}} replied to your outreach',
+        message: 'A prospect has written back to {{assistant.name}}. Follow-up emails to them have stopped automatically — read the reply and answer it on the Conversations tab.',
+        variables: [
+            ASSISTANT_NAME,
+            // Falls back to the contact's domain, then to a plain "A prospect", at the call site —
+            // a thread whose lead record has been deleted still deserves a readable sentence.
+            v('lead.company', 'Company that replied', 'Harbour View Retreats'),
+        ],
+    },
+    {
+        // Leads about to fall out of the Outreach queue on the 30-day retention clock
+        // (netlify/functions/lead-retention-sweep.ts). ONE digest per assistant per run, never one
+        // per lead: a tenant back from a fortnight away would otherwise be handed forty rows.
+        //
+        // The warning exists because the sweep was silent in both directions — nothing before it
+        // moved a lead and nothing after. A user who had never opened the Enrichment tab's Deleted
+        // section had no way to learn that unreviewed leads expire at all.
+        templateKey: 'leads_expiring_soon',
+        name: 'Leads about to be retired',
+        category: 'Assistants',
+        type: 'leads_expiring_soon',
+        title: '{{lead.count}} waiting on your decision',
+        message: '{{assistant.name}} has {{lead.count}} that will be moved to the Deleted section in {{lead.days}} unless you approve, archive or act on them. Nothing is destroyed — but they leave your Outreach queue.',
+        variables: [
+            ASSISTANT_NAME,
+            v('lead.count', 'Leads expiring (noun phrase)', '7 leads'),
+            v('lead.days', 'Time remaining (noun phrase)', '3 days'),
+        ],
+    },
+    {
         templateKey: 'assistant_archived',
         name: 'Assistant archived',
         category: 'Assistants',

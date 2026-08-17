@@ -177,6 +177,19 @@ export const PREF_CATEGORIES: PrefCategory[] = [
             // createNotification call in netlify/functions/autonomous-strategy-agent.ts passes
             // assistantId for exactly this reason; don't drop it.
             'strategy_proposal_pending',
+            // A prospect replied to outreach (inbound-email.ts). Here rather than in
+            // `assistant_tasks` because this category is for work PARKED on the user's answer, and
+            // a reply is the clearest case of that in the product: the cadence has stopped, nothing
+            // else will respond, and the value decays by the day. It is also the reason this
+            // category's push default matters — of everything an assistant produces, this is the
+            // one thing worth a lock-screen buzz.
+            //
+            // ⚠️ Safe in a scope:'assistant' category only because the call site passes
+            // metadata.assistantId, which the BEFORE INSERT trigger stamps onto
+            // notifications.assistant_id — the key the per-assistant override reads. Without it the
+            // row resolves to the workspace-wide value, which has no UI, and becomes permanently
+            // ON. Same trap as strategy_proposal_pending above; don't drop it from that call.
+            'lead_reply_received',
         ],
     },
     {
@@ -207,6 +220,10 @@ export const PREF_CATEGORIES: PrefCategory[] = [
             // which has no UI, and would have become permanently ON — strictly worse than the
             // wrong bucket. Don't drop it from that call site.
             'search_signals_published',
+            // The retention warning digest (lead-retention-sweep.ts). A summary of what is about to
+            // lapse, one row per assistant per run — the same shape as the search summary above, and
+            // muted on push for the same reason: it is a weekly-ish nudge, not an interruption.
+            'leads_expiring_soon',
         ],
     },
     {

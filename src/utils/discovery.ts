@@ -6,9 +6,10 @@
 
 import { getDb } from '../../db/client';
 import { randomUUID } from 'crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { discoveryCampaigns, discoveryGuardrails, discoverySchedules, discoveryJobs, aiAssistants } from '../../db/schema';
 import { icpFromOnboarding } from './icp-snapshot';
+import { MAX_ACTIVE_CAMPAIGNS_PER_ORG } from '../config/discovery-limits';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -47,6 +48,54 @@ export interface CreateRunInput {
 
 /** `jobId` is null when nothing was enqueued — i.e. a draft, or any recurring cadence. */
 export interface CreateRunResult { campaignId: number; jobId: string | null; }
+
+/**
+ * Is there room for one more RUNNING search in this organisation?
+ *
+ * ── Why a per-org cap exists at all ──────────────────────────────────────────
+ * Every guardrail in this system is per campaign — 50 leads a run, £2 of search a run — so the
+ * actual ceiling on our spend was £2 × active searches × runs per day, and nothing capped the
+ * middle term. Twenty daily searches is a £40/day search bill on a plan that meters chat turns and
+ * not one search call. See src/config/discovery-limits.ts.
+ *
+ * Counts `status = 'active'` only. Drafts and paused searches spend nothing, and a tenant drafting
+ * fifteen ideas before starting three is the behaviour the draft state was built for.
+ *
+ * ⚠️ Fails OPEN on a read error. A transient database blip must not read as "you have too many
+ * searches" — the honest failure mode of a spend guard whose input is unavailable is to let the work
+ * through and stay noisy in the logs, not to tell a paying user they are over a limit we could not
+ * measure. Every per-run cost cap downstream is still in force.
+ */
+export async function activeCampaignCapacity(
+    db: Db,
+    organisationId: number,
+): Promise<{ ok: boolean; active: number; limit: number }> {
+    const limit = MAX_ACTIVE_CAMPAIGNS_PER_ORG;
+    try {
+        const [row] = await db
+            .select({ n: sql<number>`count(*)::int` })
+            .from(discoveryCampaigns)
+            .where(and(
+                eq(discoveryCampaigns.organisationId, organisationId),
+                eq(discoveryCampaigns.status, 'active'),
+            ));
+        const active = Number(row?.n ?? 0);
+        return { ok: active < limit, active, limit };
+    } catch (err) {
+        console.error('[discovery] active-campaign count failed; allowing the start', err);
+        return { ok: true, active: 0, limit };
+    }
+}
+
+/**
+ * The sentence shown when the cap is hit. One place, because three call sites raise it (create,
+ * approve_brief, run_now) plus the chat-side idea approval, and four differently-worded refusals for
+ * one rule is how a limit reads as a bug.
+ */
+export function campaignCapacityMessage(limit: number): string {
+    return `You already have ${limit} searches running, which is the most this workspace can run at once. `
+        + 'Pause one on the Searches tab to start another — paused and draft searches do not count.';
+}
 
 /**
  * Create a campaign + guardrails + schedule and (unless it is a draft) enqueue a run.

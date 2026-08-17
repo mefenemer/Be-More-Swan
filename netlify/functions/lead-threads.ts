@@ -14,11 +14,28 @@
 //        → { followUps: PendingFollowUp[] } — the chasers DUE in a window, for the Calendar tab
 //   POST { action: 'reschedule_follow_up', assistantId, threadId, nextSendAt }
 //        → { ok, enrolment }              — move the next chaser; the past is refused
+//   POST { action: 'reply', assistantId, threadId, body, subject? }
+//        → { sent, reason?, message }     — answer a prospect from the tenant's own mailbox
 //
 // ── Read-only ABOUT THE THREAD, deliberately ──────────────────────────────────
 // Everything that WRITES lead_threads / lead_messages has exactly one owner: src/utils/lead-threads.ts,
 // for the same reason recordEvent() is the only ledger writer. That has not changed, and this
 // function must not become a second writer of those tables — it projects what they recorded.
+// `reply` sends an email and then calls that owner's `recordOutboundMessage` to write the
+// transcript; it issues no INSERT of its own.
+//
+// ── Why `reply` exists ────────────────────────────────────────────────────────
+// Every other part of this loop was built: outreach goes out, replies come in, the cadence halts,
+// the outcome is recorded. The one thing missing was answering — the warmest lead in the pipeline
+// had to be replied to from the tenant's own inbox, outside the thread, and that answer was never
+// recorded. So the transcript ended at "they replied" and the next chase was drafted with no idea
+// what the human had already said.
+//
+// ⚠️ It is NOT a second outreach path. Cold outreach is gated by qualification, approval,
+// suppression, do-not-contact and the personal-inbox rule because WE chose the recipient. Here a
+// human is answering someone who wrote to them first — so the gates that apply are the ones about
+// the RECIPIENT's wishes (opt-out) and the law (postal address in a commercial email), not the ones
+// about whether this lead should have been contacted at all. Read the gate block for which is which.
 //
 // The two actions added above write `sequence_enrolments`, which is a DIFFERENT table with a
 // different owner (src/utils/outreach-sequences.ts), and they go through that owner's helpers
@@ -35,12 +52,23 @@
 import { and, desc, eq, gte, inArray, lt, lte, or, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
-    aiAssistants, assistantRecords, leadMessages, leadThreads, sequenceEnrolments, users,
+    aiAssistants, assistantRecords, leadMessages, leadThreads, organisations, sequenceEnrolments, users,
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { haltReasonLabel } from '../../src/config/outreach-sequences';
 import { haltEnrolment } from '../../src/utils/outreach-sequences';
 import { drainSequenceSends } from './process-sequence-sends';
+// The `reply` action's send path. Every one of these is the same helper the two existing send sites
+// use — a second copy of the footer, the alias or the suppression check is how the three drift apart.
+import { buildThreadReplyEnvelope, recordOutboundMessage } from '../../src/utils/lead-threads';
+import { isUsablePostalAddress } from '../../src/config/outreach-footer';
+import { checkSuppression } from '../../src/utils/suppression';
+import { recordEvent } from '../../src/utils/revenue-ledger';
+import { getBlueprintVersion } from '../../src/utils/blueprint-version';
+import { getIcpSnapshot } from '../../src/utils/icp-snapshot';
+import { sendGmailMessage } from '../../src/utils/gmail';
+import { sendOutlookMessage } from '../../src/utils/outlook';
+import { IntegrationError } from '../../src/utils/workspace-integrations';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 function json(statusCode: number, body: unknown) {
@@ -128,11 +156,13 @@ export default withLambda(async (event) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
-    const { organisationId: orgId } = ctx;
+    // userId is used by `reply` alone — lead_messages.edited_by records WHO wrote an answer, which is
+    // the only thing that distinguishes a human reply from an agent-drafted one in the transcript.
+    const { organisationId: orgId, userId } = ctx;
 
     let body: {
         action?: string; assistantId?: number; threadId?: number; state?: string; cursor?: string;
-        from?: string; to?: string; nextSendAt?: string;
+        from?: string; to?: string; nextSendAt?: string; replyBody?: string; subject?: string;
     };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
@@ -141,8 +171,10 @@ export default withLambda(async (event) => {
 
     // IDOR guard — the assistant instance must belong to the caller's org. Every query below is
     // additionally scoped by organisationId, so a thread id from another tenant reads as missing.
+    // `onboardingContext` is selected for the `reply` action alone: the mailbox a reply is sent from
+    // is the assistant's own setup answer (outreachEmailProvider), exactly as it is for the opener.
     const [assistant] = await db
-        .select({ id: aiAssistants.id, name: aiAssistants.name })
+        .select({ id: aiAssistants.id, name: aiAssistants.name, onboardingContext: aiAssistants.onboardingContext })
         .from(aiAssistants)
         .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId)))
         .limit(1);
@@ -705,6 +737,193 @@ export default withLambda(async (event) => {
                     nextSendAt: after.nextSendAt?.toISOString() ?? null,
                     lastError: after.lastError,
                 } : null,
+            });
+        }
+
+        // ── reply ─────────────────────────────────────────────────────────────
+        // Answer a prospect in their own thread, from the tenant's connected mailbox.
+        //
+        // ── Which gates apply, and which deliberately do not ──────────────────
+        // APPLIED, because they are about the recipient's wishes and the law:
+        //   • checkSuppression — covers lead_opt_outs (address grain, "stop emailing me") AND the
+        //     tenant's CRM suppression list. Someone who has asked to be left alone must not receive
+        //     a reply either, however warmly it is meant. Fails closed, like every other caller.
+        //   • the postal-address gate — this is still a commercial email, so CAN-SPAM/CASL still
+        //     want a physical address, and the footer that carries it also carries the opt-out link.
+        //
+        // NOT applied, deliberately:
+        //   • the do-not-contact verdict from qualification. That answers "should we have emailed
+        //     this company at all", and it is moot: they wrote to US. Blocking here would mean a
+        //     mis-scored prospect who replied could never be answered, which is worse than the
+        //     thing the gate protects against — and a genuine "never contact us" is an opt-out,
+        //     which IS enforced above.
+        //   • the personal-inbox confirmation. It exists because we harvested an address and chose
+        //     to write to a named stranger. Here the address is the one they emailed us from.
+        //
+        // Sending does NOT halt the cadence. A reply from the prospect already did that
+        // (recordInboundMessage flips the thread), and on a still-'open' thread a manual message is
+        // additive — "Stop follow-ups" is the control for stopping them, and it is right there.
+        if (action === 'reply') {
+            const threadId = Number(body.threadId);
+            if (!Number.isInteger(threadId) || threadId <= 0) {
+                return json(400, { error: 'A threadId is required.' });
+            }
+            const replyBody = typeof body.replyBody === 'string' ? body.replyBody.trim().slice(0, 8000) : '';
+            if (!replyBody) return json(400, { error: 'A reply cannot be empty.' });
+
+            // ⚠️ The thread's alias credential is deliberately NOT selected here — this file must not
+            // hold it (tests/lead-threads.test.ts enforces that, and the Reply-To alias plus the
+            // unsubscribe link derived from it are why). The envelope is built by the module that owns
+            // the table: buildThreadReplyEnvelope in src/utils/lead-threads.ts.
+            const [thread] = await db
+                .select({
+                    id: leadThreads.id,
+                    contactEmail: leadThreads.contactEmail,
+                    assistantRecordId: leadThreads.assistantRecordId,
+                    discoveredLeadId: leadThreads.discoveredLeadId,
+                })
+                .from(leadThreads)
+                .where(and(
+                    eq(leadThreads.id, threadId),
+                    eq(leadThreads.organisationId, orgId),
+                    eq(leadThreads.aiAssistantId, assistantId),
+                ))
+                .limit(1);
+            if (!thread) return json(404, { error: 'Conversation not found.' });
+
+            const recipient = (thread.contactEmail || '').trim();
+            if (!recipient) {
+                return json(200, {
+                    sent: false, reason: 'no_recipient',
+                    message: 'This conversation has no email address on it, so there is nothing to reply to.',
+                });
+            }
+
+            // The mailbox. Same onboarding answer the opener reads, and the same mapping —
+            // 'microsoft' is the stored answer, 'outlook' is the OAuth provider key.
+            const onboarding = (assistant.onboardingContext && typeof assistant.onboardingContext === 'object'
+                && !Array.isArray(assistant.onboardingContext))
+                ? assistant.onboardingContext as Record<string, unknown> : {};
+            const provider = typeof onboarding.outreachEmailProvider === 'string' ? onboarding.outreachEmailProvider : '';
+            if (provider !== 'google' && provider !== 'microsoft') {
+                // Not an error: plenty of tenants chose to send outreach themselves. Hand the text
+                // back so the answer is not lost, and say where it has to go.
+                return json(200, {
+                    sent: false, reason: 'no_provider', to: recipient,
+                    message: 'No mailbox is connected to this assistant, so nothing was sent. Copy your reply and send it from your own email — connect a mailbox in Connections to send from here.',
+                });
+            }
+
+            const suppression = await checkSuppression(db, orgId, recipient);
+            if (suppression.suppressed) {
+                return json(200, {
+                    sent: false,
+                    reason: suppression.unknown ? 'suppression_check_failed' : 'suppressed',
+                    to: recipient,
+                    message: suppression.unknown
+                        ? 'Nothing was sent: we could not check your suppression list just now. Try again in a moment.'
+                        : 'Nothing was sent: this address has asked not to be contacted, or is on your suppression list.',
+                });
+            }
+
+            const [orgRow] = await db
+                .select({ name: organisations.name, postalAddress: organisations.outreachPostalAddress })
+                .from(organisations)
+                .where(eq(organisations.id, orgId))
+                .limit(1);
+            if (!isUsablePostalAddress(orgRow?.postalAddress)) {
+                return json(200, {
+                    sent: false, reason: 'no_postal_address', to: recipient,
+                    message: 'Nothing was sent: add your business postal address in Business Information first — anti-spam law requires one in every outreach email.',
+                });
+            }
+
+            // Subject. Threading is what makes this land as part of the same conversation in the
+            // prospect's client, so it is derived from the last message rather than written fresh.
+            //
+            // ⚠️ Existing Re:/Fwd: prefixes are stripped before one is added. Left alone, a
+            // three-turn conversation reads "Re: Re: Re: Quick note for Harbour View" — and the
+            // opener's subject is already the weakest line in the thread ([[outreach-subject-four-seams]]).
+            const [lastMessage] = await db
+                .select({ subject: leadMessages.subject })
+                .from(leadMessages)
+                .where(and(eq(leadMessages.organisationId, orgId), eq(leadMessages.leadThreadId, threadId)))
+                .orderBy(desc(leadMessages.occurredAt), desc(leadMessages.id))
+                .limit(1);
+            const typedSubject = typeof body.subject === 'string' ? body.subject.trim().slice(0, 300) : '';
+            const base = (typedSubject || lastMessage?.subject || `Your enquiry`).replace(/^\s*((re|fwd?)\s*:\s*)+/i, '').trim();
+            const subject = typedSubject && /^\s*re\s*:/i.test(typedSubject) ? typedSubject : `Re: ${base}`;
+
+            // The finished envelope: recipient, threaded subject, footered wire copy, the Reply-To
+            // alias so their answer comes back into THIS thread rather than into the tenant's inbox
+            // where nothing would record it, and the one-click unsubscribe header.
+            const outgoing = await buildThreadReplyEnvelope(db, threadId, {
+                organisationId: orgId,
+                aiAssistantId: assistantId,
+                subject,
+                body: replyBody,
+                senderName: orgRow?.name ?? assistant.name ?? '',
+                postalAddress: orgRow?.postalAddress,
+            });
+            if (!outgoing) {
+                // The gates above already proved the thread and its address exist, so this is a real
+                // failure rather than a state — a database error inside the owner module, which logs it.
+                return json(502, { error: 'Could not prepare that reply — please try again.' });
+            }
+
+            try {
+                if (provider === 'microsoft') await sendOutlookMessage(db, orgId, outgoing);
+                else await sendGmailMessage(db, orgId, outgoing);
+            } catch (e) {
+                if (e instanceof IntegrationError) {
+                    return json(200, {
+                        sent: false, reason: 'not_connected', to: recipient,
+                        message: 'Nothing was sent: the mailbox connection needs reauthorising. Reconnect it in Connections, then send again.',
+                    });
+                }
+                throw e;
+            }
+
+            // Past here the email has gone. Bookkeeping only — none of it may surface as a failure.
+            //
+            // `generatedBody: null` on purpose: the transcript's `edited` flag means "a human changed
+            // the agent's draft", and there was no draft. `editedBy` still records the author, which
+            // is what makes "Sent by you" distinguishable from "Sent by your assistant" in the thread.
+            await recordOutboundMessage(db, threadId, {
+                organisationId: orgId,
+                fromEmail: null,
+                subject,
+                body: replyBody,
+                generatedBody: null,
+                editedBy: userId ?? null,
+            });
+
+            // ⚠️ `manual_reply_sent`, NOT `outreach_sent`. Reply rate is replies ÷ leads emailed, and
+            // "leads emailed" means leads WE chose to approach — counting a human's answer as
+            // outreach would let a tenant improve their own reply rate by replying, and would file a
+            // human's words in the Activity feed as something the assistant did.
+            // Both attribution keys are supplied, like every other emit site (plan §7.2): the ICP
+            // snapshot resolves through the lead's own campaign, so a human reply is segmented by the
+            // targeting that found the prospect rather than by today's onboarding answers.
+            // tests/icp-snapshot.test.ts scans for exactly this and fails a call site that omits either.
+            await recordEvent(db, 'manual_reply_sent', {
+                organisationId: orgId,
+                aiAssistantId: assistantId,
+                assistantRecordId: thread.assistantRecordId,
+                discoveredLeadId: thread.discoveredLeadId,
+                actor: 'user',
+                actorUserId: userId,
+                blueprintVersion: await getBlueprintVersion(db, assistantId),
+                icpSnapshot: await getIcpSnapshot(db, {
+                    discoveredLeadId: thread.discoveredLeadId,
+                    aiAssistantId: assistantId,
+                }),
+                payload: { threadId, provider, chars: replyBody.length },
+            });
+
+            return json(200, {
+                sent: true, to: recipient, subject,
+                message: `Sent to ${recipient}. Their answer will land back in this conversation.`,
             });
         }
 

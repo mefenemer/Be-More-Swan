@@ -101,6 +101,19 @@ jobs:
           # endpoint                min-interval(s)   curl-max-time(s)
           # Ordered most time-sensitive first: if anything goes long, the queue drainers have
           # already run. Intervals mirror the crons the ten previous workflows declared.
+          #
+          # ⚠️ NO COMMENTS INSIDE THE JOBS STRING BELOW. The `while read -r NAME INTERVAL MAXTIME`
+          # loop skips empty lines and nothing else, so a `#` line would be read as an endpoint name
+          # and curl'd as ${BASE}/# — a 404 counted as a failed endpoint on every tick. Notes go here.
+          #
+          # `run-lead-sweeps` (6h) is the Lead Generator's three nightly jobs behind one endpoint:
+          # retention + its expiry warning, deep enrichment, and the CRM suppression sync. It exists
+          # because NONE of the three had ever run outside production — Netlify fires native schedules
+          # on the prod deploy only and there was no wrapper here, so the sweep that writes to every
+          # stale lead in the estate had never been exercised anywhere it could be inspected first.
+          # 6h rather than daily: all three are no-ops when nothing is due, and a shorter interval
+          # means a change gets tested the same working day. 300s of curl budget because the
+          # enrichment sweep does real per-lead work when it is switched on.
           JOBS="
           run-content-jobs          300     120
           run-discovery-jobs        300     120
@@ -111,6 +124,7 @@ jobs:
           run-campaign-reconciler   3600    120
           run-follower-counts       14400   120
           run-insights-ingest       21600   120
+          run-lead-sweeps           21600   300
           run-campaign-agent        86400   300
           run-strategy-agent        604800  300
           "

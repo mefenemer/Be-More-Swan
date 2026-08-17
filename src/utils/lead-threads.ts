@@ -20,7 +20,8 @@
 import { and, desc, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { leadThreads, leadMessages } from '../../db/schema';
-import { mintReplyToken } from './reply-address';
+import { mintReplyToken, replyAddress } from './reply-address';
+import { appendOutreachFooter, buildOutreachFooter } from '../config/outreach-footer';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -155,6 +156,82 @@ export async function recordInboundMessage(db: Db, threadId: number, input: Inbo
         return row?.id ?? null;
     } catch (err) {
         logQuietly('recordInboundMessage', err);
+        return null;
+    }
+}
+
+export interface ReplyEnvelopeInput {
+    organisationId: number;
+    aiAssistantId: number;
+    /** Subject line, already threaded (`Re: …`) by the caller. */
+    subject: string;
+    /** The human's text, un-footered. Stored as-is by recordOutboundMessage; footered only on the wire. */
+    body: string;
+    /** Who the prospect is hearing from — the organisation's name. */
+    senderName: string;
+    postalAddress?: string | null;
+}
+
+/** What a mail helper needs to send one reply, with no credential in it. */
+export interface ReplyEnvelope {
+    to: string;
+    subject: string;
+    /** `body` WITH the compliance footer appended — the wire copy, not the stored copy. */
+    body: string;
+    replyTo?: string;
+    listUnsubscribe?: string;
+}
+
+/**
+ * Build the outgoing envelope for a human reply in an existing thread.
+ *
+ * ⚠️ THIS LIVES HERE FOR ONE REASON: the thread's `replyToken` is a bearer credential — anyone
+ * holding it can post into the conversation through the public Parse webhook — and it must not leave
+ * this module. The Conversations function needs the Reply-To alias and the unsubscribe link that are
+ * DERIVED from it, so it asks for the finished envelope rather than for the token.
+ * tests/lead-threads.test.ts asserts the string `replyToken` appears in neither the read API nor the
+ * UI, which is the guard that keeps this arrangement honest.
+ *
+ * Returns null when the thread is missing, belongs to another tenant or assistant, or has no contact
+ * address. Never throws, like everything else in this file.
+ */
+export async function buildThreadReplyEnvelope(
+    db: Db,
+    threadId: number,
+    input: ReplyEnvelopeInput,
+): Promise<ReplyEnvelope | null> {
+    try {
+        const [row] = await db
+            .select({ contactEmail: leadThreads.contactEmail, replyToken: leadThreads.replyToken })
+            .from(leadThreads)
+            .where(and(
+                eq(leadThreads.id, threadId),
+                eq(leadThreads.organisationId, input.organisationId),
+                eq(leadThreads.aiAssistantId, input.aiAssistantId),
+            ))
+            .limit(1);
+
+        const to = (row?.contactEmail || '').trim();
+        if (!to) return null;
+
+        // The same footer builder both send sites use. A reply is an independent commercial email and
+        // needs its own opt-out route and sender identification, exactly as the opener and each
+        // chaser do.
+        const footer = buildOutreachFooter({
+            senderName: input.senderName,
+            postalAddress: input.postalAddress,
+            replyToken: row?.replyToken,
+        });
+
+        return {
+            to,
+            subject: input.subject,
+            body: appendOutreachFooter(input.body, footer),
+            ...(row?.replyToken ? { replyTo: replyAddress(row.replyToken) } : {}),
+            ...(footer.listUnsubscribe ? { listUnsubscribe: footer.listUnsubscribe } : {}),
+        };
+    } catch (err) {
+        logQuietly('buildThreadReplyEnvelope', err);
         return null;
     }
 }

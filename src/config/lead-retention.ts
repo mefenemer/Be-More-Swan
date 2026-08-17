@@ -58,6 +58,24 @@
 export const LEAD_RETENTION_DAYS = 30;
 
 /**
+ * How many days ahead of the deadline the tenant is warned (lead-retention-sweep.ts).
+ *
+ * ⚠️ The sweep used to be silent in both directions — nothing before it moved a lead and nothing
+ * after — so a tenant back from a fortnight away found leads in a Deleted section they had never
+ * been told existed. The countdown column was the only warning, and it is only visible to someone
+ * already looking at the tab they had stopped opening.
+ *
+ * Three days is chosen to be actionable rather than early: long enough to review a handful of leads
+ * over a weekend, short enough that the warning still describes leads the user has genuinely
+ * abandoned. Any action on a lead restarts its clock, so a user who acts on the warning removes
+ * those leads from the next one by definition.
+ */
+// Annotated `number` rather than left as the literal 3: callers pluralise off it, and a literal type
+// makes `=== 1` a compile error ("no overlap") — which would quietly push people to hardcode "days"
+// in copy that then goes wrong the day this value changes.
+export const LEAD_RETENTION_WARN_DAYS: number = 3;
+
+/**
  * Where the verdict lives on `assistant_records.data`.
  *
  * One object rather than loose keys, so "is this lead retained?" is a single presence check in

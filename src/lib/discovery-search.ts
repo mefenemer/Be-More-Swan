@@ -16,7 +16,7 @@
 //   DISCOVERY_FETCH_TIMEOUT_MS  — per-page fetch timeout for footprint checks (default 8000)
 
 import * as cheerio from 'cheerio';
-import { safeFetchText } from '../utils/safe-fetch';
+import { safeFetchText, USER_AGENTS } from '../utils/safe-fetch';
 
 const PROVIDER = (process.env.DISCOVERY_SEARCH_PROVIDER ?? 'serper').toLowerCase();
 const SERPER_API_KEY = process.env.SERPER_API_KEY;
@@ -159,7 +159,9 @@ export async function fetchPageText(url: string): Promise<string> {
         const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
         const res = await fetch(url, {
             signal: controller.signal,
-            headers: { 'User-Agent': 'BeMoreSwan-LeadDiscovery/1.0 (+https://bemoreswan.com)' },
+            // The shared constant, not a second copy of the string: a site owner who blocks or
+            // allows this agent in robots.txt must see one name from us, and robots.ts matches on it.
+            headers: { 'User-Agent': USER_AGENTS.leadDiscovery },
         }).finally(() => clearTimeout(timer));
         if (!res.ok) return '';
         const html = await res.text();

@@ -16,6 +16,7 @@ import { sendEmail } from '../../src/utils/email';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
 import { resolveActionNotifications, PLAN_UPGRADED_TYPES } from '../../src/utils/notification-actions';
 import { resolveMonthlyPriceId } from '../../src/utils/stripe-price';
+import { sendPlanUpgradeAlert } from '../../src/utils/founder-alerts';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret      = process.env.JWT_SECRET!;
@@ -264,12 +265,14 @@ export default withLambda(async (event) => {
                 .values({ stripeEventId: upgradeEmailKey, eventType: 'upgrade_confirmation_email_sent' })
                 .onConflictDoNothing();
 
+            // Hoisted out of the userRecord block below so the founder alert can reuse them.
+            const latestInvoice = updatedSub.latest_invoice;
+            const invoiceUrl = typeof latestInvoice === 'string' ? null : (latestInvoice as any)?.hosted_invoice_url || null;
+            const proratedAmount = typeof latestInvoice === 'string' ? null : (((latestInvoice as any)?.amount_due || 0) / 100).toFixed(2);
+            const proratedPence = typeof latestInvoice === 'string' ? null : ((latestInvoice as any)?.amount_due ?? null);
+
             const [userRecord] = await db.select({ email: users.email, firstName: users.firstName }).from(users).where(eq(users.id, userId)).limit(1);
             if (userRecord) {
-                const latestInvoice = updatedSub.latest_invoice;
-                const invoiceUrl = typeof latestInvoice === 'string' ? null : (latestInvoice as any)?.hosted_invoice_url || null;
-                const proratedAmount = typeof latestInvoice === 'string' ? null : (((latestInvoice as any)?.amount_due || 0) / 100).toFixed(2);
-
                 await sendEmail({
                     to: userRecord.email,
                     subject: `You've upgraded to ${targetMp.name} — welcome to your new plan`,
@@ -282,6 +285,25 @@ export default withLambda(async (event) => {
                            <p>The Be More Swan Team</p>`,
                 }).catch(() => { /* non-critical */ });
             }
+
+            // ── Founder alert — someone moved up a tier ──────────────────
+            // Inside the same idempotency guard as the customer email, so a retried
+            // upgrade can't alert twice. Never throws (see founder-alerts.ts).
+            await sendPlanUpgradeAlert({
+                db,
+                userId,
+                organisationId:       user.organisationId,
+                fromPlanName:         currentMp?.name ?? null,
+                fromTierKey:          currentMp?.tierKey ?? null,
+                fromMonthlyPriceGbp:  currentMp ? String(currentMp.monthlyPriceGbp) : null,
+                toPlanName:           targetMp.name,
+                toTierKey:            targetTierKey,
+                toMonthlyPriceGbp:    String(targetMp.monthlyPriceGbp),
+                proratedPence,
+                invoiceUrl,
+                stripeCustomerId:     currentPlan.stripeCustomerId,
+                stripeSubscriptionId: currentPlan.stripeSubscriptionId,
+            });
         }
 
         return {

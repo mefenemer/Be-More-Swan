@@ -49,9 +49,25 @@ export function isUsablePostalAddress(value: string | null | undefined): boolean
     return v.split(/\s+/).filter(Boolean).length >= 3;
 }
 
-/** The public unsubscribe endpoint for a thread. */
+/**
+ * The public unsubscribe endpoint for a thread.
+ *
+ * ⚠️ `/unsubscribe`, not `/.netlify/functions/lead-unsubscribe`. This URL is printed in a cold email
+ * to a stranger and posted to by Gmail/Yahoo one-click, so it is the single most trust-sensitive
+ * string this module produces: an internal-looking function path is what a phishing link looks like,
+ * and it tied a compliance-critical route to an implementation detail that renaming the function
+ * would silently break for every email already in someone's inbox.
+ *
+ * The rewrite lives in netlify.toml and is a status-200 rewrite rather than a redirect, because
+ * one-click unsubscribe is a POST and mail clients do not reliably re-issue a redirected POST.
+ *
+ * ⚠️ BASE_URL must be set per deploy context. Unset, this falls back to the production domain — so a
+ * staging send would print prod links whose tokens resolve against the prod database and find
+ * nothing. The fallback is right for prod and wrong everywhere else, which is exactly the shape of
+ * default that hides.
+ */
 export function unsubscribeUrl(replyToken: string): string {
-    return `${BASE_URL}/.netlify/functions/lead-unsubscribe?t=${encodeURIComponent(replyToken)}`;
+    return `${BASE_URL}/unsubscribe?t=${encodeURIComponent(replyToken)}`;
 }
 
 export interface OutreachFooterOptions {

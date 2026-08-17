@@ -273,6 +273,29 @@
               { value: 'microsoft', label: 'Yes — Microsoft (Outlook / 365)', description: 'BMS sends approved outreach from your connected Outlook or Microsoft 365 account. Work and school accounts may need your IT administrator to approve the connection.' },
             ],
           },
+          {
+            // Read by enrolInSequence (src/utils/outreach-sequences.ts) on the send path.
+            //
+            // ⚠️ THIS QUESTION EXISTS BECAUSE APPROVING ONE EMAIL USED TO AUTHORISE FOUR. Every
+            // confirmed send enrolled the lead in a three-step cadence with no question asked and no
+            // way to turn it off — only a per-conversation Stop, after the first chaser had already
+            // gone. The AR Clerk, which chases the user's OWN customers, asks how chasers go out; the
+            // assistant that emails strangers did not.
+            //
+            // Optional on purpose, and 'automatic' is the documented default for a blank answer:
+            // every assistant hired before this field existed already has cadences running, and
+            // reading "no answer" as "stop chasing" would silently halt live sequences on deploy.
+            // The default is stated in the option's own copy so it is a choice, not a surprise.
+            key: 'outreachFollowUps',
+            label: 'Chase leads who do not reply?',
+            type: 'radio',
+            required: true,
+            helpText: 'Chasers are written in the context of each conversation and sent from the same mailbox. They stop the moment someone replies, and the last one always says it is the last.',
+            options: [
+              { value: 'automatic', label: 'Yes — chase automatically', description: 'Up to three follow-ups: 3 days after the first email, then a week later, then a polite sign-off. Nothing after that.' },
+              { value: 'none', label: 'No — one email only', description: 'Approving a lead sends exactly one email. You can still send follow-ups yourself from the Conversations tab.' },
+            ],
+          },
         ],
       },
     ],

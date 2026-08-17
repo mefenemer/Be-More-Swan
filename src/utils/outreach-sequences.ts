@@ -24,7 +24,7 @@
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
-    outreachSequences, sequenceSteps, sequenceEnrolments, leadThreads, leadMessages,
+    aiAssistants, outreachSequences, sequenceSteps, sequenceEnrolments, leadThreads, leadMessages,
 } from '../../db/schema';
 import { recordEvent } from './revenue-ledger';
 import { getBlueprintVersion } from './blueprint-version';
@@ -60,6 +60,35 @@ export function addDays(from: Date, days: number): Date {
 }
 
 // ── Sequence provisioning ────────────────────────────────────────────────────
+
+/**
+ * Has this assistant's owner asked for automatic follow-ups?
+ *
+ * Reads `outreachFollowUps` off the assistant's onboarding answers — the same place the send path
+ * reads `outreachEmailProvider`. Only the explicit opt-out turns chasing off; every other value,
+ * including a missing one, is automatic (see the caller's note on why silence cannot mean "stop").
+ *
+ * ⚠️ Fails OPEN on a read error, which is the opposite of most gates in this file. The alternative is
+ * a transient database blip silently ending a tenant's follow-ups with no halt row, no log the user
+ * can see, and no evidence afterwards that anything was skipped. The consequence of failing open is
+ * a cadence the user explicitly asked for; the enrolment itself is still capped, still halts on a
+ * reply, and is still stoppable per conversation.
+ */
+async function followUpsEnabled(db: Db, aiAssistantId: number): Promise<boolean> {
+    try {
+        const [row] = await db
+            .select({ onboardingContext: aiAssistants.onboardingContext })
+            .from(aiAssistants)
+            .where(eq(aiAssistants.id, aiAssistantId))
+            .limit(1);
+        const ctx = (row?.onboardingContext && typeof row.onboardingContext === 'object' && !Array.isArray(row.onboardingContext))
+            ? row.onboardingContext as Record<string, unknown> : {};
+        return String(ctx.outreachFollowUps ?? '') !== 'none';
+    } catch (err) {
+        logQuietly('followUpsEnabled', err);
+        return true;
+    }
+}
 
 export interface SequenceStepRow { id: number; stepNumber: number; delayDays: number; bodyPrompt: string }
 
@@ -177,6 +206,18 @@ export interface EnrolInput {
  */
 export async function enrolInSequence(db: Db, input: EnrolInput): Promise<number | null> {
     try {
+        // ── The tenant's own answer, checked before anything is provisioned ──
+        //
+        // ⚠️ This gate is the difference between "approving sends an email" and "approving starts a
+        // sequence", and until the setup question existed there was no way to have the first. A user
+        // who chose one-email-only gets no enrolment at all — not a halted one, which would still
+        // show a stopped cadence on every conversation and imply chasers had been intended.
+        //
+        // A BLANK answer means automatic, deliberately: assistants hired before the question existed
+        // have live cadences, and reading silence as "stop" would halt them all on deploy. See the
+        // field note in src/public/assistant-onboarding-schemas.js.
+        if (!(await followUpsEnabled(db, input.aiAssistantId))) return null;
+
         const seq = await ensureDefaultSequence(db, input.organisationId, input.aiAssistantId);
         if (!seq || !seq.steps.length) return null;
 

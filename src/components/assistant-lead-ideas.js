@@ -144,6 +144,23 @@
     if (statusEl) statusEl.classList.add('hidden');
     try {
       const data = await call('approve_idea', { ideaId });
+
+      // ⚠️ A 200 does NOT mean a run started. The workspace has a ceiling on searches running at
+      // once (src/config/discovery-limits.ts), and at the cap the server approves the idea and
+      // declines the run — reported as `runStarted: false`. Leaving the buttons in place is the
+      // point: the user has something to do (pause a search) and then press this again.
+      if (data.runStarted === false) {
+        btn.disabled = false;
+        btn.textContent = 'Approve';
+        if (declineBtn) declineBtn.disabled = false;
+        if (statusEl) {
+          statusEl.textContent = data.message || 'That search could not be started right now.';
+          statusEl.classList.remove('hidden');
+        }
+        window.showToast?.(data.message || 'That search could not be started right now.');
+        return;
+      }
+
       // Approval now launches a background discovery run (real web search) rather than
       // returning fabricated leads synchronously. Show a "run started" state in place.
       btn.parentElement?.remove();

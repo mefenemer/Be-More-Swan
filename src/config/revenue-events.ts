@@ -39,6 +39,15 @@ export const EVENT_TYPES = [
     'outreach_bounced',
     'reply_received',
     'reply_classified',
+    // A HUMAN answered a prospect from the Conversations tab (netlify/functions/lead-threads.ts
+    // `reply`).
+    //
+    // ⚠️ Deliberately NOT a flavour of `outreach_sent`, and this is the one distinction in this list
+    // that protects a headline metric. Reply rate is replies ÷ leads WE emailed; folding a tenant's
+    // own answers into the denominator would let them raise their reply rate by replying, and would
+    // file a human's words in the Activity feed as something the assistant did. It is also not an
+    // engagement event about the prospect — they had already engaged, which is why we are writing.
+    'manual_reply_sent',
     // The prospect asked us to stop. Its own event, not a flavour of reply_received: opt-out RATE
     // is the health metric that says targeting or copy is wrong, and it has to be answerable
     // without parsing message bodies after the fact.

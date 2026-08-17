@@ -335,9 +335,23 @@ const REGISTRY = read('src/components/assistant-dashboard-registry.js');
 const DETAIL_HTML = read('assistant-detail.html');
 const leadRegistry = REGISTRY.slice(landmark(REGISTRY, 'lead_qualifier: {'), landmark(REGISTRY, 'accounts_receivable_clerk: {'));
 
+/**
+ * The lead role's whole `reviewQueue` block.
+ *
+ * ⚠️ Sliced to the NEXT KEY, not to a character count. Both checks below used to read a fixed window
+ * (1400 chars for the label, 2400 for the column overrides) and both were one comment away from
+ * silently sliding out of range: adding the follow-up-cadence disclosure to the subtitle pushed
+ * `columnLabels` past 2400, and moving `columnLabels` up to fix that pushed `label` past 1400. A
+ * window measured in characters makes prose length load-bearing, which is how a source-scan test ends
+ * up reporting a regression in a feature that is working.
+ */
+function leadReviewQueueBlock(): string {
+    return leadRegistry.slice(landmark(leadRegistry, 'reviewQueue: {'), landmark(leadRegistry, 'hubTab: {'));
+}
+
 check('the Lead Generator renames the tab, and the chat prompt agrees', () => {
-    const rq = leadRegistry.slice(landmark(leadRegistry, 'reviewQueue: {'));
-    const label = /label:\s*'([^']+)'/.exec(rq.slice(0, 1400));
+    const rq = leadReviewQueueBlock();
+    const label = /label:\s*'([^']+)'/.exec(rq);
     assert.ok(label, 'lead_qualifier no longer overrides the review-queue tab label');
     // Derived, never a literal: tests/lead-prompt-surfaces.test.ts already fails if the prompt
     // omits a labelled surface, and pinning the word here as well would just be a third copy.
@@ -348,8 +362,8 @@ check('the Lead Generator renames the tab, and the chat prompt agrees', () => {
 });
 
 check('the Scheduled column is renamed for leads, and only for leads', () => {
-    const rq = leadRegistry.slice(landmark(leadRegistry, 'reviewQueue: {'));
-    assert.match(rq.slice(0, 2400), /columnLabels:\s*\{[^}]*scheduled:\s*'[^']+'/,
+    const rq = leadReviewQueueBlock();
+    assert.match(rq, /columnLabels:\s*\{[^}]*scheduled:\s*'[^']+'/,
         'lead_qualifier must override the Scheduled column — for a lead that state means the email '
         + 'has ALREADY gone, and the shared word promises the opposite');
     // The markup keeps "Scheduled": post queues genuinely do hold pending sends there. An edit to

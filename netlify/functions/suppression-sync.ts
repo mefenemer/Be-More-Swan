@@ -59,7 +59,12 @@ async function resolveActorUserId(db: Db, organisationId: number, integrationId:
     return wi?.connectedBy ?? null;
 }
 
-export default withLambda(async () => {
+/**
+ * Pull every enabled suppression recipe, exported so the staging trigger can run it over HTTP
+ * (run-lead-sweeps.ts). Netlify fires scheduled functions on the production deploy only, so this had
+ * never run outside prod — and it is what stops cold outreach reaching a tenant's own customers.
+ */
+export async function syncSuppressionLists(): Promise<{ recipes: number; synced: number; domainsAdded: number; skipped: number }> {
     const db = getDb();
 
     const recipes = await db
@@ -102,5 +107,10 @@ export default withLambda(async () => {
         }
     }
 
-    return { statusCode: 200, body: JSON.stringify({ recipes: recipes.length, synced, domainsAdded: added, skipped }) };
+    return { recipes: recipes.length, synced, domainsAdded: added, skipped };
+}
+
+export default withLambda(async () => {
+    const result = await syncSuppressionLists();
+    return { statusCode: 200, body: JSON.stringify(result) };
 });
