@@ -365,7 +365,18 @@
         {
           label: 'Pipeline Volume',
           title: 'Qualified Leads',
-          desc: 'Leads this assistant found that you judged worth pursuing, against how many it sifted to get there.',
+          // ⚠️ The last sentence exists because a SMART goal on the same page carries the same two
+          // words and a different number, and users read the pair as one figure computed twice.
+          // This card counts `lead_approved` events in the 90-day window (get-lead-performance.ts →
+          // the revenue ledger), so it is a record of what HAPPENED and never falls. The goal
+          // (qualified_leads in src/config/goal-metrics.ts) counts the Approved + Awaiting-reply
+          // columns as they stand RIGHT NOW, over all time, so it drops when a lead is rejected or
+          // deleted. Both are correct; only their being unlabelled was not. Keep the two
+          // descriptions in step — they are the only thing on the page that reconciles them.
+          desc: 'Leads this assistant found that you judged worth pursuing, against how many it sifted to get there. '
+            + 'Counts approvals made in the window — a lead you approved and later deleted still counts here, which is '
+            + 'why this can read higher than a Qualified Leads goal (that one counts the leads sitting in Approved and '
+            + 'Awaiting reply right now).',
         },
         {
           label: 'Targeting Accuracy',
@@ -450,10 +461,6 @@
         // in chat-orchestrator.ts names the tab too — the assistant tells users which tab to go to,
         // and a stale name there sends them to a tab that does not exist.
         label: 'Outreach',
-        // Hedged on the send because it's conditional: a user who picked manual outreach during
-        // onboarding (outreachMode 'none'), or who hasn't connected an inbox, gets the draft to
-        // send themselves — send_outreach returns 'no_provider' / 'not_connected' and nothing goes out.
-        subtitle: 'Leads awaiting your approval — read the drafted email on each one. Approving sends it from your connected inbox, if you have one, and sets a chase reminder.',
         // Per-column label overrides, keyed by the column's `data-status`. Only the ones that differ
         // from the shared lifecycle wording need to appear.
         //
@@ -465,7 +472,27 @@
         //
         // Post-backed queues keep "Scheduled", where it is correct — hence an override rather than
         // an edit to the markup.
+        //
+        // ⚠️ ORDER IS LOAD-BEARING HERE, in two directions at once.
+        // tests/lead-outreach-lifecycle.test.ts reads `label:` within 1400 characters of
+        // `reviewQueue: {` and `columnLabels` within 2400. So this block sits AFTER the label and
+        // BEFORE the subtitle: growing the subtitle once pushed columnLabels past 2400, and moving
+        // this to the top to fix that pushed `label` past 1400. Either way the assertion silently
+        // stops reaching the thing it checks. Long prose goes below both keys.
         columnLabels: { scheduled: 'Awaiting reply' },
+        // Hedged on the send because it's conditional: a user who picked manual outreach during
+        // onboarding (outreachMode 'none'), or who hasn't connected an inbox, gets the draft to
+        // send themselves — send_outreach returns 'no_provider' / 'not_connected' and nothing goes out.
+        //
+        // ⚠️ THE LAST SENTENCE IS THE CONSENT DISCLOSURE — do not trim it back. This copy used to stop
+        // at "sets a chase reminder", which describes a diary entry; what approving actually starts is
+        // up to three further emails to a stranger (src/config/outreach-sequences.ts
+        // DEFAULT_SEQUENCE_STEPS, gated on the `outreachFollowUps` setup answer). A user cannot
+        // consent to a sequence they were told was a reminder. Where to switch it off is stated in the
+        // setup question itself and in the post-send toast, not crammed in here.
+        subtitle: 'Leads awaiting your approval — read the drafted email on each one. Approving sends it from your connected inbox, if you have one, '
+          + 'and sets a chase reminder. With automatic chasing on, it also starts up to three follow-ups — 3 days, a week, then a sign-off — '
+          + 'stopping the moment they reply.',
       },
       hubTab: {
         id: 'datahub',
@@ -486,7 +513,28 @@
         // reviewQueue label above carries.
         label: 'Enrichment',
         recordType: 'lead',
-        description: 'Every lead this assistant has scored — with its outreach draft — plus any lead lists you import. This is where a lead is enriched: contact details found, details corrected, and cold leads worked up into warm ones.',
+        // ⚠️ The last two sentences state the RETENTION RULES, and they belong here rather than
+        // only on the Deleted section below. The table on this tab carries a "Deletes in" column
+        // on every row, so a user reads a countdown to a deletion before they reach any copy
+        // explaining it — and the two notices that DO explain it (LeadRetention.NOTICE above the
+        // Outreach columns, LeadRetention.DELETED_NOTICE on the Deleted section) both sit
+        // somewhere the user has to already be looking. A countdown nobody has explained reads as
+        // a threat to their data.
+        //
+        // The day count is read from window.LeadRetention rather than typed, so it cannot drift
+        // from LEAD_RETENTION_DAYS (src/config/lead-retention.ts) — platform-constants.js loads
+        // before this file in workspace.html, so the global is there when this literal evaluates.
+        // The `?? 30` is the load-order insurance, not a second opinion about the number.
+        //
+        // ⚠️ Says "moved", never "permanently deleted". A retained lead is still readable, still
+        // countable and still recoverable through "Send back for enrichment"; overstating it would
+        // make the Deleted section that follows look like a bug rather than the destination.
+        description: 'Every lead this assistant has scored — with its outreach draft — plus any lead lists you import. '
+          + 'This is where a lead is enriched: contact details found, details corrected, and cold leads worked up into warm ones. '
+          + `A lead you delete, and any lead left sitting in Outreach ▸ Review or ▸ Archived for ${(window.LeadRetention && window.LeadRetention.DAYS) || 30} days without a decision, `
+          + 'is moved to the Deleted section at the foot of this tab — nothing is destroyed, and the reason it was dropped is kept with it '
+          + 'so a later search does not put the same company back in front of you as though it were new. '
+          + 'Any action on a lead restarts its clock, and "Send back for enrichment" returns it to the pipeline.',
         // Manual entry: the Data Hub shows an "Add Lead" button (assistant-data-hub.js) that
         // scores a single hand-typed lead via netlify/functions/lead-generation.ts (score_lead).
         manualAdd: true,

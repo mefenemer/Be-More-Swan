@@ -3287,6 +3287,13 @@ function formatCurrency(amount, currency) {
       if (postIdParam && Number.isInteger(Number(postIdParam))) window._assistantDetailInitialPostId = Number(postIdParam);
       await loadView('assistant-detail', qs.get('assistantId'));
     } else if (viewParam && routes[viewParam]) {
+      // ⚠️ replaceState below drops the WHOLE query string, so any param the view itself needs has
+      // to be lifted onto a global first — the same pattern as _assistantDetailInitialTab above.
+      // ?changePlan=<tierKey> comes from checkout.html, which forwards an already-subscribed user
+      // here rather than trying (and silently failing) to sell them a second subscription; the
+      // billing view reads this to open Change Plan on the tier they actually asked for.
+      const changePlanParam = qs.get('changePlan');
+      if (viewParam === 'billing' && changePlanParam) window._billingInitialChangePlan = changePlanParam;
       history.replaceState(null, '', window.location.pathname);
       await loadView(viewParam);
     }

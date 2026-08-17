@@ -429,8 +429,26 @@
       return;
     }
 
-    // Defensive: a £0 plan at initial load (no promo) shouldn't happen, but if the
-    // backend reports no payment is due, the plan is already active — go to dashboard.
+    // ⚠️ An EXISTING subscriber landing here is an upgrade, not a new subscription, and it must
+    // not be answered with "payment=success".
+    //
+    // create-subscription's double-charge guard returns { requiresPayment:false,
+    // alreadySubscribed:true } for any org that already has an active plan — correctly, because
+    // confirming a second Stripe subscription would bill them twice. But this page then treated
+    // that identically to the £0-promo case and sent them to workspace.html?payment=success, i.e.
+    // the dashboard: press "Upgrade" on the assistant-limit modal (whose CTA is /checkout.html
+    // ?tier=…), or pick a plan card on pricing.html while logged in, and you land on "Welcome
+    // back." with no upgrade offered, no error, and a URL claiming a payment succeeded.
+    //
+    // The proration path is billing-upgrade.ts, driven by the Change Plan modal on the billing
+    // page — so send them there with the tier they picked preselected. This page can only ever
+    // create a FIRST subscription; that is the whole reason the guard exists.
+    if (checkoutData.alreadySubscribed) {
+      window.location.href = `${window.location.origin}/workspace.html?view=billing&changePlan=${encodeURIComponent(tier)}`;
+      return;
+    }
+
+    // A genuine £0 activation (100%-off promo): provisioned server-side, nothing to confirm.
     if (checkoutData.requiresPayment === false) {
       window.location.href = `${window.location.origin}/workspace.html?payment=success`;
       return;

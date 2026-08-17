@@ -366,7 +366,25 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         direction: 'increase',
         objective: 'outcome',
         roles: ['lead_qualifier'],
-        description: 'Leads your assistant qualified and you cleared for outreach — the Approved and Awaiting reply columns of the Outreach tab.',
+        // ⚠️ States BOTH halves of what this number is, because there is a second "Qualified Leads"
+        // on the same page and the two do not agree — and both are right.
+        //
+        //   • THIS one is a LIVE STATE count, over ALL TIME: how many leads are sitting in the
+        //     Approved and Awaiting-reply columns at the moment of the last measurement. A lead you
+        //     later reject or delete leaves it, so this can go DOWN.
+        //   • The Performance Metrics card of the same name (src/utils/lead-performance.ts) counts
+        //     `lead_approved` EVENTS in the revenue ledger over the trailing 90 DAYS. It never goes
+        //     down, and it still counts a lead that has since been deleted. Its card prints "Last 90
+        //     days" beneath it; this one had nothing saying "right now", which is why the pair read
+        //     as one number computed two ways rather than two different questions.
+        //
+        // Do not "fix" the disagreement by repointing this at revenue_events: that table is a manual
+        // apply (db/revenue-events.sql) and predates most orgs' leads, so an all-time ledger count
+        // would silently under-report every approval made before it existed.
+        description: 'Leads you have cleared for outreach right now — what the Approved and Awaiting reply '
+            + 'columns of the Outreach tab hold, counted over all time. Rejecting or deleting a lead takes it '
+            + 'back out. (The Performance Metrics card of the same name asks a different question: how many you '
+            + 'approved in the last 90 days, which nothing later removes.)',
         available: true,
         realism: { maxDailyDelta: 1000, maxDailyGrowthPct: 1 },
     },

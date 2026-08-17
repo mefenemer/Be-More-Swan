@@ -2,6 +2,24 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-reply-composer",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/cc4bdb45-4337-436b-9241-5bcd3e0bd2d3/scratchpad/replyharness/server.mjs"
+      ],
+      "port": 4377,
+      "autoPort": false
+    },
+    {
+      "name": "component-harness-assistant-cards",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/9ba5864b-455f-4edb-8326-296dd823fd65/scratchpad/cardharness/server.mjs"
+      ],
+      "port": 4371,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-push-prefs",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

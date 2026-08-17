@@ -763,5 +763,48 @@
     _selectedTierKey = null;
     _selectedDirection = null;
   };
+
+  // ── Deep link: ?view=billing&changePlan=<tierKey> ────────────────────────────────
+  //
+  // The landing point for anyone who pressed "Upgrade" while already subscribed. checkout.html
+  // can only create a FIRST subscription — create-subscription refuses to open a second one for
+  // an org that already has an active plan — so it forwards those users here with the tier they
+  // chose, and this opens the Change Plan modal on it. Without the preselect they would arrive at
+  // a billing page with no sign of why, having asked twice to upgrade and been shown neither a
+  // price nor a button.
+  //
+  // Runs on view injection (this IIFE is re-executed by workspace.html's loadView every time the
+  // billing view is loaded), so the request is consumed immediately: leaving it set would reopen
+  // the modal on every later return to this view, including the one straight after a successful
+  // upgrade.
+  //
+  // ⚠️ Read the GLOBAL first, not the URL. workspace.html's ?view= handler calls
+  // history.replaceState(pathname) before loadView, so by the time this runs the query string is
+  // already gone — it lifts ?changePlan onto window._billingInitialChangePlan on the way past. The
+  // URL is still checked as a fallback for anyone who opens billing.html directly.
+  (async function _handleChangePlanDeepLink() {
+    const params = new URLSearchParams(window.location.search);
+    const wanted = window._billingInitialChangePlan || params.get('changePlan');
+    if (!wanted) return;
+    window._billingInitialChangePlan = null;
+    if (params.has('changePlan')) {
+      params.delete('changePlan');
+      const qs = params.toString();
+      history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+    }
+
+    await window._openChangePlanModal();
+    // Preselect only if the tier is actually offered. It will not be when the user is already on
+    // it, or when it is below their current plan and they arrived by an old link — in which case
+    // the modal is still the right place to be, just without a choice made for them.
+    const radio = document.querySelector(`input[name="change-plan-tier"][value="${CSS.escape(wanted)}"]`);
+    if (!radio) return;
+    radio.checked = true;
+    // The radio's own onchange does not fire for a programmatic `checked`, so call the handler
+    // directly — and read the direction off the rendered row rather than assuming "upgrade", so a
+    // link to a lower tier still shows the downgrade impact panel instead of a proration preview.
+    const isDowngrade = !!radio.closest('label')?.textContent?.includes('Downgrade');
+    window._onTierSelect(wanted, isDowngrade ? 'downgrade' : 'upgrade');
+  })();
 })();
 </script>

@@ -239,9 +239,56 @@ window.generateAssistantCardHTML = function(assistant) {
             </span>`;
         }).join('');
 
-    const metricsHtml = totalCreated > 0 ? `
-        <div class="mt-3 mb-4 p-3 rounded-xl bg-gray-50 border border-gray-100">
-            <div class="flex items-center justify-between gap-2 mb-2">
+    // ── The activity strip, for roles that file RECORDS rather than publish posts ────────────
+    //
+    // ⚠️ This whole strip used to be gated on `totalCreated > 0` — a count of scheduled_posts. A
+    // Lead Generator publishes nothing, so the gate never opened and its card carried no activity
+    // figures and, worse, no "~Xh saved / £Y ROI" line, while the Social Media Assistant card
+    // beside it carried all of them. The ROI numbers were never missing: roi-activity.ts has priced
+    // assistant_records since 2026-08-16 and get-assistants has always sent hoursSaved/gbpSaved.
+    // They were simply behind a question about posts.
+    //
+    // So the strip now takes whichever set of counts this assistant HAS, and the ROI footer below
+    // is shared by both — it is the same figure computed the same way for every role, and it is the
+    // one line on the card that should never depend on which kind of work the assistant does.
+    const rm = assistant.recordMetrics || null;
+    const hasRecordActivity = !!rm && rm.total > 0;
+
+    // Per-type wording. Keyed on the record type, NOT the roleKey: the type is what was actually
+    // counted, and a role whose configuration.type has drifted still gets an honest strip.
+    //
+    // The three lead words are lifted verbatim from the surfaces they link to, so the card and the
+    // page agree: "found" is what the Enrichment tab holds, "awaiting you" is the Outreach ▸ Review
+    // column, and "cleared for outreach" is Approved + Awaiting reply — the same two states the
+    // qualified_leads goal counts. Deliberately NOT "qualified": that word means two different
+    // things on the detail page already (a live count on the goal, a 90-day count on the
+    // Performance card) and a third copy on a card would make it worse.
+    const _RECORD_WORDS = {
+        lead:       { total: 'leads found',      pending: 'awaiting you', cleared: 'cleared for outreach' },
+        meeting:    { total: 'meetings',         pending: 'awaiting you', cleared: 'actioned' },
+        invoice:    { total: 'invoices',         pending: 'awaiting you', cleared: 'approved' },
+        ticket:     { total: 'tickets',          pending: 'awaiting you', cleared: 'resolved' },
+        enrichment: { total: 'records enriched', pending: 'awaiting you', cleared: 'approved' },
+    };
+    const words = (rm && _RECORD_WORDS[rm.recordType]) || { total: 'records', pending: 'awaiting you', cleared: 'approved' };
+
+    const recordCountsHtml = hasRecordActivity ? `
+                <div class="flex items-center gap-3 flex-wrap">
+                    <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="Everything this assistant has filed and scored, excluding anything moved to Deleted">
+                        <svg class="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                        ${rm.total} ${words.total}
+                    </span>
+                    <span class="inline-flex items-center gap-1 text-xs font-semibold ${rm.pending ? 'text-amber-700' : 'text-gray-700'}" title="Waiting on your decision in the Review Queue">
+                        <svg class="w-3.5 h-3.5 ${rm.pending ? 'text-amber-500' : 'text-blue-500'}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        ${rm.pending} ${words.pending}
+                    </span>
+                    <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="Approved, plus anything already acted on — the same two states the Approved column shows">
+                        <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        ${rm.cleared} ${words.cleared}
+                    </span>
+                </div>` : '';
+
+    const postCountsHtml = totalCreated > 0 ? `
                 <div class="flex items-center gap-3 flex-wrap">
                     <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="Posts created by this assistant">
                         <svg class="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
@@ -255,9 +302,19 @@ window.generateAssistantCardHTML = function(assistant) {
                         <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                         ${totalPublished} published
                     </span>
-                </div>
+                </div>` : '';
+
+    // Posts win when an assistant somehow has both: a role that publishes is described by what it
+    // published. In practice the two are mutually exclusive — the registry gives a role either a
+    // posts queue or a records queue, never both.
+    const countsHtml = postCountsHtml || recordCountsHtml;
+
+    const metricsHtml = countsHtml ? `
+        <div class="mt-3 mb-4 p-3 rounded-xl bg-gray-50 border border-gray-100">
+            <div class="flex items-center justify-between gap-2 mb-2">
+                ${countsHtml}
             </div>
-            ${platformPills ? `<div class="flex items-center gap-3 mb-2">${platformPills}</div>` : ''}
+            ${postCountsHtml && platformPills ? `<div class="flex items-center gap-3 mb-2">${platformPills}</div>` : ''}
             <div class="flex items-center justify-between pt-2 border-t border-gray-200">
                 <span class="inline-flex items-center gap-1 text-xs font-semibold text-green-700" title="Time saved this month — matches this assistant's Impact & ROI tab">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -693,8 +750,10 @@ window._activateMainTab = function(name) {
     // Campaigns renders lazily for the same reason — init() already fetched, because the count
     // feeds both the tab badge and the control strip above the tab bar.
     if (name === 'campaigns') window.AssistantCampaigns?.activate();
-    // Conversations fetches on first activation only — nothing on this tab feeds a badge, so a
-    // user who never opens it never pays for the query.
+    // Conversations already fetched at init() — its thread total feeds the tab's own count, so it
+    // cannot wait for the tab to be opened. activate() repaints from that result rather than
+    // refetching. (This comment used to say the opposite and was stale: the prefetch landed when
+    // the tab grew a count, and a badge nothing loads is a badge that is always blank.)
     if (name === 'conversations') window.AssistantLeadThreads?.activate();
     // Strategy resolved its gate (and loaded) on init — activation only paints.
     if (name === 'strategy') window.AssistantStrategy?.activate();
@@ -867,8 +926,13 @@ function _detailRqSetColumnBadge(statusKey, count) {
 // this is a no-op on every other page and every other tab.
 document.addEventListener('bms:notifications-arrived', () => {
     const panel = document.getElementById('maintab-review-queue');
-    if (!panel || panel.classList.contains('hidden')) return;
-    window.detailRqRefresh?.();
+    if (!panel) return;
+    if (!panel.classList.contains('hidden')) { window.detailRqRefresh?.(); return; }
+    // The panel is off screen, so there is no list to re-render — but the tab BUTTON is still
+    // visible from wherever the user is standing, and on a records queue it carries the count.
+    // Leaving it stale is the thing the user actually notices: they are told a lead came in and
+    // the number beside "Outreach" does not move until they open the tab. Two fetches, no paint.
+    if ((window._detailReviewQueue || {}).kind === 'records') window._detailRqRefreshColumnCounts?.();
 });
 
 /**
@@ -1124,6 +1188,100 @@ function _rqColumnLabel(status) {
 
 // Records currently on screen, by id — see the merge note in _detailRqRenderRecords.
 const _rqRecordsById = new Map();
+
+// ── Send readiness for the Lead Generator's Outreach tab ─────────────────────
+//
+// ⚠️ THE PROBLEM THIS SOLVES: the postal-address gate is a HARD block on every outreach send, and the
+// field lives on a different page (Business Information) that nothing in this assistant's flow sends
+// you to. So the first thing a new tenant met was an approval that emailed nobody — measured on
+// production, zero organisations had an address, which made that outcome certain rather than likely.
+// The mailbox is the same shape of problem one step down: legitimate to have none, wrong to discover
+// it by pressing "Approve & send email".
+//
+// { postalAddress: bool, provider: 'google'|'microsoft'|'none', followUps: 'automatic'|'none' },
+// or null before the first fetch resolves. Keyed by assistant id so switching assistants cannot show
+// the previous one's setup.
+let _rqReadiness = null;
+let _rqReadinessFor = null;
+let _rqReadinessInFlight = false;
+// The last paint's options, so the readiness repaint reproduces the same empty state. See the note
+// at the _rqEnsureOutreachReadiness call site.
+let _rqLastPaintOpts = null;
+
+/** True when the current queue is the Lead Generator's, which is the only one that sends email. */
+function _rqIsLeadQueue() {
+    return (window._detailReviewQueue || {}).recordType === 'lead';
+}
+
+/**
+ * Fetch the readiness answer once per assistant, then repaint so the banner lands.
+ *
+ * Fire-and-forget by design: the list must never wait on this. Failures are silent — a banner that
+ * could not load is not worth an error on a tab whose actual job is reviewing leads, and every gate
+ * it describes is still enforced server-side at send time.
+ */
+function _rqEnsureOutreachReadiness(statusKey) {
+    const assistantId = window._currentAssistantId;
+    if (!_rqIsLeadQueue() || !assistantId) return;
+    if (_rqReadinessFor === assistantId || _rqReadinessInFlight) return;
+
+    _rqReadinessInFlight = true;
+    fetch('/.netlify/functions/lead-generation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'outreach_readiness', assistantId }),
+    })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+            if (!data) return;
+            _rqReadiness = data;
+            _rqReadinessFor = assistantId;
+            // Only repaint if the tab is still showing the column that asked. A repaint of a column
+            // the user has since left would fight whatever they are now reading.
+            if (_rqRecordsPageKey === statusKey) _detailRqPaintRecords(statusKey, _rqLastPaintOpts);
+        })
+        .catch(() => {})
+        .finally(() => { _rqReadinessInFlight = false; });
+}
+
+/**
+ * The banner, or ''. Shown on the two columns where a send can be triggered — Review (Approve &
+ * send) and Approved (Send email now) — and nowhere else: a warning about sending, over a column of
+ * leads whose email has already gone, is noise that teaches users to ignore the banner.
+ *
+ * Amber for the postal address because it BLOCKS, grey-blue for the mailbox because it does not: the
+ * draft is still produced and can be sent by hand, and colouring a supported workflow as a fault
+ * would tell a user their setup is broken when they chose it.
+ */
+function _rqOutreachReadinessHtml(statusKey) {
+    if (!_rqIsLeadQueue() || !_rqReadiness) return '';
+    if (statusKey !== 'review' && statusKey !== 'approved') return '';
+
+    const parts = [];
+    if (!_rqReadiness.postalAddress) {
+        parts.push(`<div class="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 my-3">
+            <span class="text-sm leading-none mt-0.5">📮</span>
+            <p class="text-xs text-amber-900">
+              <span class="font-bold">No outreach can be sent yet.</span>
+              Anti-spam law in the US and Canada requires a physical postal address in every marketing email, so
+              approving a lead will not send anything until yours is saved.
+              <button type="button" onclick="window.loadView &amp;&amp; window.loadView('assets')"
+                class="underline font-bold hover:no-underline cursor-pointer">Add it in Business Information</button> —
+              use your registered business address, since prospects will see it.
+            </p>
+          </div>`);
+    } else if (_rqReadiness.provider === 'none') {
+        parts.push(`<div class="flex items-start gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 my-3">
+            <span class="text-sm leading-none mt-0.5">✉️</span>
+            <p class="text-xs text-gray-600">
+              <span class="font-bold">No mailbox connected.</span>
+              Approving a lead will draft its email and hand it to you to send yourself. Connect Gmail or Outlook on the
+              Connections tab if you would rather your assistant sent them for you.
+            </p>
+          </div>`);
+    }
+    return parts.join('');
+}
 
 // ── Paging + collapse state for the records queue ────────────────────────────
 // Both exist for the same reason: a lead search files fifteen to sixty records at a time, and this
@@ -2171,6 +2329,18 @@ function _detailRqPaintRecords(statusKey, opts) {
             ? 'No emails waiting for you. Leads without a contact address can’t be emailed yet — they’re in the Enrichment tab.'
             : 'Nothing awaiting your review.';
 
+    // ── Send readiness (the pre-flight) ──────────────────────────────────────────
+    // Kicked off here rather than on page load: this is the only tab where it is shown, and a user
+    // who never opens it should not pay for the query. Fire-and-forget with a repaint on arrival —
+    // the banner appearing a moment after the list is far better than the list waiting for it.
+    //
+    // ⚠️ `opts` is remembered for that repaint. It carries `deliverableOnly`, which is the difference
+    // between "No emails waiting for you — leads without an address are in Enrichment" and a bare
+    // "Nothing awaiting your review"; repainting without it would quietly downgrade the empty state
+    // of the one column where the distinction matters.
+    _rqLastPaintOpts = opts || null;
+    _rqEnsureOutreachReadiness(statusKey);
+
     // The 30-day retention notice, above the two columns the sweep actually collects.
     //
     // ⚠️ Review and Archived ONLY. Approved and Awaiting-reply leads are never swept — on this role
@@ -2213,8 +2383,11 @@ function _detailRqPaintRecords(statusKey, opts) {
              the other the chase reminder — so these columns add up to more than the tab’s own total.</p>`
         : '';
 
+    // The send-readiness banner, above the columns where a send is actually triggered.
+    const readyHtml = _rqOutreachReadinessHtml(statusKey);
+
     if (!records.length) {
-        container.innerHTML = noticeHtml + `<p class="text-sm text-gray-400 py-10 text-center">${emptyMsg}</p>`;
+        container.innerHTML = readyHtml + noticeHtml + `<p class="text-sm text-gray-400 py-10 text-center">${emptyMsg}</p>`;
         return;
     }
 
@@ -2225,7 +2398,7 @@ function _detailRqPaintRecords(statusKey, opts) {
     // on page 4) lands on the last real page rather than rendering nothing.
     _rqRecordsPage = pg.page || 1;
     const noun = (window._detailReviewQueue || {}).recordType === 'lead' ? 'leads' : 'records';
-    container.innerHTML = noticeHtml + overlapHtml
+    container.innerHTML = readyHtml + noticeHtml + overlapHtml
         + `<div class="divide-y divide-gray-100">${pg.items.map((r) => _detailRqRecordCard(r, statusKey)).join('')}</div>`
         + (window.ListPager ? window.ListPager.controlsHtml(pg, { attr: 'data-rq-page', noun }) : '');
     // The container outlives every repaint, so one delegated listener covers every page of every
@@ -2488,10 +2661,18 @@ async function _rqSendLeadOutreach(recordId, opts) {
 
         if (sdata.sent) {
             const d = sdata.chaseDate ? new Date(sdata.chaseDate) : null;
+            // ⚠️ States whether a SEQUENCE started, not just that a reminder was set. The server
+            // returns `followUps: 'started' | 'none'` from the enrolment it actually made
+            // (lead-generation.ts), so this cannot claim a cadence that was skipped — or hide one
+            // that was not. Approving one email can start up to four; the toast is the last moment
+            // that fact can reach the person who pressed the button.
+            const chasers = sdata.followUps === 'started'
+                ? ' Automatic chasers are on for this assistant, so up to three more emails will follow unless they reply.'
+                : '';
             // Names the column as THIS role labels it — the Lead Generator calls it "Awaiting
             // reply", and a toast sending the user to a "Scheduled" tab they do not have is the
             // same dead end as naming a tool that does not exist.
-            return `Outreach emailed to ${sdata.to} — chase reminder set${d ? ` for ${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}. It’s in the ${_rqColumnLabel('scheduled')} column and on the Calendar.`;
+            return `Outreach emailed to ${sdata.to} — chase reminder set${d ? ` for ${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}. It’s in the ${_rqColumnLabel('scheduled')} column and on the Calendar.${chasers}`;
         }
 
         // ── No inbox to send from ────────────────────────────────────────────
@@ -2533,11 +2714,27 @@ async function _rqSendLeadOutreach(recordId, opts) {
         if (sdata.reason === 'suppressed') {
             return say('nothing sent. This company is on your suppression list.');
         }
+        // ⚠️ checkSuppression fails CLOSED, so a lookup error is a non-send with its own reason —
+        // and this branch was missing, which meant the ONE outcome caused by our own infrastructure
+        // fell through to a bare "Lead approved." beside an email that never left. Named here, and
+        // it says the send can be retried, because unlike every other reason on this list nothing
+        // about the lead is wrong.
+        if (sdata.reason === 'suppression_check_failed') {
+            return say('nothing sent — your suppression list could not be checked just now, and we never email without checking. Press “Send email now” on this lead to try again.');
+        }
         if (sdata.reason === 'no_postal_address') {
             // The only non-send reason the user can clear themselves in one step, so it names the
             // page rather than just the problem. Everything else here is about the LEAD; this is
             // about their own setup, and a bare "nothing sent" would read as a bug.
             return say(`nothing sent. ${sdata.detail || 'Add your business postal address in Business Information.'}`);
+        }
+        // ⚠️ A non-send we have no sentence for. Reached only if send_outreach gains a reason and
+        // this list is not updated — which is exactly how suppression_check_failed stayed invisible.
+        // Report the reason verbatim rather than the bare "Lead approved.": an unfamiliar word the
+        // user can quote at support beats silence about an email that did not go.
+        if (sdata.reason) {
+            console.warn('[lead-outreach] unhandled non-send reason from send_outreach:', sdata.reason);
+            return say(`nothing sent (${String(sdata.reason).replace(/_/g, ' ')}).`);
         }
         return plain;
     } catch {
@@ -2824,6 +3021,20 @@ window._detailRqRecordAct = async function (btn, action) {
         await _detailRqRenderGroups(_detailRqCurrentStatus);
         _rqShowEditReasonStrip();
         _rqShowRejectReasonStrip();
+        // ⚠️ Re-count EVERY column, not just the one on screen. _detailRqRenderRecords above sets
+        // the badge for the column it rendered and nothing else, so the whole point of an approval
+        // — the lead leaving Review and arriving in Approved / Awaiting reply — was invisible until
+        // the user clicked the column it moved to. The tab's own "Outreach (23)" parenthetical is
+        // set in the same place, so it was stale from the first action onwards too.
+        window._detailRqRefreshColumnCounts?.();
+        // Approving a LEAD sends its email, and a real send mints the conversation thread
+        // (openLeadThread runs just before it) — so the Conversations tab's count is wrong the
+        // instant this returns. It loads once at init and `activate()` deliberately repaints from
+        // state rather than refetching, so nothing else would ever correct it in this session.
+        // Only on approve: no other action here can create a thread.
+        if (action === 'approve' && (window._detailReviewQueue || {}).recordType === 'lead') {
+            window.AssistantLeadThreads?.refresh?.();
+        }
         // A newly scheduled/approved record changes the Calendar + Data Hub — force them to reload
         // next time they're opened (both are cached once per detail mount).
         const calHost = document.getElementById('assistant-calendar-host');
@@ -4248,6 +4459,18 @@ function _applyDashboardRegistry(data) {
     const rqLabel = window._detailReviewQueue.label || 'Review';
     setText('detail-rq-heading', rqLabel);
     setText('review-queue-tab-label', rqLabel);
+    // ⚠️ Count NOW, not on first activation. _detailRqRefreshRecordCounts was only ever reached
+    // through _activateMainTab('review-queue'), so "Outreach (23)" — and all four column badges —
+    // were blank until the user clicked the tab, and only that tab. Every other tab in the lead
+    // strip (Searches, Enrichment, Conversations) already loads its own count at init, so Outreach
+    // was the one button in the row that said nothing about itself, and the user had to open it to
+    // find out whether it was worth opening.
+    //
+    // Records queues only. A posts queue counts one column per request (_detailRqColumnCount), so
+    // priming it eagerly would be five or six fetches on every assistant page load for a number
+    // nothing renders until the tab opens — the records path is two, and it is the one that feeds
+    // a tab label. Fire-and-forget: counts are ambient, and this must never delay the page.
+    if (window._detailReviewQueue.kind === 'records') window._detailRqRefreshColumnCounts?.();
     // Lifecycle column labels. A role may rename any of them via reviewQueue.columnLabels, keyed by
     // the column's `data-status` — the Lead Generator renames "Scheduled" to "Awaiting reply",
     // because on that role the state means the email has ALREADY gone and what is scheduled is the

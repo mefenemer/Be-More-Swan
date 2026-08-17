@@ -1,8 +1,9 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, gte, sql, count, inArray } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, contentGenerationJobs, goals, masterAssistants, scheduledPosts, userProfiles } from '../../db/schema';
+import { aiAssistants, assistantRecords, contentGenerationJobs, goals, masterAssistants, scheduledPosts, userProfiles } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { RETENTION_DELETED_SQL_PATH } from '../../src/config/lead-retention';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
 import { countRoiActivityByAssistant } from '../../src/utils/roi-activity';
 import { parseRoiPeriod, roiPeriodStart } from '../../src/utils/roi-period';
@@ -54,7 +55,7 @@ export default withLambda(async (event) => {
         const periodStart = roiPeriodStart(period);
 
         // Run goals + post metrics + hourly rate in parallel
-        const [goalRows, postRows, activeJobRows, profileRow, mult, roiByAssistant] = await Promise.all([
+        const [goalRows, postRows, recordRows, activeJobRows, profileRow, mult, roiByAssistant] = await Promise.all([
             // SMART Goals AC2.1.1 — the goal block on the dashboard / My Assistants card.
             //
             // Selects the ROWS rather than a GROUP BY tally. The card shows one headline goal with a
@@ -94,6 +95,43 @@ export default withLambda(async (event) => {
                   ))
                   .groupBy(scheduledPosts.assistantId, scheduledPosts.status, scheduledPosts.platform)
                 : Promise.resolve([] as { assistantId: number | null; status: string; platform: string; c: number }[]),
+
+            // Per-assistant assistant_records counts, grouped by type + approval gate.
+            //
+            // ── Why this query exists ────────────────────────────────────────────────────────
+            // The card's activity strip is built entirely from `postMetrics`, and it is gated on
+            // `totalCreated > 0`. A Lead Generator publishes nothing, so that gate never opened:
+            // its card showed a name, a status pill and a goal bar, while a Social Media Assistant
+            // beside it showed created/scheduled/published, per-platform pills and ~Xh saved / £Y
+            // ROI. The ROI half was the worst of it — roi-activity.ts has counted assistant_records
+            // since 2026-08-16, so the figures existed and were simply never rendered, because the
+            // only branch that renders them asks about POSTS.
+            //
+            // ⚠️ LIVE records only, matching every other lead surface (assistant-records.ts
+            // defaults to ?retention=live). A lead the retention sweep has moved to Deleted is not
+            // in the Enrichment tab's count, and a card that included it would disagree with the
+            // page it links to. Same predicate, built from the same constant, never retyped.
+            //
+            // Grouped in ONE query for every assistant in the org, like postRows above — never one
+            // query per assistant.
+            assistantIds.length > 0
+                ? db.select({
+                    assistantId: assistantRecords.aiAssistantId,
+                    recordType: assistantRecords.recordType,
+                    approvalStatus: assistantRecords.approvalStatus,
+                    c: sql<number>`count(*)::int`,
+                  })
+                  .from(assistantRecords)
+                  .where(and(
+                      eq(assistantRecords.organisationId, orgId),
+                      inArray(assistantRecords.aiAssistantId, assistantIds),
+                      // Byte-for-byte the predicate assistant-records.ts uses for ?retention=live,
+                      // built from the same constant. `data` is unqualified because this select
+                      // has no join — the same shape that query has.
+                      sql`${sql.raw(`NULLIF(BTRIM(data #>> '${RETENTION_DELETED_SQL_PATH}'), '')`)} IS NULL`,
+                  ))
+                  .groupBy(assistantRecords.aiAssistantId, assistantRecords.recordType, assistantRecords.approvalStatus)
+                : Promise.resolve([] as { assistantId: number; recordType: string; approvalStatus: string; c: number }[]),
 
             // Operational signal (Epic 1 AC1.1.2): mid-flight generation jobs per assistant, same
             // "active" statuses the detail page's Recent Activity loader uses (get-assistant-activity.ts)
@@ -208,6 +246,44 @@ export default withLambda(async (event) => {
             }
         }
 
+        // --- Record metrics per assistant (data-hub roles) ---
+        //
+        // The record-shaped equivalent of postMetrics above. `primaryType` is the record type this
+        // assistant has most of, and it is what the card labels its strip from — resolved from the
+        // data rather than from roleKey deliberately, because roleKey is read out of
+        // `configuration->>'type'` and a legacy or hand-edited row can carry one this endpoint has
+        // never heard of. Counting what is actually there cannot produce a strip for a type the
+        // assistant does not have.
+        //
+        // ⚠️ `cleared` is approved + scheduled, NOT approved alone. A lead whose outreach email
+        // actually sent rests at 'scheduled' — that state is the chase reminder, not a pending send
+        // (lead-generation.ts `send_outreach`) — so counting only 'approved' would make the number
+        // FALL each time the assistant succeeded. This is the same two-state rule the Outreach
+        // tab's Approved column and the qualified_leads goal both apply; see
+        // src/config/lead-outreach-state.ts.
+        type RecordMetric = { total: number; pending: number; cleared: number; rejected: number };
+        const recordMetrics = new Map<number, Map<string, RecordMetric>>();
+        for (const r of recordRows) {
+            if (r.assistantId == null) continue;
+            if (!recordMetrics.has(r.assistantId)) recordMetrics.set(r.assistantId, new Map());
+            const byType = recordMetrics.get(r.assistantId)!;
+            if (!byType.has(r.recordType)) byType.set(r.recordType, { total: 0, pending: 0, cleared: 0, rejected: 0 });
+            const m = byType.get(r.recordType)!;
+            m.total += r.c;
+            if (r.approvalStatus === 'pending_approval') m.pending += r.c;
+            if (r.approvalStatus === 'approved' || r.approvalStatus === 'scheduled') m.cleared += r.c;
+            if (r.approvalStatus === 'rejected') m.rejected += r.c;
+
+            // The status pill's "Awaiting Human Review" sub-state reads opSignals.pendingReview,
+            // which was populated from pending_approval POSTS only — so a Lead Generator with 162
+            // leads waiting on a human read "Idle". `lead_idea` is excluded for the same reason
+            // roi-activity.ts excludes it: approving one produces the leads that are already
+            // counted here, so including both bills one piece of work twice.
+            if (r.approvalStatus === 'pending_approval' && r.recordType !== 'lead_idea') {
+                pendingReviewCount.set(r.assistantId, (pendingReviewCount.get(r.assistantId) || 0) + r.c);
+            }
+        }
+
         const activeJobCount = new Map<number, number>();
         for (const r of activeJobRows) {
             if (r.assistantId == null) continue;
@@ -226,6 +302,20 @@ export default withLambda(async (event) => {
             // agrees with the assistant detail page's Impact & ROI tab and sums into the hero.
             const hoursSaved = roiByAssistant.get(a.id)?.hoursSaved ?? 0;
             const gbpSaved = hourlyRateGbp ? parseFloat((hoursSaved * hourlyRateGbp).toFixed(2)) : null;
+
+            // The record type this assistant has most of, plus its counts — null for a role that
+            // files nothing (social/blog), which is how the card decides which strip to draw.
+            // `lead_idea` is never the primary type: it is scaffolding for producing leads, and a
+            // card headlining "3 lead ideas" over an assistant holding 162 leads would describe
+            // the wrong work.
+            const byType = recordMetrics.get(a.id);
+            let recordMetric: { recordType: string } & RecordMetric | null = null;
+            if (byType) {
+                for (const [recordType, m] of byType) {
+                    if (recordType === 'lead_idea') continue;
+                    if (!recordMetric || m.total > recordMetric.total) recordMetric = { recordType, ...m };
+                }
+            }
             return {
                 ...a,
                 goalSummary: goalBlock.get(a.id)?.summary ?? summariseGoals([]),
@@ -236,6 +326,9 @@ export default withLambda(async (event) => {
                     gbpSaved,
                     hourlyRateSet: hourlyRateGbp !== null,
                 },
+                // Present only for roles that file records. The card renders one strip or the
+                // other, never both — see generateAssistantCardHTML in assistants.js.
+                recordMetrics: recordMetric,
                 // Feeds the same "working" sub-state refinement (Executing Task / Awaiting
                 // Human Review / Idle) the assistant-detail pill uses, so the list card matches.
                 opSignals: {
