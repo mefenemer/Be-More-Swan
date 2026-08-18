@@ -72,7 +72,10 @@ export default withLambda(async (event) => {
             .where(and(
                 eq(contentGenerationJobs.assistantId, assistant.id),
                 eq(contentGenerationJobs.triggerType, 'conversion'),
-                sql`(${contentGenerationJobs.createdAt} >= ${intervalAgo} OR ${contentGenerationJobs.status} IN ('queued','processing'))`,
+                // ⚠️ `.toISOString()`, NOT the Date — a raw template binds its values as-is and
+                // postgres-js throws ERR_INVALID_ARG_TYPE on a Date during Bind. The eq() predicates
+                // above are safe with a Date; this one is not, and nothing in the types says so.
+                sql`(${contentGenerationJobs.createdAt} >= ${intervalAgo.toISOString()} OR ${contentGenerationJobs.status} IN ('queued','processing'))`,
             ))
             .limit(1);
         if (recent) { skipped.recent_conversion++; continue; }

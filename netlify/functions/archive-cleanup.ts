@@ -96,7 +96,14 @@ async function sweepAbandonedBlanks(db: Db, now: Date, limit: number): Promise<S
             SELECT sp.id, sp.organisation_id, sp.crosspost_group_id
             FROM scheduled_posts sp
             WHERE sp.status = 'draft'
-              AND sp.created_at < ${cutoff}
+              -- toISOString(), never the Date: postgres-js binds a raw template's values as-is and
+              -- throws ERR_INVALID_ARG_TYPE in Bind, client-side, before the statement is sent.
+              -- (No backticks in this comment: it lives INSIDE a template literal, and one would end
+              -- the string. That is what broke the build the first time this note was written.)
+              -- It hid from tests/raw-sql-date-params.test.ts for a different reason than the lead
+              -- sweep did: that lint matched only the .execute(sql ...) shape, and the TYPE GENERIC
+              -- on db.execute<{...}>( broke the match. Both shapes are covered now.
+              AND sp.created_at < ${cutoff.toISOString()}
               AND btrim(coalesce(sp.caption, '')) = ''
               AND btrim(coalesce(sp.hashtags, '')) = ''
               AND (

@@ -1126,6 +1126,13 @@ export default withLambda(async (event) => {
             const now = new Date();
             const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
             const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+            // ⚠️ Both forms are needed and they are NOT interchangeable. The `gte()` calls below
+            // take the Date — the column's own mapToDriverValue converts it. The raw sql`` templates
+            // must take the ISO string: postgres-js binds a template's values as-is and writes each
+            // with Buffer.byteLength during Bind, which throws ERR_INVALID_ARG_TYPE on a Date,
+            // client-side, before the statement is ever sent. drizzle rethrows that as
+            // "Failed query: SELECT …", which reads exactly like a schema fault and is not one.
+            const thirtyDaysAgoIso = thirtyDaysAgo.toISOString();
 
             // (1) Platform total COGS this month
             const [totRow] = await db
@@ -1210,7 +1217,7 @@ export default withLambda(async (event) => {
                     category,
                     COUNT(*) AS call_count
                 FROM ai_usage_log, unnest(data_categories) AS category
-                WHERE created_at >= ${thirtyDaysAgo}
+                WHERE created_at >= ${thirtyDaysAgoIso}
                 GROUP BY category
                 ORDER BY call_count DESC
             `);
@@ -1225,7 +1232,7 @@ export default withLambda(async (event) => {
             const specialCatRows = await db.execute(sql`
                 SELECT COUNT(*) AS cnt
                 FROM ai_usage_log
-                WHERE created_at >= ${thirtyDaysAgo}
+                WHERE created_at >= ${thirtyDaysAgoIso}
                   AND 'special_category_suspected' = ANY(data_categories)
             `);
             const specialCatCount = Number((specialCatRows[0] as any)?.cnt ?? 0);
@@ -1234,7 +1241,7 @@ export default withLambda(async (event) => {
             const specialCatTrend = await db.execute(sql`
                 SELECT DATE(created_at) AS day, COUNT(*) AS cnt
                 FROM ai_usage_log
-                WHERE created_at >= ${thirtyDaysAgo}
+                WHERE created_at >= ${thirtyDaysAgoIso}
                   AND 'special_category_suspected' = ANY(data_categories)
                 GROUP BY DATE(created_at)
                 ORDER BY day
@@ -2541,8 +2548,8 @@ export default withLambda(async (event) => {
             const now = new Date();
             const ago24h = new Date(now.getTime() - 86_400_000);
             const ago7d  = new Date(now.getTime() - 7 * 86_400_000);
-            const [pub24h] = await db.execute<{ c: number }>(sql`SELECT COUNT(*)::int AS c FROM scheduled_posts WHERE platform='instagram' AND status='published' AND published_at >= ${ago24h}`);
-            const [pub7d]  = await db.execute<{ c: number }>(sql`SELECT COUNT(*)::int AS c FROM scheduled_posts WHERE platform='instagram' AND status='published' AND published_at >= ${ago7d}`);
+            const [pub24h] = await db.execute<{ c: number }>(sql`SELECT COUNT(*)::int AS c FROM scheduled_posts WHERE platform='instagram' AND status='published' AND published_at >= ${ago24h.toISOString()}`);
+            const [pub7d]  = await db.execute<{ c: number }>(sql`SELECT COUNT(*)::int AS c FROM scheduled_posts WHERE platform='instagram' AND status='published' AND published_at >= ${ago7d.toISOString()}`);
             const [queue]  = await db.execute<{ c: number }>(sql`SELECT COUNT(*)::int AS c FROM scheduled_posts WHERE platform='instagram' AND status='scheduled' AND publish_date <= now()`);
             const [failed] = await db.execute<{ c: number }>(sql`SELECT COUNT(*)::int AS c FROM scheduled_posts WHERE platform='instagram' AND status='failed'`);
             return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
@@ -2583,7 +2590,7 @@ export default withLambda(async (event) => {
                 JOIN organisations o ON o.id = sc.organisation_id
                 WHERE sc.service_name = 'instagram'
                   AND sc.status = 'active'
-                  AND sc.token_expires_at < ${in14d}
+                  AND sc.token_expires_at < ${in14d.toISOString()}
                 ORDER BY sc.token_expires_at ASC
             `);
             return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify([...rows].map(r => ({

@@ -118,12 +118,18 @@ check('the jsonb read is guarded by jsonb_typeof', () => {
 check('the age gate uses created_at, never updated_at', () => {
     // updated_at only moves when a writer explicitly sets it, and ~30 functions update
     // scheduled_posts. created_at is immutable and always set, so it cannot under-report activity.
+    // ⚠️ The COLUMN is what this check is about, so the binding is matched loosely. It used to pin
+    // the exact text `${cutoff}` and went red when that Date was converted to `${cutoff.toISOString()}`
+    // — a fix for a real outage (postgres-js throws ERR_INVALID_ARG_TYPE binding a Date into a raw
+    // template, so this sweep had never completed a run). A test that pins the serialisation of a
+    // value it does not care about blocks the repair of a bug it never checked for; the binding has
+    // its own guard in tests/raw-sql-date-params.test.ts.
     assert.ok(
-        /sp\.created_at < \$\{cutoff\}/.test(cleanup),
+        /sp\.created_at\s*<\s*\$\{cutoff/.test(cleanup),
         'the blank sweep lost its created_at age gate — an open composer can be deleted'
     );
     assert.ok(
-        !/updated_at\s*<\s*\$\{cutoff\}/.test(cleanup),
+        !/updated_at\s*<\s*\$\{cutoff/.test(cleanup),
         'the sweep gates on updated_at, which is not reliably bumped by every writer'
     );
 });

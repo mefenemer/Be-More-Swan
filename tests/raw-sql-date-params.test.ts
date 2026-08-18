@@ -43,30 +43,77 @@ function walk(dir: string, out: string[] = []): string[] {
     return out;
 }
 
-/** Identifiers whose value is a Date often enough to be worth refusing inside a raw template. */
 const DATE_ISH = /\$\{\s*([A-Za-z_$][\w$]*(?:\.[\w$]+)*)\s*\}/g;
+
+/**
+ * Names that read like a Date. A fallback net only — see dateLocals() for the primary test.
+ *
+ * ⚠️ This list was the ONLY gate until 2026-08-18, and it is why six live instances of this bug sat
+ * in the repo while a test named "must not bind a Date" passed. It flags `cutoff` and misses
+ * `thirtyDaysAgo`, `ago24h`, `ago7d`, `in14d`, `staleBefore`, `intervalAgo`, `soonFrom` and `soonTo`
+ * — every one of which was a real Date bound into a real template, five of them inside the
+ * `.execute(sql`…`)` shape this test already claimed to cover. A hand-maintained list of names
+ * cannot be the gate: it only ever knows about the bugs already found.
+ */
 const LOOKS_LIKE_DATE = /(^|[a-z])(date|periodStart|expiresAt|createdAt|updatedAt|startedAt|cutoff|since|until|deletedAt|scheduledFor)($|[A-Z_])/i;
+
+/**
+ * Identifiers this file DECLARES as a Date — `= new Date(...)` or annotated `: Date`.
+ *
+ * This is the real test, and it needs no allowlist: it reads what the code says the value IS rather
+ * than guessing from what it is called. `${staleBefore}` is caught because four lines up the file
+ * says `staleBefore: Date`, which no naming convention would have told us.
+ *
+ * Known limit, stated rather than assumed: a Date that arrives without a local declaration — read
+ * off an object, or returned untyped from a helper — is invisible here. LOOKS_LIKE_DATE is kept
+ * alongside as a second net for that case, which is the only job it is fit for.
+ */
+function dateLocals(src: string): Set<string> {
+    const names = new Set<string>();
+    for (const m of src.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=\s*new Date\b/g)) names.add(m[1]);
+    for (const m of src.matchAll(/\b([A-Za-z_$][\w$]*)\s*\??\s*:\s*Date\b/g)) names.add(m[1]);
+    return names;
+}
 
 console.log('\nraw sql`` templates must not bind a Date\n');
 
-check('no execute(sql`...`) template interpolates a Date-shaped identifier', () => {
+check('no raw sql`...` template interpolates a Date-shaped identifier', () => {
+    // ⚠️ SCOPE WIDENED 2026-08-18, and the narrow version is why this test existed while the bug
+    // shipped anyway. It only ever scanned `.execute(sql`…`)`, but the driver binds a raw template
+    // the same way WHEREVER it appears — including inside a query-builder `.where(and(…))`, which is
+    // exactly where lead-retention-sweep.ts bound a Date. That sweep had never completed a single run
+    // since the file was written: the failure only showed as a nightly scheduled invocation erroring
+    // in production, and it took giving the job an HTTP endpoint that reports its own result to see
+    // it. A lint that checks one call shape is a lint that says the other shapes are safe.
     const offenders: string[] = [];
     for (const dir of SCAN_DIRS) {
         for (const file of walk(path.join(ROOT, dir))) {
             const src = readFileSync(file, 'utf8');
-            // Each raw template passed to .execute(). Crude but sufficient: the template literal
-            // runs to the closing backtick, and these are all single-level templates.
-            const templates = src.matchAll(/\.execute\(\s*sql`([\s\S]*?)`\s*\)/g);
+            const declaredDates = dateLocals(src);
+            // EVERY sql`` template, not just the ones handed to .execute(). Crude but sufficient:
+            // these are all single-level templates that run to the closing backtick.
+            const templates = src.matchAll(/\bsql`([^`]*)`/g);
             for (const t of templates) {
                 for (const m of t[1].matchAll(DATE_ISH)) {
                     const ident = m[1];
                     const last = ident.split('.').pop() || '';
+                    // ⚠️ A DOTTED identifier in a template is a drizzle COLUMN reference
+                    // (`${taskRuns.createdAt}`), which serialises to a SQL identifier and is
+                    // completely safe — there are seventeen of those in this repo and flagging them
+                    // would drown the two real bugs. A bare `${cutoff}` is a local variable, which is
+                    // where the Date actually comes from. The residual gap is a Date read off an
+                    // object (`${row.createdAt}`); accepted, and named here so it is a known limit
+                    // rather than an assumed absence.
+                    if (ident.includes('.')) continue;
                     // A name ending in Param/Iso/Str is the CONVERTED value — that is the fix, not
-                    // the bug, and flagging it would make the lint impossible to satisfy.
-                    if (/(Param|Iso|IsoString|Str|String|Text)$/.test(last)) continue;
-                    // `.toISOString()` and friends are already strings, so only a BARE identifier
-                    // that reads like a Date is suspicious.
-                    if (LOOKS_LIKE_DATE.test(last)) {
+                    // the bug, and flagging it would make the lint impossible to satisfy. `Sql` is a
+                    // pre-built sql.raw fragment, not a value at all.
+                    if (/(Param|Iso|IsoString|Str|String|Text|Sql)$/.test(last)) continue;
+                    // `.toISOString()` and friends are already strings — `${x.toISOString()}`
+                    // carries parens, so DATE_ISH never matched it in the first place. What is left
+                    // is a bare identifier: flag it if the file DECLARES it a Date, and fall back to
+                    // the name heuristic for the Dates that arrive without a local declaration.
+                    if (declaredDates.has(last) || LOOKS_LIKE_DATE.test(last)) {
                         offenders.push(`${path.relative(ROOT, file)}: \${${ident}}`);
                     }
                 }

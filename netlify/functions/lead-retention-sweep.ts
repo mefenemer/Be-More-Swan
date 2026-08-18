@@ -96,7 +96,18 @@ async function collect(db: Db, cutoff: Date): Promise<Expired[]> {
                 eq(assistantRecords.approvalStatus, 'pending_approval'),
                 eq(assistantRecords.approvalStatus, 'rejected'),
             ),
-            sql`${clockSql} < ${cutoff}`,
+            // ⚠️ `.toISOString()`, NOT the Date. postgres-js binds a raw template's values as-is and
+            // its Bind step writes each with Buffer.byteLength, which throws ERR_INVALID_ARG_TYPE on a
+            // Date — client-side, before the statement is ever sent. drizzle rethrows it as
+            // "Failed query: select …", which reads exactly like a schema fault and is not one.
+            //
+            // ⚠️ THIS SWEEP HAD NEVER COMPLETED. The bug shipped with the file: the query-builder
+            // parts are safe (the column's mapToDriverValue converts the Date), so nothing else here
+            // failed, and the only symptom was a nightly scheduled invocation erroring in prod where
+            // nobody reads the logs. It surfaced the day run-lead-sweeps.ts gave the job an endpoint
+            // that reports its own failures. An ISO string is exactly what drizzle's timestamp mapper
+            // emits, so the value this matches on and the value an INSERT writes stay identical.
+            sql`${clockSql} < ${cutoff.toISOString()}`,
             notAlreadyDeleted,
         ))
         .orderBy(sql`${clockSql} ASC`)
@@ -166,8 +177,12 @@ async function warnBeforeSweep(db: Db, now: Date): Promise<number> {
                     eq(assistantRecords.approvalStatus, 'pending_approval'),
                     eq(assistantRecords.approvalStatus, 'rejected'),
                 ),
-                sql`${clockSql} >= ${soonFrom}`,
-                sql`${clockSql} < ${soonTo}`,
+                // Same ISO-string rule as collect() above — and the same silence if it is broken:
+                // this function swallows its own errors so a warning failure cannot stop the sweep,
+                // which means a Date bound here would have produced no warnings and no log anyone
+                // would connect to it.
+                sql`${clockSql} >= ${soonFrom.toISOString()}`,
+                sql`${clockSql} < ${soonTo.toISOString()}`,
                 notAlreadyDeleted,
             ))
             .groupBy(assistantRecords.aiAssistantId);

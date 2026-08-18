@@ -117,7 +117,13 @@ async function collectCandidates(db: Db, staleBefore: Date): Promise<Candidate[]
             // Never enriched, or enriched long enough ago to have gone stale.
             or(
                 sql`${assistantRecords.data} -> '${sql.raw(INTEL_FIELD)}' IS NULL`,
-                sql`(${assistantRecords.data} #>> '{${sql.raw(INTEL_FIELD)},gatheredAt}')::timestamptz < ${staleBefore}`,
+                // ⚠️ `.toISOString()`, NOT the Date. This is a hand-written template, so it bypasses
+                // the column mapper that makes the query-builder predicates around it safe — a Date
+                // here throws ERR_INVALID_ARG_TYPE inside postgres-js Bind, client-side, and drizzle
+                // rethrows it as a "Failed query" that reads like a schema fault. Latent until now
+                // only because the sweep reports `skipped: disabled`; it would have failed on the
+                // first run after enrichment was switched on.
+                sql`(${assistantRecords.data} #>> '{${sql.raw(INTEL_FIELD)},gatheredAt}')::timestamptz < ${staleBefore.toISOString()}`,
             ),
             // Excluded, per the block comment above.
             sql`${assistantRecords.data} ->> 'doNotContact' IS DISTINCT FROM 'true'`,

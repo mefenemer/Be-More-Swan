@@ -8,6 +8,7 @@ import Stripe from 'stripe';
 import { eq, and } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
 import { users, plans, leads } from '../../db/schema';
+import { sendCancellationAlert } from '../../src/utils/founder-alerts';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret    = process.env.JWT_SECRET;
@@ -76,7 +77,12 @@ export default withLambda(async (event) => {
         const [activePlan] = await db.update(plans)
             .set(withUpdatedAt({ status: 'cancelling' }))
             .where(and(eq(plans.userId, userId), eq(plans.status, 'active')))
-            .returning({ planName: plans.planName, organisationId: plans.organisationId });
+            .returning({
+                planName: plans.planName,
+                organisationId: plans.organisationId,
+                masterPlanId: plans.masterPlanId,
+                stripeCustomerId: plans.stripeCustomerId,
+            });
 
         // US-SALES-1.1 Part 3c: capture cancellation intent as a high-priority lead
         try {
@@ -96,6 +102,21 @@ export default withLambda(async (event) => {
         } catch (leadErr) {
             console.error('[billing-cancel] lead capture failed (non-fatal):', leadErr);
         }
+
+        // ── Founder alert — churn, while they are still a customer ───
+        // Fired here rather than on customer.subscription.deleted: that webhook lands at
+        // period end, weeks later, when nothing can be done. Never throws.
+        const periodEndUnix = updated.items.data[0]?.current_period_end ?? null;
+        await sendCancellationAlert({
+            db,
+            userId,
+            organisationId:       activePlan?.organisationId ?? null,
+            planName:             activePlan?.planName ?? null,
+            masterPlanId:         activePlan?.masterPlanId ?? null,
+            effectiveDate:        periodEndUnix ? new Date(periodEndUnix * 1000) : null,
+            stripeCustomerId:     activePlan?.stripeCustomerId ?? customerId,
+            stripeSubscriptionId,
+        });
 
         return {
             statusCode: 200,

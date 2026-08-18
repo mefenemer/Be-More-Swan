@@ -1,6 +1,6 @@
 // src/utils/founder-alerts.ts
 //
-// Internal founder alerts — "someone subscribed", "someone upgraded". Sent to
+// Internal founder alerts — subscribed, upgraded, downgraded, cancelled. Sent to
 // hello@bemoreswan.com (override with FOUNDER_ALERT_EMAIL).
 //
 // These are INTERNAL ops emails, deliberately NOT routed through renderTemplate()/the
@@ -11,11 +11,17 @@
 // Callers:
 //   - new subscriber → stripe-webhook.ts, both checkout branches
 //   - upgrade        → billing-upgrade.ts, inside the existing idempotency guard
+//   - downgrade      → billing-downgrade.ts, at schedule time (not when it activates)
+//   - cancellation   → billing-cancel.ts, at request time (not when the period ends)
+//
+// The two churn alerts fire on the REQUEST, while the customer is still a customer and a
+// save is still possible. The webhook events that follow weeks later (subscription.updated
+// for the downgrade phase, subscription.deleted for the cancellation) are the receipt.
 //
 // Every send here is best-effort and NEVER throws. In the webhook a throw would release
 // the processed_webhook_events claim and trigger a Stripe retry that re-runs plan
-// activation; in billing-upgrade it would turn a completed upgrade into a 402 for the
-// customer. An undelivered alert is logged and swallowed.
+// activation; in the billing functions it would turn a completed change into a 5xx for
+// the customer. An undelivered alert is logged and swallowed.
 
 import { eq } from 'drizzle-orm';
 import { users, organisations, masterPlans } from '../../db/schema';
@@ -368,5 +374,247 @@ export async function sendPlanUpgradeAlert(params: PlanUpgradeAlertParams): Prom
         console.log(`[founder-alerts] upgrade alert sent to ${FOUNDER_EMAIL} for user ${userId} (${fromTierKey || '?'} → ${toTierKey})`);
     } catch (err: any) {
         console.error('[founder-alerts] upgrade alert FAILED (non-blocking):', err?.message || err);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Plan downgrade (scheduled)
+//
+// Fires from billing-downgrade.ts at REQUEST time, not when the lower tier actually
+// activates. Same reasoning as the upgrade alert — the request site knows both tiers
+// exactly — plus the founder-facing one: a downgrade taking effect at period end is old
+// news, while a downgrade just requested is still a save opportunity. `effectiveDate`
+// carries when the MRR actually drops.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface PlanDowngradeAlertParams {
+    db: any;
+    userId: number;
+    organisationId: number | null;
+    fromPlanName: string | null;
+    fromTierKey: string | null;
+    fromMonthlyPriceGbp: string | null;
+    toPlanName: string;
+    toTierKey: string;
+    toMonthlyPriceGbp: string;
+    /** When the lower price takes effect (current period end). */
+    effectiveDate?: Date | null;
+    stripeCustomerId?: string | null;
+    stripeSubscriptionId?: string | null;
+}
+
+export interface PlanDowngradeAlertData {
+    companyName: string;
+    fullName: string;
+    email: string | null;
+    fromLabel: string;
+    toLabel: string;
+    toPlanName: string;
+    fromPriceLabel: string;
+    toPriceLabel: string;
+    deltaLabel: string | null;
+    effectiveLabel: string | null;
+    userId: number;
+    organisationId: number | null;
+    stripeCustomerId?: string | null;
+    stripeSubscriptionId?: string | null;
+}
+
+export function buildPlanDowngradeAlertEmail(d: PlanDowngradeAlertData): { subject: string; html: string; text: string } {
+    const html = shell({
+        accent: '#b45309',
+        headline: 'Plan downgrade ⬇️',
+        rowsHtml: [
+            row('Company', esc(d.companyName)),
+            row('Person', personCell(d.fullName, d.email)),
+            row('Downgrade', `${esc(d.fromLabel)} <span style="color:#5c564b;font-weight:400">→</span> ${esc(d.toLabel)}`),
+            row('New price', `${esc(d.toPriceLabel)}<span style="font-weight:400;color:#5c564b;font-size:13px"> · was ${esc(d.fromPriceLabel)}</span>`),
+            d.deltaLabel     ? row('MRR change', `<span style="color:#b91c1c">${esc(d.deltaLabel)}</span>`) : '',
+            d.effectiveLabel ? row('Takes effect', `${esc(d.effectiveLabel)}<span style="font-weight:400;color:#5c564b;font-size:13px"> · still on the old tier until then</span>`) : '',
+            row('Stripe customer', stripeLink('customers', d.stripeCustomerId)),
+            row('Subscription', stripeLink('subscriptions', d.stripeSubscriptionId)),
+        ].join(''),
+        footerHtml: `
+              User #${esc(d.userId)} · Org #${esc(d.organisationId ?? '—')} ·
+              Requested ${esc(new Date().toUTCString())}<br>
+              Triggered by <code>billing-downgrade</code>`,
+    });
+
+    const text = [
+        'Plan downgrade (scheduled)',
+        `Company:      ${d.companyName}`,
+        `Person:       ${d.fullName || '(no name on record)'} <${d.email || '—'}>`,
+        `Downgrade:    ${d.fromLabel} -> ${d.toLabel}`,
+        `New price:    ${d.toPriceLabel} (was ${d.fromPriceLabel})`,
+        d.deltaLabel ? `MRR change:   ${d.deltaLabel}` : '',
+        d.effectiveLabel ? `Takes effect: ${d.effectiveLabel}` : '',
+        `Stripe:       customer ${d.stripeCustomerId || '—'} / subscription ${d.stripeSubscriptionId || '—'}`,
+        `User #${d.userId} · Org #${d.organisationId ?? '—'} · via billing-downgrade`,
+    ].filter(Boolean).join('\n');
+
+    return {
+        subject: `⬇️ Downgrade: ${d.companyName} — ${d.fromLabel} → ${d.toLabel} (${d.toPriceLabel})`,
+        html,
+        text,
+    };
+}
+
+export async function sendPlanDowngradeAlert(params: PlanDowngradeAlertParams): Promise<void> {
+    const {
+        db, userId, organisationId, fromPlanName, fromTierKey, fromMonthlyPriceGbp,
+        toPlanName, toTierKey, toMonthlyPriceGbp, effectiveDate,
+        stripeCustomerId, stripeSubscriptionId,
+    } = params;
+
+    try {
+        const { person, fullName, companyName } = await loadSubject(db, userId, organisationId);
+
+        const fromPence = fromMonthlyPriceGbp !== null ? Math.round(parseFloat(fromMonthlyPriceGbp) * 100) : null;
+        const toPence   = Math.round(parseFloat(toMonthlyPriceGbp) * 100);
+        const hasFrom   = fromPence !== null && Number.isFinite(fromPence);
+        const deltaPence = hasFrom ? toPence - (fromPence as number) : null;
+
+        const { subject, html, text } = buildPlanDowngradeAlertEmail({
+            companyName,
+            fullName,
+            email:          person?.email ?? null,
+            fromLabel:      fromPlanName ? (fromTierKey ? `${fromPlanName} (${fromTierKey})` : fromPlanName) : '(unknown plan)',
+            toLabel:        `${toPlanName} (${toTierKey})`,
+            toPlanName,
+            fromPriceLabel: hasFrom ? `${formatMoney(fromPence as number, 'gbp')} / month` : 'unknown',
+            toPriceLabel:   `${formatMoney(toPence, 'gbp')} / month`,
+            deltaLabel:     deltaPence !== null ? `-${formatMoney(Math.abs(deltaPence), 'gbp')} / month` : null,
+            effectiveLabel: effectiveDate ? effectiveDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : null,
+            userId,
+            organisationId,
+            stripeCustomerId,
+            stripeSubscriptionId,
+        });
+
+        await sendEmail({ to: FOUNDER_EMAIL, subject, html, text });
+        console.log(`[founder-alerts] downgrade alert sent to ${FOUNDER_EMAIL} for user ${userId} (${fromTierKey || '?'} → ${toTierKey})`);
+    } catch (err: any) {
+        console.error('[founder-alerts] downgrade alert FAILED (non-blocking):', err?.message || err);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cancellation (at period end)
+//
+// Fires from billing-cancel.ts, which sets cancel_at_period_end rather than cancelling
+// outright — so this is the churn signal while the customer is still a customer. The
+// subscription.deleted webhook that follows weeks later is the receipt, not the news.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface CancellationAlertParams {
+    db: any;
+    userId: number;
+    organisationId: number | null;
+    /** Plan name from the plans row; masterPlanId refines it to name + tier + price. */
+    planName: string | null;
+    masterPlanId: number | null;
+    /** Last day of paid access (current period end). */
+    effectiveDate?: Date | null;
+    stripeCustomerId?: string | null;
+    stripeSubscriptionId?: string | null;
+}
+
+export interface CancellationAlertData {
+    companyName: string;
+    fullName: string;
+    email: string | null;
+    planLabel: string;
+    mrrLostLabel: string | null;
+    effectiveLabel: string | null;
+    customerSinceLabel: string | null;
+    userId: number;
+    organisationId: number | null;
+    stripeCustomerId?: string | null;
+    stripeSubscriptionId?: string | null;
+}
+
+export function buildCancellationAlertEmail(d: CancellationAlertData): { subject: string; html: string; text: string } {
+    const html = shell({
+        accent: '#b91c1c',
+        headline: 'Cancellation ✕',
+        rowsHtml: [
+            row('Company', esc(d.companyName)),
+            row('Person', personCell(d.fullName, d.email)),
+            row('Plan', esc(d.planLabel)),
+            d.mrrLostLabel       ? row('MRR lost', `<span style="color:#b91c1c">${esc(d.mrrLostLabel)}</span>`) : '',
+            d.effectiveLabel     ? row('Access until', `${esc(d.effectiveLabel)}<span style="font-weight:400;color:#5c564b;font-size:13px"> · still reachable until then</span>`) : '',
+            d.customerSinceLabel ? row('Customer since', esc(d.customerSinceLabel)) : '',
+            row('Stripe customer', stripeLink('customers', d.stripeCustomerId)),
+            row('Subscription', stripeLink('subscriptions', d.stripeSubscriptionId)),
+        ].join(''),
+        footerHtml: `
+              User #${esc(d.userId)} · Org #${esc(d.organisationId ?? '—')} ·
+              Requested ${esc(new Date().toUTCString())}<br>
+              Triggered by <code>billing-cancel</code> · cancels at period end, not immediately`,
+    });
+
+    const text = [
+        'Cancellation (at period end)',
+        `Company:      ${d.companyName}`,
+        `Person:       ${d.fullName || '(no name on record)'} <${d.email || '—'}>`,
+        `Plan:         ${d.planLabel}`,
+        d.mrrLostLabel ? `MRR lost:     ${d.mrrLostLabel}` : '',
+        d.effectiveLabel ? `Access until: ${d.effectiveLabel}` : '',
+        d.customerSinceLabel ? `Customer since: ${d.customerSinceLabel}` : '',
+        `Stripe:       customer ${d.stripeCustomerId || '—'} / subscription ${d.stripeSubscriptionId || '—'}`,
+        `User #${d.userId} · Org #${d.organisationId ?? '—'} · via billing-cancel`,
+    ].filter(Boolean).join('\n');
+
+    return {
+        subject: `✕ Cancellation: ${d.companyName} — ${d.planLabel}${d.mrrLostLabel ? ` (${d.mrrLostLabel})` : ''}`,
+        html,
+        text,
+    };
+}
+
+export async function sendCancellationAlert(params: CancellationAlertParams): Promise<void> {
+    const {
+        db, userId, organisationId, planName, masterPlanId, effectiveDate,
+        stripeCustomerId, stripeSubscriptionId,
+    } = params;
+
+    try {
+        const { person, fullName, companyName } = await loadSubject(db, userId, organisationId);
+
+        let tierKey: string | null = null;
+        let resolvedPlanName = planName || 'unknown plan';
+        let mrrPence: number | null = null;
+        if (masterPlanId) {
+            const [mp] = await db
+                .select({ name: masterPlans.name, tierKey: masterPlans.tierKey, price: masterPlans.monthlyPriceGbp })
+                .from(masterPlans)
+                .where(eq(masterPlans.id, masterPlanId))
+                .limit(1);
+            if (mp) {
+                resolvedPlanName = mp.name;
+                tierKey = mp.tierKey;
+                const p = Math.round(parseFloat(String(mp.price)) * 100);
+                if (Number.isFinite(p)) mrrPence = p;
+            }
+        }
+
+        const { subject, html, text } = buildCancellationAlertEmail({
+            companyName,
+            fullName,
+            email:              person?.email ?? null,
+            planLabel:          tierKey ? `${resolvedPlanName} (${tierKey})` : resolvedPlanName,
+            mrrLostLabel:       mrrPence !== null ? `-${formatMoney(mrrPence, 'gbp')} / month` : null,
+            effectiveLabel:     effectiveDate ? effectiveDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : null,
+            customerSinceLabel: person?.createdAt ? new Date(person.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : null,
+            userId,
+            organisationId,
+            stripeCustomerId,
+            stripeSubscriptionId,
+        });
+
+        await sendEmail({ to: FOUNDER_EMAIL, subject, html, text });
+        console.log(`[founder-alerts] cancellation alert sent to ${FOUNDER_EMAIL} for user ${userId} (${resolvedPlanName})`);
+    } catch (err: any) {
+        console.error('[founder-alerts] cancellation alert FAILED (non-blocking):', err?.message || err);
     }
 }

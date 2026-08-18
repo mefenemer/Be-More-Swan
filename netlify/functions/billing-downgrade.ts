@@ -14,6 +14,7 @@ import { users, plans, masterPlans, aiAssistants, userOrganisations } from '../.
 import { createNotification } from '../../src/utils/notify';
 import { checkImpersonationBlock } from '../../src/utils/impersonation-guard';
 import { resolveMonthlyPriceId } from '../../src/utils/stripe-price';
+import { sendPlanDowngradeAlert } from '../../src/utils/founder-alerts';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret    = process.env.JWT_SECRET!;
@@ -56,6 +57,7 @@ export default withLambda(async (event) => {
             id: plans.id,
             masterPlanId: plans.masterPlanId,
             stripeSubscriptionId: plans.stripeSubscriptionId,
+            stripeCustomerId: plans.stripeCustomerId,
             status: plans.status,
         })
         .from(plans)
@@ -67,7 +69,7 @@ export default withLambda(async (event) => {
 
     // Also check for 'downgrading' status for SC6
     const [downgradinPlan] = await db
-        .select({ id: plans.id, masterPlanId: plans.masterPlanId, stripeSubscriptionId: plans.stripeSubscriptionId })
+        .select({ id: plans.id, masterPlanId: plans.masterPlanId, stripeSubscriptionId: plans.stripeSubscriptionId, stripeCustomerId: plans.stripeCustomerId })
         .from(plans)
         .where(and(eq(plans.organisationId, user.organisationId), eq(plans.status, 'downgrading')))
         .limit(1);
@@ -258,6 +260,24 @@ export default withLambda(async (event) => {
             userId,
             context: { plan: { name: targetMp.name }, billing: { period_end: periodEnd } },
             isRead: false,
+        });
+
+        // ── Founder alert — revenue is scheduled to drop ─────────────
+        // Fired at schedule time, while there is still a period left to save the account.
+        // Never throws (see founder-alerts.ts).
+        await sendPlanDowngradeAlert({
+            db,
+            userId,
+            organisationId:       user.organisationId,
+            fromPlanName:         currentMp?.name ?? null,
+            fromTierKey:          currentMp?.tierKey ?? null,
+            fromMonthlyPriceGbp:  currentMp ? String(currentMp.monthlyPriceGbp) : null,
+            toPlanName:           targetMp.name,
+            toTierKey:            targetTierKey,
+            toMonthlyPriceGbp:    String(targetMp.monthlyPriceGbp),
+            effectiveDate:        currentPeriodEndUnix ? new Date(currentPeriodEndUnix * 1000) : null,
+            stripeCustomerId:     activePlan.stripeCustomerId,
+            stripeSubscriptionId: activePlan.stripeSubscriptionId,
         });
 
         return {
