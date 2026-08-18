@@ -309,7 +309,10 @@ export interface ComputeSlotsArgs {
 }
 
 /** Eligible weekdays in the order a week is read, so an even spread reads as an even spread. */
-const MONDAY_FIRST: readonly WeekdayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+/** Exported only so scripts/gen-client-constants.ts can emit it beside the browser's copy of
+ *  selectWeeklySlots — that copy is the REAL function stringified, so its free variables have to
+ *  exist in the generated file under these exact names. Not part of the API otherwise. */
+export const MONDAY_FIRST: readonly WeekdayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 
 /** One recurring publish slot in the weekly pattern: a weekday and a wall-clock time on it. */
 export interface WeeklySlot {

@@ -255,15 +255,23 @@
       container.querySelector('[data-aos-root]').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
-    function renderSuccess() {
+    // draftsQueued comes back from update-assistant-context, which now tops up the draft queue on
+    // save instead of leaving the first drafts to the next cron tick. Say the number: "everything it
+    // needs to get to work" is a promise with no evidence, and the user's next screen is an empty
+    // queue that looks identical whether the assistant started or silently didn't.
+    function renderSuccess(draftsQueued) {
       progressEl.style.width = '100%';
+      const n = Number(draftsQueued) || 0;
+      const started = n > 0
+        ? `It's already drafting — ${n} post${n === 1 ? '' : 's'} queued for your approval.`
+        : 'Your assistant now has everything it needs to get to work.';
       formEl.innerHTML = `
         <div class="step-active text-center py-4">
           <div class="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg class="w-8 h-8 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
           </div>
           <h2 class="text-3xl font-extrabold text-gray-900 mb-2">Setup complete!</h2>
-          <p class="text-gray-500">Your assistant now has everything it needs to get to work.</p>
+          <p class="text-gray-500">${started}</p>
         </div>`;
     }
 
@@ -288,8 +296,8 @@
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.success) throw new Error(data.error || `Save failed (${res.status})`);
 
-        renderSuccess();
-        if (typeof onComplete === 'function') onComplete({ ...answers });
+        renderSuccess(data.draftsQueued);
+        if (typeof onComplete === 'function') onComplete({ ...answers, draftsQueued: data.draftsQueued || 0 });
       } catch (err) {
         console.error('[AssistantOnboardingShell] save failed:', err);
         saveErrEl.textContent = "We couldn't save your setup — please check your connection and try again.";

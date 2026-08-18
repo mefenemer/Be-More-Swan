@@ -280,8 +280,12 @@
   var POSTING_CADENCES = [{"key":"daily","label":"Daily","postsPerWeek":7},{"key":"5x_week","label":"5 times a week","postsPerWeek":5},{"key":"4x_week","label":"4 times a week","postsPerWeek":4},{"key":"3x_week","label":"3 times a week","postsPerWeek":3},{"key":"2x_week","label":"2 times a week","postsPerWeek":2},{"key":"weekly","label":"Weekly","postsPerWeek":1},{"key":"on_demand","label":"On demand","postsPerWeek":0}];
   var NUMBER_WORDS = {"once":1,"one":1,"twice":2,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7};
   var DEFAULT_POSTING_FREQUENCY = "3 times a week";
+  var MONDAY_FIRST = ["mon","tue","wed","thu","fri","sat","sun"];
+  var DEFAULT_POSTING_DAYS = ["mon","tue","wed","thu","fri"];
+  var DEFAULT_POSTING_TIMES = ["09:00"];
   var postsPerWeekFor = function postsPerWeekFor(value){if(typeof value!=="string")return 0;const raw=value.trim().toLowerCase();if(!raw)return 0;const byKey=POSTING_CADENCES.find(c=>c.key===raw);if(byKey)return byKey.postsPerWeek;const byLabel=POSTING_CADENCES.find(c=>c.label.toLowerCase()===raw);if(byLabel)return byLabel.postsPerWeek;if(/on[\s-]?demand|as needed|ad[\s-]?hoc|manual/.test(raw))return 0;if(/fortnight|every (two|2) weeks|bi[\s-]?weekly/.test(raw))return .5;if(/\bdaily\b|every ?day/.test(raw))return 7;if(/\bweekly\b|every ?week/.test(raw))return 1;const perDay=raw.match(/(\d+)\s*(?:x|times)?\s*(?:per|a|\/)?\s*day/);if(perDay)return Number(perDay[1])*7;const perWeek=raw.match(/(\d+)\s*(?:x|times)?\s*(?:per|a|\/)?\s*week/);if(perWeek)return Number(perWeek[1]);for(const[word,n]of Object.entries(NUMBER_WORDS)){if(new RegExp(`\\b${word}\\b.*\\bday`).test(raw))return n*7;if(new RegExp(`\\b${word}\\b.*\\bweek`).test(raw))return n}const bare=raw.match(/^(\d+)$/);if(bare)return Number(bare[1]);return 0};
   var readCadence = function readCadence(value){const postsPerWeek=postsPerWeekFor(value);if(postsPerWeek>0)return{postsPerWeek,kind:"scheduled"};const raw=String(value??"").trim().toLowerCase();if(!raw)return{postsPerWeek:postsPerWeekFor(DEFAULT_POSTING_FREQUENCY),kind:"scheduled"};const canonical=POSTING_CADENCES.some(c=>c.key===raw||c.label.toLowerCase()===raw);if(canonical)return{postsPerWeek:0,kind:"on_demand"};if(/on[\s-]?demand|as needed|ad[\s-]?hoc|manual/.test(raw))return{postsPerWeek:0,kind:"on_demand"};return{postsPerWeek:0,kind:"unrecognised"}};
+  var selectWeeklySlots = function selectWeeklySlots(days,times,perWeek){if(perWeek<=0)return[];const dayset=new Set(days.length?days:DEFAULT_POSTING_DAYS);const ordered=MONDAY_FIRST.filter(d=>dayset.has(d));const timeList=(times.length?times:DEFAULT_POSTING_TIMES).slice().sort();if(!ordered.length||!timeList.length)return[];const grid=[];for(const day of ordered)for(const time of timeList)grid.push({day,time});const count=Math.max(1,Math.min(grid.length,Math.round(perWeek)));if(count>=grid.length)return grid;const picked=[];for(let i=0;i<count;i++){picked.push(grid[Math.floor((i+.5)*grid.length/count)])}return picked};
 
   window.PostingCadence = {
     /** The catalogue, in canonical order. Render pickers from THIS, never a retyped list. */
@@ -302,6 +306,18 @@
     /** True when the scheduler will draft ahead for this cadence. */
     isActive: function (value) {
       return readCadence(value).kind === 'scheduled';
+    },
+
+    /**
+     * The weekly pattern the SCHEDULER will actually use: [{ day, time }, ...].
+     *
+     * Ticked days are ELIGIBLE days, not guaranteed ones — the cadence sets the rate and this
+     * function picks which of the eligible days carry it. "Weekly" + Mon-Fri is ONE post on
+     * Wednesday, not five. Every surface that shows a user their schedule must render THIS, not
+     * the raw posting_days array, or it promises four posts a week that will never be written.
+     */
+    weeklyPattern: function (days, times, frequency) {
+      return selectWeeklySlots(days || [], times || [], postsPerWeekFor(frequency));
     },
   };
 

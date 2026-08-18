@@ -1126,7 +1126,13 @@
                 <label style="display:inline-flex;align-items:center;gap:.4rem" class="text-sm text-gray-700"><input type="checkbox" id="edit_day_sat" class="rounded text-emerald-700 focus:ring-emerald-700"> Sat</label>
                 <label style="display:inline-flex;align-items:center;gap:.4rem" class="text-sm text-gray-700"><input type="checkbox" id="edit_day_sun" class="rounded text-emerald-700 focus:ring-emerald-700"> Sun</label>
               </div>
-              <p class="text-xs text-gray-400 mt-1">Posts are only scheduled on the days you select.</p>
+              <!-- Live outcome, written by _syncScheduleOutcome() in assistants.js. The old static
+                   hint ("Posts are only scheduled on the days you select") was true but reinforced
+                   the wrong inference: ticking five days does not buy five posts — the FREQUENCY
+                   sets the rate and the scheduler picks which ticked days carry it. This line
+                   states the resulting plan instead of restating the control. -->
+              <p id="posting-days-outcome" class="text-xs text-gray-500 mt-1">Days you allow posting on. Your frequency decides how many of them are used.</p>
+              <p id="posting-days-narrowed" class="hidden text-xs text-amber-700 mt-1 font-medium"></p>
             </div>
 
             <!-- Preferred times -->

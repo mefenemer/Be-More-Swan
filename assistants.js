@@ -660,6 +660,76 @@ function _collectPostingDays() {
     return _POSTING_DAY_KEYS.filter(d => document.getElementById('edit_day_' + d)?.checked);
 }
 
+// Write the schedule the engine will ACTUALLY run, under the Preferred Days checkboxes, live as the
+// controls change.
+//
+// The controls read as additive — tick five days, get five posts — and they are not: the FREQUENCY
+// sets the rate, and selectWeeklySlots picks which of the ticked days carry it. A Blog Writer set to
+// "Weekly" with Mon-Fri ticked publishes once, on Wednesday, and nothing on this page said so. The
+// user finds out by watching four days a week stay empty.
+//
+// ⚠️ The pattern comes from window.PostingCadence.weeklyPattern — the scheduler's own
+// selectWeeklySlots, stringified into the constants bundle. Do NOT reimplement the day-picking here;
+// a private copy that disagrees with the engine is exactly the bug this page has already had once,
+// when a hand-rolled regex reported a dead autopilot as Active for weeks.
+window._syncScheduleOutcome = function () {
+    const outcomeEl = document.getElementById('posting-days-outcome');
+    const narrowEl = document.getElementById('posting-days-narrowed');
+    if (!outcomeEl) return;
+    const hideNarrow = () => { if (narrowEl) { narrowEl.textContent = ''; narrowEl.classList.add('hidden'); } };
+
+    const freq = document.getElementById('edit_frequency')?.value || '';
+    const days = _collectPostingDays();
+    const times = _collectPostingTimes();
+
+    // Fail safe: without the constants bundle, say nothing rather than guess.
+    const cadence = window.PostingCadence;
+    if (!cadence?.read || !cadence?.weeklyPattern) {
+        outcomeEl.textContent = 'Days you allow posting on. Your frequency decides how many of them are used.';
+        hideNarrow();
+        return;
+    }
+
+    const reading = cadence.read(freq);
+    if (reading.kind === 'on_demand') {
+        outcomeEl.textContent = 'On demand — nothing is drafted automatically, so these days aren’t used.';
+        hideNarrow();
+        return;
+    }
+    if (reading.kind === 'unrecognised') {
+        // Their choice was not "off" — we simply can't parse it. Say so here rather than letting the
+        // days line imply a working schedule.
+        outcomeEl.textContent = 'Days you allow posting on.';
+        if (narrowEl) {
+            narrowEl.textContent = `We can’t read “${freq}” as a posting rate, so nothing will be drafted. Pick a frequency from the list above.`;
+            narrowEl.classList.remove('hidden');
+        }
+        return;
+    }
+
+    if (!days.length || !times.length) {
+        outcomeEl.textContent = 'Pick at least one day and one time, or nothing can be scheduled.';
+        hideNarrow();
+        return;
+    }
+
+    const pattern = cadence.weeklyPattern(days, times, freq);
+    const usedDays = _POSTING_DAY_KEYS.filter(d => pattern.some(p => p.day === d));
+    const dayNames = usedDays.map(d => _AUTOPILOT_DAY_LABEL[d]).join(', ');
+    const n = pattern.length;
+    outcomeEl.textContent = `${n} post${n === 1 ? '' : 's'} a week — ${dayNames} at ${Array.from(new Set(pattern.map(p => p.time))).sort().join(', ')}.`;
+
+    // Ticked more days than the rate can fill. Not an error, but it is the whole misunderstanding,
+    // so name the unused days and the control that would use them.
+    const unused = days.filter(d => !usedDays.includes(d));
+    if (unused.length && narrowEl) {
+        narrowEl.textContent = `${unused.map(d => _AUTOPILOT_DAY_LABEL[d]).join(', ')} won’t be used at this frequency — raise the frequency above to publish on more of the days you’ve picked.`;
+        narrowEl.classList.remove('hidden');
+    } else {
+        hideNarrow();
+    }
+};
+
 // Content Pillars are stored as a discrete array. Parse the comma/semicolon/newline-separated
 // entry field into a deduped, trimmed list of up to 5 themes.
 function _parsePillars(raw) {
@@ -3580,22 +3650,44 @@ function _autopilotSummary(ctx) {
     const phrase = _AUTOPILOT_FREQ_PHRASE[low]
         || (reading.postsPerWeek > 0 ? `${reading.postsPerWeek}× a week` : rawFreq);
 
-    const days = (Array.isArray(ctx.posting_days) && ctx.posting_days.length
+    const eligibleDays = (Array.isArray(ctx.posting_days) && ctx.posting_days.length
         ? ctx.posting_days.map(d => String(d).toLowerCase().slice(0, 3)).filter(d => _AUTOPILOT_DAY_LABEL[d])
         : ['mon', 'tue', 'wed', 'thu', 'fri']);
-    const daySet = new Set(days);
+    const times = (Array.isArray(ctx.posting_times) && ctx.posting_times.length ? ctx.posting_times : ['09:00'])
+        .map(t => String(t).trim()).filter(Boolean);
+
+    // ⚠️ Ticked days are ELIGIBLE days, not guaranteed ones. The cadence sets the RATE and
+    // selectWeeklySlots decides which of the eligible days carry it — so "Weekly" across Mon-Fri
+    // publishes once, on Wednesday. This card used to print the ticked days verbatim ("once a week
+    // · weekdays"), which reads as five posts a week and is the single most misleading thing on the
+    // page: a user picks five days, sees five days confirmed back, and gets one post.
+    // Ask the scheduler's own function what it will do, exactly as `active` above asks its parser.
+    const pattern = window.PostingCadence?.weeklyPattern?.(eligibleDays, times, rawFreq) || [];
+    // Fail safe: with no constants bundle, fall back to the eligible days rather than claiming a
+    // precision we don't have.
+    const usedDays = pattern.length
+        ? ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].filter(d => pattern.some(p => p.day === d))
+        : eligibleDays;
+    const usedTimes = pattern.length
+        ? Array.from(new Set(pattern.map(p => p.time))).sort()
+        : times;
+
+    const daySet = new Set(usedDays);
     let daysLabel;
     if (daySet.size === 7) daysLabel = 'every day';
     else if (['mon', 'tue', 'wed', 'thu', 'fri'].every(d => daySet.has(d)) && !daySet.has('sat') && !daySet.has('sun')) daysLabel = 'weekdays';
     else daysLabel = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].filter(d => daySet.has(d)).map(d => _AUTOPILOT_DAY_LABEL[d]).join(', ') || 'weekdays';
 
-    const times = (Array.isArray(ctx.posting_times) && ctx.posting_times.length ? ctx.posting_times : ['09:00'])
-        .map(t => String(t).trim()).filter(Boolean);
-    const timesLabel = times.join(', ');
+    const timesLabel = usedTimes.join(', ');
 
     const tzLabel = String(ctx.posting_timezone || 'Europe/London').split('/').pop().replace(/_/g, ' ');
 
-    return { active, kind, phrase, rawFreq, daysLabel, timesLabel, tzLabel };
+    // True when the user ticked more days than the cadence can use. Not an error — it is how the
+    // controls are meant to work — but it must be SAID, because the gap between "I chose five days"
+    // and "I get one post" is otherwise invisible until the calendar stays empty.
+    const narrowed = pattern.length > 0 && usedDays.length < new Set(eligibleDays).size;
+
+    return { active, kind, phrase, rawFreq, daysLabel, timesLabel, tzLabel, narrowed, usedDays, eligibleDays };
 }
 
 function _syncAutopilotPending(count) {
@@ -3673,9 +3765,17 @@ window._renderAutopilotCard = function(data) {
         if (headline) headline.textContent = isBlog
             ? `Writing ${s.phrase}, automatically`
             : `Drafting ${s.phrase}, automatically`;
-        if (detail) detail.textContent = isBlog
-            ? `${s.daysLabel} at ${s.timesLabel} · ${s.tzLabel} — new drafts land in your Blogs tab for approval.`
-            : `${s.daysLabel} at ${s.timesLabel} · ${s.tzLabel} — new drafts land in your Review for approval.`;
+        if (detail) {
+            const where = isBlog ? 'your Blogs tab' : 'your Review';
+            let text = `${s.daysLabel} at ${s.timesLabel} · ${s.tzLabel} — new drafts land in ${where} for approval.`;
+            // s.daysLabel already names only the days that will actually be used, but a user who
+            // ticked five and reads "Wednesdays" needs to know that isn't a display truncation.
+            if (s.narrowed) {
+                const ticked = new Set(s.eligibleDays).size;
+                text += ` You’ve picked ${ticked} possible days; publishing ${s.phrase} uses ${s.usedDays.length} of them.`;
+            }
+            detail.textContent = text;
+        }
         if (adjustBtn) adjustBtn.textContent = 'Adjust schedule';
         if (horizonStat) horizonStat.classList.remove('hidden');
         if (horizonEl) horizonEl.textContent = String(horizon);
@@ -4912,6 +5012,8 @@ function _detailHydrate(data) {
     }
     const horizonEl = document.getElementById('posting-horizon-input');
     if (horizonEl) horizonEl.value = data.draftHorizonDays ?? 7;
+    // State the resulting plan as soon as the saved schedule is on screen, not only after an edit.
+    window._syncScheduleOutcome?.();
 
     // Objective
     const objectiveVal = ctx.primary_objective || inputs.primary_objective || '';
@@ -5551,6 +5653,9 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         document.querySelectorAll(selectors).forEach(el => {
             el.addEventListener('input', triggerAutoSave);
             el.addEventListener('change', triggerAutoSave);
+            // The frequency select, day checkboxes and timezone all match [id^="edit_"], so the
+            // outcome line re-derives from whatever the form now says. Cheap and idempotent.
+            el.addEventListener('change', () => window._syncScheduleOutcome?.());
         });
     }
 
@@ -5559,12 +5664,16 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     // time rows + "Add a time" button notify through this global hook; the draft horizon has its
     // own endpoint (set-draft-horizon) with gap-fill / archive side-effects, so it saves separately.
     function _wirePostingSchedule() {
-        window._postingScheduleChanged = triggerAutoSave;
+        // Time rows are dynamic, so they report changes through this hook rather than a bound
+        // listener — the outcome line has to be refreshed here too, or adding a time updates the
+        // saved schedule while the sentence under the days keeps describing the old one.
+        window._postingScheduleChanged = () => { triggerAutoSave(); window._syncScheduleOutcome?.(); };
 
         const addBtn = document.getElementById('btn-add-posting-time');
         if (addBtn) addBtn.addEventListener('click', () => {
             _addPostingTimeRow('09:00');
             triggerAutoSave();
+            window._syncScheduleOutcome?.();
         });
 
         const horizonEl = document.getElementById('posting-horizon-input');

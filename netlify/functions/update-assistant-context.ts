@@ -1,13 +1,29 @@
 import { Handler } from '@netlify/functions';
 import { eq, and } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, auditLogs } from '../../db/schema';
+import { aiAssistants, auditLogs, masterAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { retryBlockedAssistants } from '../../src/utils/retry-provisioning';
 import { assembleBlueprint } from '../../src/utils/blueprint';
+import { enqueueScheduleGapFill } from '../../src/utils/schedule-gap-fill';
+import { enqueueBlogGapFill } from '../../src/utils/blog-gap-fill';
+import { BLOG_WRITER_ROLE_KEYS } from '../../src/constants/roles';
 import { MIN_HORIZON_DAYS, MAX_HORIZON_DAYS } from '../../src/config/posting-cadence';
 import { withLambda } from '@netlify/aws-lambda-compat';
+
+/** Everything the post-save gap-fill needs, captured from inside the write transaction. */
+interface GapFillTarget {
+    id: number;
+    userId: number;
+    organisationId: number;
+    name: string;
+    onboardingContext: Record<string, unknown>;
+    draftHorizonDays: number;
+    configuration: unknown;
+    roleKey: string;
+    isActive: boolean;
+}
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'PUT') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -22,6 +38,10 @@ export default withLambda(async (event) => {
     const { assistantId, newContext, newConfiguration, newName, appliedDefaults, disclosureText } = JSON.parse(event.body || '{}');
 
     if (!assistantId || !newContext) return { statusCode: 400, body: JSON.stringify({ error: 'Missing parameters.' }) };
+
+    // Captured inside the transaction so the post-commit gap-fill below works from the values that
+    // were actually written, not a re-read that could race another save.
+    let fillTarget: GapFillTarget | null = null;
 
     try {
         // RLS-enforced: the whole unit of work runs under withTenant (app_user + app.current_org).
@@ -96,6 +116,26 @@ export default withLambda(async (event) => {
                 .set(updatePayload)
                 .where(eq(aiAssistants.id, assistantId));
 
+            // Which autopilot engine owns this assistant. Blog and social keep separate queues and
+            // separate draft tables, so the post-commit top-up below has to route on the role the
+            // same way set-draft-horizon.ts does.
+            const [master] = await tx.select({ roleKey: masterAssistants.roleKey })
+                .from(masterAssistants)
+                .where(eq(masterAssistants.id, existingAssistant.masterAssistantId!))
+                .limit(1);
+
+            fillTarget = {
+                id: assistantId,
+                userId: existingAssistant.userId,
+                organisationId: orgId,
+                name: updatePayload.name ?? existingAssistant.name,
+                onboardingContext: mergedContext,
+                draftHorizonDays: updatePayload.draftHorizonDays ?? existingAssistant.draftHorizonDays,
+                configuration: updatePayload.configuration ?? existingAssistant.configuration,
+                roleKey: master?.roleKey ?? '',
+                isActive: existingAssistant.isActive,
+            };
+
             // SCENARIO 5: Create Immutable Audit Log
             await tx.insert(auditLogs).values({
                 userId: currentUserId,
@@ -139,7 +179,53 @@ export default withLambda(async (event) => {
             }
         }
 
-        return { statusCode: 200, body: JSON.stringify({ success: true }) };
+        // ── Top up the draft queue now, rather than at the next cron tick ────────────────────────
+        //
+        // Saving this form is the moment a hire becomes a working assistant: it is where the
+        // publishing cadence and the draft horizon are answered. Nothing here used to enqueue
+        // anything, so the first drafts waited for the daily/hourly gap-fill cron — and because
+        // blog-horizon-fill runs once a day at 05:00 UTC, a Blog Writer hired at 08:00 sat visibly
+        // idle for 21 hours with nothing in the UI to explain the silence. That reads as broken,
+        // and the support answer ("wait until tomorrow") is indistinguishable from a real fault.
+        //
+        // Safe to run on EVERY save, not just the first:
+        //   · Both helpers are idempotent — a slot already covered by a planned post or an
+        //     in-flight job is skipped, so a repeat save enqueues nothing (`fully_covered`).
+        //   · An on-demand cadence returns `on_demand` and enqueues nothing, so switching autopilot
+        //     off and saving cannot resurrect it.
+        //   · Changing the cadence is exactly when a user expects the queue to follow, so filling
+        //     the newly-shaped window here is the behaviour the form already implies.
+        //
+        // Best-effort, like the recompile above: the save is already committed and the cron remains
+        // the backstop, so a failure here must never surface as a failed save.
+        let draftsQueued = 0;
+        // The assertion is load-bearing: `fillTarget` is only ever assigned inside the withTenant
+        // callback, which TS's control-flow analysis does not track, so it narrows the variable to
+        // `null` here and every property access below becomes an error on type `never`.
+        const target = fillTarget as GapFillTarget | null;
+        if (target && target.isActive) {
+            try {
+                const common = {
+                    id: target.id,
+                    userId: target.userId,
+                    organisationId: target.organisationId,
+                    name: target.name,
+                    onboardingContext: target.onboardingContext,
+                    draftHorizonDays: target.draftHorizonDays,
+                };
+                const result = BLOG_WRITER_ROLE_KEYS.includes(target.roleKey)
+                    ? await enqueueBlogGapFill(db, common)
+                    : await enqueueScheduleGapFill(db, { ...common, configuration: target.configuration });
+                draftsQueued = result.enqueued;
+            } catch (e) {
+                console.warn('[update-assistant-context] gap-fill failed (context still saved):',
+                    e instanceof Error ? e.message : e);
+            }
+        }
+
+        // draftsQueued lets the caller tell the user their assistant has already started, instead of
+        // ending onboarding on a screen that promises work with no evidence any was scheduled.
+        return { statusCode: 200, body: JSON.stringify({ success: true, draftsQueued }) };
     } catch (error: any) {
         if (error?.message?.startsWith('DISCLOSURE_REQUIRED')) {
             return { statusCode: 422, body: JSON.stringify({ error: 'AI disclosure text is required before this assistant can be activated (EU AI Act Art. 52).', code: 'DISCLOSURE_MISSING' }) };

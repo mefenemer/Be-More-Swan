@@ -38,6 +38,7 @@ import {
 } from '../src/config/campaign-vocab';
 import {
     POSTING_CADENCES, NUMBER_WORDS, DEFAULT_POSTING_FREQUENCY, postsPerWeekFor, readCadence,
+    MONDAY_FIRST, DEFAULT_POSTING_DAYS, DEFAULT_POSTING_TIMES, selectWeeklySlots,
 } from '../src/config/posting-cadence';
 import {
     LEAD_RECIPIENT_PATHS, resolveLeadRecipient, hasOutreachDraft, isLeadDeliverable,
@@ -355,8 +356,12 @@ ${formatRows}
   var POSTING_CADENCES = ${JSON.stringify(POSTING_CADENCES)};
   var NUMBER_WORDS = ${JSON.stringify(NUMBER_WORDS)};
   var DEFAULT_POSTING_FREQUENCY = ${JSON.stringify(DEFAULT_POSTING_FREQUENCY)};
+  var MONDAY_FIRST = ${JSON.stringify(MONDAY_FIRST)};
+  var DEFAULT_POSTING_DAYS = ${JSON.stringify(DEFAULT_POSTING_DAYS)};
+  var DEFAULT_POSTING_TIMES = ${JSON.stringify(DEFAULT_POSTING_TIMES)};
   var postsPerWeekFor = ${postsPerWeekFor.toString()};
   var readCadence = ${readCadence.toString()};
+  var selectWeeklySlots = ${selectWeeklySlots.toString()};
 
   window.PostingCadence = {
     /** The catalogue, in canonical order. Render pickers from THIS, never a retyped list. */
@@ -377,6 +382,18 @@ ${formatRows}
     /** True when the scheduler will draft ahead for this cadence. */
     isActive: function (value) {
       return readCadence(value).kind === 'scheduled';
+    },
+
+    /**
+     * The weekly pattern the SCHEDULER will actually use: [{ day, time }, ...].
+     *
+     * Ticked days are ELIGIBLE days, not guaranteed ones — the cadence sets the rate and this
+     * function picks which of the eligible days carry it. "Weekly" + Mon-Fri is ONE post on
+     * Wednesday, not five. Every surface that shows a user their schedule must render THIS, not
+     * the raw posting_days array, or it promises four posts a week that will never be written.
+     */
+    weeklyPattern: function (days, times, frequency) {
+      return selectWeeklySlots(days || [], times || [], postsPerWeekFor(frequency));
     },
   };
 
