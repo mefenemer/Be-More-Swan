@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendOutreachFooter, buildOutreachFooter, isUsablePostalAddress, unsubscribeUrl } from '../src/config/outreach-footer';
-import { landmark } from './landmark';
+import { landmark, landmarkEnd } from './landmark';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -114,6 +114,29 @@ check('the blocked send is explained in the UI', () => {
     const js = read('assistants.js');
     assert.match(js, /sdata\.reason === 'no_postal_address'/,
         'an unexplained non-send reads as a bug; this one is fixable by the user in one step');
+});
+
+check('the Outreach banner re-asks after the user has been sent away to fix it', () => {
+    // The banner tells the user to add their address on ANOTHER page and links there with
+    // window.loadView — an SPA view swap that keeps assistants.js module state alive. The readiness
+    // answer is cached in _rqReadinessFor and refetched only on a change of assistant id, so
+    // WITHOUT an invalidation the pre-save answer survives the round trip: the user does exactly
+    // what the banner asked, comes back, and is told again that no outreach can be sent. Seen on
+    // production 2026-08-18. Nothing is broken server-side, which is why it can persist unnoticed —
+    // the only escape is a full browser reload, and a user has no reason to guess that.
+    const js = read('assistants.js');
+
+    const bannerAt = landmark(js, 'function _rqOutreachReadinessHtml(');
+    const banner = js.slice(bannerAt, bannerAt + 2000);
+    assert.match(banner, /window\.loadView/,
+        'the banner sends the user to Business Information in-app — which is what strands the cache');
+
+    // Bounded by the next top-level `window.` declaration, so the check cannot pass on an
+    // invalidation that lives somewhere else in the file.
+    const from = landmark(js, 'window.initAssistantDetail = async function(');
+    const init = js.slice(from, landmarkEnd(js, '\nwindow.', from + 1));
+    assert.match(init, /_rqReadinessFor = null/,
+        'entering the detail page must drop the cached readiness, not just switching assistants');
 });
 
 check('the sender is identified, and the postal address is reported when missing', () => {
