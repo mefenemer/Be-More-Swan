@@ -17,7 +17,7 @@ import { aiAssistants, auditLogs, contentAssets, contentRules, postIdeaSuggestio
 import { isBakedFor, renderableOverlays } from '../../src/lib/post-render';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { resolvePostImage, resolvePostVideo } from '../../src/utils/social-publish';
-import { resolvePostingSchedule, computeScheduleSlots, intervalHoursFor } from '../../src/config/posting-cadence';
+import { resolvePostingSchedule, computeScheduleSlots, intervalHoursFor, resolveHorizonDays } from '../../src/config/posting-cadence';
 import { formatBlockedReason, postFormatSpec } from '../../src/config/post-formats';
 import { loadAssetMetrics, validateAgainstFormat } from '../../src/utils/format-router';
 import { platformFormat, normalizePlatform, PLATFORM_FORMATS } from '../../src/config/platform-formats';
@@ -48,7 +48,7 @@ async function pickOptimalSlot(
     const crosspostGroupId = post.crosspostGroupId;
     const ctx = (assistant.onboardingContext as Record<string, unknown>) ?? {};
     const schedule = resolvePostingSchedule(ctx);
-    const horizonDays = assistant.draftHorizonDays ?? 7;
+    const horizonDays = resolveHorizonDays(assistant);
 
     // Look BEYOND the draft horizon when hunting for a free slot. The horizon governs how far ahead
     // the assistant pre-drafts; it must not cap where an approved post may land, or a full horizon

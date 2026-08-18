@@ -17,14 +17,16 @@ import { and, eq, gte, lte, ne, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, blogPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
-import { resolvePostingSchedule, computeScheduleSlots } from '../../src/config/posting-cadence';
+import { resolvePostingSchedule, computeScheduleSlots, resolveHorizonDays, DEFAULT_HORIZON_DAYS } from '../../src/config/posting-cadence';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 type Db = ReturnType<typeof getDb>;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Cadence auto-scheduling on approval: the Blog Writer "picks the post up" and schedules it into the
-// next free slot of its posting cadence (onboarding_context.posting_frequency + draft_horizon_days),
+// next free slot of its posting cadence (onboarding_context.posting_frequency for the cadence, the
+// ai_assistants.draft_horizon_days COLUMN for the window — see DEFAULT_HORIZON_DAYS for why the
+// jsonb key of the same name must not be read),
 // skipping slots already taken by its other active posts. Mirrors approve-post.ts's pickOptimalSlot.
 // Falls back to the post's own future date, else now+24h, when the cadence is on-demand (no slots).
 async function pickCadenceSlot(
@@ -34,7 +36,7 @@ async function pickCadenceSlot(
     now: Date,
 ): Promise<Date> {
     let ctx: Record<string, unknown> = {};
-    let horizonDays = 14;
+    let horizonDays = DEFAULT_HORIZON_DAYS;
     if (post.assistantId != null) {
         const [assistant] = await db
             .select({ onboardingContext: aiAssistants.onboardingContext, draftHorizonDays: aiAssistants.draftHorizonDays })
@@ -43,7 +45,15 @@ async function pickCadenceSlot(
             .limit(1);
         if (assistant) {
             ctx = (assistant.onboardingContext as Record<string, unknown>) ?? {};
-            horizonDays = Number(ctx.draft_horizon_days) || assistant.draftHorizonDays || 14;
+            // The COLUMN is the one source of truth for the horizon — same read as approve-post.ts's
+            // pickOptimalSlot, blog-gap-fill and schedule-gap-fill. This line used to prefer
+            // `onboarding_context.draft_horizon_days` and fall back to 14, which made it the only
+            // reader in the codebase disagreeing with the other four. The two stores drift by
+            // design: the onboarding wizard writes the jsonb answer while set-draft-horizon.ts
+            // writes the column, and nothing synced them — on staging assistant 23 that was jsonb
+            // "30" against column 7. Approve then scheduled into a 30-day window that gap-fill only
+            // ever filled to 7 days, so slots past day 7 were never treated as covered.
+            horizonDays = resolveHorizonDays(assistant);
         }
     }
 

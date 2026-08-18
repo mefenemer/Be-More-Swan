@@ -187,6 +187,84 @@ check('the UI keeps a failed reply’s text and says why', () => {
         'and must NOT clear the draft — the user’s words are the expensive part');
 });
 
+/**
+ * The whole `record_direct_reply` branch.
+ *
+ * ⚠️ Bounded by the next action, not by a character count. A 4000-char window over this branch
+ * already lost the payload assertion once — the branch is long, and a window that stops short reports
+ * a missing behaviour that is present three lines further down.
+ */
+function directReplyBranch(): string {
+    return THREADS_API.slice(
+        landmark(THREADS_API, "action === 'record_direct_reply'"),
+        landmark(THREADS_API, 'return json(400, { error: `Unknown action'),
+    );
+}
+
+console.log('\n──── 2b. a reply that never reached us ────');
+
+check('the tenant can record a reply that bypassed Reply-To', () => {
+    // Reply-To is a request, not a guarantee: Reply-All, a forwarded thread, or a client that
+    // favours the From header all land the answer in the TENANT's inbox, where we never see it.
+    // Nothing reads their mailbox — that needs a mail-scope consent this product does not ask for.
+    assert.ok(THREADS_API.includes("action === 'record_direct_reply'"),
+        'there must be a way to tell the product what it could not observe');
+});
+
+check('recording it STOPS the cadence — that is the whole point', () => {
+    const act = directReplyBranch();
+    assert.match(act, /haltEnrolment/,
+        'the damage is not the missing transcript line, it is that the cadence keeps chasing someone '
+        + 'who already answered');
+    // The halt must come before the bookkeeping: a failure further down must not leave the cadence
+    // running, because that is the part that emails a real person.
+    assert.ok(landmark(act, 'haltEnrolment') < landmark(act, 'recordInboundMessage'),
+        'stop the sending first, record second');
+});
+
+check('it flips the thread state through the owner, not by hand', () => {
+    const act = directReplyBranch();
+    assert.match(act, /recordInboundMessage/,
+        'the state flip to replied is what every other surface reads — the Conversations filter, the '
+        + 'worker pre-send check, the reply-rate aggregate — and it belongs to the table owner');
+});
+
+check('a hand-recorded reply is counted, but marked as hand-recorded', () => {
+    const act = directReplyBranch();
+    assert.match(act, /recordEvent\(db, 'reply_received'/,
+        'it IS a reply — excluding it would understate reply rate and make the copy look worse than it is');
+    assert.match(act, /actor: 'user'/,
+        "actor 'user' is what separates it from one the system actually received (inbound-email uses 'system')");
+    assert.match(act, /source: 'direct_to_sender'/,
+        'and the payload should say how we learned of it');
+});
+
+check('nothing is emailed by recording it', () => {
+    const act = directReplyBranch();
+    for (const send of ['sendGmailMessage', 'sendOutlookMessage']) {
+        assert.ok(!act.includes(send), `${send} must not appear — this records what already happened`);
+    }
+});
+
+check('the empty-note path is not blocked, and cancel is distinguishable', () => {
+    // The urgent half is stopping the cadence. Requiring pasted text before we stop chasing would put
+    // a copy-and-paste chore in front of the safety fix.
+    const fn = THREADS_UI.slice(landmark(THREADS_UI, 'async function recordDirectReply'));
+    assert.match(fn.slice(0, 2200), /required:\s*false/,
+        'the note must be optional');
+    assert.match(fn.slice(0, 2200), /note === null \|\| note === undefined/,
+        'null is CANCEL and empty string is "record it with no text" — collapsing the two either '
+        + 'loses the cancel or blocks the path that matters');
+});
+
+check('the UI says where the blind spot is, next to the button', () => {
+    const banner = THREADS_UI.slice(landmark(THREADS_UI, 'function cadenceBanner'), landmark(THREADS_UI, 'function actionBar'));
+    assert.match(banner, /data-lt-direct/, 'the control belongs where the pending chasers are described');
+    assert.match(banner, /tracked address/i,
+        'and the copy has to explain that chasers stop on their own ONLY for replies we can see — '
+        + 'otherwise the button looks redundant and nobody presses it');
+});
+
 console.log('\n──── 3. approving one email cannot authorise four silently ────');
 
 check('the cadence is gated on a setup answer', () => {

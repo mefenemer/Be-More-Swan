@@ -17,6 +17,7 @@ import { getDb } from '../../db/client';
 import { widgetConfigs, blogPosts, organisations } from '../../db/schema';
 import { resolveInlineMedia, resolveFeatureImageUrl } from '../../src/utils/blog-media-resolve';
 import { resolveCanonical, renderBlogPage } from '../../src/utils/blog-seo';
+import { isAiAssisted } from '../../src/utils/blog-ai-assisted';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { excerpt } from '../../src/utils/markdown-render';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -79,7 +80,10 @@ export default withLambda(async (event: HandlerEvent) => {
             ownerLabel: blogPosts.ownerLabel,
             publishedAt: blogPosts.publishedAt,
             updatedAt: blogPosts.updatedAt,
-            provenanceContentId: blogPosts.provenanceContentId,
+            jobId: blogPosts.jobId,
+            blueprintId: blogPosts.blueprintId,
+            isAutonomous: blogPosts.isAutonomous,
+            generationReason: blogPosts.generationReason,
         })
         .from(blogPosts)
         .where(and(
@@ -134,7 +138,7 @@ export default withLambda(async (event: HandlerEvent) => {
         publisher: { name: siteName, logoUrl: null },
         siteName,
         bodyHtml,
-        aiAssisted: !!post.provenanceContentId,
+        aiAssisted: isAiAssisted(post),
         badgeEnabled: cfg.badgeEnabled,
     });
 

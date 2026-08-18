@@ -26,8 +26,9 @@
 
   window.AssistantOnboardingSchemas = {
     // Content Engine — Blog Writer. Topics + brand voice, then the publishing cadence that drives
-    // assistant-scheduled "Approve & Schedule" (posting_frequency + draft_horizon_days are read by
-    // src/config/posting-cadence.ts via schedule-blog's approve path).
+    // assistant-scheduled "Approve & Schedule" (posting_frequency is read from onboarding_context by
+    // src/config/posting-cadence.ts via schedule-blog's approve path; draft_horizon_days is promoted
+    // out of here onto the ai_assistants.draft_horizon_days COLUMN, which is what every reader uses).
     blog_writer: [
       {
         title: 'What should your Blog Writer cover?',
@@ -77,8 +78,10 @@
             ],
           },
           {
-            // How far ahead approvals may be scheduled. Stored as draft_horizon_days (clamped 1–30
-            // by computeScheduleSlots); the approve path finds the next free slot within it.
+            // How far ahead approvals may be scheduled. update-assistant-context.ts promotes this
+            // answer onto the ai_assistants.draft_horizon_days COLUMN (clamped 1–30) — that column is
+            // the single source of truth; the copy left in onboarding_context is never read. The
+            // approve path finds the next free slot within the resulting window.
             key: 'draft_horizon_days',
             label: 'How far ahead to schedule',
             type: 'dropdown',

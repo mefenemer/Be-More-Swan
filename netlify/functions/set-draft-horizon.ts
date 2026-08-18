@@ -20,11 +20,12 @@ import { resolveActiveOrg } from '../../src/utils/tenant';
 import { enqueueScheduleGapFill } from '../../src/utils/schedule-gap-fill';
 import { enqueueBlogGapFill } from '../../src/utils/blog-gap-fill';
 import { BLOG_WRITER_ROLE_KEYS } from '../../src/constants/roles';
+import { resolveHorizonDays, MIN_HORIZON_DAYS, MAX_HORIZON_DAYS } from '../../src/config/posting-cadence';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
-const MIN_HORIZON = 1;
-const MAX_HORIZON = 30;
+const MIN_HORIZON = MIN_HORIZON_DAYS;
+const MAX_HORIZON = MAX_HORIZON_DAYS;
 
 function getUserId(event: any): number | null {
     try {
@@ -99,13 +100,25 @@ export default withLambda(async (event) => {
     }
 
     const isBlogWriter = BLOG_WRITER_ROLE_KEYS.includes(assistant.roleKey ?? '');
-    const previousHorizon = assistant.draftHorizonDays ?? 7;
+    const previousHorizon = resolveHorizonDays(assistant);
     const isExpanding = days > previousHorizon;
     const isShrinking = days < previousHorizon;
 
-    // Persist the new horizon value (RLS-enforced — only the org's own row is updatable)
+    // Persist the new horizon value (RLS-enforced — only the org's own row is updatable).
+    // The column is the source of truth; the onboarding_context key of the same name is a legacy
+    // echo that nothing reads (see DEFAULT_HORIZON_DAYS in posting-cadence.ts). It is rewritten here
+    // anyway so the two can never disagree: update-assistant-context.ts promotes that key back onto
+    // the column, and callers spread existing context into partial saves, so a stale echo left
+    // behind would silently undo this change on the next unrelated save.
     await withTenant(orgId, (tx) => tx.update(aiAssistants)
-        .set({ draftHorizonDays: days, updatedAt: new Date() })
+        .set({
+            draftHorizonDays: days,
+            onboardingContext: {
+                ...((assistant.onboardingContext as Record<string, unknown> | null) ?? {}),
+                draft_horizon_days: days,
+            },
+            updatedAt: new Date(),
+        })
         .where(eq(aiAssistants.id, assistantId)));
 
     // ── Horizon expanded → fill the newly-opened window immediately ───────────

@@ -11,7 +11,7 @@
 // established, and every query here is scoped by it.
 
 import Anthropic from '@anthropic-ai/sdk';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, aiBlueprints, blogPosts, organisations } from '../../db/schema';
 import { logAiUsage } from './ai-usage';
@@ -19,6 +19,7 @@ import { buildInspoBlock } from './inspo-profile';
 import { currentDatePromptBlock } from './current-date-prompt';
 import { resolvePostingSchedule } from '../config/posting-cadence';
 import { assembleBlueprint } from './blueprint';
+import { ASSISTANT_DRAFT_REASON } from './blog-ai-assisted';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -273,8 +274,16 @@ export async function generateBlogBody(
         inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
     });
 
+    // Stamp the body AND the provenance marker in one write, so a machine-drafted post can never
+    // exist without the flag the AI transparency badge reads (src/utils/blog-ai-assisted.ts).
+    // COALESCE, not a plain set: the autopilot worker inserts 'autopilot_schedule' and then calls
+    // this function, so overwriting would erase the more specific reason. First writer wins.
     await db.update(blogPosts)
-        .set({ bodyMarkdown, updatedAt: new Date() })
+        .set({
+            bodyMarkdown,
+            generationReason: sql`COALESCE(${blogPosts.generationReason}, ${ASSISTANT_DRAFT_REASON})`,
+            updatedAt: new Date(),
+        })
         .where(and(eq(blogPosts.id, blogPostId), eq(blogPosts.organisationId, organisationId)));
 
     return { bodyMarkdown, tone };

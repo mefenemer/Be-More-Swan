@@ -124,6 +124,19 @@
   }
 
   /**
+   * Has this lead been erased at the request of the person it named?
+   *
+   * ⚠️ The stamp is all that is left to read. Erasing strips the address, the name and the research
+   * out of `data`, so an erased lead is otherwise indistinguishable from one nobody has looked at —
+   * which is precisely the shape "Look again" and "Research this lead" are offered ON. Without this
+   * check the tab that erases a person also offers, two inches away, to go and find them again.
+   */
+  function isErasedLead(record) {
+    const v = record.data && record.data.erasedAt;
+    return typeof v === 'string' && !!v.trim();
+  }
+
+  /**
    * Which of the five states a lead is in, derived entirely from what the record already carries.
    *
    * `enrichAttemptedAt` is the load-bearing key: `recordEnrichment` (process-discovery-jobs.ts)
@@ -1087,6 +1100,16 @@
     if (state.hub.recordType !== 'lead') return null;
     const d = record.data || {};
 
+    // ⚠️ FIRST, ahead of every other terminal state. An erased lead has no address, so without this
+    // it falls through to "add an address" — and the footer OWNS that button, which the bar no
+    // longer draws for an erased lead, leaving a promoted control that does nothing when pressed.
+    // It is also the truest thing to say: erased outranks rejected or approved as a description of
+    // where this lead stands.
+    if (isErasedLead(record)) {
+      return { owner: 'closed', action: null,
+        note: 'This lead was erased at the request of the person it named. Their details are gone, their address stays on your do-not-contact list, and nothing here can look them up again.' };
+    }
+
     const outcome = d.dealOutcome && d.dealOutcome.outcome;
     if (outcome) {
       const RC = window.RevenueConstants;
@@ -1286,7 +1309,11 @@
       // only place to do it was an Email field three items down a modal called "Edit lead" — a
       // remedy nobody would find from the sentence offering it. On a lead with no address this is
       // the only action that unblocks anything, so it leads the row and says what it does.
-      if (!contactEmailOf(record)) {
+      // ⚠️ Every button in this block goes and COLLECTS the person again, so all three are gated on
+      // the erasure. The server refuses them too (lead-generation.ts `isErasedLead`) — this is the
+      // half that stops the tab from offering an action it will then refuse.
+      const erased = isErasedLead(record);
+      if (!erased && !contactEmailOf(record)) {
         buttons.push({ label: 'Add an address', key: 'add-address', async run(btn) {
           btn.disabled = false;
           openEditLeadModal(record, { focus: 'contactEmail' });
@@ -1296,7 +1323,7 @@
       // (state 'none'). On every other no-address state the stamp it clears is already absent, so
       // the button would be a no-op dressed as an action: 'missed' and 'checking' are unstamped by
       // definition, and 'unchecked' is a cold lead the scraper skips on rating.
-      if (contactState(record) === 'none') {
+      if (!erased && contactState(record) === 'none') {
         buttons.push({ label: 'Look again', key: 'look-again', async run(btn, status) {
           const res = await fetch('/.netlify/functions/lead-generation', {
             method: 'POST',
@@ -1334,7 +1361,7 @@
       //
       // Offered on every lead including rejected ones: "was I wrong to turn this down?" is exactly
       // the question this answers, and the evidence is what makes the answer worth anything.
-      buttons.push({
+      if (!erased) buttons.push({
         label: record.data?.intel ? 'Research again' : 'Research this lead',
         key: 'enrich',
         async run(btn, status) {
@@ -1582,6 +1609,149 @@
   // Three ways out, all always offered whatever the diagnosis said — a classification we got wrong
   // must not be able to remove the option the user actually needed. See _rqFailureRecoveryHtml in
   // workspace.html, which offers the same set plus reconnect/reject.
+  /**
+   * "They asked me to delete their data" — the same act as the one on a conversation
+   * (assistant-lead-threads.js), offered here because this is where a lead is read when there is no
+   * conversation to read it from: a request that arrived by phone, by post, or through a colleague.
+   *
+   * ⚠️ NOT a button in the action bar, and deliberately not beside Delete. Delete is the rejection
+   * (see deleteReasonStrip) and its whole promise is that the lead is KEPT — the confirmation says
+   * so, because that is the fact that makes pressing it safe. Erasing is the opposite promise. Two
+   * red buttons an inch apart, one keeping the record and one destroying it, is exactly the
+   * two-words-for-one-act trap that had Reject removed from this tab; so this gets its own strip at
+   * the foot of the panel, in grey, with the difference written out.
+   *
+   * ⚠️ Offered on a lead with NO address too, which is most of them — enrichment finds one for
+   * roughly a lead in three. The other two still hold a person: a name, a job title, the colleagues
+   * found on their site, a paragraph of research quoting them. Those are the leads whose subject
+   * never gave us anything and has the least reason to expect us to hold it, and the erasure is
+   * keyed on the record instead. What changes is the BLOCK — with no address there is no
+   * do-not-contact grain, so the company's domain is excluded from every search instead, and the
+   * copy has to say so before the button is pressed rather than after.
+   */
+  function erasureStrip(record) {
+    if (state.hub.recordType !== 'lead') return null;
+
+    const strip = document.createElement('div');
+    strip.className = 'mt-3 pt-3 border-t border-gray-100';
+
+    if (isErasedLead(record)) {
+      // Says WHEN, because "did we action that request?" is the question this record now exists to
+      // answer, and the date is the whole answer.
+      strip.innerHTML = `<p class="text-[11px] text-gray-500">
+        Erased at this person&rsquo;s request on ${esc(fmtDate(record.data.erasedAt))}. What is left is the shape of the
+        lead with nothing identifying them in it. Their address stays on your do-not-contact list, and this lead
+        cannot be looked up again.</p>`;
+      return strip;
+    }
+
+    const email = contactEmailOf(record);
+
+    strip.innerHTML = `
+      <div class="flex items-start gap-3 flex-wrap">
+        <p class="text-[11px] text-gray-500 flex-1 min-w-[12rem]">
+          Asked you to delete their details? Erasing removes ${email ? 'their address, ' : ''}their messages and everything
+          researched about them &mdash; and ${email
+            ? 'keeps them on your do-not-contact list, so no future search can find them and start this again.'
+            : 'blocks this company from every search, so nobody there is found again. There is no address on this lead to block instead.'}
+          Your own funnel history stays, carrying nothing that identifies them.</p>
+        <button type="button" data-hub-erase
+          class="px-2 py-1 text-[11px] font-bold rounded-lg bg-white border border-gray-200 text-gray-500 hover:border-red-300 hover:text-red-700 transition cursor-pointer">Erase their data</button>
+      </div>
+      <p class="hidden text-[11px] font-semibold mt-1.5" data-hub-erase-status></p>`;
+
+    const btn = strip.querySelector('[data-hub-erase]');
+    const status = strip.querySelector('[data-hub-erase-status]');
+    btn.addEventListener('click', () => eraseLeadProspect(record, btn, status));
+    return strip;
+  }
+
+  /**
+   * Run the erasure, after asking the two questions that cannot be skipped.
+   *
+   * Scope first (only a human can tell a limited company from a sole trader whose company IS their
+   * name), then the irreversible-act confirmation. ⚠️ A missing dialog ABORTS rather than falling
+   * through: elsewhere in this file a modal is a convenience, here it is the safeguard.
+   */
+  async function eraseLeadProspect(record, btn, status) {
+    const email = contactEmailOf(record);
+
+    const say = (text, cls) => {
+      status.classList.remove('hidden');
+      status.className = `text-[11px] font-semibold mt-1.5 ${cls}`;
+      status.textContent = text;
+    };
+
+    if (!window.choiceModal || !window.confirmModal) {
+      say('The confirmation dialog could not be opened, so nothing was erased. Reload the page and try again.', 'text-red-600');
+      return;
+    }
+
+    const scope = await window.choiceModal(
+      `Everything held about ${email ? `<span class="font-semibold">${esc(email)}</span>` : 'this person'} is removed: `
+      + `${email ? 'their address, the emails sent to them, ' : ''}the research gathered on them and anything your `
+      + 'assistant drafted. Your own funnel history stays &mdash; that this lead was found, approached and closed '
+      + '&mdash; carrying nothing that identifies them.',
+      [
+        { value: 'contact', label: 'Their personal details',
+          description: 'The right answer for a company. Removes the person; the company name and website stay on the record.' },
+        { value: 'full', label: 'Their details and the company&rsquo;s',
+          description: 'For a sole trader or a one-person business, where the company name or domain IS the person.' },
+      ],
+      { title: 'Erase this person&rsquo;s data', cancelLabel: 'Not now' },
+    );
+    if (!scope) return;
+
+    // ⚠️ States the block that will ACTUALLY be taken. With no address the erasure excludes the
+    // company's domain from every search — a bigger consequence than the request asked for, taken
+    // because there is nothing finer to take, and not something to discover afterwards by noticing
+    // a company has stopped appearing in the pipeline.
+    const ok = await window.confirmModal(
+      'This cannot be undone, and there is no copy to restore from. '
+      + (email
+        ? 'They stay on your do-not-contact list afterwards, so no future search can bring them back into your pipeline.'
+        : 'There is no address on this lead to block, so this company is excluded from every one of your searches instead — nobody there will be found again.'),
+      {
+        title: email ? 'Erase and keep them blocked?' : 'Erase and block this company?',
+        confirmLabel: 'Erase their data', cancelLabel: 'Cancel', confirmColor: '#b91c1c',
+      },
+    );
+    if (!ok) return;
+
+    btn.disabled = true;
+    say('Erasing…', 'text-gray-500');
+    try {
+      const res = await fetch('/.netlify/functions/lead-generation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          action: 'erase_prospect',
+          assistantId: state.assistantId,
+          recordId: record.id,
+          email: email || undefined,
+          eraseScope: scope,
+          confirmErase: true,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not erase that lead.');
+      // A full refetch, not a patch. The erasure rewrote `data` server-side — the address, the
+      // intel, the hooks, the draft and (on a full erasure) the title — and patching the four
+      // fields this browser happens to know about would leave the panel showing the rest.
+      //
+      // Re-opened afterwards for the same reason the research button does it: the refresh collapses
+      // the row the user is reading, and the outcome would otherwise be a row quietly changing in a
+      // list. The re-opened panel carries the durable version of this message.
+      state.pendingFocusId = record.id;
+      state.pendingFocusTone = 'neutral';
+      await refresh();
+    } catch (err) {
+      btn.disabled = false;
+      say(err.message || 'Could not erase that lead.', 'text-red-600');
+    }
+  }
+
   function failureBanner(record) {
     const p = record.data || {};
     // Older payloads (and any surface that hasn't been through get-social-drafts) arrive without a
@@ -1752,6 +1922,9 @@
     panel.appendChild(detailActions(record, {
       hasNextStepFooter: !!rendered.querySelector?.('[data-next-step-footer]'),
     }));
+    // Last thing in the panel, below the action bar — see erasureStrip for why it is not IN it.
+    const erasure = state.hub.recordType === 'lead' ? erasureStrip(record) : null;
+    if (erasure) panel.appendChild(erasure);
     // Delegated, and attached after the bar exists: the next-step button presses a control in it.
     if (state.hub.recordType === 'lead') wireNextStepAction(panel);
     return panel;

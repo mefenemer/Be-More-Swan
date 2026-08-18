@@ -6,6 +6,7 @@ import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { CURRENT_DPA_VERSION } from './accept-dpa';
 import { requireTenant } from '../../src/utils/tenant';
 import { AUTONOMOUS_DRAFT_PLATFORMS, describeAutoPublishVolume } from '../../src/utils/publish-policy';
+import { resolveHorizonDays } from '../../src/config/posting-cadence';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -98,7 +99,7 @@ export default withLambda(async (event) => {
                 // Derived server-side from the same helper that computes the enforced ceiling, so
                 // the sentence the user reads can't disagree with the limit actually applied.
                 autoPublishVolumeText: describeAutoPublishVolume(row.onboardingContext),
-                draftHorizonDays: row.draftHorizonDays ?? 7,
+                draftHorizonDays: resolveHorizonDays(row),
                 reviewNotifPreference: row.reviewNotifPreference ?? 'immediate',
                 name: row.name,
                 role: row.role || 'Digital Assistant',

@@ -10,11 +10,12 @@
 
 import { and, eq } from 'drizzle-orm';
 import type { getDb } from '../../../db/client';
-import { blogPosts } from '../../../db/schema';
+import { blogPosts, widgetConfigs } from '../../../db/schema';
 import { getBlogAdapter } from './index';
 import { resolveDestinationCreds, listBlogDestinations } from './store';
 import { stripMediaForSyndication } from '../blog-publish';
 import { renderMarkdown } from '../markdown-render';
+import { isAiAssisted, BLOG_AI_NOTICE } from '../blog-ai-assisted';
 import type { BlogDestinationId, BlogDestinationPost } from './types';
 
 type Db = ReturnType<typeof getDb>;
@@ -36,17 +37,37 @@ export interface SyndicatablePost {
     tags?: unknown;
     metaDescription?: string | null;
     destinations?: unknown;
+    // Provenance — drives the AI transparency notice on the syndicated copy (see isAiAssisted).
+    jobId?: string | null;
+    blueprintId?: number | null;
+    isAutonomous?: boolean | null;
+    generationReason?: string | null;
 }
 
 /** Project a published blog_posts row into the text-only payload adapters consume, or null if empty. */
 // Async only because rendering reaches `marked` through a dynamic import — see markdown-render.ts.
-export async function projectPost(post: SyndicatablePost): Promise<BlogDestinationPost | null> {
+export async function projectPost(
+    post: SyndicatablePost,
+    opts: { badgeEnabled?: boolean } = {},
+): Promise<BlogDestinationPost | null> {
     // Syndicated copies are TEXT ONLY (docs/blog-media-composition-plan.md §3.5): our media URLs are
     // presigned/expiring and Pexels is hotlink-only, so external platforms receive no media rather
     // than links that 404 or breach a licence. bodyHtml is derived from the SAME stripped source
     // because the HTML adapters (WordPress/Ghost/WordPress.com) send `bodyHtml || bodyMarkdown`.
-    const syndicatedMarkdown = await stripMediaForSyndication(post.bodyMarkdown || '');
-    if (!syndicatedMarkdown.trim()) return null;
+    const stripped = await stripMediaForSyndication(post.bodyMarkdown || '');
+    if (!stripped.trim()) return null;
+
+    // AI transparency (EU AI Act Art. 50). The widget and the /b/:key/:slug permalink both badge a
+    // machine-drafted post; a syndicated copy carried NO disclosure at all, so the same article was
+    // labelled on our surfaces and unlabelled on the customer's Dev.to or Ghost. The notice is
+    // appended to the MARKDOWN, before bodyHtml is derived from it, so the markdown adapters
+    // (Dev.to, Hashnode) and the HTML adapters (WordPress, Ghost, WordPress.com) all carry it.
+    //
+    // `badgeEnabled` defaults to true when the caller supplies nothing: an unknown workspace
+    // preference must fail towards disclosing, never away from it.
+    const disclose = isAiAssisted(post) && (opts.badgeEnabled ?? true);
+    const syndicatedMarkdown = disclose ? `${stripped}\n\n*${BLOG_AI_NOTICE}*` : stripped;
+
     return {
         title: post.title,
         bodyMarkdown: syndicatedMarkdown,
@@ -72,7 +93,16 @@ export async function syndicatePublishedPost(
     const connected = (await listBlogDestinations(db, organisationId)).filter((d) => d.connected);
     if (!connected.length) return {};
 
-    const projected = await projectPost(post);
+    // The workspace's AI-badge preference governs the syndicated notice too, so a customer who turns
+    // the badge off on their widget is not still labelled on Dev.to. No widget config row (a
+    // syndicate-only workspace never provisions one) means no stated preference — disclose.
+    const [wcfg] = await db
+        .select({ badgeEnabled: widgetConfigs.badgeEnabled })
+        .from(widgetConfigs)
+        .where(eq(widgetConfigs.organisationId, organisationId))
+        .limit(1);
+
+    const projected = await projectPost(post, { badgeEnabled: wcfg?.badgeEnabled ?? true });
     if (!projected) return {}; // media-only post: nothing to syndicate as text
 
     const existing = (post.destinations as Record<string, unknown>) || {};

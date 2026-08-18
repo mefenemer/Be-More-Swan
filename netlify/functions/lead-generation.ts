@@ -32,11 +32,11 @@
 // treats it as untrusted and escapes on render.
 
 import { Handler } from '@netlify/functions';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, asc, count, desc, eq, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, assistantRecords, discoveredLeads, leadRejectFeedback, masterAssistants, organisations, revenueEvents } from '../../db/schema';
+import { adminAuditLog, aiAssistants, assistantRecords, discoveredLeads, leadRejectFeedback, masterAssistants, organisations, revenueEvents } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { activeCampaignCapacity, campaignCapacityMessage, createDiscoveryRun } from '../../src/utils/discovery';
@@ -62,6 +62,7 @@ import {
     DOMAIN_EXCLUSION_REASONS, LEAD_REJECT_REASONS, isLeadRejectReason,
 } from '../../src/config/lead-reject-reasons';
 import { recordLeadRejection } from '../../src/utils/lead-reject-feedback';
+import { eraseProspect } from '../../src/utils/prospect-erasure';
 import { openLeadThread, recordOutboundMessage } from '../../src/utils/lead-threads';
 import { replyAddress } from '../../src/utils/reply-address';
 import { checkSuppression } from '../../src/utils/suppression';
@@ -137,6 +138,27 @@ function parseJson<T = unknown>(raw: string): T | null {
 }
 
 
+/**
+ * Has this lead been erased at the request of the person it named?
+ *
+ * ⚠️ The stamp is the ONLY thing left to ask. `eraseProspect` strips the address, the name, the
+ * research and the social handles out of `data` and leaves `erasedAt` behind precisely so that the
+ * routes which go back out and COLLECT those things again can refuse. Without it an erased lead is
+ * indistinguishable from one that was never enriched — which is exactly the shape "Look again" and
+ * "Research this lead" are built to act on, and they would walk straight back to the same website
+ * and re-scrape the person who asked to be forgotten.
+ *
+ * The opt-out stops us EMAILING them. Nothing else stops us re-collecting them, so this does.
+ */
+function isErasedLead(data: Record<string, unknown>): boolean {
+    return typeof data.erasedAt === 'string' && data.erasedAt.trim().length > 0;
+}
+
+/** One sentence, used by all three re-collection routes — three wordings would read as three rules. */
+const ERASED_LEAD_REFUSAL = 'This lead was erased at the request of the person it named. Looking it up again '
+    + 'would re-collect the details they asked to have removed, so it is blocked. Their address stays on your '
+    + 'do-not-contact list.';
+
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
@@ -152,6 +174,7 @@ export default withLambda(async (event) => {
         lead?: Record<string, unknown>; confirmPersonal?: boolean; reason?: string;
         outcome?: string; lossReason?: string; valueGbp?: number | string | null; confirmChange?: boolean;
         editReason?: string; provider?: string; note?: string;
+        email?: string; confirmErase?: boolean; eraseScope?: string;
     };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
@@ -436,6 +459,10 @@ ${OUTREACH_SUBJECT_RULES}`;
             if (!rec) return json(404, { error: 'Lead not found.' });
 
             const data = (rec.data && typeof rec.data === 'object' && !Array.isArray(rec.data)) ? rec.data as Record<string, unknown> : {};
+            // ⚠️ BEFORE the "no address" check, not after. An erased lead HAS no address — that is
+            // what erasing it did — so it sails through every other guard here and looks exactly
+            // like the case this action exists to fix.
+            if (isErasedLead(data)) return json(409, { error: ERASED_LEAD_REFUSAL });
             if (str(data.contactEmail as string, 200)) {
                 return json(400, { error: 'This lead already has an address — there is nothing to look for.' });
             }
@@ -535,6 +562,9 @@ ${OUTREACH_SUBJECT_RULES}`;
 
             const data = (rec.data && typeof rec.data === 'object' && !Array.isArray(rec.data))
                 ? rec.data as Record<string, unknown> : {};
+            // Sending an erased lead back for enrichment is the same act as Look again, reached from
+            // the Deleted section instead of the table.
+            if (isErasedLead(data)) return json(409, { error: ERASED_LEAD_REFUSAL });
 
             // The discovery row, when there is one — it holds the domain and the stamp that governs
             // the worker's own eligibility, and both have to be cleared together or the lead reads
@@ -690,6 +720,9 @@ ${OUTREACH_SUBJECT_RULES}`;
 
             const recData = (rec.data && typeof rec.data === 'object' && !Array.isArray(rec.data))
                 ? rec.data as Record<string, unknown> : {};
+            // The most expensive way to undo an erasure: deep enrichment writes back `intel`,
+            // `hooks` and named `people` — the three fields that carry the most about a person.
+            if (isErasedLead(recData)) return json(409, { error: ERASED_LEAD_REFUSAL });
 
             const [link] = await db
                 .select({ id: discoveredLeads.id, domain: discoveredLeads.domain })
@@ -1413,6 +1446,124 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
                 // Reported so the tab can state what approving will actually set off, from the same
                 // answer enrolInSequence reads rather than from a second guess about the default.
                 followUps: String(onboarding.outreachFollowUps ?? '') === 'none' ? 'none' : 'automatic',
+            });
+        }
+
+        // ── Erase a prospect's personal data, on their request ───────────────────
+        //
+        // A prospect is a third-party data subject: they never signed up, never agreed to anything,
+        // and their details were scraped from their own website or bought from a broker. Until this
+        // existed there was no way to erase them — and the request arrives by REPLY TO THE TENANT, not
+        // to us, which is why this is a tenant action rather than an admin one. The mechanics, and in
+        // particular why the opt-out is deliberately kept, are in src/utils/prospect-erasure.ts.
+        //
+        // Takes a recordId (the normal path — the tenant is looking at the lead) or a bare email for a
+        // request that arrives with no obvious record. Both are org-scoped: the email form can only
+        // ever reach rows belonging to the caller's own organisation.
+        if (action === 'erase_prospect') {
+            const recordId = Number(body.recordId);
+            let email = str(body.email, 200);
+
+            if (Number.isInteger(recordId)) {
+                const [rec] = await db
+                    .select({ data: assistantRecords.data })
+                    .from(assistantRecords)
+                    .where(and(
+                        eq(assistantRecords.id, recordId),
+                        eq(assistantRecords.organisationId, orgId),
+                        eq(assistantRecords.aiAssistantId, assistant.id),
+                        eq(assistantRecords.recordType, 'lead'),
+                    ))
+                    .limit(1);
+                if (!rec) return json(404, { error: 'Lead not found.' });
+                const data = (rec.data && typeof rec.data === 'object' && !Array.isArray(rec.data))
+                    ? rec.data as Record<string, unknown> : {};
+                email = email || str(data.contactEmail as string, 200);
+            }
+
+            // ⚠️ NO address is not an error. Enrichment finds one for roughly a third of leads, and
+            // the other two still hold a person — a name, a job title, the colleagues found on their
+            // site, a paragraph of research quoting them. The erasure runs from the record instead,
+            // and takes a heavier block (the company's domain) because there is no address-grain one
+            // to take. What is refused is a request naming neither.
+            if (!email && !Number.isInteger(recordId)) {
+                return json(400, { error: 'Name a lead or an address to erase.' });
+            }
+
+            // ⚠️ A deliberate, irreversible act needs a deliberate confirmation. Unlike the
+            // do-not-contact override there is no reason field: we are not asking them to justify
+            // honouring a data subject's request, only to confirm they meant to.
+            if (body.confirmErase !== true) {
+                return json(409, {
+                    error: 'Erasing removes this person’s address, their messages and everything researched about them, and cannot be undone. Confirm to proceed.',
+                    needsConfirmation: true,
+                });
+            }
+
+            const result = await eraseProspect(db, {
+                organisationId: orgId,
+                email,
+                assistantRecordId: Number.isInteger(recordId) ? recordId : null,
+                scope: body.eraseScope === 'full' ? 'full' : 'contact',
+                requestedBy: userId,
+            });
+
+            // Audited, because an erasure is exactly the act you must be able to evidence later — and
+            // because the data proving it happened is, by design, gone from everywhere else.
+            //
+            // ⚠️ The address is NOT written here. An audit row naming the person would re-create the
+            // record the request asked us to remove, in a table nothing erases. A one-way hash is
+            // enough to answer "did you action the request for this address?" without holding it.
+            try {
+                await db.insert(adminAuditLog).values({
+                    adminId: null,
+                    action: 'prospect_erasure',
+                    targetType: 'lead_prospect',
+                    // target_id is TEXT on this table, not an integer id.
+                    targetId: Number.isInteger(recordId) ? String(recordId) : null,
+                    newState: {
+                        organisationId: orgId,
+                        aiAssistantId: assistant.id,
+                        requestedBy: userId ?? null,
+                        // Null on the record-keyed path — there was no address to hash, which is
+                        // itself the fact worth recording: it is why the block below is a domain.
+                        emailSha256: result.email ? createHash('sha256').update(result.email).digest('hex') : null,
+                        scope: result.scope,
+                        redacted: result.redacted,
+                        optOutRetained: result.optOutRetained,
+                        blockedBy: result.blockedBy,
+                        domainExcluded: result.domainExcluded,
+                        campaignsBlocked: result.campaignsBlocked,
+                        failures: result.failures,
+                    },
+                });
+            } catch (err) {
+                console.error('[lead-generation] prospect erasure ran but the audit row failed', err);
+            }
+
+            // The block is stated in the tenant's own words, because the three outcomes are three
+            // different promises and only one of them is "this person is off limits". Excluding a
+            // domain removes the whole COMPANY from every search — a bigger consequence than the
+            // request asked for, taken because there was no address to block instead — and a tenant
+            // who is not told will find out when a company stops appearing in their pipeline.
+            const blockLine = result.blockedBy === 'opt_out'
+                ? 'They are on your do-not-contact list, so no future search can reach them again.'
+                : result.blockedBy === 'domain_exclusion'
+                    ? `There was no address to block, so ${result.domainExcluded} has been excluded from ${result.campaignsBlocked === 1 ? 'your search' : `all ${result.campaignsBlocked} of your searches`} — nobody at that company will be found again.`
+                    : 'There was no address and no website on this lead, so there is nothing that could reach them or find them again.';
+
+            return json(200, {
+                erased: result.failures.length === 0,
+                scope: result.scope,
+                redacted: result.redacted,
+                optOutRetained: result.optOutRetained,
+                blockedBy: result.blockedBy,
+                domainExcluded: result.domainExcluded,
+                campaignsBlocked: result.campaignsBlocked,
+                failures: result.failures,
+                message: result.failures.length === 0
+                    ? `Erased. Their details, messages and research are gone. ${blockLine}`
+                    : `Partly erased — ${result.failures.join(', ')} could not be completed. ${blockLine} Try again, or contact support with this lead.`,
             });
         }
 

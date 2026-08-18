@@ -20,7 +20,7 @@ import { and, eq, gte, lte, sql, inArray } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import type { getDb } from '../../db/client';
 import { blogPosts, contentGenerationJobs } from '../../db/schema';
-import { resolvePostingSchedule, computeScheduleSlots } from '../config/posting-cadence';
+import { resolvePostingSchedule, computeScheduleSlots, resolveHorizonDays } from '../config/posting-cadence';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -53,7 +53,7 @@ export async function enqueueBlogGapFill(
 ): Promise<BlogGapFillResult> {
     const ctx = (assistant.onboardingContext as Record<string, unknown>) ?? {};
     const schedule = resolvePostingSchedule(ctx);
-    const horizonDays = assistant.draftHorizonDays ?? 7;
+    const horizonDays = resolveHorizonDays(assistant);
 
     const slots = computeScheduleSlots({ schedule, horizonDays, now });
     if (!slots.length) return { enqueued: 0, reason: 'on_demand' };

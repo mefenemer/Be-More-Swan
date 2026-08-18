@@ -16,6 +16,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { widgetConfigs, blogPosts } from '../../db/schema';
 import { resolveInlineMedia, resolveFeatureImageUrl } from '../../src/utils/blog-media-resolve';
+import { isAiAssisted } from '../../src/utils/blog-ai-assisted';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const CORS = {
@@ -71,7 +72,10 @@ export default withLambda(async (event: HandlerEvent) => {
                 metaDescription: blogPosts.metaDescription,
                 tags: blogPosts.tags,
                 publishedAt: blogPosts.publishedAt,
-                provenanceContentId: blogPosts.provenanceContentId,
+                jobId: blogPosts.jobId,
+                blueprintId: blogPosts.blueprintId,
+                isAutonomous: blogPosts.isAutonomous,
+                generationReason: blogPosts.generationReason,
             })
             .from(blogPosts)
             .where(and(eq(blogPosts.organisationId, orgId), eq(blogPosts.status, 'published')))
@@ -83,7 +87,7 @@ export default withLambda(async (event: HandlerEvent) => {
             excerpt: r.metaDescription || '',
             tags: r.tags,
             publishedAt: r.publishedAt,
-            aiAssisted: !!r.provenanceContentId,
+            aiAssisted: isAiAssisted(r),
         }));
         return json(200, { posts }, true);
     }
@@ -101,7 +105,10 @@ export default withLambda(async (event: HandlerEvent) => {
                 hookVariants: blogPosts.hookVariants,
                 winningVariant: blogPosts.winningVariant,
                 abState: blogPosts.abState,
-                provenanceContentId: blogPosts.provenanceContentId,
+                jobId: blogPosts.jobId,
+                blueprintId: blogPosts.blueprintId,
+                isAutonomous: blogPosts.isAutonomous,
+                generationReason: blogPosts.generationReason,
             })
             .from(blogPosts)
             .where(and(
@@ -137,7 +144,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 hookVariants: post.hookVariants,
                 winningVariant: post.winningVariant,
                 abState: post.abState,
-                aiAssisted: !!post.provenanceContentId,
+                aiAssisted: isAiAssisted(post),
                 badgeEnabled: cfg.badgeEnabled,
             },
         }, true);

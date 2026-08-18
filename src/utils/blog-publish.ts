@@ -18,6 +18,7 @@ import { renderMarkdown, excerpt } from './markdown-render';
 import { isC2paSigningEnabled, signStoredImageAsset, type ManifestSummary } from './c2pa-sign';
 import { stripMediaForSyndication as stripMedia } from '../public/marked-bms-directives.js';
 import { resolveCanonical } from './blog-seo';
+import { isAiAssisted } from './blog-ai-assisted';
 import { fireOrchestrations } from './orchestration';
 
 const jwtSecret = process.env.JWT_SECRET || 'fallback';
@@ -125,7 +126,10 @@ export async function publishBlogPost(db: any, post: BlogPostRow, organisationId
     };
 
     // Stamp provenance (create on first publish, refresh publishedAt on re-publish).
-    const aiAssisted = !!(post.jobId || post.blueprintId || post.isAutonomous);
+    // The AI flag comes from the shared predicate — this used to inline `jobId || blueprintId ||
+    // isAutonomous`, which the interactive Studio drafting path sets none of, so an assistant-written
+    // post recorded itself as 'human-authored'. See src/utils/blog-ai-assisted.ts.
+    const aiAssisted = isAiAssisted(post);
     const contentId = post.provenanceContentId || randomUUID();
     const now = new Date();
 

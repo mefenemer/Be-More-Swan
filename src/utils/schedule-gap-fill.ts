@@ -13,7 +13,7 @@ import { randomUUID } from 'crypto';
 import type { getDb } from '../../db/client';
 import { aiBlueprints, scheduledPosts, contentGenerationJobs, contentAssets, notifications } from '../../db/schema';
 import { createNotification } from './notify';
-import { resolvePostingSchedule, computeScheduleSlots, readCadence } from '../config/posting-cadence';
+import { resolvePostingSchedule, computeScheduleSlots, readCadence, resolveHorizonDays } from '../config/posting-cadence';
 import { assembleBlueprint } from './blueprint';
 import { resolveConnectedDraftPlatforms } from './auto-publish-runtime';
 import { resolveLiveSocialConnections } from './live-social-connections';
@@ -83,7 +83,7 @@ export async function enqueueScheduleGapFill(
 ): Promise<GapFillResult> {
     const ctx = (assistant.onboardingContext as Record<string, unknown>) ?? {};
     const schedule = resolvePostingSchedule(ctx);
-    const horizonDays = assistant.draftHorizonDays ?? 7;
+    const horizonDays = resolveHorizonDays(assistant);
 
     const slots = computeScheduleSlots({ schedule, horizonDays, now });
     if (!slots.length) {

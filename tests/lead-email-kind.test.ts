@@ -162,7 +162,10 @@ check('a lead with no address offers the fix on the record itself', () => {
     // find is not a remedy.
     const hub = read('src/components/assistant-data-hub.js');
     const actions = hub.slice(landmark(hub, 'function detailActions'), landmark(hub, 'function detailPanel'));
-    assert.ok(/if \(!contactEmailOf\(record\)\)/.test(actions),
+    // The guard gained a second conjunct in 2026-08: an ERASED lead also has no address, and
+    // offering to add one back for a person who asked to be forgotten is the one case where this
+    // remedy is wrong. The address condition still has to be in there.
+    assert.ok(/if \([^)]*!contactEmailOf\(record\)\)/.test(actions),
         'the add-an-address action is not conditional on the lead actually lacking one');
     assert.ok(/label: 'Add an address'/.test(actions), 'the action is gone or renamed');
     assert.ok(/focus: 'contactEmail'/.test(actions),

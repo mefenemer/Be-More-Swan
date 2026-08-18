@@ -161,6 +161,34 @@ export const DEFAULT_POSTING_DAYS: WeekdayKey[] = ['mon', 'tue', 'wed', 'thu', '
 export const DEFAULT_POSTING_TIMES = ['09:00'];
 export const DEFAULT_POSTING_TIMEZONE = 'Europe/London';
 
+// ── draft horizon ────────────────────────────────────────────────────────────────────────────
+// How many days ahead an assistant keeps its queue filled.
+//
+// ⚠️ The ONE source of truth is the `ai_assistants.draft_horizon_days` COLUMN. `onboarding_context
+// .draft_horizon_days` is a LEGACY echo of the wizard's answer and must never be read: the two
+// stores are written by different surfaces (the onboarding wizard writes the jsonb,
+// set-draft-horizon.ts writes the column) and nothing keeps them equal, so reading the jsonb gives
+// a different window from the one the gap-fillers actually fill. Measured on staging 2026-08-18:
+// assistant 23 had jsonb "30" against column 7.
+//
+// Every reader goes through resolveHorizonDays() so they cannot drift apart again.
+export const DEFAULT_HORIZON_DAYS = 7;
+export const MIN_HORIZON_DAYS = 1;
+export const MAX_HORIZON_DAYS = 30;
+
+/**
+ * The horizon window for an assistant, in days.
+ *
+ * Takes the whole assistant row deliberately: the parameter type accepts `onboardingContext` so
+ * that a caller holding one cannot be tempted to reach into it for `draft_horizon_days`. This
+ * function reads the COLUMN and nothing else.
+ */
+export function resolveHorizonDays(
+    assistant: { draftHorizonDays?: number | null; onboardingContext?: unknown },
+): number {
+    return assistant.draftHorizonDays ?? DEFAULT_HORIZON_DAYS;
+}
+
 export interface PostingSchedule {
     frequency: string;        // stored posting_frequency label/key/free-text
     days: WeekdayKey[];       // eligible weekdays
@@ -358,7 +386,7 @@ export function computeScheduleSlots({ schedule, horizonDays, now = new Date() }
     const perWeek = postsPerWeekFor(schedule.frequency);
     if (perWeek <= 0) return [];
 
-    const horizon = Math.max(1, Math.min(30, Math.round(horizonDays)));
+    const horizon = Math.max(MIN_HORIZON_DAYS, Math.min(MAX_HORIZON_DAYS, Math.round(horizonDays)));
     const tz = schedule.timezone || DEFAULT_POSTING_TIMEZONE;
     const windowEnd = new Date(now.getTime() + horizon * 24 * 60 * 60 * 1000);
 

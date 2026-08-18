@@ -12,6 +12,8 @@
 //   · buildHeadTags()     — the SEO + Open Graph + Twitter Card + JSON-LD tags for the <head>;
 //   · renderBlogPage()    — the full standalone HTML document a crawler / human receives.
 
+import { BLOG_AI_NOTICE } from './blog-ai-assisted';
+
 // ── escaping ───────────────────────────────────────────────────────────────────────────────────
 // HTML text/attribute escape. Applied to every interpolated value except bodyHtml, which is the
 // already-sanitised published_payload snapshot (allowlisted at publish time) and must stay markup.
@@ -168,7 +170,7 @@ export function renderBlogPage(d: BlogPageData): string {
         ? `<img class="hero" src="${escHtml(d.imageUrl)}" alt="${escHtml(d.imageAlt || d.title)}">`
         : '';
     const badge = (d.aiAssisted && d.badgeEnabled)
-        ? `<p class="ai-badge">✨ This post was created with AI assistance and reviewed by a human.</p>`
+        ? `<p class="ai-badge">✨ ${escHtml(BLOG_AI_NOTICE)}</p>`
         : '';
     const tagList = d.tags?.length
         ? `<ul class="tags">${d.tags.map((t) => `<li>${escHtml(t)}</li>`).join('')}</ul>`

@@ -55,6 +55,15 @@
   const API = '/.netlify/functions/lead-threads';
 
   /**
+   * The lead endpoint, for the one action that is not about the conversation.
+   *
+   * Erasure works on the PERSON, across every table that holds them — the lead record, the scraped
+   * research, the account memory, the enrolment — so it belongs where the rest of the lead's life is
+   * written, not in the threads function. This tab is only where the request is READ.
+   */
+  const LEAD_API = '/.netlify/functions/lead-generation';
+
+  /**
    * How many conversations are held client-side.
    *
    * The controls compare every loaded row, so this is also the point past which the filters would
@@ -102,6 +111,12 @@
     replySending: {},    // threadId → true while a reply is in flight
     replyError: {},      // threadId → why the last reply did not go (the draft is kept)
     replyNotice: {},     // threadId → "Sent to …", cleared on the next attempt
+    // threadId → true while an erasure is in flight. ⚠️ Deliberately NOT `busy`: that flag greys out
+    // the cadence buttons, and an erasure — which is slower and irreversible — must not leave the
+    // user staring at a disabled "Stop follow-ups" wondering which of the two they actually pressed.
+    erasing: {},
+    eraseNotice: {},     // threadId → what was actually removed, kept until the row is closed
+    eraseError: {},      // threadId → why an erasure could not be completed
     // Set from the reply notification's deep link (window._assistantDetailFocusThreadId), consumed
     // once by paintRows so a later repaint cannot re-scroll the page.
     focusThreadId: null,
@@ -615,7 +630,13 @@
             ${busy ? 'Sending…' : 'Send the next one now'}</button>
           <button type="button" data-lt-stop="${t.id}" ${busy ? 'disabled' : ''}
             class="${btn} bg-white border-gray-200 text-gray-700 hover:border-red-300 hover:text-red-700">Stop follow-ups</button>
+          <button type="button" data-lt-direct="${t.id}" ${busy ? 'disabled' : ''}
+            class="${btn} bg-white border-gray-200 text-gray-700 hover:border-amber-400 hover:text-amber-800">They replied to me directly</button>
         </div>
+        <p class="text-[11px] text-gray-500 mt-1.5">
+          Chasers stop by themselves only when a reply comes back to the tracked address.
+          If they answered your own inbox instead &mdash; or rang, or replied on another thread &mdash;
+          press <span class="font-semibold">They replied to me directly</span>, or this will keep emailing them.</p>
       </div>`;
     }
 
@@ -708,7 +729,8 @@
              <p class="text-sm font-semibold text-gray-900">Nothing recorded on this conversation</p>
              <p class="text-xs text-gray-500 mt-1">The thread exists but no message was written to it &mdash; check the function logs for lead-threads warnings.</p>
            </div>`}
-      ${composer(t, loaded)}`;
+      ${composer(t, loaded)}
+      ${erasureBar(t, loaded)}`;
   }
 
   /**
@@ -760,6 +782,74 @@
       </div>
       ${err ? `<p class="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">${esc(err)}</p>` : ''}
       ${notice ? `<p class="mt-2 text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">${esc(notice)}</p>` : ''}
+    </div>`;
+  }
+
+  /**
+   * The erasure request — the one thing a prospect could ask for that this product could not do.
+   *
+   * ── Why it lives HERE ──────────────────────────────────────────────────────
+   * "Delete my data" arrives the way every other reply does: as an email to the tenant, in this
+   * thread. It is not a request routed to Be More Swan — the prospect has never heard of us, they
+   * heard of the tenant, whose name and mailbox were on the cold email. So the control belongs on the
+   * screen where the request is read, one press from the sentence asking for it. A form somewhere in
+   * settings would mean reading the request here and going elsewhere to honour it, which is how a
+   * request with a statutory clock on it gets lost.
+   *
+   * ⚠️ Deliberately NOT in the action bar. Everything up there moves a deal along and is undoable;
+   * this ends one and cannot be undone. Its own strip, at the bottom, in grey until hovered — the
+   * same reason Delete is not sitting next to Approve on the Leads table.
+   */
+  function erasureBar(t, loaded) {
+    const email = (loaded.thread && loaded.thread.contactEmail) || t.contactEmail || '';
+    const erasedAt = loaded.thread && loaded.thread.erasedAt;
+    // No address is NOT the same as nothing to erase. The lead behind this conversation still holds
+    // a name, a job title, the colleagues found on their site and a paragraph of research quoting
+    // them — and a thread whose address was never recorded is exactly the lead that most needs the
+    // record-keyed erasure. What decides it is whether there is a LEAD to key on.
+    const target = email || t.assistantRecordId;
+    const busy = !!state.erasing[t.id];
+    const notice = state.eraseNotice[t.id];
+    const err = state.eraseError[t.id];
+    // The outcome line is kept whether or not an address survives — after a successful erasure there
+    // IS no address, and dropping the message with it would make the screen look like nothing ran.
+    const outcome = `
+      ${err ? `<p class="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">${esc(err)}</p>` : ''}
+      ${notice ? `<p class="mt-2 text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">${esc(notice)}</p>` : ''}`;
+
+    // Already done. The server tells us (thread.erasedAt) rather than the screen inferring it from
+    // the missing address — an erased thread has no address BECAUSE it was erased, so inferring
+    // would offer to erase it a second time on the one lead where the work is finished.
+    if (erasedAt) {
+      return `<div class="px-4 py-3 border-t border-gray-100">
+        <p class="text-[11px] text-gray-400">Erased at this person&rsquo;s request. What is left of this conversation
+          carries nothing that identifies them, and they cannot be contacted or found again from here.</p>
+        ${outcome}
+      </div>`;
+    }
+
+    // Nothing to key an erasure on: no address, and no lead record either (the FK is ON DELETE SET
+    // NULL, so a thread outlives the lead it belonged to). This is the only case where the answer is
+    // genuinely "there is nothing here".
+    if (!target) {
+      return `<div class="px-4 py-3 border-t border-gray-100">
+        <p class="text-[11px] text-gray-400">No address and no lead record are held on this conversation, so there is nothing here to erase.</p>
+        ${outcome}
+      </div>`;
+    }
+
+    return `<div class="px-4 py-3 border-t border-gray-100">
+      <div class="flex items-start gap-3 flex-wrap">
+        <p class="text-[11px] text-gray-500 flex-1 min-w-[12rem]">
+          Asked you to delete their details? Erasing removes ${email ? 'their address, ' : ''}their messages and everything
+          researched about them &mdash; and ${email
+            ? 'keeps them on your do-not-contact list, so no future search can find them and start this again.'
+            : 'blocks this company from every search, so nobody there is found again. There is no address on this conversation to block instead.'}</p>
+        <button type="button" data-lt-erase="${t.id}" ${busy ? 'disabled' : ''}
+          class="px-3 py-1.5 bg-white border border-gray-200 text-gray-500 hover:border-red-300 hover:text-red-700 text-xs font-bold rounded-lg transition disabled:opacity-50">
+          ${busy ? 'Erasing&hellip;' : 'Erase their data'}</button>
+      </div>
+      ${outcome}
     </div>`;
   }
 
@@ -1125,6 +1215,10 @@
     }
     td.querySelector('[data-lt-send-reply]')?.addEventListener('click', () => sendReply(t));
 
+    td.querySelector('[data-lt-direct]')?.addEventListener('click', () => recordDirectReply(t));
+
+    td.querySelector('[data-lt-erase]')?.addEventListener('click', () => eraseProspectData(t));
+
     td.querySelector('[data-lt-nudge]')?.addEventListener('click', () => runCadenceAction(t, 'nudge'));
     td.querySelector('[data-lt-stop]')?.addEventListener('click', () => runCadenceAction(t, 'stop_follow_ups'));
   }
@@ -1211,6 +1305,171 @@
       state.replyError[t.id] = err.message || 'Could not send that reply.';
     } finally {
       delete state.replySending[t.id];
+      repaintDetail(t);
+    }
+  }
+
+  /**
+   * Record a reply that never reached us — they answered the sender's own address.
+   *
+   * ⚠️ The prompt is OPTIONAL text, and the button must work without it. The urgent half of this is
+   * stopping the cadence; asking someone to paste an email before we stop chasing their prospect
+   * would put a copy-and-paste task in front of the safety fix. What they paste is stored as the
+   * inbound message; what they skip is recorded as plainly not being the prospect's words.
+   */
+  async function recordDirectReply(t) {
+    if (state.busy[t.id]) return;
+
+    const note = await (window.promptModal ? window.promptModal(
+      'Paste what they said, if you have it. This goes into the conversation so the next chaser — and '
+      + 'anyone reading this later — knows what was already said. You can leave it empty.',
+      { title: 'They replied to you directly', confirmLabel: 'Record it', multiline: true, required: false },
+    ) : Promise.resolve(''));
+    // ⚠️ null is CANCEL; empty string is "record it with no text". Treating them the same would
+    // either lose the cancel or block the no-text path, and the no-text path is the important one.
+    if (note === null || note === undefined) return;
+
+    state.busy[t.id] = true;
+    delete state.rowError[t.id];
+    delete state.rowNotice[t.id];
+    repaintDetail(t);
+    try {
+      const data = await call('record_direct_reply', { threadId: t.id, note: String(note || '').trim() });
+      state.rowNotice[t.id] = data.message || 'Recorded.';
+      // Refetch: the thread has flipped to Replied, the cadence has halted and a message has been
+      // added — three things the open panel is showing stale.
+      try {
+        const fresh = await call('get', { threadId: t.id });
+        state.open[t.id] = { thread: fresh.thread, messages: fresh.messages || [], enrolment: fresh.enrolment || null };
+        t.sequence = fresh.enrolment || t.sequence;
+        if (fresh.thread) t.state = fresh.thread.state;
+      } catch { /* the notice is still true; the panel catches up on the next open */ }
+    } catch (err) {
+      state.rowError[t.id] = err.message || 'Could not record that.';
+    } finally {
+      delete state.busy[t.id];
+      repaintDetail(t);
+    }
+  }
+
+  /**
+   * Erase this prospect, because they asked.
+   *
+   * ── Two questions, in this order, and neither is optional ──────────────────
+   * First WHAT counts as their data, because only a human can tell a limited company from a sole
+   * trader whose company IS their name — for the second, the domain and the trading name are personal
+   * data and leaving them behind would not be an erasure at all. Then the irreversible-act
+   * confirmation, which is last so that the thing being confirmed is already decided.
+   *
+   * ⚠️ If the dialogs are missing this bails out rather than proceeding. Every other flow in this file
+   * degrades to "carry on without the prompt"; here the prompt IS the safeguard, and a silent erasure
+   * on a stray click is worse than a button that says it could not run.
+   */
+  async function eraseProspectData(t) {
+    if (state.erasing[t.id]) return;
+    const loaded = state.open[t.id];
+    const email = (loaded && loaded.thread && loaded.thread.contactEmail) || t.contactEmail || '';
+    const recordId = t.assistantRecordId || null;
+    if (!email && !recordId) return;
+
+    delete state.eraseError[t.id];
+    delete state.eraseNotice[t.id];
+
+    if (!window.choiceModal || !window.confirmModal) {
+      state.eraseError[t.id] = 'The confirmation dialog could not be opened, so nothing was erased. Reload the page and try again.';
+      repaintDetail(t);
+      return;
+    }
+
+    const who = email ? `<span class="font-semibold">${esc(email)}</span>` : 'this person';
+    const scope = await window.choiceModal(
+      `Everything held about ${who} is removed: ${email ? 'their address, ' : ''}the emails `
+      + 'in this conversation, the research gathered on them and anything your assistant wrote to them. '
+      + 'Your own funnel history stays &mdash; that this lead was found, approached and closed &mdash; carrying '
+      + 'nothing that identifies them.',
+      [
+        { value: 'contact', label: 'Their personal details',
+          description: 'The right answer for a company. Removes the person; the company name and website stay on the record.' },
+        { value: 'full', label: 'Their details and the company&rsquo;s',
+          description: 'For a sole trader or a one-person business, where the company name or domain IS the person.' },
+      ],
+      { title: 'Erase this person&rsquo;s data', cancelLabel: 'Not now' },
+    );
+    if (!scope) return;
+
+    // ⚠️ The confirmation states the block that will ACTUALLY be taken. With no address there is no
+    // address-grain block available, so the erasure excludes the company's domain from every search
+    // — a bigger consequence than the request asked for, and one nobody should discover afterwards
+    // by noticing a company has stopped appearing.
+    const ok = await window.confirmModal(
+      'This cannot be undone, and there is no copy to restore from. '
+      + (email
+        ? 'They stay on your do-not-contact list afterwards, so no future search can bring them back into your pipeline.'
+        : 'There is no address on this conversation to block, so this company is excluded from every one of your searches instead — nobody there will be found again.'),
+      {
+        title: email ? 'Erase and keep them blocked?' : 'Erase and block this company?',
+        confirmLabel: 'Erase their data',
+        cancelLabel: 'Cancel',
+        confirmColor: '#b91c1c',
+      },
+    );
+    if (!ok) return;
+
+    state.erasing[t.id] = true;
+    repaintDetail(t);
+    try {
+      const res = await fetch(LEAD_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          action: 'erase_prospect',
+          assistantId: state.assistantId,
+          // The thread's address is what is sent, not the record's: this is the person who wrote in,
+          // and a lead record can carry a different (or stale) address. `recordId` still rides along
+          // when there is one, so the audit row can name the lead the request came through.
+          recordId: recordId || undefined,
+          email: email || undefined,
+          eraseScope: scope,
+          confirmErase: true,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not erase that.');
+      state.eraseNotice[t.id] = data.message || 'Erased.';
+
+      // Refetch, because the conversation has been redacted underneath us: the address is gone, the
+      // messages now read as erased and the thread is closed. Leaving the old transcript on screen
+      // after telling the user it was erased is the one thing this screen must not do.
+      try {
+        const fresh = await call('get', { threadId: t.id });
+        state.open[t.id] = { thread: fresh.thread, messages: fresh.messages || [], enrolment: fresh.enrolment || null };
+        t.contactEmail = (fresh.thread && fresh.thread.contactEmail) || null;
+        t.lastExcerpt = '';
+        t.erasedAt = (fresh.thread && fresh.thread.erasedAt) || null;
+        if (fresh.thread) {
+          t.state = fresh.thread.state;
+          t.title = fresh.thread.title || t.title;
+        }
+        t.sequence = fresh.enrolment || t.sequence;
+      } catch {
+        // The erasure DID happen; only the reload failed. Drop the cached copy rather than repaint
+        // from it — that cache is the pre-erasure transcript, and it is the thing just erased.
+        delete state.open[t.id];
+        delete state.replyDraft[t.id];
+        t.contactEmail = null;
+        t.lastExcerpt = '';
+        state.rowError[t.id] = 'Erased. This conversation could not be reloaded — open it again to see what is left.';
+      }
+      // Their half-written reply is to someone who asked to be forgotten. Nothing should be able to
+      // send it, and the box it lives in is gone anyway.
+      delete state.replyDraft[t.id];
+      delete state.replyNotice[t.id];
+      delete state.replyError[t.id];
+    } catch (err) {
+      state.eraseError[t.id] = err.message || 'Could not erase that.';
+    } finally {
+      delete state.erasing[t.id];
       repaintDetail(t);
     }
   }

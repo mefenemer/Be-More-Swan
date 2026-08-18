@@ -16,6 +16,8 @@
 //        → { ok, enrolment }              — move the next chaser; the past is refused
 //   POST { action: 'reply', assistantId, threadId, body, subject? }
 //        → { sent, reason?, message }     — answer a prospect from the tenant's own mailbox
+//   POST { action: 'record_direct_reply', assistantId, threadId, note? }
+//        → { ok, halted }                 — they answered the tenant's OWN inbox; stop chasing them
 //
 // ── Read-only ABOUT THE THREAD, deliberately ──────────────────────────────────
 // Everything that WRITES lead_threads / lead_messages has exactly one owner: src/utils/lead-threads.ts,
@@ -60,7 +62,7 @@ import { haltEnrolment } from '../../src/utils/outreach-sequences';
 import { drainSequenceSends } from './process-sequence-sends';
 // The `reply` action's send path. Every one of these is the same helper the two existing send sites
 // use — a second copy of the footer, the alias or the suppression check is how the three drift apart.
-import { buildThreadReplyEnvelope, recordOutboundMessage } from '../../src/utils/lead-threads';
+import { buildThreadReplyEnvelope, recordInboundMessage, recordOutboundMessage } from '../../src/utils/lead-threads';
 import { isUsablePostalAddress } from '../../src/config/outreach-footer';
 import { checkSuppression } from '../../src/utils/suppression';
 import { recordEvent } from '../../src/utils/revenue-ledger';
@@ -127,6 +129,20 @@ function notesOf(data: unknown): string {
 }
 
 /**
+ * Has this conversation's lead been erased at the request of the person it named?
+ *
+ * One key off the same blob, for the same reason as the two above. The screen needs it because an
+ * erased thread has NO contact address — that is what erasing it did — and without this the erasure
+ * control would read that as "no address held" and offer to erase all over again, on a lead where
+ * the work is done and the only true thing left to say is when it happened.
+ */
+function erasedAtOf(data: unknown): string | null {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+    const at = (data as Record<string, unknown>).erasedAt;
+    return typeof at === 'string' && at.trim() ? at : null;
+}
+
+/**
  * Composite cursor over (updatedAt, id) — the exact ORDER BY below.
  *
  * updatedAt is the right sort key because src/utils/lead-threads.ts stamps it on every message in
@@ -162,7 +178,7 @@ export default withLambda(async (event) => {
 
     let body: {
         action?: string; assistantId?: number; threadId?: number; state?: string; cursor?: string;
-        from?: string; to?: string; nextSendAt?: string; replyBody?: string; subject?: string;
+        from?: string; to?: string; nextSendAt?: string; replyBody?: string; subject?: string; note?: string;
     };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
@@ -579,6 +595,7 @@ export default withLambda(async (event) => {
                     // linked record at all, and a `data` blob that isn't an object.
                     dealOutcome: dealOutcomeOf(thread.recordData),
                     notes: notesOf(thread.recordData),
+                    erasedAt: erasedAtOf(thread.recordData),
                     lastOutboundAt: thread.lastOutboundAt?.toISOString() ?? null,
                     lastInboundAt: thread.lastInboundAt?.toISOString() ?? null,
                     createdAt: thread.createdAt.toISOString(),
@@ -924,6 +941,110 @@ export default withLambda(async (event) => {
             return json(200, {
                 sent: true, to: recipient, subject,
                 message: `Sent to ${recipient}. Their answer will land back in this conversation.`,
+            });
+        }
+
+        // ── record_direct_reply ───────────────────────────────────────────────
+        // The blind spot in the reply loop, and the only one that keeps SENDING.
+        //
+        // Outreach goes out from the tenant's own mailbox with Reply-To set to the thread's alias, so
+        // a prospect who presses Reply lands back in the product. But Reply-To is a request, not a
+        // guarantee: Reply-All, a forwarded thread, a phone call followed by an email, or a client
+        // that simply favours the From header all put the answer in the TENANT's inbox instead. We
+        // never see it. Nothing reads their mailbox — that would need a mail-scope OAuth consent this
+        // product does not ask for, and reading a user's whole inbox to catch this is a wildly
+        // disproportionate remedy.
+        //
+        // ⚠️ The damage is not that the reply is missing from the transcript. It is that the thread
+        // stays 'open', so the cadence believes nobody answered and keeps chasing someone who did —
+        // which the sequence worker's own comments call the single most damaging thing this system
+        // can do. This action is the human closing that loop in one press.
+        //
+        // Deliberately NOT a notification and NOT an email: nothing is sent here. It records what the
+        // user already knows, and everything downstream (halt, state, ledger) follows from that.
+        if (action === 'record_direct_reply') {
+            const threadId = Number(body.threadId);
+            if (!Number.isInteger(threadId) || threadId <= 0) {
+                return json(400, { error: 'A threadId is required.' });
+            }
+
+            const [row] = await db
+                .select({
+                    id: leadThreads.id,
+                    state: leadThreads.state,
+                    contactEmail: leadThreads.contactEmail,
+                    assistantRecordId: leadThreads.assistantRecordId,
+                    discoveredLeadId: leadThreads.discoveredLeadId,
+                    enrolmentId: sequenceEnrolments.id,
+                    enrolmentState: sequenceEnrolments.state,
+                    lastStepSent: sequenceEnrolments.lastStepSent,
+                })
+                .from(leadThreads)
+                .leftJoin(sequenceEnrolments, eq(sequenceEnrolments.leadThreadId, leadThreads.id))
+                .where(and(
+                    eq(leadThreads.id, threadId),
+                    eq(leadThreads.organisationId, orgId),
+                    eq(leadThreads.aiAssistantId, assistantId),
+                ))
+                .limit(1);
+            if (!row) return json(404, { error: 'Conversation not found.' });
+
+            // ⚠️ Stop the cadence FIRST. Everything else here is bookkeeping; this is the part that
+            // prevents another email going to someone who has already answered, and it must not be
+            // skipped because a later step failed.
+            let halted = false;
+            if (row.enrolmentId && row.enrolmentState === 'active') {
+                halted = await haltEnrolment(db, {
+                    id: row.enrolmentId,
+                    organisationId: orgId,
+                    aiAssistantId: assistantId,
+                    assistantRecordId: row.assistantRecordId ?? null,
+                    discoveredLeadId: row.discoveredLeadId ?? null,
+                    lastStepSent: row.lastStepSent ?? 0,
+                }, 'replied', 'replied directly to the sender, recorded by hand');
+            }
+
+            // Put it in the transcript. `recordInboundMessage` is the owner's writer and it also flips
+            // the thread to 'replied', which is what every other surface reads — the Conversations
+            // filter, the cadence's own pre-send check, and the reply-rate aggregate.
+            //
+            // The body is NOT NULL, and what goes in it must never be mistaken for the prospect's
+            // words. If the user pasted what they said, that is stored as-is; if not, the row says
+            // plainly that the text was not copied in.
+            const note = typeof body.note === 'string' ? body.note.trim().slice(0, 8000) : '';
+            const messageId = await recordInboundMessage(db, threadId, {
+                organisationId: orgId,
+                fromEmail: row.contactEmail ?? null,
+                subject: 'Replied directly (recorded by hand)',
+                body: note || '(They replied to your own email address rather than the tracked one, so we '
+                    + 'never received it. Recorded here so follow-ups stop; the text was not copied in.)',
+            });
+
+            // Counted as a reply, because it IS one — a reply rate that ignored these would understate
+            // engagement and make the outreach copy look worse than it is. actor 'user' and
+            // source 'direct_to_sender' are what separate it from one the system actually received;
+            // inbound-email.ts writes the same event with actor 'system'.
+            await recordEvent(db, 'reply_received', {
+                organisationId: orgId,
+                aiAssistantId: assistantId,
+                assistantRecordId: row.assistantRecordId,
+                discoveredLeadId: row.discoveredLeadId,
+                actor: 'user',
+                actorUserId: userId,
+                blueprintVersion: await getBlueprintVersion(db, assistantId),
+                icpSnapshot: await getIcpSnapshot(db, {
+                    discoveredLeadId: row.discoveredLeadId,
+                    aiAssistantId: assistantId,
+                }),
+                payload: { threadId, messageId, source: 'direct_to_sender', hadText: !!note, sequencesHalted: halted ? 1 : 0 },
+            });
+
+            return json(200, {
+                ok: true,
+                halted,
+                message: halted
+                    ? 'Recorded. Follow-up emails to them have stopped.'
+                    : 'Recorded. No follow-ups were running on this conversation.',
             });
         }
 

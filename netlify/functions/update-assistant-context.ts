@@ -6,6 +6,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { retryBlockedAssistants } from '../../src/utils/retry-provisioning';
 import { assembleBlueprint } from '../../src/utils/blueprint';
+import { MIN_HORIZON_DAYS, MAX_HORIZON_DAYS } from '../../src/config/posting-cadence';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -62,6 +63,23 @@ export default withLambda(async (event) => {
             if (newConfiguration) updatePayload.configuration = newConfiguration;
             if (newName) updatePayload.name = newName;
             if (disclosureText !== undefined) updatePayload.disclosureText = disclosureText;
+
+            // The wizard's "How far ahead to schedule" answer lands in onboarding_context, but every
+            // reader resolves the horizon from the `draft_horizon_days` COLUMN (see
+            // DEFAULT_HORIZON_DAYS in posting-cadence.ts). Promote the answer to the column so the
+            // choice actually takes effect — otherwise picking "1 month ahead" is a no-op and the
+            // assistant keeps filling the default 7-day window. Clamped to the same 1–30 range
+            // set-draft-horizon.ts enforces. A caller that doesn't send the key leaves the column
+            // untouched (Number(undefined) is NaN), so partial saves can't reset it.
+            const answeredHorizon = Number(mergedContext.draft_horizon_days);
+            if (Number.isFinite(answeredHorizon)) {
+                const clamped = Math.max(MIN_HORIZON_DAYS, Math.min(MAX_HORIZON_DAYS, Math.round(answeredHorizon)));
+                updatePayload.draftHorizonDays = clamped;
+                // Keep the legacy jsonb echo equal to the column. It is never read, but callers
+                // spread the existing context back in on partial saves, so a stale copy left here
+                // would be promoted over a newer value set via set-draft-horizon.ts.
+                mergedContext.draft_horizon_days = clamped;
+            }
             if (appliedDefaults !== undefined) {
                 // Merge appliedDefaults into existing configuration rather than overwrite
                 const existingConfig = existingAssistant.configuration as any || {};
