@@ -10,7 +10,8 @@
     "get_started": "Empezar",
     "log_out": "Cerrar sesión",
     "dashboard": "Panel",
-    "billing": "Facturación"
+    "billing": "Facturación",
+    "blog": "Blog"
   },
   "footer": {
     "tagline": "Delega el trabajo que odias. Construimos, alojamos y gestionamos tus asistentes digitales para que puedas centrarte en lo que importa.",
@@ -30,7 +31,8 @@
     "trust_security": "Confianza y seguridad",
     "data_deletion": "Eliminación de datos",
     "copyright": "© 2026 Be More Swan. Todos los derechos reservados.",
-    "language": "Idioma"
+    "language": "Idioma",
+    "blog": "Blog"
   },
   "common": {
     "submit": "Enviar",

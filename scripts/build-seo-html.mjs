@@ -48,6 +48,7 @@ const SITE_ORIGIN = 'https://bemoreswan.com';
 const FOOTER_PAGES = [
     'index.html',
     'about.html',
+    'blog.html',
     'pricing.html',
     'assistants.html',
     'faq.html',

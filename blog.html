@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blog | Be More Swan</title>
+    <!-- SEO: canonical + social share metadata -->
+    <meta name="description" content="Notes on delegating the work you hate — written, scheduled and published by our own Blog Writing Assistant, the same one you can hire.">
+    <link rel="canonical" href="https://bemoreswan.com/blog.html">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Be More Swan">
+    <meta property="og:title" content="The Be More Swan Blog">
+    <meta property="og:description" content="Notes on delegating the work you hate — written, scheduled and published by our own Blog Writing Assistant, the same one you can hire.">
+    <meta property="og:url" content="https://bemoreswan.com/blog.html">
+    <meta property="og:image" content="https://bemoreswan.com/images/og-default.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="607">
+    <meta property="og:image:alt" content="Be More Swan — your digital workforce">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="The Be More Swan Blog">
+    <meta name="twitter:description" content="Notes on delegating the work you hate — written, scheduled and published by our own Blog Writing Assistant, the same one you can hire.">
+    <meta name="twitter:image" content="https://bemoreswan.com/images/og-default.png">
+    <meta name="twitter:image:alt" content="Be More Swan — your digital workforce">
+    <!-- /SEO -->
+    <link href="./style.css" rel="stylesheet">
+    <link rel="icon" href="/favicon/favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
+    <link rel="manifest" href="/favicon/manifest.json">
+    <script src="/src/i18n.js"></script>
+</head>
+<body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
+
+<div id="nav-placeholder"></div>
+
+<!-- Hero Section -->
+<section class="relative bg-white">
+    <div class="max-w-7xl mx-auto px-4 py-20 lg:py-24 text-center">
+        <span class="inline-block px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-xs font-bold uppercase tracking-wider mb-6 border border-emerald-100">The Blog</span>
+        <h1 class="text-4xl md:text-6xl font-extrabold text-gray-900 tracking-tight leading-tight mb-6 max-w-4xl mx-auto">
+            Written by the Assistant <span class="text-emerald-700">You Can Hire.</span>
+        </h1>
+        <p class="text-xl text-gray-500 max-w-2xl mx-auto">
+            Every post below was researched, drafted and scheduled by our own Blog Writing Assistant, then approved by a human before it went live. It is the product, doing the job, in public.
+        </p>
+    </div>
+</section>
+
+<!-- The blog itself.
+     #bms-blog is the mount point for widget.js, the same drop-in embed every customer gets from
+     Blog Studio → Widget → Embed snippet. The widget renders into a Shadow DOM, so nothing in
+     style.css reaches it and nothing it ships leaks back out — which is also why this section
+     styles the wrapper and leaves the inside alone.
+
+     Note for anyone chasing an SEO question here: this list is client-rendered and routes on
+     location.hash, so crawlers see an empty div. That is expected and it is not the indexable
+     surface. Each published post is ALSO served as real server-rendered HTML at
+     /b/<widget-key>/<slug> (netlify/functions/blog-page.ts), with a per-blog sitemap at
+     /b/<widget-key>/sitemap.xml. Submit THAT sitemap to Search Console, not this page. -->
+<section class="py-20 bg-gray-50">
+    <div class="max-w-7xl mx-auto px-4">
+        <div id="bms-blog"></div>
+
+        <!-- Shown only when the widget key below has not been filled in yet. Without this, an
+             unconfigured deploy publishes a Blog link in the main nav that leads to a blank
+             section — worse than having no Blog page at all. -->
+        <div id="bms-blog-setup" class="max-w-2xl mx-auto text-center" style="display: none;">
+            <div class="bg-white p-10 rounded-3xl border border-gray-100 shadow-sm">
+                <h2 class="text-2xl font-extrabold text-gray-900 mb-4">The first posts are on their way.</h2>
+                <p class="text-gray-600 mb-6">
+                    Our Blog Writing Assistant is drafting them now. Check back shortly — or see what else it can do.
+                </p>
+                <a href="assistants.html" class="inline-block px-8 py-4 text-lg font-bold rounded-lg text-white bg-green-600 hover:bg-green-700 shadow-lg hover:shadow-xl transition">
+                    Browse the Assistant Library
+                </a>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Footer CTA -->
+<section class="py-20 bg-emerald-700 text-white text-center px-4">
+    <div class="max-w-2xl mx-auto">
+        <h2 class="text-3xl md:text-4xl font-extrabold mb-4 tracking-tight">Your blog could write itself too.</h2>
+        <p class="opacity-90 leading-relaxed mb-8 text-lg">
+            The Blog Writing Assistant researches topics, drafts in your brand voice, and publishes to your site on a schedule you set. You approve each post. It does the rest.
+        </p>
+        <div class="flex flex-col sm:flex-row gap-3 justify-center">
+            <a href="pricing.html" class="inline-block px-8 py-4 text-lg font-bold rounded-lg text-white bg-green-600 hover:bg-green-700 shadow-lg hover:shadow-xl transition">
+                Hire Your Assistant
+            </a>
+            <a href="assistants.html" class="inline-block px-8 py-4 text-lg font-bold rounded-lg border-2 border-white/30 text-white hover:border-white/60 hover:bg-white/10 transition">
+                Browse the Assistant Library
+            </a>
+        </div>
+        <p class="opacity-80 text-sm mt-6">
+            Still deciding? <a href="faq.html" class="underline font-semibold hover:opacity-100">Read the FAQs</a> or <a href="contact.html" class="underline font-semibold hover:opacity-100">talk to us first</a>.
+        </p>
+    </div>
+</section>
+
+<div id="footer-placeholder"></div>
+
+<script src="./mobileMenu.js"></script>
+<script>
+    // ── The blog widget key ────────────────────────────────────────────────────────────────────
+    // Our OWN public widget key, from Blog Studio → Widget → "Embed snippet" (the wgt_… value in
+    // the data-bms-key attribute). It is a public identifier — it is baked into a <script> tag on
+    // a customer's own website by design — so it belongs in source, not in an env var.
+    //
+    // Until it is set, the page shows the setup panel above instead of an empty section. Replace
+    // the placeholder and this line is the only change needed to take the blog live.
+    const BMS_BLOG_WIDGET_KEY = 'wgt_REPLACE_WITH_KEY_FROM_BLOG_STUDIO';
+
+    function mountBlogWidget() {
+        if (!/^wgt_/.test(BMS_BLOG_WIDGET_KEY) || BMS_BLOG_WIDGET_KEY.includes('REPLACE')) {
+            document.getElementById('bms-blog-setup').style.display = '';
+            return;
+        }
+        // Injected rather than hard-coded as a <script> tag so the guard above can run first.
+        // widget.js reads document.currentScript, which is set for a dynamically inserted classic
+        // script, and its own mount lookup runs after DOMContentLoaded — both hold here.
+        const s = document.createElement('script');
+        s.async = true;
+        s.src = './widget.js';
+        s.setAttribute('data-bms-key', BMS_BLOG_WIDGET_KEY);
+        s.setAttribute('data-bms-mount', '#bms-blog');
+        document.body.appendChild(s);
+    }
+
+    async function loadComponent(id, path) {
+        try {
+            const r = await fetch(path);
+            if (r.ok) document.getElementById(id).innerHTML = await r.text();
+        } catch {}
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        await loadComponent('nav-placeholder', './components/nav.html');
+        loadComponent('footer-placeholder', './components/footer.html');
+        if (window.i18n) window.i18n.apply();
+        setupMobileMenu();
+        mountBlogWidget();
+    });
+</script>
+</body>
+</html>

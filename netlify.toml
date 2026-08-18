@@ -241,6 +241,15 @@
   to = "/.netlify/functions/integration-scenarios"
   status = 200
 
+# Autonomous Content Engine (US 3.2 §A.4): per-widget RSS 2.0 feed. MUST precede the /api/widget/*
+# catch-all below — Netlify evaluates redirects top-to-bottom, first match wins, so without this an
+# RSS request would fall through to widget-api, which parses "rss" as a resource name and 404s.
+# Same ordering trap as /b/:key/sitemap.xml further down.
+[[redirects]]
+  from = "/api/widget/:key/rss"
+  to = "/.netlify/functions/widget-rss"
+  status = 200
+
 # Autonomous Content Engine (US 3.1): public, read-only native-widget API. Rewrite (status 200) —
 # the original /api/widget/:key/:resource path survives in event.rawUrl, which widget-api.ts parses.
 [[redirects]]
@@ -354,10 +363,13 @@ node_bundler = "esbuild"
 #      Cache-Control rule above untouched (Netlify merges rules that set different headers,
 #      and resolves by specificity only when two rules set the SAME header).
 #
-# This inverts an allow-list. Everything indexable is: / index about pricing contact faq
-# trust privacy terms_of_service data-deletion help assistants licenses register — those 13
+# This inverts an allow-list. Everything indexable is: / index about blog pricing contact faq
+# trust privacy terms_of_service data-deletion help assistants licenses register — those 14
 # carry <link rel=canonical> + Open Graph tags and are the entries in sitemap.xml. When you
 # add a public marketing page, add it to sitemap.xml; when you add an app page, add it here.
+#
+# NOTE the /blog-studio* rule below is deliberately NOT /blog* — blog.html is the public
+# marketing blog and must stay indexable; blog-studio.html is the authenticated editor.
 
 # Workspace shell plus the view fragments it injects. These are served standalone at their
 # own URLs (Netlify publishes the repo root), but they are not pages — several have no

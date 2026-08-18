@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "copy-harness-blog-snippet",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/dcae76bd-b112-4b26-90a8-5c917250e99d/scratchpad/copyharness/server.mjs"
+      ],
+      "port": 4401,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-reply-composer",
       "runtimeExecutable": "node",
       "runtimeArgs": [

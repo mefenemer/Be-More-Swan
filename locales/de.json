@@ -10,7 +10,8 @@
     "get_started": "Loslegen",
     "log_out": "Abmelden",
     "dashboard": "Dashboard",
-    "billing": "Abrechnung"
+    "billing": "Abrechnung",
+    "blog": "Blog"
   },
   "footer": {
     "tagline": "Delegieren Sie die Arbeit, die Sie hassen. Wir bauen, hosten und verwalten Ihre digitalen Assistenten, damit Sie sich auf das Wesentliche konzentrieren können.",
@@ -30,7 +31,8 @@
     "trust_security": "Vertrauen & Sicherheit",
     "data_deletion": "Datenlöschung",
     "copyright": "© 2026 Be More Swan. Alle Rechte vorbehalten.",
-    "language": "Sprache"
+    "language": "Sprache",
+    "blog": "Blog"
   },
   "common": {
     "submit": "Absenden",

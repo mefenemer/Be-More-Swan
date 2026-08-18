@@ -171,8 +171,23 @@
     + '          <input id="bs-site-path" placeholder="/blog/{slug}">'
     + '          <span class="bs-status" style="font-size:11px;">Must start with / and contain {slug}. Needed for canonical URLs to point at your site.</span></div>'
     + '        <button id="bs-save-theme" class="bs-btn bs-btn-ghost">Save settings</button>'
-    + '        <div style="margin-top:12px;"><label class="bs-status">Embed snippet</label>'
-    + '          <div id="bs-snippet" class="bs-snippet">Create a widget to get your embed code.</div></div>'
+    // The snippet is a two-line <script> tag nobody should have to select by hand — a copy
+    // button is the difference between "paste this into your site" and a transcription bug
+    // in a key that fails silently (widget-api 404s and the blog renders "Unable to load posts").
+    + '        <div style="margin-top:12px;">'
+    + '          <div class="bs-row" style="justify-content:space-between;">'
+    + '            <label class="bs-status">Embed snippet</label>'
+    + '            <button id="bs-snippet-copy" class="bs-linkbtn" type="button">Copy</button></div>'
+    + '          <div id="bs-snippet" class="bs-snippet">Create a widget to get your embed code.</div>'
+    + '          <span class="bs-status" style="font-size:11px;">Paste this into any page on your site, alongside a &lt;div id="bms-blog"&gt;&lt;/div&gt; for it to render into.</span></div>'
+    // The RSS feed of published posts. Anything that reads a feed (Mailchimp, Zapier, an aggregator,
+    // a reader) can pull the blog without a dedicated connector — see widget-rss.ts.
+    + '        <div style="margin-top:12px;">'
+    + '          <div class="bs-row" style="justify-content:space-between;">'
+    + '            <label class="bs-status">RSS feed</label>'
+    + '            <button id="bs-rss-copy" class="bs-linkbtn" type="button">Copy</button></div>'
+    + '          <div id="bs-rss" class="bs-snippet">Create a widget to get your feed URL.</div>'
+    + '          <span class="bs-status" style="font-size:11px;">Published posts only. Media is left out and AI-assisted posts carry the disclosure notice.</span></div>'
     + '      </div>'
     + '      <div class="bs-panel">'
     + '        <h3>Feature image</h3>'
@@ -459,6 +474,7 @@
   function renderSnippet(key) {
     el('bs-snippet').textContent =
       '<script async src="' + location.origin + '/widget.js"\n        data-bms-key="' + key + '" data-bms-mount="#bms-blog"><\/script>';
+    el('bs-rss').textContent = location.origin + '/api/widget/' + key + '/rss';
   }
   function loadWidget() {
     api('save-widget-config', { method: 'GET' }).then(function (res) {
@@ -960,6 +976,47 @@
         refreshSeoCounts();
       });
     });
+
+    // ── Copy-to-clipboard for the embed snippet / feed URL ────────────────────────────────────
+    // navigator.clipboard needs a secure context; it is absent over plain http and rejects when the
+    // document is not focused. Falling back to execCommand('copy') via a throwaway textarea keeps
+    // the button working there instead of failing silently, which is the whole point of adding it.
+    function copyText(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+      }
+      return new Promise(function (resolve, reject) {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        var ok = false;
+        try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+        document.body.removeChild(ta);
+        ok ? resolve() : reject(new Error('copy failed'));
+      });
+    }
+
+    // srcId's text is the source of truth, so the button can never copy something stale — it reads
+    // whatever renderSnippet() last wrote. Guarded on both elements: the RSS pair may not exist.
+    function wireCopy(btnId, srcId) {
+      var btn = document.getElementById(btnId), src = document.getElementById(srcId);
+      if (!btn || !src) return;
+      btn.addEventListener('click', function () {
+        var text = src.textContent || '';
+        // Before a widget exists the box holds placeholder prose, not a snippet. Copying that would
+        // hand the user something broken to paste into their site.
+        if (!/wgt_/.test(text)) { btn.textContent = 'Not ready yet'; }
+        else { copyText(text).then(function () { btn.textContent = 'Copied'; })
+                             .catch(function () { btn.textContent = 'Press Ctrl+C'; }); }
+        setTimeout(function () { btn.textContent = 'Copy'; }, 2000);
+      });
+    }
+    wireCopy('bs-snippet-copy', 'bs-snippet');
+    wireCopy('bs-rss-copy', 'bs-rss');
 
     el('bs-save-theme').addEventListener('click', function () {
       var theme = { accent: el('bs-accent').value, fontFamily: el('bs-font').value };

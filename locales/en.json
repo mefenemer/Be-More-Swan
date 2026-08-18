@@ -10,7 +10,8 @@
     "get_started": "Get Started",
     "log_out": "Log Out",
     "dashboard": "Dashboard",
-    "billing": "Billing"
+    "billing": "Billing",
+    "blog": "Blog"
   },
   "footer": {
     "tagline": "Delegate the work you hate. We build, host, and manage your digital assistants so you can focus on what matters.",
@@ -30,7 +31,8 @@
     "trust_security": "Trust & Security",
     "data_deletion": "Data Deletion",
     "copyright": "© 2026 Be More Swan. All rights reserved.",
-    "language": "Language"
+    "language": "Language",
+    "blog": "Blog"
   },
   "common": {
     "submit": "Submit",
