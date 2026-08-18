@@ -252,6 +252,17 @@ window.NotifKit = (function () {
                 window.routeToAssistantDetail?.(meta.assistantId);
             } };
         }
+        // A company excluded from every search because someone erased a prospect we held no address
+        // for. An UPDATE item, so it would render button-less by default — but its own message ends
+        // "you can undo this in the search's own settings", and those live on exactly one screen:
+        // the Searches tab, whose campaign editor owns the excluded-domains field. A card that names
+        // a consequence and offers no way to inspect it is how a wrong block goes uncorrected.
+        if (notif.type === 'lead_company_blocked' && meta.assistantId) {
+            return { label: 'Open your searches', run: () => {
+                window._assistantDetailInitialTab = 'signals';
+                window.routeToAssistantDetail?.(meta.assistantId);
+            } };
+        }
         if ((notif.type === 'post_draft_ready' || notif.type === 'ai_review') && meta.postId) {
             return { label: 'Review draft', run: () => window.loadView?.('review-queue', { postId: meta.postId }) };
         }

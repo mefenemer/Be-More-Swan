@@ -30,6 +30,9 @@ import {
     leadMessages, leadOptOuts, leadThreads, sequenceEnrolments,
 } from '../db/schema';
 import { ERASED_TEXT, eraseProspect } from '../src/utils/prospect-erasure';
+import { PREF_CATEGORIES } from '../src/utils/notification-prefs';
+import { getNotificationDefault } from '../src/utils/notification-templates-catalog';
+import { categoryOf } from '../src/utils/notification-actions';
 import { landmark } from './landmark';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -684,6 +687,93 @@ async function main() {
             'the control must be offered whenever EITHER key exists');
         assert.match(bar, /No address and no lead record/,
             'and the empty state has to name both, or it reads as a bug on a lead that has research on it');
+    });
+
+    console.log('\n──── 11. a company leaving the pipeline has a cause on the record ────');
+
+    await check('the company-grain block tells the rest of the team', () => {
+        // One person actions an erasure request; a whole company disappears from every search in the
+        // workspace. The colleague who built that search would otherwise learn it by noticing an
+        // absence, weeks later, with nothing to explain it.
+        const act = eraseAction();
+        assert.match(act, /createNotifications\(db, 'lead_company_blocked'/,
+            'the domain-grain block must raise a notification');
+        assert.match(act, /userOrganisations/,
+            'and it goes to the workspace, not to one person — the whole team lost the company');
+    });
+
+    await check('it is NOT raised when the block was address-grain', () => {
+        // An opt-out stops us contacting one person and leaves the company a legitimate prospect.
+        // Nothing changed for anyone else, and an alert about it is noise that teaches people to
+        // ignore the bell.
+        const act = eraseAction();
+        const guard = act.slice(landmark(act, 'Tell the rest of the team'), landmark(act, "createNotifications(db, 'lead_company_blocked'"));
+        assert.match(guard, /result\.blockedBy === 'domain_exclusion'/,
+            'only the company-grain block warrants it');
+        assert.match(guard, /result\.campaignsBlocked > 0/,
+            'and a company already on every exclusion list changed nothing — nothing to announce');
+    });
+
+    await check('the person who pressed it is not told what they just did', () => {
+        const act = eraseAction();
+        assert.match(act, /\.filter\(\(id\) => id && id !== userId\)/,
+            'they saw it in the confirmation and again in the response; a third copy is the noise '
+            + 'that trains people to ignore notifications');
+    });
+
+    await check('the alert carries the domain and NOTHING else about the person', () => {
+        // Everything identifying them has just been deleted on purpose. A notification row is the
+        // least controlled surface in the product — rendered in the bell, emailed by the fallback,
+        // and pushed to a lock screen — and is the last place to write any of it back.
+        const tpl = getNotificationDefault('lead_company_blocked');
+        assert.ok(tpl, 'the template must exist, or notify.ts drops the notification entirely');
+        const copy = `${tpl!.title} ${tpl!.message}`;
+        for (const leak of ['lead.contact', 'lead.email', 'lead.name', 'contactEmail', 'contactName']) {
+            assert.ok(!copy.includes(leak), `the copy must not carry ${leak}`);
+        }
+        const keys = (tpl!.variables || []).map((v) => v.key);
+        assert.deepStrictEqual(keys.filter((k) => k.startsWith('lead.')).sort(), ['lead.domain', 'lead.searches'],
+            'the domain is needed to make the alert actionable; nothing else about the person is');
+    });
+
+    await check('the type is wired end to end: template, routing category and a preference row', () => {
+        // ⚠️ A type with no preference row falls through to FALLBACK_CATEGORY, which puts a
+        // "your pipeline just shrank" alert wherever product announcements live — mutable by anyone
+        // who muted marketing.
+        assert.strictEqual(categoryOf('lead_company_blocked'), 'state_change',
+            'it is done, it was correct, and nothing waits on the reader — not suggested_action');
+        const cat = PREF_CATEGORIES.find((c) => c.types.includes('lead_company_blocked'));
+        assert.ok(cat, 'no preference row — the alert would land in the fallback category');
+        assert.strictEqual(cat!.scope, 'assistant');
+    });
+
+    await check('an assistant-scoped alert is attributed, or its toggle has no home', () => {
+        // The BEFORE INSERT trigger stamps metadata.assistantId onto notifications.assistant_id,
+        // which is the key the per-assistant override reads. Without it the row resolves to the
+        // workspace-wide value, which has NO UI, and the alert becomes permanently ON.
+        const act = eraseAction();
+        const call = act.slice(landmark(act, "createNotifications(db, 'lead_company_blocked'"));
+        assert.match(call.slice(0, 1400), /metadata:\s*\{[^}]*assistantId/,
+            'metadata.assistantId is what the per-assistant preference override keys on');
+    });
+
+    await check('a failed notification does not fail the erasure', () => {
+        const act = eraseAction();
+        const at = landmark(act, "createNotifications(db, 'lead_company_blocked'");
+        assert.match(act.slice(at), /catch \(err\)/,
+            'the data subject’s request outranks our bookkeeping — same rule as the audit row');
+        assert.ok(landmark(act, 'await eraseProspect(') < at, 'and it runs after the erasure, not before');
+    });
+
+    await check('the card offers a way to inspect the block it announces', () => {
+        // Its own message says the exclusion can be undone in the search's settings, and those live
+        // on exactly one screen. An UPDATE item renders button-less unless the type is mapped.
+        const ui = read('notifications.js');
+        const branch = ui.slice(landmark(ui, "notif.type === 'lead_company_blocked'"));
+        assert.match(branch.slice(0, 400), /_assistantDetailInitialTab = 'signals'/,
+            'the excluded-domains field lives behind the Searches tab’s campaign editor');
+        assert.match(branch.slice(0, 400), /routeToAssistantDetail/,
+            'and the detail page needs the assistant id or it renders blank');
     });
 
     console.log(`\n${passed} checks passed.`);

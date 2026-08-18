@@ -207,6 +207,35 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        // An erasure request took a COMPANY-grain block (lead-generation.ts `erase_prospect`).
+        //
+        // Raised only when the erased prospect had no address. With one, `lead_opt_outs` stops us
+        // contacting that person and the company stays a legitimate prospect — nothing worth
+        // telling anyone. Without one there is no address grain to block at, so the erasure excludes
+        // the company's domain from every search in the workspace, and a whole company silently
+        // leaves everyone's pipeline on one person's press. The teammate who built that search finds
+        // out by noticing an absence, which is the worst way to learn anything.
+        //
+        // ⚠️ Names the DOMAIN and nothing else about the person — not their name, not their address.
+        // The domain has to be here or the alert is unactionable ("a company was blocked" — which?),
+        // and it is already held in plaintext on the search's own exclusion list, so this puts no
+        // new personal data anywhere. Everything that identified the individual has just been
+        // deleted on purpose; a notification row is the last place to write it back.
+        templateKey: 'lead_company_blocked',
+        name: 'A company was blocked by an erasure request',
+        category: 'Assistants',
+        type: 'lead_company_blocked',
+        title: '{{lead.domain}} will no longer appear in your searches',
+        message: 'Someone asked {{assistant.name}} to erase their data, and there was no email address on that lead to add to your do-not-contact list. {{lead.domain}} has been excluded from {{lead.searches}} instead, so nobody at that company will be found again. You can undo this in the search’s own settings if it was not what you intended.',
+        variables: [
+            ASSISTANT_NAME,
+            v('lead.domain', 'Company domain blocked', 'harbourviewretreats.co.uk'),
+            // A noun phrase, not a bare number: "excluded from 3" reads as nonsense, and the
+            // singular case ("your search") is the common one on a workspace with one saved search.
+            v('lead.searches', 'Searches it was added to (noun phrase)', 'all 3 of your searches'),
+        ],
+    },
+    {
         // Leads about to fall out of the Outreach queue on the 30-day retention clock
         // (netlify/functions/lead-retention-sweep.ts). ONE digest per assistant per run, never one
         // per lead: a tenant back from a fortnight away would otherwise be handed forty rows.

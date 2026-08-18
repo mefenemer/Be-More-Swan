@@ -224,6 +224,18 @@ export const PREF_CATEGORIES: PrefCategory[] = [
             // lapse, one row per assistant per run — the same shape as the search summary above, and
             // muted on push for the same reason: it is a weekly-ish nudge, not an interruption.
             'leads_expiring_soon',
+            // A company excluded from every search by an erasure request (lead-generation.ts
+            // `erase_prospect`). Here rather than in `approvals` for the same reason as the two
+            // above: nothing is parked on anyone's answer — the block is already taken and it was
+            // the right call. What this category buys it is the bell and the email without a
+            // lock-screen buzz, which is the correct weight for "a thing happened that you would
+            // otherwise learn by noticing an absence".
+            //
+            // ⚠️ scope:'assistant', so the call site MUST pass metadata.assistantId — the BEFORE
+            // INSERT trigger stamps it onto notifications.assistant_id, the key the per-assistant
+            // override reads. Without it the row falls back to the workspace-wide value, which has
+            // no UI at all, and the alert becomes permanently ON. Same trap as the three above.
+            'lead_company_blocked',
         ],
     },
     {

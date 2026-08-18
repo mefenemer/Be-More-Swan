@@ -36,7 +36,7 @@ import { createHash, randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, asc, count, desc, eq, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { adminAuditLog, aiAssistants, assistantRecords, discoveredLeads, leadRejectFeedback, masterAssistants, organisations, revenueEvents } from '../../db/schema';
+import { adminAuditLog, aiAssistants, assistantRecords, discoveredLeads, leadRejectFeedback, masterAssistants, organisations, revenueEvents, userOrganisations } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { activeCampaignCapacity, campaignCapacityMessage, createDiscoveryRun } from '../../src/utils/discovery';
@@ -62,6 +62,7 @@ import {
     DOMAIN_EXCLUSION_REASONS, LEAD_REJECT_REASONS, isLeadRejectReason,
 } from '../../src/config/lead-reject-reasons';
 import { recordLeadRejection } from '../../src/utils/lead-reject-feedback';
+import { createNotifications } from '../../src/utils/notify';
 import { eraseProspect } from '../../src/utils/prospect-erasure';
 import { openLeadThread, recordOutboundMessage } from '../../src/utils/lead-threads';
 import { replyAddress } from '../../src/utils/reply-address';
@@ -1551,6 +1552,59 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
                 : result.blockedBy === 'domain_exclusion'
                     ? `There was no address to block, so ${result.domainExcluded} has been excluded from ${result.campaignsBlocked === 1 ? 'your search' : `all ${result.campaignsBlocked} of your searches`} — nobody at that company will be found again.`
                     : 'There was no address and no website on this lead, so there is nothing that could reach them or find them again.';
+
+            // ── Tell the rest of the team a company just left the pipeline ───────
+            //
+            // Only on the domain-grain block, and only when it changed something. With an address
+            // the opt-out covers that one person and the company stays a legitimate prospect —
+            // nothing anyone needs to hear about. Without one, a single press removes a whole
+            // company from every search in the workspace, and the colleague who built that search
+            // would otherwise find out by noticing an absence weeks later, with no cause on record.
+            //
+            // ⚠️ NOT sent to the person who pressed it: they were shown the same fact in the
+            // confirmation dialog and again in the response, and a notification telling you what
+            // you just did is the noise that teaches people to ignore the bell.
+            //
+            // Never fails the erasure. Same rule as the audit row above — the data subject's
+            // request outranks our bookkeeping, and a notification that cannot be written must not
+            // turn a completed erasure into an error the user retries.
+            if (result.blockedBy === 'domain_exclusion' && result.campaignsBlocked > 0) {
+                try {
+                    const members = await db
+                        .select({ userId: userOrganisations.userId })
+                        .from(userOrganisations)
+                        .where(eq(userOrganisations.organisationId, orgId));
+                    const audience = members
+                        .map((m) => m.userId)
+                        .filter((id) => id && id !== userId);
+                    if (audience.length) {
+                        await createNotifications(db, 'lead_company_blocked', audience, {
+                            context: {
+                                assistant: { name: assistant.name || 'your Lead Generator' },
+                                lead: {
+                                    domain: result.domainExcluded,
+                                    // A noun phrase: "excluded from 3" reads as nonsense, and one
+                                    // saved search is the common case on a small workspace.
+                                    searches: result.campaignsBlocked === 1
+                                        ? 'your search'
+                                        : `all ${result.campaignsBlocked} of your searches`,
+                                },
+                            },
+                            // Load-bearing, not decoration: the BEFORE INSERT trigger stamps this
+                            // onto notifications.assistant_id, which is the key the per-assistant
+                            // preference override reads. Drop it and this alert is permanently on
+                            // with no toggle anywhere. Same trap as lead_reply_received.
+                            metadata: {
+                                assistantId: assistant.id,
+                                domain: result.domainExcluded,
+                                recordId: Number.isInteger(recordId) ? recordId : null,
+                            },
+                        });
+                    }
+                } catch (err) {
+                    console.error('[lead-generation] company blocked but the notification failed', err);
+                }
+            }
 
             return json(200, {
                 erased: result.failures.length === 0,

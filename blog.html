@@ -107,16 +107,20 @@
     // the data-bms-key attribute). It is a public identifier — it is baked into a <script> tag on
     // a customer's own website by design — so it belongs in source, not in an env var.
     //
-    // Until it is set, the page shows the setup panel above instead of an empty section. Replace
-    // the placeholder and this line is the only change needed to take the blog live.
-    const BMS_BLOG_WIDGET_KEY = 'wgt_REPLACE_WITH_KEY_FROM_BLOG_STUDIO';
+    // The guard below falls back to the setup panel if this is ever cleared or replaced with a
+    // placeholder, so the Blog nav link can never lead to a blank section.
+    //
+    // ⚠️ Keys are per-organisation and per-database. This one is from the PRODUCTION workspace; a
+    // key minted on staging resolves to nothing here and the widget would render "Unable to load
+    // posts." Do not swap it for one copied out of a staging session.
+    const BMS_BLOG_WIDGET_KEY = 'wgt_a29af16bd7af9af3499cd70c';
 
-    function mountBlogWidget() {
-        if (!/^wgt_/.test(BMS_BLOG_WIDGET_KEY) || BMS_BLOG_WIDGET_KEY.includes('REPLACE')) {
-            document.getElementById('bms-blog-setup').style.display = '';
-            return;
-        }
-        // Injected rather than hard-coded as a <script> tag so the guard above can run first.
+    function showSetupPanel() {
+        document.getElementById('bms-blog-setup').style.display = '';
+    }
+
+    function mountWidgetScript() {
+        // Injected rather than hard-coded as a <script> tag so the checks above can run first.
         // widget.js reads document.currentScript, which is set for a dynamically inserted classic
         // script, and its own mount lookup runs after DOMContentLoaded — both hold here.
         const s = document.createElement('script');
@@ -125,6 +129,26 @@
         s.setAttribute('data-bms-key', BMS_BLOG_WIDGET_KEY);
         s.setAttribute('data-bms-mount', '#bms-blog');
         document.body.appendChild(s);
+    }
+
+    // Two ways this page can embarrass us, and the widget cannot defend against either — it renders
+    // its own bare "No posts yet." / "Unable to load posts." into an otherwise empty section:
+    //   1. no key configured;
+    //   2. a valid key with nothing published behind it — the state a brand-new blog starts in.
+    // So the widget only mounts once we know it has something to render; anything else falls back
+    // to the styled setup panel. One extra request, paid only on this page.
+    function mountBlogWidget() {
+        if (!/^wgt_/.test(BMS_BLOG_WIDGET_KEY) || BMS_BLOG_WIDGET_KEY.includes('REPLACE')) {
+            showSetupPanel();
+            return;
+        }
+        fetch('/api/widget/' + encodeURIComponent(BMS_BLOG_WIDGET_KEY) + '/posts', { credentials: 'omit' })
+            .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)); })
+            .then(function (data) {
+                if (data && data.posts && data.posts.length > 0) mountWidgetScript();
+                else showSetupPanel();
+            })
+            .catch(showSetupPanel);
     }
 
     async function loadComponent(id, path) {
