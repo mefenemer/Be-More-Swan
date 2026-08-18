@@ -5424,6 +5424,15 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     window.activeAssistantId = assistantId;
     window._currentAssistantId = assistantId;
 
+    // ⚠️ Drop the cached outreach readiness on every entry to this page, not just on a change of
+    // assistant. The banner's own CTA sends the user to Business Information via loadView, which
+    // swaps the DOM but keeps this module's state — so the answer fetched BEFORE the postal address
+    // was saved survived, and a user who did exactly what the banner asked came back to the same
+    // banner and no way to clear it short of a full browser reload. The re-fetch is one POST, only
+    // on the lead queue's Review/Approved columns, and only when this view is opened.
+    _rqReadinessFor = null;
+    _rqReadiness = null;
+
     // Back button
     const btnBack = document.getElementById('btn-back-assistants');
     if (btnBack) {
