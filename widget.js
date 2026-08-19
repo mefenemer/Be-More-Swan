@@ -91,10 +91,39 @@
     }, { once: true });
   }
 
+  // The Google Fonts stylesheet for the chosen family, if any.
+  //
+  // It goes on the HOST document's <head>, NOT into the shadow root. `@font-face` declared inside a
+  // shadow tree is not reliably honoured across browsers (the font registry is document-scoped), so
+  // a <link> in here would leave the family unresolved and fall straight back — the exact silent
+  // failure this feature exists to fix. The rule that USES the family still lives in the shadow.
+  //
+  // Best-effort by design: a customer with a strict CSP may block fonts.googleapis.com. That costs
+  // them the webfont and nothing else, because the stored stack always ends in a generic family.
+  function loadFontStylesheet(theme) {
+    var url = theme && theme.fontUrl;
+    if (!url || typeof url !== 'string') return;
+    // Server-validated on write (save-widget-config validateTheme), re-checked here because this
+    // runs on somebody else's page: the config arrives over the network and this is a <link href>.
+    if (url.indexOf('https://fonts.googleapis.com/css2?') !== 0) return;
+    if (document.querySelector('link[data-bms-font="' + url.replace(/"/g, '') + '"]')) return;
+    var pre = document.createElement('link');
+    pre.rel = 'preconnect';
+    pre.href = 'https://fonts.gstatic.com';
+    pre.crossOrigin = 'anonymous';
+    document.head.appendChild(pre);
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = url;
+    link.setAttribute('data-bms-font', url.replace(/"/g, ''));
+    document.head.appendChild(link);
+  }
+
   function applyTheme(shadow, theme) {
     theme = theme || {};
     var accent = theme.accent || '#ec4899';
     var font = theme.fontFamily || 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+    loadFontStylesheet(theme);
     var base = document.createElement('style');
     base.textContent =
       ':host{all:initial;}' +

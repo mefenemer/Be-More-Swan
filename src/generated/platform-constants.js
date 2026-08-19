@@ -531,4 +531,95 @@
         + 'customer profile from your setup — ' + band.meaning.replace(' + ', ', and ') + '.';
     },
   };
+
+  // ── Blog fonts (src/config/blog-fonts.ts) ────────────────────────────────────────────────────
+  // Blog Studio's Font family picker. Carries the CSS stack AND the Google Fonts stylesheet, because
+  // choosing a font without fetching it is what made the old three-option picker meaningless — two
+  // of its three choices rendered identically on any machine without Inter installed.
+  var BLOG_FONTS = [
+    {"label":"System default","stack":"system-ui, sans-serif","category":"System","url":null},
+    {"label":"Georgia","stack":"Georgia, serif","category":"System","url":null},
+    {"label":"Helvetica / Arial","stack":"Helvetica, Arial, sans-serif","category":"System","url":null},
+    {"label":"Times New Roman","stack":"\"Times New Roman\", Times, serif","category":"System","url":null},
+    {"label":"Inter","stack":"'Inter', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap"},
+    {"label":"Roboto","stack":"'Roboto', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap"},
+    {"label":"Open Sans","stack":"'Open Sans', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;700&display=swap"},
+    {"label":"Lato","stack":"'Lato', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap"},
+    {"label":"Montserrat","stack":"'Montserrat', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap"},
+    {"label":"Poppins","stack":"'Poppins', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&display=swap"},
+    {"label":"Raleway","stack":"'Raleway', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Raleway:wght@400;700&display=swap"},
+    {"label":"Nunito","stack":"'Nunito', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Nunito:wght@400;700&display=swap"},
+    {"label":"Nunito Sans","stack":"'Nunito Sans', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;700&display=swap"},
+    {"label":"Work Sans","stack":"'Work Sans', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;700&display=swap"},
+    {"label":"Rubik","stack":"'Rubik', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Rubik:wght@400;700&display=swap"},
+    {"label":"Manrope","stack":"'Manrope', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Manrope:wght@400;700&display=swap"},
+    {"label":"DM Sans","stack":"'DM Sans', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;700&display=swap"},
+    {"label":"Karla","stack":"'Karla', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Karla:wght@400;700&display=swap"},
+    {"label":"Mulish","stack":"'Mulish', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Mulish:wght@400;700&display=swap"},
+    {"label":"Figtree","stack":"'Figtree', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Figtree:wght@400;700&display=swap"},
+    {"label":"Outfit","stack":"'Outfit', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Outfit:wght@400;700&display=swap"},
+    {"label":"Barlow","stack":"'Barlow', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Barlow:wght@400;700&display=swap"},
+    {"label":"Source Sans 3","stack":"'Source Sans 3', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;700&display=swap"},
+    {"label":"Plus Jakarta Sans","stack":"'Plus Jakarta Sans', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;700&display=swap"},
+    {"label":"Quicksand","stack":"'Quicksand', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Quicksand:wght@400;700&display=swap"},
+    {"label":"Archivo","stack":"'Archivo', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Archivo:wght@400;700&display=swap"},
+    {"label":"Public Sans","stack":"'Public Sans', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;700&display=swap"},
+    {"label":"Space Grotesk","stack":"'Space Grotesk', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&display=swap"},
+    {"label":"Oswald","stack":"'Oswald', sans-serif","category":"Sans serif","url":"https://fonts.googleapis.com/css2?family=Oswald:wght@400;700&display=swap"},
+    {"label":"Merriweather","stack":"'Merriweather', serif","category":"Serif","url":"https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700&display=swap"},
+    {"label":"Playfair Display","stack":"'Playfair Display', serif","category":"Serif","url":"https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&display=swap"},
+    {"label":"Lora","stack":"'Lora', serif","category":"Serif","url":"https://fonts.googleapis.com/css2?family=Lora:wght@400;700&display=swap"},
+    {"label":"PT Serif","stack":"'PT Serif', serif","category":"Serif","url":"https://fonts.googleapis.com/css2?family=PT+Serif:wght@400;700&display=swap"},
+    {"label":"Source Serif 4","stack":"'Source Serif 4', serif","category":"Serif","url":"https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400;700&display=swap"},
+    {"label":"Libre Baskerville","stack":"'Libre Baskerville', serif","category":"Serif","url":"https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&display=swap"},
+    {"label":"Crimson Text","stack":"'Crimson Text', serif","category":"Serif","url":"https://fonts.googleapis.com/css2?family=Crimson+Text:wght@400;700&display=swap"},
+    {"label":"EB Garamond","stack":"'EB Garamond', serif","category":"Serif","url":"https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;700&display=swap"},
+    {"label":"Bitter","stack":"'Bitter', serif","category":"Serif","url":"https://fonts.googleapis.com/css2?family=Bitter:wght@400;700&display=swap"},
+    {"label":"Cormorant Garamond","stack":"'Cormorant Garamond', serif","category":"Serif","url":"https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;700&display=swap"},
+    {"label":"Noto Serif","stack":"'Noto Serif', serif","category":"Serif","url":"https://fonts.googleapis.com/css2?family=Noto+Serif:wght@400;700&display=swap"},
+    {"label":"Zilla Slab","stack":"'Zilla Slab', serif","category":"Serif","url":"https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@400;700&display=swap"},
+    {"label":"Domine","stack":"'Domine', serif","category":"Serif","url":"https://fonts.googleapis.com/css2?family=Domine:wght@400;700&display=swap"},
+    {"label":"Arvo","stack":"'Arvo', serif","category":"Serif","url":"https://fonts.googleapis.com/css2?family=Arvo:wght@400;700&display=swap"},
+    {"label":"Spectral","stack":"'Spectral', serif","category":"Serif","url":"https://fonts.googleapis.com/css2?family=Spectral:wght@400;700&display=swap"},
+    {"label":"Bebas Neue","stack":"'Bebas Neue', sans-serif","category":"Display","url":"https://fonts.googleapis.com/css2?family=Bebas+Neue:wght@400&display=swap"},
+    {"label":"Abril Fatface","stack":"'Abril Fatface', serif","category":"Display","url":"https://fonts.googleapis.com/css2?family=Abril+Fatface:wght@400&display=swap"},
+    {"label":"Lobster","stack":"'Lobster', cursive","category":"Display","url":"https://fonts.googleapis.com/css2?family=Lobster:wght@400&display=swap"},
+    {"label":"Comfortaa","stack":"'Comfortaa', sans-serif","category":"Display","url":"https://fonts.googleapis.com/css2?family=Comfortaa:wght@400;700&display=swap"},
+    {"label":"JetBrains Mono","stack":"'JetBrains Mono', monospace","category":"Monospace","url":"https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap"},
+    {"label":"Roboto Mono","stack":"'Roboto Mono', monospace","category":"Monospace","url":"https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap"},
+    {"label":"IBM Plex Mono","stack":"'IBM Plex Mono', monospace","category":"Monospace","url":"https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&display=swap"},
+    {"label":"Source Code Pro","stack":"'Source Code Pro', monospace","category":"Monospace","url":"https://fonts.googleapis.com/css2?family=Source+Code+Pro:wght@400;700&display=swap"},
+    {"label":"Space Mono","stack":"'Space Mono', monospace","category":"Monospace","url":"https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap"},
+  ];
+
+  window.BlogFonts = {
+    all: BLOG_FONTS,
+    categories: ["System","Sans serif","Serif","Display","Monospace"],
+    defaultStack: "system-ui, sans-serif",
+
+    /** Look a font up by its STORED value (the CSS stack). null when it isn't one we offer. */
+    get: function (stack) {
+      if (typeof stack !== 'string') return null;
+      var v = stack.trim();
+      for (var i = 0; i < BLOG_FONTS.length; i++) {
+        if (BLOG_FONTS[i].stack === v) return BLOG_FONTS[i];
+      }
+      return null;
+    },
+
+    /**
+     * The stylesheet a stored stack needs, or null when it needs none.
+     * ⚠️ Returns null for an UNKNOWN stack too. That is deliberate: the caller stores what it gets,
+     * and inventing a URL for a stack we don't recognise would store one the validator rejects.
+     */
+    urlFor: function (stack) {
+      var f = this.get(stack);
+      return (f && f.url) || null;
+    },
+
+    /** Fonts in one category, in catalogue order — the picker renders an <optgroup> per category. */
+    inCategory: function (category) {
+      return BLOG_FONTS.filter(function (f) { return f.category === category; });
+    },
+  };
 })();

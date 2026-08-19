@@ -5994,7 +5994,13 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     if (_skelAutopilot) _endCardLoading('autopilot-status-card');
     // Audience counts hit the platform APIs, so they're deliberately not awaited — the Autopilot
     // card is already complete without them and the block reveals itself when they land.
-    _fetchAndRenderFollowerCounts();
+    // Registry-driven, like metricsSource: a role whose audience isn't social gets its own renderer
+    // rather than another roleKey compared inline here.
+    if (window.AssistantDashboardRegistry?.get?.(currentData.roleKey)?.audienceSource === 'blog_destinations') {
+        _fetchAndRenderBlogDestinations();
+    } else {
+        _fetchAndRenderFollowerCounts();
+    }
 
     // ── Recent Activity ───────────────────────────────────────────
     // TWO feeds behind one renderer. The default (get-assistant-activity) reads the content
@@ -6478,6 +6484,88 @@ function _audienceTimeAgo(iso) {
 }
 
 const _audienceFullTime = (iso) => new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+/**
+ * Blog destinations — the Audience block's Blog Writer variant.
+ *
+ * Reuses the same panel (heading, list, footer note) because it answers the same question for this
+ * role: where does this assistant's work reach people. What it does NOT do is invent a follower
+ * count — none of the blog connectors (WordPress, WordPress.com, Ghost, Dev.to, Hashnode) exposes
+ * one, and the social version's "—" row exists precisely so an unavailable figure is never faked.
+ * So this renders reach as a LIST of destinations and their publish mode, with no bars at all.
+ *
+ * Every destination is listed, connected or not, for the same reason the social block keeps its
+ * unavailable rows: the absence is the information, and a blog with nothing connected should read
+ * as "nothing connected yet", not as an empty box.
+ */
+async function _fetchAndRenderBlogDestinations() {
+    const block = document.getElementById('autopilot-audience');
+    const list = document.getElementById('audience-by-platform');
+    if (!block || !list) return;
+
+    const heading = block.querySelector('h4');
+    const updatedNote = document.getElementById('audience-updated-note');
+    const refreshNote = document.getElementById('audience-refresh-note');
+    // Retitle: this panel is not "Audience" for a Blog Writer, and leaving the social heading over
+    // blog connectors is the same category error as showing it Instagram counts.
+    if (heading) heading.textContent = 'Publishing to';
+    if (updatedNote) { updatedNote.textContent = 'Your blog + connected platforms'; updatedNote.title = ''; }
+    block.classList.remove('hidden');
+
+    const setFooter = (html) => {
+        if (!refreshNote) return;
+        refreshNote.innerHTML = html || '';
+        refreshNote.classList.toggle('hidden', !html);
+    };
+
+    try {
+        const res = await fetch('/.netlify/functions/connect-blog-destination');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const { destinations } = await res.json();
+        if (!Array.isArray(destinations) || !destinations.length) {
+            list.innerHTML = '<p class="text-xs text-gray-400 py-1">No blog platforms available to connect.</p>';
+            setFooter('');
+            return;
+        }
+
+        // Connected first, then alphabetically — the useful rows lead, exactly as the follower bars
+        // sort their available figures to the top.
+        const rows = destinations.slice().sort((a, b) =>
+            (Number(b.connected) - Number(a.connected)) || String(a.label).localeCompare(String(b.label)));
+        const connectedCount = rows.filter(r => r.connected).length;
+
+        list.innerHTML = `<div class="space-y-2.5">${rows.map(r => {
+            const label = _escapeHtml(r.label || r.id);
+            // publishMode is only meaningful once connected. 'draft' is the default and the safe
+            // one — a post going live on our site must never surprise-publish on someone else's.
+            const mode = r.publishMode === 'live' ? 'Publishes live' : 'Sends as a draft';
+            const account = r.accountLabel ? ` · ${_escapeHtml(r.accountLabel)}` : '';
+            const state = r.connected
+                ? `<span class="text-[11px] font-semibold text-emerald-700">${_escapeHtml(mode)}${account}</span>`
+                : '<span class="text-[11px] text-gray-400">Not connected</span>';
+            const dot = r.connected ? 'bg-emerald-500' : 'bg-gray-200';
+            return `<div class="flex items-center justify-between gap-3">
+                <span class="flex items-center gap-2 text-xs font-semibold text-gray-700 min-w-0">
+                    <span class="w-2 h-2 rounded-full shrink-0 ${dot}"></span>
+                    <span class="truncate">${label}</span>
+                </span>
+                ${state}
+            </div>`;
+        }).join('')}</div>`;
+
+        // Always states the one thing that is true regardless: the post goes live on the customer's
+        // own blog first. A reader seeing "0 connected" should not conclude nothing gets published.
+        setFooter(connectedCount
+            ? 'Every published post goes to your own blog first, then syndicates to the platforms above.'
+            : 'Published posts go to your own blog. Connect a platform on the <span class="font-semibold">Connections</span> tab to syndicate them further.');
+    } catch (err) {
+        console.error('[blog-destinations] load failed:', err);
+        // Its own copy, for the same reason the KPI cards keep error and no-data apart: a network
+        // blip must never be reported to the user as "you have nothing connected".
+        list.innerHTML = '<p class="text-xs text-gray-400 py-1">Couldn\'t load your publishing destinations just now.</p>';
+        setFooter('');
+    }
+}
 
 /**
  * Audience block — one horizontal bar per connected platform, plus the freshness of the figures.
@@ -7156,6 +7244,13 @@ function _setMetricsEmptyState(mode) {
         if (title) title.textContent = 'No lead activity to measure yet';
         if (body)  body.textContent  = 'These fill in as your assistant finds leads, you approve or turn them down, and outreach gets replies. Start or run a search on the Searches tab to get the first numbers in.';
         if (note) note.textContent = '';
+    } else if (mode === 'blog-no-data') {
+        // Distinct from 'no-data' for the same reason the lead and campaign variants are: this
+        // assistant writes long-form to blog_posts, not social posts, so "nothing has been
+        // published" points at the wrong thing entirely. Name the action that fills the cards.
+        if (title) title.textContent = 'No blog activity to measure yet';
+        if (body)  body.textContent  = 'These fill in as your assistant drafts posts, you approve them, and they go live. Open the Blogs tab to write the first one or review what is waiting.';
+        if (note) note.textContent = '';
     } else if (mode === 'campaign-no-data') {
         // Distinct from 'no-data' on purpose. This assistant publishes nothing itself, so "nothing
         // has been published" would be both confusing and permanently true; what is actually
@@ -7174,6 +7269,85 @@ function _setMetricsEmptyState(mode) {
     // The "Open Review Queue" button that used to be wired up here is gone (2026-07-30) — it did
     // not work, and the panel reads fine as pure explanation. Don't reinstate it without a target
     // that actually resolves; the review queue was never a route to performance data anyway.
+}
+
+// ── Blog Writer KPI cards ────────────────────────────────────────────────────
+// Four cards, same markup as every other role, fed by get-blog-performance.ts instead of the
+// social post_insights endpoint. Routed here by `metricsSource: 'blog'` in the dashboard registry.
+//
+// The old path could never populate: a Blog Writer writes to blog_posts and never to post_insights,
+// so the shared endpoint answered hasData:false for ever while the registry painted Blog Writer
+// labels over engagement-rate / reach / CTR fields. Both halves are fixed — the source, and the
+// labels-to-fields correspondence (see the registry entry).
+//
+// The window is 90 days, not the social 30: blogs publish weekly at best, and 30 days on a
+// fortnightly cadence reports "2" and makes an ordinary month look like a collapse.
+async function _loadBlogMetrics(assistantId) {
+    const valEl   = (k) => document.getElementById(`metric-${k}-value`);
+    const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
+    const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
+
+    // The social card 4 carries a "low reach, high value" callout with no blog meaning. Cleared
+    // defensively: a role switch on a cached page would otherwise strand it under a draft count.
+    document.getElementById('metric-value-wins')?.classList.add('hidden');
+
+    const setDot = (k, state) => {
+        const el = dotEl(k);
+        if (!el) return;
+        el.className = 'w-2 h-2 rounded-full ' + (
+            state === 'up' ? 'bg-emerald-400' : state === 'down' ? 'bg-rose-400' :
+            state === 'live' ? 'bg-emerald-400' : 'bg-gray-200'
+        );
+    };
+
+    try {
+        const res = await fetch(`/.netlify/functions/get-blog-performance?id=${assistantId}`);
+        if (!res.ok) { _setMetricsEmptyState('error'); return; }
+        const data = await res.json();
+
+        if (!data.hasData) { _setMetricsEmptyState('blog-no-data'); return; }
+
+        _setMetricsEmptyState('cards');
+        const note = document.getElementById('metrics-status-note');
+        if (note) note.textContent = `Last ${data.periodDays || 90} days`;
+
+        const m = data.metrics || {};
+        const t = data.trends || {};
+
+        // Card 1 — Posts Published. A count. Its trend carries the period-over-period comparison,
+        // which is null (not 0%) when there is no prior window to compare against.
+        valEl('engagement').textContent = String(m.postsPublished ?? 0);
+        _setKpiCard('engagement', { empty: !m.postsPublished });
+        if (trendEl('engagement')) trendEl('engagement').textContent = t.postsPublished || '—';
+        if (m.postsPublished) setDot('engagement', m.publishedGrowth === null ? 'live' : (m.publishedGrowth >= 0 ? 'up' : 'down'));
+
+        // Card 2 — Search Impressions. null means Search Console is not connected: that is "we
+        // cannot see this", and it must not render as the measured zero that "0" would claim.
+        const hasSearch = m.searchImpressions !== null && m.searchImpressions !== undefined;
+        valEl('reach').textContent = hasSearch ? Number(m.searchImpressions).toLocaleString() : 'Not tracked';
+        _setKpiCard('reach', { empty: !hasSearch || !m.searchImpressions });
+        if (trendEl('reach')) trendEl('reach').textContent = t.searchImpressions || '—';
+        if (hasSearch && m.searchImpressions) setDot('reach', 'live');
+
+        // Card 3 — Hours Reclaimed, from roi-activity.ts (the single module all four ROI surfaces
+        // count through). One decimal: "12.5 hrs" is a claim we can stand behind, "12.4837" isn't.
+        valEl('ctr').textContent = m.hoursSaved ? `${Number(m.hoursSaved).toFixed(1)} hrs` : '—';
+        _setKpiCard('ctr', { empty: !m.hoursSaved });
+        if (trendEl('ctr')) trendEl('ctr').textContent = t.hoursSaved || '—';
+        if (m.hoursSaved) setDot('ctr', 'up');
+
+        // Card 4 — Awaiting Approval. A LIVE count, not a windowed one, and the only card here
+        // where a high number is bad — it is work sitting on the user, so it tones 'down'.
+        if (valEl('value')) {
+            valEl('value').textContent = String(m.awaitingApproval ?? 0);
+            _setKpiCard('value', { empty: !m.awaitingApproval, tone: m.awaitingApproval ? 'down' : 'brand' });
+            if (trendEl('value')) trendEl('value').textContent = t.awaitingApproval || '—';
+            setDot('value', m.awaitingApproval ? 'down' : 'none');
+        }
+    } catch (err) {
+        console.error('[blog-metrics] load failed:', err);
+        _setMetricsEmptyState('error');
+    }
 }
 
 // ── Campaign Assistant KPI cards ─────────────────────────────────────────────
@@ -7375,6 +7549,10 @@ async function _loadAssistantMetrics(assistantId, roleKey) {
     if (source === 'lead') {
         _setMetricsEmptyState('pending');
         return _loadLeadMetrics(assistantId);
+    }
+    if (source === 'blog') {
+        _setMetricsEmptyState('pending');
+        return _loadBlogMetrics(assistantId);
     }
 
     // Show the explanatory panel BEFORE the fetch, synchronously. The overwhelmingly likely answer

@@ -19,7 +19,8 @@ import { renderMarkdown } from '../src/utils/markdown-render';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const Editor = require('../src/components/markdown-editor.js');
 
-const { splitBlocks, isMediaBlock, isColumnsBlock, mediaRaw, spliceColumnRaw } = Editor;
+const { splitBlocks, isMediaBlock, isColumnsBlock, mediaRaw, spliceColumnRaw,
+        toggleInlineMark, insertLink, detectBlockType, setBlockType, INLINE_MARKS } = Editor;
 
 let passed = 0;
 /**
@@ -215,6 +216,101 @@ await check('the snapshot stays SRC-LESS — the asset:// presign invariant hold
 await check('no literal directive text can reach a published page', async () => {
     const html = await renderMarkdown(spliceColumnRaw(COLS, 1, mediaRaw({ assetId: 42, type: 'image', caption: 'C' }))!);
     assert.ok(!html.includes(':::'), html);
+});
+
+// ── Formatting bar primitives ─────────────────────────────────────────────────────────────────
+// The bar writes Markdown into the same block `raw` that typing and AI rewrites write, so a bug
+// here is not a cosmetic toolbar bug — it is a corrupted draft that autosaves over the original.
+
+await check('bold wraps the selection and keeps it selected', () => {
+    const out = toggleInlineMark('make this bold', 5, 9, INLINE_MARKS.bold);
+    assert.strictEqual(out.text, 'make **this** bold');
+    assert.strictEqual(out.text.slice(out.selStart, out.selEnd), 'this');
+});
+
+await check('bold on an already-bold selection unwraps it (round-trip)', () => {
+    const on = toggleInlineMark('make this bold', 5, 9, INLINE_MARKS.bold);
+    const off = toggleInlineMark(on.text, on.selStart, on.selEnd, INLINE_MARKS.bold);
+    assert.strictEqual(off.text, 'make this bold');
+    assert.strictEqual(off.text.slice(off.selStart, off.selEnd), 'this');
+});
+
+await check('bold unwraps when the markers are INSIDE the selection too', () => {
+    const out = toggleInlineMark('make **this** bold', 5, 13, INLINE_MARKS.bold);
+    assert.strictEqual(out.text, 'make this bold');
+});
+
+await check('a collapsed caret gets an empty pair with the caret between the markers', () => {
+    const out = toggleInlineMark('ab', 1, 1, INLINE_MARKS.bold);
+    assert.strictEqual(out.text, 'a****b');
+    assert.strictEqual(out.selStart, 3);
+    assert.strictEqual(out.selEnd, 3);
+});
+
+await check('a backwards drag-select (end < start) is handled, not corrupted', () => {
+    const out = toggleInlineMark('make this bold', 9, 5, INLINE_MARKS.bold);
+    assert.strictEqual(out.text, 'make **this** bold');
+});
+
+// ⚠️ THE REASON ITALIC IS `_` AND NOT `*`. With `*`, this toggle matches the bold marker one
+// character in, strips a single star, and turns **bold** into a broken half-emphasis — silently,
+// in a draft that then autosaves. Changing INLINE_MARKS.italic to '*' must fail here.
+await check('italic inside a bold run does not eat the bold markers', () => {
+    const out = toggleInlineMark('a **bold** b', 4, 8, INLINE_MARKS.italic);
+    assert.strictEqual(out.text, 'a **_bold_** b');
+});
+
+await check('link wraps the selection and leaves the URL selected to type over', () => {
+    const out = insertLink('see the docs here', 8, 12);
+    assert.strictEqual(out.text, 'see the [docs](https://) here');
+    assert.strictEqual(out.text.slice(out.selStart, out.selEnd), 'https://');
+});
+
+await check('link with no selection still emits visible label text', () => {
+    // `[](https://)` renders as nothing at all, which reads as the button having done nothing.
+    const out = insertLink('', 0, 0);
+    assert.strictEqual(out.text, '[link text](https://)');
+});
+
+await check('detectBlockType reads the first line', () => {
+    assert.strictEqual(detectBlockType('## Heading'), 'h2');
+    assert.strictEqual(detectBlockType('> quoted'), 'quote');
+    assert.strictEqual(detectBlockType('- one\n- two'), 'ul');
+    assert.strictEqual(detectBlockType('1. one\n2. two'), 'ol');
+    assert.strictEqual(detectBlockType('just words'), 'p');
+    assert.strictEqual(detectBlockType(''), 'p');
+});
+
+// Naive prepending produces `> - ## text`, which renders as a quote containing a bulleted heading.
+await check('switching type REPLACES the old prefix rather than stacking', () => {
+    assert.strictEqual(setBlockType('## Heading', 'quote'), '> Heading');
+    assert.strictEqual(setBlockType('> quoted', 'ul'), '- quoted');
+    assert.strictEqual(setBlockType('- item', 'h2'), '## item');
+    assert.strictEqual(setBlockType('1. item', 'p'), 'item');
+});
+
+await check('every type round-trips back to a clean paragraph', () => {
+    for (const t of ['p', 'h1', 'h2', 'h3', 'h4', 'quote', 'ul', 'ol']) {
+        assert.strictEqual(setBlockType(setBlockType('plain text', t), 'p'), 'plain text', t);
+        assert.strictEqual(detectBlockType(setBlockType('plain text', t)), t, t);
+    }
+});
+
+await check('a multi-line block becomes ONE heading, not one heading per line', () => {
+    assert.strictEqual(setBlockType('line one\nline two', 'h2'), '## line one line two');
+});
+
+await check('lists and quotes are applied per line, and ol renumbers from 1', () => {
+    assert.strictEqual(setBlockType('a\nb\nc', 'ol'), '1. a\n2. b\n3. c');
+    assert.strictEqual(setBlockType('a\nb', 'ul'), '- a\n- b');
+    assert.strictEqual(setBlockType('a\nb', 'quote'), '> a\n> b');
+});
+
+// The bar disables itself for these, but the guard is worth stating: their raw is a directive, and
+// stripBlockPrefix on `:::media{...}` would be a corrupted layout the author never asked for.
+await check('media and columns raw are recognised, so the bar can lock itself', () => {
+    assert.ok(isMediaBlock(mediaRaw({ assetId: 1, type: 'video' })));
+    assert.ok(isColumnsBlock(COLS));
 });
 
 console.log(`\n${passed} checks passed.\n`);

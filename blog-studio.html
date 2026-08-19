@@ -24,6 +24,10 @@
        escaped plain text (not just media). Must stay in step with workspace.html's copy. -->
   <script src="./src/public/marked-bms-directives.js"></script>
   <script src="./src/components/markdown-editor.js"></script>
+  <!-- window.BlogFonts — the Font family picker's catalogue, GENERATED from src/config/blog-fonts.ts.
+       workspace.html loads this same file for window.PlatformConstants; the Studio needs it on this
+       standalone page too or the picker falls back to the system stack alone. -->
+  <script src="./src/generated/platform-constants.js"></script>
   <!-- The Blog Studio's media pickers include Canva; without this the button is a silent no-op
        on this page (workspace.html loads it alongside its own Create Post sheet). -->
   <script src="./src/components/canva-browser.js"></script>

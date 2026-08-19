@@ -4,6 +4,8 @@
 // GET  → the org's widget config (or { config: null } if none yet)
 // POST { action:'create' }                                   → create with a fresh public_key
 // POST { action:'update', theme?, badgeEnabled?, name?, allowedOrigins?, siteBaseUrl?, sitePostPath? }
+//   theme: { accent?: '#rrggbb', fontFamily?: <a stack from src/config/blog-fonts.ts> }
+//          fontUrl is DERIVED server-side from fontFamily — see validateTheme.
 //                                                            → update (admin/owner only)
 //
 // siteBaseUrl + sitePostPath tell us where the customer PUBLISHES so canonical URLs can credit their
@@ -21,9 +23,52 @@ import { getDb } from '../../db/client';
 import { widgetConfigs } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { findBlogFont, googleFontUrl, DEFAULT_FONT_STACK } from '../../src/config/blog-fonts';
 
 const WRITE_ROLES = ['owner', 'admin'];
 const newPublicKey = () => 'wgt_' + randomBytes(12).toString('hex');
+
+/**
+ * Validate a theme before it is stored.
+ *
+ * ⚠️ This used to be `updates.theme = body.theme` — whatever the client sent, stored verbatim. Both
+ * fields end up INSIDE a published page: `accent` and `fontFamily` are written into a `<style>` on
+ * the customer's own site by widget.js, and `fontUrl` becomes a `<link href>` there and on the
+ * server-rendered permalink. Being authenticated is not the same as being safe to interpolate — a
+ * fontFamily of `x; } body { … }` closes the rule and opens another.
+ *
+ * So the rule is: a theme must be something this codebase could itself have produced. accent is a
+ * 6-digit hex (what `<input type="color">` emits and nothing else), fontFamily must be a stack from
+ * src/config/blog-fonts.ts, and fontUrl must be exactly that font's own stylesheet.
+ *
+ * Returns the clean theme, or a message naming the offending field.
+ */
+function validateTheme(raw: unknown): { theme: Record<string, unknown> } | { error: string } {
+    if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return { error: 'theme must be an object.' };
+    const input = raw as Record<string, unknown>;
+    const theme: Record<string, unknown> = {};
+
+    if (input.accent !== undefined && input.accent !== null) {
+        if (typeof input.accent !== 'string' || !/^#[0-9a-f]{6}$/i.test(input.accent.trim())) {
+            return { error: 'theme.accent must be a hex colour, e.g. #ec4899.' };
+        }
+        theme.accent = input.accent.trim().toLowerCase();
+    }
+
+    if (input.fontFamily !== undefined && input.fontFamily !== null && input.fontFamily !== '') {
+        const font = findBlogFont(input.fontFamily as string);
+        if (!font) return { error: 'theme.fontFamily is not one of the available fonts.' };
+        theme.fontFamily = font.stack;
+        // Derived, never trusted from the body. The client sends it so the two stay visibly in step,
+        // but a mismatch means a stale or tampered page — take our own answer either way.
+        theme.fontUrl = googleFontUrl(font);
+    } else if (input.fontFamily === '' || input.fontFamily === null) {
+        theme.fontFamily = DEFAULT_FONT_STACK;
+        theme.fontUrl = null;
+    }
+
+    return { theme };
+}
 
 export default withLambda(async (event: HandlerEvent) => {
     const db = getDb();
@@ -73,7 +118,11 @@ export default withLambda(async (event: HandlerEvent) => {
     if (body.action === 'update') {
         if (!existing) return { statusCode: 404, body: JSON.stringify({ error: 'No widget to update — create one first.' }) };
         const updates: Record<string, unknown> = { updatedAt: new Date() };
-        if (body.theme && typeof body.theme === 'object') updates.theme = body.theme;
+        if (body.theme !== undefined) {
+            const checked = validateTheme(body.theme);
+            if ('error' in checked) return { statusCode: 400, body: JSON.stringify({ error: checked.error }) };
+            updates.theme = checked.theme;
+        }
         if (typeof body.name === 'string') updates.name = body.name.slice(0, 120);
         if (typeof body.badgeEnabled === 'boolean') updates.badgeEnabled = body.badgeEnabled;
         if (Array.isArray(body.allowedOrigins)) updates.allowedOrigins = body.allowedOrigins.slice(0, 50);

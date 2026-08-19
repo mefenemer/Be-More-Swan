@@ -59,6 +59,9 @@ export default withLambda(async (event: HandlerEvent) => {
             siteBaseUrl: widgetConfigs.siteBaseUrl,
             sitePostPath: widgetConfigs.sitePostPath,
             badgeEnabled: widgetConfigs.badgeEnabled,
+            // Read so the permalink honours the author's chosen font. It previously did not, so a
+            // font applied on the customer's embed and NOT on the page we serve to crawlers.
+            theme: widgetConfigs.theme,
         })
         .from(widgetConfigs)
         .where(eq(widgetConfigs.publicKey, publicKey))
@@ -140,6 +143,7 @@ export default withLambda(async (event: HandlerEvent) => {
         bodyHtml,
         aiAssisted: isAiAssisted(post),
         badgeEnabled: cfg.badgeEnabled,
+        theme: (cfg.theme as { fontFamily?: string | null; fontUrl?: string | null } | null) || null,
     });
 
     // Never cache a noindex post at the CDN as if indexable; still fine for the browser.

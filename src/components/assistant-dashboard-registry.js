@@ -156,6 +156,11 @@
     // NOT assistant_records — so no hubTab. All social-only modules are off (it has its own
     // review/approval + scheduling inside Blog Studio, not the social Review Queue / Posting Schedule).
     blog_writer: {
+      // ⚠️ These four labels must describe what get-blog-performance.ts actually returns. They used
+      // to sit over cards fed by get-assistant-performance (engagement rate, reach growth, CTR,
+      // meaningful engagement, all off the Instagram post_insights table) — so the label and the
+      // number underneath it were about different things, on a card that could never populate.
+      // `metricsSource: 'blog'` below is what routes them to the right source.
       kpis: [
         {
           label: 'Publishing Consistency',
@@ -163,9 +168,12 @@
           desc: 'Long-form posts drafted, approved and published on the cadence you set.',
         },
         {
+          // "Organic Traffic" was the old title and it over-claimed: what is stored is the peak
+          // search IMPRESSIONS per post (blog_posts.traffic_baseline, kept by ingest-gsc-metrics
+          // to detect decay). Clicks are not recorded anywhere, so the card cannot report them.
           label: 'Search Visibility',
-          title: 'Organic Traffic',
-          desc: 'Readers arriving from search as your library compounds over time.',
+          title: 'Search Impressions',
+          desc: 'How often your posts have appeared in Google search results, from Search Console.',
         },
         {
           label: 'Hours Reclaimed',
@@ -178,6 +186,9 @@
           desc: 'Drafts sitting in review, waiting for your sign-off before they schedule.',
         },
       ],
+      // Routes _loadAssistantMetrics to _loadBlogMetrics / get-blog-performance. Without it the
+      // Blog Writer falls through to the social post_insights endpoint, which holds none of its data.
+      metricsSource: 'blog',
       modules: {
         // hasPostingSchedule drives BOTH the schedule controls in Operational Setup and the
         // Autopilot status card. Blog Autopilot (blog-horizon-fill → process-blog-jobs) gives the
@@ -199,6 +210,15 @@
       // schedule and delete drafts (blog-posts.ts). It's the landing tab, and the old separate
       // Content Library / Data Hub tab is retired (hideDataHub) since it showed the same posts.
       reviewQueue: { kind: 'posts', source: 'blog_posts', label: 'Blogs' },
+      // The Overview's "Audience" block is follower/subscriber counts pulled from the SOCIAL
+      // platform APIs — Instagram, Facebook, YouTube, X. A Blog Writer publishes to none of them,
+      // so it was showing this assistant a chart of an audience it does not write for (and the
+      // counts are org-wide, so they moved for reasons nothing on this page caused).
+      //
+      // Its blog connectors live in a different store entirely (workspace_integrations, via
+      // src/utils/blog-destinations), and none of those platforms exposes a follower count — so the
+      // honest replacement is WHERE this assistant publishes, not how many read it.
+      audienceSource: 'blog_destinations',
       defaultMainTab: 'review-queue',
       hideDataHub: true,
       // hubTab is retained (used by the Calendar's from/to feed + generic registry readers) even

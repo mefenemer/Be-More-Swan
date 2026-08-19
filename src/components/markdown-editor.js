@@ -129,6 +129,106 @@
     return COLUMNS_BLOCK_RE.test(String(raw == null ? '' : raw).trim());
   }
 
+  // ── Formatting primitives ─────────────────────────────────────────────────────────────────────
+  // Pure string→string, so the format bar's behaviour is locked by tests rather than by clicking
+  // around a browser. Every one of these takes and returns raw MARKDOWN: the block's `raw` stays
+  // the single source of truth, exactly as typing and AI rewrites do — a formatting button is just
+  // another way to write the same characters the author could type by hand.
+
+  // Italic is `_`, NOT `*`. With `*`, toggling italic on a selection sitting inside `**bold**`
+  // matches the bold marker one character in, strips a single star, and silently turns bold into a
+  // broken half-emphasis. `_` cannot collide with `**`, so the two toggles stay independent.
+  const INLINE_MARKS = { bold: '**', italic: '_', code: '`' };
+  const LINK_PLACEHOLDER = 'https://';
+
+  // Clamp + order a (start,end) pair against the text. A textarea can hand back end < start after a
+  // backwards drag-select, and every helper below indexes with these.
+  function selRange(text, start, end) {
+    const s = String(text == null ? '' : text);
+    let a = Math.max(0, Math.min(s.length, start | 0));
+    let b = Math.max(0, Math.min(s.length, end | 0));
+    if (a > b) { const t = a; a = b; b = t; }
+    return { s, a, b };
+  }
+
+  /**
+   * Toggle an inline marker around the selection.
+   *   → { text, selStart, selEnd }
+   *
+   * Three cases, in order: the selection sits INSIDE an existing pair (unwrap), the selection
+   * INCLUDES the pair (strip), otherwise wrap. A collapsed caret wraps nothing and lands between
+   * the two markers, so pressing B and typing gives bold text — the behaviour every editor has.
+   */
+  function toggleInlineMark(text, start, end, marker) {
+    const { s, a, b } = selRange(text, start, end);
+    const len = marker.length;
+
+    if (a >= len && b + len <= s.length
+        && s.slice(a - len, a) === marker && s.slice(b, b + len) === marker) {
+      return {
+        text: s.slice(0, a - len) + s.slice(a, b) + s.slice(b + len),
+        selStart: a - len, selEnd: b - len,
+      };
+    }
+    if (b - a >= len * 2 && s.slice(a, a + len) === marker && s.slice(b - len, b) === marker) {
+      return {
+        text: s.slice(0, a) + s.slice(a + len, b - len) + s.slice(b),
+        selStart: a, selEnd: b - len * 2,
+      };
+    }
+    return {
+      text: s.slice(0, a) + marker + s.slice(a, b) + marker + s.slice(b),
+      selStart: a + len, selEnd: b + len,
+    };
+  }
+
+  /**
+   * Wrap the selection as a link, leaving the URL selected so it can be typed straight over.
+   * An empty selection gets placeholder label text rather than `[](https://)`, which renders as
+   * nothing at all and looks like the button did nothing.
+   */
+  function insertLink(text, start, end) {
+    const { s, a, b } = selRange(text, start, end);
+    const label = s.slice(a, b) || 'link text';
+    const urlStart = a + 1 + label.length + 2;   // '[' + label + '](' 
+    return {
+      text: s.slice(0, a) + '[' + label + '](' + LINK_PLACEHOLDER + ')' + s.slice(b),
+      selStart: urlStart, selEnd: urlStart + LINK_PLACEHOLDER.length,
+    };
+  }
+
+  // Every line prefix the block-type control owns. Anchored and applied per line, so switching type
+  // REPLACES the old prefix instead of stacking (`> - ## text` is what naive prepending produces).
+  const BLOCK_PREFIX_RE = /^\s*(?:#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)/;
+  function stripBlockPrefix(line) { return String(line).replace(BLOCK_PREFIX_RE, ''); }
+
+  /** The type currently in force, read off the FIRST line — what the select should show. */
+  function detectBlockType(raw) {
+    const first = String(raw == null ? '' : raw).split('\n')[0] || '';
+    const h = first.match(/^(#{1,6})\s/);
+    if (h) return 'h' + h[1].length;
+    if (/^>\s?/.test(first)) return 'quote';
+    if (/^[-*+]\s/.test(first)) return 'ul';
+    if (/^\d+[.)]\s/.test(first)) return 'ol';
+    return 'p';
+  }
+
+  /**
+   * Rewrite a block's raw Markdown as `type` ('p' | 'h1'..'h6' | 'quote' | 'ul' | 'ol').
+   * Never call this on a media or columns block — their raw is a directive, and stripping "prefixes"
+   * off it would corrupt the layout. The bar disables the control for those instead.
+   */
+  function setBlockType(raw, type) {
+    const bare = String(raw == null ? '' : raw).split('\n').map(stripBlockPrefix);
+    if (type === 'quote') return bare.map((l) => '> ' + l).join('\n');
+    if (type === 'ul') return bare.map((l) => '- ' + l).join('\n');
+    if (type === 'ol') return bare.map((l, i) => (i + 1) + '. ' + l).join('\n');
+    const h = /^h([1-6])$/.exec(String(type));
+    // A heading is one line by definition — a three-line block becomes ONE heading, not three.
+    if (h) return '#'.repeat(Number(h[1])) + ' ' + bare.join(' ').trim();
+    return bare.join('\n');
+  }
+
   // Build the Markdown for one media item.
   //
   // A plain image with no caption stays plain `![alt](asset://N)` — the `:::media` directive is for
@@ -248,6 +348,41 @@
         font: inherit; color: inherit; background: transparent; resize: none; overflow: hidden;
         line-height: 1.6; }
       .bmsme-placeholder { color:#9ca3af; margin:0; }
+      /* Typography for RENDERED blocks.
+         ⚠️ Not cosmetic. The editor is mounted inside pages that load a Tailwind build, and its
+         preflight reset flattens headings to the body size and weight — measured: an <h1> in a
+         block computed to 16px/400, identical to the <p> beside it. So picking "Heading 2" in the
+         format bar changed the Markdown correctly and changed NOTHING on screen, which reads as
+         the control being broken.
+         These rules are scoped to .bmsme-block so they cannot leak into the host page, and they
+         mirror the shapes widget.js and blog-seo.ts publish — the preview should not lie about
+         what the reader will get. Sized in em so everything tracks the host's base size.
+         (No backticks in this comment — the whole block is a JS template literal.) */
+      .bmsme-block h1, .bmsme-block h2, .bmsme-block h3,
+      .bmsme-block h4, .bmsme-block h5, .bmsme-block h6 {
+        font-weight:700; line-height:1.25; margin:.6em 0 .3em; color:#111827; }
+      .bmsme-block h1 { font-size:1.75em; }
+      .bmsme-block h2 { font-size:1.4em; }
+      .bmsme-block h3 { font-size:1.2em; }
+      .bmsme-block h4 { font-size:1.05em; }
+      .bmsme-block h5, .bmsme-block h6 { font-size:1em; }
+      .bmsme-block p { margin:.5em 0; }
+      .bmsme-block strong, .bmsme-block b { font-weight:700; }
+      .bmsme-block em, .bmsme-block i { font-style:italic; }
+      .bmsme-block a { color:#ec4899; text-decoration:underline; }
+      .bmsme-block blockquote { margin:.5em 0; padding-left:12px; border-left:3px solid #e5e7eb;
+        color:#4b5563; font-style:italic; }
+      /* list-style-type as well as position: preflight sets list-style:none on ul/ol, so padding
+         alone would indent the items and still show no bullets. */
+      .bmsme-block ul { list-style:disc outside; padding-left:1.4em; margin:.5em 0; }
+      .bmsme-block ol { list-style:decimal outside; padding-left:1.6em; margin:.5em 0; }
+      .bmsme-block li { margin:.15em 0; }
+      .bmsme-block code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.9em;
+        background:#f3f4f6; padding:1px 4px; border-radius:4px; }
+      .bmsme-block pre { background:#111827; color:#e5e7eb; padding:12px; border-radius:8px;
+        overflow-x:auto; margin:.5em 0; }
+      .bmsme-block pre code { background:transparent; color:inherit; padding:0; }
+      .bmsme-block hr { border:0; border-top:1px solid #e5e7eb; margin:1em 0; }
       /* Inline media preview. Mirrors widget.js's rules so the author sees roughly the shape they
          will publish — same reasoning as sharing the tokenizer: the preview shouldn't lie. */
       .bmsme-block img, .bmsme-block video { max-width:100%; height:auto; border-radius:8px; display:block; }
@@ -259,6 +394,23 @@
       .bmsme-block .bms-columns[data-cols="3"] { grid-template-columns:repeat(3,minmax(0,1fr)); }
       @media (max-width:640px) { .bmsme-block .bms-columns,
         .bmsme-block .bms-columns[data-cols="3"] { grid-template-columns:minmax(0,1fr); } }
+      /* Formatting bar — light, in normal flow at the top of the draft, so it is visible before
+         the author does anything. Deliberately NOT the dark floating pill: that one is the AI
+         toolbar, and the two doing different jobs should not look like the same control. */
+      .bmsme-formatbar { display:flex; align-items:center; gap:4px; flex-wrap:wrap;
+        padding:6px; margin:0 0 10px; border:1px solid #e5e7eb; border-radius:10px;
+        background:#fff; }
+      .bmsme-fb-select { font:inherit; font-size:13px; padding:4px 6px; border:1px solid #d1d5db;
+        border-radius:6px; background:#fff; color:#111827; cursor:pointer; }
+      .bmsme-fb-btn { font:inherit; font-size:13px; min-width:30px; padding:4px 8px; border:0;
+        border-radius:6px; background:transparent; color:#374151; cursor:pointer; }
+      .bmsme-fb-btn:hover { background:#f3f4f6; }
+      .bmsme-fb-bold { font-weight:800; }
+      .bmsme-fb-italic { font-style:italic; }
+      .bmsme-fb-code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+      .bmsme-fb-sep { width:1px; height:18px; background:#e5e7eb; margin:0 2px; }
+      .bmsme-formatbar [disabled] { opacity:.4; cursor:not-allowed; }
+      .bmsme-formatbar [disabled]:hover { background:transparent; }
       .bmsme-toolbar { position: absolute; z-index: 40; display: flex; gap: 4px;
         background: #111827; color: #fff; padding: 4px; border-radius: 8px;
         box-shadow: 0 6px 24px rgba(0,0,0,.25); font-size: 13px; }
@@ -335,6 +487,147 @@
     toolbar.className = 'bmsme-toolbar';
     toolbar.style.display = 'none';
     root.appendChild(toolbar);
+
+    // ── Formatting bar ───────────────────────────────────────────────────────────────────────────
+    // Always visible, sitting above the draft. The Studio previously offered NO way to format text:
+    // the only toolbar was the AI one (Expand / Condense / Tone / Rewrite…), which appears on a
+    // selection and REWRITES words rather than marking them up. Bold, headings, quotes and lists
+    // were reachable only by typing raw Markdown — which the placeholder mentions and nobody reads.
+    //
+    // It writes Markdown into the block's `raw`, the same place typing and AI rewrites write, so
+    // there is still exactly one source of truth and nothing new to serialise.
+    //
+    // Actions target the block open for editing, or the last one that was (`formatTargetId`). With
+    // no target at all, a click starts a fresh block at the end — so no button is ever inert.
+    const BLOCK_TYPES = [
+      ['p', 'Paragraph'],
+      ['h1', 'Heading 1'],
+      ['h2', 'Heading 2'],
+      ['h3', 'Heading 3'],
+      ['h4', 'Heading 4'],
+      ['quote', 'Quote'],
+      ['ul', 'Bulleted list'],
+      ['ol', 'Numbered list'],
+    ];
+    const BLOCK_TYPE_KEYS = new Set(BLOCK_TYPES.map((t) => t[0]));
+    let formatTargetId = null;
+
+    const formatBar = document.createElement('div');
+    formatBar.className = 'bmsme-formatbar';
+    formatBar.setAttribute('role', 'toolbar');
+    formatBar.setAttribute('aria-label', 'Text formatting');
+
+    const typeSel = document.createElement('select');
+    typeSel.className = 'bmsme-fb-select';
+    typeSel.setAttribute('aria-label', 'Paragraph style');
+    BLOCK_TYPES.forEach(([value, label]) => {
+      const o = document.createElement('option');
+      o.value = value;
+      o.textContent = label;
+      typeSel.appendChild(o);
+    });
+    formatBar.appendChild(typeSel);
+
+    const fbButtons = [];
+    function fbButton(label, title, run, extraClass) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'bmsme-fb-btn' + (extraClass ? ' ' + extraClass : '');
+      btn.textContent = label;
+      btn.title = title;
+      btn.setAttribute('aria-label', title);
+      // mousedown + preventDefault, NOT click: a click blurs the textarea first, blur commits the
+      // edit and destroys the selection, so the mark would land on nothing at all.
+      btn.addEventListener('mousedown', (e) => { e.preventDefault(); run(); });
+      formatBar.appendChild(btn);
+      fbButtons.push(btn);
+      return btn;
+    }
+    function fbSeparator() {
+      const sep = document.createElement('span');
+      sep.className = 'bmsme-fb-sep';
+      sep.setAttribute('aria-hidden', 'true');
+      formatBar.appendChild(sep);
+    }
+
+    fbSeparator();
+    fbButton('B', 'Bold (Ctrl/Cmd+B)', () => applyInlineMark(INLINE_MARKS.bold), 'bmsme-fb-bold');
+    fbButton('I', 'Italic (Ctrl/Cmd+I)', () => applyInlineMark(INLINE_MARKS.italic), 'bmsme-fb-italic');
+    fbButton('Link', 'Insert link (Ctrl/Cmd+K)', () => applyInline(insertLink));
+    fbButton('Code', 'Inline code', () => applyInlineMark(INLINE_MARKS.code), 'bmsme-fb-code');
+    root.appendChild(formatBar);
+
+    // The textarea every inline action needs. Opens one if the author hasn't clicked into the draft
+    // yet, or has clicked away since, so B / I / Link always do something visible.
+    function ensureEditing() {
+      if (editing) return editing;
+      if (formatTargetId) {
+        const el = root.querySelector('.bmsme-block[data-block-id="' + formatTargetId + '"]');
+        if (el) {
+          enterEdit(el, formatTargetId);
+          if (editing) return editing;
+        }
+      }
+      appendBlockAndEdit();
+      return editing;
+    }
+
+    /** Run a (text, start, end) → { text, selStart, selEnd } transform against the open textarea. */
+    function applyInline(transform) {
+      const target = ensureEditing();
+      if (!target) return;
+      const b = blocks.find((x) => x.id === target.blockId);
+      // A media/columns block's raw is a directive, not prose — marking it up would corrupt it.
+      if (!b || isMediaBlock(b.raw) || isColumnsBlock(b.raw)) return;
+      const ta = target.textarea;
+      const out = transform(ta.value, ta.selectionStart, ta.selectionEnd);
+      ta.value = out.text;
+      ta.setSelectionRange(out.selStart, out.selEnd);
+      // Assigning .value fires NO `input` event, so mirror what that handler does by hand. Without
+      // this the block keeps its pre-format raw and the whole edit is discarded on blur.
+      b.raw = ta.value;
+      autosize(ta);
+      ta.focus();
+      scheduleSave();
+    }
+    function applyInlineMark(marker) {
+      applyInline((text, a, b) => toggleInlineMark(text, a, b, marker));
+    }
+
+    typeSel.addEventListener('change', () => {
+      const type = typeSel.value;
+      const id = (editing && editing.blockId) || formatTargetId;
+      // A <select> takes focus, which blurs the textarea and commits the edit — so by the time
+      // `change` fires there is no open editor to work through. commitEdit may also SPLIT or drop
+      // the block, so the target is resolved after it, never before.
+      commitEdit();
+      let b = id ? blocks.find((x) => x.id === id) : null;
+      if (!b) { b = { id: uid(), raw: '' }; blocks.push(b); }
+      if (isMediaBlock(b.raw) || isColumnsBlock(b.raw)) { syncFormatBar(); return; }
+      b.raw = setBlockType(b.raw, type);
+      formatTargetId = b.id;
+      renderAll();
+      scheduleSave();
+      const el = root.querySelector('.bmsme-block[data-block-id="' + b.id + '"]');
+      if (el) enterEdit(el, b.id);
+    });
+
+    // Reflect what the bar would act on, and lock it while a media/columns block is open.
+    // h5/h6 aren't offered (a blog body that deep is pathological); such a block simply shows
+    // Paragraph until the author picks something, and picking is what rewrites it — never this.
+    function syncFormatBar() {
+      const active = editing ? blocks.find((x) => x.id === editing.blockId) : null;
+      const locked = !!(active && (isMediaBlock(active.raw) || isColumnsBlock(active.raw)));
+      formatBar.classList.toggle('bmsme-fb-locked', locked);
+      typeSel.disabled = locked;
+      fbButtons.forEach((btn) => { btn.disabled = locked; });
+      if (active && !locked) formatTargetId = active.id;
+
+      const shown = (active && !locked) ? active : blocks.find((x) => x.id === formatTargetId);
+      const type = (shown && !isMediaBlock(shown.raw) && !isColumnsBlock(shown.raw))
+        ? detectBlockType(shown.raw) : 'p';
+      typeSel.value = BLOCK_TYPE_KEYS.has(type) ? type : 'p';
+    }
 
     let activeMenu = null;
     let currentSel = null; // { blockId, text }
@@ -447,6 +740,7 @@
       }
       renderAll();
       scheduleSave();
+      syncFormatBar();
     }
 
     function enterEdit(blockEl, blockId) {
@@ -477,10 +771,19 @@
       ta.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') { e.preventDefault(); b.raw = editing ? editing.prevRaw : b.raw; ta.value = b.raw; ta.blur(); }
         else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); ta.blur(); }
+        // The shortcuts every writer already has in their fingers. Alt is excluded so this can't
+        // swallow an OS-level combination the browser owns.
+        else if ((e.metaKey || e.ctrlKey) && !e.altKey) {
+          const k = String(e.key).toLowerCase();
+          if (k === 'b') { e.preventDefault(); applyInlineMark(INLINE_MARKS.bold); }
+          else if (k === 'i') { e.preventDefault(); applyInlineMark(INLINE_MARKS.italic); }
+          else if (k === 'k') { e.preventDefault(); applyInline(insertLink); }
+        }
       });
       ta.focus();
       ta.setSelectionRange(ta.value.length, ta.value.length);
       autosize(ta);
+      syncFormatBar();
     }
 
     function appendBlockAndEdit() {
@@ -925,6 +1228,7 @@
     root.addEventListener('drop', onDrop);
 
     renderAll();
+    syncFormatBar();   // paint the bar's initial state before the author touches anything
 
     return {
       getMarkdown,
@@ -1001,6 +1305,9 @@
   // and click-to-edit halves stay browser-only by nature. Mirrors marked-bms-directives.js's
   // dual export rather than inventing a second convention.
   if (typeof module === 'object' && module.exports) {
-    module.exports = { splitBlocks, isMediaBlock, isColumnsBlock, mediaRaw, spliceColumnRaw, MEDIA_MIME };
+    module.exports = {
+      splitBlocks, isMediaBlock, isColumnsBlock, mediaRaw, spliceColumnRaw, MEDIA_MIME,
+      toggleInlineMark, insertLink, detectBlockType, setBlockType, INLINE_MARKS,
+    };
   }
 })();

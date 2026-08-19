@@ -56,6 +56,9 @@ import {
 } from '../src/config/lead-retention';
 import { RATING_BANDS } from '../src/config/icp-profile';
 import { LEAD_RATING_CHIPS, LEAD_RATING_CHIP_UNKNOWN } from '../src/config/lead-rating-chips';
+import {
+    BLOG_FONTS, BLOG_FONT_CATEGORIES, DEFAULT_FONT_STACK, googleFontUrl,
+} from '../src/config/blog-fonts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const OUTPUT_PATH = join(root, 'src', 'generated', 'platform-constants.js');
@@ -78,6 +81,16 @@ export function renderClientConstants(): string {
     });
 
     const rows = platforms.map(p => `    ${JSON.stringify(p)},`).join('\n');
+
+    // Blog fonts, from src/config/blog-fonts.ts. The stylesheet URL is RESOLVED here rather than
+    // rebuilt in the browser: widget.js, blog-seo.ts and the picker must all agree on the exact
+    // string, because save-widget-config validates the stored fontUrl by exact match against it.
+    const fontRows = BLOG_FONTS.map(f => JSON.stringify({
+        label: f.label,
+        stack: f.stack,
+        category: f.category,
+        url: googleFontUrl(f),
+    })).map(j => `    ${j},`).join('\n');
 
     // The editor's per-format records. Short keys because this list is rendered per keystroke in a
     // page with no build step — and because the shape predates the generator, so keeping it means
@@ -605,6 +618,45 @@ ${formatRows}
       var name = band.rating.charAt(0).toUpperCase() + band.rating.slice(1);
       return name + ': scored ' + band.min + '–' + band.max + ' out of 100 against the ideal '
         + 'customer profile from your setup — ' + band.meaning.replace(' + ', ', and ') + '.';
+    },
+  };
+
+  // ── Blog fonts (src/config/blog-fonts.ts) ────────────────────────────────────────────────────
+  // Blog Studio's Font family picker. Carries the CSS stack AND the Google Fonts stylesheet, because
+  // choosing a font without fetching it is what made the old three-option picker meaningless — two
+  // of its three choices rendered identically on any machine without Inter installed.
+  var BLOG_FONTS = [
+${fontRows}
+  ];
+
+  window.BlogFonts = {
+    all: BLOG_FONTS,
+    categories: ${JSON.stringify(BLOG_FONT_CATEGORIES)},
+    defaultStack: ${JSON.stringify(DEFAULT_FONT_STACK)},
+
+    /** Look a font up by its STORED value (the CSS stack). null when it isn't one we offer. */
+    get: function (stack) {
+      if (typeof stack !== 'string') return null;
+      var v = stack.trim();
+      for (var i = 0; i < BLOG_FONTS.length; i++) {
+        if (BLOG_FONTS[i].stack === v) return BLOG_FONTS[i];
+      }
+      return null;
+    },
+
+    /**
+     * The stylesheet a stored stack needs, or null when it needs none.
+     * ⚠️ Returns null for an UNKNOWN stack too. That is deliberate: the caller stores what it gets,
+     * and inventing a URL for a stack we don't recognise would store one the validator rejects.
+     */
+    urlFor: function (stack) {
+      var f = this.get(stack);
+      return (f && f.url) || null;
+    },
+
+    /** Fonts in one category, in catalogue order — the picker renders an <optgroup> per category. */
+    inCategory: function (category) {
+      return BLOG_FONTS.filter(function (f) { return f.category === category; });
     },
   };
 })();

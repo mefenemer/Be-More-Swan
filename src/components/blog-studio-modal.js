@@ -30,7 +30,11 @@
     }, opts)).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); });
   };
 
-  var state = { injected: false, postId: null, editor: null, assistants: {}, assistantId: null, mediaTarget: 'feature' };
+  var state = { injected: false, postId: null, editor: null, assistants: {}, assistantId: null,
+    mediaTarget: 'feature', postStatus: null,
+    // undefined = not fetched yet; null = fetched and the business has no URL on file.
+    // The two must stay distinguishable or loadOrgWebsite() refetches on every open.
+    orgWebsite: undefined };
 
   function el(id) { return document.getElementById(id); }
   function setStatus(id, msg) { var e = el(id); if (e) e.textContent = msg; }
@@ -116,6 +120,14 @@
       + 'display:flex;align-items:center;justify-content:center;text-align:center;padding:4px;'
       + 'font-size:11px;color:#374151;background:#f9fafb;overflow:hidden;word-break:break-word;}'
     + '.bs-media-audio:hover{border-color:#ec4899;}'
+    + '.bs-hook{border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;margin-bottom:8px;}'
+    + '.bs-hook:last-child{margin-bottom:0;}'
+    + '.bs-hook-win{border-color:#ec4899;background:#fdf2f8;}'
+    + '.bs-hook-tag{display:inline-block;font-size:11px;font-weight:700;color:#6b7280;'
+      + 'background:#f3f4f6;border-radius:999px;padding:1px 8px;margin-bottom:6px;}'
+    + '.bs-hook-win .bs-hook-tag{background:#ec4899;color:#fff;}'
+    + '.bs-hook-h1{font-size:15px;font-weight:700;color:#111827;margin:0 0 4px;}'
+    + '.bs-hook-intro{font-size:13px;color:#4b5563;margin:0;line-height:1.5;}'
     + '.bs-linkbtn{background:none;border:0;color:#6b7280;font-size:12px;cursor:pointer;text-decoration:underline;padding:0;}'
     + '.bs-linkbtn:hover{color:#ec4899;}'
     // Feedback + composer affordances brought over from the Create Post sheet.
@@ -158,10 +170,10 @@
     + '      <div class="bs-panel" style="margin-bottom:16px;">'
     + '        <h3>Widget</h3>'
     + '        <div class="bs-field"><label>Accent colour</label><input id="bs-accent" type="color" value="#ec4899"></div>'
-    + '        <div class="bs-field"><label>Font family</label><select id="bs-font">'
-    + '          <option value="system-ui, sans-serif">System</option>'
-    + '          <option value="Georgia, serif">Serif</option>'
-    + '          <option value="\'Inter\', sans-serif">Inter</option></select></div>'
+    // Options are injected by populateFontPicker() from window.BlogFonts (generated from
+    // src/config/blog-fonts.ts). Hand-writing them here is what left the picker at three choices —
+    // two of which rendered identically, because nothing ever downloaded the font.
+    + '        <div class="bs-field"><label>Font family</label><select id="bs-font"></select></div>'
     + '        <div class="bs-field"><label><input id="bs-badge" type="checkbox" checked> Show AI transparency badge</label></div>'
     // Where you republish the widget on your own site. Both fields let a post\'s canonical URL credit
     // YOUR domain instead of our permalink — leave blank to use the Be More Swan permalink.
@@ -268,8 +280,18 @@
     + '      </div>'
     + '      <div id="bs-editor" class="bs-editor"></div>'
     + '      <div class="bs-row" style="margin-top:16px;">'
-    + '        <button id="bs-generate-hooks" class="bs-btn bs-btn-ghost">Generate A/B hooks</button>'
+    // "Generate A/B hooks" told the author nothing about what would happen, and the only trace the
+    // feature left was a toast reading "3 hook variants ready" — three of WHAT, ready for what.
+    + '        <button id="bs-generate-hooks" class="bs-btn bs-btn-ghost"'
+    + '          title="Write three alternative headlines and openings, then let your readers pick the winner">Test 3 headlines</button>'
     + '        <button id="bs-generate-seo" class="bs-btn bs-btn-ghost">Generate SEO</button>'
+    + '      </div>'
+    // The A/B test, made visible. It was running invisibly: the variants were never shown, no state
+    // was reported, and the winner was promoted by a cron the author had no way of observing.
+    + '      <div id="bs-hooks-panel" class="bs-panel bs-hidden" style="margin-top:16px;">'
+    + '        <h3>Headline test</h3>'
+    + '        <p id="bs-hooks-explainer" class="bs-status" style="line-height:1.5;margin-bottom:10px;"></p>'
+    + '        <div id="bs-hooks-list"></div>'
     + '      </div>'
     // Crawler-facing metadata (US 1.3). Generate SEO fills these in; the author can override before
     // publishing. Saved via save-blog-draft; emitted server-side by the /b/:key/:slug permalink.
@@ -408,6 +430,10 @@
     loadFeature();
     loadSearchConsole();
     populateSeo(post);
+    // Remembered because the headline-test copy differs before and after publication: a draft's test
+    // has not started yet, and saying it is live would be a plain lie about what readers are seeing.
+    state.postStatus = (post && post.status) || null;
+    renderHooks(post);
     return state.editor;
   }
 
@@ -476,24 +502,106 @@
       '<script async src="' + location.origin + '/widget.js"\n        data-bms-key="' + key + '" data-bms-mount="#bms-blog"><\/script>';
     el('bs-rss').textContent = location.origin + '/api/widget/' + key + '/rss';
   }
+  // Where the customer publishes. Both fields were left blank until someone typed them in, which
+  // meant every canonical URL quietly credited OUR permalink instead of their domain — the opposite
+  // of the point. The business URL is already on file (Business Information → organisations.
+  // website_url), so asking a second time is asking for a value we hold.
+  //
+  // These are SUGGESTIONS painted into the inputs on OPEN, never a silent write: the user still
+  // presses "Save settings" to persist them, and a stored value always wins. Suggestions are
+  // deliberately not re-applied after a save (applyWidget's `suggest` flag) — clearing a field,
+  // saving, and watching it refill itself reads as the clear having been ignored.
+  var DEFAULT_SITE_POST_PATH = '/blog/{slug}';
+
+  // save-widget-config demands a full http(s) URL; Business Information accepts a bare host
+  // ("acme.com"). Normalise here rather than let a perfectly good default fail validation on save.
+  function normaliseSiteBase(raw) {
+    var v = String(raw || '').trim();
+    if (!v) return '';
+    if (!/^https?:\/\//i.test(v)) v = 'https://' + v.replace(/^\/+/, '');
+    if (!/^https?:\/\/[^\s/]+/i.test(v)) return '';
+    return v.replace(/\/+$/, '');
+  }
+
+  // Fetched once per session. A failure is non-fatal — the field simply stays empty, exactly as it
+  // behaved before, so a business-profile outage can never block the Widget panel from painting.
+  function loadOrgWebsite() {
+    if (state.orgWebsite !== undefined) return Promise.resolve(state.orgWebsite);
+    return api('organisation-profile', { method: 'GET' })
+      .then(function (res) {
+        var profile = (res.ok && res.body && res.body.profile) || null;
+        state.orgWebsite = normaliseSiteBase(profile && profile.websiteUrl) || null;
+        return state.orgWebsite;
+      })
+      .catch(function () { state.orgWebsite = null; return null; });
+  }
+
   function loadWidget() {
-    api('save-widget-config', { method: 'GET' }).then(function (res) {
+    // Both in flight together: the config read is the slow one, and the org profile must be in hand
+    // before applyWidget paints or the suggestion lands after the user has started typing.
+    Promise.all([
+      api('save-widget-config', { method: 'GET' }),
+      loadOrgWebsite(),
+    ]).then(function (out) {
+      var res = out[0];
       var cfg = res.body.config;
       if (!cfg) {
         return api('save-widget-config', { method: 'POST', body: JSON.stringify({ action: 'create' }) })
-          .then(function (r) { if (r.ok) applyWidget(r.body.config); });
+          .then(function (r) { if (r.ok) applyWidget(r.body.config, { suggest: true }); });
       }
-      applyWidget(cfg);
+      applyWidget(cfg, { suggest: true });
     });
   }
-  function applyWidget(cfg) {
+  // Fill the Font family picker from the generated catalogue, grouped by category. Called before
+  // every applyWidget so the stored value has an option to select — assigning select.value to a
+  // family with no matching <option> silently selects NOTHING, which reads as the setting being lost.
+  function populateFontPicker() {
+    var sel = el('bs-font');
+    if (!sel || sel.dataset.populated === '1') return;
+    var catalogue = window.BlogFonts;
+    if (!catalogue) return;   // generated file not loaded — leave the select alone rather than empty it
+    catalogue.categories.forEach(function (category) {
+      var fonts = catalogue.inCategory(category);
+      if (!fonts.length) return;
+      var group = document.createElement('optgroup');
+      group.label = category;
+      fonts.forEach(function (f) {
+        var opt = document.createElement('option');
+        opt.value = f.stack;
+        opt.textContent = f.label;
+        // Preview each family in its own face. Only meaningful once the sheet is loaded, which is
+        // what previewFont() below arranges as soon as one is selected.
+        opt.style.fontFamily = f.stack;
+        group.appendChild(opt);
+      });
+      sel.appendChild(group);
+    });
+    sel.dataset.populated = '1';
+  }
+
+  // Load the chosen font into the STUDIO so the picker isn't a blind choice — the author sees the
+  // face they are about to publish. One <link> per family, kept and reused: re-adding on every
+  // change would leave a growing pile of stylesheets in the modal's host page.
+  function previewFont(stack) {
+    var url = window.BlogFonts && window.BlogFonts.urlFor(stack);
+    if (!url || document.querySelector('link[data-bms-font="' + CSS.escape(url) + '"]')) return;
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = url;
+    link.setAttribute('data-bms-font', url);
+    document.head.appendChild(link);
+  }
+
+  function applyWidget(cfg, opts) {
+    var suggest = !!(opts && opts.suggest);
     renderSnippet(cfg.publicKey);
+    populateFontPicker();
     var theme = cfg.theme || {};
     if (theme.accent) el('bs-accent').value = theme.accent;
-    if (theme.fontFamily) el('bs-font').value = theme.fontFamily;
+    if (theme.fontFamily) { el('bs-font').value = theme.fontFamily; previewFont(theme.fontFamily); }
     el('bs-badge').checked = cfg.badgeEnabled !== false;
-    el('bs-site-base').value = cfg.siteBaseUrl || '';
-    el('bs-site-path').value = cfg.sitePostPath || '';
+    el('bs-site-base').value = cfg.siteBaseUrl || (suggest ? (state.orgWebsite || '') : '');
+    el('bs-site-path').value = cfg.sitePostPath || (suggest ? DEFAULT_SITE_POST_PATH : '');
   }
 
   // ── SEO metadata panel ─────────────────────────────────────────────────────────────────────────
@@ -511,6 +619,64 @@
     el('bs-robots').value = (post && post.robots) || 'index,follow';
     el('bs-canonical').textContent = (post && post.canonicalUrl) || 'Set when the post is published.';
     refreshSeoCounts();
+  }
+
+  // ── Headline A/B test (US 5.2) ────────────────────────────────────────────────────────────────
+  // What the feature actually does, in plain terms, because none of it was on screen: generate-hooks
+  // writes three alternative H1 + opening-paragraph pairs to blog_posts.hook_variants and flips
+  // ab_state to 'testing'. The embedded widget then serves ONE variant per visitor at random, sticky
+  // in localStorage so that reader's dwell time and scroll depth are attributed to one version. Once
+  // the variants total 200 impressions, the resolve-ab-tests cron scores them (60% engaged rate, 25%
+  // dwell, 15% scroll), stamps winning_variant and flips ab_state to 'decided' — after which every
+  // reader gets the winner.
+  //
+  // Until now the author saw a toast reading "3 hook variants ready" and nothing else: not the three
+  // headlines, not that a test was running, not which one won. The work was real and entirely
+  // invisible, which is indistinguishable from it not happening.
+  function bsEscape(str) {
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function hooksExplainer(state_, winner, isPublished) {
+    if (state_ === 'decided' && winner) {
+      return 'Version ' + bsEscape(winner) + ' won and is now the headline every reader sees. '
+        + 'The others are kept for reference.';
+    }
+    if (!isPublished) {
+      return 'These three openings are ready. The test starts when the post is published: readers '
+        + 'each see one version at random, and the one that holds attention longest becomes the '
+        + 'permanent headline.';
+    }
+    return 'Live test. Each reader sees one of these three at random — the same one on every visit, '
+      + 'so their reading time counts for that version. After around 200 readers in total, whichever '
+      + 'keeps people reading longest becomes the permanent headline. Only the headline and opening '
+      + 'paragraph change; the rest of the post is identical.';
+  }
+
+  function renderHooks(post) {
+    var panel = el('bs-hooks-panel');
+    var list = el('bs-hooks-list');
+    if (!panel || !list) return;
+    var variants = (post && post.hookVariants) || [];
+    if (!Array.isArray(variants) || !variants.length) {
+      panel.classList.add('bs-hidden');
+      list.innerHTML = '';
+      return;
+    }
+    var abState = post.abState || 'testing';
+    var winner = post.winningVariant || null;
+    panel.classList.remove('bs-hidden');
+    el('bs-hooks-explainer').innerHTML = hooksExplainer(abState, winner, post.status === 'published');
+    list.innerHTML = variants.map(function (v) {
+      var won = abState === 'decided' && winner && v.id === winner;
+      return '<div class="bs-hook' + (won ? ' bs-hook-win' : '') + '">'
+        + '<span class="bs-hook-tag">Version ' + bsEscape(v.id) + (won ? ' · winner' : '') + '</span>'
+        + '<p class="bs-hook-h1">' + bsEscape(v.h1) + '</p>'
+        + '<p class="bs-hook-intro">' + bsEscape(v.intro) + '</p>'
+        + '</div>';
+    }).join('');
   }
 
   // ── Feature / inline media (reuses content-assets + generate-ai-image + pexels-search) ─────────
@@ -627,9 +793,15 @@
   // onEditorDropMedia attaches it and the editor places it. Uses the editor's own exported MIME so
   // the two can't drift — a mismatched string would present as "dragging just does nothing".
   function makeTileDraggable(tile, payload) {
-    // Only the body takes a drop: the hero is a single slot with its own picker, so there is
-    // nowhere to aim a drag at.
-    if (state.mediaTarget !== 'inline') return;
+    // EVERY tile is draggable, whichever picker it came from. The gate used to be
+    // `state.mediaTarget !== 'inline'`, which made the tiles under the "Stock photo" / "Choose from
+    // Library" buttons (the FEATURE row) silently inert — two near-identical buttons, only the
+    // smaller inline one draggable, and no feedback on the wrong one. That reads as "dragging is
+    // broken", not "wrong button".
+    //
+    // A drop is unambiguous regardless of which picker opened: the hero is a single slot filled by
+    // clicking, and the body is the only drop target, so onEditorDropMedia always attaches inline.
+    // Clicking a tile still routes by state.mediaTarget, so the feature picker keeps its own job.
     tile.draggable = true;
     tile.addEventListener('dragstart', function (e) {
       e.dataTransfer.setData(window.MarkdownEditor.MEDIA_MIME, JSON.stringify(payload));
@@ -957,10 +1129,15 @@
 
     el('bs-generate-hooks').addEventListener('click', function () {
       if (!state.postId) return;
-      setBanner('bs-action-status', 'Generating hooks…');
+      setBanner('bs-action-status', 'Writing three headlines\u2026');
       api('generate-hooks', { method: 'POST', body: JSON.stringify({ blogPostId: state.postId }) }).then(function (res) {
-        if (res.ok) setBanner('bs-action-status', res.body.hookVariants.length + ' hook variants ready');
-        else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not generate hooks.', 'error');
+        if (!res.ok) { setBanner('bs-action-status', (res.body && res.body.error) || 'Could not write the headlines.', 'error'); return; }
+        // generate-hooks returns the variants but not the post, and it has just set ab_state to
+        // 'testing' server-side — so hand renderHooks that state rather than re-reading the row.
+        renderHooks({ hookVariants: res.body.hookVariants, abState: 'testing', winningVariant: null, status: state.postStatus });
+        setBanner('bs-action-status', 'Three headlines ready \u2014 see "Headline test" below.');
+        var panel = el('bs-hooks-panel');
+        if (panel && panel.scrollIntoView) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       });
     });
     el('bs-generate-seo').addEventListener('click', function () {
@@ -1018,8 +1195,20 @@
     wireCopy('bs-snippet-copy', 'bs-snippet');
     wireCopy('bs-rss-copy', 'bs-rss');
 
+    // Preview as soon as a family is picked, not only after Save — otherwise the author is choosing
+    // from a list of names rendered in a font they cannot see.
+    el('bs-font').addEventListener('change', function () { previewFont(el('bs-font').value); });
+
     el('bs-save-theme').addEventListener('click', function () {
-      var theme = { accent: el('bs-accent').value, fontFamily: el('bs-font').value };
+      // fontUrl travels WITH the stack. widget.js and the /b/:key/:slug permalink both need the
+      // stylesheet, and neither carries the catalogue — resolving it here is what turns a font
+      // choice into a font that actually loads. null for a system stack that needs no download.
+      var stack = el('bs-font').value;
+      var theme = {
+        accent: el('bs-accent').value,
+        fontFamily: stack,
+        fontUrl: (window.BlogFonts && window.BlogFonts.urlFor(stack)) || null,
+      };
       api('save-widget-config', { method: 'POST', body: JSON.stringify({
         action: 'update', theme: theme, badgeEnabled: el('bs-badge').checked,
         siteBaseUrl: el('bs-site-base').value.trim(), sitePostPath: el('bs-site-path').value.trim(),

@@ -15,7 +15,7 @@
 // is deleted on the final attempt so a failed slot doesn't litter the user's Blogs tab.
 
 import { Handler } from '@netlify/functions';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, blogPosts, contentGenerationJobs } from '../../db/schema';
 import { generateBlogBody } from '../../src/utils/blog-generate';
@@ -62,6 +62,9 @@ export async function drainBlogJobs(): Promise<number> {
            AND (next_retry_at IS NULL OR next_retry_at <= now())
          ORDER BY created_at
          LIMIT ${BATCH}
+         -- Retained as a cheap first filter under real concurrent load, but it is NOT what makes
+         -- this safe: these locks die at autocommit, before any job runs. The status-guarded claim
+         -- in processBlogJob is the guarantee. See the note there before changing either.
          FOR UPDATE SKIP LOCKED`
     );
 
@@ -78,10 +81,37 @@ export async function drainBlogJobs(): Promise<number> {
 }
 
 async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Promise<void> {
-    const attempt = job.attempt + 1;
-    await db.update(contentGenerationJobs)
-        .set({ status: 'processing', attempt, updatedAt: new Date() })
-        .where(eq(contentGenerationJobs.id, job.id));
+    // Claim the job ATOMICALLY. `AND status = 'queued'` is the whole guard — the SELECT in
+    // drainBlogJobs uses FOR UPDATE SKIP LOCKED, but it runs as a standalone statement, so
+    // postgres-js autocommits and those row locks are gone before the first job is touched. Two
+    // overlapping drains therefore claim the SAME rows.
+    //
+    // Measured on prod 2026-08-18 (assistant 6, Lyra): five jobs produced NINE blog posts. Job
+    // aa86c6a5 was already flipped to 'processing' when the second drain ran its SELECT, so it made
+    // one post; the other four were still 'queued' and made two each — three of them empty-bodied,
+    // sitting in the Blogs tab looking like real drafts. Every one reported attempt = 1, because
+    // both drains read attempt 0 and both wrote 1, so the counter hid the double-run as well.
+    //
+    // Same claim-then-verify shape as publish-blog-posts.ts, which had it right all along.
+    const [claimed] = await db.update(contentGenerationJobs)
+        .set({
+            status: 'processing',
+            // Incremented in SQL, not from the SELECTed value: two racers computing job.attempt + 1
+            // both write the same number, so the count silently under-reports.
+            attempt: sql`${contentGenerationJobs.attempt} + 1`,
+            updatedAt: new Date(),
+        })
+        .where(and(
+            eq(contentGenerationJobs.id, job.id),
+            eq(contentGenerationJobs.status, 'queued'),
+        ))
+        .returning({ attempt: contentGenerationJobs.attempt });
+
+    // Lost the race — the other drain owns this job and will complete it, fail it, or leave it to
+    // the stuck-job reclaim above. Doing nothing is the only safe move: this invocation must not
+    // write a second post for the same slot.
+    if (!claimed) return;
+    const attempt = claimed.attempt;
 
     // Track the row we create so a mid-flight failure can clean it up.
     let createdPostId: number | null = null;

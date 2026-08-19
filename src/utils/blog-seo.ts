@@ -13,6 +13,7 @@
 //   · renderBlogPage()    — the full standalone HTML document a crawler / human receives.
 
 import { BLOG_AI_NOTICE } from './blog-ai-assisted';
+import { findBlogFont, googleFontUrl, GOOGLE_FONT_ORIGINS } from '../config/blog-fonts';
 
 // ── escaping ───────────────────────────────────────────────────────────────────────────────────
 // HTML text/attribute escape. Applied to every interpolated value except bodyHtml, which is the
@@ -155,6 +156,36 @@ export interface BlogPageData extends BlogHeadData {
     bodyHtml: string;           // resolved, sanitised published_payload HTML (kept as markup)
     aiAssisted: boolean;
     badgeEnabled: boolean;
+    /**
+     * The widget theme (widget_configs.theme). Honoured for the FONT only.
+     *
+     * The permalink previously ignored the theme outright, so a customer who picked a font saw it
+     * on their embed and not on the page we host for them — the page crawlers and social unfurlers
+     * actually read. `accent` is deliberately still ignored: this document has its own
+     * prefers-color-scheme-aware link colour, and a single stored hex cannot be legible on both
+     * grounds. Fonts have no such problem.
+     *
+     * Both fields are validated on write (save-widget-config validateTheme), and escaped again here
+     * — this is a `<style>` body and a `<link href>`, and neither forgives a lie about provenance.
+     */
+    theme?: { fontFamily?: string | null; fontUrl?: string | null } | null;
+}
+
+/** CSS `font-family` value, or null. Re-validated against the catalogue rather than trusted. */
+function themeFontStack(theme: BlogPageData['theme']): string | null {
+    const font = findBlogFont(theme?.fontFamily);
+    return font ? font.stack : null;
+}
+
+/** The stylesheet <link>s for the theme's font, or '' when it needs none. */
+function themeFontLinks(theme: BlogPageData['theme']): string {
+    const font = findBlogFont(theme?.fontFamily);
+    const url = googleFontUrl(font);
+    if (!url) return '';
+    return GOOGLE_FONT_ORIGINS
+        .map((o) => `<link rel="preconnect" href="${escHtml(o)}"${o.includes('gstatic') ? ' crossorigin' : ''}>`)
+        .concat(`<link rel="stylesheet" href="${escHtml(url)}">`)
+        .join('\n    ');
 }
 
 // A self-contained, dependency-free HTML document. Server-rendered so crawlers (which run no JS) and
@@ -162,6 +193,8 @@ export interface BlogPageData extends BlogHeadData {
 // hash-routed Shadow-DOM widget cannot give them.
 export function renderBlogPage(d: BlogPageData): string {
     const head = buildHeadTags(d);
+    const fontLinks = themeFontLinks(d.theme);
+    const fontStack = themeFontStack(d.theme);
     const dateLine = d.publishedAt
         ? `<time datetime="${escHtml(d.publishedAt)}">${escHtml(new Date(d.publishedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }))}</time>`
         : '';
@@ -182,10 +215,11 @@ export function renderBlogPage(d: BlogPageData): string {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     ${head}
+    ${fontLinks}
     <style>
       :root { color-scheme: light dark; }
       * { box-sizing: border-box; }
-      body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.65; color: #1a1a1a; background: #fff; }
+      body { margin: 0; font-family: ${fontStack || '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'}; line-height: 1.65; color: #1a1a1a; background: #fff; }
       main { max-width: 720px; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
       h1 { font-size: 2.25rem; line-height: 1.2; margin: 0 0 .5rem; letter-spacing: -.02em; }
       .meta { color: #666; font-size: .95rem; margin: 0 0 2rem; display: flex; gap: 1rem; flex-wrap: wrap; }

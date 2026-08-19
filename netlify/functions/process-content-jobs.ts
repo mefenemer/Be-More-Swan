@@ -1,6 +1,11 @@
 // netlify/functions/process-content-jobs.ts
 // US-SMM-3.1.1 + US-SMM-3.4.1: Drains the content_generation_jobs queue every minute.
-// Uses FOR UPDATE SKIP LOCKED to safely handle concurrent cron ticks.
+//
+// Concurrency safety comes from the STATUS-GUARDED CLAIM in processJob (`AND status = 'queued'`),
+// not from the SELECT's FOR UPDATE SKIP LOCKED. This comment used to credit the latter, which was
+// wrong and cost real duplicate content: the SELECT is a standalone statement, so its row locks are
+// released at autocommit before any work starts. Never remove the WHERE clause on the strength of
+// SKIP LOCKED being present.
 
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
@@ -159,9 +164,25 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
     admin_id: number | null; target_publish_date: string | null; crosspost_group_id: string | null;
     platforms: string[] | null; revised_from_post_id: number | null;
 }, now: Date) {
-    await db.execute(
-        `UPDATE content_generation_jobs SET status = 'processing', attempt = attempt + 1, updated_at = now() WHERE id = ${job.id}`
+    // Claim the job ATOMICALLY. `AND status = 'queued'` is the whole guard: the SELECT above uses
+    // FOR UPDATE SKIP LOCKED, but it runs as a standalone statement, so postgres-js autocommits and
+    // the row locks are released the moment it returns — long before any job is processed. Two
+    // overlapping invocations therefore select the SAME queued rows. Until this WHERE clause existed
+    // both of them wrote 'processing' and both generated content: measured on prod 2026-08-18, one
+    // Blog Writer's five jobs produced NINE posts, four slots double-booked, every one still
+    // reporting attempt = 1 because both drains read attempt 0 and both wrote 1.
+    // Same claim-then-verify shape as publish-blog-posts.ts.
+    const claimed = await db.execute(
+        `UPDATE content_generation_jobs SET status = 'processing', attempt = attempt + 1, updated_at = now()
+         WHERE id = ${job.id} AND status = 'queued'
+         RETURNING attempt`
     );
+    // Lost the race — the other invocation owns this job. Returning is correct rather than retrying:
+    // the winner is mid-flight and will complete, fail or be reclaimed by the stuck-job sweep above.
+    if (!claimed.length) return;
+    // Read the attempt back from the DB rather than trusting the value SELECTed earlier: a reclaimed
+    // job may have been attempted since, and the failure path below decides give-up-or-retry on it.
+    const claimedAttempt = Number((claimed[0] as any).attempt);
 
     // "Create Post" → Suggest an idea: when a scheduled/conversion job carries no context of its
     // own, fold in the oldest pending user idea for this assistant (FIFO, consumed once). Best-effort
@@ -1049,7 +1070,10 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         }
 
     } catch (err) {
-        const attempt = job.attempt + 1;
+        // The value the CLAIM wrote, not job.attempt + 1 recomputed from the earlier SELECT — those
+        // disagree for any job that was reclaimed from 'processing', and this number decides whether
+        // the job retries or is given up on.
+        const attempt = claimedAttempt;
         const errorMessage = err instanceof Error ? err.message : String(err);
         console.error(`[process-content-jobs] job ${job.job_id} attempt ${attempt} failed:`, errorMessage);
 
