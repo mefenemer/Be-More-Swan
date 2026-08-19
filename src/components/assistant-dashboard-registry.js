@@ -176,14 +176,33 @@
           desc: 'How often your posts have appeared in Google search results, from Search Console.',
         },
         {
-          label: 'Hours Reclaimed',
-          title: 'Time Saved',
-          desc: 'Research, drafting and formatting hours this assistant has taken off your plate.',
+          // Was "Hours Reclaimed / Time Saved". It moved out, it did not disappear: the hero's
+          // Time Saved / Money Saved strip (roiSource: 'blog' below) is now the ONE place that
+          // figure appears, and leaving a copy here meant the same page printed two different
+          // numbers for the same thing over two different windows.
+          //
+          // Clicks are the honest partner to Search Impressions above. That card says Google SHOWED
+          // the post; this one says somebody actually came — which is the only one of the two that
+          // tells the author whether their titles and meta descriptions are doing any work.
+          label: 'Organic Clicks',
+          title: 'Search Visits',
+          desc: 'Visitors who clicked through from Google search results to read your posts.',
         },
         {
-          label: 'Needs You',
-          title: 'Awaiting Approval',
-          desc: 'Drafts sitting in review, waiting for your sign-off before they schedule.',
+          // Was "Needs You / Awaiting Approval". That count still has a home — the Blogs tab badge
+          // carries it, and it is a live number better read where the drafts actually are.
+          //
+          // This card is the quality counterweight to the three above it, and the one that matters
+          // most for an AI writer: cards 1-3 can all look healthy while the content is thin. High
+          // impressions with a short read time is precisely that failure, and nothing else on this
+          // page would catch it.
+          //
+          // ⚠️ Measured on the widget embed only — a customer who republishes to their own CMS has
+          // readers we never see. The description says "measured reads" for that reason; do not
+          // reword it to imply total audience.
+          label: 'Reader Engagement',
+          title: 'Average Read Time',
+          desc: 'How long readers actually spend with your posts, averaged over measured reads on your embedded blog.',
         },
       ],
       // Routes _loadAssistantMetrics to _loadBlogMetrics / get-blog-performance. Without it the

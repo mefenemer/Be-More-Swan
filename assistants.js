@@ -7401,6 +7401,16 @@ async function _loadBlogMetrics(assistantId) {
         );
     };
 
+    // "2m 40s" / "45s". Minutes-and-seconds rather than a decimal: nobody reads "2.7 minutes" as
+    // a duration, and the raw seconds figure is the one the beacon actually measured.
+    const _fmtReadTime = (seconds) => {
+        const total = Math.max(0, Math.round(Number(seconds) || 0));
+        if (total < 60) return `${total}s`;
+        const mins = Math.floor(total / 60);
+        const rem = total % 60;
+        return rem ? `${mins}m ${rem}s` : `${mins}m`;
+    };
+
     try {
         const res = await fetch(`/.netlify/functions/get-blog-performance?id=${assistantId}`);
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
@@ -7430,20 +7440,29 @@ async function _loadBlogMetrics(assistantId) {
         if (trendEl('reach')) trendEl('reach').textContent = t.searchImpressions || '—';
         if (hasSearch && m.searchImpressions) setDot('reach', 'live');
 
-        // Card 3 — Hours Reclaimed, from roi-activity.ts (the single module all four ROI surfaces
-        // count through). One decimal: "12.5 hrs" is a claim we can stand behind, "12.4837" isn't.
-        valEl('ctr').textContent = m.hoursSaved ? `${Number(m.hoursSaved).toFixed(1)} hrs` : '—';
-        _setKpiCard('ctr', { empty: !m.hoursSaved });
-        if (trendEl('ctr')) trendEl('ctr').textContent = t.hoursSaved || '—';
-        if (m.hoursSaved) setDot('ctr', 'up');
+        // Card 3 — Organic Clicks. Same null-vs-zero contract as card 2 above: null means Search
+        // Console is not connected ("we cannot see this"), 0 means we asked and nobody clicked
+        // through. Rendering the first as "0" would blame the author for a missing integration.
+        // (Time Saved used to sit here; it now lives once, in the hero ROI strip.)
+        const hasClicks = m.searchClicks !== null && m.searchClicks !== undefined;
+        valEl('ctr').textContent = hasClicks ? Number(m.searchClicks).toLocaleString() : 'Not tracked';
+        _setKpiCard('ctr', { empty: !hasClicks || !m.searchClicks });
+        if (trendEl('ctr')) trendEl('ctr').textContent = t.searchClicks || '—';
+        if (hasClicks && m.searchClicks) setDot('ctr', 'live');
 
-        // Card 4 — Awaiting Approval. A LIVE count, not a windowed one, and the only card here
-        // where a high number is bad — it is work sitting on the user, so it tones 'down'.
+        // Card 4 — Average Read Time, from the widget's anonymous engagement beacon. null means
+        // nothing has been measured (the blog is not embedded anywhere, or nobody has opened a
+        // post yet) — which is NOT the same as a zero-second read, and must not render as "0s".
         if (valEl('value')) {
-            valEl('value').textContent = String(m.awaitingApproval ?? 0);
-            _setKpiCard('value', { empty: !m.awaitingApproval, tone: m.awaitingApproval ? 'down' : 'brand' });
-            if (trendEl('value')) trendEl('value').textContent = t.awaitingApproval || '—';
-            setDot('value', m.awaitingApproval ? 'down' : 'none');
+            const secs = m.engagementSeconds;
+            const hasRead = secs !== null && secs !== undefined;
+            valEl('value').textContent = hasRead ? _fmtReadTime(secs) : 'Not tracked';
+            _setKpiCard('value', { empty: !hasRead });
+            if (trendEl('value')) trendEl('value').textContent = t.engagementSeconds || '—';
+            // Two minutes is roughly the point where a reader has genuinely engaged with long-form
+            // rather than bounced off the intro; below it the dot stays neutral rather than green,
+            // so the card cannot congratulate a blog nobody is finishing.
+            if (hasRead) setDot('value', secs >= 120 ? 'up' : 'none');
         }
     } catch (err) {
         console.error('[blog-metrics] load failed:', err);
@@ -9334,7 +9353,10 @@ window._reorderMediaSource = function (src, delta) {
 // AC3.1 — premium AI recommendations for an off-track goal.
 window._getAiRecommendations = async function (goalId) {
     if (!_goalEntitlements.aiRecommendations) {
-        return _openUpgrade('AI Recommendations are available on the Saver and Employee plans.');
+        // Names the plans the gate ACTUALLY opens on: GOAL_AI_TIERS.recommendations is
+        // ['buster','employee','enterprise']; `saver` (The Workflow Saver, £29) is the entry tier
+        // that is locked OUT. See the tier-keys-read-backwards warning in goal-metrics.ts.
+        return _openUpgrade('AI Recommendations are available on The Busywork Buster plan and above.');
     }
     const box = document.getElementById('review-recommendations');
     if (box) { box.classList.remove('hidden'); box.innerHTML = '<p class="text-sm text-gray-400 mt-3">Analysing your goal…</p>'; }
@@ -9409,7 +9431,10 @@ window._progressSelectedRecs = async function () {
 // AC3.2 — goal-aware field rewrite (magic wand).
 window._magicWand = async function (field, inputId, btn) {
     if (!_goalEntitlements.magicWand) {
-        return _openUpgrade('The AI Magic Wand is available on the Saver and Employee plans.');
+        // Names the plans the gate ACTUALLY opens on: GOAL_AI_TIERS.magicWand is
+        // ['buster','employee','enterprise']; `saver` (The Workflow Saver, £29) is the entry tier
+        // that is locked OUT. See the tier-keys-read-backwards warning in goal-metrics.ts.
+        return _openUpgrade('The AI Magic Wand is available on The Busywork Buster plan and above.');
     }
     const input = document.getElementById(inputId);
     if (!input) return;
@@ -9512,7 +9537,10 @@ const _STRATEGY_FIELD_INPUTS = { tone_of_voice: 'edit_tone', target_audience: 'e
 
 window._openStrategyFix = async function (goalId) {
     if (!_goalEntitlements.aiRecommendations) {
-        return _openUpgrade('One-Click Fix is available on the Saver and Employee plans.');
+        // Gated on aiRecommendations: GOAL_AI_TIERS.recommendations is ['buster','employee',
+        // 'enterprise']; `saver` (The Workflow Saver, £29) is the entry tier that is locked OUT.
+        // See the tier-keys-read-backwards warning in goal-metrics.ts.
+        return _openUpgrade('One-Click Fix is available on The Busywork Buster plan and above.');
     }
     const modal = document.getElementById('modal-strategy-fix');
     const body = document.getElementById('strategy-fix-body');
@@ -9631,7 +9659,10 @@ function _applyStrategyFix(changes) {
 // AC3.3.1 — toggle Autonomous Goal Seeking (premium-gated).
 window._toggleAutonomousGoals = async function () {
     if (!_goalEntitlements.autonomous && !_autonomousGoalSeeking) {
-        return _openUpgrade('Autonomous Goal Seeking is available on the Saver and Employee plans.');
+        // Names the plans the gate ACTUALLY opens on: GOAL_AI_TIERS.autonomous is
+        // ['buster','employee','enterprise']; `saver` (The Workflow Saver, £29) is the entry tier
+        // that is locked OUT. See the tier-keys-read-backwards warning in goal-metrics.ts.
+        return _openUpgrade('Autonomous Goal Seeking is available on The Busywork Buster plan and above.');
     }
     const next = !_autonomousGoalSeeking;
     try {

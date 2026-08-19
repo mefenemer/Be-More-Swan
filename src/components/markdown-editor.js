@@ -297,6 +297,44 @@
     return hit ? next : null;
   }
 
+  // Read the Nth column's body out of a `::::columns` raw string; null when there is no such
+  // column. An untouched column reads as EMPTY, never as the seed: the seed is an instruction to
+  // the author, and handing it back as editable text is how "Drop text or an image here." ends up
+  // published inside a post.
+  function columnBodyRaw(raw, colIndex) {
+    let i = 0;
+    let found = null;
+    String(raw).replace(COLUMN_BODY_RE, function (m, open, body) {
+      if (i++ === colIndex) found = isColumnSeed(body) ? '' : body.trim();
+      return m;
+    });
+    return found;
+  }
+
+  // REPLACE the Nth column's body (spliceColumnRaw appends to it). Returns the new raw, or null if
+  // there is no such column — never a half-edited string.
+  //
+  // Blank re-seeds the column rather than emptying it: an empty `.bms-column` has no height, so a
+  // column cleared to nothing would vanish out of the grid with nothing left to click back into.
+  // Fence lines are stripped from the incoming text — an author typing ":::" into a column would
+  // otherwise close the container early and take the rest of the layout with it.
+  function replaceColumnRaw(raw, colIndex, md) {
+    const body = String(md == null ? '' : md)
+      .replace(/\r\n/g, '\n')
+      .split('\n')
+      .filter((line) => !/^\s*:{3,}/.test(line))
+      .join('\n')
+      .trim();
+    let i = 0;
+    let hit = false;
+    const next = String(raw).replace(COLUMN_BODY_RE, function (m, open, _body, close) {
+      if (i++ !== colIndex) return m;
+      hit = true;
+      return open + (body || COLUMN_SEED) + close;
+    });
+    return hit ? next : null;
+  }
+
   // Split Markdown into blocks on blank lines, but keep fenced code blocks — and column
   // containers — intact.
   //
@@ -449,6 +487,11 @@
       .bmsme-block .bms-columns { display:grid; gap:16px; margin:12px 0;
         grid-template-columns:repeat(2,minmax(0,1fr)); }
       .bmsme-block .bms-columns[data-cols="3"] { grid-template-columns:repeat(3,minmax(0,1fr)); }
+      /* A column opened for typing. The ring belongs to the COLUMN, not to the whole row, or the
+         author cannot see which of the two or three they are actually typing into. min-height
+         keeps the grid from collapsing while the textarea is empty. */
+      .bmsme-block .bms-column.bmsme-editing { border-radius:8px; padding:6px; min-height:2.6em; }
+      .bmsme-block .bms-column .bmsme-input::placeholder { color:#9ca3af; }
       @media (max-width:640px) { .bmsme-block .bms-columns,
         .bmsme-block .bms-columns[data-cols="3"] { grid-template-columns:minmax(0,1fr); } }
       /* Formatting bar — light, in normal flow at the top of the draft, so it is visible before
@@ -631,7 +674,10 @@
     // yet, or has clicked away since, so B / I / Link always do something visible.
     function ensureEditing() {
       if (editing) return editing;
-      if (formatTargetId) {
+      // Never fall back onto a media or columns block: enterEdit would open its RAW directive as
+      // the thing to type into. A new paragraph at the end is the honest place for the caret.
+      const target = formatTargetId ? blocks.find((x) => x.id === formatTargetId) : null;
+      if (target && !isMediaBlock(target.raw) && !isColumnsBlock(target.raw)) {
         const el = root.querySelector('.bmsme-block[data-block-id="' + formatTargetId + '"]');
         if (el) {
           enterEdit(el, formatTargetId);
@@ -648,14 +694,17 @@
       if (!target) return;
       const b = blocks.find((x) => x.id === target.blockId);
       // A media/columns block's raw is a directive, not prose — marking it up would corrupt it.
-      if (!b || isMediaBlock(b.raw) || isColumnsBlock(b.raw)) return;
+      // A COLUMN edit is the exception: its textarea holds one column's prose, and writeEditing
+      // splices the result back inside the fence, so B/I/Link work there like anywhere else.
+      if (!b || isMediaBlock(b.raw)) return;
+      if (isColumnsBlock(b.raw) && target.colIndex == null) return;
       const ta = target.textarea;
       const out = transform(ta.value, ta.selectionStart, ta.selectionEnd);
       ta.value = out.text;
       ta.setSelectionRange(out.selStart, out.selEnd);
       // Assigning .value fires NO `input` event, so mirror what that handler does by hand. Without
       // this the block keeps its pre-format raw and the whole edit is discarded on blur.
-      b.raw = ta.value;
+      writeEditing(b, ta.value);
       autosize(ta);
       ta.focus();
       scheduleSave();
@@ -687,11 +736,15 @@
     // Paragraph until the author picks something, and picking is what rewrites it — never this.
     function syncFormatBar() {
       const active = editing ? blocks.find((x) => x.id === editing.blockId) : null;
-      const locked = !!(active && (isMediaBlock(active.raw) || isColumnsBlock(active.raw)));
+      // Typing inside a column is ordinary prose, so the marks stay live there. The block TYPE
+      // select does not: setBlockType would rewrite the fence rather than the paragraph.
+      const inColumn = !!(editing && editing.colIndex != null);
+      const locked = !!(active && (isMediaBlock(active.raw) || (isColumnsBlock(active.raw) && !inColumn)));
       formatBar.classList.toggle('bmsme-fb-locked', locked);
-      typeSel.disabled = locked;
+      typeSel.disabled = locked || inColumn;
       fbButtons.forEach((btn) => { btn.disabled = locked; });
-      if (active && !locked) formatTargetId = active.id;
+      // formatTargetId is what ensureEditing re-opens later — a columns block must never become it.
+      if (active && !locked && !inColumn) formatTargetId = active.id;
 
       const shown = (active && !locked) ? active : blocks.find((x) => x.id === formatTargetId);
       const type = (shown && !isMediaBlock(shown.raw) && !isColumnsBlock(shown.raw))
@@ -749,13 +802,24 @@
       }
     }
 
+    // A repaint on the next tick, coalesced. See commitEdit's deferRender.
+    let refreshTimer = null;
+    function refreshSoon() {
+      if (refreshTimer != null) return;
+      refreshTimer = setTimeout(() => { refreshTimer = null; renderAll(); }, 0);
+    }
+
     function renderAll() {
+      // A direct render supersedes a pending one — otherwise the deferred pass fires a tick later
+      // and repaints over whatever the caller has just done.
+      if (refreshTimer != null) { clearTimeout(refreshTimer); refreshTimer = null; }
       // A re-render mid-edit (setAssetUrls, an image insert) must not orphan the open textarea:
       // leaving `editing` pointing at a detached node wedges enterEdit's same-block guard shut and
       // the draft silently stops accepting clicks. Carry the edit across the render instead.
       const open = editing ? {
         id: editing.blockId, value: editing.textarea.value,
         start: editing.textarea.selectionStart, end: editing.textarea.selectionEnd,
+        colIndex: editing.colIndex,
       } : null;
       editing = null;
 
@@ -772,7 +836,8 @@
       if (open && blocks.some((b) => b.id === open.id)) {
         const el = root.querySelector('.bmsme-block[data-block-id="' + open.id + '"]');
         if (el) {
-          enterEdit(el, open.id);
+          if (open.colIndex != null) enterColumnEdit(open.id, open.colIndex);
+          else enterEdit(el, open.id);
           if (editing) {
             editing.textarea.value = open.value;
             editing.textarea.setSelectionRange(open.start, open.end);
@@ -850,12 +915,50 @@
     // the block re-renders on blur.
     function autosize(ta) { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; }
 
-    function commitEdit() {
+    // The ONE place an open textarea's text goes back into the model. A whole-block edit owns its
+    // block's raw outright; a column edit owns only one column's body, so it has to be spliced back
+    // inside the fence — writing the textarea straight to b.raw there would replace the entire
+    // layout with the prose of a single column.
+    function writeEditing(b, value) {
+      if (editing && editing.colIndex != null) {
+        const next = replaceColumnRaw(b.raw, editing.colIndex, value);
+        if (next != null) b.raw = next;
+        return;
+      }
+      b.raw = value;
+    }
+
+    /**
+     * Close the open textarea and write it back.
+     *
+     * `deferRender` is for the BLUR path, and it is not cosmetic. Blur fires between mousedown and
+     * mouseup, so repainting there removes the very node the author is clicking on — and a click
+     * whose mousedown target has been detached is never dispatched at all. That is why moving
+     * straight from one paragraph into another took two clicks: the repaint ate the first one. It
+     * bites hardest on a column layout, where both columns live in the SAME block, so every repaint
+     * detaches the column being aimed at.
+     *
+     * The model is always written synchronously — only the DOM refresh waits a tick, by which time
+     * the click has been handled and renderAll can carry whatever it opened across the refresh.
+     */
+    function commitEdit(deferRender) {
       if (!editing) return;
-      const { blockId, textarea } = editing;
+      const { blockId, textarea, colIndex } = editing;
       editing = null;                       // clear first: blur handlers must not re-enter
+      const repaint = deferRender === true ? refreshSoon : renderAll;
       const b = blocks.find((x) => x.id === blockId);
-      if (!b) { renderAll(); return; }
+      if (!b) { repaint(); return; }
+      // A column edit never re-splits on blank lines: those are paragraphs WITHIN the column, and
+      // splitting them into top-level blocks is exactly what would strand the fence and destroy
+      // the layout. The container is left byte-for-byte as it was.
+      if (colIndex != null) {
+        const next = replaceColumnRaw(b.raw, colIndex, textarea.value);
+        if (next != null) b.raw = next;
+        repaint();
+        scheduleSave();
+        syncFormatBar();
+        return;
+      }
       b.raw = textarea.value.trim();
 
       // A blank line means the author started a new paragraph — re-split so each becomes its own
@@ -867,7 +970,7 @@
       } else if (!parts.length && blocks.length > 1) {
         blocks.splice(at, 1);               // emptied — drop it, unless it's the only block left
       }
-      renderAll();
+      repaint();
       scheduleSave();
       syncFormatBar();
     }
@@ -889,16 +992,66 @@
       el.innerHTML = '';
       el.classList.add('bmsme-editing');
       el.appendChild(ta);
-      editing = { blockId, textarea: ta, prevRaw: b.raw };
+      editing = { blockId, textarea: ta, prevRaw: b.raw, colIndex: null };
+      wireEditingTextarea(ta, b);
+    }
 
+    /**
+     * Open ONE column of a layout for typing.
+     *
+     * The block-level editor cannot be used here: a columns block's raw IS the container, so its
+     * textarea would show the author the `::::columns{cols=2}` / `:::column` scaffolding they never
+     * wrote — the "clicking the layout fills it with directive text" complaint. Editing per column
+     * keeps the fence out of sight and out of reach, and the seed prose opens as an empty field
+     * (with the seed as its placeholder) so it is never something to select and delete by hand.
+     */
+    function enterColumnEdit(blockId, colIndex) {
+      if (editing && editing.blockId === blockId && editing.colIndex === colIndex) return;
+      commitEdit();
+      const b = blocks.find((x) => x.id === blockId);
+      if (!b) return;
+      // Re-resolve after commitEdit: it may have re-rendered every block.
+      const el = root.querySelector('.bmsme-block[data-block-id="' + blockId + '"]');
+      if (!el) return;
+      const colEl = el.querySelectorAll('.bms-column')[colIndex];
+      const body = columnBodyRaw(b.raw, colIndex);
+      // body === null means the raw and the rendered grid disagree about how many columns exist.
+      // Opening nothing beats opening a textarea that would splice back into the wrong column.
+      if (!colEl || body == null) return;
+      hideChrome();
+
+      const ta = document.createElement('textarea');
+      ta.className = 'bmsme-input';
+      ta.value = body;
+      ta.placeholder = COLUMN_SEED;
+      ta.setAttribute('aria-label', 'Edit column ' + (colIndex + 1));
+      colEl.innerHTML = '';
+      colEl.classList.add('bmsme-editing');
+      colEl.appendChild(ta);
+      // The block node keeps its drag handle and its remove control — only the column swaps out.
+      editing = { blockId, textarea: ta, prevRaw: b.raw, colIndex };
+      wireEditingTextarea(ta, b);
+    }
+
+    // Everything an open textarea needs, shared by the block editor and the column editor so the
+    // two can never drift on what Escape restores or which shortcuts fire.
+    function wireEditingTextarea(ta, b) {
       ta.addEventListener('input', () => {
         autosize(ta);
-        b.raw = ta.value;   // keep getMarkdown() live so onChange (word count) tracks typing
+        writeEditing(b, ta.value);   // keep getMarkdown() live so onChange (word count) tracks typing
         scheduleSave();
       });
-      ta.addEventListener('blur', commitEdit);
+      ta.addEventListener('blur', () => commitEdit(true));
       ta.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') { e.preventDefault(); b.raw = editing ? editing.prevRaw : b.raw; ta.value = b.raw; ta.blur(); }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          // prevRaw is always the whole BLOCK's raw, so restoring it also restores the fence; the
+          // textarea then has to be re-filled from the column it is actually showing.
+          const col = editing ? editing.colIndex : null;
+          if (editing) b.raw = editing.prevRaw;
+          ta.value = col != null ? (columnBodyRaw(b.raw, col) || '') : b.raw;
+          ta.blur();
+        }
         else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); ta.blur(); }
         // The shortcuts every writer already has in their fingers. Alt is excluded so this can't
         // swallow an OS-level combination the browser owns.
@@ -947,7 +1100,17 @@
       const blockEl = e.target.closest && e.target.closest('.bmsme-block');
       if (blockEl) {
         if (blockEl.querySelector('.bmsme-diff')) return;   // a rewrite is awaiting Accept/Reject
-        enterEdit(blockEl, blockEl.getAttribute('data-block-id'));
+        const blockId = blockEl.getAttribute('data-block-id');
+        const b = blocks.find((x) => x.id === blockId);
+        // A column layout is opened one COLUMN at a time (see enterColumnEdit). A click on the
+        // grid's own padding — between the columns, or the strip above and below them — opens
+        // nothing at all: the only thing a block-level editor could put there is the raw fence.
+        if (b && isColumnsBlock(b.raw)) {
+          const col = columnTargetAt(e.target, true);
+          if (col && col.blockId === blockId && col.colIndex >= 0) enterColumnEdit(blockId, col.colIndex);
+          return;
+        }
+        enterEdit(blockEl, blockId);
         return;
       }
       if (e.target === root) appendBlockAndEdit();           // clicking the empty space below
@@ -1211,9 +1374,20 @@
 
     // Is the pointer inside a rendered column? If so the drop targets that column rather than a
     // gap between top-level blocks.
-    function columnTargetAt(node) {
+    /**
+     * Which column, if any, a node sits in.
+     *
+     * `allowDetached` is for the CLICK path. Clicking out of an open textarea fires its blur first,
+     * and blur commits and re-renders — so by the time the click handler runs, the node the author
+     * aimed at has already been replaced and is no longer in the document. The id and the column's
+     * position within its block survive on that detached node, which is all the click needs (it
+     * re-resolves both against the live DOM). The DROP path must keep the containment check: it
+     * uses `el` for the hint and the pending pill, and those have to be on screen.
+     */
+    function columnTargetAt(node, allowDetached) {
       const colEl = node && node.closest ? node.closest('.bms-column') : null;
-      if (!colEl || !root.contains(colEl)) return null;
+      if (!colEl) return null;
+      if (!allowDetached && !root.contains(colEl)) return null;
       const blockEl = colEl.closest('.bmsme-block');
       if (!blockEl) return null;
       const cols = Array.from(blockEl.querySelectorAll('.bms-column'));
@@ -1447,6 +1621,8 @@
         const pending = saveTimer != null;
         destroyed = true;
         if (saveTimer) clearTimeout(saveTimer);
+        // A blur-deferred repaint can still be queued; let it fire and it repaints a torn-down root.
+        if (refreshTimer != null) { clearTimeout(refreshTimer); refreshTimer = null; }
         if (pending && blogPostId) {
           const body = JSON.stringify({ id: blogPostId, bodyMarkdown: getMarkdown() });
           if (navigator.sendBeacon) navigator.sendBeacon(SAVE_URL, new Blob([body], { type: 'application/json' }));
@@ -1476,6 +1652,7 @@
   if (typeof module === 'object' && module.exports) {
     module.exports = {
       splitBlocks, isMediaBlock, isColumnsBlock, mediaRaw, spliceColumnRaw, MEDIA_MIME,
+      columnBodyRaw, replaceColumnRaw, COLUMN_SEED,
       toggleInlineMark, insertLink, detectBlockType, setBlockType, INLINE_MARKS,
     };
   }

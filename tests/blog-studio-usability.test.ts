@@ -20,6 +20,10 @@
 //     carried draggable=true — so there was no way to move a paragraph into a column at all.
 //  9/10. "AI draft", "Ask Swan to improve", "Stock", "AI" named nobody, though the work is done by
 //     an assistant the user hired and named.
+// 11. The Widget panel was the last thing in the Studio behind a "Save settings" button, in a modal
+//     where the body, the SEO fields and the destinations all autosave. Nobody presses a button
+//     they have been trained not to need, so accent, font, badge and the two canonical-URL fields
+//     were being typed and thrown away on close.
 //
 // Pure source scans plus a real call into the editor's pure helpers. No DB, no network, no DOM.
 // Run:  npx tsx tests/blog-studio-usability.test.ts
@@ -46,6 +50,7 @@ const modal = read('../src/components/blog-studio-modal.js');
 const editor = read('../src/components/markdown-editor.js');
 const draft = read('../netlify/functions/save-blog-draft.ts');
 const syndicate = read('../src/utils/blog-destinations/syndicate.ts');
+const widgetFn = read('../netlify/functions/save-widget-config.ts');
 
 // The STYLES / MARKUP constants are string-concatenated JS, so a scan of the file text is a scan of
 // the rendered CSS and HTML. Slice them apart so a match in one can't be read as a match in both.
@@ -237,6 +242,113 @@ check('a Blog Writer is resolved when the caller passed no assistantId', () => {
     assert.ok(fn.includes('resolveBlogWriter()'), 'no fallback lookup, so the buttons stay anonymous');
     assert.ok(/state\.assistantName === ''/.test(fn),
         'a workspace with no Blog Writer refetches on every open — "" must record the negative result');
+});
+
+console.log('\n(11) Widget settings autosave, and say so\n');
+
+// One slice per concern, so a failure names which half moved.
+const widgetSave = modal.slice(landmark(modal, 'function saveWidgetSettings()'),
+                               landmark(modal, 'function widgetChanged()'));
+const widgetWiring = modal.slice(landmark(modal, 'function widgetChanged()'),
+                                 landmark(modal, '// ── SEO metadata overrides'));
+
+check('the Save settings button is gone, not merely hidden', () => {
+    assert.ok(!codeOnly(modal).includes('bs-save-theme'), 'the Save settings button is still in the source');
+    assert.ok(!/>Save settings</.test(codeOnly(markup)), '"Save settings" is still on screen');
+    // A panel that saves silently and shows nothing reads as a panel that has stopped saving.
+    assert.ok(markup.includes('id="bs-widget-status"'), 'nothing tells the author the panel is saving');
+});
+
+check('every control in the panel schedules a save', () => {
+    [['bs-accent', 'input'], ['bs-font', 'change'], ['bs-badge', 'change'],
+     ['bs-site-base', 'input'], ['bs-site-path', 'input'],
+    ].forEach(([id, ev]) => {
+        assert.ok(new RegExp(`el\\('${id}'\\)\\.addEventListener\\('${ev}', widgetChanged\\)`).test(widgetWiring),
+            `${id} still writes nowhere on ${ev}`);
+    });
+    // <input type="color"> fires `input` continuously while the swatch is dragged — without the
+    // debounce that is a request per frame.
+    assert.ok(/setTimeout\(saveWidgetSettings, \d{3}\)/.test(widgetWiring), 'the save is not debounced');
+});
+
+check('a save is armed only once the panel shows the org’s OWN settings', () => {
+    // The markup default for bs-accent is Be More Swan pink and the font select starts empty; a
+    // save fired before applyWidget paints would store those over a real brand.
+    const apply = modal.slice(landmark(modal, 'function applyWidget('), landmark(modal, '// ── SEO metadata panel'));
+    assert.ok(/state\.widgetReady = true/.test(apply), 'nothing ever arms the autosave');
+    const clear = modal.slice(landmark(modal, 'function clearWorkspaceState()'), landmark(modal, '// ── Public API'));
+    assert.ok(/state\.widgetReady = false/.test(clear),
+        'the modal is reused between opens, so a stale arm survives into the next post');
+    // Both ends: the debounce must not be scheduled, AND a timer already in flight must not fire.
+    assert.ok(/if \(!state\.widgetReady\) return;/.test(widgetWiring), 'an edit during the load still schedules a save');
+    assert.ok(/if \(!state\.widgetReady\) return Promise\.resolve\(\)/.test(widgetSave),
+        'a debounce started before the reload still fires into it');
+});
+
+check('a half-typed URL is held back, and says so instead of failing silently', () => {
+    const guards = modal.slice(landmark(modal, 'function siteBaseState()'), landmark(modal, 'function saveWidgetSettings()'));
+    // The hold-back mirrors save-widget-config's own validation — sending "https:/" earns a 400.
+    assert.ok(/\^https\?:\\\/\\\/\[\^\\s\/\]\+/.test(guards), 'the base-URL guard no longer matches the server rule');
+    assert.ok(/v\.charAt\(0\) === '\/' && v\.indexOf\('\{slug\}'\) >= 0/.test(guards),
+        'the path guard no longer matches the server rule');
+    // '' is a decision (clear the field), not an unfinished value — it must still be sent.
+    assert.ok((guards.match(/return \{ send: true, value: '' \}/g) || []).length === 2,
+        'clearing a site field no longer clears it server-side');
+    assert.ok(/if \(base\.send\) payload\.siteBaseUrl/.test(widgetSave), 'a valid base URL is not sent');
+    assert.ok(/if \(path\.send\) payload\.sitePostPath/.test(widgetSave), 'a valid path is not sent');
+    // Silence would be the worst of both: typed, abandoned, never stored, nothing admitting it.
+    ['bs-site-base-hint', 'bs-site-path-hint'].forEach((id) => {
+        assert.ok(markup.includes('id="' + id + '"'), `${id} is missing, so the hold-back is invisible`);
+    });
+    assert.ok(/toggleHint\('bs-site-base-hint', !base\.send\)/.test(widgetSave), 'the base hint never appears');
+    assert.ok(/toggleHint\('bs-site-path-hint', !path\.send\)/.test(widgetSave), 'the path hint never appears');
+    assert.ok(/Saved \\u2014 one field is still waiting/.test(widgetSave),
+        'a partial save reports plain "Saved", which is a lie about the held-back field');
+});
+
+check('an untouched font survives a change to the accent', () => {
+    // ⚠️ The trap this guards. `theme` is ONE json column and the update branch does
+    // `updates.theme = checked.theme` — a REPLACE, not a merge. So omitting fontFamily does not
+    // preserve the stored face, it deletes it. Assert the server really is wholesale, because the
+    // day it starts merging, the client-side merge base below is dead weight and should go.
+    const upd = widgetFn.slice(landmark(widgetFn, "if (body.action === 'update')"),
+                               landmark(widgetFn, 'if (typeof body.name'));
+    assert.ok(/updates\.theme = checked\.theme;/.test(upd),
+        'save-widget-config no longer replaces the theme wholesale — re-check the client merge base');
+    // Hence: re-send what the panel is not changing. The picker reads '' whenever the stored stack
+    // has no matching <option> (catalogue not loaded, or a family retired from blog-fonts.ts).
+    assert.ok(/var stack = el\('bs-font'\)\.value \|\| stored\.fontFamily \|\| '';/.test(widgetSave),
+        'an empty picker sends no fontFamily, which wipes the stored one');
+    const apply = modal.slice(landmark(modal, 'function applyWidget('), landmark(modal, '// ── SEO metadata panel'));
+    assert.ok(/state\.widgetTheme = theme;/.test(apply), 'nothing records what was last stored');
+    assert.ok(/state\.widgetTheme = res\.body\.config\.theme/.test(widgetSave),
+        'the merge base goes stale after the first save');
+    // Still guarded at the bottom: '' really does mean "never chosen", and the server reads that
+    // as a reset to DEFAULT_FONT_STACK — recording a choice nobody made.
+    assert.ok(/if \(stack\) payload\.theme\.fontFamily = stack;/.test(widgetSave),
+        'an empty stack is sent as a deliberate reset');
+    assert.ok(/theme\.fontFamily = DEFAULT_FONT_STACK/.test(widgetFn), 'the reset-on-empty rule moved — re-check the guard');
+});
+
+check('the response never repaints the inputs', () => {
+    // applyWidget would yank a half-typed URL out from under the person still typing it.
+    assert.ok(!/applyWidget\(/.test(codeOnly(widgetSave)), 'the save handler repaints the panel from the server');
+});
+
+check('nothing is lost to the debounce window', () => {
+    // Leaving a field is the author saying they are done with it.
+    ['bs-site-base', 'bs-site-path'].forEach((id) => {
+        assert.ok(new RegExp(`el\\('${id}'\\)\\.addEventListener\\('blur'`).test(widgetWiring),
+            `${id} sits on the debounce when the author moves on`);
+    });
+    assert.ok(/state\.flushWidgetSettings = function \(\)/.test(widgetWiring),
+        'no flush is exposed, so closeBlogStudio cannot reach the pending save');
+    const close = modal.slice(landmark(modal, 'function closeBlogStudio()'), landmark(modal, 'function closeBlogStudio()') + 700);
+    assert.ok(/if \(state\.flushWidgetSettings\) state\.flushWidgetSettings\(\);/.test(close),
+        'closing inside the debounce window drops the last edit');
+    // The flush must run BEFORE the editor teardown clears state, not after.
+    assert.ok(landmark(close, 'state.flushWidgetSettings()') < landmark(close, 'state.editor.destroy'),
+        'the flush runs after the modal has already begun tearing down');
 });
 
 console.log(`\n${passed} checks passed.\n`);

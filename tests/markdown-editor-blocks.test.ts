@@ -20,6 +20,7 @@ import { renderMarkdown } from '../src/utils/markdown-render';
 const Editor = require('../src/components/markdown-editor.js');
 
 const { splitBlocks, isMediaBlock, isColumnsBlock, mediaRaw, spliceColumnRaw,
+        columnBodyRaw, replaceColumnRaw, COLUMN_SEED,
         toggleInlineMark, insertLink, detectBlockType, setBlockType, INLINE_MARKS } = Editor;
 
 let passed = 0;
@@ -185,6 +186,72 @@ await check('the splice output still splits as ONE block (the two halves agree)'
     assert.deepStrictEqual(splitBlocks(out), [out]);
 });
 
+// ── columnBodyRaw / replaceColumnRaw: TYPING in a column ──────────────────────────────────────
+// Clicking a layout used to open the block editor, whose textarea holds the block's raw — for a
+// columns block that is the `::::columns{cols=2}` container itself, so the author was handed the
+// scaffolding as the thing to type over. The editor now opens one COLUMN, and these two functions
+// are the seam: read a column's prose out, write the edited prose back inside the fence.
+console.log('\ncolumn editing — read/write one column body');
+
+await check('a column body reads back without any fence around it', () => {
+    assert.strictEqual(columnBodyRaw(COLS, 0), 'Left para one.\n\nLeft para two.');
+    assert.strictEqual(columnBodyRaw(COLS, 1), 'Right side.');
+});
+
+await check('an untouched column reads as EMPTY, never as the seed instruction', () => {
+    const fresh = `::::columns{cols=2}\n:::column\n${COLUMN_SEED}\n:::\n:::column\n${COLUMN_SEED}\n:::\n::::`;
+    assert.strictEqual(columnBodyRaw(fresh, 0), '');
+    assert.strictEqual(columnBodyRaw(fresh, 1), '');
+});
+
+await check('an out-of-range column reads null, so nothing opens over the wrong column', () => {
+    assert.strictEqual(columnBodyRaw(COLS, 2), null);
+    assert.strictEqual(columnBodyRaw(COLS, -1), null);
+});
+
+await check('an edit REPLACES that column and leaves the other byte-for-byte alone', () => {
+    const out = replaceColumnRaw(COLS, 0, 'Rewritten.')!;
+    assert.ok(out.includes(':::column\nRewritten.\n:::'), out);
+    assert.ok(out.includes('Right side.'), out);
+    assert.ok(!out.includes('Left para one.'), out);
+});
+
+await check('blank RE-SEEDS the column — an empty .bms-column has no height to click back into', () => {
+    const out = replaceColumnRaw(COLS, 1, '   \n  ')!;
+    assert.strictEqual(columnBodyRaw(out, 1), '');
+    assert.ok(out.includes(COLUMN_SEED), out);
+});
+
+await check('a typed fence line cannot close the container early', () => {
+    const out = replaceColumnRaw(COLS, 0, 'safe\n:::\n::::columns{cols=3}\nalso safe')!;
+    // The container's own open + close, and nothing smuggled in between.
+    assert.strictEqual((out.match(/^::::columns\{/gm) || []).length, 1);
+    assert.strictEqual((out.match(/^::::$/gm) || []).length, 1);
+    assert.strictEqual((out.match(/^:::column$/gm) || []).length, 2);
+    assert.strictEqual(columnBodyRaw(out, 0), 'safe\nalso safe');
+});
+
+await check('an out-of-range write returns null rather than a half-edited draft', () => {
+    assert.strictEqual(replaceColumnRaw(COLS, 5, 'x'), null);
+    assert.strictEqual(replaceColumnRaw(COLS, -1, 'x'), null);
+});
+
+await check('an edited layout still splits as ONE block — the fence is never stranded', () => {
+    const out = replaceColumnRaw(COLS, 0, 'One para.\n\nTwo para.')!;
+    assert.deepStrictEqual(splitBlocks(out), [out]);
+});
+
+await check('read → write with no change is a no-op (the round-trip the blur handler runs)', () => {
+    assert.strictEqual(replaceColumnRaw(COLS, 0, columnBodyRaw(COLS, 0)!), COLS);
+    assert.strictEqual(replaceColumnRaw(COLS, 1, columnBodyRaw(COLS, 1)!), COLS);
+});
+
+await check('media already in a column survives an edit to the OTHER column', () => {
+    const withMedia = spliceColumnRaw(COLS, 1, mediaRaw({ assetId: 42, type: 'image', alt: 'Shot' }))!;
+    const out = replaceColumnRaw(withMedia, 0, 'New left.')!;
+    assert.ok(out.includes('![Shot](asset://42)'), out);
+});
+
 // ── Round-trip: the editor's writer vs the server's reader ────────────────────────────────────
 // The seam that matters. Anything the editor writes must render on the server, or the Studio's
 // preview is lying about what will publish.
@@ -211,6 +278,14 @@ await check('dropped audio renders an <audio> element inside the column (Phase 2
 await check('the snapshot stays SRC-LESS — the asset:// presign invariant holds inside columns', async () => {
     const html = await renderMarkdown(spliceColumnRaw(COLS, 1, mediaRaw({ assetId: 42, type: 'video' }))!);
     assert.ok(!/<(img|video|audio)[^>]+src=/.test(html), html);
+});
+
+await check('prose typed into a column publishes as that column, formatting and all', async () => {
+    const html = await renderMarkdown(replaceColumnRaw(COLS, 0, 'A **bold** line.')!);
+    const cols = html.split('<div class="bms-column">');
+    assert.ok(cols[1].includes('<strong>bold</strong>'), cols[1]);
+    assert.ok(cols[2].includes('Right side.'), cols[2]);
+    assert.strictEqual((html.match(/class="bms-column"/g) || []).length, 2);
 });
 
 await check('no literal directive text can reach a published page', async () => {

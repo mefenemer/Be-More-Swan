@@ -125,6 +125,9 @@
     + '.bs-snippet{font-family:ui-monospace,monospace;font-size:12px;background:#111827;color:#e5e7eb;'
     + 'padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all;}'
     + '.bs-status{font-size:12px;color:#6b7280;}'
+    // Amber, not red: the value is not wrong, it is not finished. Same colour the SEO counters use
+    // when they overrun.
+    + '.bs-pending{display:block;font-size:11px;color:#b45309;margin-top:4px;}'
     + '.bs-hidden{display:none !important;}'
     // Explanatory prose. Used wherever a control's job isn't self-evident from its label — the
     // feature-image slot being the case that prompted it.
@@ -230,11 +233,16 @@
     // Where you republish the widget on your own site. Both fields let a post\'s canonical URL credit
     // YOUR domain instead of our permalink — leave blank to use the Be More Swan permalink.
     + '        <div class="bs-field"><label>Your site URL <span class="bs-status" style="font-weight:400;">(optional)</span></label>'
-    + '          <input id="bs-site-base" type="url" placeholder="https://acme.com"></div>'
+    + '          <input id="bs-site-base" type="url" placeholder="https://acme.com">'
+    + '          <span id="bs-site-base-hint" class="bs-pending bs-hidden">Not saved yet \u2014 needs the full address, e.g. https://acme.com</span></div>'
     + '        <div class="bs-field"><label>Post URL pattern</label>'
     + '          <input id="bs-site-path" placeholder="/blog/{slug}">'
+    + '          <span id="bs-site-path-hint" class="bs-pending bs-hidden">Not saved yet \u2014 must start with / and contain {slug}.</span>'
     + '          <span class="bs-status" style="font-size:11px;">Must start with / and contain {slug}. Needed for canonical URLs to point at your site.</span></div>'
-    + '        <button id="bs-save-theme" class="bs-btn bs-btn-ghost">Save settings</button>'
+    // These settings autosave like everything else in the Studio. The status line is the whole
+    // feedback surface, so it has to say "Saving…"/"Saved" where the button used to be — a panel
+    // that saves silently and shows nothing reads as a panel that has stopped saving.
+    + '        <span id="bs-widget-status" class="bs-status"></span>'
     // The snippet is a two-line <script> tag nobody should have to select by hand — a copy
     // button is the difference between "paste this into your site" and a transcription bug
     // in a key that fails silently (widget-api 404s and the blog renders "Unable to load posts").
@@ -642,10 +650,11 @@
   // of the point. The business URL is already on file (Business Information → organisations.
   // website_url), so asking a second time is asking for a value we hold.
   //
-  // These are SUGGESTIONS painted into the inputs on OPEN, never a silent write: the user still
-  // presses "Save settings" to persist them, and a stored value always wins. Suggestions are
-  // deliberately not re-applied after a save (applyWidget's `suggest` flag) — clearing a field,
-  // saving, and watching it refill itself reads as the clear having been ignored.
+  // These are SUGGESTIONS painted into the inputs on OPEN, never a silent write, and the autosave
+  // does not change that: applyWidget assigns .value directly, which fires neither `input` nor
+  // `change`, so a suggestion sits there until the author touches it and a stored value always
+  // wins. Suggestions are deliberately not re-applied after a save (applyWidget's `suggest` flag)
+  // — clearing a field, saving, and watching it refill itself reads as the clear being ignored.
   var DEFAULT_SITE_POST_PATH = '/blog/{slug}';
 
   // save-widget-config demands a full http(s) URL; Business Information accepts a bare host
@@ -785,11 +794,20 @@
         body: JSON.stringify({ action: 'update', theme: seed }),
       }).catch(function () {});
     }
+    // The merge base for saveWidgetSettings — see the ⚠️ there. Held because the theme column is
+    // replaced wholesale on write, so anything this panel cannot re-derive from its own inputs has
+    // to be carried forward from what was last read.
+    state.widgetTheme = theme;
     if (theme.accent) el('bs-accent').value = theme.accent;
     if (theme.fontFamily) { el('bs-font').value = theme.fontFamily; applyFontToEditor(theme.fontFamily); }
     el('bs-badge').checked = cfg.badgeEnabled !== false;
     el('bs-site-base').value = cfg.siteBaseUrl || (suggest ? (state.orgWebsite || '') : '');
     el('bs-site-path').value = cfg.sitePostPath || (suggest ? DEFAULT_SITE_POST_PATH : '');
+    // Autosave is armed only once the panel is showing the org's own settings rather than the
+    // markup's defaults. Before this the accent input reads #ec4899 — OUR pink — and the font
+    // select is empty, and save-widget-config treats an empty fontFamily as "reset to default".
+    // A save fired in that window would quietly overwrite a stored brand with placeholders.
+    state.widgetReady = true;
   }
 
   // ── SEO metadata panel ─────────────────────────────────────────────────────────────────────────
@@ -1521,28 +1539,113 @@
     wireCopy('bs-snippet-copy', 'bs-snippet');
     wireCopy('bs-rss-copy', 'bs-rss');
 
-    // Preview as soon as a family is picked, not only after Save — otherwise the author is choosing
-    // from a list of names rendered in a font they cannot see.
+    // Preview as soon as a family is picked — otherwise the author is choosing from a list of
+    // names rendered in a font they cannot see.
     el('bs-font').addEventListener('change', function () { applyFontToEditor(el('bs-font').value); });
 
-    el('bs-save-theme').addEventListener('click', function () {
-      // fontUrl travels WITH the stack. widget.js and the /b/:key/:slug permalink both need the
-      // stylesheet, and neither carries the catalogue — resolving it here is what turns a font
-      // choice into a font that actually loads. null for a system stack that needs no download.
-      var stack = el('bs-font').value;
-      var theme = {
-        accent: el('bs-accent').value,
-        fontFamily: stack,
-        fontUrl: (window.BlogFonts && window.BlogFonts.urlFor(stack)) || null,
+    // ── Widget settings — debounced autosave, mirroring the body and SEO contract ────────────────
+    //
+    // This panel was the one thing in the Studio kept behind a Save button, and the reason was
+    // real: save-widget-config validates both site fields and answers a half-typed address with a
+    // 400, so sending every keystroke would throw "must be a full http(s) URL" at someone who is
+    // still typing it. That reason survives as the HOLD-BACK rule rather than as a button — a
+    // field is sent only once it is something the server will accept, and until then it says so
+    // beneath itself. Silence there would be the worst of both: a URL typed halfway, abandoned,
+    // and never persisted, with nothing on screen admitting it.
+    //
+    // '' is a decision, not an in-progress value: it clears the field server-side, so it sends.
+    function siteBaseState() {
+      var v = el('bs-site-base').value.trim();
+      if (!v) return { send: true, value: '' };
+      return /^https?:\/\/[^\s/]+/i.test(v) ? { send: true, value: v } : { send: false, value: null };
+    }
+    function sitePathState() {
+      var v = el('bs-site-path').value.trim();
+      if (!v) return { send: true, value: '' };
+      return (v.charAt(0) === '/' && v.indexOf('{slug}') >= 0)
+        ? { send: true, value: v } : { send: false, value: null };
+    }
+    function toggleHint(id, show) {
+      var e = el(id);
+      if (e) e.classList.toggle('bs-hidden', !show);
+    }
+
+    var widgetTimer = null;
+    function saveWidgetSettings() {
+      clearTimeout(widgetTimer);
+      widgetTimer = null;
+      if (!state.widgetReady) return Promise.resolve();
+      var base = siteBaseState(), path = sitePathState();
+      toggleHint('bs-site-base-hint', !base.send);
+      toggleHint('bs-site-path-hint', !path.send);
+
+      // ⚠️ `theme` is ONE json column and save-widget-config REPLACES it wholesale
+      // (`updates.theme = checked.theme`). The omit-don't-blank rule used on the site fields below
+      // is therefore exactly wrong here: inside the theme, an omitted key is a DELETED key. Every
+      // value the panel is not changing has to be re-sent, which is what state.widgetTheme — the
+      // last config applyWidget painted from, refreshed from each save's response — is for.
+      //
+      // The picker reads '' whenever the stored stack has no matching <option> (catalogue not
+      // loaded, or a family retired from src/config/blog-fonts.ts). Falling back to the stored
+      // family there is the difference between "the author changed the accent" and "the author
+      // changed the accent and silently lost their typeface".
+      var stored = state.widgetTheme || {};
+      var stack = el('bs-font').value || stored.fontFamily || '';
+      var payload = {
+        action: 'update',
+        // fontUrl travels WITH the stack. widget.js and the /b/:key/:slug permalink both need the
+        // stylesheet, and neither carries the catalogue. The server derives its own from
+        // fontFamily and ignores this — it is sent so the two stay visibly in step.
+        theme: {
+          accent: el('bs-accent').value,
+          fontUrl: (window.BlogFonts && window.BlogFonts.urlFor(stack)) || null,
+        },
+        badgeEnabled: el('bs-badge').checked,
       };
-      api('save-widget-config', { method: 'POST', body: JSON.stringify({
-        action: 'update', theme: theme, badgeEnabled: el('bs-badge').checked,
-        siteBaseUrl: el('bs-site-base').value.trim(), sitePostPath: el('bs-site-path').value.trim(),
-      }) }).then(function (res) {
-        if (res.ok) { setBanner('bs-action-status', 'Settings saved.'); applyWidget(res.body.config); }
-        else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not save settings.', 'error');
-      });
-    });
+      // Still guarded: '' is a RESET to the default stack server-side, so a workspace that has
+      // genuinely never chosen a face must send nothing rather than record a choice nobody made.
+      if (stack) payload.theme.fontFamily = stack;
+      // Omitted, not blanked — and here it really does preserve, because these are TOP-LEVEL keys
+      // and the update branch only assigns the ones present in the body.
+      if (base.send) payload.siteBaseUrl = base.value;
+      if (path.send) payload.sitePostPath = path.value;
+
+      setStatus('bs-widget-status', 'Saving\u2026');
+      return api('save-widget-config', { method: 'POST', body: JSON.stringify(payload) })
+        .then(function (res) {
+          // Deliberately NOT applyWidget(): it repaints the inputs from the stored config, which
+          // would yank a half-typed URL out from under the person still typing it.
+          if (!res.ok) { setStatus('bs-widget-status', (res.body && res.body.error) || 'Not saved'); return; }
+          // Keep the merge base honest: the server normalises what it stored (accent lower-cased,
+          // fontUrl derived), and the NEXT save re-sends this theme's untouched keys.
+          if (res.body && res.body.config) state.widgetTheme = res.body.config.theme || {};
+          setStatus('bs-widget-status', (base.send && path.send) ? 'Saved' : 'Saved \u2014 one field is still waiting');
+        })
+        .catch(function () { setStatus('bs-widget-status', 'Not saved'); });
+    }
+
+    // Only USER edits schedule a save. applyWidget assigns .value directly and that fires neither
+    // `input` nor `change`, so painting the panel on open — including the site-URL suggestions,
+    // which are still suggestions and not decisions — never writes anything by itself.
+    function widgetChanged() {
+      if (!state.widgetReady) return;
+      clearTimeout(widgetTimer);
+      widgetTimer = setTimeout(saveWidgetSettings, 900);
+    }
+    // `input` on the colour picker fires continuously while the swatch is dragged; the debounce is
+    // what keeps that from becoming a request per frame.
+    el('bs-accent').addEventListener('input', widgetChanged);
+    el('bs-font').addEventListener('change', widgetChanged);
+    el('bs-badge').addEventListener('change', widgetChanged);
+    el('bs-site-base').addEventListener('input', widgetChanged);
+    el('bs-site-path').addEventListener('input', widgetChanged);
+    // Leaving a field is the author saying they are done with it — don't sit on the debounce.
+    el('bs-site-base').addEventListener('blur', function () { if (widgetTimer) saveWidgetSettings(); });
+    el('bs-site-path').addEventListener('blur', function () { if (widgetTimer) saveWidgetSettings(); });
+
+    // Closing the modal inside the debounce window must not drop the edit. Exposed on `state`
+    // because closeBlogStudio lives outside this closure.
+    state.flushWidgetSettings = function () { if (widgetTimer) saveWidgetSettings(); };
 
     // ── SEO metadata overrides (US 1.3) — debounced autosave, mirrors the body autosave contract ──
     function saveSeo() {
@@ -1737,7 +1840,12 @@
   // Clear transient editor state before (re)opening onto a post — the modal is injected once and
   // reused, so status lines and the AI-draft form must not carry over between opens.
   function clearWorkspaceState() {
-    ['bs-save-status', 'bs-media-status', 'bs-ai-draft-status', 'bs-dist-status'].forEach(function (id) { setStatus(id, ''); });
+    // Disarm the widget autosave until loadWidget has repainted the panel. The DOM survives between
+    // opens, so without this a change made during the reload would save the PREVIOUS session's
+    // values back over whatever this one just fetched.
+    state.widgetReady = false;
+    state.widgetTheme = null;
+    ['bs-save-status', 'bs-media-status', 'bs-ai-draft-status', 'bs-dist-status', 'bs-widget-status'].forEach(function (id) { setStatus(id, ''); });
     var dist = el('bs-dist-list'); if (dist) dist.innerHTML = '';
     var picker = el('bs-media-picker');
     if (picker) { picker.innerHTML = ''; picker.classList.add('bs-hidden'); }
@@ -1784,6 +1892,9 @@
 
   function closeBlogStudio() {
     if (!state.injected) return;
+    // Widget settings autosave on a debounce; close inside that window and the last edit would be
+    // lost. The editor's own destroy() flushes the body for the same reason.
+    if (state.flushWidgetSettings) state.flushWidgetSettings();
     if (state.editor && state.editor.destroy) { state.editor.destroy(); state.editor = null; }
     el('bms-blog-backdrop').classList.remove('bs-open');
     window.ScrollLock.release('blog-studio');

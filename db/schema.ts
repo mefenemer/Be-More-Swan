@@ -3245,6 +3245,11 @@ export const blogPosts = pgTable("blog_posts", {
 
   // Content-decay detection (US 5.1)
   trafficBaseline: integer("traffic_baseline"),
+  // ⚠️ NOT the same shape as traffic_baseline above. That is a running PEAK of impressions (it
+  // never falls, by design, so decay can be measured against it); this is the LATEST windowed
+  // click count, overwritten on every daily ingest. Never divide one by the other for a CTR.
+  // NULL = never measured, which is a different answer from 0 = nobody clicked. db/blog-search-clicks.sql
+  searchClicks: integer("search_clicks"),
   lastMetricsAt: timestamp("last_metrics_at"),
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -3307,6 +3312,21 @@ export const blogAbStats = pgTable("blog_ab_stats", {
   unique("blog_ab_stats_pk").on(t.blogPostId, t.variantId),
   index("blog_ab_stats_post_idx").on(t.blogPostId),
 ]);
+
+// Anonymous per-POST reader engagement from widget.js — dwell time and scroll depth for every
+// published post, not just ones running a headline test (db/blog-engagement-stats.sql).
+//
+// ⚠️ Deliberately NOT folded into blogAbStats above. That table is keyed per variant and is scored
+// by resolve-ab-tests to pick a headline winner; a whole-post row in it would be treated as a
+// competing variant and would win on volume alone. Different question, different table.
+export const blogEngagementStats = pgTable("blog_engagement_stats", {
+  blogPostId: integer("blog_post_id").primaryKey().references(() => blogPosts.id, { onDelete: "cascade" }),
+  views: integer("views").notNull().default(0),          // measured reads (beacon flushes), not page loads
+  sumDwellMs: bigint("sum_dwell_ms", { mode: "number" }).notNull().default(0),
+  sumScrollPct: bigint("sum_scroll_pct", { mode: "number" }).notNull().default(0),
+  engagedCount: integer("engaged_count").notNull().default(0),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
 
 // ────────────────────────────────────────────────────────────────────────────
 // Lead Generator — Outbound Discovery Layer

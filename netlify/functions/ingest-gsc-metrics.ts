@@ -33,7 +33,17 @@ async function listProperties(token: string): Promise<string[]> {
         .map((s) => s.siteUrl!);
 }
 
-async function queryImpressions(token: string, property: string, pageUrl: string, range: { startDate: string; endDate: string }): Promise<number | null> {
+/**
+ * One post's Search Console performance over the window.
+ *
+ * Returns BOTH numbers from the one call. `clicks` was always in this response and was always
+ * discarded — the request never changed, only what we read out of it. That is the whole reason
+ * the Organic Clicks card costs no extra quota: it is the same daily query it always was.
+ *
+ * null (rather than zeroes) when the call fails, so a transient GSC error can never be written
+ * down as a measured "nobody found you".
+ */
+async function queryPerformance(token: string, property: string, pageUrl: string, range: { startDate: string; endDate: string }): Promise<{ impressions: number; clicks: number } | null> {
     const res = await fetch(`https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(property)}/searchAnalytics/query`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -46,8 +56,9 @@ async function queryImpressions(token: string, property: string, pageUrl: string
         }),
     });
     if (!res.ok) return null;
-    const data = (await res.json().catch(() => ({}))) as { rows?: { impressions?: number }[] };
-    return Math.round(data.rows?.[0]?.impressions ?? 0);
+    const data = (await res.json().catch(() => ({}))) as { rows?: { impressions?: number; clicks?: number }[] };
+    const row = data.rows?.[0];
+    return { impressions: Math.round(row?.impressions ?? 0), clicks: Math.round(row?.clicks ?? 0) };
 }
 
 export default withLambda(async () => {
@@ -89,14 +100,18 @@ export default withLambda(async () => {
                 const property = matchProperty(url, properties);
                 if (!property) continue;
 
-                const current = await queryImpressions(fresh.accessToken, property, url, range);
-                if (current == null) continue;
+                const perf = await queryPerformance(fresh.accessToken, property, url, range);
+                if (perf == null) continue;
+                const current = perf.impressions;
                 checked++;
 
                 const peak = post.trafficBaseline; // the pre-update peak, for the notification copy
                 const { newBaseline, decayed } = evaluateDecay({ baseline: peak, current, minBaseline: MIN_BASELINE, decayRatio: DECAY_RATIO });
                 await db.update(blogPosts)
-                    .set({ trafficBaseline: newBaseline, lastMetricsAt: new Date(), updatedAt: new Date() })
+                    // searchClicks is OVERWRITTEN, not maxed like the baseline beside it: the card
+                    // it feeds reports clicks over the current window, so a post that has stopped
+                    // earning clicks must be allowed to say so.
+                    .set({ trafficBaseline: newBaseline, searchClicks: perf.clicks, lastMetricsAt: new Date(), updatedAt: new Date() })
                     .where(eq(blogPosts.id, post.id));
 
                 if (!decayed || post.userId == null) continue;

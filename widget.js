@@ -62,9 +62,17 @@
     return variants.filter(function (v) { return v.id === chosen; })[0];
   }
 
-  // Anonymous engagement beacon for the active A/B variant (dwell + max scroll depth).
+  // Anonymous engagement beacon: dwell time + max scroll depth, for EVERY published post.
+  //
+  // This used to bail out unless the post had an active headline test (`!variantId ||
+  // post.abState === 'decided'`), so the only posts anyone measured were the ones mid-experiment.
+  // Reader engagement is a property of the post, not of the experiment — it is now always sent,
+  // and `variantId` is passed through only when there genuinely is one, so the A/B side keeps
+  // exactly the data it had. See widget-ab-beacon.ts for the two-table split.
+  //
+  // Still anonymous and still aggregate: no cookies, no identifiers, no raw rows. The localStorage
+  // key above is the A/B variant assignment and is unrelated to this.
   function trackEngagement(post, variantId) {
-    if (!variantId || post.abState === 'decided') return;
     var start = Date.now();
     var maxScroll = 0;
     function onScroll() {
@@ -77,7 +85,10 @@
       window.removeEventListener('scroll', onScroll);
       var dwellMs = Date.now() - start;
       var payload = JSON.stringify({
-        publicKey: key, slug: post.slug, variantId: variantId,
+        publicKey: key, slug: post.slug,
+        // Absent when this post is not running a headline test, or the test is already decided —
+        // the server then records the read against the post and skips the per-variant row.
+        variantId: (variantId && post.abState !== 'decided') ? variantId : null,
         dwellMs: dwellMs, scrollPct: Math.round(maxScroll * 100),
         engaged: dwellMs > 15000 || maxScroll > 0.5,
       });

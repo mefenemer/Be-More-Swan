@@ -20,7 +20,8 @@ function check(name: string, fn: () => void) { fn(); console.log(`  ✓ ${name}`
 
 const counts = (over: Partial<BlogPerformanceCounts> = {}): BlogPerformanceCounts => ({
     publishedCurrent: 0, publishedPrior: 0, awaitingApproval: 0,
-    searchImpressions: null, trackedPosts: 0, hoursSaved: 0, ...over,
+    searchImpressions: null, trackedPosts: 0, searchClicks: null, clickedPosts: 0,
+    engagementViews: 0, engagementSeconds: null, hoursSaved: 0, ...over,
 });
 
 console.log('\nhasData — what counts as "this assistant has done something"');
@@ -128,6 +129,69 @@ check('the raw counts are echoed back, so the renderer never has to re-derive th
 check('"All clear" is only said when the queue is genuinely empty', () => {
     assert.strictEqual(buildBlogPerformance(counts({ publishedCurrent: 2 })).trends.awaitingApproval, 'All clear');
     assert.strictEqual(buildBlogPerformance(counts({ awaitingApproval: 1 })).trends.awaitingApproval, 'Waiting on you');
+});
+
+console.log('\nOrganic Clicks — the partner card to Search Impressions');
+
+check('no Search Console connection reports null, not a measured zero', () => {
+    const out = buildBlogPerformance(counts({ publishedCurrent: 3, searchClicks: null }));
+    assert.strictEqual(out.metrics.searchClicks, null);
+    assert.strictEqual(out.trends.searchClicks, 'Connect Search Console');
+});
+
+check('connected-but-nobody-clicked is a real 0, and says so', () => {
+    const out = buildBlogPerformance(counts({ publishedCurrent: 3, searchClicks: 0, clickedPosts: 3 }));
+    assert.strictEqual(out.metrics.searchClicks, 0);
+    assert.strictEqual(out.trends.searchClicks, '3 posts tracked');
+});
+
+check('the clicks trend names its OWN denominator, not the impressions one', () => {
+    // The two populations genuinely differ — a post ingested before search_clicks existed has
+    // impressions and no clicks row — so the card must not borrow trackedPosts.
+    const out = buildBlogPerformance(counts({
+        publishedCurrent: 9, searchImpressions: 900, trackedPosts: 7, searchClicks: 40, clickedPosts: 2,
+    }));
+    assert.strictEqual(out.trends.searchImpressions, '7 posts tracked');
+    assert.strictEqual(out.trends.searchClicks, '2 posts tracked');
+});
+
+check('a single tracked post is not pluralised', () => {
+    const out = buildBlogPerformance(counts({ publishedCurrent: 1, searchClicks: 9, clickedPosts: 1 }));
+    assert.strictEqual(out.trends.searchClicks, '1 post tracked');
+});
+
+check('the empty payload carries clicks as null, never 0', () => {
+    assert.strictEqual(emptyBlogPerformance().metrics.searchClicks, null);
+});
+
+console.log('\nAverage Read Time — the quality counterweight');
+
+check('nothing measured reports null, not a zero-second read', () => {
+    const out = buildBlogPerformance(counts({ publishedCurrent: 3 }));
+    assert.strictEqual(out.metrics.engagementSeconds, null);
+    assert.strictEqual(out.trends.engagementSeconds, 'No reads measured yet');
+});
+
+check('the trend names the sample size, plural-safely', () => {
+    assert.strictEqual(
+        buildBlogPerformance(counts({ publishedCurrent: 2, engagementViews: 1, engagementSeconds: 95 })).trends.engagementSeconds,
+        '1 read measured');
+    assert.strictEqual(
+        buildBlogPerformance(counts({ publishedCurrent: 2, engagementViews: 340, engagementSeconds: 160 })).trends.engagementSeconds,
+        '340 reads measured');
+});
+
+check('live readers alone keep the grid open, even with nothing published in the window', () => {
+    // Reads are lifetime, publishedCurrent is windowed — a blog being read but not freshly
+    // published to must not fall back to the "you have done nothing" empty state.
+    const out = buildBlogPerformance(counts({ engagementViews: 12, engagementSeconds: 143 }));
+    assert.strictEqual(out.hasData, true);
+    assert.strictEqual(out.metrics.engagementSeconds, 143);
+});
+
+check('the empty payload carries read time as null, never 0', () => {
+    assert.strictEqual(emptyBlogPerformance().metrics.engagementSeconds, null);
+    assert.strictEqual(emptyBlogPerformance().counts.engagementViews, 0);
 });
 
 console.log(`\n${passed} checks passed.\n`);

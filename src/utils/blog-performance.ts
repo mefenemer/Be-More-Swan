@@ -17,11 +17,18 @@
 // ── What each card actually measures ────────────────────────────────────────────────────────────
 //   1 Posts Published    — blog_posts published inside the window, with the prior window as trend.
 //   2 Search Impressions — summed from blog_posts.traffic_baseline (Google Search Console).
-//   3 Hours Reclaimed    — from src/utils/roi-activity.ts, the ONE module all four ROI surfaces
-//                          count through. Never re-derive hours here.
-//   4 Awaiting Approval  — a LIVE count, deliberately not windowed. "3 drafts waiting" is only
-//                          useful as a fact about right now; "3 drafts waited during March" is not
-//                          something anyone can act on.
+//   3 Organic Clicks     — summed from blog_posts.search_clicks (Google Search Console). Card 2
+//                          says Google SHOWED the post; this says somebody actually came. Together
+//                          they are the honest read on whether titles and meta descriptions work.
+//                          ⚠️ Do NOT divide this by card 2 to get a CTR — see the shape warning in
+//                          db/blog-search-clicks.sql. Card 2 is a running peak, this is windowed.
+//   4 Avg Engagement     — average measured reading time per view, from blog_engagement_stats
+//                          (widget.js's anonymous beacon). The quality counterweight to cards 1-3:
+//                          high impressions with a 20-second read time is the signature of thin
+//                          content, and nothing else on this page would catch it.
+//                          ⚠️ Measures readers on the WIDGET EMBED and nothing else. A customer who
+//                          republishes to their own CMS has readers we never see. Say "measured
+//                          reads", never "all readers".
 
 /** The reporting window. Longer than the social 30 days: blogs publish weekly at best, and a
  *  30-day window on a fortnightly cadence reports 2 and calls a normal month a collapse. */
@@ -42,7 +49,29 @@ export interface BlogPerformanceCounts {
     searchImpressions: number | null;
     /** How many published posts contributed to searchImpressions — the honesty qualifier for it. */
     trackedPosts: number;
-    /** Hours saved in the window, from roi-activity.ts. */
+    /**
+     * Summed Search Console clicks across posts we have a figure for, or null when Search Console
+     * is not connected. Same null-vs-0 contract as searchImpressions: null is "we cannot see this",
+     * 0 is "we looked and nobody clicked through".
+     */
+    searchClicks: number | null;
+    /** How many published posts contributed to searchClicks — the denominator for its trend line. */
+    clickedPosts: number;
+    /** Measured reads (beacon flushes) across this assistant's published posts. The denominator. */
+    engagementViews: number;
+    /**
+     * Mean seconds per measured read, or null when nothing has been measured. null vs 0 matters as
+     * much here as on the search cards: null is "nobody has read one through the widget yet",
+     * 0 would be a verdict on the writing.
+     */
+    engagementSeconds: number | null;
+    /**
+     * Hours saved in the window, from roi-activity.ts.
+     * ⚠️ No longer rendered as a KPI card — the hero's Time Saved / Money Saved strip is the one
+     * place that figure appears now, so the grid stopped showing a second copy of it over a
+     * different window. Kept because `hasData` below still counts it: an assistant that has saved
+     * hours but published nothing yet has genuinely done work, and must not get the empty state.
+     */
     hoursSaved: number;
 }
 
@@ -53,12 +82,16 @@ export interface BlogPerformancePayload {
         postsPublished: number;
         publishedGrowth: number | null;
         searchImpressions: number | null;
+        searchClicks: number | null;
+        engagementSeconds: number | null;
         hoursSaved: number;
         awaitingApproval: number;
     };
     trends: {
         postsPublished: string;
         searchImpressions: string;
+        searchClicks: string;
+        engagementSeconds: string;
         hoursSaved: string;
         awaitingApproval: string;
     };
@@ -70,13 +103,17 @@ export function emptyBlogPerformance(days = BLOG_PERFORMANCE_DAYS): BlogPerforma
         hasData: false,
         periodDays: days,
         metrics: {
-            postsPublished: 0, publishedGrowth: null, searchImpressions: null,
-            hoursSaved: 0, awaitingApproval: 0,
+            postsPublished: 0, publishedGrowth: null, searchImpressions: null, searchClicks: null,
+            engagementSeconds: null, hoursSaved: 0, awaitingApproval: 0,
         },
-        trends: { postsPublished: '—', searchImpressions: '—', hoursSaved: '—', awaitingApproval: '—' },
+        trends: {
+            postsPublished: '—', searchImpressions: '—', searchClicks: '—',
+            engagementSeconds: '—', hoursSaved: '—', awaitingApproval: '—',
+        },
         counts: {
             publishedCurrent: 0, publishedPrior: 0, awaitingApproval: 0,
-            searchImpressions: null, trackedPosts: 0, hoursSaved: 0,
+            searchImpressions: null, trackedPosts: 0, searchClicks: null, clickedPosts: 0,
+            engagementViews: 0, engagementSeconds: null, hoursSaved: 0,
         },
     };
 }
@@ -109,6 +146,10 @@ export function buildBlogPerformance(
     const hasData = counts.publishedCurrent > 0
         || counts.publishedPrior > 0
         || counts.awaitingApproval > 0
+        // Reads are lifetime while publishedCurrent is windowed, so an assistant whose posts all
+        // predate the window can still have live readers. Without this the grid would go empty on
+        // a blog that is being read right now, just not freshly published to.
+        || counts.engagementViews > 0
         || counts.hoursSaved > 0;
 
     if (!hasData) return { ...emptyBlogPerformance(days), counts };
@@ -122,6 +163,8 @@ export function buildBlogPerformance(
             postsPublished: counts.publishedCurrent,
             publishedGrowth: growth,
             searchImpressions: counts.searchImpressions,
+            searchClicks: counts.searchClicks,
+            engagementSeconds: counts.engagementSeconds,
             hoursSaved: counts.hoursSaved,
             awaitingApproval: counts.awaitingApproval,
         },
@@ -135,6 +178,16 @@ export function buildBlogPerformance(
                 // Names the denominator: a big number over 2 tracked posts means something very
                 // different from the same number over 40, and the card cannot say which without it.
                 : plural(counts.trackedPosts, 'post tracked', 'posts tracked'),
+            searchClicks: counts.searchClicks === null
+                ? 'Connect Search Console'
+                // Same denominator logic as impressions above. A click count means nothing without
+                // knowing how many posts had a figure to contribute.
+                : plural(counts.clickedPosts, 'post tracked', 'posts tracked'),
+            // Names the sample size. "2m 40s" over three reads is not a finding, and the card
+            // cannot say which without the denominator — the same rule as the two search cards.
+            engagementSeconds: counts.engagementSeconds === null
+                ? 'No reads measured yet'
+                : plural(counts.engagementViews, 'read measured', 'reads measured'),
             hoursSaved: counts.hoursSaved > 0
                 ? plural(counts.publishedCurrent, 'post written', 'posts written')
                 : '—',
