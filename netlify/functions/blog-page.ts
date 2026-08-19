@@ -137,6 +137,9 @@ export default withLambda(async (event: HandlerEvent) => {
 
     const html = renderBlogPage({
         title: post.metaTitle || post.title,
+        // The VISIBLE heading is the post's own title. `title` above stays the SEO string, which
+        // carries a site suffix and belongs in <title>/og:title, not in 2.25rem type on the page.
+        heading: post.title || post.metaTitle,
         description,
         pageUrl,
         canonicalUrl,

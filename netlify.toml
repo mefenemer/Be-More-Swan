@@ -241,6 +241,20 @@
   to = "/.netlify/functions/integration-scenarios"
   status = 200
 
+# Shared Audience layer (docs/newsletter-assistant-plan.md): the PUBLIC ingress for the embeddable
+# sign-up form — /api/audience/form/:key, /api/audience/subscribe, /api/audience/confirm. Rewrite
+# (status 200) so the original path survives in event.rawUrl, which audience-public.ts parses.
+#
+# ⚠️ ONE splat rule for all three routes, and it must stay ABOVE any future /api/* catch-all —
+# Netlify matches top-to-bottom, first match wins, which is the trap the /api/widget/:key/rss rule
+# below documents. The tenant-facing endpoints (audience-contacts, audience-segments,
+# audience-forms) are deliberately NOT under /api/ — they are session-authenticated and are called
+# at their /.netlify/functions/ paths, so nothing here can accidentally expose them.
+[[redirects]]
+  from = "/api/audience/*"
+  to = "/.netlify/functions/audience-public"
+  status = 200
+
 # Autonomous Content Engine (US 3.2 §A.4): per-widget RSS 2.0 feed. MUST precede the /api/widget/*
 # catch-all below — Netlify evaluates redirects top-to-bottom, first match wins, so without this an
 # RSS request would fall through to widget-api, which parses "rss" as a resource name and 404s.

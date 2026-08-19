@@ -65,6 +65,20 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
+  // Remove the body's own leading <h1>.
+  //
+  // The published payload is a render of the post's Markdown, so it ALREADY opens with an <h1>
+  // carrying the post title — and this widget rendered its own above it. Every embed showed the
+  // headline twice. Worse, during a headline A/B test the reader saw the TESTED headline stacked on
+  // top of the original, so dwell and scroll were scored against a variant nobody read in isolation.
+  //
+  // Anchored to the START: an <h1> used mid-article is the author's and is left alone. Mirrors
+  // stripLeadingH1() in src/utils/blog-seo.ts, which does the same job for the server-rendered
+  // permalink — keep the two in step.
+  function stripLeadingH1(html) {
+    return String(html == null ? '' : html).replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i, '');
+  }
+
   function getJSON(url) {
     return fetch(url, { credentials: 'omit' }).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -248,7 +262,10 @@
         var post = data.post;
         var variant = pickVariant(post);
         var payload = post.payload || {};
-        var h1 = variant && variant.h1 ? variant.h1 : (post.metaTitle || post.title);
+        // A live headline test wins — that is the whole point of it. Otherwise the post's own
+        // title, NOT metaTitle: that one is the SEO string for <title>, routinely tuned with a site
+        // suffix, and it reads badly as the heading a human sees.
+        var h1 = variant && variant.h1 ? variant.h1 : (post.title || post.metaTitle);
         var intro = variant && variant.intro ? '<p>' + esc(variant.intro) + '</p>' : '';
         var fi = payload.featureImage;
         var hero = (fi && fi.url)
@@ -259,7 +276,7 @@
           '<button class="bms-back">← All posts</button>' +
           hero +
           '<h1>' + esc(h1) + '</h1>' + intro +
-          (payload.html || '') +
+          stripLeadingH1(payload.html) +
           badgeHtml(post, config.badgeEnabled);
         view.querySelector('.bms-back').addEventListener('click', function () { navigate(null); });
         trackEngagement(post, variant && variant.id);

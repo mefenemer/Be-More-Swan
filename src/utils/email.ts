@@ -27,10 +27,24 @@ interface SendEmailParams {
     html: string;
     /** Plain-text alternative part (US-COMMS-2 AC3). Omitted → HTML-only, as before. */
     text?: string;
+    /**
+     * Override the From line. Defaults to Be More Swan's own noreply address, which is right for
+     * every email WE send to OUR users.
+     *
+     * ⚠️ The address must stay on a domain Resend has verified for this account — a From on the
+     * tenant's own domain would be rejected (or land in spam) unless they have completed domain
+     * verification. The supported use is a DISPLAY NAME that names the tenant while the address
+     * stays ours: `Acme (via Be More Swan) <noreply@bemoreswan.com>`. That matters for the
+     * audience double opt-in, where the recipient signed up on the tenant's website and has never
+     * heard of us — an unexplained email from a stranger is the one most likely to be reported.
+     */
+    from?: string;
+    /** Where replies should go — usually the tenant, when `from` names them. */
+    replyTo?: string;
 }
 
 // sendEmail is an alias for sendMagicLinkEmail used by most Netlify functions
-export const sendEmail = async ({ to, subject, html, text }: SendEmailParams) => {
+export const sendEmail = async ({ to, subject, html, text, from, replyTo }: SendEmailParams) => {
     if (!resend) {
         console.warn(`[DEV MODE] RESEND_API_KEY missing. Simulated email to ${to}`);
         return null;
@@ -40,7 +54,14 @@ export const sendEmail = async ({ to, subject, html, text }: SendEmailParams) =>
     // rejected send); only network/runtime problems throw. Normalise both into `error` so
     // the real reason is always logged verbatim and never silently swallowed.
     const { data, error } = await resend.emails
-        .send({ from: 'Be More Swan <noreply@bemoreswan.com>', to, subject, html, ...(text ? { text } : {}) })
+        .send({
+            from: from || 'Be More Swan <noreply@bemoreswan.com>',
+            to,
+            subject,
+            html,
+            ...(text ? { text } : {}),
+            ...(replyTo ? { replyTo } : {}),
+        })
         .catch((err: any) => ({ data: null, error: { name: 'ResendException', message: err?.message ?? String(err) } }));
 
     if (error) {

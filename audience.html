@@ -1,0 +1,221 @@
+<!-- audience.html — the shared Audience (view fragment, loaded by workspace.html's router).
+     Controller: audience.js (window.initAudience).
+
+     ⚠️ ORG-WIDE, NOT PER-ASSISTANT. This page must never read window._currentAssistantId: the whole
+     point of the audience layer is that it belongs to the organisation and outlives any one
+     assistant. The router clears that global when leaving assistant-detail, and a view that
+     inherited it would show a different list depending on which workspace was opened earlier. -->
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full pb-20">
+
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+    <div>
+      <h1 class="text-3xl font-extrabold text-gray-900">Audience</h1>
+      <p class="text-gray-500 mt-1">Everyone who has agreed to hear from you — shared by every assistant you hire.</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <button type="button" id="aud-form-btn"
+        class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-gray-700 bg-white hover:bg-gray-50 rounded-lg transition-colors border border-gray-300 cursor-pointer">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+        Sign-up form
+      </button>
+      <button type="button" id="aud-import-btn"
+        class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-gray-700 bg-white hover:bg-gray-50 rounded-lg transition-colors border border-gray-300 cursor-pointer">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+        Import CSV
+      </button>
+      <button type="button" id="aud-add-btn"
+        class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors cursor-pointer">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        Add contact
+      </button>
+    </div>
+  </div>
+
+  <!-- Status counts. Computed over the WHOLE audience, never over the loaded page — see the cap
+       note in netlify/functions/audience-contacts.ts. -->
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6" id="aud-kpis">
+    <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+      <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">Subscribed</p>
+      <p class="text-2xl font-extrabold text-gray-900 mt-1" data-kpi="subscribed">—</p>
+      <p class="text-[11px] text-gray-400 mt-0.5">Can be emailed</p>
+    </div>
+    <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+      <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">Awaiting confirmation</p>
+      <p class="text-2xl font-extrabold text-gray-900 mt-1" data-kpi="pending">—</p>
+      <p class="text-[11px] text-gray-400 mt-0.5">Signed up, not yet confirmed</p>
+    </div>
+    <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+      <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">Unsubscribed</p>
+      <p class="text-2xl font-extrabold text-gray-900 mt-1" data-kpi="unsubscribed">—</p>
+      <p class="text-[11px] text-gray-400 mt-0.5">Never emailed again</p>
+    </div>
+    <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+      <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">Total contacts</p>
+      <p class="text-2xl font-extrabold text-gray-900 mt-1" data-kpi="total">—</p>
+      <p class="text-[11px] text-gray-400 mt-0.5">Across every source</p>
+    </div>
+  </div>
+
+  <!-- Segments -->
+  <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-4">
+    <div class="flex items-center justify-between mb-3">
+      <p class="text-sm font-bold text-gray-900">Segments</p>
+      <button type="button" id="aud-new-segment"
+        class="text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer">+ New segment</button>
+    </div>
+    <div id="aud-segments" class="flex flex-wrap gap-2">
+      <p class="text-sm text-gray-400">Loading…</p>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-4 flex flex-col sm:flex-row sm:items-center gap-3">
+    <div class="relative flex-1">
+      <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+        <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+      </div>
+      <input type="text" id="aud-search" placeholder="Search name, email or company…"
+        class="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm transition-all">
+    </div>
+    <select id="aud-status"
+      class="px-3 py-2.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 focus:ring-2 focus:ring-emerald-600 outline-none cursor-pointer">
+      <option value="">All statuses</option>
+      <option value="subscribed">Subscribed</option>
+      <option value="pending">Awaiting confirmation</option>
+      <option value="unsubscribed">Unsubscribed</option>
+      <option value="bounced">Bounced</option>
+      <option value="complained">Marked as spam</option>
+    </select>
+  </div>
+
+  <!-- Bulk action bar. ⚠️ Uses BOTH the hidden class and an inline display reset: `hidden` loses to
+       a utility that sets display (flex here), so toggling the class alone leaves it on screen. -->
+  <div id="aud-bulk" class="hidden items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 mb-4" style="display:none">
+    <p class="text-sm font-bold text-emerald-900"><span id="aud-bulk-count">0</span> selected</p>
+    <div class="flex-1"></div>
+    <button type="button" id="aud-bulk-segment" class="px-3 py-1.5 text-xs font-bold text-emerald-800 bg-white border border-emerald-300 rounded-lg hover:bg-emerald-50 cursor-pointer">Add to segment</button>
+    <button type="button" id="aud-bulk-unsub" class="px-3 py-1.5 text-xs font-bold text-amber-800 bg-white border border-amber-300 rounded-lg hover:bg-amber-50 cursor-pointer">Unsubscribe</button>
+  </div>
+
+  <div id="aud-truncated" class="hidden mb-4 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-900"></div>
+
+  <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead class="bg-gray-50 border-b border-gray-200">
+          <tr>
+            <th class="px-4 py-3 w-10"><input type="checkbox" id="aud-select-all" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer"></th>
+            <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Contact</th>
+            <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Status</th>
+            <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Source</th>
+            <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Added</th>
+            <th class="px-4 py-3"></th>
+          </tr>
+        </thead>
+        <tbody id="aud-rows" class="divide-y divide-gray-100">
+          <tr><td colspan="6" class="p-8 text-center text-gray-500">Loading your audience…</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="aud-pager"></div>
+  </div>
+
+  <!-- Add-contact modal. In-page markup rather than a JS-built dialog: dialogs.js owns the
+       confirm/alert/prompt family and has no multi-field form, and a second dialog implementation
+       is exactly what that file exists to prevent. -->
+  <div id="aud-add-modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4" style="display:none">
+    <div class="absolute inset-0 bg-black/40" data-aud-add-close></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+      <h2 class="text-lg font-extrabold text-gray-900 mb-1">Add a contact</h2>
+      <p class="text-sm text-gray-500 mb-5">Only add people who have agreed to hear from you. This is recorded against your account.</p>
+      <div class="space-y-3">
+        <input type="email" id="aud-add-email" placeholder="email@example.com" autocomplete="off"
+          class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
+        <div class="grid grid-cols-2 gap-3">
+          <input type="text" id="aud-add-first" placeholder="First name"
+            class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
+          <input type="text" id="aud-add-last" placeholder="Last name"
+            class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
+        </div>
+        <input type="text" id="aud-add-company" placeholder="Company (optional)"
+          class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
+        <select id="aud-add-segment"
+          class="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-700 focus:ring-2 focus:ring-emerald-600 outline-none cursor-pointer">
+          <option value="">No segment</option>
+        </select>
+      </div>
+      <div class="flex justify-end gap-2 mt-6">
+        <button type="button" data-aud-add-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
+        <button type="button" id="aud-add-save" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Add contact</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CSV import modal -->
+  <div id="aud-import-modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4" style="display:none">
+    <div class="absolute inset-0 bg-black/40" data-aud-import-close></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
+      <h2 class="text-lg font-extrabold text-gray-900 mb-1">Import contacts</h2>
+      <p class="text-sm text-gray-500 mb-5">A CSV with a header row. We look for columns named
+        <span class="font-mono text-xs bg-gray-100 px-1 rounded">email</span>,
+        <span class="font-mono text-xs bg-gray-100 px-1 rounded">first name</span>,
+        <span class="font-mono text-xs bg-gray-100 px-1 rounded">last name</span> and
+        <span class="font-mono text-xs bg-gray-100 px-1 rounded">company</span>.</p>
+
+      <input type="file" id="aud-import-file" accept=".csv,text/csv"
+        class="w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-amber-50 file:text-amber-700 cursor-pointer">
+
+      <div id="aud-import-preview" class="hidden mt-4 text-sm text-gray-700"></div>
+
+      <select id="aud-import-segment"
+        class="w-full mt-4 px-3 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-700 focus:ring-2 focus:ring-emerald-600 outline-none cursor-pointer">
+        <option value="">Add to no segment</option>
+      </select>
+
+      <!-- ⚠️ The declaration is the only lawful basis an imported list has. The server refuses the
+           import without it; this checkbox is the record of who claimed it and when. -->
+      <label class="flex items-start gap-2 mt-4 text-sm text-gray-700 cursor-pointer select-none">
+        <input type="checkbox" id="aud-import-consent" class="mt-0.5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-600">
+        <span>I confirm these people gave us permission to email them, and I can show when and how.</span>
+      </label>
+
+      <div id="aud-import-progress" class="hidden mt-4 text-sm font-medium text-gray-600"></div>
+
+      <div class="flex justify-end gap-2 mt-6">
+        <button type="button" data-aud-import-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
+        <button type="button" id="aud-import-start" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" disabled>Import</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sign-up form settings. Lives on the Audience page rather than inside an assistant: the form
+       writes into the shared audience, and a tenant with no Newsletter Assistant yet can still
+       start collecting subscribers. -->
+  <div id="aud-form-modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4" style="display:none">
+    <div class="absolute inset-0 bg-black/40" data-aud-form-close></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
+      <div class="flex items-start justify-between mb-1">
+        <h2 class="text-lg font-extrabold text-gray-900">Sign-up form</h2>
+        <button type="button" data-aud-form-close class="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 cursor-pointer">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="text-sm text-gray-500 mb-5">Paste this on your own website. Anyone who signs up lands in the audience above.</p>
+      <div id="aud-form-body"></div>
+    </div>
+  </div>
+
+  <!-- Contact detail slide-over -->
+  <div id="aud-detail" class="hidden fixed inset-0 z-50" style="display:none">
+    <div class="absolute inset-0 bg-black/40" data-aud-close></div>
+    <div class="absolute right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl flex flex-col">
+      <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+        <p id="aud-detail-title" class="text-sm font-bold text-gray-900 truncate pr-4">Contact</p>
+        <button type="button" data-aud-close class="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 cursor-pointer">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div id="aud-detail-body" class="flex-1 overflow-auto p-5 space-y-6"></div>
+    </div>
+  </div>
+</div>

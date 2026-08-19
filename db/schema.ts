@@ -14,6 +14,7 @@ import {
   jsonb,
   unique,
   uniqueIndex,
+  primaryKey,
   varchar,
   index,
   check,
@@ -4092,6 +4093,234 @@ export const campaignDecisions = pgTable("campaign_decisions", {
   // The constraint that makes the feedback loop real rather than optional. Without it "reject"
   // degrades into a status flip that teaches nothing — exactly what happened to lead rejection.
   check("campaign_decisions_reject_reason_check", sql`${t.status} <> 'rejected' OR ${t.rejectReason} IS NOT NULL`),
+]);
+
+// ── Shared Audience layer (db/audience.sql) ─────────────────────────────────────────────────────
+// The ORGANISATION's own contacts, readable by every assistant it hires. ⚠️ NOT `leads` (that is
+// Be More Swan's own sales CRM, admin-visible, no mandatory org) and NOT `assistant_records` (per
+// assistant, dies with it). The grain is (organisationId, email). See docs/newsletter-assistant-plan.md.
+export const audienceContacts = pgTable("audience_contacts", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  // Normalised lowercase + trimmed by the writer. Never insert a raw form value.
+  email: text("email").notNull(),
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  company: text("company"),
+  phone: text("phone"),
+  // ⚠️ 'pending' (double opt-in not completed) is NEVER mailable. Nothing that can send may read
+  // this column directly — ask src/utils/audience-consent.ts, which also consults lead_opt_outs.
+  status: text("status").notNull().default("pending"),
+  source: text("source").notNull().default("manual"),
+  sourceDetail: jsonb("source_detail").notNull().default({}),   // { formId, importJobId, assistantRecordId, page }
+  consentBasis: text("consent_basis"),
+  confirmedAt: timestamp("confirmed_at"),
+  unsubscribedAt: timestamp("unsubscribed_at"),
+  lastSentAt: timestamp("last_sent_at"),
+  customFields: jsonb("custom_fields").notNull().default({}),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  unique("audience_contacts_org_email_unique").on(t.organisationId, t.email),
+  index("audience_contacts_org_status_idx").on(t.organisationId, t.status),
+  index("audience_contacts_org_email_idx").on(t.organisationId, t.email),
+  // 'suppressed' is OUR verdict; 'unsubscribed' is THEIRS. Collapsing them loses the why.
+  check("audience_contacts_status_check", sql`${t.status} IN ('pending','subscribed','unsubscribed','bounced','complained','suppressed')`),
+  check("audience_contacts_source_check", sql`${t.source} IN ('web_form','csv_import','manual','lead_promotion','api')`),
+  check("audience_contacts_consent_basis_check", sql`${t.consentBasis} IS NULL OR ${t.consentBasis} IN ('double_opt_in','single_opt_in','imported_declared','soft_opt_in','manual_entry')`),
+]);
+
+export const audienceSegments = pgTable("audience_segments", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  kind: text("kind").notNull().default("manual"),               // 'manual' shipped; 'dynamic' reserved
+  rules: jsonb("rules").notNull().default({}),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  // Case-insensitive: "Newsletter" and "newsletter" as two segments is a support ticket.
+  uniqueIndex("audience_segments_org_name_unique").on(t.organisationId, sql`lower(${t.name})`),
+  check("audience_segments_kind_check", sql`${t.kind} IN ('manual','dynamic')`),
+]);
+
+export const audienceContactSegments = pgTable("audience_contact_segments", {
+  contactId: integer("contact_id").notNull().references(() => audienceContacts.id, { onDelete: "cascade" }),
+  segmentId: integer("segment_id").notNull().references(() => audienceSegments.id, { onDelete: "cascade" }),
+  addedAt: timestamp("added_at").defaultNow().notNull(),
+  addedBy: integer("added_by").references(() => users.id, { onDelete: "set null" }),
+}, (t) => [
+  primaryKey({ columns: [t.contactId, t.segmentId] }),
+  index("audience_contact_segments_segment_idx").on(t.segmentId),
+]);
+
+// Append-only consent evidence. ⚠️ Nothing may UPDATE or DELETE these rows: a contact row is
+// mutable and this is the proof of what was agreed, from which page, and when.
+export const audienceConsentEvents = pgTable("audience_consent_events", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  // SET NULL, not CASCADE — deleting the contact must not delete the evidence. The address is kept
+  // on the event for exactly that reason.
+  contactId: integer("contact_id").references(() => audienceContacts.id, { onDelete: "set null" }),
+  email: text("email").notNull(),
+  event: text("event").notNull(),
+  channel: text("channel"),
+  sourceUrl: text("source_url"),
+  // PSEUDONYMISED (/24) — src/utils/ip-pseudonymise.ts. Never a raw address.
+  ipHash: text("ip_hash"),
+  userAgent: text("user_agent"),
+  formId: integer("form_id"),
+  issueId: integer("issue_id"),
+  evidence: text("evidence"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("audience_consent_events_org_email_idx").on(t.organisationId, t.email, t.createdAt),
+  index("audience_consent_events_contact_idx").on(t.contactId, t.createdAt),
+  check("audience_consent_events_event_check", sql`${t.event} IN ('subscribe_requested','confirmed','unsubscribed','bounced','complained','imported','promoted','manual_added','erased','resubscribed')`),
+]);
+
+export const audienceImportJobs = pgTable("audience_import_jobs", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  filename: text("filename"),
+  rowCount: integer("row_count").notNull().default(0),
+  imported: integer("imported").notNull().default(0),
+  skipped: integer("skipped").notNull().default(0),
+  failed: integer("failed").notNull().default(0),
+  status: text("status").notNull().default("queued"),
+  errorSummary: jsonb("error_summary").notNull().default([]),
+  // The tenant's assertion that they hold consent — the only lawful basis an imported list has.
+  declaredConsent: boolean("declared_consent").notNull().default(false),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+}, (t) => [
+  index("audience_import_jobs_org_idx").on(t.organisationId, t.createdAt),
+  check("audience_import_jobs_status_check", sql`${t.status} IN ('queued','running','completed','failed')`),
+]);
+
+// The embeddable capture form. ⚠️ Its own key namespace ('aud_'), NOT widgetConfigs.publicKey:
+// that one is a READ key for cacheable content, this one authorises anonymous WRITES.
+export const audienceForms = pgTable("audience_forms", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  publicKey: text("public_key").notNull().unique(),             // 'aud_<nanoid>' — rotatable
+  name: text("name").notNull().default("Default"),
+  // ⚠️ NULL = any origin. An EMPTY ARRAY = nothing allowed. The two are different states and
+  // conflating them turns "I cleared the list" into a wide-open endpoint (see originAllowed).
+  allowedOrigins: text("allowed_origins").array(),
+  segmentId: integer("segment_id").references(() => audienceSegments.id, { onDelete: "set null" }),
+  doubleOptIn: boolean("double_opt_in").notNull().default(true),
+  fields: jsonb("fields").notNull().default(["email", "first_name"]),
+  theme: jsonb("theme").notNull().default({}),
+  successMessage: text("success_message"),
+  redirectUrl: text("redirect_url"),
+  // The exact sentence shown beside the submit button, stored because "what did the form say" is
+  // a question that gets asked later and must not be answered with the current template.
+  consentText: text("consent_text"),
+  status: text("status").notNull().default("active"),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("audience_forms_org_idx").on(t.organisationId),
+  check("audience_forms_status_check", sql`${t.status} IN ('active','disabled')`),
+]);
+
+// Double opt-in pending tokens. tokenHash, never the token — it is the whole credential and it
+// lives in an inbox.
+export const audienceConfirmations = pgTable("audience_confirmations", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  contactId: integer("contact_id").notNull().references(() => audienceContacts.id, { onDelete: "cascade" }),
+  formId: integer("form_id").references(() => audienceForms.id, { onDelete: "set null" }),
+  tokenHash: text("token_hash").notNull().unique(),             // sha256(token), hex
+  expiresAt: timestamp("expires_at").notNull(),
+  confirmedAt: timestamp("confirmed_at"),
+  // Throttle state — an unthrottled resend is an email-bombing tool pointed at strangers.
+  sentCount: integer("sent_count").notNull().default(1),
+  lastSentAt: timestamp("last_sent_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("audience_confirmations_contact_idx").on(t.contactId, t.createdAt),
+]);
+
+// ── Newsletter Assistant (db/newsletter.sql) ────────────────────────────────────────────────────
+// Mirrors blogPosts deliberately: same status vocabulary, same reuse of content_generation_jobs /
+// ai_blueprints / content_provenance. An issue is a blog post that is mailed instead of published.
+export const newsletterIssues = pgTable("newsletter_issues", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  assistantId: integer("assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  ownerId: integer("owner_id").references(() => users.id, { onDelete: "set null" }),
+  ownerLabel: text("owner_label"),
+  subject: text("subject").notNull(),
+  preheader: text("preheader"),
+  bodyMarkdown: text("body_markdown").notNull().default(""),
+  // Snapshot taken at APPROVAL: { html, text }. ⚠️ Sending never re-renders from bodyMarkdown — a
+  // human approved these exact words, and an edit landing mid-send would ship two versions.
+  renderedPayload: jsonb("rendered_payload"),
+  // NULL = every 'subscribed' contact in the org.
+  segmentId: integer("segment_id").references(() => audienceSegments.id, { onDelete: "set null" }),
+  status: text("status").notNull().default("draft"),
+  scheduledFor: timestamp("scheduled_for"),
+  sendingStartedAt: timestamp("sending_started_at"),
+  sentAt: timestamp("sent_at"),
+  isAutonomous: boolean("is_autonomous").notNull().default(false),
+  generationReason: text("generation_reason"),
+  provenanceContentId: text("provenance_content_id"),
+  confidenceScore: text("confidence_score"),
+  factualClaims: jsonb("factual_claims"),
+  jobId: text("job_id"),
+  blueprintId: integer("blueprint_id").references(() => aiBlueprints.id, { onDelete: "set null" }),
+  // Denormalised on purpose: KPI cards must not COUNT(*) a ledger of hundreds of thousands of rows.
+  recipientCount: integer("recipient_count").notNull().default(0),
+  deliveredCount: integer("delivered_count").notNull().default(0),
+  openedCount: integer("opened_count").notNull().default(0),
+  clickedCount: integer("clicked_count").notNull().default(0),
+  bouncedCount: integer("bounced_count").notNull().default(0),
+  complainedCount: integer("complained_count").notNull().default(0),
+  unsubscribedCount: integer("unsubscribed_count").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("newsletter_issues_org_status_idx").on(t.organisationId, t.status),
+  index("newsletter_issues_assistant_idx").on(t.assistantId, t.createdAt),
+  index("newsletter_issues_due_idx").on(t.status, t.scheduledFor),
+  check("newsletter_issues_status_check", sql`${t.status} IN ('draft','pending_approval','in_review','approved','scheduled','sending','sent','paused','failed','rejected','archived')`),
+]);
+
+// ⚠️ The UNIT OF WORK for dispatch, not a log written afterwards. One row per recipient is minted
+// BEFORE anything sends, and (issueId, email) is what makes a half-failed batch resumable instead
+// of duplicative — the lesson from 5 blog jobs producing 9 published posts on production.
+export const newsletterSends = pgTable("newsletter_sends", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  issueId: integer("issue_id").notNull().references(() => newsletterIssues.id, { onDelete: "cascade" }),
+  contactId: integer("contact_id").references(() => audienceContacts.id, { onDelete: "set null" }),
+  email: text("email").notNull(),
+  status: text("status").notNull().default("queued"),
+  // 'skipped' with no reason is the shape of a silent bug.
+  skipReason: text("skip_reason"),
+  providerMessageId: text("provider_message_id"),
+  // Per-(issue, contact) unsubscribe credential. Mirrors leadThreads.replyToken: unique, NOT NULL,
+  // ROTATED rather than cleared.
+  unsubscribeToken: text("unsubscribe_token").notNull(),
+  error: text("error"),
+  sentAt: timestamp("sent_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  unique("newsletter_sends_issue_email_unique").on(t.issueId, t.email),
+  unique("newsletter_sends_token_unique").on(t.unsubscribeToken),
+  index("newsletter_sends_issue_status_idx").on(t.issueId, t.status),
+  index("newsletter_sends_provider_idx").on(t.providerMessageId),
+  index("newsletter_sends_org_email_idx").on(t.organisationId, t.email),
+  check("newsletter_sends_status_check", sql`${t.status} IN ('queued','sent','delivered','bounced','complained','failed','skipped')`),
+  check("newsletter_sends_skip_reason_check", sql`${t.skipReason} IS NULL OR ${t.skipReason} IN ('opted_out','suppressed','unconfirmed','not_in_audience','bounced_previously','complained_previously','consent_check_failed','invalid_address','do_not_contact')`),
 ]);
 
 // Relational-query definitions for the chat tables live in db/relations.ts

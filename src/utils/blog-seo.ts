@@ -171,6 +171,13 @@ export interface BlogPageData extends BlogHeadData {
     theme?: { fontFamily?: string | null; fontUrl?: string | null } | null;
 
     /**
+     * The VISIBLE <h1>. Distinct from `title`, which is the SEO string for <title>/og:title and is
+     * routinely tuned with a site suffix ("… | Be More Swan") that reads badly as a page heading.
+     * Falls back to `title` when absent.
+     */
+    heading?: string | null;
+
+    /**
      * When set, the page carries the anonymous engagement beacon (dwell time + max scroll depth),
      * posting the same payload widget.js does to the same endpoint and the same aggregate row.
      *
@@ -200,6 +207,24 @@ function themeFontLinks(theme: BlogPageData['theme']): string {
         .map((o) => `<link rel="preconnect" href="${escHtml(o)}"${o.includes('gstatic') ? ' crossorigin' : ''}>`)
         .concat(`<link rel="stylesheet" href="${escHtml(url)}">`)
         .join('\n    ');
+}
+
+/**
+ * Remove the body's own leading <h1>.
+ *
+ * `published_payload.html` is a render of the post's Markdown, which starts with its "# Title" line
+ * — so the snapshot already opens with an <h1> carrying the post title. This document renders its
+ * own <h1> above the byline, which put TWO <h1> elements on every permalink: the meta title (site
+ * suffix and all) followed by the real headline. Two <h1>s is a malformed document outline, and the
+ * one search engines read first was the SEO string, not the headline.
+ *
+ * Dropping the body's copy rather than our own keeps the heading where the layout expects it —
+ * above the byline and the hero — instead of stranding "By … · 19 August 2026" above an untitled
+ * article. Anchored to the START, so an <h1> used legitimately mid-article is untouched. This is a
+ * render-time decision only; the stored snapshot is never mutated.
+ */
+function stripLeadingH1(bodyHtml: string): string {
+    return bodyHtml.replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i, '');
 }
 
 /**
@@ -257,6 +282,8 @@ export function renderBlogPage(d: BlogPageData): string {
     const head = buildHeadTags(d);
     const fontLinks = themeFontLinks(d.theme);
     const beacon = engagementScript(d.engagement);
+    const heading = d.heading || d.title;
+    const body = stripLeadingH1(d.bodyHtml);
     const fontStack = themeFontStack(d.theme);
     const dateLine = d.publishedAt
         ? `<time datetime="${escHtml(d.publishedAt)}">${escHtml(new Date(d.publishedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }))}</time>`
@@ -307,11 +334,11 @@ export function renderBlogPage(d: BlogPageData): string {
   </head>
   <body>
     <main>
-      <h1>${escHtml(d.title)}</h1>
+      <h1>${escHtml(heading)}</h1>
       <div class="meta">${[byline, dateLine].filter(Boolean).join('')}</div>
       ${hero}
       ${badge}
-      <article>${d.bodyHtml}</article>
+      <article>${body}</article>
       ${tagList}
     </main>
     ${beacon}

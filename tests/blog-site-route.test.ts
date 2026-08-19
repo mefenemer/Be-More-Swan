@@ -218,6 +218,61 @@ check('an unsafe or placeholder-less data-bms-post-url is rejected, not turned i
     assert.ok(guard.test('https://acme.com/blog/{slug}'));
 });
 
+// ── the page heading ────────────────────────────────────────────────────────
+// published_payload.html is a render of the post's Markdown and so opens with its own "# Title"
+// <h1>. The document also rendered one from the SEO meta title, which put TWO <h1> elements on
+// every permalink — the site-suffixed SEO string first, the real headline second.
+const BODY_WITH_H1 = '<h1>The Real Headline</h1>\n<p>Opening paragraph.</p><h2>A section</h2>';
+
+check('exactly one <h1>, and it is the post title — not the SEO meta title', () => {
+    const html = renderBlogPage({
+        ...BASE,
+        title: 'Safe Content Benchmark for Brand Integrity | Be More Swan',
+        heading: 'The Real Headline',
+        bodyHtml: BODY_WITH_H1,
+    });
+    assert.equal((html.match(/<h1[\s>]/g) || []).length, 1, 'a document must not carry two <h1>s');
+    assert.ok(html.includes('<h1>The Real Headline</h1>'));
+    assert.ok(!/<h1>[^<]*\| Be More Swan/.test(html), 'the site suffix must not appear as the page heading');
+});
+
+check('the SEO title still owns <title>, og:title and the JSON-LD', () => {
+    const html = renderBlogPage({
+        ...BASE,
+        title: 'SEO Title | Be More Swan',
+        heading: 'The Real Headline',
+        bodyHtml: BODY_WITH_H1,
+    });
+    assert.ok(html.includes('<title>SEO Title | Be More Swan</title>'));
+    assert.ok(html.includes('content="SEO Title | Be More Swan"'), 'og/twitter title unchanged');
+});
+
+check('a body with NO leading h1 still gets a heading', () => {
+    const html = renderBlogPage({ ...BASE, heading: 'The Real Headline', bodyHtml: '<p>Straight into prose.</p>' });
+    assert.equal((html.match(/<h1[\s>]/g) || []).length, 1);
+    assert.ok(html.includes('<h1>The Real Headline</h1>'));
+    assert.ok(html.includes('<p>Straight into prose.</p>'), 'body must survive untouched');
+});
+
+check('only a LEADING h1 is dropped — one used mid-article survives', () => {
+    const html = renderBlogPage({
+        ...BASE, heading: 'Top', bodyHtml: '<p>Intro.</p><h1>Mid-article</h1><p>More.</p>',
+    });
+    assert.ok(html.includes('<h1>Mid-article</h1>'), 'a non-leading h1 is the author\'s, leave it');
+    assert.ok(html.includes('<h1>Top</h1>'));
+});
+
+check('heading falls back to the title when none is given', () => {
+    const html = renderBlogPage({ ...BASE, title: 'Only A Title', bodyHtml: '<p>x</p>' });
+    assert.ok(html.includes('<h1>Only A Title</h1>'));
+});
+
+check('a hostile heading is escaped', () => {
+    const html = renderBlogPage({ ...BASE, heading: '<img src=x onerror=alert(1)>', bodyHtml: '<p>x</p>' });
+    assert.ok(!html.includes('<img src=x'), 'heading must be escaped, it is not sanitised markup');
+    assert.ok(html.includes('&lt;img src=x'));
+});
+
 check('one read sends one beacon, on BOTH the widget and the server page', () => {
     // A reader who tabs away and later closes the page fires visibilitychange AND pagehide. Without
     // a guard that is two views for one read — which inflates blog_engagement_stats.views and so
@@ -226,6 +281,30 @@ check('one read sends one beacon, on BOTH the widget and the server page', () =>
         'widget.js flush() must be idempotent');
     const page = renderBlogPage({ ...BASE, engagement: { publicKey: 'wgt_k', slug: 'a-post' } });
     assert.ok(/if \(sent\) return;/.test(page), 'the server page beacon must be idempotent too');
+});
+
+// ── widget.js carries the same heading fix ──────────────────────────────────
+check('the widget strips the body\'s leading h1 instead of stacking two headlines', () => {
+    assert.ok(widget.includes('function stripLeadingH1(html)'), 'widget.js lost stripLeadingH1');
+    assert.ok(widget.includes('stripLeadingH1(payload.html)'),
+        'the helper must actually be applied to the body, not just defined');
+    assert.ok(!/\(payload\.html \|\| ''\) \+/.test(widget), 'the raw body is being rendered again');
+});
+
+check('the widget heading is the post title, and a live A/B variant still wins', () => {
+    assert.ok(widget.includes("variant && variant.h1 ? variant.h1 : (post.title || post.metaTitle)"),
+        'headline test must win; the fallback must be the post title, not the SEO metaTitle');
+    assert.ok(!widget.includes('(post.metaTitle || post.title)'),
+        'the SEO meta title must not be the visible heading');
+});
+
+check('both strip helpers use the SAME pattern — they must not drift apart', () => {
+    // One is the server permalink, one is the customer embed. A pattern fixed on one side only is
+    // how the duplicate heading comes back on the surface nobody re-checked.
+    const seo = read('src/utils/blog-seo.ts');
+    const pattern = String.raw`/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i`;
+    assert.ok(seo.includes(pattern), `blog-seo.ts strip pattern changed shape:\n${pattern}`);
+    assert.ok(widget.includes(pattern), `widget.js strip pattern changed shape:\n${pattern}`);
 });
 
 console.log(`\n${passed} checks passed.`);

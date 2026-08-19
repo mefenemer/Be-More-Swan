@@ -2,6 +2,32 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-subscribe-widget",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4472",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/fd1fd3bc-c418-47e8-b114-22c6ae0d9aa7/scratchpad/subharness"
+      ],
+      "port": 4472,
+      "autoPort": false
+    },
+    {
+      "name": "component-harness-audience-page",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4471",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/fd1fd3bc-c418-47e8-b114-22c6ae0d9aa7/scratchpad/audharness"
+      ],
+      "port": 4471,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-blog-permalinks",
       "runtimeExecutable": "python3",
       "runtimeArgs": [
