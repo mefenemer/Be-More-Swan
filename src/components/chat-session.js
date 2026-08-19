@@ -493,6 +493,56 @@
         });
     }
 
+    // "Save this draft" on a BlogPostDraftCard (disruptive-ui-registry.js). Unlike the two
+    // proposal cards above, the thing being saved is the ONLY copy of a finished article — the
+    // orchestrator deliberately writes no row for the blog route, so if this call fails the piece
+    // exists nowhere but in the transcript. Hence the card's re-enable-on-failure contract, and
+    // hence no optimistic UI here.
+    //
+    // Straight to blog-posts.ts, the same endpoint Blog Studio's "New draft" button uses: it owns
+    // the tenant guard, the assistant's org check, the AI-provenance stamp that the transparency
+    // notice is read from, and the re-press dedupe. A second path to blog_posts is how two of them
+    // start disagreeing about which of those a draft gets.
+    function onBlogDraftCreate(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      if (!assistantId) {
+        respond({ ok: false, error: 'This chat is not attached to an assistant, so the draft cannot be saved.' });
+        return;
+      }
+      fetch('/.netlify/functions/blog-posts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          assistantId,
+          title: d.title,
+          bodyMarkdown: d.bodyMarkdown,
+          tags: d.tags || [],
+        }),
+      })
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `Save failed (HTTP ${res.status}).`);
+          respond({ ok: true, deduped: data.deduped === true });
+          // Same reason as discovery:created and campaign:created above — the Blogs tab is sitting
+          // behind this chat modal, already rendered, with no other way to learn about a write made
+          // from in here. Without this the user closes the chat onto "No blog drafts awaiting
+          // review" immediately after being told it saved.
+          document.dispatchEvent(new CustomEvent('blog:created', {
+            detail: {
+              assistantId,
+              postId: (data.post && data.post.id) || null,
+              deduped: data.deduped === true,
+            },
+          }));
+        })
+        .catch((err) => {
+          console.error('[ChatSession] blog draft save failed:', err);
+          respond({ ok: false, error: err.message });
+        });
+    }
+
     // The composer does not exist in read-only mode, so its listeners are conditional. The
     // container-level ones stay: a hydrated transcript can still contain Disruptive UI cards.
     if (!readOnly) {
@@ -503,6 +553,7 @@
     container.addEventListener('handoff:response', onHandoffResponse);
     container.addEventListener('discovery:create', onDiscoveryCreate);
     container.addEventListener('campaign:create', onCampaignCreate);
+    container.addEventListener('blog:createDraft', onBlogDraftCreate);
 
     // Starter pills send their prompt verbatim; the first appendMessage removes the
     // zero-state (and the pills with it), so no explicit teardown is needed.
@@ -530,6 +581,7 @@
         container.removeEventListener('handoff:response', onHandoffResponse);
         container.removeEventListener('discovery:create', onDiscoveryCreate);
         container.removeEventListener('campaign:create', onCampaignCreate);
+        container.removeEventListener('blog:createDraft', onBlogDraftCreate);
         container.innerHTML = '';
       },
     };

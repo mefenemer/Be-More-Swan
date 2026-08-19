@@ -979,6 +979,20 @@ window._onBlogStudioChanged = function() {
     window._renderAutopilotCard?.();
 };
 
+// A draft saved from the chat modal's Blog Draft card (chat-session.js → blog:created) lands in
+// exactly the same list, from a modal that also sits over the top of this page. Reuse the Blog
+// Studio refresh rather than a second one: the Blogs list, its column counts, the Review badge and
+// the Autopilot card's "awaiting approval" figure all move together or not at all, and "Saved to
+// your Blogs tab" followed by a tab still reading "No blog drafts awaiting review" is the exact
+// contradiction that makes a user think the assistant is lying to them.
+document.addEventListener('blog:created', function (e) {
+    const detail = (e && e.detail) || {};
+    // Only the assistant it belongs to reacts — the event is on `document` because the modal is
+    // mounted at body level, outside this page's subtree.
+    if (Number(detail.assistantId) !== Number(window._currentAssistantId)) return;
+    window._onBlogStudioChanged();
+});
+
 // ── Lifecycle column counts ──────────────────────────────────────────────────
 // Every column carries its own count, not just Review. Previously only the Review badge was
 // populated (inside _detailRqRenderGroups, gated on statusKey === 'review'), so a post that moved

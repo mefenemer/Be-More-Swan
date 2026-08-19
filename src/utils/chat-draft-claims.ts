@@ -85,8 +85,13 @@ export function replyClaimsPostSaved(reply: string): boolean {
  *                    still reaches the user via the uiElement, so the message points at it.
  *   not_saved_here — drafting INTO a post the user has open. Persisting is correct-by-design
  *                    here; only the claim is wrong, and the client renders an apply button.
+ *   blog_no_draft  — the blog route's version of no_draft. Long-form drafts are never written
+ *                    by the turn (the user keeps or discards them from the card), so the only
+ *                    unbacked claim available to that route is claiming a post that was never
+ *                    drafted at all — and it lands in the Blogs tab, not the Review Queue, so
+ *                    it needs its own sentence rather than a reused one pointing somewhere else.
  */
-export type DraftClaimFailure = 'no_draft' | 'persist_failed' | 'not_saved_here';
+export type DraftClaimFailure = 'no_draft' | 'persist_failed' | 'not_saved_here' | 'blog_no_draft';
 
 /** The reply that ships instead of the false one. Plain, first-person, and actionable. */
 export function honestDraftReply(kind: DraftClaimFailure): string {
@@ -98,6 +103,11 @@ export function honestDraftReply(kind: DraftClaimFailure): string {
             return "Sorry — I said that was done, but nothing actually saved, so there's nothing in your Review Queue to look at. Ask me for a single post and I'll do it properly this time.";
         case 'persist_failed':
             return "I've written this one, but couldn't save it to your Review Queue just then. The caption's below — ask me to try again in a moment.";
+        case 'blog_no_draft':
+            // "I'll do it properly" and not "I'll write it properly", for the reason above: the
+            // latter matches the CLAIM_PATTERNS entry for "i'll write", and this guard flagging
+            // its own replacement text is a loop the user would see.
+            return "Sorry — I said that was done, but no draft came through, so there's nothing here for you to keep. Send me the topic again and I'll do it properly this time.";
         case 'not_saved_here':
             // Phrased to hold whether or not a caption card accompanies it: the model may have
             // claimed a save without producing a draft at all, in which case there is no button.

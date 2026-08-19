@@ -28,11 +28,29 @@ CREATE TABLE IF NOT EXISTS assistant_features (
 CREATE INDEX IF NOT EXISTS assistant_features_master_idx
   ON assistant_features (master_assistant_id);
 
--- Seed: Social Media Manager is the live, launch-ready role — pre-enable AI media generation.
--- All other roles start disabled; admins enable per-type as those roles go live.
+-- Seed: pre-enable AI media generation for the live content roles.
+-- All other roles start disabled; admins enable per-type as those roles go live via
+-- Admin → Master Data → Assistant Features.
+--
+-- ⚠️ role_key MUST be a CANONICAL catalog key from db/seed-catalog.ts. This seed originally
+-- targeted the legacy key 'social_media', which db/rolekey-namespace-unification.sql merged
+-- into 'social_media_manager' and then DELETED — so from that migration onward this INSERT
+-- silently matched ZERO rows, leaving assistant_features empty and making
+-- orgHasAssistantFeature() return false for every org. The user-visible symptom was
+-- "None of your assistants can generate AI images." on every AI-image surface.
+--
+-- Which roles get what:
+--   social_media_manager — image + video (My Content media pool)
+--   blog_writer          — image only    (Blog Studio feature/inline media; there is no
+--                                         video surface in the Blog Studio)
+-- Note the runtime gate is ORG-WIDE: any one active assistant carrying the flag unlocks the
+-- feature for the whole org, on every surface.
 INSERT INTO assistant_features (master_assistant_id, feature_key, enabled)
 SELECT ma.id, f.key, true
 FROM master_assistants ma
-CROSS JOIN (VALUES ('ai_image_generation'), ('ai_video_generation')) AS f(key)
-WHERE ma.role_key = 'social_media'
+JOIN (VALUES
+    ('social_media_manager', 'ai_image_generation'),
+    ('social_media_manager', 'ai_video_generation'),
+    ('blog_writer',          'ai_image_generation')
+) AS f(role_key, key) ON f.role_key = ma.role_key
 ON CONFLICT (master_assistant_id, feature_key) DO NOTHING;

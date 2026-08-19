@@ -1491,6 +1491,136 @@
   register('social_post_draft', renderSocialPostDraftCard);
   register('SocialPostDraftCard', renderSocialPostDraftCard);
 
+  // ── Built-in: Blog Post Draft Card ──────────────────────────────────────────
+  // Renderer for the blog_writer route's wire shape (chat-orchestrator.ts, normalised by
+  // src/utils/blog-chat-draft.ts): { type: 'blog_post_draft', title, bodyMarkdown, tags }.
+  //
+  // The ONE drafting card whose content is not already saved when it appears. The social draft
+  // card shows a post the orchestrator has already written to scheduled_posts; this one holds the
+  // only copy of a whole article, and pressing "Save this draft" is what creates the row. So the
+  // card has to say that plainly BEFORE the buttons — a user who assumes it is filed and closes
+  // the chat loses the piece — and the wording after a save has to name where it went.
+  //
+  // Indigo, like the two proposal cards: in this transcript's visual language indigo means "your
+  // decision", emerald means "done". Discarding is a real choice here, not a dismissal of a card.
+  //
+  // Save dispatches a bubbling 'blog:createDraft' CustomEvent — chat-session.js owns the call
+  // because it is what holds the assistantId the post must belong to; the renderer only ever
+  // receives `ui`. detail.respond carries the outcome back, because a create can fail and a card
+  // that always claims success is worse than no card at all.
+  function renderBlogPostDraftCard(ui, esc) {
+    const bodyMarkdown = typeof ui.bodyMarkdown === 'string' ? ui.bodyMarkdown.trim() : '';
+    if (!bodyMarkdown) return null;                 // nothing written — fall back to text-only
+    const title = typeof ui.title === 'string' && ui.title.trim() ? ui.title.trim() : 'Untitled draft';
+    // Strip a leading hash for display: the normaliser (src/utils/blog-chat-draft.ts) already does
+    // it server-side, but the same rendering path also has to survive whatever a transcript
+    // stored before that normaliser existed.
+    const tags = (Array.isArray(ui.tags) ? ui.tags : [])
+      .filter((t) => typeof t === 'string' && t.trim())
+      .map((t) => t.trim().replace(/^#/, ''))
+      .filter((t, i, all) => t && all.indexOf(t) === i);
+    const words = bodyMarkdown.split(/\s+/).filter(Boolean).length;
+
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <div class="flex items-start gap-3 mb-3">
+        <div class="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-xl shrink-0">📝</div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase" data-bpd-eyebrow>Blog draft · Not saved yet</p>
+          <p class="font-bold text-gray-900 break-words">${esc(title)}</p>
+        </div>
+      </div>
+
+      <div class="bg-white border border-indigo-100 rounded-lg p-3 mb-3 max-h-64 overflow-y-auto">
+        <p class="text-sm text-gray-700 whitespace-pre-wrap break-words">${esc(bodyMarkdown)}</p>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-1.5 mb-3">
+        <span class="text-[11px] font-semibold text-gray-500">${esc(String(words))} words</span>
+        ${tags.map((t) => `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-white text-indigo-700 border border-indigo-200">${esc(t)}</span>`).join('')}
+      </div>
+
+      <div class="flex items-center gap-2" data-bpd-actions>
+        <button type="button" data-bpd-save
+          class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          Save this draft
+        </button>
+        <button type="button" data-bpd-discard
+          class="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          Discard
+        </button>
+      </div>
+      <p class="mt-2 text-xs font-semibold text-indigo-700" data-bpd-status>Saving keeps it as a draft you can edit, schedule or publish. Discarding throws it away.</p>
+    `;
+
+    const status = el.querySelector('[data-bpd-status]');
+    function say(text, tone) {
+      status.textContent = text;
+      status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`;
+    }
+    function setBusy(busy) {
+      el.querySelectorAll('[data-bpd-save], [data-bpd-discard]').forEach((b) => { b.disabled = busy; });
+    }
+
+    // The eyebrow is a claim about where this article is, and it is the first thing read. Leaving
+    // it on "Not saved yet" above a line saying it saved is the same contradiction this card
+    // exists to prevent, one paragraph higher up.
+    function setEyebrow(text) {
+      const eyebrow = el.querySelector('[data-bpd-eyebrow]');
+      if (eyebrow) eyebrow.textContent = text;
+    }
+
+    el.addEventListener('click', (e) => {
+      const save = e.target.closest('[data-bpd-save]');
+      const discard = e.target.closest('[data-bpd-discard]');
+      if (!save && !discard) return;
+
+      if (discard) {
+        // The article stays on screen — only the choice goes away. It is still in the transcript,
+        // and "discard" here means "don't file it", not "delete the conversation".
+        setBusy(true);
+        setEyebrow('Blog draft · Discarded');
+        say('Discarded — nothing was saved. Ask me for another angle any time.');
+        return;
+      }
+
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('blog:createDraft', {
+        bubbles: true,
+        detail: {
+          title,
+          bodyMarkdown,
+          tags: tags.map((t) => t.trim()),
+          // Re-enabling on failure is the point: this card holds the only copy of the article, so
+          // a transient error must never strand it behind two dead buttons.
+          respond({ ok, deduped, error }) {
+            if (ok) {
+              setEyebrow('Blog draft · Saved');
+              // "Blogs" and "Blog Studio" are the REAL names of those surfaces
+              // (assistant-dashboard-registry.js blog_writer.reviewQueue.label, and the detail
+              // page's primary button). Pinned by tests/chat-blog-draft.test.ts so this sentence
+              // cannot drift off the tab it names.
+              say(deduped
+                ? 'Already saved — it is in your Blogs tab.'
+                : 'Saved to your Blogs tab — open it in Blog Studio to edit, schedule or publish it.');
+              return;
+            }
+            setBusy(false);
+            setEyebrow('Blog draft · Not saved yet');
+            say(error || 'Could not save that draft — please try again.', 'error');
+          },
+        },
+      }));
+    });
+
+    return el;
+  }
+
+  register('blog_post_draft', renderBlogPostDraftCard);
+  register('BlogPostDraftCard', renderBlogPostDraftCard);
+
   // ── Built-in: Upgrade Required Card (paywall) ───────────────────────────────
   // Renderer for the orchestrator's 403 over-limit wire shape (chat-orchestrator.ts):
   // { type: 'upgrade_required', reason }

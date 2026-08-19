@@ -33,6 +33,7 @@ import { EXCLUDE_PROFILE_RULE, SCORING_BANDS, icpBlock } from '../../src/config/
 import { normalizePlatform, platformFormat, type SocialPlatform } from '../../src/config/platform-formats';
 import { normalizeMediaSources } from '../../src/utils/media-sources';
 import { replyClaimsPostSaved, honestDraftReply, type DraftClaimFailure } from '../../src/utils/chat-draft-claims';
+import { blogPostDraftFromUiElement, BLOG_POST_DRAFT_TYPE } from '../../src/utils/blog-chat-draft';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -1389,6 +1390,60 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
         parseResponse: parseStructuredReply,
     },
 
+    // Blog Writer — long-form. The one drafting route that deliberately does NOT write a row on
+    // the turn: the card it emits carries "Save this draft" / "Discard" buttons and the client
+    // makes the write (src/utils/blog-chat-draft.ts explains why; chat-session.js does it).
+    //
+    // Before this route existed, blog_writer fell through to defaultRoute — so a Blog Writer could
+    // write a whole publish-ready post in chat and then, correctly, tell the user to copy it out
+    // and retype it into Blog Studio, because nothing in the product could carry it across. The
+    // post was already written; only the wiring was missing.
+    blog_writer: {
+        model: DEFAULT_MODEL,
+        // Same library that shapes an autopilot blog draft (process-blog-jobs → generateBlogBody),
+        // so a post written in chat sounds like one written overnight.
+        usesInspo: true,
+        // A finished ~800-word post lives JSON-escaped inside "bodyMarkdown", with the reply on
+        // top. The social route has already paid for getting this wrong: when the envelope
+        // truncates mid-string the JSON never parses, parseStructuredReply degrades to
+        // STRUCTURED_REPLY_FALLBACK, and the post the model had just written is discarded in
+        // front of the user. max_tokens is a ceiling, not a spend.
+        maxTokens: 4096,
+        buildRolePrompt: (rc) => [
+            sharedContextBlock(rc),
+            `You are this business's blog writer. When the user gives you a topic, an angle, a brief or a rough idea — or asks you to write about something you already have enough context for — write the ACTUAL finished article, ready to publish as-is: no outlines, no placeholders, no "[insert example here]".
+
+Write it in Markdown: a single H1 title on the first line, a short hook intro, three to six H2 sections with substantive paragraphs under them, and a brief conclusion. Aim for 700-1,100 words unless the user asks for something shorter or longer. Weave any keywords they give you in naturally and never keyword-stuff.`,
+            // The one thing this route must never get wrong. The card is an OFFER, so a reply
+            // that reports the post as filed is false at the exact moment the user reads it.
+            `WHAT HAPPENS TO THE DRAFT — including the draft object below does NOT save anything. It puts the post on screen underneath your reply with two buttons on it: "Save this draft" and "Discard". Pressing Save is what puts it in this business's blog drafts; pressing Discard throws it away and nothing is kept. Until they press one, the post exists only in this conversation.
+
+So: NEVER say the post has been saved, filed, added, created, scheduled, published or queued — not even loosely. Say it is ready and that they can keep it or bin it with the buttons. Never tell them to copy the text out, to paste it somewhere, or to go and re-create it themselves — the button does that, and telling them to retype work you have already done is the single worst thing you can say here.
+
+Once saved, a draft appears in this assistant's "Blogs" tab and opens in Blog Studio, where they edit it, add pictures, set its SEO, schedule it or publish it. That is the only place those things happen: you cannot schedule or publish from this chat, so if they ask, say so plainly and point at Blog Studio — after they have saved the draft, which is the step that gets it there.
+
+ONE POST PER REPLY. The draft object holds exactly one article, so one reply can only ever offer one. If they ask for several, write the FIRST one properly and offer the next.
+
+WHAT YOU CANNOT SEE — this conversation gives you no sight of the posts this business already has: not their drafts, not what is scheduled, not what is published, and not how any of it is performing. If they ask about existing work, say plainly that you cannot see it from here (their drafts and scheduled posts are in the "Blogs" tab, and how published posts are doing is on this assistant's "Overview" tab) and offer to write something new. Never guess at what they have posted, invent a figure, or describe a screen you have not been told about.
+
+NEVER claim you have written a post unless THIS reply carries the draft object. If it is null, nothing was written, and a reply saying otherwise leaves the user looking for something that does not exist.`,
+            // Before the JSON contract, deliberately — the block ends with exemplar copy, so it
+            // must not be the last thing shaping the reply's SHAPE. Same ordering as the social route.
+            rc.inspoBlock ?? '',
+            `Return STRICT JSON and NOTHING else — no markdown, no code fences, no prose before or after the object. Keep "reply" to one or two short sentences: the article itself belongs in bodyMarkdown, never in the reply. Every string must be valid JSON — escape the quotes and newlines inside bodyMarkdown:
+{
+  "reply": "your conversational message to the user",
+  "uiElement": {                      // or null when there is nothing to write yet
+    "type": "blog_post_draft",
+    "title": "<the post's title, plain text, no markdown>",
+    "bodyMarkdown": "<the complete article in Markdown, starting with the H1>",
+    "tags": ["<up to 5 short topic tags>"]
+  }
+}`,
+        ].filter(Boolean).join('\n\n'),
+        parseResponse: parseStructuredReply,
+    },
+
     // Social Media Assistant — the default/legacy assistant role. Drafts real, ready-to-post
     // captions in chat; the handler below (persistSocialPostDraft) saves each as a
     // pending_approval scheduled_posts row, so the reply only needs to confirm the draft
@@ -1877,7 +1932,8 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // `content` is not final: the reconciliation guard below replaces it when the model
         // claims a post was saved and no row was actually written.
         const parsed = route.parseResponse(raw);
-        const uiElement = parsed.uiElement;
+        // Not final either: the blog route replaces it with a normalised draft (or nothing) below.
+        let uiElement = parsed.uiElement;
         let content = parsed.content;
 
         // Golden Rule 2: structured output flows into the Data Hub automatically. Computed
@@ -1914,6 +1970,16 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             }
         }
 
+        // Long-form drafts are the one structured output a turn does NOT write: the card carries
+        // Save/Discard and the client makes the row (src/utils/blog-chat-draft.ts says why). What
+        // the server still owes is a clean payload — uiElementJson is persisted verbatim and
+        // re-rendered on every reload of this conversation, so a half-formed draft object would
+        // come back as a broken card with a Save button on it for as long as the transcript lives.
+        const blogDraft = route === ROUTES.blog_writer ? blogPostDraftFromUiElement(uiElement) : null;
+        if (route === ROUTES.blog_writer) {
+            uiElement = blogDraft ? { type: BLOG_POST_DRAFT_TYPE, ...blogDraft } : null;
+        }
+
         // ── Reply ↔ persistence reconciliation ────────────────────────────────────
         // The reply text and the scheduled_posts row come from the same model response but by
         // independent paths, and nothing used to compare them — so "all three posts are drafted
@@ -1936,6 +2002,16 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 );
                 content = honestDraftReply(breach);
             }
+        }
+
+        // The blog route's version of the same reconciliation. It cannot fail to PERSIST (it never
+        // persists), so the only unbacked claim available to it is claiming an article it did not
+        // write — which is the identical bug: a confident reply about a post that does not exist.
+        if (route === ROUTES.blog_writer && !blogDraft && replyClaimsPostSaved(content)) {
+            console.warn(
+                `[chat-orchestrator] suppressed unbacked blog draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
+            );
+            content = honestDraftReply('blog_no_draft');
         }
 
         if (hubLink && uiElement && typeof uiElement === 'object') {

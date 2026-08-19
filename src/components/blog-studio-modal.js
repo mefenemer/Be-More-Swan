@@ -38,7 +38,11 @@
     // The two must stay distinguishable or loadOrgWebsite() refetches on every open.
     orgWebsite: undefined,
     // Same undefined/null contract as orgWebsite. null = no kit, or the neutral default one.
-    brandKit: undefined };
+    brandKit: undefined,
+    // Whether this org's assistants may generate AI images. Admin-managed per assistant TYPE
+    // (assistant_features), so it is re-resolved on every open and never assumed. false until
+    // get-ai-credit-balance says otherwise — see loadMediaCapabilities().
+    canImage: false };
 
   function el(id) { return document.getElementById(id); }
   function setStatus(id, msg) { var e = el(id); if (e) e.textContent = msg; }
@@ -289,6 +293,10 @@
     // a worse place.
     + '          <input type="file" id="bs-media-upload-input" class="bs-hidden" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm,audio/mpeg,audio/mp4,audio/wav,audio/webm,audio/ogg">'
     + '        </div>'
+    // AI image generation is a capability an org may simply not have. The button above is
+    // disabled on open in that case and this line says why, so nobody writes a prompt only to
+    // meet generate-ai-image's 403 — see applyMediaCapabilities().
+    + '        <p id="bs-ai-unavailable" class="bs-help bs-hidden" style="margin-top:10px;"></p>'
     + '        <div id="bs-ai-form" class="bs-field bs-hidden" style="margin-top:12px;">'
     + '          <input id="bs-ai-prompt" placeholder="Describe the image\u2026">'
     + '          <button id="bs-ai-go" class="bs-btn bs-btn-ghost bs-btn-sm" style="margin-top:8px;">Generate</button></div>'
@@ -1193,7 +1201,47 @@
     });
   }
 
+  // ── AI image generation: resolve the capability BEFORE offering it ───────────────────────────
+  // Generating images is an admin-managed capability of an assistant TYPE (assistant_features), so
+  // an org can have an active Blog Writer and still not be allowed to generate. My Content already
+  // preflights this on modal-open and hides its AI tab (_mcLoadCapabilities / _mcApplyTabVisibility
+  // in my-content.js); the Studio offered a live-looking button either way, and the author found
+  // out from generate-ai-image's raw 403 sentence after writing a prompt.
+  //
+  // The button is DISABLED rather than removed: unlike My Content's tab strip, this row is the
+  // author's map of where images come from, and a source that silently isn't there reads as a bug.
+  var AI_UNAVAILABLE = 'None of your assistants can generate images \u2014 use Library, Upload, '
+    + 'Canva or stock search instead, or ask an admin to enable AI image generation.';
+
+  function loadMediaCapabilities() {
+    return api('get-ai-credit-balance', { method: 'GET' })
+      .then(function (res) { state.canImage = !!(res.ok && res.body && res.body.canImage); })
+      // Failed lookup means "not offered", never "offered": generate-ai-image is the real gate,
+      // and a hopeful button here would only move the 403 later.
+      .catch(function () { state.canImage = false; })
+      .then(applyMediaCapabilities);
+  }
+
+  function applyMediaCapabilities() {
+    var can = !!state.canImage;
+    var btn = el('bs-media-ai');
+    if (btn) {
+      btn.disabled = !can;                     // .bs-btn:disabled already dims it and kills the cursor
+      if (can) btn.removeAttribute('title'); else btn.setAttribute('title', AI_UNAVAILABLE);
+    }
+    var note = el('bs-ai-unavailable');
+    if (note) {
+      note.textContent = can ? '' : AI_UNAVAILABLE;
+      note.classList.toggle('bs-hidden', can);
+    }
+    // A capability lost mid-session must not leave a live prompt box open behind the explanation.
+    if (!can && mediaEls && mediaEls.aiForm) mediaEls.aiForm.classList.add('bs-hidden');
+  }
+
   function openAiForm() {
+    // A disabled button fires no click, so this only catches a programmatic call — but the panel
+    // must never be reachable when the server would refuse the generate.
+    if (!state.canImage) { setStatus('bs-media-status', AI_UNAVAILABLE); return; }
     mediaEls.picker.classList.add('bs-hidden');
     mediaEls.pexelsForm.classList.add('bs-hidden');
     mediaEls.aiForm.classList.remove('bs-hidden');
@@ -1585,12 +1633,20 @@
       // value the panel is not changing has to be re-sent, which is what state.widgetTheme — the
       // last config applyWidget painted from, refreshed from each save's response — is for.
       //
-      // The picker reads '' whenever the stored stack has no matching <option> (catalogue not
-      // loaded, or a family retired from src/config/blog-fonts.ts). Falling back to the stored
-      // family there is the difference between "the author changed the accent" and "the author
-      // changed the accent and silently lost their typeface".
+      // The picker reads '' whenever the stored stack has no matching <option>, which happens two
+      // ways and they need opposite answers:
+      //   • the catalogue never loaded (platform-constants.js missing) — the stored face is fine,
+      //     carry it forward, or changing the accent silently strips the author's typeface;
+      //   • the family was RETIRED from src/config/blog-fonts.ts — findBlogFont refuses it, so
+      //     re-sending it 400s the WHOLE save and the accent the author just picked is refused
+      //     along with it, from a panel whose picker cannot show them the offending value either.
+      // BlogFonts.get() is the difference: it recognises a stack the catalogue still offers.
       var stored = state.widgetTheme || {};
-      var stack = el('bs-font').value || stored.fontFamily || '';
+      var catalogue = window.BlogFonts;
+      var stack = el('bs-font').value;
+      if (!stack && stored.fontFamily) {
+        stack = (!catalogue || catalogue.get(stored.fontFamily)) ? stored.fontFamily : '';
+      }
       var payload = {
         action: 'update',
         // fontUrl travels WITH the stack. widget.js and the /b/:key/:slug permalink both need the
@@ -1598,7 +1654,7 @@
         // fontFamily and ignores this — it is sent so the two stay visibly in step.
         theme: {
           accent: el('bs-accent').value,
-          fontUrl: (window.BlogFonts && window.BlogFonts.urlFor(stack)) || null,
+          fontUrl: (catalogue && catalogue.urlFor(stack)) || null,
         },
         badgeEnabled: el('bs-badge').checked,
       };
@@ -1769,7 +1825,27 @@
       mediaEls.picker.innerHTML = '<div class="bs-media-empty">Generating…</div>';
       api('generate-ai-image', { method: 'POST', body: JSON.stringify({ prompt: prompt, aspectRatio: '16:9' }) })
         .then(function (res) {
-          if (!res.ok) { setStatus('bs-media-status', (res.body && res.body.error) || 'Generation failed'); mediaEls.picker.innerHTML = ''; return; }
+          if (!res.ok) {
+            mediaEls.picker.innerHTML = '';
+            mediaEls.picker.classList.add('bs-hidden');
+            // The capability went away since this modal opened (or the tab predates the preflight).
+            // Retire the control and explain, rather than printing the server's raw sentence.
+            if (res.body && res.body.code === 'feature_unavailable') {
+              state.canImage = false;
+              applyMediaCapabilities();
+              setStatus('bs-media-status', AI_UNAVAILABLE);
+              return;
+            }
+            // 402 carries the machine code 'insufficient_credits' in `error` — showing that verbatim
+            // is the same fault in a different branch. Wording mirrors my-content.html's warning.
+            if (res.body && res.body.error === 'insufficient_credits') {
+              setStatus('bs-media-status', 'You don\u2019t have enough credits to generate an image. '
+                + 'Upgrade your plan for more.');
+              return;
+            }
+            setStatus('bs-media-status', (res.body && res.body.error) || 'Generation failed');
+            return;
+          }
           setStatus('bs-media-status', 'Pick a variation');
           var jobId = res.body.jobId;
           mediaEls.picker.innerHTML = '';
@@ -1864,6 +1940,11 @@
     window.ScrollLock.lock('blog-studio');
 
     clearWorkspaceState();
+    // Resolve AI image generation before the author can reach for it. Reset to "no" first and paint
+    // that, so a previous org's capability can never leave the button live for a beat.
+    state.canImage = false;
+    applyMediaCapabilities();
+    loadMediaCapabilities();
     // Paint the fallback wording immediately so no button is briefly blank, then correct it once
     // the assistant list is in.
     applyAssistantNaming();

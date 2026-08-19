@@ -315,10 +315,19 @@ check('an untouched font survives a change to the accent', () => {
                                landmark(widgetFn, 'if (typeof body.name'));
     assert.ok(/updates\.theme = checked\.theme;/.test(upd),
         'save-widget-config no longer replaces the theme wholesale — re-check the client merge base');
-    // Hence: re-send what the panel is not changing. The picker reads '' whenever the stored stack
-    // has no matching <option> (catalogue not loaded, or a family retired from blog-fonts.ts).
-    assert.ok(/var stack = el\('bs-font'\)\.value \|\| stored\.fontFamily \|\| '';/.test(widgetSave),
+    // Hence: re-send what the panel is not changing.
+    assert.ok(/var stack = el\('bs-font'\)\.value;/.test(widgetSave), 'the picker is no longer the first source');
+    assert.ok(/if \(!stack && stored\.fontFamily\)/.test(widgetSave),
         'an empty picker sends no fontFamily, which wipes the stored one');
+    // ...but NOT blindly. A family retired from the catalogue is refused by findBlogFont, and
+    // re-sending it would 400 the whole save — losing the accent too, from a panel that cannot
+    // show the author the value it is choking on.
+    assert.ok(/stack = \(!catalogue \|\| catalogue\.get\(stored\.fontFamily\)\) \? stored\.fontFamily : '';/.test(widgetSave),
+        'a stack the catalogue no longer offers is re-sent, which 400s every save from this panel');
+    assert.ok(/null when it isn't one we offer/.test(read('../src/generated/platform-constants.js')),
+        'BlogFonts.get no longer answers null for an unknown stack, so the guard above is inert');
+    assert.ok(/if \(!font\) return \{ error: 'theme\.fontFamily is not one of the available fonts\.' \}/.test(widgetFn),
+        'the server no longer rejects an unknown family — re-check whether the guard is still needed');
     const apply = modal.slice(landmark(modal, 'function applyWidget('), landmark(modal, '// ── SEO metadata panel'));
     assert.ok(/state\.widgetTheme = theme;/.test(apply), 'nothing records what was last stored');
     assert.ok(/state\.widgetTheme = res\.body\.config\.theme/.test(widgetSave),
@@ -349,6 +358,68 @@ check('nothing is lost to the debounce window', () => {
     // The flush must run BEFORE the editor teardown clears state, not after.
     assert.ok(landmark(close, 'state.flushWidgetSettings()') < landmark(close, 'state.editor.destroy'),
         'the flush runs after the modal has already begun tearing down');
+});
+
+console.log('\n(12) AI image generation is preflighted, not discovered from a 403\n');
+
+// Generating images is an admin-managed capability of an assistant TYPE (assistant_features).
+// My Content resolves it on modal-open and hides its AI tab; Blog Studio rendered a live-looking
+// "Ask <name> to generate" button regardless, and the only feedback an org without the capability
+// got was generate-ai-image's raw 403 sentence, printed into the status line after they had already
+// written a prompt.
+const caps = modal.slice(landmark(modal, 'function loadMediaCapabilities()'),
+                         landmark(modal, 'function openAiForm()'));
+const openStudio = modal.slice(landmark(modal, 'function openBlogStudio('),
+                               landmark(modal, 'function notifyChanged()'));
+const aiGenerate = modal.slice(landmark(modal, "mediaEls.aiGo.addEventListener('click'"),
+                               landmark(modal, 'mediaEls.pexelsGo.addEventListener'));
+
+check('the capability is resolved from the same endpoint My Content preflights against', () => {
+    assert.ok(/api\('get-ai-credit-balance'/.test(caps), 'nothing asks whether the org may generate at all');
+    assert.ok(/res\.body\.canImage/.test(caps), 'the answer is fetched but canImage is never read');
+    // Same source of truth as my-content.js's _mcLoadCapabilities — if that endpoint stops
+    // reporting the flag, both surfaces are wrong together rather than one silently drifting.
+    assert.ok(/canImage/.test(read('../netlify/functions/get-ai-credit-balance.ts')),
+        'get-ai-credit-balance no longer reports canImage — the preflight has nothing to read');
+});
+
+check('a failed lookup closes the control rather than opening it', () => {
+    assert.ok(/\.catch\(function \(\) \{ state\.canImage = false; \}\)/.test(caps),
+        'a network failure leaves the last answer standing — the button must fail shut');
+});
+
+check('the control is resolved on every open, from a closed start', () => {
+    assert.ok(/state\.canImage = false;/.test(openStudio), 'the previous org’s answer is reused');
+    assert.ok(/loadMediaCapabilities\(\)/.test(openStudio), 'the capability is never resolved on open');
+    // Painting the closed state first is what stops a stale capability flashing a live button.
+    assert.ok(landmark(openStudio, 'state.canImage = false;') < landmark(openStudio, 'loadMediaCapabilities()'),
+        'the reset lands after the fetch is armed, so a stale answer can still paint');
+});
+
+check('an org without the capability sees a disabled button AND the reason', () => {
+    assert.ok(/btn\.disabled = !can;/.test(caps), 'the generate button stays clickable without the capability');
+    assert.ok(/setAttribute\('title', AI_UNAVAILABLE\)/.test(caps), 'a disabled button with no title explains nothing');
+    assert.ok(markup.includes('id="bs-ai-unavailable"'), 'there is nowhere on screen to say why the button is dead');
+    assert.ok(/note\.classList\.toggle\('bs-hidden', can\)/.test(caps),
+        'the explanation does not track the capability');
+    // A disabled button that looks identical to a live one is the original fault in a new place.
+    assert.ok(/\.bs-btn:disabled\{[^}]*opacity/.test(styles), 'disabled buttons are not visibly disabled');
+    // openAiForm is reachable programmatically; the prompt box must not be.
+    const guard = modal.slice(landmark(modal, 'function openAiForm()'), landmark(modal, 'function openPexelsForm()'));
+    assert.ok(/if \(!state\.canImage\)/.test(guard), 'the prompt box opens even when the server would refuse');
+});
+
+check('feature_unavailable is handled, not printed', () => {
+    assert.ok(/res\.body\.code === 'feature_unavailable'/.test(aiGenerate),
+        'the 403 code is ignored, so the server sentence lands in the status line verbatim');
+    assert.ok(/state\.canImage = false;[\s\S]{0,120}applyMediaCapabilities\(\)/.test(aiGenerate),
+        'a capability revoked mid-session leaves the button live for the next attempt');
+    // The code the client keys on has to be the one the server sends.
+    assert.ok(/code: 'feature_unavailable'/.test(read('../src/utils/assistant-capabilities.ts')),
+        'featureUnavailableResponse no longer sends that code — the client branch is dead');
+    // 402's `error` is the machine string 'insufficient_credits'; the same fault, one branch over.
+    assert.ok(/res\.body\.error === 'insufficient_credits'/.test(aiGenerate),
+        'an out-of-credits org is shown the raw machine code');
 });
 
 console.log(`\n${passed} checks passed.\n`);
