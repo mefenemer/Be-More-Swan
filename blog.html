@@ -51,11 +51,14 @@
      style.css reaches it and nothing it ships leaks back out — which is also why this section
      styles the wrapper and leaves the inside alone.
 
-     Note for anyone chasing an SEO question here: this list is client-rendered and routes on
-     location.hash, so crawlers see an empty div. That is expected and it is not the indexable
-     surface. Each published post is ALSO served as real server-rendered HTML at
-     /b/<widget-key>/<slug> (netlify/functions/blog-page.ts), with a per-blog sitemap at
-     /b/<widget-key>/sitemap.xml. Submit THAT sitemap to Search Console, not this page. -->
+     Note for anyone chasing an SEO question here: this list is client-rendered, so crawlers see an
+     empty div. That is expected — this page is an INDEX, not the indexable surface. Each published
+     post is served as real server-rendered HTML at /blog/<slug> (netlify.toml rewrite →
+     netlify/functions/blog-page.ts), which is also the canonical our prod widget config stamps, and
+     the cards below are real <a href> links into those pages (data-bms-post-url). The same document
+     is still reachable tenant-neutrally at /b/<widget-key>/<slug>, and the per-blog sitemap at
+     /b/<widget-key>/sitemap.xml lists the CANONICAL url of each post — so it now lists the /blog/
+     form. Submit THAT sitemap to Search Console, not this page. -->
 <section class="py-20 bg-gray-50">
     <div class="max-w-7xl mx-auto px-4">
         <div id="bms-blog"></div>
@@ -128,6 +131,12 @@
         s.src = './widget.js';
         s.setAttribute('data-bms-key', BMS_BLOG_WIDGET_KEY);
         s.setAttribute('data-bms-mount', '#bms-blog');
+        // Cards link to the server-rendered post instead of swapping the widget's innerHTML behind
+        // a #fragment. Those pages are crawlable, shareable, and carry the engagement beacon — a
+        // hash change carries none of the three. Must stay in step with SITE_BLOG_POST_PATH in
+        // src/config/site-blog.ts and with the /blog/:slug rewrite in netlify.toml; the read on the
+        // other end is netlify/functions/blog-page.ts. tests/blog-site-route.test.ts locks all four.
+        s.setAttribute('data-bms-post-url', '/blog/{slug}');
         document.body.appendChild(s);
     }
 

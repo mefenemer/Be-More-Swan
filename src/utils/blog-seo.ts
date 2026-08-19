@@ -169,6 +169,20 @@ export interface BlogPageData extends BlogHeadData {
      * — this is a `<style>` body and a `<link href>`, and neither forgives a lie about provenance.
      */
     theme?: { fontFamily?: string | null; fontUrl?: string | null } | null;
+
+    /**
+     * When set, the page carries the anonymous engagement beacon (dwell time + max scroll depth),
+     * posting the same payload widget.js does to the same endpoint and the same aggregate row.
+     *
+     * Why it belongs here and not only in the widget: this document is what every shared link,
+     * search result and canonical URL resolves to, and it used to report NOTHING. "Average Read
+     * Time" therefore measured only the reads that happened inside a customer's embed — the page
+     * doing most of the reading was the one page invisible to the metric.
+     *
+     * Omit it (or pass null) for a document that must not report — the beacon is then absent from
+     * the markup entirely rather than present-and-disabled.
+     */
+    engagement?: { publicKey: string; slug: string } | null;
 }
 
 /** CSS `font-family` value, or null. Re-validated against the catalogue rather than trusted. */
@@ -188,12 +202,61 @@ function themeFontLinks(theme: BlogPageData['theme']): string {
         .join('\n    ');
 }
 
+/**
+ * The inline engagement beacon, or '' when the caller passed none.
+ *
+ * A deliberate near-copy of widget.js's trackEngagement, NOT a shared module: that one runs on a
+ * customer's page inside a Shadow DOM and resolves its endpoint from the script origin, this one is
+ * same-origin and standalone. Keep the PAYLOAD identical though — widget-ab-beacon.ts upserts both
+ * into blog_engagement_stats, and a field renamed on one side silently stops counting on the other.
+ *
+ * `variantId` is omitted rather than sent as null: this page never picks an A/B variant, and the
+ * server already treats a missing variant as the normal case (most posts run no headline test).
+ *
+ * Values are embedded with jsonLdSafe, not escHtml — this is a script body, where the escape that
+ * matters is the one stopping a slug from closing the element early.
+ */
+function engagementScript(e: BlogPageData['engagement']): string {
+    if (!e || !e.publicKey || !e.slug) return '';
+    return `<script>
+      (function () {
+        var start = Date.now(), maxScroll = 0, sent = false;
+        function onScroll() {
+          var h = document.documentElement;
+          var pct = h.scrollTop / Math.max(1, h.scrollHeight - h.clientHeight);
+          maxScroll = Math.max(maxScroll, Math.min(1, pct));
+        }
+        window.addEventListener('scroll', onScroll, { passive: true });
+        function flush() {
+          if (sent) return;
+          sent = true;
+          window.removeEventListener('scroll', onScroll);
+          var dwellMs = Date.now() - start;
+          try {
+            if (navigator.sendBeacon) navigator.sendBeacon('/.netlify/functions/widget-ab-beacon', JSON.stringify({
+              publicKey: ${jsonLdSafe(e.publicKey)},
+              slug: ${jsonLdSafe(e.slug)},
+              dwellMs: dwellMs,
+              scrollPct: Math.round(maxScroll * 100),
+              engaged: dwellMs > 15000 || maxScroll > 0.5
+            }));
+          } catch (err) {}
+        }
+        window.addEventListener('pagehide', flush, { once: true });
+        document.addEventListener('visibilitychange', function () {
+          if (document.visibilityState === 'hidden') flush();
+        });
+      })();
+    </script>`;
+}
+
 // A self-contained, dependency-free HTML document. Server-rendered so crawlers (which run no JS) and
 // social unfurlers get the real title/description/image and full article text — the exact thing the
 // hash-routed Shadow-DOM widget cannot give them.
 export function renderBlogPage(d: BlogPageData): string {
     const head = buildHeadTags(d);
     const fontLinks = themeFontLinks(d.theme);
+    const beacon = engagementScript(d.engagement);
     const fontStack = themeFontStack(d.theme);
     const dateLine = d.publishedAt
         ? `<time datetime="${escHtml(d.publishedAt)}">${escHtml(new Date(d.publishedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }))}</time>`
@@ -251,6 +314,7 @@ export function renderBlogPage(d: BlogPageData): string {
       <article>${d.bodyHtml}</article>
       ${tagList}
     </main>
+    ${beacon}
   </body>
 </html>`;
 }

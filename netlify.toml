@@ -273,6 +273,38 @@
   to = "/.netlify/functions/blog-page"
   status = 200
 
+# Be More Swan's OWN blog posts on the marketing domain: /blog/<slug> → the same server-rendered
+# permalink function, with the widget key implied by the domain (src/config/site-blog.ts) instead of
+# carried in the URL. See src/utils/blog-route.ts.
+#
+# WHY this exists: the prod widget config has site_base_url + site_post_path = "/blog/{slug}" set,
+# and resolveCanonical() honours that pair over our own /b/:key/:slug permalink. So every published
+# post was ALREADY stamping its canonical — and its sitemap <loc>, and its RSS item link — at
+# bemoreswan.com/blog/<slug>, a path that nothing served. blog.html answers /blog, but it is a
+# hash-routed widget mount with no per-post route behind it, so the pattern pointed at a 404 and the
+# whole blog was un-indexable by its own declared canonical.
+#
+# ⚠️ ":slug" MATCHES ONE PATH SEGMENT — do not "simplify" this to "/blog/*". The splat would also
+# swallow /blog/anything/deeper and answer it with whatever post the first segment happens to name,
+# which is the same failure the /powered-by rule above documents at length.
+#
+# Placement audited against first-match-wins: NO rule above this one matches a /blog/… path. The
+# source-exposure 404s are all other top-level directories; the aura-assist.com rules are
+# host-absolute; /help, /support and /faq are exact; /powered-by/:slug is a different first segment;
+# and — the one worth stating plainly — "/b/*" does NOT match "/blog/x", because Netlify matches
+# whole path SEGMENTS and "b" is not "blog".
+#
+# NOT `force = true`, and that is deliberate: no file exists at /blog/<slug>, so the rewrite already
+# wins, and leaving force off means a real file would keep priority. That is the opposite of the
+# rules at the top of this file, where force IS load-bearing precisely because a real file exists.
+#
+# Note this does NOT shadow /blog itself: ":slug" requires a segment after /blog, so blog.html keeps
+# serving the index at both /blog and /blog.html.
+[[redirects]]
+  from = "/blog/:slug"
+  to = "/.netlify/functions/blog-page"
+  status = 200
+
 # Prospect opt-out from a tenant's cold outreach. A stable, human-legible path because this URL is
 # PRINTED IN THE EMAIL — both as the visible "Unsubscribe here" link and as the RFC 8058
 # List-Unsubscribe header value that Gmail and Yahoo POST to. `/.netlify/functions/lead-unsubscribe`

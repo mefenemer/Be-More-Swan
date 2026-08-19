@@ -1,9 +1,15 @@
 // netlify/functions/blog-page.ts
 // Autonomous Content Engine — US 1.3: the SERVER-RENDERED permalink for a published blog post.
 //
-// Behind a netlify.toml rewrite:  /b/*  →  /.netlify/functions/blog-page
+// Behind two netlify.toml rewrites, both landing here:
 //   GET /b/:key/:slug  → a full HTML document with a crawler-facing <head> (SEO + Open Graph +
 //                        Twitter Card + JSON-LD BlogPosting) and the server-rendered article body.
+//                        Tenant-neutral: the widget key is in the URL.
+//   GET /blog/:slug    → the SAME document for Be More Swan's own blog, where the key is implied by
+//                        the domain (SITE_BLOG_WIDGET_KEY). This exists because our prod widget
+//                        config stamps canonicals at bemoreswan.com/blog/<slug> — before this route
+//                        nothing served that path, so every canonical and sitemap entry 404'd.
+//                        See src/utils/blog-route.ts for the parsing.
 //
 // WHY this exists alongside widget-api.ts: the native widget renders client-side into a Shadow DOM
 // on the customer's domain and routes on location.hash. Social crawlers run no JavaScript, and
@@ -17,6 +23,7 @@ import { getDb } from '../../db/client';
 import { widgetConfigs, blogPosts, organisations } from '../../db/schema';
 import { resolveInlineMedia, resolveFeatureImageUrl } from '../../src/utils/blog-media-resolve';
 import { resolveCanonical, renderBlogPage } from '../../src/utils/blog-seo';
+import { parseBlogRoute } from '../../src/utils/blog-route';
 import { isAiAssisted } from '../../src/utils/blog-ai-assisted';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { excerpt } from '../../src/utils/markdown-render';
@@ -44,12 +51,12 @@ function notFound(): { statusCode: number; headers: Record<string, string>; body
 export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
-    // Parse /b/:key/:slug from the original (pre-rewrite) path.
+    // Parse the original (pre-rewrite) path — a rewrite is status 200, so rawUrl still carries the
+    // URL the visitor actually requested, which is the only place the key and slug survive.
     const path = event.rawUrl ? new URL(event.rawUrl).pathname : event.path || '';
-    const m = path.match(/\/b\/([^/]+)\/([^/?#]+)/);
-    if (!m) return notFound();
-    const [, publicKey, slugRaw] = m;
-    const slug = decodeURIComponent(slugRaw);
+    const route = parseBlogRoute(path);
+    if (!route) return notFound();
+    const { publicKey, slug } = route;
 
     const db = getDb();
     const [cfg] = await db
@@ -112,7 +119,9 @@ export default withLambda(async (event: HandlerEvent) => {
     const imageAlt = (payload?.featureImage?.alt as string | undefined) || post.title;
 
     const baseUrl = resolveBaseUrl(event.headers as Record<string, string | undefined>);
-    const pageUrl = `${(baseUrl || '').replace(/\/+$/, '')}/b/${encodeURIComponent(publicKey)}/${encodeURIComponent(post.slug || slug)}`;
+    // og:url is the URL THIS response was served at, not the canonical — route.pathname keeps the
+    // two apart, so a post opened at /blog/<slug> does not advertise the /b/<key>/<slug> form.
+    const pageUrl = `${(baseUrl || '').replace(/\/+$/, '')}${route.pathname}`;
 
     // Prefer the stamped canonical_url (set at publish); recompute as a fallback for posts published
     // before the column was backfilled. Both go through the same resolver so they can't diverge.
@@ -144,6 +153,12 @@ export default withLambda(async (event: HandlerEvent) => {
         aiAssisted: isAiAssisted(post),
         badgeEnabled: cfg.badgeEnabled,
         theme: (cfg.theme as { fontFamily?: string | null; fontUrl?: string | null } | null) || null,
+        // Anonymous dwell/scroll beacon, the same one widget.js sends. Without it this page — the
+        // one every shared link, search result and canonical points at — contributed NOTHING to
+        // blog_engagement_stats, so "Average Read Time" only ever measured reads that happened
+        // inside a customer's embed. Keyed on the resolved public key + the STORED slug, so the
+        // row it upserts is the same one the widget would have written.
+        engagement: post.slug ? { publicKey, slug: post.slug } : null,
     });
 
     // Never cache a noindex post at the CDN as if indexable; still fine for the browser.

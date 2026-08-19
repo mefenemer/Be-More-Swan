@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-blog-permalinks",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4460",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/48388169-cffc-467e-a6fc-8b525797035b/scratchpad/harness"
+      ],
+      "port": 4460,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-blog-draft-card",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

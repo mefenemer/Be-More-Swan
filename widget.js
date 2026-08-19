@@ -22,6 +22,33 @@
   var mountSel = script.getAttribute('data-bms-mount') || '#bms-blog';
   if (!key) { console.error('[bms-widget] missing data-bms-key'); return; }
 
+  // OPTIONAL, opt-in: data-bms-post-url="/blog/{slug}".
+  //
+  // Without it the widget behaves exactly as it always has — cards open the post in place and route
+  // on location.hash. That default must not change: for most customers the widget IS the blog, and
+  // silently turning every card into a link off their own site would be a regression they never
+  // asked for.
+  //
+  // With it, cards become real <a href> elements pointing at the customer's own per-post route — the
+  // same URL their site_post_path canonicalises to. That is worth having wherever such a route
+  // genuinely exists: a real page can be linked, shared, crawled, and MEASURED (the server-rendered
+  // permalink carries the engagement beacon; a hash change does not).
+  //
+  // Validated here rather than trusted: this string becomes an href. A rooted path or an absolute
+  // http(s) URL only, and it must carry {slug} — without the placeholder every card would link to
+  // the same page, which is precisely the duplicate-content failure resolveCanonical() refuses to
+  // create on the server side.
+  var postUrlTemplate = script.getAttribute('data-bms-post-url') || '';
+  if (postUrlTemplate && !(/^(\/(?!\/)|https?:\/\/)/.test(postUrlTemplate) && postUrlTemplate.indexOf('{slug}') !== -1)) {
+    console.error('[bms-widget] ignoring data-bms-post-url: need a rooted path or http(s) URL containing {slug}');
+    postUrlTemplate = '';
+  }
+
+  function postHref(slug) {
+    if (!postUrlTemplate || !slug) return null;
+    return postUrlTemplate.replace('{slug}', encodeURIComponent(slug));
+  }
+
   // Resolve API origin from the script src so the widget works on any host.
   var apiBase;
   try { apiBase = new URL(script.src).origin; } catch (e) { apiBase = ''; }
@@ -75,6 +102,12 @@
   function trackEngagement(post, variantId) {
     var start = Date.now();
     var maxScroll = 0;
+    // ONE read must send ONE beacon. Both listeners below can fire in a single visit — a reader who
+    // switches tab (visibilitychange → hidden) and later closes the page (pagehide) hit flush twice,
+    // and `{ once: true }` on each does nothing about that because they are different events. That
+    // recorded two views for one read, which inflates blog_engagement_stats.views and therefore
+    // DEFLATES the "Average Read Time" KPI, since it divides summed dwell by views.
+    var sent = false;
     function onScroll() {
       var h = document.documentElement;
       var pct = (h.scrollTop) / Math.max(1, h.scrollHeight - h.clientHeight);
@@ -82,6 +115,8 @@
     }
     window.addEventListener('scroll', onScroll, { passive: true });
     function flush() {
+      if (sent) return;
+      sent = true;
       window.removeEventListener('scroll', onScroll);
       var dwellMs = Date.now() - start;
       var payload = JSON.stringify({
@@ -99,7 +134,7 @@
     window.addEventListener('pagehide', flush, { once: true });
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState === 'hidden') flush();
-    }, { once: true });
+    });
   }
 
   // The Google Fonts stylesheet for the chosen family, if any.
@@ -161,6 +196,9 @@
       '.bms .bms-hero{width:100%;object-fit:cover;margin:8px 0 16px;}' +
       '.bms .bms-credit{font-size:12px;color:#6b7280;margin:-8px 0 16px;}' +
       '.bms .bms-card{padding:16px 0;border-bottom:1px solid #e5e7eb;cursor:pointer;}' +
+      // The linked card form (data-bms-post-url). `.bms a{color:accent}` above would otherwise
+      // repaint the whole card — title, excerpt and all — in the accent colour and underline it.
+      '.bms a.bms-card{display:block;color:inherit;text-decoration:none;}' +
       '.bms .bms-badge{display:inline-block;margin-top:24px;padding:4px 10px;border-radius:999px;' +
         'background:#f3f4f6;color:#6b7280;font-size:12px;}' +
       '.bms .bms-back{background:none;border:0;color:' + accent + ';cursor:pointer;padding:8px 0;font-size:14px;}';
@@ -191,11 +229,15 @@
       getJSON(API + '/posts').then(function (data) {
         var posts = data.posts || [];
         view.innerHTML = posts.map(function (p) {
-          return '<div class="bms-card" data-slug="' + esc(p.slug) + '">' +
-            '<h2>' + esc(p.title) + '</h2>' +
-            '<p>' + esc(p.excerpt) + '</p></div>';
+          var href = postHref(p.slug);
+          var body = '<h2>' + esc(p.title) + '</h2><p>' + esc(p.excerpt) + '</p>';
+          // A real anchor, not a div with a click handler: middle-click, ctrl-click, "copy link
+          // address" and a crawler following the list all need an href to exist.
+          return href
+            ? '<a class="bms-card" href="' + esc(href) + '">' + body + '</a>'
+            : '<div class="bms-card" data-slug="' + esc(p.slug) + '">' + body + '</div>';
         }).join('') || '<p>No posts yet.</p>';
-        Array.prototype.forEach.call(view.querySelectorAll('.bms-card'), function (card) {
+        Array.prototype.forEach.call(view.querySelectorAll('div.bms-card'), function (card) {
           card.addEventListener('click', function () { navigate(card.getAttribute('data-slug')); });
         });
       }).catch(function () { view.innerHTML = '<p>Unable to load posts.</p>'; });
