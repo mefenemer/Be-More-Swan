@@ -331,7 +331,7 @@
     + '        <div class="bs-row" style="margin-top:12px;">'
     + '          <button id="bs-unschedule" class="bs-btn bs-btn-ghost bs-hidden">Unschedule</button>'
     + '          <button id="bs-unpublish" class="bs-btn bs-btn-ghost bs-hidden">Unpublish</button>'
-    + '          <button id="bs-discard" class="bs-btn bs-btn-danger">Discard draft</button>'
+    + '          <button id="bs-discard" class="bs-btn bs-btn-danger">Archive draft</button>'
     + '        </div>'
     + '        <div id="bs-action-status" class="bs-banner bs-hidden"></div>'
     + '      </div>'
@@ -619,6 +619,21 @@
     el('bs-robots').value = (post && post.robots) || 'index,follow';
     el('bs-canonical').textContent = (post && post.canonicalUrl) || 'Set when the post is published.';
     refreshSeoCounts();
+    syncSeoButton();
+  }
+
+  // Autopilot drafts now arrive WITH metadata (process-blog-jobs calls generateBlogSeo as soon as
+  // the body is written), so for most posts this button is no longer the thing that produces SEO —
+  // it is the thing that refreshes it after an edit. Label it for what it does, or it reads as an
+  // unfinished step on a draft that is already complete.
+  function syncSeoButton() {
+    var btn = el('bs-generate-seo');
+    if (!btn) return;
+    var has = !!(el('bs-meta-title').value || '').trim() || !!(el('bs-meta-desc').value || '').trim();
+    btn.textContent = has ? 'Regenerate SEO' : 'Generate SEO';
+    btn.title = has
+      ? 'Rewrite the search title, description and tags from the current draft.'
+      : 'Write a search title, description, slug and tags from this draft.';
   }
 
   // ── Headline A/B test (US 5.2) ────────────────────────────────────────────────────────────────
@@ -1046,14 +1061,15 @@
       el('bs-schedule-picker').classList.add('bs-hidden');
     });
 
-    // Discard — drafts only; blog-posts DELETE refuses a published post.
+    // Archive — drafts only; blog-posts DELETE refuses a published post. That endpoint no longer
+    // destroys the row (it sets status='archived'), so this must not warn about permanence.
     el('bs-discard').addEventListener('click', function () {
       if (!state.postId) return;
-      if (!window.confirm('Discard this draft? This cannot be undone.')) return;
-      setBanner('bs-action-status', 'Discarding…');
+      if (!window.confirm('Archive this draft? You can find it again in the Archive tab.')) return;
+      setBanner('bs-action-status', 'Archiving…');
       api('blog-posts?id=' + encodeURIComponent(state.postId), { method: 'DELETE' }).then(function (res) {
-        if (res.ok) closeBlogStudio();
-        else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not discard this draft.', 'error');
+        if (res.ok) { notifyChanged(); closeBlogStudio(); }
+        else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not archive this draft.', 'error');
       });
     });
 
@@ -1075,6 +1091,7 @@
         if (res.ok && res.body.post) {
           setBanner('bs-action-status', 'Approved — scheduled for ' + new Date(res.body.post.publishDate).toLocaleString());
           el('bs-unschedule').classList.remove('bs-hidden');
+          notifyChanged();   // leaves Review for Scheduled — both counts move
         } else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not schedule this post.', 'error');
       });
     });
@@ -1091,6 +1108,7 @@
           setBanner('bs-action-status', 'Scheduled for ' + new Date(res.body.post.publishDate).toLocaleString());
           el('bs-schedule-picker').classList.add('bs-hidden');
           el('bs-unschedule').classList.remove('bs-hidden');
+          notifyChanged();   // manual date — same lifecycle move as approve
         } else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not schedule this post.', 'error');
       });
     });
@@ -1151,6 +1169,8 @@
         if (res.body.metaTitle) el('bs-meta-title').value = res.body.metaTitle;
         if (res.body.metaDescription) el('bs-meta-desc').value = res.body.metaDescription;
         refreshSeoCounts();
+        // After the fields are populated, never before — the label is derived from their values.
+        syncSeoButton();
       });
     });
 
@@ -1380,6 +1400,18 @@
         startBlankPost();
       }
     });
+  }
+
+  // Tell the host page a post changed lifecycle, so the Blogs list and its tab badge reload.
+  //
+  // Both come from the SAME call (_detailRqRenderBlog sets the list, the column badge, the tab badge,
+  // the pending-review count and the op signals), so without this the count keeps its pre-action
+  // value until the user switches tabs or reloads. The list card's own Archive button always
+  // refreshed; the modal never did, which is why archiving from inside Blog Studio left the Review
+  // count one too high.
+  function notifyChanged() {
+    try { window._onBlogStudioChanged && window._onBlogStudioChanged(); }
+    catch (e) { /* the host page is optional — the modal must still close */ }
   }
 
   function closeBlogStudio() {

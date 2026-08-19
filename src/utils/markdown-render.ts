@@ -63,7 +63,11 @@ function loadMarked(): Promise<MarkedType> {
 const ALLOWED_TAGS = [
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
     'p', 'a', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code',
-    'strong', 'em', 'del', 'hr', 'br', 'img', 'figure', 'figcaption',
+    // 'u' and 'mark' back the editor's underline / highlight buttons. Both are attribute-free
+    // presentational tags with no script surface — and they must stay here: markdown has no syntax
+    // for either, so they reach this sanitiser as raw HTML, and dropping them would strip the
+    // author's formatting out of published_payload while the Studio preview kept showing it.
+    'strong', 'em', 'u', 'mark', 'del', 'hr', 'br', 'img', 'figure', 'figcaption',
     'table', 'thead', 'tbody', 'tr', 'th', 'td',
     'video', 'audio', 'source', 'div',
 ];

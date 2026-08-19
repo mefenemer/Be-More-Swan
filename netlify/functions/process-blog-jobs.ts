@@ -17,6 +17,7 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
+import { generateBlogSeo } from '../../src/utils/blog-seo-generate';
 import { aiAssistants, blogPosts, contentGenerationJobs } from '../../db/schema';
 import { generateBlogBody } from '../../src/utils/blog-generate';
 import { ideateBlogTopic } from '../../src/utils/blog-topic-ideation';
@@ -170,6 +171,26 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
             keywords: idea.keywords,
             notes: job.context_prompt ?? undefined,
         });
+
+        // SEO, while the body is fresh. This used to be reachable ONLY from Blog Studio's
+        // "Generate SEO" button, so every unattended draft sat with no search title, no description,
+        // no tags and no slug until a human opened it and clicked — and a post that publishes
+        // without metadata is precisely what a Blog Writer is for.
+        //
+        // Best-effort by design: the body is the expensive artifact and it is already saved. A
+        // metadata failure must not fail the job, because the retry would redraft the whole post to
+        // fix a title tag. The button stays as "Regenerate SEO" for exactly this case, and for
+        // re-running after an edit.
+        try {
+            await generateBlogSeo(db, {
+                blogPostId: post.id,
+                organisationId: job.organisation_id,
+                userId: job.user_id,
+            });
+        } catch (err) {
+            console.warn(`[process-blog-jobs] SEO generation failed for post ${post.id} (draft kept)`,
+                err instanceof Error ? err.message : err);
+        }
 
         await db.update(contentGenerationJobs)
             .set({ status: 'completed', resultBlogPostId: post.id, errorMessage: null, updatedAt: new Date() })

@@ -4,7 +4,9 @@
 // GET  /.netlify/functions/blog-posts            → list the org's posts (summary rows)
 // GET  /.netlify/functions/blog-posts?id=<n>     → one full post (org-scoped)
 // POST /.netlify/functions/blog-posts            → create a draft { title }  → { post }
-// DELETE /.netlify/functions/blog-posts?id=<n>   → delete a draft (org-scoped; published posts blocked)
+// DELETE /.netlify/functions/blog-posts?id=<n>   → ARCHIVE a draft (status='archived'; org-scoped;
+//                                                  published posts blocked). The verb is kept for the
+//                                                  existing callers; the row is never destroyed.
 
 import { HandlerEvent } from '@netlify/functions';
 import { and, desc, eq, gte, inArray, lte, or } from 'drizzle-orm';
@@ -145,9 +147,18 @@ export default withLambda(async (event: HandlerEvent) => {
         if (post.status === 'published') {
             return { statusCode: 409, body: JSON.stringify({ error: 'This post is published. Unpublish it before deleting.' }) };
         }
-        // Dependent blog_post_assets / blog_ab_stats rows cascade (onDelete: 'cascade' in schema).
-        await db.delete(blogPosts).where(and(eq(blogPosts.id, id), eq(blogPosts.organisationId, ctx.organisationId)));
-        return { statusCode: 200, body: JSON.stringify({ ok: true, id }) };
+        // ARCHIVE, not destroy. This used to be `db.delete(...)`, which took the row and cascaded
+        // its blog_post_assets / blog_ab_stats away with it — one click, nothing recoverable, from a
+        // button sitting next to an Archive tab that implied the opposite.
+        //
+        // 'archived' is the status set-draft-horizon.ts already writes when a horizon shrinks, so
+        // this adds no new state and needs no DDL. Deliberately absent from the gap-fill coverage
+        // list in blog-gap-fill.ts — archiving a draft frees its slot, so autopilot redrafts it,
+        // which is what a user who discarded something almost always wants.
+        await db.update(blogPosts)
+            .set({ status: 'archived', updatedAt: new Date() })
+            .where(and(eq(blogPosts.id, id), eq(blogPosts.organisationId, ctx.organisationId)));
+        return { statusCode: 200, body: JSON.stringify({ ok: true, id, status: 'archived' }) };
     }
 
     return { statusCode: 405, body: 'Method Not Allowed' };

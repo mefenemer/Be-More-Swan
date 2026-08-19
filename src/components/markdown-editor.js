@@ -138,7 +138,17 @@
   // Italic is `_`, NOT `*`. With `*`, toggling italic on a selection sitting inside `**bold**`
   // matches the bold marker one character in, strips a single star, and silently turns bold into a
   // broken half-emphasis. `_` cannot collide with `**`, so the two toggles stay independent.
-  const INLINE_MARKS = { bold: '**', italic: '_', code: '`' };
+  //
+  // Underline and highlight have NO Markdown syntax, so they are raw HTML pairs rather than a
+  // symmetric marker. Both tags are on the server's sanitize-html allowlist in markdown-render.ts —
+  // WITHOUT that they would render here and be stripped from published_payload, so the Studio would
+  // show the author formatting their live post does not have. Never add an inline mark here without
+  // checking that allowlist first.
+  const INLINE_MARKS = {
+    bold: '**', italic: '_', code: '`',
+    underline: ['<u>', '</u>'],
+    highlight: ['<mark>', '</mark>'],
+  };
   const LINK_PLACEHOLDER = 'https://';
 
   // Clamp + order a (start,end) pair against the text. A textarea can hand back end < start after a
@@ -161,24 +171,30 @@
    */
   function toggleInlineMark(text, start, end, marker) {
     const { s, a, b } = selRange(text, start, end);
-    const len = marker.length;
+    // A plain string is a SYMMETRIC marker ('**'); an array is an asymmetric pair for the HTML
+    // marks, whose closing tag differs from its opening one. Accepting both keeps every existing
+    // caller — and the tests that pass INLINE_MARKS.bold straight in — working unchanged.
+    const open = Array.isArray(marker) ? marker[0] : marker;
+    const close = Array.isArray(marker) ? marker[1] : marker;
+    const oLen = open.length;
+    const cLen = close.length;
 
-    if (a >= len && b + len <= s.length
-        && s.slice(a - len, a) === marker && s.slice(b, b + len) === marker) {
+    if (a >= oLen && b + cLen <= s.length
+        && s.slice(a - oLen, a) === open && s.slice(b, b + cLen) === close) {
       return {
-        text: s.slice(0, a - len) + s.slice(a, b) + s.slice(b + len),
-        selStart: a - len, selEnd: b - len,
+        text: s.slice(0, a - oLen) + s.slice(a, b) + s.slice(b + cLen),
+        selStart: a - oLen, selEnd: b - oLen,
       };
     }
-    if (b - a >= len * 2 && s.slice(a, a + len) === marker && s.slice(b - len, b) === marker) {
+    if (b - a >= oLen + cLen && s.slice(a, a + oLen) === open && s.slice(b - cLen, b) === close) {
       return {
-        text: s.slice(0, a) + s.slice(a + len, b - len) + s.slice(b),
-        selStart: a, selEnd: b - len * 2,
+        text: s.slice(0, a) + s.slice(a + oLen, b - cLen) + s.slice(b),
+        selStart: a, selEnd: b - oLen - cLen,
       };
     }
     return {
-      text: s.slice(0, a) + marker + s.slice(a, b) + marker + s.slice(b),
-      selStart: a + len, selEnd: b + len,
+      text: s.slice(0, a) + open + s.slice(a, b) + close + s.slice(b),
+      selStart: a + oLen, selEnd: b + oLen,
     };
   }
 
@@ -369,6 +385,8 @@
       .bmsme-block p { margin:.5em 0; }
       .bmsme-block strong, .bmsme-block b { font-weight:700; }
       .bmsme-block em, .bmsme-block i { font-style:italic; }
+      .bmsme-block u { text-decoration:underline; }
+      .bmsme-block mark { background:#fef08a; color:inherit; padding:0 2px; border-radius:2px; }
       .bmsme-block a { color:#ec4899; text-decoration:underline; }
       .bmsme-block blockquote { margin:.5em 0; padding-left:12px; border-left:3px solid #e5e7eb;
         color:#4b5563; font-style:italic; }
@@ -407,6 +425,8 @@
       .bmsme-fb-btn:hover { background:#f3f4f6; }
       .bmsme-fb-bold { font-weight:800; }
       .bmsme-fb-italic { font-style:italic; }
+      .bmsme-fb-underline { text-decoration:underline; }
+      .bmsme-fb-highlight { background:#fef08a; }
       .bmsme-fb-code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
       .bmsme-fb-sep { width:1px; height:18px; background:#e5e7eb; margin:0 2px; }
       .bmsme-formatbar [disabled] { opacity:.4; cursor:not-allowed; }
@@ -553,6 +573,8 @@
     fbSeparator();
     fbButton('B', 'Bold (Ctrl/Cmd+B)', () => applyInlineMark(INLINE_MARKS.bold), 'bmsme-fb-bold');
     fbButton('I', 'Italic (Ctrl/Cmd+I)', () => applyInlineMark(INLINE_MARKS.italic), 'bmsme-fb-italic');
+    fbButton('U', 'Underline (Ctrl/Cmd+U)', () => applyInlineMark(INLINE_MARKS.underline), 'bmsme-fb-underline');
+    fbButton('H', 'Highlight', () => applyInlineMark(INLINE_MARKS.highlight), 'bmsme-fb-highlight');
     fbButton('Link', 'Insert link (Ctrl/Cmd+K)', () => applyInline(insertLink));
     fbButton('Code', 'Inline code', () => applyInlineMark(INLINE_MARKS.code), 'bmsme-fb-code');
     root.appendChild(formatBar);
@@ -777,6 +799,9 @@
           const k = String(e.key).toLowerCase();
           if (k === 'b') { e.preventDefault(); applyInlineMark(INLINE_MARKS.bold); }
           else if (k === 'i') { e.preventDefault(); applyInlineMark(INLINE_MARKS.italic); }
+          // preventDefault matters here beyond consistency: the browser's own Ctrl+U is
+          // "view source" in some builds, and in a contenteditable it inserts its own <u>.
+          else if (k === 'u') { e.preventDefault(); applyInlineMark(INLINE_MARKS.underline); }
           else if (k === 'k') { e.preventDefault(); applyInline(insertLink); }
         }
       });

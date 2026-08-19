@@ -118,7 +118,10 @@ const SURFACES: Array<[string, string]> = [
     ['rewrite-post-text.ts (caption rewrites)',                '../netlify/functions/rewrite-post-text.ts'],
     ['blog-generate.ts (blog bodies)',                         '../src/utils/blog-generate.ts'],
     ['blog-topic-ideation.ts (blog titles)',                   '../src/utils/blog-topic-ideation.ts'],
-    ['generate-seo.ts (meta titles + slugs)',                  '../netlify/functions/generate-seo.ts'],
+    // Follows the prompt, not the endpoint: the SEO derivation was extracted to a shared util so the
+    // autopilot worker could call it too (the handler now only authenticates and delegates). The
+    // date block moved with the prompt, and this scan has to track it or it guards an empty file.
+    ['blog-seo-generate.ts (meta titles + slugs)',             '../src/utils/blog-seo-generate.ts'],
     ['generate-hooks.ts (blog H1 variants)',                   '../netlify/functions/generate-hooks.ts'],
 ];
 

@@ -961,6 +961,24 @@ window.detailRqRefresh = function() {
     return _detailRqRenderGroups(_detailRqCurrentStatus);
 };
 
+// Blog Studio closes over the top of this page, so nothing it does reaches the list underneath.
+// Archiving, approving or scheduling from inside the modal all move a post between lifecycle
+// columns — and the Blogs list, its per-column counts and the Review tab badge are all written by
+// the SAME render pass, so skipping it leaves every one of them showing the pre-action state until
+// the user switches tabs or reloads. The list card's own Archive button always refreshed; the modal
+// never did, which is exactly the mismatch a user notices.
+window._onBlogStudioChanged = function() {
+    window.detailRqRefresh?.();
+    // The calendar caches its feed; drop the ready flag so it refetches on next view.
+    const calHost = document.getElementById('assistant-calendar-host');
+    if (calHost) calHost.dataset.ready = '';
+    // The Autopilot card counts drafts awaiting approval, so it moves too. Go through the card's own
+    // renderer rather than calling _loadBlogAutopilotStats directly: its second argument gates the
+    // "Next post" line on the schedule being active, and hardcoding that true would advertise a next
+    // post for an on-demand assistant that has no schedule at all.
+    window._renderAutopilotCard?.();
+};
+
 // ── Lifecycle column counts ──────────────────────────────────────────────────
 // Every column carries its own count, not just Review. Previously only the Review badge was
 // populated (inside _detailRqRenderGroups, gated on statusKey === 'review'), so a post that moved
@@ -3122,13 +3140,18 @@ window._detailRqRecordAct = async function (btn, action) {
 // ── Blog Writer Review Queue (kind 'posts', source 'blog_posts') ─────────────
 // Long-form drafts (blog_posts). Review/editing happens in Blog Studio, so the queue lists
 // drafts per lifecycle column and routes into the studio; scheduling uses schedule-blog.ts.
-// Autonomous + manual drafts default to 'draft'; there's no rejected/archived blog state.
+// Autonomous + manual drafts default to 'draft'.
+//
+// ⚠️ `archived` was an EMPTY list, under a comment claiming "there's no rejected/archived blog
+// state". There is: set-draft-horizon.ts sets status='archived' on every draft beyond the window
+// whenever a user SHRINKS their draft horizon, and blog-posts.ts's DELETE now archives too. Those
+// rows were in the database and listed by no tab in the product — invisible, not gone.
 const _RQ_BLOG_STATUS = {
     review: ['draft', 'pending_approval', 'in_review'],
     approved: ['approved'],
     scheduled: ['scheduled'],
     posted: ['published'],
-    archived: [],
+    archived: ['archived'],
 };
 
 function _rqBlogActions(p, statusKey) {
@@ -3155,8 +3178,9 @@ function _rqBlogActions(p, statusKey) {
     } else {
         actions.push(btn('open', 'Open in Blog Studio', secondary));
     }
-    // Delete — available for any draft that isn't already live (published deletes are blocked server-side).
-    if (statusKey !== 'posted') actions.push(btn('delete', 'Delete', danger));
+    // Archive — available for any draft that isn't already live (published posts are blocked
+    // server-side). Recoverable from the Archive tab; it is not a delete and must not say so.
+    if (statusKey !== 'posted' && statusKey !== 'archived') actions.push(btn('delete', 'Archive', danger));
     return `<div class="flex flex-wrap items-center gap-2 mt-3">
         ${actions.join('')}
         <div class="rq-sched-row hidden w-full flex items-center gap-2 mt-2">
@@ -3225,17 +3249,19 @@ window._detailRqBlogAct = async function (btn, action) {
     if (action === 'open') { window.openBlogStudio?.({ assistantId: window._currentAssistantId, postId: id }); return; }
     if (action === 'showSchedule') { card.querySelector('.rq-sched-row')?.classList.remove('hidden'); return; }
 
-    // Delete — hard-deletes the draft (blog-posts.ts DELETE, org-scoped; published posts are blocked).
+    // Archive — blog-posts.ts DELETE sets status='archived' (org-scoped; published posts blocked).
+    // The action key stays 'delete' because the endpoint verb does; the WORDING must not, or it
+    // tells the user their draft is unrecoverable when it is one tab away.
     if (action === 'delete') {
-        if (!(await window.confirmModal('This cannot be undone.', {
-            title: 'Delete this blog draft?', confirmLabel: 'Yes, delete', cancelLabel: 'Keep it',
+        if (!(await window.confirmModal('You can find it again in the Archive tab.', {
+            title: 'Archive this blog draft?', confirmLabel: 'Yes, archive', cancelLabel: 'Keep it',
         }))) return;
         const buttons = card.querySelectorAll('button');
         buttons.forEach((b) => { b.disabled = true; });
         try {
             const res = await fetch(`/.netlify/functions/blog-posts?id=${id}`, { method: 'DELETE' });
             if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Delete failed.');
-            window.showToast?.('Blog draft deleted.');
+            window.showToast?.('Blog draft archived.');
             _detailRqRenderGroups(_detailRqCurrentStatus);
             const calHost = document.getElementById('assistant-calendar-host');
             if (calHost) calHost.dataset.ready = '';
