@@ -219,6 +219,20 @@
       // src/utils/blog-destinations), and none of those platforms exposes a follower count — so the
       // honest replacement is WHERE this assistant publishes, not how many read it.
       audienceSource: 'blog_destinations',
+      // ⊕ The hero's "Time Saved / Money Saved" strip.
+      //
+      // ⚠️ A SECOND, independent switch from modules.hasImpactRoi — same pairing as the Lead
+      // Generator above, and for the same reason. hasImpactRoi stays false so the post-based
+      // "Content by platform" breakdown (scheduled_posts) is kept off a role that writes none;
+      // roiSource re-reveals the strip alone.
+      //
+      // Why it is 'blog' and not simply true: the figures come from get-assistant-metrics, whose
+      // hours are counted by src/utils/roi-activity.ts — and that module already prices blog_posts.
+      // So a Blog Writer's hours were correct at the source the whole time and simply had nowhere
+      // to appear: the strip was hidden, and "Time Saved" instead showed up as one of the four KPI
+      // cards, in a different shape, in a different place, over a different window from the same
+      // figure on the Social Media Manager and Lead Generator pages.
+      roiSource: 'blog',
       defaultMainTab: 'review-queue',
       hideDataHub: true,
       // hubTab is retained (used by the Calendar's from/to feed + generic registry readers) even

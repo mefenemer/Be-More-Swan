@@ -36,7 +36,9 @@
     assistantName: null, postStatus: null,
     // undefined = not fetched yet; null = fetched and the business has no URL on file.
     // The two must stay distinguishable or loadOrgWebsite() refetches on every open.
-    orgWebsite: undefined };
+    orgWebsite: undefined,
+    // Same undefined/null contract as orgWebsite. null = no kit, or the neutral default one.
+    brandKit: undefined };
 
   function el(id) { return document.getElementById(id); }
   function setStatus(id, msg) { var e = el(id); if (e) e.textContent = msg; }
@@ -301,7 +303,8 @@
     + '        <div class="bs-subhead">Side-by-side layout</div>'
     + '        <p class="bs-help">Adds an empty row of columns after the section you last clicked in.'
     + ' Fill it by dragging paragraphs or images into a column using the <strong>\u22EE\u22EE</strong> handle'
-    + ' that appears to the left of each section.</p>'
+    + ' that appears to the left of each section. To take a row out again, hover it in the draft and'
+    + ' press the <strong>\u2715</strong> on its right.</p>'
     + '        <div class="bs-row">'
     + '          <button id="bs-cols-2" class="bs-btn bs-btn-ghost bs-btn-sm"><span class="bs-btn-ico">\u25A5</span>Add 2 columns</button>'
     + '          <button id="bs-cols-3" class="bs-btn bs-btn-ghost bs-btn-sm"><span class="bs-btn-ico">\u25A4</span>Add 3 columns</button>'
@@ -401,7 +404,11 @@
     // Scheduling mirrors the Create Post sheet: one guided question, not three loose button rows.
     + '      <div class="bs-panel" style="margin-top:16px;">'
     + '        <p class="bs-ready-q">Your post is ready. How should it go out?</p>'
-    + '        <div class="bs-stack">'
+    // bs-row, NOT bs-stack. A column stack stretches its children to the panel width, so these
+    // three ran edge-to-edge while "Archive draft" — the one button that lives in a row below —
+    // sat at its natural size. Four buttons doing the same job at two different widths reads as
+    // two different kinds of control. All four are now natural-width in wrapping rows.
+    + '        <div class="bs-row">'
     + '          <button id="bs-approve" class="bs-btn bs-btn-outline">Let <span id="bs-approve-name">your assistant</span> schedule it</button>'
     + '          <button id="bs-pick-time" class="bs-btn bs-btn-ghost">Pick a time myself</button>'
     + '          <button id="bs-publish" class="bs-btn bs-btn-primary">Publish now</button>'
@@ -664,12 +671,41 @@
       .catch(function () { state.orgWebsite = null; return null; });
   }
 
+  // The org's own colours and typeface, extracted from their website (organisations.brand_kit).
+  // Only a REAL kit is kept: source 'default' is the neutral monochrome placeholder, and treating
+  // it as a brand choice would paint every unconfigured blog near-black on purpose.
+  function loadBrandKit() {
+    if (state.brandKit !== undefined) return Promise.resolve(state.brandKit);
+    return api('brand-kit', { method: 'GET' })
+      .then(function (res) {
+        var kit = (res.ok && res.body && res.body.brandKit) || null;
+        state.brandKit = (kit && kit.source && kit.source !== 'default') ? kit : null;
+        return state.brandKit;
+      })
+      .catch(function () { state.brandKit = null; return null; });
+  }
+
+  // The theme this org's blog should start on, from their brand kit — the client-side twin of
+  // brandSeedTheme() in save-widget-config.ts, which seeds it for widgets created from now on.
+  // This covers the ones created BEFORE that, whose theme is still {}.
+  function brandTheme() {
+    var kit = state.brandKit;
+    if (!kit) return null;
+    var theme = {};
+    if (kit.primaryColor) theme.accent = kit.primaryColor;
+    var font = window.BlogFonts && window.BlogFonts.matchFamily
+      ? window.BlogFonts.matchFamily(kit.fontFamily) : null;
+    if (font) theme.fontFamily = font.stack;
+    return (theme.accent || theme.fontFamily) ? theme : null;
+  }
+
   function loadWidget() {
     // Both in flight together: the config read is the slow one, and the org profile must be in hand
     // before applyWidget paints or the suggestion lands after the user has started typing.
     Promise.all([
       api('save-widget-config', { method: 'GET' }),
       loadOrgWebsite(),
+      loadBrandKit(),
     ]).then(function (out) {
       var res = out[0];
       var cfg = res.body.config;
@@ -733,6 +769,22 @@
     renderSnippet(cfg.publicKey);
     populateFontPicker();
     var theme = cfg.theme || {};
+    // ⚠️ An unset accent is NOT neutral. widget.js and the /b/:key/:slug permalink both fall back
+    // to #ec4899 — Be More Swan's pink — so a workspace that never opened this panel was publishing
+    // a blog on its OWN domain in our brand colour. When nothing has been chosen, the org's own
+    // brand kit is the honest default, and it is WRITTEN BACK rather than only shown: a suggestion
+    // sitting unsaved in the picker would leave the panel disagreeing with the live blog.
+    // Only an untouched theme is seeded — a stored accent is a decision and is never overwritten.
+    var seed = (!theme.accent && !theme.fontFamily) ? brandTheme() : null;
+    if (seed) {
+      theme = seed;
+      // Best effort. A non-admin gets a 403 here (theming is owner/admin), and that is fine —
+      // the picker still shows their brand, and saving is their admin's to do.
+      api('save-widget-config', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'update', theme: seed }),
+      }).catch(function () {});
+    }
     if (theme.accent) el('bs-accent').value = theme.accent;
     if (theme.fontFamily) { el('bs-font').value = theme.fontFamily; applyFontToEditor(theme.fontFamily); }
     el('bs-badge').checked = cfg.badgeEnabled !== false;

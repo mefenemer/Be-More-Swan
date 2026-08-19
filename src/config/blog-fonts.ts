@@ -135,6 +135,25 @@ export function findBlogFont(stack: string | null | undefined): BlogFont | undef
 }
 
 /**
+ * Look a font up by its DISPLAY FAMILY NAME — 'Poppins', 'Georgia', 'IBM Plex Mono'.
+ *
+ * The stored value everywhere else is the CSS stack, so findBlogFont above is the normal lookup.
+ * This one exists for the brand kit (src/utils/brand-kit.ts), which records the family the org's
+ * own website uses as a bare name because that is what the extractor reads out of their CSS. It is
+ * matched against both the picker label and the Google family, case- and space-insensitively.
+ *
+ * Returns undefined for a family we cannot serve — the caller then leaves the font unset rather
+ * than inventing a stack, exactly as with an unknown stored stack.
+ */
+export function matchBlogFontByFamily(family: string | null | undefined): BlogFont | undefined {
+    if (typeof family !== 'string') return undefined;
+    const want = family.trim().toLowerCase().replace(/\s+/g, ' ').replace(/^["']|["']$/g, '');
+    if (!want) return undefined;
+    return BLOG_FONTS.find(f =>
+        f.label.toLowerCase() === want || (f.google || '').toLowerCase() === want);
+}
+
+/**
  * The Google Fonts stylesheet for a family, or null when it needs no download.
  *
  * `display=swap` is deliberate: without it the reader stares at invisible text for up to 3s while

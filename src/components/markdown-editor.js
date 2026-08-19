@@ -385,6 +385,18 @@
       .bmsme-block:hover .bmsme-handle, .bmsme-handle:focus { opacity:1; }
       .bmsme-handle:hover { color:#ec4899; border-color:#f9a8d4; }
       .bmsme-handle:active { cursor:grabbing; }
+      /* Remove control. Only STRUCTURAL blocks get one — a column row and a media block are
+         directives, not prose, so the ordinary "select the text and delete it" route means opening
+         a textarea full of a columns directive and clearing it by hand. Nobody found that, which
+         is why a column layout read as permanent once added. Prose blocks keep the old route: a
+         one-click delete on every paragraph is a much easier way to lose work by accident.
+         (No backticks in this comment — the whole block is a JS template literal.) */
+      .bmsme-remove { position:absolute; right:2px; top:3px; width:18px; height:18px; display:flex;
+        align-items:center; justify-content:center; border-radius:4px; cursor:pointer;
+        color:#9ca3af; font-size:12px; line-height:1; user-select:none; padding:0;
+        opacity:0; transition:opacity .12s ease; background:#fff; border:1px solid #e5e7eb; }
+      .bmsme-block:hover .bmsme-remove, .bmsme-remove:focus { opacity:1; }
+      .bmsme-remove:hover { color:#b91c1c; border-color:#fecaca; background:#fef2f2; }
       /* Click-to-edit: the block swaps its rendered HTML for a textarea over its raw Markdown. */
       .bmsme-editing { background: rgba(236,72,153,.04); box-shadow: inset 0 0 0 1px #fbcfe8; }
       .bmsme-input { display:block; width:100%; border:0; outline:0; padding:0; margin:0;
@@ -713,6 +725,17 @@
       handle.title = 'Drag to move this section — including into a column';
       handle.textContent = '\u22EE\u22EE';   // a two-column grip
       el.appendChild(handle);
+      if (isMediaBlock(b.raw) || isColumnsBlock(b.raw)) {
+        const rm = document.createElement('button');
+        rm.type = 'button';
+        rm.className = 'bmsme-remove';
+        rm.title = isColumnsBlock(b.raw) ? 'Remove this column row' : 'Remove this media block';
+        rm.setAttribute('aria-label', rm.title);
+        rm.textContent = '\u2715';
+        rm.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); });
+        rm.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); removeBlock(b.id); });
+        el.appendChild(rm);
+      }
       if (isMediaBlock(b.raw)) {
         el.setAttribute('draggable', 'true');
         // img/video are draggable by default, and that native drag would win over the wrapper's —
@@ -757,6 +780,40 @@
           }
         }
       }
+    }
+
+    /**
+     * Drop a whole block. Confirmed first: for a column row this throws away every paragraph and
+     * image dragged into it, and those are not recoverable from the editor (the next autosave
+     * overwrites the stored Markdown).
+     *
+     * An emptied draft keeps ONE blank block — the same invariant commitEdit holds — or the editor
+     * becomes a dead surface with nothing left to click into.
+     */
+    async function removeBlock(blockId) {
+      const at = blocks.findIndex((b) => b.id === blockId);
+      if (at < 0) return;
+      const isCols = isColumnsBlock(blocks[at].raw);
+      const question = isCols
+        ? 'Remove this column row? Anything you dragged into its columns goes with it.'
+        : 'Remove this from the post?';
+      // /dialogs.js when the host page has it (every surface that mounts this editor does), the
+      // browser's own dialog otherwise — this component is generic and must not require the app.
+      const ok = typeof window.confirmModal === 'function'
+        ? await window.confirmModal(question, { title: 'Remove section', confirmLabel: 'Yes, remove it', confirmColor: '#b91c1c' })
+        : window.confirm(question);
+      if (!ok) return;
+      // Re-resolve: the draft can have moved on while the dialog was open.
+      const idx = blocks.findIndex((b) => b.id === blockId);
+      if (idx < 0) return;
+      // The open textarea may belong to the block about to go; drop the edit rather than let
+      // commitEdit's blur handler write back into a block that no longer exists.
+      editing = null;
+      blocks.splice(idx, 1);
+      if (!blocks.length) blocks.push({ id: uid(), raw: '' });
+      renderAll();
+      scheduleSave();
+      syncFormatBar();
     }
 
     function renderOneBlock(blockId) {
@@ -885,6 +942,8 @@
       // The handle is a grip. Clicking it must not open the block for typing, or a mis-aimed drag
       // would dump the author into a textarea instead of moving anything.
       if (e.target.closest && e.target.closest('.bmsme-handle')) return;
+      // Same for the remove control — its own handler has already run by the time this fires.
+      if (e.target.closest && e.target.closest('.bmsme-remove')) return;
       const blockEl = e.target.closest && e.target.closest('.bmsme-block');
       if (blockEl) {
         if (blockEl.querySelector('.bmsme-diff')) return;   // a rewrite is awaiting Accept/Reject

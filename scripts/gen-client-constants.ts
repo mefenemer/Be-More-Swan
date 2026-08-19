@@ -658,6 +658,22 @@ ${fontRows}
     inCategory: function (category) {
       return BLOG_FONTS.filter(function (f) { return f.category === category; });
     },
+
+    /**
+     * Look a font up by its DISPLAY FAMILY NAME rather than its stack — 'Poppins', 'Georgia'.
+     * Mirrors matchBlogFontByFamily in src/config/blog-fonts.ts, for the one caller that has a
+     * bare family name: the org's brand kit, which records what their own website uses.
+     * null for a family we cannot serve, so the caller leaves the font alone instead of guessing.
+     */
+    matchFamily: function (family) {
+      if (typeof family !== 'string') return null;
+      var want = family.trim().toLowerCase().replace(/\\s+/g, ' ').replace(/^["']|["']$/g, '');
+      if (!want) return null;
+      for (var i = 0; i < BLOG_FONTS.length; i++) {
+        if (BLOG_FONTS[i].label.toLowerCase() === want) return BLOG_FONTS[i];
+      }
+      return null;
+    },
   };
 })();
 `;

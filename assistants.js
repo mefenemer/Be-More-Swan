@@ -6339,6 +6339,78 @@ async function _fetchAndRenderLeadRoi(assistantId, period = 'all') {
     }
 }
 
+/**
+ * The hero's Time Saved / Money Saved strip for the Blog Writer (registry `roiSource: 'blog'`).
+ *
+ * Same endpoint as the social path — get-assistant-metrics, whose hours come from
+ * src/utils/roi-activity.ts, and that module already counts blog_posts. What it does NOT do is
+ * touch the Created/Scheduled/Published tiles or the per-platform breakdown: those read
+ * scheduled_posts, which a Blog Writer never writes to, so the post path bails out on the
+ * role-hidden breakdown card before it ever reaches the two figures.
+ *
+ * The markup, the period toggle and the wording are the shared ones, deliberately: this exists so
+ * the same figure looks the same on all three assistants, not so the blog gets a third variant.
+ */
+async function _fetchAndRenderBlogRoi(assistantId, period = 'all') {
+    const roiStrip = document.getElementById('detail-roi-strip');
+    if (!roiStrip || roiStrip.dataset.roleHidden === '1') return;
+    const el = id => document.getElementById(id);
+
+    // Bound before the fetch so the toggle is live even on a slow request. Re-entering here keeps
+    // the blog branch — the strip's dataset flag is what routes it, set once by the registry.
+    roiStrip.querySelectorAll('.metrics-period-btn').forEach(btn => {
+        const active = btn.dataset.period === period;
+        btn.className = `metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition ${active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`;
+        btn.setAttribute('aria-selected', String(active));
+        btn.onclick = active ? null : () => _fetchAndRenderBlogRoi(assistantId, btn.dataset.period);
+    });
+
+    try {
+        const res = await fetch(`/.netlify/functions/get-assistant-metrics?id=${assistantId}&period=${period}`);
+        if (!res.ok) return;
+        const d = await res.json();
+        if (roiStrip.dataset.roleHidden === '1') return;   // role switched while we were awaiting
+
+        // Nothing written yet. Hidden rather than "~0h", the same rule both other paths follow —
+        // a brand-new assistant has not failed at anything.
+        if (!d.hoursSaved) { roiStrip.classList.add('hidden'); return; }
+        roiStrip.classList.remove('hidden');
+
+        const periodLabel = period === 'all' ? 'all time' : period === 'month' ? 'this month' : 'this week';
+        const dashLabel = period === 'all' ? 'All Time' : period === 'month' ? 'This Month' : 'This Week';
+        const note = el('metrics-period-note');
+        if (note) {
+            note.textContent = `Time & money saved ${periodLabel}`;
+            note.title = `Time & money saved ${periodLabel} (matches the dashboard's ${dashLabel} view)`;
+        }
+
+        // Reset explicitly: the Lead Generator's branch rewrites this heading to "Effort Saved",
+        // and the page is reused across assistants without a reload.
+        const hoursLabel = el('metrics-hours-label');
+        if (hoursLabel) hoursLabel.textContent = 'Time Saved';
+        const hours = el('metrics-hours-saved');
+        if (hours) { hours.textContent = `~${d.hoursSaved}h`; hours.title = ''; }
+        // Not "~N min per post": that multiplier prices a SOCIAL post, and a long-form article is
+        // not one. The rate card is the platform's, and the strip says whose work it is costing.
+        const hoursNote = el('metrics-hours-note');
+        if (hoursNote) hoursNote.textContent = 'Researching, drafting and formatting long-form posts';
+
+        const gbp = el('metrics-gbp-saved');
+        const roiNote = el('metrics-roi-note');
+        if (d.gbpSaved !== null && d.gbpSaved !== undefined) {
+            if (gbp) { gbp.textContent = `£${Number(d.gbpSaved).toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`; gbp.title = ''; }
+            if (roiNote) roiNote.textContent = 'At your configured hourly rate';
+        } else {
+            if (gbp) { gbp.textContent = '—'; gbp.title = ''; }
+            // Blank, never £0 — an unset rate is a blank field in Settings, not a verdict.
+            if (roiNote) roiNote.innerHTML = `<a href="#" onclick="loadView && loadView('account'); return false" class="text-emerald-600 hover:underline">Set your hourly rate</a> to see this`;
+        }
+    } catch {
+        // Supplementary chrome on an always-rendered hero — leave it as it was rather than
+        // replacing real figures with an error.
+    }
+}
+
 async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
     // Issue: the "Content by platform" breakdown moved into the Autopilot card. `card` now points at
     // that relocated block (#autopilot-platform-breakdown); the Created/Scheduled/Published totals it
@@ -6354,6 +6426,9 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
     // mean the strip never filled.
     if (roiStrip && roiStrip.dataset.roiSource === 'lead') {
         return _fetchAndRenderLeadRoi(assistantId, period);
+    }
+    if (roiStrip && roiStrip.dataset.roiSource === 'blog') {
+        return _fetchAndRenderBlogRoi(assistantId, period);
     }
     if (!card) return;
     // Non-social roles have no post-based ROI — the registry marks both role-hidden; respect it.
@@ -8708,6 +8783,17 @@ function _setGoalBuilderMode(mode) {
     if (metricSel) metricSel.disabled = isEdit;
 }
 
+/**
+ * Put the assistant's real name on the "Ask … to suggest" button beside "Why does this matter?".
+ * The detail page is reused across assistants without a reload, so this runs every time the
+ * builder opens rather than once — otherwise the previous assistant's name is still on the button.
+ */
+function _syncGoalRationaleAiLabel() {
+    const nameEl = document.getElementById('goal-rationale-ai-name');
+    if (!nameEl) return;
+    nameEl.textContent = document.getElementById('detail-name-input')?.value?.trim() || 'your assistant';
+}
+
 window._toggleGoalBuilder = function (show) {
     const builder = document.getElementById('goal-builder');
     const err = document.getElementById('goal-builder-error');
@@ -8725,6 +8811,7 @@ window._toggleGoalBuilder = function (show) {
         const ra = document.getElementById('goal-rationale'); if (ra) ra.value = '';
         const help = document.getElementById('goal-metric-help'); if (help) help.textContent = '';
         _syncGoalPrimaryGate(false);    // no metric chosen yet — nothing to gate on
+        _syncGoalRationaleAiLabel();
         _setGoalBuilderMode('add');
         // Reset the Metric dropdown back to its "select an objective first" state.
         _populateGoalMetricDropdown();
@@ -8789,6 +8876,7 @@ window._editGoal = function (id) {
     // comes from the server on every goal, so this holds even for a metric missing from _goalMetrics.
     _syncGoalPrimaryGate(!!g.isManual);
 
+    _syncGoalRationaleAiLabel();
     _setGoalBuilderMode('edit');
     builder.classList.remove('hidden');
     builder.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -9342,6 +9430,63 @@ window._magicWand = async function (field, inputId, btn) {
     } finally {
         if (btn) { btn.disabled = false; btn.style.opacity = ''; }
         wandImg?.classList.remove('is-casting');
+    }
+};
+
+/**
+ * "Ask <name> to suggest" beside the goal builder's "Why does this matter?".
+ *
+ * Unlike the Magic Wand this writes STRAIGHT into the textarea rather than opening a review modal.
+ * The field is empty in the case that matters, so there is nothing to diff against — and a modal
+ * over a form the user is still filling in puts a decision between them and a box they were about
+ * to type in anyway. It is their draft to edit, and Cancel on the builder still discards it.
+ *
+ * The goal is not saved yet, so the half-built form is what gets sent (goal-ai action=rationale
+ * takes the fields, never a goalId).
+ */
+window._suggestGoalRationale = async function (btn) {
+    if (!_goalEntitlements.magicWand) {
+        // ⚠️ Names the plans the gate ACTUALLY opens on: GOAL_AI_TIERS.magicWand is
+        // ['buster','employee','enterprise'], and `saver` (The Workflow Saver, £29) is the entry
+        // tier that is locked OUT. See the tier-keys-read-backwards warning in goal-metrics.ts.
+        return _openUpgrade('Asking your assistant to draft this is available on The Busywork Buster plan and above.');
+    }
+    const box = document.getElementById('goal-rationale');
+    if (!box || !_goalsAssistantId) return;
+
+    // Never silently paste over something the user wrote. Their own words are the better brief.
+    if (box.value.trim() && !window.confirm('Replace what you have written here with a fresh suggestion?')) return;
+
+    const label = btn ? btn.innerHTML : null;
+    if (btn) { btn.disabled = true; btn.textContent = 'Thinking…'; }
+    try {
+        const res = await fetch(GOAL_AI_API, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'rationale',
+                assistantId: _goalsAssistantId,
+                title: document.getElementById('goal-title')?.value || '',
+                objective: document.getElementById('goal-objective')?.value || '',
+                metricKey: document.getElementById('goal-metric')?.value || '',
+                targetValue: document.getElementById('goal-target')?.value || '',
+                targetDate: document.getElementById('goal-date')?.value || '',
+            }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 402) return _openUpgrade('Asking your assistant to draft this requires a higher plan.');
+        if (!res.ok || !data.suggestion) {
+            window.showToast?.(data.error || 'Could not draft this. Please try again.', { icon: '⚠️' });
+            return;
+        }
+        box.value = data.suggestion;
+        // Mirrors the Magic Wand's apply path — anything watching the field (autosave, counters)
+        // has to see the change, and assigning .value fires no event of its own.
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+        box.focus();
+    } catch {
+        window.showToast?.('Could not draft this. Please try again.', { icon: '⚠️' });
+    } finally {
+        if (btn) { btn.disabled = false; if (label !== null) btn.innerHTML = label; }
     }
 };
 

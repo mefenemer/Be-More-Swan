@@ -20,10 +20,11 @@ import { HandlerEvent } from '@netlify/functions';
 import { randomBytes } from 'crypto';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { widgetConfigs } from '../../db/schema';
+import { organisations, widgetConfigs } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
-import { findBlogFont, googleFontUrl, DEFAULT_FONT_STACK } from '../../src/config/blog-fonts';
+import { findBlogFont, googleFontUrl, matchBlogFontByFamily, DEFAULT_FONT_STACK } from '../../src/config/blog-fonts';
+import { normalizeBrandKit } from '../../src/utils/brand-kit';
 
 const WRITE_ROLES = ['owner', 'admin'];
 const newPublicKey = () => 'wgt_' + randomBytes(12).toString('hex');
@@ -70,6 +71,42 @@ function validateTheme(raw: unknown): { theme: Record<string, unknown> } | { err
     return { theme };
 }
 
+/**
+ * The theme a brand-new widget starts on: the org's OWN colours and typeface, taken from
+ * organisations.brand_kit (extracted from their website — see src/lib/brand-extract-fetch.ts).
+ *
+ * ⚠️ Why this is not simply `{}`. An empty theme is not neutral: widget.js and the permalink
+ * renderer both fall back to #ec4899, which is Be More Swan's pink. So every customer who never
+ * opened the Widget panel was publishing a blog on their own domain in OUR brand colour — the
+ * same class of mistake DEFAULT_BRAND_KIT exists to prevent on brand cards.
+ *
+ * Only a kit that was actually extracted or set by hand is used. `source: 'default'` is the
+ * neutral monochrome placeholder, and stamping near-black on a blog as a deliberate choice would
+ * be inventing a decision nobody made.
+ *
+ * Font: the kit records a bare family name off the site's CSS; only families we can actually serve
+ * survive matchBlogFontByFamily, and the URL is derived here exactly as validateTheme derives it.
+ */
+async function brandSeedTheme(db: ReturnType<typeof getDb>, organisationId: number): Promise<Record<string, unknown>> {
+    try {
+        const [org] = await db
+            .select({ brandKit: organisations.brandKit })
+            .from(organisations).where(eq(organisations.id, organisationId)).limit(1);
+        const kit = normalizeBrandKit(org?.brandKit);
+        if (kit.source === 'default') return {};
+
+        const theme: Record<string, unknown> = {};
+        if (kit.primaryColor) theme.accent = kit.primaryColor;
+        const font = matchBlogFontByFamily(kit.fontFamily);
+        if (font) { theme.fontFamily = font.stack; theme.fontUrl = googleFontUrl(font); }
+        return theme;
+    } catch {
+        // Creating the widget matters more than theming it — an unreadable brand kit leaves the
+        // theme empty, which is exactly where this started.
+        return {};
+    }
+}
+
 export default withLambda(async (event: HandlerEvent) => {
     const db = getDb();
 
@@ -110,6 +147,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 organisationId: ctx.organisationId,
                 publicKey: newPublicKey(),
                 createdBy: ctx.userId,
+                theme: await brandSeedTheme(db, ctx.organisationId),
             })
             .returning();
         return { statusCode: 201, body: JSON.stringify({ config }) };
