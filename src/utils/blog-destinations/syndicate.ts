@@ -4,9 +4,11 @@
 // re-running updates the existing external post via the stored externalId rather than duplicating.
 //
 // This is the single dispatch path: it runs automatically from publishBlogPost() the moment a post
-// goes live (src/utils/blog-publish.ts), and backs the manual re-push endpoint. There is no
-// per-post target selection any more — connecting a destination (in the assistant Connections tab)
-// opts it in; its publish mode decides draft vs live.
+// goes live (src/utils/blog-publish.ts), and backs the manual re-push endpoint. Connecting a
+// destination (in the assistant Connections tab) opts it in and its publish mode decides draft vs
+// live — but the author can narrow that per post in Blog Studio, which is stored as the reserved
+// `selected` key inside destinations jsonb. Absent (every post written before the picker existed)
+// means "every connected destination", so nothing that already worked changes behaviour.
 
 import { and, eq } from 'drizzle-orm';
 import type { getDb } from '../../../db/client';
@@ -90,7 +92,14 @@ export async function syndicatePublishedPost(
     organisationId: number,
     post: SyndicatablePost,
 ): Promise<Record<string, SyndicationTargetResult>> {
-    const connected = (await listBlogDestinations(db, organisationId)).filter((d) => d.connected);
+    const stored = (post.destinations as Record<string, unknown>) || {};
+    // null (not []) when the author never made a choice — an empty array is a real answer meaning
+    // "my site only", and collapsing the two would silently push a post the author excluded.
+    const selected = Array.isArray(stored.selected) ? stored.selected.map(String) : null;
+
+    const connected = (await listBlogDestinations(db, organisationId))
+        .filter((d) => d.connected)
+        .filter((d) => selected === null || selected.includes(d.id));
     if (!connected.length) return {};
 
     // The workspace's AI-badge preference governs the syndicated notice too, so a customer who turns
@@ -105,7 +114,7 @@ export async function syndicatePublishedPost(
     const projected = await projectPost(post, { badgeEnabled: wcfg?.badgeEnabled ?? true });
     if (!projected) return {}; // media-only post: nothing to syndicate as text
 
-    const existing = (post.destinations as Record<string, unknown>) || {};
+    const existing = stored;
     const results: Record<string, SyndicationTargetResult> = {};
 
     for (const dest of connected) {

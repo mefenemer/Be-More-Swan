@@ -190,7 +190,9 @@ export async function publishBlogPost(db: any, post: BlogPostRow, organisationId
         .where(and(eq(blogPosts.id, id), eq(blogPosts.organisationId, organisationId)))
         .returning();
 
-    // Auto-syndicate to every connected external blog (US 3.2). Best-effort and awaited: a Lambda
+    // Syndicate to the connected external blogs this post is destined for (US 3.2) — every one by
+    // default, or just the ones the author ticked in Blog Studio's "Where this post gets published"
+    // panel, which is carried in destinations.selected. Best-effort and awaited: a Lambda
     // freezes on return, so an un-awaited push would strand mid-flight — but a syndication failure
     // must never fail the publish itself. Lazy import breaks the blog-publish ↔ syndicate cycle.
     try {

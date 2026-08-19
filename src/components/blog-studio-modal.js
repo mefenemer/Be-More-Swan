@@ -31,7 +31,9 @@
   };
 
   var state = { injected: false, postId: null, editor: null, assistants: {}, assistantId: null,
-    mediaTarget: 'feature', postStatus: null,
+    // Resolved lazily when no assistantId was passed in (the standalone page, the Calendar) so the
+    // "Ask <name> to…" buttons can still name somebody. '' = looked and found none.
+    assistantName: null, postStatus: null,
     // undefined = not fetched yet; null = fetched and the business has no URL on file.
     // The two must stay distinguishable or loadOrgWebsite() refetches on every open.
     orgWebsite: undefined };
@@ -99,9 +101,22 @@
     // ...but a checkbox is not a text field: the rule above stretched it across the row and pushed
     // its label away. Keep it intrinsic and sit it next to the text it labels.
     + '.bs-field input[type="checkbox"]{width:auto;padding:0;margin:0 6px 0 0;vertical-align:middle;accent-color:#ec4899;}'
-    + '.bs-btn{padding:8px 14px;border-radius:8px;border:0;cursor:pointer;font-size:14px;}'
-    + '.bs-btn-primary{background:#ec4899;color:#fff;}'
-    + '.bs-btn-ghost{background:#f3f4f6;color:#111827;}'
+    // A flat grey rectangle with no border, no shadow and no hover reads as a label, not a control —
+    // which is exactly how every media/layout/connect button in here was being read. Give the
+    // secondary style a real edge, a lift on hover and a press state, and let each button carry a
+    // leading glyph so the row scans as a set of actions.
+    + '.bs-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;'
+    + 'border:1px solid transparent;cursor:pointer;font-size:14px;font-weight:600;line-height:1.2;'
+    + 'transition:background .12s ease,border-color .12s ease,box-shadow .12s ease,transform .06s ease;}'
+    + '.bs-btn:active:not(:disabled){transform:translateY(1px);}'
+    + '.bs-btn:focus-visible{outline:2px solid #ec4899;outline-offset:2px;}'
+    + '.bs-btn-primary{background:#ec4899;color:#fff;border-color:#ec4899;box-shadow:0 1px 2px rgba(17,24,39,.12);}'
+    + '.bs-btn-primary:hover:not(:disabled){background:#db2777;border-color:#db2777;}'
+    + '.bs-btn-ghost{background:#fff;color:#374151;border-color:#d1d5db;box-shadow:0 1px 2px rgba(17,24,39,.06);}'
+    + '.bs-btn-ghost:hover:not(:disabled){background:#fdf2f8;border-color:#f9a8d4;color:#9d174d;}'
+    // The compact variant for the dense media row, so five actions still fit on one line.
+    + '.bs-btn-sm{padding:6px 10px;font-size:13px;}'
+    + '.bs-btn-ico{font-size:14px;line-height:1;}'
     + '.bs-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}'
     + '.bs-title-input{width:100%;font-size:26px;font-weight:700;border:0;outline:0;padding:8px 0;background:transparent;}'
     + '.bs-editor{min-height:320px;border:1px solid #e5e7eb;border-radius:12px;padding:16px;background:#fff;}'
@@ -109,14 +124,49 @@
     + 'padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all;}'
     + '.bs-status{font-size:12px;color:#6b7280;}'
     + '.bs-hidden{display:none !important;}'
-    + '.bs-feature-empty{font-size:12px;color:#6b7280;border:1px dashed #d1d5db;border-radius:8px;padding:20px;text-align:center;}'
-    + '.bs-feature-preview img{width:100%;border-radius:8px;display:block;}'
-    + '.bs-media-picker{margin-top:12px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-height:260px;overflow:auto;}'
-    + '.bs-media-picker img,.bs-media-picker video{width:100%;height:72px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid transparent;background:#000;}'
+    // Explanatory prose. Used wherever a control's job isn't self-evident from its label — the
+    // feature-image slot being the case that prompted it.
+    + '.bs-help{font-size:12px;color:#6b7280;line-height:1.5;margin:0 0 10px;}'
+    + '.bs-help strong{color:#374151;font-weight:600;}'
+    + '.bs-subhead{font-size:12px;font-weight:600;color:#374151;margin-top:16px;}'
+    // The feature slot is a DROP TARGET, so it has to look like one whether or not it is filled.
+    + '.bs-feature-drop{position:relative;border-radius:10px;}'
+    + '.bs-feature-drop.bs-drop-hot{outline:2px dashed #ec4899;outline-offset:3px;background:#fdf2f8;}'
+    + '.bs-feature-empty{font-size:12px;color:#6b7280;border:2px dashed #d1d5db;border-radius:10px;'
+    + 'padding:22px 14px;text-align:center;line-height:1.5;background:#fafafa;}'
+    + '.bs-feature-preview{position:relative;}'
+    + '.bs-feature-preview img{width:100%;border-radius:10px;display:block;}'
+    // Removing the hero used to be a grey word in a row of five other grey words. As a labelled
+    // control sitting ON the image there is no question what it removes.
+    + '.bs-feature-remove{position:absolute;top:8px;right:8px;display:inline-flex;align-items:center;gap:4px;'
+    + 'background:rgba(17,24,39,.78);color:#fff;border:0;border-radius:8px;padding:5px 10px;font-size:12px;'
+    + 'font-weight:600;cursor:pointer;line-height:1;}'
+    + '.bs-feature-remove:hover{background:#b91c1c;}'
+    // Two columns, not three. The panel lives in a 260px rail, so a 3-up grid gave ~48px tiles —
+    // too small to judge a photo by, and far too narrow for the "Feature" chip to sit on.
+    + '.bs-media-picker{margin-top:12px;display:grid;grid-template-columns:repeat(2,1fr);gap:8px;max-height:320px;overflow:auto;}'
+    // One tile = one piece of media + the two things you can do with it. Both actions are on the
+    // tile because "click to add, drag to feature" leaves the feature slot unreachable without a
+    // pointer drag — and a drag is not an accessible-only path.
+    + '.bs-tile{position:relative;border-radius:6px;overflow:hidden;}'
+    + '.bs-media-picker img,.bs-media-picker video{width:100%;height:84px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid transparent;background:#000;display:block;}'
     + '.bs-media-picker img:hover,.bs-media-picker video:hover{border-color:#ec4899;}'
+    // Always visible, never hover-only. A destination you can only discover by hovering is the
+    // same class of problem as the Remove button nobody could find.
+    + '.bs-tile-feature{position:absolute;left:4px;bottom:4px;background:rgba(17,24,39,.8);color:#fff;'
+    + 'border:0;border-radius:6px;padding:2px 7px;font-size:11px;font-weight:600;cursor:pointer;'
+    + 'transition:background .12s ease;}'
+    + '.bs-tile-feature:hover,.bs-tile-feature:focus{background:#ec4899;}'
     + '.bs-media-empty{grid-column:1 / -1;font-size:12px;color:#6b7280;text-align:center;padding:12px;}'
+    // Distribution checkboxes — one row per connected platform.
+    + '.bs-dest{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid #e5e7eb;'
+    + 'border-radius:10px;background:#fff;cursor:pointer;}'
+    + '.bs-dest:hover{border-color:#f9a8d4;background:#fdf2f8;}'
+    + '.bs-dest input{margin:2px 0 0;accent-color:#ec4899;}'
+    + '.bs-dest-name{font-size:13px;font-weight:600;color:#111827;}'
+    + '.bs-dest-note{display:block;font-size:11px;color:#6b7280;font-weight:400;margin-top:1px;}'
     // Audio has no thumbnail — a labelled tile stands in, sized to match the image/video ones.
-    + '.bs-media-audio{height:72px;border-radius:6px;cursor:pointer;border:2px solid #e5e7eb;'
+    + '.bs-media-audio{height:84px;border-radius:6px;cursor:pointer;border:2px solid #e5e7eb;'
       + 'display:flex;align-items:center;justify-content:center;text-align:center;padding:4px;'
       + 'font-size:11px;color:#374151;background:#f9fafb;overflow:hidden;word-break:break-word;}'
     + '.bs-media-audio:hover{border-color:#ec4899;}'
@@ -201,45 +251,60 @@
     + '          <div id="bs-rss" class="bs-snippet">Create a widget to get your feed URL.</div>'
     + '          <span class="bs-status" style="font-size:11px;">Published posts only. Media is left out and AI-assisted posts carry the disclosure notice.</span></div>'
     + '      </div>'
+    // ONE media panel, not two. There used to be a "Feature image" row of five buttons and an
+    // "Inline body media" row of the same five, differing only in where the result landed — so the
+    // author had to decide the destination BEFORE seeing the media, and the same five sources were
+    // on screen twice. Now there is a single set of sources; every result lands in one picker, and
+    // each tile carries the two destinations it can go to (click → into the post, "Feature" → the
+    // hero). The hero slot is also a drop target, so a drag does the same job.
     + '      <div class="bs-panel">'
-    + '        <h3>Feature image</h3>'
-    + '        <div id="bs-feature-preview" class="bs-feature-empty">No feature image yet.</div>'
-    + '        <div class="bs-row" style="margin-top:12px;">'
-    + '          <button id="bs-feature-library" class="bs-btn bs-btn-ghost">Choose from Library</button>'
-    + '          <button id="bs-feature-upload" class="bs-btn bs-btn-ghost">Upload</button>'
-    + '          <button id="bs-feature-pexels" class="bs-btn bs-btn-ghost">Stock photo</button>'
-    + '          <button id="bs-feature-canva" class="bs-btn bs-btn-ghost">Canva</button>'
-    + '          <button id="bs-feature-ai" class="bs-btn bs-btn-ghost">AI generate</button>'
-    + '          <button id="bs-feature-remove" class="bs-btn bs-btn-ghost bs-hidden">Remove</button>'
-    + '          <input type="file" id="bs-feature-upload-input" class="bs-hidden" accept="image/png,image/jpeg,image/gif,image/webp">'
-    + '        </div>'
-    + '        <div style="margin-top:14px;font-size:12px;color:#6b7280;">Inline body media</div>'
-    + '        <div class="bs-row" style="margin-top:6px;">'
-    + '          <button id="bs-inline-library" class="bs-btn bs-btn-ghost">Library</button>'
-    + '          <button id="bs-inline-upload" class="bs-btn bs-btn-ghost">Upload</button>'
-    + '          <button id="bs-inline-pexels" class="bs-btn bs-btn-ghost">Stock</button>'
-    + '          <button id="bs-inline-canva" class="bs-btn bs-btn-ghost">Canva</button>'
-    + '          <button id="bs-inline-ai" class="bs-btn bs-btn-ghost">AI</button>'
-    // Video and audio are body-only: the hero input above stays images-only. Audio is upload-only
-    // by decision (plan §7.4) — there is no stock provider and no AI generation, which is why the
-    // Stock and AI buttons beside this one stay image/video. MIME list mirrors
-    // content-upload-url.ts's ALLOWED_MIME_TYPES — widening it here without widening that would
-    // just move the rejection to a worse place.
-    + '          <input type="file" id="bs-inline-upload-input" class="bs-hidden" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm,audio/mpeg,audio/mp4,audio/wav,audio/webm,audio/ogg">'
+    + '        <h3>Images &amp; media</h3>'
+    + '        <p class="bs-help">Find something below, then <strong>click it to drop it into your post</strong>'
+    + ' — or drag it onto the feature image, or press <strong>Feature</strong> on the tile.</p>'
+    + '        <div class="bs-row">'
+    + '          <button id="bs-media-library" class="bs-btn bs-btn-ghost bs-btn-sm"><span class="bs-btn-ico">\uD83D\uDDC2</span>Library</button>'
+    + '          <button id="bs-media-upload" class="bs-btn bs-btn-ghost bs-btn-sm"><span class="bs-btn-ico">\u2B06\uFE0F</span>Upload</button>'
+    + '          <button id="bs-media-canva" class="bs-btn bs-btn-ghost bs-btn-sm"><span class="bs-btn-ico">\uD83C\uDFA8</span>Canva</button>'
+    // These two are the assistant doing the work, not an anonymous "AI" — the label is rewritten
+    // with the assistant's real name by applyAssistantNaming() as soon as one resolves.
+    + '          <button id="bs-media-pexels" class="bs-btn bs-btn-ghost bs-btn-sm"><span class="bs-btn-ico">\uD83D\uDD0D</span>'
+    + '<span data-bs-assistant-label="stock">Ask your assistant to search stock</span></button>'
+    + '          <button id="bs-media-ai" class="bs-btn bs-btn-ghost bs-btn-sm">'
+    + '<img src="/images/BeMoreSwan_SwanAI.png" alt="" style="width:15px;height:15px;object-fit:contain;">'
+    + '<span data-bs-assistant-label="generate">Ask your assistant to generate</span></button>'
+    // Images, video and audio all land in the body; the hero stays images-only (blog-media rejects
+    // anything else for the feature role). Audio is upload-only by decision (plan §7.4) — there is
+    // no stock provider and no AI generation for it. MIME list mirrors content-upload-url.ts's
+    // ALLOWED_MIME_TYPES — widening it here without widening that would just move the rejection to
+    // a worse place.
+    + '          <input type="file" id="bs-media-upload-input" class="bs-hidden" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm,audio/mpeg,audio/mp4,audio/wav,audio/webm,audio/ogg">'
     + '        </div>'
     + '        <div id="bs-ai-form" class="bs-field bs-hidden" style="margin-top:12px;">'
-    + '          <input id="bs-ai-prompt" placeholder="Describe the image…">'
-    + '          <button id="bs-ai-go" class="bs-btn bs-btn-ghost" style="margin-top:8px;">Generate</button></div>'
+    + '          <input id="bs-ai-prompt" placeholder="Describe the image\u2026">'
+    + '          <button id="bs-ai-go" class="bs-btn bs-btn-ghost bs-btn-sm" style="margin-top:8px;">Generate</button></div>'
     + '        <div id="bs-pexels-form" class="bs-field bs-hidden" style="margin-top:12px;">'
-    + '          <input id="bs-pexels-query" placeholder="Search stock photos…">'
-    + '          <button id="bs-pexels-go" class="bs-btn bs-btn-ghost" style="margin-top:8px;">Search</button></div>'
+    + '          <input id="bs-pexels-query" placeholder="Search stock photos\u2026">'
+    + '          <button id="bs-pexels-go" class="bs-btn bs-btn-ghost bs-btn-sm" style="margin-top:8px;">Search</button></div>'
     + '        <div id="bs-media-picker" class="bs-media-picker bs-hidden"></div>'
     + '        <span id="bs-media-status" class="bs-status"></span>'
-    // Column layouts. Media can then be dragged into either side; the row stacks on a phone.
-    + '        <div style="margin-top:14px;font-size:12px;color:#6b7280;">Layout</div>'
-    + '        <div class="bs-row" style="margin-top:6px;">'
-    + '          <button id="bs-cols-2" class="bs-btn bs-btn-ghost">2 columns</button>'
-    + '          <button id="bs-cols-3" class="bs-btn bs-btn-ghost">3 columns</button>'
+    // The hero. It was previously an unexplained empty box above a row of buttons, with no hint
+    // that it was fillable, and a "Remove" that hid among five identical grey buttons.
+    + '        <div class="bs-subhead">Feature image</div>'
+    + '        <p class="bs-help">The banner shown at the top of the published post and on your blog'
+    + ' index. Drag an image onto the box below, or press <strong>Feature</strong> on any tile above.</p>'
+    + '        <div id="bs-feature-drop" class="bs-feature-drop">'
+    + '          <div id="bs-feature-preview" class="bs-feature-empty">Drop an image here to make it the feature image.</div>'
+    + '          <button type="button" id="bs-feature-remove" class="bs-feature-remove bs-hidden">\u2715 Remove feature image</button>'
+    + '        </div>'
+    // Column layouts. Media and text blocks are then dragged in by their handles; the row stacks
+    // on a phone.
+    + '        <div class="bs-subhead">Side-by-side layout</div>'
+    + '        <p class="bs-help">Adds an empty row of columns after the section you last clicked in.'
+    + ' Fill it by dragging paragraphs or images into a column using the <strong>\u22EE\u22EE</strong> handle'
+    + ' that appears to the left of each section.</p>'
+    + '        <div class="bs-row">'
+    + '          <button id="bs-cols-2" class="bs-btn bs-btn-ghost bs-btn-sm"><span class="bs-btn-ico">\u25A5</span>Add 2 columns</button>'
+    + '          <button id="bs-cols-3" class="bs-btn bs-btn-ghost bs-btn-sm"><span class="bs-btn-ico">\u25A4</span>Add 3 columns</button>'
     + '        </div>'
     + '      </div>'
     // Syndication connectors moved to the assistant Connections tab; posts now auto-publish to
@@ -248,7 +313,8 @@
     + '        <h3>Search performance</h3>'
     + '        <div id="bs-gsc-status" class="bs-status">Checking&hellip;</div>'
     + '        <div class="bs-row" style="margin-top:10px;">'
-    + '          <button id="bs-gsc-connect" class="bs-btn bs-btn-ghost bs-hidden" type="button">Connect Google Search Console</button>'
+    + '          <button id="bs-gsc-connect" class="bs-btn bs-btn-ghost bs-btn-sm bs-hidden" type="button">'
+    + '<span class="bs-btn-ico">\uD83D\uDD17</span>Connect Google Search Console</button>'
     + '          <button id="bs-gsc-disconnect" class="bs-linkbtn bs-hidden" type="button">Disconnect</button>'
     + '        </div>'
     + '        <div class="bs-status" style="font-size:11px;margin-top:4px;">Lets your Blog Writer spot posts losing search traffic and flag them for a refresh.</div>'
@@ -258,12 +324,18 @@
     + '      <div class="bs-row" style="justify-content:space-between;margin-bottom:4px;">'
     + '        <span id="bs-readout" class="bs-chip">0 words · under a minute read</span>'
     + '        <div class="bs-row" style="gap:12px;">'
+    // "AI draft" and "Ask Swan to improve" named nobody. The work is done by the workspace's own
+    // Blog Writer, who has a name the user chose — so the buttons say so. The <span>s carry
+    // data-bs-assistant-label and are rewritten by applyAssistantNaming(); the wording here is the
+    // fallback for the case where no assistant can be resolved at all.
     + '          <button type="button" id="bs-ai-draft" class="bs-swan"'
-    + '            title="Draft this post from a topic with AI">'
-    + '            <img src="/images/BeMoreSwan_SwanAI.png" alt=""><span>AI draft</span></button>'
+    + '            title="Draft this post from a topic">'
+    + '            <img src="/images/BeMoreSwan_SwanAI.png" alt="">'
+    + '<span data-bs-assistant-label="draft">Ask your assistant to draft</span></button>'
     + '          <button type="button" id="bs-swan-improve" class="bs-swan bs-hidden"'
     + '            title="Ask your assistant to suggest improvements to this draft">'
-    + '            <img src="/images/BeMoreSwan_SwanAI.png" alt=""><span>Ask Swan to improve</span></button>'
+    + '            <img src="/images/BeMoreSwan_SwanAI.png" alt="">'
+    + '<span data-bs-assistant-label="improve">Ask your assistant to improve</span></button>'
     + '        </div>'
     + '      </div>'
     + '      <input id="bs-title" class="bs-title-input" placeholder="Post title">'
@@ -312,6 +384,20 @@
     + '          <div id="bs-canonical" class="bs-status" style="word-break:break-all;">Set when the post is published.</div></div>'
     + '        <span id="bs-seo-status" class="bs-status"></span>'
     + '      </div>'
+    // Where the post is published, as a per-post choice. Connecting a blog in the assistant's
+    // Connections tab used to opt it in permanently and silently — every published post went to
+    // every connected platform with nothing on screen saying so, and no way to hold one back.
+    + '      <div class="bs-panel" style="margin-top:16px;">'
+    + '        <h3>Where this post gets published</h3>'
+    + '        <p class="bs-help">Your own blog always gets it. Tick any other connected platform'
+    + ' you want this post sent to when it goes live.</p>'
+    + '        <label class="bs-dest" style="border-color:#fbcfe8;background:#fdf2f8;cursor:default;">'
+    + '          <input type="checkbox" checked disabled>'
+    + '          <span class="bs-dest-name">Your blog<span class="bs-dest-note">Your embedded widget and its public permalink \u2014 always included.</span></span>'
+    + '        </label>'
+    + '        <div id="bs-dist-list" class="bs-stack" style="margin-top:8px;"></div>'
+    + '        <div id="bs-dist-status" class="bs-status" style="margin-top:8px;">Checking connected platforms\u2026</div>'
+    + '      </div>'
     // Scheduling mirrors the Create Post sheet: one guided question, not three loose button rows.
     + '      <div class="bs-panel" style="margin-top:16px;">'
     + '        <p class="bs-ready-q">Your post is ready. How should it go out?</p>'
@@ -348,6 +434,48 @@
   function assistantTone() {
     var a = selectedAssistant();
     return (a && a.tone) ? a.tone : '';
+  }
+
+  // ── Naming the assistant on every button that asks it to do something ─────────────────────────
+  // "AI draft", "Ask Swan to improve", "Stock photo", "AI generate" — four labels for work done by
+  // ONE named colleague the user hired and named themselves. Each button's text node carries
+  // data-bs-assistant-label; this is the single place that writes them.
+  var ASSISTANT_LABELS = {
+    draft: function (n) { return 'Ask ' + n + ' to draft'; },
+    improve: function (n) { return 'Ask ' + n + ' to improve'; },
+    stock: function (n) { return 'Ask ' + n + ' to search stock'; },
+    generate: function (n) { return 'Ask ' + n + ' to generate'; },
+  };
+
+  function assistantName() {
+    var a = selectedAssistant();
+    if (a && a.name) return a.name;
+    return state.assistantName || '';
+  }
+
+  function applyAssistantNaming() {
+    var name = assistantName() || 'your assistant';
+    var root = el('bms-blog-backdrop');
+    if (!root) return;
+    Array.prototype.forEach.call(root.querySelectorAll('[data-bs-assistant-label]'), function (n) {
+      var make = ASSISTANT_LABELS[n.getAttribute('data-bs-assistant-label')];
+      if (make) n.textContent = make(name);
+    });
+    var approve = el('bs-approve-name');
+    if (approve) approve.textContent = name;
+  }
+
+  // Some entry points pass an assistantId (Assistant Detail, Review Queue); the Calendar and the
+  // standalone page pass only a postId, or nothing at all. Fall back to the org's first active
+  // Blog Writer so the buttons still name somebody real. Resolved once per session: '' records
+  // "looked and found none" so a workspace without a Blog Writer doesn't refetch on every open.
+  function ensureAssistantIdentity() {
+    if (assistantName()) { applyAssistantNaming(); return Promise.resolve(); }
+    if (state.assistantName === '') { applyAssistantNaming(); return Promise.resolve(); }
+    return resolveBlogWriter().then(function (a) {
+      state.assistantName = (a && a.name) || '';
+      applyAssistantNaming();
+    });
   }
 
   // ── "Ask Swan to improve": hand the draft to the assistant in chat ────────────────────────────
@@ -424,9 +552,9 @@
     });
     refreshReadout(md);
     syncSwanButton();
-    var a = selectedAssistant();
-    el('bs-approve-name').textContent = a && a.name ? a.name : 'your assistant';
+    ensureAssistantIdentity();
     loadWidget();
+    loadDistribution(post);
     loadFeature();
     loadSearchConsole();
     populateSeo(post);
@@ -592,13 +720,21 @@
     document.head.appendChild(link);
   }
 
+  // Put the chosen family on the DRAFT. previewFont only downloads the stylesheet; nothing ever
+  // applied the face to the editor, so changing "Font family" moved a setting and changed nothing
+  // the author could see — a picker of 53 names rendered in a font none of them was.
+  function applyFontToEditor(stack) {
+    previewFont(stack);
+    if (state.editor && state.editor.setFontFamily) state.editor.setFontFamily(stack || '');
+  }
+
   function applyWidget(cfg, opts) {
     var suggest = !!(opts && opts.suggest);
     renderSnippet(cfg.publicKey);
     populateFontPicker();
     var theme = cfg.theme || {};
     if (theme.accent) el('bs-accent').value = theme.accent;
-    if (theme.fontFamily) { el('bs-font').value = theme.fontFamily; previewFont(theme.fontFamily); }
+    if (theme.fontFamily) { el('bs-font').value = theme.fontFamily; applyFontToEditor(theme.fontFamily); }
     el('bs-badge').checked = cfg.badgeEnabled !== false;
     el('bs-site-base').value = cfg.siteBaseUrl || (suggest ? (state.orgWebsite || '') : '');
     el('bs-site-path').value = cfg.sitePostPath || (suggest ? DEFAULT_SITE_POST_PATH : '');
@@ -703,7 +839,9 @@
       mediaEls.remove.classList.remove('bs-hidden');
     } else {
       mediaEls.preview.className = 'bs-feature-empty';
-      mediaEls.preview.textContent = 'No feature image yet.';
+      // Say what the box is FOR. "No feature image yet." reported a state and offered no way out
+      // of it, which is why the slot read as something the system fills, not something you can.
+      mediaEls.preview.textContent = 'Drop an image here to make it the feature image.';
       mediaEls.remove.classList.add('bs-hidden');
     }
   }
@@ -717,27 +855,21 @@
       if (state.editor && state.editor.setAssetUrls) state.editor.setAssetUrls(map);
     });
   }
-  function hidePicker() {
-    mediaEls.picker.classList.add('bs-hidden');
-    mediaEls.picker.innerHTML = '';
-    mediaEls.aiForm.classList.add('bs-hidden');
-    mediaEls.pexelsForm.classList.add('bs-hidden');
+  // The picker deliberately STAYS open after a placement. A post takes several images, and closing
+  // the grid on each one turned the second image into a fresh search.
+  function featureAttached(res) {
+    if (res.ok) { renderFeature(res.body.feature); setStatus('bs-media-status', 'Set as the feature image.'); }
+    else setStatus('bs-media-status', (res.body && res.body.error) || 'Failed');
   }
   function attachFeature(assetId) {
     setStatus('bs-media-status', 'Attaching…');
     api('blog-media', { method: 'POST', body: JSON.stringify({ blogPostId: state.postId, action: 'attach', role: 'feature', assetId: assetId }) })
-      .then(function (res) {
-        if (res.ok) { renderFeature(res.body.feature); hidePicker(); setStatus('bs-media-status', ''); }
-        else setStatus('bs-media-status', (res.body && res.body.error) || 'Failed');
-      });
+      .then(featureAttached);
   }
   function attachFeatureCandidate(candidate) {
     setStatus('bs-media-status', 'Attaching…');
     api('blog-media', { method: 'POST', body: JSON.stringify({ blogPostId: state.postId, action: 'attach', role: 'feature', pexelsCandidate: candidate }) })
-      .then(function (res) {
-        if (res.ok) { renderFeature(res.body.feature); hidePicker(); setStatus('bs-media-status', ''); }
-        else setStatus('bs-media-status', (res.body && res.body.error) || 'Failed');
-      });
+      .then(featureAttached);
   }
   // Attach media as inline body media, then insert a block for it. `body` is { assetId } or
   // { pexelsCandidate }. Inline attach appends, so the new asset is the last inline[] item.
@@ -768,8 +900,11 @@
     setStatus('bs-media-status', 'Adding…');
     attachInlineAsset(body).then(function (media) {
       if (!media) return;
-      state.editor.insertMedia(media);
-      hidePicker(); setStatus('bs-media-status', '');
+      var blockId = state.editor.insertMedia(media);
+      // Show where it landed. An insert anchored to the last-touched block can easily be off
+      // screen, and an image you can't see is an image you assume didn't arrive.
+      if (blockId && state.editor.revealBlock) state.editor.revealBlock(blockId);
+      setStatus('bs-media-status', 'Added to your post.');
     });
   }
 
@@ -808,25 +943,28 @@
   // onEditorDropMedia attaches it and the editor places it. Uses the editor's own exported MIME so
   // the two can't drift — a mismatched string would present as "dragging just does nothing".
   function makeTileDraggable(tile, payload) {
-    // EVERY tile is draggable, whichever picker it came from. The gate used to be
-    // `state.mediaTarget !== 'inline'`, which made the tiles under the "Stock photo" / "Choose from
-    // Library" buttons (the FEATURE row) silently inert — two near-identical buttons, only the
-    // smaller inline one draggable, and no feedback on the wrong one. That reads as "dragging is
-    // broken", not "wrong button".
-    //
-    // A drop is unambiguous regardless of which picker opened: the hero is a single slot filled by
-    // clicking, and the body is the only drop target, so onEditorDropMedia always attaches inline.
-    // Clicking a tile still routes by state.mediaTarget, so the feature picker keeps its own job.
+    // EVERY tile is draggable, whichever source produced it. The gate used to be
+    // `state.mediaTarget !== 'inline'`, which made the tiles under the FEATURE row's buttons
+    // silently inert — two near-identical button rows, only the smaller inline one draggable, and
+    // no feedback on the wrong one. That reads as "dragging is broken", not "wrong button".
+    // The mode flag is gone entirely now: a tile carries its own destinations.
     tile.draggable = true;
     tile.addEventListener('dragstart', function (e) {
       e.dataTransfer.setData(window.MarkdownEditor.MEDIA_MIME, JSON.stringify(payload));
       e.dataTransfer.effectAllowed = 'copy';
     });
   }
-  function routeMedia(body) {
-    if (state.mediaTarget === 'inline') return attachInline(body);
+
+  // The hero. Split out of the old routeMedia(), which decided the destination from a mode flag
+  // set by whichever of the two duplicate button rows had been pressed — the thing that forced the
+  // author to choose a destination before they could see the media.
+  function routeFeature(body) {
     if (body.pexelsCandidate) return attachFeatureCandidate(body.pexelsCandidate);
     return attachFeature(body.assetId);
+  }
+  // A picker/editor drag payload → the body blog-media wants. Both sources use the same shape.
+  function attachBodyFor(d) {
+    return (d && d.pexelsCandidate) ? { pexelsCandidate: d.pexelsCandidate } : { assetId: d && d.assetId };
   }
   // content_assets.assetType is the thing that decides how the body renders the media, so derive it
   // from the file rather than assuming 'image' — an mp4 filed as an image renders as a broken <img>.
@@ -869,64 +1007,20 @@
     mediaEls.picker.classList.add('bs-hidden');
     setStatus('bs-media-status', 'Uploading…');
     uploadContentAsset(file).then(function (asset) {
-      setStatus('bs-media-status', '');
-      routeMedia({ assetId: asset.id });
+      // Show it rather than place it. Where an upload belongs is a decision the author can only
+      // really make once they can see it, and it is the same decision as for anything else in the
+      // grid — so it gets the same tile with the same two actions.
+      openLibrary({ only: [asset.id] });
+      setStatus('bs-media-status', 'Uploaded — click it to add it to your post, or press Feature.');
     }).catch(function (err) {
       setStatus('bs-media-status', err.message || 'Upload failed. Please try again.');
     });
   }
-  function openLibrary() {
-    if (!state.postId) return;
-    mediaEls.aiForm.classList.add('bs-hidden');
-    mediaEls.pexelsForm.classList.add('bs-hidden');
-    mediaEls.picker.classList.remove('bs-hidden');
-    mediaEls.picker.innerHTML = '<div class="bs-media-empty">Loading…</div>';
-    api('content-assets', { method: 'GET' }).then(function (res) {
-      if (!res.ok) { mediaEls.picker.innerHTML = '<div class="bs-media-empty">Could not load library.</div>'; return; }
-      var groups = res.body.assets || {};
-      var all = [].concat(groups.pending || [], groups.scheduled || [], groups.posted || []);
-      // The hero must be an image (blog-media rejects anything else for the feature role), but the
-      // body can carry video too — so the inline picker offers both.
-      var inline = state.mediaTarget === 'inline';
-      var items = all.filter(function (a) {
-        if (!(a.storageUrl || a.externalUrl)) return false;
-        return a.assetType === 'image'
-          || (inline && (a.assetType === 'video' || a.assetType === 'audio'));
-      });
-      if (!items.length) {
-        mediaEls.picker.innerHTML = '<div class="bs-media-empty">'
-          + (inline ? 'No images, videos or audio in your library yet.' : 'No images in your library yet.')
-          + '</div>';
-        return;
-      }
-      mediaEls.picker.innerHTML = '';
-      items.forEach(function (a) {
-        // A <video> with preload=metadata shows its first frame, which is a usable thumbnail —
-        // content_assets has no separate poster to fall back on.
-        var isVideo = a.assetType === 'video';
-        var isAudio = a.assetType === 'audio';
-        // Audio has no frame to show, so it gets a labelled tile rather than a broken thumbnail.
-        // A real <audio> element here would be a player the author has to avoid clicking to pick.
-        var tile = document.createElement(isAudio ? 'div' : (isVideo ? 'video' : 'img'));
-        if (isAudio) {
-          tile.className = 'bs-media-audio';
-          tile.textContent = '♪ ' + (a.name || 'Audio');
-        } else {
-          tile.src = a.storageUrl || a.externalUrl;
-          if (isVideo) { tile.preload = 'metadata'; tile.muted = true; }
-          else { tile.alt = a.name || ''; }
-        }
-        tile.title = a.name || '';
-        tile.addEventListener('click', function () { routeMedia({ assetId: a.id }); });
-        makeTileDraggable(tile, { source: 'library', assetId: a.id, type: a.assetType || 'image' });
-        mediaEls.picker.appendChild(tile);
-      });
-    });
-  }
+
   // Canva imports land in content_assets like any other source, so once the picker reports back
-  // there is nothing Canva-specific left to do — routeMedia attaches the asset exactly as the
-  // Library and Upload paths do. assetType 'image' keeps video designs out: a feature or inline
-  // image can't be an mp4.
+  // there is nothing Canva-specific left to do — the import shows up as a tile exactly as the
+  // Library, Upload, stock and AI paths do. assetType 'image' keeps video designs out: a feature
+  // or inline image can't be an mp4.
   function openCanva() {
     if (!state.postId || !window.CanvaBrowser) return;
     mediaEls.picker.classList.add('bs-hidden');
@@ -937,12 +1031,98 @@
       multiple: false,
       onImported: function (assetIds) {
         if (!assetIds || !assetIds.length) return;
-        // A multi-page design yields several assets; attach the first and leave the rest in the
-        // library rather than stuffing every page into the post.
-        routeMedia({ assetId: assetIds[0] });
+        // A multi-page design yields several assets; show them all and let the author place the
+        // one they want rather than stuffing every page into the post.
+        openLibrary({ only: assetIds });
+        setStatus('bs-media-status', 'Imported from Canva — click to add it to your post, or press Feature.');
       },
     });
   }
+  // ── The picker: one grid, one tile shape, two destinations per tile ───────────────────────────
+  // Every source (Library, Upload, Canva, stock search, AI generation) now ends here rather than
+  // dropping its result straight into a destination the author chose beforehand. An `item` is:
+  //   { type, url, name, title, body }  where `body` is the blog-media attach body.
+  function mediaNodeFor(item) {
+    var isVideo = item.type === 'video';
+    var isAudio = item.type === 'audio';
+    // A <video> with preload=metadata shows its first frame, which is a usable thumbnail —
+    // content_assets has no separate poster to fall back on. Audio has no frame at all, so it gets
+    // a labelled tile; a real <audio> here would be a player the author has to avoid clicking.
+    var node = document.createElement(isAudio ? 'div' : (isVideo ? 'video' : 'img'));
+    if (isAudio) {
+      node.className = 'bs-media-audio';
+      node.textContent = '\u266A ' + (item.name || 'Audio');
+    } else {
+      node.src = item.url;
+      if (isVideo) { node.preload = 'metadata'; node.muted = true; }
+      else { node.alt = item.name || ''; }
+    }
+    return node;
+  }
+
+  function renderTiles(items, emptyMessage) {
+    mediaEls.picker.classList.remove('bs-hidden');
+    mediaEls.picker.innerHTML = '';
+    if (!items.length) {
+      mediaEls.picker.innerHTML = '<div class="bs-media-empty">' + (emptyMessage || 'Nothing to show.') + '</div>';
+      return;
+    }
+    items.forEach(function (item) {
+      var tile = document.createElement('div');
+      tile.className = 'bs-tile';
+      var node = mediaNodeFor(item);
+      node.title = (item.title || item.name || '') + (item.title || item.name ? ' \u2014 ' : '') + 'Click to add to your post';
+      node.addEventListener('click', function () { attachInline(item.body); });
+      makeTileDraggable(node, Object.assign({ source: item.source || 'library', type: item.type || 'image' }, item.body));
+      tile.appendChild(node);
+      // The hero must be an image — blog-media refuses any other assetType for the feature role,
+      // so offering "Feature" on a video would be offering an action that always fails.
+      if ((item.type || 'image') === 'image') {
+        var feature = document.createElement('button');
+        feature.type = 'button';
+        feature.className = 'bs-tile-feature';
+        feature.textContent = 'Feature';
+        feature.title = 'Use this as the feature image';
+        feature.addEventListener('click', function (e) {
+          e.stopPropagation();          // the tile's own click adds to the post — not both
+          routeFeature(item.body);
+        });
+        tile.appendChild(feature);
+      }
+      mediaEls.picker.appendChild(tile);
+    });
+  }
+
+  // `opts.only` narrows the grid to specific asset ids — how a fresh upload, Canva import or saved
+  // AI image is presented: the same tile with the same two actions, rather than a silent insert
+  // into a destination that was chosen before the author had seen the image.
+  function openLibrary(opts) {
+    if (!state.postId) return;
+    var only = (opts && opts.only) || null;
+    mediaEls.aiForm.classList.add('bs-hidden');
+    mediaEls.pexelsForm.classList.add('bs-hidden');
+    mediaEls.picker.classList.remove('bs-hidden');
+    mediaEls.picker.innerHTML = '<div class="bs-media-empty">Loading\u2026</div>';
+    api('content-assets', { method: 'GET' }).then(function (res) {
+      if (!res.ok) { mediaEls.picker.innerHTML = '<div class="bs-media-empty">Could not load library.</div>'; return; }
+      var groups = res.body.assets || {};
+      var all = [].concat(groups.pending || [], groups.scheduled || [], groups.posted || []);
+      var items = all.filter(function (a) {
+        if (!(a.storageUrl || a.externalUrl)) return false;
+        if (only && only.indexOf(a.id) < 0) return false;
+        return a.assetType === 'image' || a.assetType === 'video' || a.assetType === 'audio';
+      }).map(function (a) {
+        return {
+          type: a.assetType || 'image', url: a.storageUrl || a.externalUrl,
+          name: a.name || '', title: a.name || '', body: { assetId: a.id },
+        };
+      });
+      renderTiles(items, only
+        ? 'That upload is still processing \u2014 open Library in a moment to place it.'
+        : 'No images, videos or audio in your library yet.');
+    });
+  }
+
   function openAiForm() {
     mediaEls.picker.classList.add('bs-hidden');
     mediaEls.pexelsForm.classList.add('bs-hidden');
@@ -987,6 +1167,75 @@
 
   // Syndication connectors + push now live in the assistant Connections tab (integrations.js): posts
   // auto-publish to every connected blog on publish. No per-post syndication UI here any more.
+
+  // ── Where this post gets published (per-post syndication targets) ──────────────────────────────
+  // Connecting a blog in the assistant's Connections tab opted it in permanently: every published
+  // post went to every connected platform, with nothing on screen saying so and no way to hold one
+  // post back. The choice is stored as the reserved `selected` key inside blog_posts.destinations
+  // and honoured by syndicatePublishedPost().
+  //
+  // ABSENT (not empty) means "everything connected" — that is what posts written before this panel
+  // existed carry, and it is the behaviour they were published under. So the first time a post is
+  // opened here, every connected destination is ticked; unticking one is a real, saved decision.
+  function selectedDestinations(post) {
+    var d = (post && post.destinations) || {};
+    return Array.isArray(d.selected) ? d.selected.map(String) : null;
+  }
+
+  function saveDistribution() {
+    if (!state.postId) return;
+    var boxes = el('bs-dist-list').querySelectorAll('input[type="checkbox"]');
+    var chosen = Array.prototype.filter.call(boxes, function (b) { return b.checked; })
+      .map(function (b) { return b.value; });
+    setStatus('bs-dist-status', 'Saving…');
+    api('save-blog-draft', { method: 'POST', body: JSON.stringify({ id: state.postId, distribution: chosen }) })
+      .then(function (res) {
+        setStatus('bs-dist-status', res.ok
+          ? (chosen.length ? 'Saved — also publishing to ' + chosen.length + ' other platform'
+              + (chosen.length === 1 ? '.' : 's.') : 'Saved — your blog only.')
+          : ((res.body && res.body.error) || 'Could not save that choice.'));
+      });
+  }
+
+  function loadDistribution(post) {
+    var list = el('bs-dist-list');
+    if (!list) return;
+    list.innerHTML = '';
+    setStatus('bs-dist-status', 'Checking connected platforms…');
+    var selected = selectedDestinations(post);
+    api('connect-blog-destination', { method: 'GET' }).then(function (res) {
+      var connected = ((res.ok && res.body.destinations) || []).filter(function (d) { return d.connected; });
+      if (!connected.length) {
+        setStatus('bs-dist-status', 'No other platforms connected yet. Connect WordPress, Ghost, '
+          + 'Dev.to or Hashnode from your assistant\u2019s Connections tab and they\u2019ll appear here.');
+        return;
+      }
+      connected.forEach(function (d) {
+        var label = document.createElement('label');
+        label.className = 'bs-dest';
+        var box = document.createElement('input');
+        box.type = 'checkbox';
+        box.value = d.id;
+        box.checked = selected === null || selected.indexOf(d.id) >= 0;
+        box.addEventListener('change', saveDistribution);
+        var text = document.createElement('span');
+        text.className = 'bs-dest-name';
+        // Say which way it lands over there. "draft" vs "live" is the difference between a post
+        // appearing on someone's public blog and waiting for them there.
+        text.innerHTML = bsEscape(d.label + (d.accountLabel ? ' \u00b7 ' + d.accountLabel : ''))
+          + '<span class="bs-dest-note">'
+          + (d.publishMode === 'live' ? 'Published live as soon as this post goes out.'
+                                      : 'Sent as a draft for you to release over there.')
+          + '</span>';
+        label.appendChild(box);
+        label.appendChild(text);
+        list.appendChild(label);
+      });
+      setStatus('bs-dist-status', selected === null
+        ? 'All connected platforms are selected. Untick any you want to skip for this post.'
+        : '');
+    }).catch(function () { setStatus('bs-dist-status', 'Could not check connected platforms.'); });
+  }
 
   // ── Search Console (US 5.1 content-decay loop) — connect status ────────────────────────────────
   function loadSearchConsole() {
@@ -1063,9 +1312,14 @@
 
     // Archive — drafts only; blog-posts DELETE refuses a published post. That endpoint no longer
     // destroys the row (it sets status='archived'), so this must not warn about permanence.
-    el('bs-discard').addEventListener('click', function () {
+    el('bs-discard').addEventListener('click', async function () {
       if (!state.postId) return;
-      if (!window.confirm('Archive this draft? You can find it again in the Archive tab.')) return;
+      // window.confirm() is the browser's own grey box: wrong typeface, wrong buttons, and it names
+      // the site rather than the product. Every other dialog in the app goes through /dialogs.js.
+      if (!(await window.confirmModal(
+        'The draft is kept — you can find it again in the Archive tab and bring it back.',
+        { title: 'Archive this draft?', confirmLabel: 'Yes, archive it', cancelLabel: 'Keep editing' },
+      ))) return;
       setBanner('bs-action-status', 'Archiving…');
       api('blog-posts?id=' + encodeURIComponent(state.postId), { method: 'DELETE' }).then(function (res) {
         if (res.ok) { notifyChanged(); closeBlogStudio(); }
@@ -1217,7 +1471,7 @@
 
     // Preview as soon as a family is picked, not only after Save — otherwise the author is choosing
     // from a list of names rendered in a font they cannot see.
-    el('bs-font').addEventListener('change', function () { previewFont(el('bs-font').value); });
+    el('bs-font').addEventListener('change', function () { applyFontToEditor(el('bs-font').value); });
 
     el('bs-save-theme').addEventListener('click', function () {
       // fontUrl travels WITH the stack. widget.js and the /b/:key/:slug permalink both need the
@@ -1262,45 +1516,96 @@
     el('bs-robots').addEventListener('change', saveSeo);
 
     mediaEls = {
-      preview: el('bs-feature-preview'), library: el('bs-feature-library'), pexels: el('bs-feature-pexels'),
-      ai: el('bs-feature-ai'), remove: el('bs-feature-remove'),
-      upload: el('bs-feature-upload'), uploadInput: el('bs-feature-upload-input'),
+      preview: el('bs-feature-preview'), drop: el('bs-feature-drop'), remove: el('bs-feature-remove'),
+      library: el('bs-media-library'), upload: el('bs-media-upload'), uploadInput: el('bs-media-upload-input'),
+      pexels: el('bs-media-pexels'), ai: el('bs-media-ai'), canva: el('bs-media-canva'),
       aiForm: el('bs-ai-form'), aiPrompt: el('bs-ai-prompt'), aiGo: el('bs-ai-go'),
       pexelsForm: el('bs-pexels-form'), pexelsQuery: el('bs-pexels-query'), pexelsGo: el('bs-pexels-go'),
-      picker: el('bs-media-picker'), canva: el('bs-feature-canva'),
-      inlineLibrary: el('bs-inline-library'), inlinePexels: el('bs-inline-pexels'), inlineAi: el('bs-inline-ai'),
-      inlineUpload: el('bs-inline-upload'), inlineUploadInput: el('bs-inline-upload-input'),
-      inlineCanva: el('bs-inline-canva'),
+      picker: el('bs-media-picker'),
       cols2: el('bs-cols-2'), cols3: el('bs-cols-3'),
     };
 
     mediaEls.remove.addEventListener('click', function () {
       if (!state.postId) return;
+      setStatus('bs-media-status', 'Removing…');
       api('blog-media', { method: 'POST', body: JSON.stringify({ blogPostId: state.postId, action: 'detach', role: 'feature' }) })
-        .then(function (res) { if (res.ok) renderFeature(res.body.feature); });
+        .then(function (res) {
+          if (res.ok) { renderFeature(res.body.feature); setStatus('bs-media-status', 'Feature image removed.'); }
+          else setStatus('bs-media-status', (res.body && res.body.error) || 'Could not remove it.');
+        });
     });
-    // A column layout is body structure, not media, so it doesn't route through mediaTarget or the
-    // picker — it goes straight into the draft, after whichever block the author last touched.
+
+    // ── The feature slot as a drop target ────────────────────────────────────────────────────────
+    // The body was already the only place anything could be dropped, which is what made the hero
+    // feel like a box the system owns. It now accepts the same picker payloads as the editor, plus
+    // files straight off the desktop.
+    function featureDragKind(dt) {
+      if (!dt) return null;
+      var types = Array.prototype.slice.call(dt.types || []);
+      if (types.indexOf(window.MarkdownEditor.MEDIA_MIME) >= 0) return 'media';
+      if (types.indexOf('Files') >= 0) return 'files';
+      return null;
+    }
+    mediaEls.drop.addEventListener('dragover', function (e) {
+      if (!state.postId || !featureDragKind(e.dataTransfer)) return;
+      e.preventDefault();                       // required, or the browser refuses to fire `drop`
+      e.dataTransfer.dropEffect = 'copy';
+      mediaEls.drop.classList.add('bs-drop-hot');
+    });
+    mediaEls.drop.addEventListener('dragleave', function (e) {
+      // Only when the pointer has actually left the box — dragleave also fires crossing into a child.
+      if (!mediaEls.drop.contains(e.relatedTarget)) mediaEls.drop.classList.remove('bs-drop-hot');
+    });
+    mediaEls.drop.addEventListener('drop', function (e) {
+      var kind = featureDragKind(e.dataTransfer);
+      if (!state.postId || !kind) return;
+      e.preventDefault();
+      mediaEls.drop.classList.remove('bs-drop-hot');
+      if (kind === 'media') {
+        var payload;
+        try { payload = JSON.parse(e.dataTransfer.getData(window.MarkdownEditor.MEDIA_MIME)); }
+        catch (_) { return; }                   // malformed — never guess at what was dropped
+        // The hero is images-only. Say so rather than letting blog-media reject it downstream.
+        if (payload && payload.type && payload.type !== 'image') {
+          setStatus('bs-media-status', 'The feature image has to be an image — video and audio go in the post body.');
+          return;
+        }
+        routeFeature(attachBodyFor(payload));
+        return;
+      }
+      var file = (e.dataTransfer.files || [])[0];
+      if (!file) return;
+      if (!/^image\//.test(file.type || '')) {
+        setStatus('bs-media-status', 'The feature image has to be an image.');
+        return;
+      }
+      setStatus('bs-media-status', 'Uploading…');
+      uploadContentAsset(file)
+        .then(function (asset) { routeFeature({ assetId: asset.id }); })
+        .catch(function (err) { setStatus('bs-media-status', err.message || 'Upload failed. Please try again.'); });
+    });
+
+    // A column layout is body structure, not media, so it doesn't go through the picker — it goes
+    // straight into the draft, after whichever block the author last touched, and the editor
+    // scrolls it into view and flashes it so "nothing happened" is never the reading.
     function insertColumns(n) {
       if (!state.editor) return;
       state.editor.insertColumns(n);
-      setStatus('bs-media-status', 'Column layout added — drag media into a column, or click to edit the text.');
+      setStatus('bs-media-status', n + '-column row added. Drag a paragraph or image into a column '
+        + 'using the \u22EE\u22EE handle on its left.');
     }
     mediaEls.cols2.addEventListener('click', function () { insertColumns(2); });
     mediaEls.cols3.addEventListener('click', function () { insertColumns(3); });
-    mediaEls.library.addEventListener('click', function () { state.mediaTarget = 'feature'; openLibrary(); });
-    mediaEls.inlineLibrary.addEventListener('click', function () { state.mediaTarget = 'inline'; openLibrary(); });
-    mediaEls.ai.addEventListener('click', function () { state.mediaTarget = 'feature'; openAiForm(); });
-    mediaEls.inlineAi.addEventListener('click', function () { state.mediaTarget = 'inline'; openAiForm(); });
-    mediaEls.pexels.addEventListener('click', function () { state.mediaTarget = 'feature'; openPexelsForm(); });
-    mediaEls.inlinePexels.addEventListener('click', function () { state.mediaTarget = 'inline'; openPexelsForm(); });
-    mediaEls.canva.addEventListener('click', function () { state.mediaTarget = 'feature'; openCanva(); });
-    mediaEls.inlineCanva.addEventListener('click', function () { state.mediaTarget = 'inline'; openCanva(); });
-    mediaEls.upload.addEventListener('click', function () { state.mediaTarget = 'feature'; mediaEls.uploadInput.click(); });
-    mediaEls.inlineUpload.addEventListener('click', function () { state.mediaTarget = 'inline'; mediaEls.inlineUploadInput.click(); });
+    mediaEls.library.addEventListener('click', function () { openLibrary(); });
+    mediaEls.ai.addEventListener('click', openAiForm);
+    mediaEls.pexels.addEventListener('click', openPexelsForm);
+    mediaEls.canva.addEventListener('click', openCanva);
+    mediaEls.upload.addEventListener('click', function () { mediaEls.uploadInput.click(); });
     mediaEls.uploadInput.addEventListener('change', handleUploadInput);
-    mediaEls.inlineUploadInput.addEventListener('change', handleUploadInput);
 
+    // AI generation is a two-stage flow of its own: the variations are not assets yet, so they get
+    // a bare grid, and only the CHOSEN one becomes an asset — which then appears as an ordinary
+    // tile with the ordinary two actions.
     mediaEls.aiGo.addEventListener('click', function () {
       var prompt = mediaEls.aiPrompt.value.trim();
       if (!prompt || !state.postId) return;
@@ -1316,12 +1621,20 @@
           (res.body.images || []).forEach(function (im) {
             var img = document.createElement('img');
             img.src = im.url;
+            img.title = 'Keep this variation';
             img.addEventListener('click', function () {
               setStatus('bs-media-status', 'Saving…');
               api('generate-ai-image', { method: 'POST', body: JSON.stringify({ action: 'select', jobId: jobId, index: im.index }) })
                 .then(function (sel) {
-                  if (sel.ok && sel.body.assetId) routeMedia({ assetId: sel.body.assetId });
-                  else setStatus('bs-media-status', (sel.body && sel.body.error) || 'Could not save image');
+                  if (!sel.ok || !sel.body.assetId) {
+                    setStatus('bs-media-status', (sel.body && sel.body.error) || 'Could not save image');
+                    return;
+                  }
+                  // The variation URL is already in hand, so the tile can be built without a
+                  // library round-trip — no waiting to find out where the image can go.
+                  renderTiles([{ type: 'image', url: im.url, name: prompt, title: prompt,
+                    source: 'ai', body: { assetId: sel.body.assetId } }]);
+                  setStatus('bs-media-status', 'Saved — click it to add it to your post, or press Feature.');
                 });
             });
             mediaEls.picker.appendChild(img);
@@ -1339,18 +1652,14 @@
         .then(function (res) {
           if (!res.ok) { setStatus('bs-media-status', (res.body && res.body.error) || 'Search failed'); mediaEls.picker.innerHTML = ''; return; }
           var candidates = (res.body && res.body.candidates) || [];
-          if (!candidates.length) { mediaEls.picker.innerHTML = '<div class="bs-media-empty">No matches — try a different search.</div>'; setStatus('bs-media-status', ''); return; }
-          setStatus('bs-media-status', 'Pick a photo');
-          mediaEls.picker.innerHTML = '';
-          candidates.forEach(function (c) {
-            var img = document.createElement('img');
-            img.src = c.url;
-            img.alt = c.title || '';
-            img.title = c.photographer ? ('Photo by ' + c.photographer + ' on Pexels') : '';
-            img.addEventListener('click', function () { routeMedia({ pexelsCandidate: c }); });
-            makeTileDraggable(img, { source: 'pexels', pexelsCandidate: c, type: 'image' });
-            mediaEls.picker.appendChild(img);
-          });
+          renderTiles(candidates.map(function (c) {
+            return {
+              type: 'image', url: c.url, name: c.title || '', source: 'pexels',
+              title: c.photographer ? ('Photo by ' + c.photographer + ' on Pexels') : (c.title || ''),
+              body: { pexelsCandidate: c },
+            };
+          }), 'No matches — try a different search.');
+          setStatus('bs-media-status', candidates.length ? 'Pick a photo' : '');
         });
     });
   }
@@ -1376,7 +1685,11 @@
   // Clear transient editor state before (re)opening onto a post — the modal is injected once and
   // reused, so status lines and the AI-draft form must not carry over between opens.
   function clearWorkspaceState() {
-    ['bs-save-status', 'bs-media-status', 'bs-ai-draft-status'].forEach(function (id) { setStatus(id, ''); });
+    ['bs-save-status', 'bs-media-status', 'bs-ai-draft-status', 'bs-dist-status'].forEach(function (id) { setStatus(id, ''); });
+    var dist = el('bs-dist-list'); if (dist) dist.innerHTML = '';
+    var picker = el('bs-media-picker');
+    if (picker) { picker.innerHTML = ''; picker.classList.add('bs-hidden'); }
+    ['bs-ai-form', 'bs-pexels-form'].forEach(function (id) { var e = el(id); if (e) e.classList.add('bs-hidden'); });
     ['bs-action-status'].forEach(function (id) { setBanner(id, ''); });
     var f = el('bs-ai-draft-form'); if (f) f.classList.add('bs-hidden');
     ['bs-ai-topic', 'bs-ai-keywords'].forEach(function (id) { var e = el(id); if (e) e.value = ''; });
@@ -1391,6 +1704,9 @@
     window.ScrollLock.lock('blog-studio');
 
     clearWorkspaceState();
+    // Paint the fallback wording immediately so no button is briefly blank, then correct it once
+    // the assistant list is in.
+    applyAssistantNaming();
     loadAssistants().then(function () {
       // Opening onto an existing post loads it; opening fresh drops straight into a blank draft in
       // the editor (the old "Start a new post" brief screen is gone).

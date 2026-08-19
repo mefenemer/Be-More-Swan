@@ -276,13 +276,23 @@
   // if the two drift, the editor writes something the server won't parse back and the preview
   // starts lying about what publishes.
   const COLUMN_BODY_RE = /(:::column[ \t]*\n)([\s\S]*?)(\n:::[ \t]*)(?=\n|$)/g;
+
+  // The prose a brand-new column is seeded with. An empty `.bms-column` has no height, so a blank
+  // grid renders as nothing at all and the buttons read as broken — but the seed must then get out
+  // of the way the moment real content lands, or every filled column keeps a stray instruction
+  // line above it. isColumnSeed() is the test for "still untouched".
+  const COLUMN_SEED = 'Drop text or an image here.';
+  function isColumnSeed(body) { return body.trim() === COLUMN_SEED; }
+
   function spliceColumnRaw(raw, colIndex, md) {
     let i = 0;
     let hit = false;
     const next = String(raw).replace(COLUMN_BODY_RE, function (m, open, body, close) {
       if (i++ !== colIndex) return m;
       hit = true;
-      return open + (body.trim() ? body + '\n\n' : '') + md + close;
+      // Replace the seed rather than append below it; keep real content and append after it.
+      const keep = body.trim() && !isColumnSeed(body) ? body + '\n\n' : '';
+      return open + keep + md + close;
     });
     return hit ? next : null;
   }
@@ -356,8 +366,25 @@
     if (document.getElementById(STYLE_ID)) return;
     const css = `
       .bmsme-root { position: relative; min-height: 120px; cursor: text; }
-      .bmsme-block { padding: 2px 4px; border-radius: 4px; }
+      /* Every block reserves a left gutter for its drag handle. Without the gutter the handle
+         would either overlap the first word or hang outside the editor's padding box. */
+      .bmsme-block { position: relative; padding: 2px 4px 2px 26px; border-radius: 4px; }
       .bmsme-block:hover { background: rgba(0,0,0,0.02); }
+      /* The typeface the reader will actually get. Applied by setFontFamily() from the Studio's
+         Font family picker, so choosing a font reformats the draft instead of only changing a
+         setting nobody can see. Scoped to blocks: the format bar is chrome and stays system-UI. */
+      .bmsme-block, .bmsme-block .bmsme-input { font-family: var(--bmsme-font, inherit); }
+      /* Drag handle. EVERY block gets one, not just media: dragging a paragraph into a column is
+         the only way to fill a column layout, and a block with no visible grip reads as immovable.
+         The handle carries draggable=true rather than the block itself — draggable on the block
+         kills text selection inside it, which the AI-rewrite toolbar depends on. */
+      .bmsme-handle { position:absolute; left:2px; top:3px; width:18px; height:18px; display:flex;
+        align-items:center; justify-content:center; border-radius:4px; cursor:grab;
+        color:#9ca3af; font-size:13px; line-height:1; letter-spacing:-2px; user-select:none;
+        opacity:0; transition:opacity .12s ease; background:#fff; border:1px solid #e5e7eb; }
+      .bmsme-block:hover .bmsme-handle, .bmsme-handle:focus { opacity:1; }
+      .bmsme-handle:hover { color:#ec4899; border-color:#f9a8d4; }
+      .bmsme-handle:active { cursor:grabbing; }
       /* Click-to-edit: the block swaps its rendered HTML for a textarea over its raw Markdown. */
       .bmsme-editing { background: rgba(236,72,153,.04); box-shadow: inset 0 0 0 1px #fbcfe8; }
       .bmsme-input { display:block; width:100%; border:0; outline:0; padding:0; margin:0;
@@ -460,10 +487,19 @@
         height:8px; border-radius:50%; background:#ec4899; }
       .bmsme-droppending { position:absolute; left:8px; z-index:43; background:#111827; color:#fff;
         font-size:12px; padding:3px 10px; border-radius:10px; pointer-events:none; display:none; }
-      /* Only media blocks get draggable=true — see isMediaBlock. */
+      /* Media blocks stay draggable by their whole body (there is no text to select in them);
+         everything else is dragged by its handle. */
       .bmsme-block[draggable="true"] { cursor:grab; }
       .bmsme-block[draggable="true"]:active { cursor:grabbing; }
       .bmsme-dragging { opacity:.4; }
+      /* A freshly inserted column layout, flashed so the author can see WHERE it landed — the
+         complaint about the Columns buttons was never that they did nothing, it was that the new
+         row appeared below the fold with no indication it was the thing that had just appeared. */
+      .bmsme-flash { animation: bmsme-flash 1.1s ease-out 1; }
+      @keyframes bmsme-flash {
+        0% { box-shadow: 0 0 0 3px rgba(236,72,153,.45); background: rgba(236,72,153,.08); }
+        100% { box-shadow: 0 0 0 3px rgba(236,72,153,0); background: transparent; }
+      }
       /* A drop aimed inside a column targets that column, not a gap between blocks — so it gets an
          outline instead of the insertion line. */
       .bmsme-colhint { outline:2px dashed #ec4899; outline-offset:3px; border-radius:4px; }
@@ -665,6 +701,31 @@
         : '<p class="bmsme-placeholder">' + escapeHtml(placeholder) + '</p>';
     }
 
+    // Fill a block node with its rendered HTML AND its drag handle. Every path that rewrites a
+    // block's innerHTML must come through here: renderOneBlock used to assign innerHTML directly,
+    // which silently ate the handle and left that one block ungrabbable until the next full render.
+    function paintBlock(el, b) {
+      el.innerHTML = blockHtml(b);
+      const handle = document.createElement('span');
+      handle.className = 'bmsme-handle';
+      handle.setAttribute('draggable', 'true');
+      handle.setAttribute('aria-hidden', 'true');
+      handle.title = 'Drag to move this section — including into a column';
+      handle.textContent = '\u22EE\u22EE';   // a two-column grip
+      el.appendChild(handle);
+      if (isMediaBlock(b.raw)) {
+        el.setAttribute('draggable', 'true');
+        // img/video are draggable by default, and that native drag would win over the wrapper's —
+        // handing the drop a URL/file payload instead of our block id, so a reorder would read as
+        // an external insert and duplicate the media.
+        el.querySelectorAll('img, video, audio, a').forEach((n) => { n.draggable = false; });
+      } else if (isColumnsBlock(b.raw)) {
+        // Media inside a column isn't a block of its own, so there's nothing to reorder — stop
+        // its native image drag from starting a drag the drop handler would only ignore.
+        el.querySelectorAll('img, video, audio').forEach((n) => { n.draggable = false; });
+      }
+    }
+
     function renderAll() {
       // A re-render mid-edit (setAssetUrls, an image insert) must not orphan the open textarea:
       // leaving `editing` pointing at a detached node wedges enterEdit's same-block guard shut and
@@ -681,18 +742,7 @@
         const el = document.createElement('div');
         el.className = 'bmsme-block';
         el.setAttribute('data-block-id', b.id);
-        el.innerHTML = blockHtml(b);
-        if (isMediaBlock(b.raw)) {
-          el.setAttribute('draggable', 'true');
-          // img/video are draggable by default, and that native drag would win over the wrapper's —
-          // handing the drop a URL/file payload instead of our block id, so a reorder would read as
-          // an external insert and duplicate the media.
-          el.querySelectorAll('img, video, audio, a').forEach((n) => { n.draggable = false; });
-        } else if (isColumnsBlock(b.raw)) {
-          // Media inside a column isn't a block of its own, so there's nothing to reorder — stop
-          // its native image drag from starting a drag the drop handler would only ignore.
-          el.querySelectorAll('img, video, audio').forEach((n) => { n.draggable = false; });
-        }
+        paintBlock(el, b);
         root.appendChild(el);
       }
 
@@ -712,7 +762,7 @@
     function renderOneBlock(blockId) {
       const b = blocks.find((x) => x.id === blockId);
       const el = root.querySelector('.bmsme-block[data-block-id="' + blockId + '"]');
-      if (b && el) { el.classList.remove('bmsme-editing'); el.innerHTML = blockHtml(b); }
+      if (b && el) { el.classList.remove('bmsme-editing'); paintBlock(el, b); }
     }
 
     function scheduleSave() {
@@ -832,6 +882,9 @@
       const sel = window.getSelection();
       if (sel && !sel.isCollapsed && String(sel).trim()) return;
       if (e.target.closest && e.target.closest('.bmsme-diff, .bmsme-toolbar, .bmsme-menu')) return;
+      // The handle is a grip. Clicking it must not open the block for typing, or a mis-aimed drag
+      // would dump the author into a textarea instead of moving anything.
+      if (e.target.closest && e.target.closest('.bmsme-handle')) return;
       const blockEl = e.target.closest && e.target.closest('.bmsme-block');
       if (blockEl) {
         if (blockEl.querySelector('.bmsme-diff')) return;   // a rewrite is awaiting Accept/Reject
@@ -988,16 +1041,28 @@
       return block.id;
     }
 
-    // Insert an empty column layout at a gap index. Columns are seeded with placeholder prose
-    // rather than left empty: an empty `.bms-column` has no height, so a blank grid renders as
-    // nothing at all and the author sees the button do nothing.
+    // Scroll a block into view and flash it. A layout inserted below the fold is indistinguishable
+    // from nothing having happened, which is exactly how the Columns buttons read.
+    function revealBlock(blockId) {
+      const el = root.querySelector('.bmsme-block[data-block-id="' + blockId + '"]');
+      if (!el) return;
+      if (el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.remove('bmsme-flash');
+      void el.offsetWidth;              // restart the animation if the same block is hit twice
+      el.classList.add('bmsme-flash');
+      setTimeout(() => el.classList.remove('bmsme-flash'), 1300);
+    }
+
+    // Insert an empty column layout at a gap index. Columns carry seed prose rather than being
+    // left empty: an empty `.bms-column` has no height, so a blank grid renders as nothing at all
+    // and the author sees the button do nothing. The seed doubles as the instruction for what to
+    // do next, and spliceColumnRaw replaces it as soon as anything is dropped in.
     function insertColumnsAt(index, cols) {
       const n = cols === 3 ? 3 : 2;
-      const names = ['Column one', 'Column two', 'Column three'];
       const beforeId = (index >= 0 && index < blocks.length) ? blocks[index].id : null;
       commitEdit();
       let body = '';
-      for (let i = 0; i < n; i++) body += ':::column\n' + names[i] + '.\n:::\n';
+      for (let i = 0; i < n; i++) body += ':::column\n' + COLUMN_SEED + '\n:::\n';
       const raw = '::::columns{cols=' + n + '}\n' + body + '::::';
 
       let at = beforeId != null ? blocks.findIndex((b) => b.id === beforeId) : blocks.length;
@@ -1006,6 +1071,7 @@
       blocks.splice(at, 0, block);
       currentSel = null;
       renderAll();
+      revealBlock(block.id);
       scheduleSave();
       return block.id;
     }
@@ -1125,7 +1191,11 @@
 
     function onDragStart(e) {
       const blockEl = e.target.closest && e.target.closest('.bmsme-block');
-      if (!blockEl || blockEl.getAttribute('draggable') !== 'true') return;
+      if (!blockEl) return;
+      // Two ways in: the handle (any block, incl. prose) or the block body (media only, where
+      // there is no text selection to protect). Anything else dragging inside a block is ignored.
+      const fromHandle = !!(e.target.closest && e.target.closest('.bmsme-handle'));
+      if (!fromHandle && blockEl.getAttribute('draggable') !== 'true') return;
       e.dataTransfer.setData(BLOCK_MIME, blockEl.getAttribute('data-block-id'));
       e.dataTransfer.effectAllowed = 'move';
       blockEl.classList.add('bmsme-dragging');
@@ -1283,13 +1353,28 @@
       // Positional insert. Exposed so a host can place media without a drag (the accessible path —
       // drag-and-drop is a pointer gesture and can't be the only way to position media).
       insertMediaAt,
+      // Set the typeface the draft renders in — the face the published post will use, so the Font
+      // family picker reformats what the author is looking at instead of only changing a stored
+      // setting. Empty/absent restores the host page's own font.
+      setFontFamily(stack) {
+        if (stack) root.style.setProperty('--bmsme-font', stack);
+        else root.style.removeProperty('--bmsme-font');
+      },
       // Insert a 2- or 3-column layout after the block the author last touched.
+      //
+      // `currentSel` alone was too narrow an anchor: it is only set by a text SELECTION, so simply
+      // clicking into a paragraph and pressing the button appended the layout to the very end of
+      // the draft — the "it adds the columns underneath" complaint. Prefer the block that is open
+      // for editing, then a selection, then the last block the format bar acted on.
       insertColumns(cols) {
-        const anchorId = currentSel && currentSel.blockId;
+        const anchorId = (editing && editing.blockId)
+          || (currentSel && currentSel.blockId)
+          || formatTargetId;
         const at = anchorId ? blocks.findIndex((b) => b.id === anchorId) : -1;
         return insertColumnsAt(at >= 0 ? at + 1 : blocks.length, cols);
       },
       insertColumnsAt,
+      revealBlock,
       // Back-compat wrapper: insertImage predates video/audio and is still what existing callers
       // reach for. Kept thin rather than duplicated so there's one insert path to maintain.
       insertImage(img) {

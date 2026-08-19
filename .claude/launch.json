@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-blog-studio",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/ecbeb877-eac9-4f0a-b7f2-c6f128b6de3b/scratchpad/blogharness/server.mjs"
+      ],
+      "port": 4455,
+      "autoPort": false
+    },
+    {
       "name": "copy-harness-blog-snippet",
       "runtimeExecutable": "node",
       "runtimeArgs": [

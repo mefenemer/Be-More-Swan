@@ -5,7 +5,8 @@
 //
 // Syndication normally runs automatically from publishBlogPost() the moment a post goes live; this
 // endpoint exists as a manual "re-push" (e.g. after connecting a new destination, or a transient
-// failure). There is no per-post target selection — connecting a destination opts it in.
+// failure). Connecting a destination opts it in for every post; the author can narrow that per post
+// in Blog Studio, and this re-push honours the same stored choice (destinations.selected).
 //
 // POST { postId }  → { results: { [target]: {...} } }
 
