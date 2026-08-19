@@ -141,16 +141,16 @@ export default withLambda(async (event: HandlerEvent) => {
         // Reported, not hidden: `needsSetup` is what the UI renders.
         let rows;
         try {
-        rows = Number.isFinite(segmentId) && segmentId
-            ? await base
-                .innerJoin(audienceContactSegments, eq(audienceContactSegments.contactId, audienceContacts.id))
-                .where(and(...filters, eq(audienceContactSegments.segmentId, segmentId)))
-                .orderBy(desc(audienceContacts.createdAt))
-                .limit(LIST_CAP + 1)
-            : await base
-                .where(and(...filters))
-                .orderBy(desc(audienceContacts.createdAt))
-                .limit(LIST_CAP + 1);
+            rows = Number.isFinite(segmentId) && segmentId
+                ? await base
+                    .innerJoin(audienceContactSegments, eq(audienceContactSegments.contactId, audienceContacts.id))
+                    .where(and(...filters, eq(audienceContactSegments.segmentId, segmentId)))
+                    .orderBy(desc(audienceContacts.createdAt))
+                    .limit(LIST_CAP + 1)
+                : await base
+                    .where(and(...filters))
+                    .orderBy(desc(audienceContacts.createdAt))
+                    .limit(LIST_CAP + 1);
         } catch (err) {
             const code = (err as { code?: string; cause?: { code?: string } })?.code
                 ?? (err as { cause?: { code?: string } })?.cause?.code;

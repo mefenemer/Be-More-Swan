@@ -1945,7 +1945,15 @@
       });
 
       if (response.ok) {
-        window.location.href = 'workspace.html';
+        // Land on the new assistant's workspace with ?welcome=1 so it greets the user in
+        // character (a Be More Swan hello + "I'm already drafting your first posts" + the Chat
+        // button) instead of silently dropping them on the generic workspace, which left them
+        // wondering whether anything had happened. The detail page consumes the flag once
+        // (assistants.js) and strips it, so a reload won't re-show the welcome.
+        const okData = await response.json().catch(() => ({}));
+        window.location.href = okData.assistantId
+          ? `workspace.html?view=assistant-detail&assistantId=${okData.assistantId}&welcome=1`
+          : 'workspace.html';
       } else if (response.status === 403) {
         const errData = await response.json();
         if (errData.code === 'DPA_REQUIRED') {

@@ -3288,6 +3288,10 @@ function formatCurrency(amount, currency) {
       history.replaceState(null, '', window.location.pathname);
       const tabParam = qs.get('tab');
       if (tabParam) window._assistantDetailInitialTab = tabParam;
+      // ?welcome=1 arrives from a just-completed onboarding (onboarding-social-media.html) —
+      // lift it onto a global (replaceState above drops the query string) so the detail page
+      // greets the freshly-hired assistant's owner in character. Consumed once by assistants.js.
+      if (qs.get('welcome') === '1') window._assistantDetailShowWelcome = true;
       // Issue #180 follow-up: a chat-drafted social post's "review & approve" link carries
       // the specific post it created — once the review-queue tab is up, pop the review
       // modal straight to it instead of leaving the user to find it in the list.
@@ -5162,6 +5166,7 @@ function formatCurrency(amount, currency) {
 <!-- Chat modal (workspace "💬 Chat" card action) — same mountable widget assistant-chat.html
      uses, embedded in-page instead of navigating to a separate page. -->
 <script src="/src/components/assistant-starter-prompts.js"></script>
+<script src="/src/components/assistant-welcome-messages.js"></script>
 <script src="/src/components/chat-session.js"></script>
 <!-- "Past conversations" drawer shared by every chat surface — lists threads from
      list-chat-sessions.ts, archives/restores via archive-chat-session.ts. -->

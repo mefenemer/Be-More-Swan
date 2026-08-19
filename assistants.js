@@ -5964,6 +5964,44 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         document.getElementById('assistant-detail-content')?.classList.remove('hidden');
     }
 
+    // ── First-run welcome ─────────────────────────────────────────
+    // A just-onboarded assistant (arriving with ?welcome=1, lifted onto the flag in
+    // workspace.html) greets its new owner in character — the same hello + Chat pointer the
+    // schema-setup screen shows — so the social flow no longer drops the user here cold.
+    // Consumed once: the flag is cleared immediately and the query string was already stripped,
+    // so a reload won't repeat it.
+    if (window._assistantDetailShowWelcome) {
+        window._assistantDetailShowWelcome = false;
+        try {
+            const contentEl = document.getElementById('assistant-detail-content');
+            if (contentEl && window.AssistantWelcomeMessages && !contentEl.querySelector('[data-assistant-welcome]')) {
+                const wrap = document.createElement('div');
+                wrap.innerHTML = window.AssistantWelcomeMessages.buildBannerHtml({
+                    assistantId,
+                    roleKey: currentData.roleKey,
+                    assistantName: currentData.name,
+                    draftsQueued: 0,
+                });
+                const banner = wrap.firstElementChild;
+                if (banner) {
+                    contentEl.insertBefore(banner, contentEl.firstChild);
+                    banner.querySelector('[data-welcome-dismiss]')?.addEventListener('click', () => banner.remove());
+                    // Keep the user on the Detail page: open the in-page chat modal rather than
+                    // navigating away when it's available (falls back to the href otherwise).
+                    const chatLink = banner.querySelector('[data-welcome-chat]');
+                    if (chatLink && typeof window.openAssistantChat === 'function') {
+                        chatLink.addEventListener('click', (e) => {
+                            e.preventDefault();
+                            window.openAssistantChat({ assistantId });
+                        });
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('[initAssistantDetail] welcome banner failed:', e);
+        }
+    }
+
     // ── Overview loading skeletons ────────────────────────────────
     // The content is revealed above, but the Overview's dynamic cards fill from the async
     // fetches kicked off below and would otherwise pop in one at a time. Skeleton the cards

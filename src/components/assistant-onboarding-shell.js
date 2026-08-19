@@ -172,7 +172,7 @@
   // ── Shell ─────────────────────────────────────────────────────────────────────
 
   function mount(props) {
-    const { container, assistantId, onComplete } = props || {};
+    const { container, assistantId, onComplete, roleKey, assistantName } = props || {};
     if (!(container instanceof HTMLElement)) {
       throw new Error('[AssistantOnboardingShell] mount() requires a container element.');
     }
@@ -261,6 +261,23 @@
     // queue that looks identical whether the assistant started or silently didn't.
     function renderSuccess(draftsQueued) {
       progressEl.style.width = '100%';
+
+      // Preferred: an in-character welcome from the assistant itself — says hi, introduces its
+      // role, states what it is ALREADY doing, and points at the Chat button so the user knows
+      // what to do next (the old terse "Setup complete!" left them guessing). buildCardHtml
+      // carries its own Chat + Workspace buttons, so this screen is now a deliberate hand-off
+      // the user acts on rather than an auto-redirect that pre-empts the message.
+      if (window.AssistantWelcomeMessages && assistantId != null) {
+        formEl.innerHTML = `<div class="step-active py-2">${window.AssistantWelcomeMessages.buildCardHtml({
+          assistantId,
+          roleKey,
+          assistantName,
+          draftsQueued,
+        })}</div>`;
+        return;
+      }
+
+      // Fallback (welcome module not loaded): the original confirmation copy.
       const n = Number(draftsQueued) || 0;
       const started = n > 0
         ? `It's already drafting — ${n} post${n === 1 ? '' : 's'} queued for your approval.`

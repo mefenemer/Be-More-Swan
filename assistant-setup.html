@@ -66,6 +66,7 @@
 
 <script src="./mobileMenu.js"></script>
 <script src="/src/public/assistant-onboarding-schemas.js"></script>
+<script src="/src/components/assistant-welcome-messages.js"></script>
 <script src="/src/components/assistant-onboarding-shell.js"></script>
 <script>
 async function loadComponent(id, path) {
@@ -130,12 +131,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     container: document.getElementById('setup-root'),
     assistantId: hire.assistantId,
     configurationSchema: schema,
-    onComplete: () => {
-      // Let the shell's "Setup complete!" state land, then drop into the conversation.
-      setTimeout(() => {
-        window.location.href = `assistant-chat.html?assistantId=${hire.assistantId}`;
-      }, 1200);
-    },
+    roleKey,
+    assistantName: hire.name,
+    // No auto-redirect: the success state is now an in-character welcome from the assistant
+    // (assistant-welcome-messages.js) with its own "Chat with …" and "Go to workspace" buttons,
+    // so the user reads the greeting and chooses where to go rather than being whisked away.
   });
 });
 </script>

@@ -26,6 +26,7 @@
     selected: new Set(),
     filters: { q: '', status: '', segmentId: '' },
     searchTimer: null,
+    needsSetup: false,
   };
 
   // ── Status vocabulary ──────────────────────────────────────────────────────
@@ -122,6 +123,10 @@
       state.total = data.total || 0;
       state.truncated = !!data.truncated;
       state.selected.clear();
+      // The environment has the code but not the tables (db/audience.sql not applied here). Say
+      // that, rather than rendering a confident empty audience — "you have no contacts" and "this
+      // feature is not installed" must never look the same.
+      state.needsSetup = !!data.needsSetup;
       renderKpis();
       renderTruncation(data.cap);
       renderRows();
@@ -194,6 +199,15 @@
     if (!tbody) return;
 
     if (!state.contacts.length) {
+      if (state.needsSetup) {
+        tbody.innerHTML = `<tr><td colspan="6" class="p-10 text-center">
+          <p class="text-sm font-bold text-gray-900">Audience is not set up on this environment yet</p>
+          <p class="text-sm text-gray-500 mt-1">The database migration has not been applied here. Nothing is lost — apply <span class="font-mono text-xs bg-gray-100 px-1 rounded">db/audience.sql</span> and reload.</p>
+        </td></tr>`;
+        const pagerEl = $('aud-pager');
+        if (pagerEl) pagerEl.innerHTML = '';
+        return;
+      }
       const filtered = state.filters.q || state.filters.status || state.filters.segmentId;
       tbody.innerHTML = `<tr><td colspan="6" class="p-10 text-center">
         <p class="text-sm font-bold text-gray-900">${filtered ? 'No contacts match those filters' : 'No contacts yet'}</p>
