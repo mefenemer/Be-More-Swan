@@ -270,6 +270,44 @@ await check('the autopilot draft carries its own generation reason', () => {
     assert.match(insert, /isAutonomous: true/);
 });
 
+// ── 6. The surfaces the go-live audit turned up ─────────────────────────────
+
+await check('the Review Queue has a renderer of its own, not the social fallback', () => {
+    // The dispatch tests kind === 'records', then source === 'blog_posts', then falls through to
+    // the SOCIAL posts renderer. A registry entry naming a source nothing dispatches on would show
+    // an empty queue under a tab that looked like it worked.
+    assert.match(ASSISTANTS, /source === 'newsletter_issues'\) return _detailRqRenderNewsletter/,
+        'the render dispatch must know this source');
+    assert.match(ASSISTANTS, /async function _detailRqRenderNewsletter/);
+    assert.match(ASSISTANTS, /newsletter-issues\?assistantId=/, 'and read the newsletter endpoint, not get-social-drafts');
+});
+
+await check('the approved column is shown for issues, unlike posts', () => {
+    // approve-post.ts schedules a post immediately, so 'approved' is never a resting state there.
+    // An approved ISSUE waits for Send now or its scheduled time — hiding the column would hide
+    // every issue sitting in exactly that state.
+    assert.match(ASSISTANTS, /toggle\('detail-rq-col-approved', rqIsRecords \|\| rqIsNewsletter\)/);
+});
+
+await check('the review copy says SENT, not scheduled', () => {
+    const sub = ASSISTANTS.slice(landmark(ASSISTANTS, 'rqIsNewsletter'), landmark(ASSISTANTS, 'rqIsNewsletter') + 2500);
+    assert.match(sub, /sent to your subscribers/,
+        'approving an issue is the decision to email real people — the copy over the button should say so');
+});
+
+await check('the chat knows what it is, and what it cannot do', () => {
+    const chat = read('netlify/functions/chat-orchestrator.ts');
+    assert.ok(chat.includes('newsletter_editor: {'), 'without a route it falls through to the generic one');
+    const route = chat.slice(landmark(chat, 'newsletter_editor: {'), landmark(chat, 'blog_writer: {'));
+    // The three things a chat can get catastrophically wrong for this role.
+    assert.match(route, /never say an issue has been saved/i, 'it cannot send, and must not imply it can');
+    assert.match(route, /WHAT YOU CANNOT SEE/, 'it cannot see the audience or past issues');
+    assert.match(route, /do not write an unsubscribe line/i, 'the footer is appended in code — writing it twice is the failure');
+    // And it must NOT offer a draft card, because nothing exists to honour one.
+    assert.ok(!route.includes('uiElement": {') && !route.includes('newsletter_issue_draft'),
+        'a Save card here would be an offer the product cannot honour');
+});
+
 console.log(`\n${passed} checks passed.`);
 }
 

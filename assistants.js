@@ -1112,6 +1112,8 @@ window._detailRqRefreshColumnCounts = async function() {
     const rq = window._detailReviewQueue || {};
     if (rq.kind === 'records') return _detailRqRefreshRecordCounts();
     if (rq.source === 'blog_posts') return;
+    // Same as blog: the newsletter renderer sets its own review badge as it draws.
+    if (rq.source === 'newsletter_issues') return;
     // Only count columns that are actually on screen (Approved is hidden for posts queues).
     const visible = Object.keys(_DETAIL_RQ_COLUMNS).filter(k => {
         const btn = document.querySelector(`.detail-rq-col[data-status="${k}"]`);
@@ -1128,6 +1130,7 @@ async function _detailRqRenderGroups(statusKey) {
     // Blog Writer: long-form drafts live in blog_posts (not scheduled_posts). The queue lists them
     // and routes into Blog Studio (where blog review/editing lives) + schedules via schedule-blog.
     if ((window._detailReviewQueue || {}).source === 'blog_posts') return _detailRqRenderBlog(statusKey);
+    if ((window._detailReviewQueue || {}).source === 'newsletter_issues') return _detailRqRenderNewsletter(statusKey);
 
     const col = _DETAIL_RQ_COLUMNS[statusKey] || _DETAIL_RQ_COLUMNS.review;
     const container = document.getElementById('detail-rq-groups');
@@ -3221,6 +3224,85 @@ function _detailRqBlogCard(p, statusKey) {
     </div>`;
 }
 
+// ── Newsletter issues in the Review Queue ───────────────────────────────────
+//
+// ⚠️ WHY THIS EXISTS. The dispatch below tests `kind === 'records'`, then `source === 'blog_posts'`,
+// and falls through to the SOCIAL posts renderer. A Newsletter Assistant registered with a kind the
+// dispatch does not know would therefore have called get-social-drafts and shown an empty queue
+// under a "Review" tab that looked like it worked — the same silent-fallback failure the dashboard
+// registry warns about, one layer down.
+const _RQ_NEWSLETTER_STATUS = {
+    review: ['draft', 'pending_approval', 'in_review'],
+    approved: ['approved'],
+    scheduled: ['scheduled'],
+    // 'sending' sits with the sent column rather than scheduled: from the reader's point of view it
+    // has left, and it can no longer be edited or stopped from here.
+    posted: ['sending', 'sent'],
+    archived: ['archived', 'failed', 'rejected'],
+};
+
+function _rqNewsletterActions(issue, statusKey) {
+    const primary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white transition cursor-pointer';
+    const secondary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 transition cursor-pointer';
+    // A sent issue is a record of what people received — it opens read-only and offers nothing else.
+    const open = `<button type="button" onclick="window._detailRqNewsletterOpen(${issue.id})" class="${statusKey === 'posted' ? secondary : primary}">${statusKey === 'posted' ? 'View' : 'Open in Studio'}</button>`;
+    return `<div class="flex items-center gap-2 mt-3">${open}</div>`;
+}
+
+function _detailRqNewsletterCard(issue, statusKey) {
+    const when = issue.sentAt
+        ? `sent ${new Date(issue.sentAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · ${Number(issue.recipientCount || 0).toLocaleString()} recipients`
+        : issue.scheduledFor
+            ? `scheduled ${new Date(issue.scheduledFor).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+            : (issue.updatedAt ? `updated ${new Date(issue.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : '');
+    return `<div class="py-4" data-rq-newsletter="${issue.id}">
+      <div class="min-w-0">
+        <p class="text-sm font-bold text-gray-900 truncate">${_rqEsc(issue.subject || '(untitled issue)')}</p>
+        <div class="flex items-center gap-2 mt-2">
+          <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">${_rqEsc(issue.status)}</span>
+          ${when ? `<span class="text-[11px] font-semibold text-gray-400">${_rqEsc(when)}</span>` : ''}
+        </div>
+      </div>
+      ${_rqNewsletterActions(issue, statusKey)}
+    </div>`;
+}
+
+// The Studio is a view, not a modal, so this routes rather than opening a dialog.
+window._detailRqNewsletterOpen = function (issueId) {
+    window._newsletterInitialIssueId = issueId;
+    window.loadView?.('newsletter');
+};
+
+async function _detailRqRenderNewsletter(statusKey) {
+    const container = document.getElementById('detail-rq-groups');
+    if (!container) return;
+    const aid = window._currentAssistantId;
+    const wanted = _RQ_NEWSLETTER_STATUS[statusKey] || [];
+
+    container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Loading…</p>';
+    if (!aid) { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">No assistant selected.</p>'; return; }
+    if (!wanted.length) { container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Newsletter issues don’t have this state.</p>'; return; }
+
+    let issues = [];
+    try {
+        const res = await fetch(`/.netlify/functions/newsletter-issues?assistantId=${aid}`);
+        if (!res.ok) throw new Error();
+        issues = ((await res.json()).issues || []).filter((i) => wanted.includes(i.status));
+    } catch { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">Failed to load.</p>'; return; }
+
+    if (statusKey === 'review') {
+        const colBadge = document.getElementById('detail-rq-col-count-review');
+        if (colBadge) { colBadge.textContent = issues.length || ''; colBadge.classList.toggle('hidden', !issues.length); }
+        _setDetailRqTabBadge(issues.length);
+        window._setPendingReviewCount?.(issues.length);
+        window._updateOpSignals?.({ pendingReview: issues.length });
+    }
+
+    container.innerHTML = issues.length
+        ? `<div class="divide-y divide-gray-100">${issues.map((i) => _detailRqNewsletterCard(i, statusKey)).join('')}</div>`
+        : `<p class="text-sm text-gray-400 py-10 text-center">${statusKey === 'review' ? 'No issues awaiting review.' : 'Nothing here yet.'}</p>`;
+}
+
 async function _detailRqRenderBlog(statusKey) {
     const container = document.getElementById('detail-rq-groups');
     if (!container) return;
@@ -4630,6 +4712,7 @@ function _applyDashboardRegistry(data) {
         if (textNode) textNode.nodeValue = `${rqColumnLabels[status] || fallback}\n          `;
     }
     const rqIsBlog = window._detailReviewQueue.source === 'blog_posts';
+    const rqIsNewsletter = window._detailReviewQueue.source === 'newsletter_issues';
     // A role can override the subtitle from the registry (reviewQueue.subtitle) when the generic
     // copy would misdescribe what its Approve button actually does.
     setText('detail-rq-subtitle', window._detailReviewQueue.subtitle
@@ -4638,7 +4721,11 @@ function _applyDashboardRegistry(data) {
         ? 'Records this assistant produced, awaiting your approval — approve, schedule or reject before anything acts on them.'
         : rqIsBlog
             ? 'Long-form drafts awaiting your review — open in Blog Studio to edit and approve, then schedule.'
-            : 'Items awaiting your review — approve, edit or reject before anything is scheduled.');
+            // Says "sent to your subscribers", not "scheduled": approving an issue is the decision
+            // to email real people, and the copy over the Approve button should say so.
+            : rqIsNewsletter
+                ? 'Issues awaiting your review — open in the Newsletter Studio to edit and approve before anything is sent to your subscribers.'
+                : 'Items awaiting your review — approve, edit or reject before anything is scheduled.');
     // Records queues have no post-generation button; blog re-points it at Blog Studio.
     toggleBtn('detail-rq-primary-btn', !rqIsRecords);
     toggle('detail-rq-col-posted', !rqIsRecords);
@@ -4651,11 +4738,19 @@ function _applyDashboardRegistry(data) {
     // 'approved' is only a real resting state for records queues. For posts, approve-post.ts moves
     // the post straight to 'scheduled' (approval IS the scheduling act), so the column would always
     // be empty — hide it rather than show a permanently blank tab.
-    toggle('detail-rq-col-approved', rqIsRecords);
+    // ⚠️ 'approved' IS a real resting state for a newsletter, unlike a post. approve-post.ts moves a
+    // post straight to 'scheduled' (approval IS the scheduling act), but an approved ISSUE waits
+    // for someone to press Send now or for its scheduled time — hiding the column would hide every
+    // issue sitting in exactly that state.
+    toggle('detail-rq-col-approved', rqIsRecords || rqIsNewsletter);
     if (rqIsBlog) {
         setText('detail-rq-primary-label', 'Write Blog Post');
         const rqBtn = document.getElementById('detail-rq-primary-btn');
         if (rqBtn) rqBtn.onclick = () => { window.openBlogStudio?.({ assistantId: data.id }); };
+    } else if (rqIsNewsletter) {
+        setText('detail-rq-primary-label', 'Write Newsletter');
+        const rqBtn = document.getElementById('detail-rq-primary-btn');
+        if (rqBtn) rqBtn.onclick = () => { window.loadView?.('newsletter'); };
     } else if (!rqIsRecords) {
         // Posts queues: keep the in-queue CTA in step with the header ("Create a Post" for SMM).
         setText('detail-rq-primary-label', cfg.primaryAction?.label || 'Create a Post');

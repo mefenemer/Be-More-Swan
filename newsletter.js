@@ -560,6 +560,10 @@
     state.dirty = false;
     wire();
     renderVarChips();
-    await loadIssues();
+    // Deep link from the Review Queue ("Open in Studio"). Consumed on read so a later visit to the
+    // Studio does not silently reopen an issue the user has moved on from.
+    const wanted = window._newsletterInitialIssueId;
+    window._newsletterInitialIssueId = null;
+    await loadIssues(wanted || undefined);
   };
 })();

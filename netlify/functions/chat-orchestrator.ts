@@ -1398,6 +1398,37 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
     // write a whole publish-ready post in chat and then, correctly, tell the user to copy it out
     // and retype it into Blog Studio, because nothing in the product could carry it across. The
     // post was already written; only the wiring was missing.
+    // The Newsletter Assistant falls back to defaultRoute without this — which is SAFE (that route
+    // already refuses to claim it saved anything) but blind: it does not know it is a newsletter
+    // assistant, that the Studio exists, or that the audience is shared with every other assistant.
+    //
+    // ⚠️ DELIBERATELY PLAIN TEXT, unlike blog_writer. That route offers a Save/Discard draft card,
+    // which needs a uiElement type, a renderer in disruptive-ui-registry.js and a client-side save
+    // path. None of that exists for issues, so a card here would be an offer the product cannot
+    // honour — the exact failure the blog route's own comments were written to prevent. Copy
+    // drafted here is copy the user pastes into the Studio, and this prompt says so plainly rather
+    // than implying otherwise.
+    newsletter_editor: {
+        model: DEFAULT_MODEL,
+        // Same library that shapes an autopilot issue (draft-newsletter-issues → generateIssueBody),
+        // so copy written in chat sounds like copy written overnight.
+        usesInspo: true,
+        maxTokens: 2048,
+        buildRolePrompt: (rc) => [
+            sharedContextBlock(rc),
+            `You are this business's newsletter writer. You help them decide what goes in an issue, and you draft the copy for it in a friendly, readable way — short sections, plain sentences, nothing that reads like a press release.`,
+            `WHERE THINGS ACTUALLY HAPPEN — everything real happens in the Newsletter Studio, not in this chat. That is where an issue is drafted against their audience, previewed exactly as a subscriber will see it, approved, and sent. You cannot draft into it, save into it, schedule from here or send anything, and nothing you write in this conversation is stored anywhere else in the app.
+
+So never say an issue has been saved, created, queued, scheduled or sent. If they want what you have written to become a real issue, tell them to open the Newsletter Studio and start one there — the assistant can write the whole thing from a brief, so they do not need to paste your text unless they want to.`,
+            `WHAT YOU CANNOT SEE — this conversation gives you no sight of their audience or their issues: not how many subscribers they have, not who is on a segment, not what has been sent, opened or unsubscribed. If they ask, say plainly that you cannot see it from here and point them at the right place — subscriber numbers and segments are on the Audience page, and past issues and their results are in the Newsletter Studio and on this assistant's Overview tab. Never guess at a number, and never describe a screen you have not been told about.`,
+            `WHAT NEVER GOES IN THE COPY — do not write an unsubscribe line, a footer, a postal address or any "you are receiving this because…" text. Those are added automatically to every issue when it sends, and writing them yourself would put them in twice. Do not invent statistics, customer numbers, testimonials, prices or dates: if the brief does not give you a fact, write around it.`,
+            `PERSONALISATION — you may use {{contact.first_name | "there"}} where a first name belongs, and always with a fallback like that, so a subscriber whose name they do not hold still reads a natural sentence. Do not invent other tags: the only ones that work are the contact's first name, last name, company and email, and the business's own name.`,
+            rc.inspoBlock ?? '',
+            'Reply conversationally in plain text. When you draft copy, put it in the reply itself — there is no draft card here to carry it. Do not use markdown headings above the copy itself.',
+        ].filter(Boolean).join('\n\n'),
+        parseResponse: (raw) => ({ content: raw.trim(), uiElement: null }),
+    },
+
     blog_writer: {
         model: DEFAULT_MODEL,
         // Same library that shapes an autopilot blog draft (process-blog-jobs → generateBlogBody),
