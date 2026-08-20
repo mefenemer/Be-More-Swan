@@ -18,7 +18,9 @@
 import { HandlerEvent } from '@netlify/functions';
 import { and, eq, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { audienceContactSegments, audienceContacts, audienceForms, audienceSegments } from '../../db/schema';
+import {
+    audienceContactSegments, audienceContacts, audienceCustomFields, audienceForms, audienceSegments,
+} from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import {
     buildSegmentCondition, checkRuleReferences, describeRules, parseRules,
@@ -83,6 +85,12 @@ export default withLambda(async (event: HandlerEvent) => {
         // Form names, so a "signed up through …" rule reads as the form's name rather than "form #3".
         // One query for the org, not one per segment.
         const tagNames = new Map<number, string>(rows.map((r) => [r.id, r.name] as const));
+        const fieldLabels = new Map<string, string>();
+        try {
+            const defs = await db.select({ key: audienceCustomFields.key, label: audienceCustomFields.label })
+                .from(audienceCustomFields).where(eq(audienceCustomFields.organisationId, ctx.organisationId));
+            for (const d of defs) fieldLabels.set(d.key, d.label);
+        } catch { /* the description falls back to the raw key */ }
         const formNames = new Map<number, string>();
         try {
             const forms = await db.select({ id: audienceForms.id, name: audienceForms.name })
@@ -115,7 +123,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 subscribedCount: count?.n ?? 0,
                 // The sentence, next to the number. A count alone is not checkable — "412 people"
                 // looks equally right whatever the rule says.
-                description: describeRules(r.rules, formNames, tagNames),
+                description: describeRules(r.rules, formNames, tagNames, fieldLabels),
                 rulesError: null,
             });
         }
@@ -163,7 +171,16 @@ export default withLambda(async (event: HandlerEvent) => {
                 .from(audienceSegments).where(eq(audienceSegments.organisationId, orgId));
             for (const t of tags) previewTags.set(t.id, t.name);
         } catch { /* degrades to "#3" */ }
-        return json(200, { matches: count?.n ?? 0, description: describeRules(body.rules, previewForms, previewTags) });
+        const previewFields = new Map<string, string>();
+        try {
+            const defs = await db.select({ key: audienceCustomFields.key, label: audienceCustomFields.label })
+                .from(audienceCustomFields).where(eq(audienceCustomFields.organisationId, orgId));
+            for (const d of defs) previewFields.set(d.key, d.label);
+        } catch { /* falls back to the raw key */ }
+        return json(200, {
+            matches: count?.n ?? 0,
+            description: describeRules(body.rules, previewForms, previewTags, previewFields),
+        });
     }
 
     if (action === 'create') {

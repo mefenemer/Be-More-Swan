@@ -368,7 +368,10 @@ export async function processIssueBatch(
 
     // Names come from the contact rows, for the merge vars.
     const contactIds = queued.map((q) => q.contactId).filter((v): v is number => v != null);
-    const contacts = new Map<number, { firstName: string | null; lastName: string | null; company: string | null }>();
+    const contacts = new Map<number, {
+        firstName: string | null; lastName: string | null; company: string | null;
+        customFields: Record<string, unknown> | null;
+    }>();
     if (contactIds.length) {
         const rows = await db
             .select({
@@ -376,10 +379,14 @@ export async function processIssueBatch(
                 firstName: audienceContacts.firstName,
                 lastName: audienceContacts.lastName,
                 company: audienceContacts.company,
+                // ⚠️ Without this every {{contact.custom.…}} in the issue renders its FALLBACK for
+                // every recipient — the personalisation silently does nothing, and looks like it
+                // worked because the sentence still reads.
+                customFields: audienceContacts.customFields,
             })
             .from(audienceContacts)
             .where(inArray(audienceContacts.id, contactIds));
-        for (const r of rows) contacts.set(r.id, r);
+        for (const r of rows) contacts.set(r.id, r as typeof rows[number] & { customFields: Record<string, unknown> | null });
     }
 
     let sent = 0; let skipped = 0; let failed = 0;

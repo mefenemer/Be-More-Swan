@@ -25,6 +25,7 @@
     page: 1,
     selected: new Set(),
     filters: { q: '', status: '', segmentId: '' },
+    customFields: [],
     searchTimer: null,
     needsSetup: false,
   };
@@ -175,6 +176,7 @@
     emailed:      { label: 'Has been emailed',   ops: { never: 'never', ever: 'at least once' }, value: null },
     form:         { label: 'Signed up through',  ops: { is: 'is' }, value: 'form' },
     tag:          { label: 'Tagged',             ops: { in: 'is', not_in: 'is not' }, value: 'tag' },
+    custom:       { label: 'Custom field',       ops: { is: 'is', is_not: 'is not', contains: 'contains', is_set: 'has any value', is_not_set: 'is empty' }, value: 'custom' },
     email_domain: { label: 'Email domain',       ops: { is: 'is', is_not: 'is not' }, value: 'domain' },
   };
   const SOURCE_OPTS = {
@@ -226,6 +228,17 @@
       } else if (spec.value === 'days') {
         valueInput = `<input type="number" min="1" max="3650" data-rule-value="${i}" value="${Number(c.value) || 30}"
           class="w-24 px-2 py-2 rounded-lg border border-gray-300 text-sm"><span class="text-sm text-gray-500">days</span>`;
+      } else if (spec.value === 'custom') {
+        // Two inputs, because a custom condition has two parts: WHICH field, and what it says. The
+        // presence ops take no value at all — "we hold a city for this person" is a whole question.
+        const picker = `<select data-rule-key="${i}" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
+          ${state.customFields.map((f) => `<option value="${esc(f.key)}" ${c.key === f.key ? 'selected' : ''}>${esc(f.label)}</option>`).join('')}
+        </select>`;
+        const needsValue = c.op !== 'is_set' && c.op !== 'is_not_set';
+        valueInput = picker + (needsValue
+          ? `<input type="text" data-rule-value="${i}" value="${esc(c.value || '')}" placeholder="Bristol"
+              class="px-2 py-2 rounded-lg border border-gray-300 text-sm">`
+          : '');
       } else if (spec.value === 'tag') {
         // Tags and manual segments only — a rule built on another rule is a cycle, and the server
         // refuses it with a sentence naming the segment.
@@ -245,7 +258,8 @@
         <select data-rule-field="${i}" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
           ${Object.entries(RULE_FIELDS)
             .filter(([k]) => (k !== 'form' || ruleForms.length)
-              && (k !== 'tag' || state.segments.some((x) => x.kind !== 'dynamic')))
+              && (k !== 'tag' || state.segments.some((x) => x.kind !== 'dynamic'))
+              && (k !== 'custom' || state.customFields.length))
             .map(([k, f]) => `<option value="${k}" ${c.field === k ? 'selected' : ''}>${esc(f.label)}</option>`).join('')}
         </select>
         <select data-rule-op="${i}" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">${ops}</select>
@@ -286,6 +300,7 @@
       ruleState.conditions[i] = {
         field,
         op: Object.keys(spec.ops)[0],
+        ...(spec.value === 'custom' ? { key: (state.customFields[0] || {}).key } : {}),
         value: spec.value === 'days' ? 30
           : spec.value === 'source' ? 'web_form'
           : spec.value === 'form' ? (ruleForms[0] && ruleForms[0].id)
@@ -295,7 +310,15 @@
       renderRuleBuilder(); previewRule();
     }));
     body.querySelectorAll('[data-rule-op]').forEach((el) => el.addEventListener('change', () => {
-      ruleState.conditions[Number(el.getAttribute('data-rule-op'))].op = el.value;
+      const i = Number(el.getAttribute('data-rule-op'));
+      ruleState.conditions[i].op = el.value;
+      // A custom condition changes SHAPE with its comparison — "is empty" has no value box — so the
+      // row is repainted rather than left showing an input the rule will ignore.
+      if (ruleState.conditions[i].field === 'custom') renderRuleBuilder();
+      previewRule();
+    }));
+    body.querySelectorAll('[data-rule-key]').forEach((el) => el.addEventListener('change', () => {
+      ruleState.conditions[Number(el.getAttribute('data-rule-key'))].key = el.value;
       previewRule();
     }));
     body.querySelectorAll('[data-rule-value]').forEach((el) => el.addEventListener('change', () => {
@@ -358,6 +381,60 @@
       await loadSegments();
       await loadContacts();
     } catch (err) { window.showToast(err.message); }
+  }
+
+  // ── Custom fields ──────────────────────────────────────────────────────────
+
+  const FIELDS_API = '/.netlify/functions/audience-custom-fields';
+
+  async function loadCustomFields() {
+    try {
+      const { fields } = await api(FIELDS_API);
+      state.customFields = fields || [];
+    } catch { state.customFields = []; }
+    renderCustomFields();
+  }
+
+  function renderCustomFields() {
+    const host = $('aud-fields');
+    if (!host) return;
+    if (!state.customFields.length) {
+      host.innerHTML = '<p class="text-sm text-gray-400">No custom fields yet. Add one to store your own details — a city, a plan, where you met.</p>';
+      return;
+    }
+    host.innerHTML = state.customFields.map((f) => `
+      <span class="inline-flex items-center rounded-full border bg-white border-gray-300" title="Use {{contact.custom.${esc(f.key)}}} in an email">
+        <span class="px-3 py-1.5 text-xs font-bold text-gray-700">${esc(f.label)}
+          <span class="text-gray-400 font-mono">${esc(f.key)}</span>
+        </span>
+        <button type="button" data-field-delete="${f.id}" title="Delete field"
+          class="pr-3 pl-1 text-xs text-gray-300 hover:text-red-500 cursor-pointer">&times;</button>
+      </span>`).join('');
+
+    host.querySelectorAll('[data-field-delete]').forEach((btn) => btn.addEventListener('click', async () => {
+      const id = Number(btn.getAttribute('data-field-delete'));
+      const f = state.customFields.find((x) => x.id === id);
+      let held = null;
+      try { held = (await api(FIELDS_API, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'usage', id }),
+      })).contacts; } catch { /* the count is a courtesy, not a gate */ }
+      // ⚠️ Says what is NOT deleted. The values stay on the contacts, so re-creating the field with
+      // the same name brings them back — which is worth knowing before deciding.
+      const ok = await window.confirmModal(
+        `Delete the field “${f ? f.label : ''}”?`
+        + (held ? ` ${held.toLocaleString()} ${held === 1 ? 'contact holds' : 'contacts hold'} a value for it.` : '')
+        + ' The values stay on your contacts and come back if you add the field again — but anything using it, like a segment rule or an email, will stop finding it.',
+        { title: 'Delete custom field?', confirmLabel: 'Delete field' });
+      if (!ok) return;
+      try {
+        await api(FIELDS_API, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'delete', id }),
+        });
+        await loadCustomFields();
+      } catch (err) { window.showToast(err.message); }
+    }));
   }
 
   function renderSegments() {
@@ -482,6 +559,8 @@
 
     try {
       const { contact, segments, timeline } = await api(`${CONTACTS_API}?id=${encodeURIComponent(id)}`);
+      // Held for the custom-field save, which is bound on the panel rather than on each input.
+      state.detailId = contact.id;
       const name = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || contact.email;
       if (title) title.textContent = name;
       const st = STATUS[contact.status] || { label: contact.status, cls: 'bg-gray-100 text-gray-600 border-gray-200' };
@@ -510,6 +589,21 @@
           <div><p class="text-xs font-bold text-gray-500 uppercase">Confirmed</p><p class="text-gray-800">${esc(fmtDate(contact.confirmedAt))}</p></div>
           <div><p class="text-xs font-bold text-gray-500 uppercase">Last emailed</p><p class="text-gray-800">${esc(fmtDate(contact.lastSentAt))}</p></div>
         </div>
+
+        ${state.customFields.length ? `
+        <div>
+          <p class="text-xs font-bold text-gray-500 uppercase mb-2">Your fields</p>
+          <div class="space-y-2">
+            ${state.customFields.map((f) => `
+              <div class="flex items-center gap-2">
+                <label class="text-xs text-gray-500 w-28 shrink-0 truncate" title="${esc(f.label)}">${esc(f.label)}</label>
+                <input type="text" data-custom-key="${esc(f.key)}" value="${esc((contact.customFields || {})[f.key] || '')}"
+                  class="flex-1 px-2 py-1.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
+              </div>`).join('')}
+          </div>
+          <button type="button" id="aud-save-custom"
+            class="mt-2 text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer">Save fields</button>
+        </div>` : ''}
 
         <div>
           <p class="text-xs font-bold text-gray-500 uppercase mb-2">Segments</p>
@@ -652,6 +746,16 @@
         if (start) start.disabled = true;
         return;
       }
+      // A column whose header matches one of the tenant's own fields, by label or by key. Matched
+      // here only to decide WHICH column; the server keeps a value only for a key it has defined,
+      // so a wrong guess writes nothing rather than something invisible.
+      const norm = rows[0].map((h) => String(h || '').trim().toLowerCase());
+      const customIdx = {};
+      for (const f of state.customFields) {
+        const at = norm.findIndex((h) => h === f.label.toLowerCase() || h === f.key);
+        if (at >= 0) customIdx[f.key] = at;
+      }
+
       importRows = rows.slice(1).map((r) => ({
         email: (r[idx.email] || '').trim(),
         firstName: idx.firstName >= 0 ? (r[idx.firstName] || '').trim() : '',
@@ -659,6 +763,9 @@
         company: idx.company >= 0 ? (r[idx.company] || '').trim() : '',
         // Raw, verbatim. The server maps it — see HEADER_ALIASES.status.
         status: idx.status >= 0 ? (r[idx.status] || '').trim() : '',
+        custom: Object.fromEntries(Object.entries(customIdx)
+          .map(([key, at]) => [key, (r[at] || '').trim()])
+          .filter(([, v]) => v)),
       })).filter((r) => r.email);
 
       if (preview) {
@@ -666,8 +773,15 @@
         // copy of that rule in the browser is the drift trap that lets a form go green on something
         // the server then refuses. Anything undeliverable comes back in the import's own report.
         const hasStatus = idx.status >= 0;
+        const matchedCustom = Object.keys(customIdx);
         preview.innerHTML = `<p><strong>${importRows.length.toLocaleString()}</strong> rows to import.
-          Columns matched: ${Object.entries(idx).filter(([, v]) => v >= 0).map(([k]) => `<span class="font-mono text-xs bg-gray-100 px-1 rounded">${k}</span>`).join(' ')}</p>`
+          Columns matched: ${Object.entries(idx).filter(([, v]) => v >= 0).map(([k]) => `<span class="font-mono text-xs bg-gray-100 px-1 rounded">${k}</span>`).join(' ')}
+          ${matchedCustom.map((k) => `<span class="font-mono text-xs bg-emerald-100 text-emerald-800 px-1 rounded">${esc(k)}</span>`).join(' ')}</p>`
+          // Named, because a column that was NOT matched is silently dropped and the tenant would
+          // otherwise find out weeks later when a personalised send prints nothing.
+          + (state.customFields.length && !matchedCustom.length
+            ? '<p class="mt-1 text-gray-600">None of your custom fields matched a column in this file. A column is matched by its exact name — rename the column to match the field, or the values will not be imported.</p>'
+            : '')
           // Said BEFORE they press the button, not after. Somebody migrating a list needs to know
           // their unsubscribes are being carried over — and, if there is no such column, that they
           // are NOT, because that is the case where importing quietly re-subscribes people.
@@ -1008,6 +1122,23 @@
       });
     });
 
+    $('aud-new-field')?.addEventListener('click', async () => {
+      const label = await window.promptModal('What is this field called?', {
+        title: 'New custom field', placeholder: 'City', confirmLabel: 'Add field',
+      });
+      if (!label) return;
+      try {
+        const { field } = await api(FIELDS_API, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'create', label }),
+        });
+        // ⚠️ The key is shown once, on creation, because it is the thing they will type inside
+        // {{contact.custom.…}} and the one thing they cannot change afterwards.
+        window.showToast(`Added. Use {{contact.custom.${field.key}}} in an email.`, { duration: 7000 });
+        await loadCustomFields();
+      } catch (err) { window.showToast(err.message); }
+    });
+
     $('aud-new-rule-segment')?.addEventListener('click', () => openRuleModal(null));
 
     $('aud-new-tag')?.addEventListener('click', async () => {
@@ -1133,6 +1264,22 @@
     if (detail) {
       detail.addEventListener('click', async (e) => {
         if (e.target.closest('[data-aud-close]')) { hide(detail); return; }
+        if (e.target.closest('#aud-save-custom')) {
+          const custom = {};
+          // Blank IS a value here: it means "clear this field", which the server handles as a
+          // removal. Sending only the filled ones would make clearing a field impossible.
+          detail.querySelectorAll('[data-custom-key]').forEach((el) => {
+            custom[el.getAttribute('data-custom-key')] = el.value.trim();
+          });
+          try {
+            await api(CONTACTS_API, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'update', id: state.detailId, custom }),
+            });
+            window.showToast('Saved.');
+          } catch (err) { window.showToast(err.message); }
+          return;
+        }
         const unsub = e.target.closest('[data-aud-unsub]');
         if (unsub) { await setStatus([unsub.getAttribute('data-aud-unsub')], 'unsubscribed'); return; }
         const resub = e.target.closest('[data-aud-resub]');
@@ -1217,6 +1364,7 @@
     state.selected.clear();
     state.filters = { q: '', status: '', segmentId: '' };
     wire();
+    await loadCustomFields();
     await loadSegments();
     await loadContacts();
   };

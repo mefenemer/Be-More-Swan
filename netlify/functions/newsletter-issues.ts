@@ -29,6 +29,8 @@ import { generateIssueBody, IssueNotFoundError, scrubMergeTags, NEWSLETTER_DRAFT
 import { renderForRecipient, renderIssueSnapshot } from '../../src/utils/newsletter-render';
 import { resendEligibility } from '../../src/utils/newsletter-resend';
 import { buildSegmentCondition } from '../../src/utils/audience-segment-rules';
+import { loadCustomFieldDefs, loadCustomFieldKeys } from '../../src/utils/audience-custom-fields';
+import { linkReportForIssue } from '../../src/utils/newsletter-link-clicks';
 import { sampleMergeContext } from '../../src/config/newsletter-merge-vars';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -144,6 +146,9 @@ export default withLambda(async (event: HandlerEvent) => {
             return json(200, {
                 issue,
                 sourcePost: sourcePost ?? null,
+                // Only for an issue that has been sent — before that there is nothing to report,
+                // and an empty "which link worked" table on a draft reads as a broken feature.
+                links: issue.sentAt ? await linkReportForIssue(db, orgId, issue.id) : [],
                 // Resolved here rather than guessed in the browser, so the button and the server
                 // are never offering different answers. Cheap: every refusal but the last two
                 // returns before it touches the database.
@@ -186,7 +191,9 @@ export default withLambda(async (event: HandlerEvent) => {
             .from(audienceSegments)
             .where(eq(audienceSegments.organisationId, orgId));
 
-        return json(200, { issues, segments });
+        // The editor's "insert a personalisation tag" menu is built from this — the vocabulary has
+        // to come from the server now that part of it is per-organisation.
+        return json(200, { issues, segments, customFields: await loadCustomFieldDefs(db, orgId) });
     }
 
     if (event.httpMethod === 'DELETE') {
@@ -342,7 +349,10 @@ export default withLambda(async (event: HandlerEvent) => {
         if ('bodyMarkdown' in body) {
             // Scrubbed on the way in as well as at generation: a human can paste a tag the send
             // worker cannot resolve just as easily as a model can invent one.
-            patch.bodyMarkdown = scrubMergeTags(String(body.bodyMarkdown || '').slice(0, MAX_BODY)).text;
+            // The org's own columns are part of the allowed vocabulary, or pasting a tag the
+            // assistant just wrote would strip it back out again.
+            const customKeys = await loadCustomFieldKeys(db, orgId);
+            patch.bodyMarkdown = scrubMergeTags(String(body.bodyMarkdown || '').slice(0, MAX_BODY), customKeys).text;
         }
         if ('segmentId' in body) {
             const segId = Number(body.segmentId || '');
@@ -401,12 +411,22 @@ export default withLambda(async (event: HandlerEvent) => {
         // email a subscriber sees, unsubscribe line and all, not a fragment of it.
         const merged = renderForRecipient({
             snapshot,
-            contact: { firstName: 'Jane', lastName: 'Okafor', company: 'Acme Ltd', email: 'jane@example.com' },
+            contact: {
+                firstName: 'Jane', lastName: 'Okafor', company: 'Acme Ltd', email: 'jane@example.com',
+                // The field's own LABEL as its sample value, so an author can see which field
+                // landed where. A made-up "Bristol" would not tell them that.
+                customFields: Object.fromEntries((await loadCustomFieldDefs(db, orgId)).map((f) => [f.key, f.label])),
+            },
             senderName,
             unsubscribeUrl: '#preview-unsubscribe',
             postalAddress: body.postalAddress ?? null,
         });
-        return json(200, { html: merged.html, text: merged.text, sampleContext: sampleMergeContext(senderName) });
+        const previewFields = await loadCustomFieldDefs(db, orgId);
+        return json(200, {
+            html: merged.html,
+            text: merged.text,
+            sampleContext: sampleMergeContext(senderName, previewFields),
+        });
     }
 
     if (action === 'approve') {

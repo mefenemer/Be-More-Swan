@@ -21,6 +21,7 @@ import {
 import { requireTenant } from '../../src/utils/tenant';
 import { renderIssueSnapshot } from '../../src/utils/newsletter-render';
 import { scrubMergeTags } from '../../src/utils/newsletter-generate';
+import { loadCustomFieldKeys } from '../../src/utils/audience-custom-fields';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, obj: unknown) => ({
@@ -126,7 +127,10 @@ export default withLambda(async (event: HandlerEvent) => {
 
         // Scrubbed like every other write path — a step can carry a tag the send worker cannot
         // resolve just as easily as an issue can, and this one goes out unattended.
-        const bodyMarkdown = scrubMergeTags(String(body.bodyMarkdown || '').slice(0, MAX_BODY)).text;
+        const bodyMarkdown = scrubMergeTags(
+            String(body.bodyMarkdown || '').slice(0, MAX_BODY),
+            await loadCustomFieldKeys(db, orgId),
+        ).text;
         if (!bodyMarkdown.trim()) return json(400, { error: 'Write the email before saving it.' });
 
         const [org] = await db.select({ name: organisations.name }).from(organisations)

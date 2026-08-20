@@ -28,6 +28,7 @@ import { audienceContacts, leadOptOuts, newsletterIssues, newsletterSends } from
 import { setContactStatus } from '../../src/utils/audience-store';
 import { normaliseEmail } from '../../src/utils/audience-contacts';
 import { haltEnrolmentsForContact } from '../../src/utils/newsletter-sequence';
+import { recordLinkClick } from '../../src/utils/newsletter-link-clicks';
 import { verifySvixSignature } from '../../src/utils/webhook-verify';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -180,6 +181,20 @@ export default withLambda(async (event) => {
         if (type === 'email.opened' || type === 'email.clicked') {
             const isClick = type === 'email.clicked';
             const now = new Date();
+
+            // WHICH link, recorded beside the fact THAT they clicked. Its own row per (recipient,
+            // link), so a repeat click on the same link is an increment rather than a second
+            // person. ⚠️ Awaited but never allowed to throw: this is a report, and the ledger
+            // writes below are what a retried webhook exists to protect.
+            if (isClick) {
+                await recordLinkClick(db, {
+                    organisationId: orgId,
+                    issueId: row.issueId,
+                    sendId: row.id,
+                    rawUrl: data?.click?.link ?? data?.link,
+                    at: now,
+                });
+            }
 
             // ⚠️ THE FIRST-TOUCH GUARD. The WHERE clause requires the timestamp to still be NULL,
             // so only the first event per recipient updates a row — and `returning()` tells us

@@ -82,6 +82,17 @@
     <div id="aud-tags" class="flex flex-wrap gap-2">
       <p class="text-sm text-gray-400">Loading…</p>
     </div>
+
+    <!-- The tenant's own columns. Values live on the contact; this is the list of what they are
+         called — see db/audience-custom-fields.sql. -->
+    <div class="flex items-center justify-between mt-4 mb-2">
+      <p class="text-sm font-bold text-gray-900">Custom fields</p>
+      <button type="button" id="aud-new-field"
+        class="text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer">+ New field</button>
+    </div>
+    <div id="aud-fields" class="flex flex-wrap gap-2">
+      <p class="text-sm text-gray-400">Loading…</p>
+    </div>
   </div>
 
   <!-- Filters -->

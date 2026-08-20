@@ -15,7 +15,7 @@
   function show(el, display = 'flex') { if (el) { el.classList.remove('hidden'); el.style.display = display; } }
   function hide(el) { if (el) { el.classList.add('hidden'); el.style.display = 'none'; } }
 
-  const state = { issues: [], segments: [], current: null, dirty: false };
+  const state = { issues: [], segments: [], customFields: [], current: null, dirty: false };
 
   const STATUS = {
     draft:            { label: 'Draft',            cls: 'bg-gray-100 text-gray-600 border-gray-200' },
@@ -39,6 +39,21 @@
     { key: 'sender.name', label: 'Your name', fallback: '' },
   ];
 
+  /**
+   * The built-ins plus the org's own columns, which only the server knows.
+   *
+   * ⚠️ A custom tag is offered WITH a fallback already written in. The server strips a bare one and
+   * warns, because there is no honest default for a field called "City" and an empty render is
+   * "our new shop in ." in every inbox where we hold no value.
+   */
+  function allVars() {
+    return VARS.concat((state.customFields || []).map((f) => ({
+      key: `contact.custom.${f.key}`,
+      label: f.label,
+      fallback: '…',
+    })));
+  }
+
   const fmtDate = (v) => {
     if (!v) return '';
     const d = new Date(v);
@@ -57,11 +72,13 @@
 
   async function loadIssues(selectId) {
     try {
-      const { issues, segments } = await api(ISSUES_API);
+      const { issues, segments, customFields } = await api(ISSUES_API);
       state.issues = issues || [];
       state.segments = segments || [];
+      state.customFields = customFields || [];
       renderList();
       fillSegments();
+      renderVarChips();
       const pick = selectId || (state.current && state.current.id);
       if (pick && state.issues.some((i) => i.id === pick)) await openIssue(pick);
       else if (!state.issues.length) { hide($('nl-editor')); show($('nl-empty'), 'block'); }
@@ -81,9 +98,10 @@
    */
   async function refreshList() {
     try {
-      const { issues, segments } = await api(ISSUES_API);
+      const { issues, segments, customFields } = await api(ISSUES_API);
       state.issues = issues || [];
       state.segments = segments || [];
+      state.customFields = customFields || [];
       renderList();
     } catch { /* the list is context, not the work — a failure here must not disturb the editor */ }
   }
@@ -136,13 +154,13 @@
   function renderVarChips() {
     const host = $('nl-vars');
     if (!host) return;
-    host.innerHTML = VARS.map((v) => `<button type="button" data-var="${esc(v.key)}"
+    host.innerHTML = allVars().map((v) => `<button type="button" data-var="${esc(v.key)}"
       class="px-2 py-1 text-[11px] font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer">+ ${esc(v.label)}</button>`).join('');
   }
 
   function insertVar(key) {
     const ta = $('nl-body');
-    const v = VARS.find((x) => x.key === key);
+    const v = allVars().find((x) => x.key === key);
     if (!ta || !v) return;
     // Written WITH the fallback, so the author can see what a subscriber with no name on file
     // will actually read. A bare tag would render as nothing for them.
@@ -157,7 +175,7 @@
 
   async function openIssue(id) {
     try {
-      const { issue, audienceEstimate, sourcePost, resend } = await api(`${ISSUES_API}?id=${encodeURIComponent(id)}`);
+      const { issue, audienceEstimate, sourcePost, resend, links } = await api(`${ISSUES_API}?id=${encodeURIComponent(id)}`);
       state.current = issue;
       state.dirty = false;
       hide($('nl-empty'));
@@ -177,6 +195,7 @@
       renderAudience(audienceEstimate);
       renderSource(issue, sourcePost);
       renderResend(issue, resend);
+      renderLinks(issue, links);
       hide($('nl-warnings'));
       renderFailure(issue);
       renderStats(issue);
@@ -293,6 +312,59 @@
         window.showToast(err.message);
       }
     });
+  }
+
+  function renderLinks(issue, links) {
+    const el = $('nl-links');
+    if (!el) return;
+    if (!issue.sentAt) { hide(el); return; }
+
+    if (!issue.engagementTracked) {
+      // The same distinction the numbers above make: no clicks recorded and no clicks MEASURABLE
+      // are different facts, and only one of them is about the reader.
+      el.innerHTML = '<p class="font-bold mb-1">Which link worked</p>'
+        + '<p class="text-gray-500">This issue was sent from your connected mailbox, which does not rewrite links — so clicks could not be measured.</p>';
+      show(el, 'block');
+      return;
+    }
+    if (!links || !links.length) {
+      // ⚠️ TWO DIFFERENT FACTS, and the issue's own click count is what tells them apart. An issue
+      // sent before per-link recording existed has clicks but no links, and saying "nobody clicked"
+      // there would be the same lie as reporting 0% opens on a mailbox send — a statement about our
+      // instrumentation dressed up as one about the reader.
+      const clicked = Number(issue.clickedCount || 0);
+      el.innerHTML = '<p class="font-bold mb-1">Which link worked</p>'
+        + (clicked
+          ? `<p class="text-gray-500">${clicked.toLocaleString()} ${clicked === 1 ? 'person' : 'people'} clicked something in this issue, but it was sent before we started recording which link. Issues from now on will show it.</p>`
+          : '<p class="text-gray-500">Nobody has clicked a link in this issue.</p>');
+      show(el, 'block');
+      return;
+    }
+
+    const rows = links.map((l) => {
+      const label = l.isUnsubscribe ? 'Unsubscribe link' : l.url;
+      return `<tr class="border-t border-gray-200">
+        <td class="py-1.5 pr-3 ${l.isUnsubscribe ? 'text-gray-500 italic' : ''}">
+          ${l.isUnsubscribe ? esc(label) : `<a href="${esc(l.url)}" target="_blank" rel="noopener" class="text-emerald-700 hover:underline break-all">${esc(l.url)}</a>`}
+        </td>
+        <td class="py-1.5 pr-3 text-right font-bold whitespace-nowrap">${Number(l.people).toLocaleString()}</td>
+        <td class="py-1.5 text-right text-gray-500 whitespace-nowrap">${Number(l.clicks).toLocaleString()}</td>
+      </tr>`;
+    }).join('');
+
+    el.innerHTML = `<p class="font-bold mb-1">Which link worked</p>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-[11px] uppercase tracking-wide text-gray-500">
+            <th class="pb-1 font-bold">Link</th>
+            <th class="pb-1 font-bold text-right">People</th>
+            <th class="pb-1 font-bold text-right">Clicks</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="text-[11px] text-gray-400 mt-2">“People” counts each subscriber once, however many times they clicked.</p>`;
+    show(el, 'block');
   }
 
   function renderStats(issue) {

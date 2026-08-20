@@ -4191,6 +4191,27 @@ export const audienceConsentEvents = pgTable("audience_consent_events", {
   check("audience_consent_events_event_check", sql`${t.event} IN ('subscribe_requested','confirmed','unsubscribed','bounced','complained','imported','promoted','manual_added','erased','resubscribed','paused','resumed','frequency_changed')`),
 ]);
 
+// The tenant's own columns. ⚠️ `key` is immutable once created — it is the JSONB key on every
+// contact and the value in every saved segment rule; renaming it would orphan both. `label` is the
+// human name and may change freely. See db/audience-custom-fields.sql.
+export const audienceCustomFields = pgTable("audience_custom_fields", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  key: text("key").notNull(),
+  label: text("label").notNull(),
+  // 'number' and 'date' are reserved in the CHECK and refused by the API — comparing them means
+  // casting tenant-entered text, which throws 22P02 mid-send on the first "about 40".
+  type: text("type").notNull().default("text"),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("audience_custom_fields_org_key_uidx").on(t.organisationId, t.key),
+  index("audience_custom_fields_org_idx").on(t.organisationId, t.label),
+  check("audience_custom_fields_type_check", sql`${t.type} IN ('text','number','date')`),
+  check("audience_custom_fields_key_check", sql`${t.key} ~ '^[a-z][a-z0-9_]{0,39}$'`),
+]);
+
 export const audienceImportJobs = pgTable("audience_import_jobs", {
   id: serial("id").primaryKey(),
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
@@ -4365,6 +4386,24 @@ export const newsletterSends = pgTable("newsletter_sends", {
 // ── Newsletter dispatch (db/newsletter-dispatch.sql) ────────────────────────────────────────────
 // The tenant's own verified sending domain. ⚠️ NOT organisations.domainVerified, which means
 // "verified for same-domain org auto-join" — a different claim about a different thing.
+// Which link worked. ⚠️ ONE ROW PER (recipient, link) — the row IS the unique click, so
+// count(*) is how many PEOPLE and sum(click_count) is how many TIMES, both exact. See
+// db/newsletter-link-clicks.sql for why the hash is the key rather than the url.
+export const newsletterLinkClicks = pgTable("newsletter_link_clicks", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  issueId: integer("issue_id").notNull().references(() => newsletterIssues.id, { onDelete: "cascade" }),
+  sendId: integer("send_id").notNull().references(() => newsletterSends.id, { onDelete: "cascade" }),
+  url: text("url").notNull(),
+  urlHash: text("url_hash").notNull(),
+  clickCount: integer("click_count").notNull().default(1),
+  firstClickedAt: timestamp("first_clicked_at").defaultNow().notNull(),
+  lastClickedAt: timestamp("last_clicked_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("newsletter_link_clicks_send_url_uidx").on(t.sendId, t.urlHash),
+  index("newsletter_link_clicks_issue_idx").on(t.issueId, t.urlHash),
+]);
+
 export const newsletterSendingDomains = pgTable("newsletter_sending_domains", {
   id: serial("id").primaryKey(),
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),

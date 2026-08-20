@@ -94,7 +94,11 @@ ${preheader}
 
 export interface RecipientRenderInput {
     snapshot: IssueSnapshot;
-    contact: { firstName?: string | null; lastName?: string | null; company?: string | null; email?: string | null };
+    contact: {
+        firstName?: string | null; lastName?: string | null; company?: string | null; email?: string | null;
+        /** The org's own columns for THIS recipient — {{contact.custom.city}} resolves from here. */
+        customFields?: Record<string, unknown> | null;
+    };
     senderName: string;
     /** Built from this recipient's newsletter_sends.unsubscribe_token. */
     unsubscribeUrl: string;

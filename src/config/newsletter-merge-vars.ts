@@ -35,33 +35,68 @@ export const NEWSLETTER_MERGE_VARS: NewsletterMergeVar[] = [
 
 export const NEWSLETTER_MERGE_KEYS = NEWSLETTER_MERGE_VARS.map((v) => v.key);
 
+/** Where a tenant's own columns live in the merge namespace: {{contact.custom.city}}. */
+export const CUSTOM_MERGE_PREFIX = 'contact.custom.';
+
+/** The org's field keys → the merge paths an issue may use. */
+export const customMergeKeys = (keys: readonly string[]): string[] =>
+    keys.map((k) => `${CUSTOM_MERGE_PREFIX}${k}`);
+
+/**
+ * ⚠️ A CUSTOM TAG MUST CARRY ITS OWN FALLBACK, and applyDefaultFallbacks deliberately cannot supply
+ * one. A built-in has a sensible generic ("there", "your team"); there is no honest default for a
+ * field called "City", and rendering an empty string produces "our new shop in ." in every inbox
+ * where we hold no city. So a bare custom tag is REMOVED at save time and the author is told —
+ * exactly like an unknown tag — rather than shipped with an invisible blank.
+ */
+export const CUSTOM_TAG_NEEDS_FALLBACK =
+    'Personalisation from a custom field needs a fallback, like {{contact.custom.city | "your area"}} — otherwise it prints nothing for anyone we hold no value for.';
+
 /** The one merge tag worth showing a model, written with its fallback already in place. */
 export const GREETING_EXAMPLE = '{{contact.first_name | "there"}}';
 
 /** Build the send-time context for one recipient. Shape must match the keys above. */
 export function contactMergeContext(
-    contact: { firstName?: string | null; lastName?: string | null; company?: string | null; email?: string | null },
+    contact: {
+        firstName?: string | null; lastName?: string | null; company?: string | null; email?: string | null;
+        customFields?: Record<string, unknown> | null;
+    },
     senderName: string,
 ): Record<string, unknown> {
+    // Values are passed through as strings. Anything else in the JSONB (a number a future type
+    // allows, or a nested object an older import left) would reach renderMergeVars and print as
+    // "[object Object]" in an email.
+    const custom: Record<string, string> = {};
+    for (const [k, v] of Object.entries(contact.customFields ?? {})) {
+        if (v === null || v === undefined || typeof v === 'object') continue;
+        custom[k] = String(v);
+    }
     return {
         contact: {
             first_name: contact.firstName ?? '',
             last_name: contact.lastName ?? '',
             company: contact.company ?? '',
             email: contact.email ?? '',
+            custom,
         },
         sender: { name: senderName ?? '' },
     };
 }
 
 /** The same shape, filled with samples — for the editor preview and the test send. */
-export function sampleMergeContext(senderName = 'Acme Ltd'): Record<string, unknown> {
-    const ctx: Record<string, Record<string, string>> = {};
+export function sampleMergeContext(
+    senderName = 'Acme Ltd',
+    customFields: readonly { key: string; label: string }[] = [],
+): Record<string, unknown> {
+    const ctx: Record<string, Record<string, unknown>> = {};
     for (const v of NEWSLETTER_MERGE_VARS) {
         const [group, field] = v.key.split('.');
         (ctx[group] ||= {})[field] = v.sample;
     }
     ctx.sender = { ...(ctx.sender || {}), name: senderName };
+    // The preview shows the FIELD'S NAME as its sample value, so an author sees which field landed
+    // where — "City" reading "City" is unambiguous, where a made-up "Bristol" is not.
+    ctx.contact = { ...(ctx.contact || {}), custom: Object.fromEntries(customFields.map((f) => [f.key, f.label])) };
     return ctx;
 }
 

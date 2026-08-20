@@ -142,6 +142,9 @@ export async function upsertContact(db: Db, input: UpsertContactInput): Promise<
                 consentBasis: sql`COALESCE(${audienceContacts.consentBasis}, EXCLUDED.consent_basis)`,
                 // Keep the ORIGINAL confirmation timestamp — it is the moment consent was given.
                 confirmedAt: sql`COALESCE(${audienceContacts.confirmedAt}, EXCLUDED.confirmed_at)`,
+                // Merged, same as the bulk path: somebody re-submitting a form with one extra
+                // detail must not blank everything else we hold about them.
+                customFields: sql`${audienceContacts.customFields} || EXCLUDED.custom_fields`,
                 updatedAt: new Date(),
             },
         })
@@ -341,6 +344,12 @@ export async function bulkUpsertContacts(
                         THEN ${audienceContacts.status}
                     ELSE EXCLUDED.status END`,
                 consentBasis: sql`COALESCE(${audienceContacts.consentBasis}, EXCLUDED.consent_basis)`,
+                // ⚠️ MERGED, not replaced and not ignored. `||` is jsonb concatenation: keys in the
+                // incoming row win, keys only on the existing contact survive. Replacing would make
+                // a re-import of a file with one column erase every other field we hold; ignoring
+                // (which is what this did until custom fields existed) would mean a second import
+                // could never fill anything in.
+                customFields: sql`${audienceContacts.customFields} || EXCLUDED.custom_fields`,
                 updatedAt: new Date(),
             },
         })

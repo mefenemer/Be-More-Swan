@@ -34,6 +34,7 @@ import {
 import { resolveImportStatus } from '../../src/config/audience-import-status';
 import { haltEnrolmentsForContact } from '../../src/utils/newsletter-sequence';
 import { buildSegmentCondition } from '../../src/utils/audience-segment-rules';
+import { audienceCustomFields } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -55,6 +56,26 @@ const DESTRUCTIVE_ROLES = ['owner', 'admin'];
 const LIST_CAP = 2000;
 /** One chunk of a CSV import. The client splits the file; this bounds one request's work. */
 const IMPORT_CHUNK_MAX = 500;
+
+/**
+ * Keep only the custom values whose key this organisation has defined, trimmed and bounded.
+ *
+ * ⚠️ An allow-list, not a filter of "obviously bad" keys. The values arrive from the browser, and
+ * the alternative is arbitrary keys written into every contact's JSONB where nothing lists them and
+ * nothing can clean them up.
+ */
+export function pickDefined(raw: unknown, allowed: Set<string>): Record<string, string> {
+    const out: Record<string, string> = {};
+    if (!raw || typeof raw !== 'object') return out;
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+        if (!allowed.has(k)) continue;
+        const value = String(v ?? '').trim().slice(0, 500);
+        // An empty cell is not a value. Storing '' would make "has a city" true for somebody whose
+        // city column was blank.
+        if (value) out[k] = value;
+    }
+    return out;
+}
 
 export default withLambda(async (event: HandlerEvent) => {
     const db = getDb();
@@ -344,6 +365,30 @@ export default withLambda(async (event: HandlerEvent) => {
         if ('company' in body) patch.company = cleanName(body.company);
         if ('phone' in body) patch.phone = cleanName(body.phone);
 
+        // The tenant's own columns. MERGED into what is already there, through the same allow-list
+        // the import uses — sending one field must not erase the others, and a key nobody defined
+        // must not be writable at all.
+        if (body.custom && typeof body.custom === 'object') {
+            const customKeys = new Set<string>();
+            try {
+                const defs = await db.select({ key: audienceCustomFields.key })
+                    .from(audienceCustomFields).where(eq(audienceCustomFields.organisationId, orgId));
+                for (const d of defs) customKeys.add(d.key);
+            } catch { /* nothing defined here — nothing to write */ }
+            const clean = pickDefined(body.custom, customKeys);
+            // ⚠️ A key sent as EMPTY is a deletion, and pickDefined drops empties — so the two are
+            // handled separately: merge what has a value, remove what was explicitly blanked.
+            const cleared = Object.entries(body.custom as Record<string, unknown>)
+                .filter(([k, v]) => customKeys.has(k) && !String(v ?? '').trim())
+                .map(([k]) => k);
+            if (Object.keys(clean).length || cleared.length) {
+                patch.customFields = sql`(COALESCE(${audienceContacts.customFields}, '{}'::jsonb) || ${JSON.stringify(clean)}::jsonb)`;
+                for (const k of cleared) {
+                    patch.customFields = sql`(${patch.customFields as never}) - ${k}`;
+                }
+            }
+        }
+
         const [updated] = await db.update(audienceContacts).set(patch)
             .where(and(eq(audienceContacts.id, id), eq(audienceContacts.organisationId, orgId)))
             .returning({ id: audienceContacts.id });
@@ -452,6 +497,15 @@ export default withLambda(async (event: HandlerEvent) => {
         // alongside everyone else. Importing them as subscribed — which this did until 2026-08-20 —
         // re-mails people who opted out, from the tenant's own domain. An unrecognised value is
         // REFUSED rather than guessed: see src/config/audience-import-status.ts.
+        // The org's own columns, read once per chunk. A file may carry a "City" column; only a
+        // tenant who has defined `city` gets it stored.
+        const customKeys = new Set<string>();
+        try {
+            const defs = await db.select({ key: audienceCustomFields.key })
+                .from(audienceCustomFields).where(eq(audienceCustomFields.organisationId, orgId));
+            for (const d of defs) customKeys.add(d.key);
+        } catch { /* no definitions table here yet — the import proceeds without custom fields */ }
+
         const prepared: BulkUpsertRow[] = [];
         const unreadable: string[] = [];
         let unsubscribedRows = 0;
@@ -470,6 +524,11 @@ export default withLambda(async (event: HandlerEvent) => {
                 lastName: r.lastName,
                 company: r.company,
                 phone: r.phone,
+                // ⚠️ Only keys this org has DEFINED are kept. The browser sends whatever the mapper
+                // produced, and an unchecked object here would let a crafted request write
+                // arbitrary keys into every contact's JSONB — invisible in the UI, and impossible
+                // to clean up because nothing would list them.
+                ...(customKeys.size ? { customFields: pickDefined(r.custom, customKeys) } : {}),
                 // No status column, or an empty cell → the import's own default, which is what a
                 // plain "here are some people to add" list means.
                 ...(status ? { status } : {}),

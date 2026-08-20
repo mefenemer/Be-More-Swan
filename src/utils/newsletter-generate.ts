@@ -29,8 +29,10 @@ import { buildBlueprintGuardrailsBlock, DEFAULT_TONE, str } from './blog-generat
 import { parseModelJson, salvageStringField } from './model-json';
 import { validateMergeVars } from './email-template';
 import {
-    GREETING_EXAMPLE, NEWSLETTER_MERGE_KEYS, NEWSLETTER_MERGE_VARS, applyDefaultFallbacks,
+    CUSTOM_MERGE_PREFIX, CUSTOM_TAG_NEEDS_FALLBACK, GREETING_EXAMPLE, NEWSLETTER_MERGE_KEYS,
+    NEWSLETTER_MERGE_VARS, applyDefaultFallbacks, customMergeKeys,
 } from '../config/newsletter-merge-vars';
+import { loadCustomFieldDefs } from './audience-custom-fields';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -92,9 +94,10 @@ export class IssueNotFoundError extends Error {
  * worth failing a draft over — but neither may reach a recipient, so they are removed here and
  * surfaced to the reviewer instead.
  */
-export function scrubMergeTags(text: string): { text: string; warnings: string[] } {
+export function scrubMergeTags(text: string, customKeys: readonly string[] = []): { text: string; warnings: string[] } {
     if (!text) return { text: '', warnings: [] };
-    const { unknown, malformed } = validateMergeVars(text, NEWSLETTER_MERGE_KEYS);
+    const allowed = [...NEWSLETTER_MERGE_KEYS, ...customMergeKeys(customKeys)];
+    const { unknown, malformed } = validateMergeVars(text, allowed);
     let out = text;
     const warnings: string[] = [];
 
@@ -111,6 +114,22 @@ export function scrubMergeTags(text: string): { text: string; warnings: string[]
         out = out.split(bad).join('');
         warnings.push(`Removed a personalisation tag we could not read: ${bad}`);
     }
+    // ⚠️ A CUSTOM TAG WITHOUT A FALLBACK IS REMOVED, not defaulted. applyDefaultFallbacks can only
+    // supply the fallbacks declared for the built-ins; there is no honest default for a field
+    // called "City", and an empty render produces "our new shop in ." in every inbox where we hold
+    // no value. Removing it and saying so is the same treatment an unknown tag gets, for the same
+    // reason: the author can see the problem, the subscriber never does.
+    let warnedCustom = false;
+    for (const key of customMergeKeys(customKeys)) {
+        const bare = new RegExp(`\\{\\{\\s*${key.replace(/\./g, '\\.')}\\s*\\}\\}`, 'g');
+        // Compared rather than tested: `regex.test()` on a /g/ regex leaves lastIndex behind it,
+        // and the next call would start mid-string. Cheap to sidestep, and invisible when wrong.
+        const next = out.replace(bare, '');
+        if (next === out) continue;
+        out = next;
+        if (!warnedCustom) { warnings.push(CUSTOM_TAG_NEEDS_FALLBACK); warnedCustom = true; }
+    }
+
     // Whatever survives gets its declared fallback, so the editor shows what a nameless
     // subscriber will actually read.
     return { text: applyDefaultFallbacks(out), warnings };
@@ -206,7 +225,14 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
         })
         : null;
 
-    const varList = NEWSLETTER_MERGE_VARS.map((v) => `{{${v.key}}} (${v.label})`).join(', ');
+    // The org's own columns, so a draft may personalise on them and the scrub below does not strip
+    // what the model was invited to write.
+    const customFields = await loadCustomFieldDefs(db, organisationId);
+    const customKeys = customFields.map((f) => f.key);
+    const varList = [
+        ...NEWSLETTER_MERGE_VARS.map((v) => `{{${v.key}}} (${v.label})`),
+        ...customFields.map((f) => `{{${CUSTOM_MERGE_PREFIX}${f.key} | "…"}} (${f.label}, and it MUST carry a fallback)`),
+    ].join(', ');
 
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const response = await anthropic.messages.create({
@@ -258,11 +284,11 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
     const bodyRaw = str(parsed?.bodyMarkdown, 20000) || str(salvageStringField(raw, 'bodyMarkdown'), 20000);
     if (!bodyRaw) throw new Error('The draft came back in a form we could not read. Try again.');
 
-    const body = scrubMergeTags(bodyRaw);
+    const body = scrubMergeTags(bodyRaw, customKeys);
     // After the scrub, so the URL is never mistaken for a malformed merge tag and stripped.
     const bodyText = appendSourceLink(body.text, opts.sourceLink);
-    const subject = scrubMergeTags(str(parsed?.subject, MAX_SUBJECT_CHARS) || issue.subject || 'Your newsletter');
-    const preheader = scrubMergeTags(str(parsed?.preheader, MAX_PREHEADER_CHARS));
+    const subject = scrubMergeTags(str(parsed?.subject, MAX_SUBJECT_CHARS) || issue.subject || 'Your newsletter', customKeys);
+    const preheader = scrubMergeTags(str(parsed?.preheader, MAX_PREHEADER_CHARS), customKeys);
 
     const warnings = [...new Set([...subject.warnings, ...preheader.warnings, ...body.warnings])];
 

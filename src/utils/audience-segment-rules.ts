@@ -24,7 +24,9 @@
 // more people.
 
 import { and, eq, inArray, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
-import { audienceContacts, audienceContactSegments, audienceSegments, newsletterSends } from '../../db/schema';
+import {
+    audienceContacts, audienceContactSegments, audienceCustomFields, audienceSegments, newsletterSends,
+} from '../../db/schema';
 
 /** A whole rule set. `match: 'all'` is AND, `'any'` is OR. */
 export interface SegmentRules {
@@ -37,9 +39,15 @@ export interface SegmentCondition {
     op: string;
     /** Number of days for the time fields, a keyword for the rest. Never free text that reaches SQL. */
     value?: string | number;
+    /**
+     * WHICH custom field, for `field: 'custom'`. Separate from `value` because a custom condition
+     * has two parts — which column and what it says — and folding them into one string is how a
+     * key with a space in it becomes a parse bug at send time.
+     */
+    key?: string;
 }
 
-export type RuleField = 'source' | 'form' | 'joined' | 'opened' | 'emailed' | 'email_domain' | 'tag';
+export type RuleField = 'source' | 'form' | 'joined' | 'opened' | 'emailed' | 'email_domain' | 'tag' | 'custom';
 
 /** What a tenant may filter on, and how. Data-driven so validation and the UI cannot disagree. */
 export const RULE_FIELDS: Record<RuleField, { label: string; ops: string[]; needsValue: boolean }> = {
@@ -54,7 +62,16 @@ export const RULE_FIELDS: Record<RuleField, { label: string; ops: string[]; need
     // have. The value is an audience_segments.id whose kind is 'tag' or 'manual' — the API refuses
     // a reference to a DYNAMIC segment, because a rule over a rule is a cycle waiting to happen.
     tag:          { label: 'Tagged',            ops: ['in', 'not_in'],        needsValue: true },
+    // One of the tenant's own columns. `is_set` / `is_not_set` take no value — "we hold a city for
+    // this person" is a question in its own right, and the commonest one before a personalised send.
+    custom:       { label: 'Custom field',      ops: ['is', 'is_not', 'contains', 'is_set', 'is_not_set'], needsValue: true },
 };
+
+/** The ops on a custom field that ask about PRESENCE rather than content. */
+const CUSTOM_NO_VALUE_OPS = ['is_set', 'is_not_set'];
+
+/** Mirrors audience_custom_fields_key_check. */
+export const CUSTOM_KEY_RE = /^[a-z][a-z0-9_]{0,39}$/;
 
 /** Mirrors audience_contacts.source — the CHECK constraint is the authority. */
 export const SOURCE_VALUES = ['web_form', 'csv_import', 'manual', 'lead_promotion', 'api'] as const;
@@ -125,6 +142,15 @@ export function parseRules(raw: unknown): ParseResult {
             conditions.push({ field, op, value: v });
             continue;
         }
+        if (field === 'custom') {
+            const key = String((c as SegmentCondition)?.key ?? '');
+            if (!CUSTOM_KEY_RE.test(key)) return { ok: false, error: `${where} does not name a custom field.` };
+            if (CUSTOM_NO_VALUE_OPS.includes(op)) { conditions.push({ field, op, key }); continue; }
+            const v = String(rawValue ?? '').trim().slice(0, 200);
+            if (!v) return { ok: false, error: `${where} needs something to compare the field to.` };
+            conditions.push({ field, op, key, value: v });
+            continue;
+        }
         if (field === 'tag') {
             const id = Number(rawValue);
             if (!Number.isFinite(id) || id < 1) return { ok: false, error: `${where} needs a tag.` };
@@ -186,6 +212,22 @@ function conditionSql(organisationId: number, c: SegmentCondition): SQL {
             return c.op === 'is'
                 ? sql`${audienceContacts.email} LIKE ${suffix}`
                 : sql`${audienceContacts.email} NOT LIKE ${suffix}`;
+        }
+
+        case 'custom': {
+            // ⚠️ The KEY is bound as a parameter too, not spliced into the SQL text. It arrives from
+            // a saved rule, which arrives from a form, and `->>` takes it as a value perfectly well.
+            const held = sql`${audienceContacts.customFields} ->> ${String(c.key)}`;
+            if (c.op === 'is_set') return sql`(${held} IS NOT NULL AND ${held} <> '')`;
+            if (c.op === 'is_not_set') return sql`(${held} IS NULL OR ${held} = '')`;
+            // Case-insensitive: this is tenant-typed data on both sides, and "Bristol" not matching
+            // "bristol" is a segment that looks broken for a reason nobody can see.
+            if (c.op === 'contains') return sql`${held} ILIKE ${`%${String(c.value)}%`}`;
+            const eqv = sql`lower(${held}) = lower(${String(c.value)})`;
+            // ⚠️ `is_not` must also match contacts with NO value. Without the IS NULL arm, "plan is
+            // not premium" would silently exclude everyone we hold no plan for — which is usually
+            // most of the list, and exactly the people the tenant meant to include.
+            return c.op === 'is' ? eqv : sql`(${held} IS NULL OR NOT (${eqv}))`;
         }
 
         case 'tag': {
@@ -254,6 +296,25 @@ export async function checkRuleReferences(
     const parsed = parseRules(raw);
     if (!parsed.ok) return parsed.error;
 
+    // A custom field the org has never defined is a rule that filters on a key nothing writes —
+    // it would compile happily and match nobody, for a reason the tenant cannot see.
+    const keys = parsed.rules.conditions
+        .filter((c) => c.field === 'custom')
+        .map((c) => String(c.key));
+    if (keys.length) {
+        const defined = await db
+            .select({ key: audienceCustomFields.key })
+            .from(audienceCustomFields)
+            .where(and(
+                eq(audienceCustomFields.organisationId, organisationId),
+                inArray(audienceCustomFields.key, [...new Set(keys)]),
+            ));
+        const have = new Set((defined as { key: string }[]).map((r) => r.key));
+        for (const k of keys) {
+            if (!have.has(k)) return `This rule filters on a custom field ("${k}") that does not exist here. Remove that condition or add the field first.`;
+        }
+    }
+
     const tagIds = parsed.rules.conditions
         .filter((c) => c.field === 'tag')
         .map((c) => Number(c.value));
@@ -291,6 +352,7 @@ export function describeRules(
     raw: unknown,
     formNames?: Map<number, string>,
     tagNames?: Map<number, string>,
+    fieldLabels?: Map<string, string>,
 ): string {
     const parsed = parseRules(raw);
     if (!parsed.ok) return parsed.error;
@@ -311,6 +373,13 @@ export function describeRules(
                 return `${c.op === 'is' ? 'uses' : 'does not use'} an @${c.value} address`;
             case 'tag':
                 return `${c.op === 'in' ? 'is tagged' : 'is not tagged'} ${tagNames?.get(Number(c.value)) ?? `#${c.value}`}`;
+            case 'custom': {
+                const name = fieldLabels?.get(String(c.key)) ?? String(c.key);
+                if (c.op === 'is_set') return `has a ${name}`;
+                if (c.op === 'is_not_set') return `has no ${name}`;
+                if (c.op === 'contains') return `has a ${name} containing "${c.value}"`;
+                return `${c.op === 'is' ? 'has' : 'does not have'} ${name} "${c.value}"`;
+            }
         }
     });
 

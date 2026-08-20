@@ -302,6 +302,9 @@ export async function processDueSequenceSteps(
                     firstName: audienceContacts.firstName,
                     lastName: audienceContacts.lastName,
                     company: audienceContacts.company,
+                    // Same reason as the issue send worker: without it every custom merge tag in a
+                    // welcome step renders its fallback for everyone.
+                    customFields: audienceContacts.customFields,
                 })
                 .from(audienceContacts).where(eq(audienceContacts.id, row.contactId)).limit(1);
 
@@ -322,7 +325,11 @@ export async function processDueSequenceSteps(
 
             const rendered = renderForRecipient({
                 snapshot,
-                contact: { ...(contact ?? {}), email: row.email },
+                contact: {
+                    ...(contact ?? {}),
+                    email: row.email,
+                    customFields: (contact?.customFields ?? null) as Record<string, unknown> | null,
+                },
                 senderName,
                 unsubscribeUrl: newsletterUnsubscribeUrl(opts.baseUrl, token),
                 postalAddress: org?.postalAddress ?? null,

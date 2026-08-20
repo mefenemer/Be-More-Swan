@@ -504,6 +504,107 @@ first three can all look healthy while the writing wears people out.
 
 ---
 
+## 11n. Per-link click reporting (2026-08-20)
+
+1. **Apply `db/newsletter-link-clicks.sql`** — staging, then prod. One table,
+   `newsletter_link_clicks`.
+2. ⚠️ **SQL first, then deploy** — though this one degrades rather than breaks: the recorder and the
+   report both treat 42P01 as "no data yet", so the newsletter page still opens on an environment
+   without it.
+
+**What was missing.** `newsletter_sends.last_clicked_url` holds ONE url per recipient — deliberately,
+because a single column pretending to be a click history would mislead. So "3.4% clicked" was
+answerable and "clicked WHAT" was not, which is the half a tenant can act on: the answer decides
+what goes at the top of the next issue.
+
+**One row per (recipient, link), not per event.** The row IS the unique click — `UNIQUE (send_id,
+url_hash)` — and a repeat increments `click_count` on it. So `count(*)` is how many PEOPLE and
+`sum(click_count)` is how many TIMES, both exact, and the table is bounded by the people who
+actually clicked rather than by everyone who was sent the issue. Same reasoning that made opens a
+first-touch timestamp rather than a counter.
+
+⚠️ **THE UNSUBSCRIBE COLLAPSE IS THE POINT OF THE NORMALISER.** Every recipient's unsubscribe url
+carries their own token, so a five-thousand-person issue would produce up to five thousand DISTINCT
+one-click rows — burying the three links the tenant actually wrote, in exactly the report built to
+surface them. They collapse to one row, and are KEPT rather than dropped: how many people went
+looking for the way out is worth knowing, and hiding it would be its own kind of dishonest. The row
+is labelled rather than shown as a url, since the url is per-recipient and not a destination.
+
+**Everything else is left alone, including utm parameters.** Two urls differing only by campaign tag
+are two links the tenant chose to distinguish; merging them would answer a question they did not ask.
+
+⚠️ **The hash is the key, not the url.** A btree entry is capped near 2704 bytes and a real campaign
+url with tracking parameters gets long — an index that works in testing and throws on a customer's
+link is not a thing to leave to chance. The url is stored alongside for display, and the hash is
+taken OF the stored url so the two cannot disagree.
+
+⚠️ **It can never break the webhook.** `recordLinkClick` swallows every failure. A 500 there makes
+the provider retry the whole event, and the bounce and complaint writes beside it are what stop us
+emailing people who asked us not to — a report is not worth risking those.
+
+**The report is aggregate by choice.** The rows underneath name a recipient, because that is what
+makes "unique" exact rather than estimated — but "who clicked what" is a different feature with
+different consent questions, and nothing here builds a view of it.
+
+**Zero and unmeasurable stay distinct**, as everywhere else in this feature: an issue sent from a
+tenant's own mailbox rewrites no links, and says so rather than reporting no clicks.
+
+⚠️ **And so does "sent before we were recording".** An issue with clicks on the ledger but no link
+rows predates this feature, and telling its owner "nobody clicked a link" would be the same lie as
+reporting 0% opens on a mailbox send — a statement about our instrumentation dressed as one about
+the reader. The issue's own `clicked_count` is what tells the two apart, so it costs nothing to be
+honest about it. (Caught after the migration was already applied, which is exactly when a tenant
+would have hit it.)
+
+---
+
+## 11m. Custom fields (2026-08-20)
+
+1. **Apply `db/audience-custom-fields.sql`** — staging, then prod. One new table,
+   `audience_custom_fields`: the LIST of what a tenant's own columns are called. The values have
+   always had a home (`audience_contacts.custom_fields`) and nothing ever wrote to them.
+2. ⚠️ **SQL first, then deploy.**
+
+⚠️ **The key is permanent; the label is not.** `key` is the JSONB key on every contact row and the
+value inside every saved segment rule, so it is derived once from the label and never renamed — a
+rename would orphan the values on thousands of rows and silently empty any rule naming it. The API's
+`rename` accepts a label and nothing else, rather than accepting a key and ignoring it. The key is
+shown to the tenant at creation, because it is what they will type inside `{{contact.custom.…}}`.
+
+**Text only, and the reservation is deliberate.** The CHECK allows `'text' | 'number' | 'date'`; the
+API accepts `text`. ⚠️ Numbers and dates are deferred for a reason rather than for time: comparing
+them means casting tenant-entered JSONB text, `(custom_fields->>'age')::numeric` throws 22P02 on the
+first contact who typed "about 40", and Postgres does not guarantee a guard in the same `AND` runs
+first. Doing it safely needs a fenced subquery; doing it unsafely breaks a SEND.
+
+**Three places tenant-supplied keys now reach, and the guard on each:**
+
+- **Into every contact's JSONB.** An ALLOW-LIST, not a filter of obviously-bad keys: the import and
+  the contact editor keep only keys this org has defined. Anything else would be written where
+  nothing lists it and nothing can clean it up. A blank cell is not a value — storing `''` would
+  make "has a city" true for somebody whose column was empty.
+- **Into an email.** `{{contact.custom.city | "your area"}}` works; a bare `{{contact.custom.city}}`
+  is REMOVED at save time and the author is told. ⚠️ There is no honest default for a field called
+  "City", and an empty render is "our new shop in ." in every inbox where we hold no value — so a
+  custom tag is treated exactly like an unknown one rather than defaulted to blank.
+- **Into the WHERE clause of a send.** ⚠️ `is_not` also matches the people we hold NO value for.
+  Without that arm, "plan is not premium" excludes everyone with no plan on file — usually most of
+  the list, and exactly the people the tenant meant to include. Comparisons are case-insensitive on
+  both sides, and the key is a bound parameter, never spliced into SQL text.
+
+**Both upsert paths merge, rather than replacing or ignoring.** `custom_fields || EXCLUDED.custom_fields`
+in the single-contact upsert AND the bulk import: replacing would erase every field not in the new
+file, and ignoring — which is what both did until now — would mean a second import could never fill
+anything in. Only the bulk path was fixed at first; the test that reads *both* blocks is what caught
+the other one.
+
+**Capture and use, so it is not a column with a UI:** CSV import matches a column by the field's
+exact name and says when none matched; the contact panel edits them (a blank clears one); segment
+rules filter on them; the newsletter editor offers them as insert-tags with the fallback already
+written in.
+
+---
+
 ## 11l. Tags (2026-08-20)
 
 1. **Apply `db/audience-tags.sql`** — staging, then prod. It widens one CHECK constraint
@@ -877,8 +978,8 @@ carrying tags and "segments" are saved rules over those tags — which is now ex
 tag is a label (`kind = 'tag'`), and a dynamic segment is a rule that can compose tags with the
 columns we hold. The example this paragraph originally used to describe the gap — "everyone who
 signed up through the shop form and has opened something in 90 days" — is two conditions in the
-builder. ⚠️ The remaining difference is not the model but the vocabulary: Kit's rules can also
-reach custom fields, and `audience_contacts.custom_fields` is still written by nothing.
+builder — and since §11m the rules reach the tenant's own columns too, which was the last piece of
+Kit's model we were missing.
 
 **2. Sequences, not just broadcasts.** Kit's centre of gravity is the automated series — above all
 the welcome sequence that fires when someone subscribes. ✅ **Built 2026-08-20** (§11g): confirming
@@ -909,8 +1010,8 @@ business tool and not worth chasing.
 | ~~**No preference centre**~~ ✅ **CLOSED 2026-08-20** | The only exit was total unsubscribe. The link now offers a 30-day or 3-month pause and an at-most-monthly cap alongside it — the pause binding every assistant, not just the newsletter, and lifting itself. The exit stays on the same page, in the same words. | Done — `db/newsletter-preferences.sql`, `src/utils/audience-preferences.ts` |
 | **No hosted sign-up page** | Customers without a website cannot collect subscribers at all. | Medium |
 | **No A/B subject testing** | `blog_ab_stats` is the pattern to copy. | Medium |
-| **No per-link click reporting** | We store `last_clicked_url` only, so "which link worked" is unanswerable. | Small–medium |
-| **No custom fields in practice** | `custom_fields` exists on the contact and nothing reads or writes it. | Small |
+| ~~**No per-link click reporting**~~ ✅ **CLOSED 2026-08-20** | `last_clicked_url` held one url per recipient, so "which link worked" was unanswerable. Every issue now reports its links by how many PEOPLE clicked each (and how many times), with every recipient's unsubscribe url collapsed to a single labelled row rather than thousands. | Done — `db/newsletter-link-clicks.sql` |
+| ~~**No custom fields in practice**~~ ✅ **CLOSED 2026-08-20** | `custom_fields` existed on the contact and nothing read or wrote it. A tenant can now define their own columns, fill them from an import or by hand, filter segments on them, and personalise an email with them — with a bare custom merge tag refused rather than rendered blank. Text only; number and date are reserved in the schema and refused by the API. | Done — `db/audience-custom-fields.sql` |
 | **No send-time/timezone handling** | Everything sends on a UTC clock. | Medium |
 | **No tenant-facing API or webhooks** | Subscribers can only arrive through the form or a CSV. | Medium |
 | **No deliverability tooling** | No spam-score preview, no seed test, no warm-up guidance for a new domain. | Medium |
