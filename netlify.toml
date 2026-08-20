@@ -270,6 +270,17 @@
   to = "/.netlify/functions/audience-public"
   status = 200
 
+# The TENANT-FACING API (docs/newsletter-assistant-plan.md §11r): a tenant's own systems writing
+# into their own audience, authenticated by an API key rather than a session.
+#
+# ⚠️ ABOVE the /api/audience/* rule is not required — the paths do not overlap — but it must stay
+# above any future /api/* catch-all, like every other rule in this file. Netlify matches
+# top-to-bottom and first match wins.
+[[redirects]]
+  from = "/api/v1/*"
+  to = "/.netlify/functions/audience-api"
+  status = 200
+
 # The HOSTED sign-up page, for tenants with no website to embed the form in: /s/<public_key>.
 # Same function as the API above — it holds the one description of what a form says, and a second
 # copy of the consent text is the copy that would drift from the one people actually agreed to.

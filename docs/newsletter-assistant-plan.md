@@ -504,6 +504,89 @@ first three can all look healthy while the writing wears people out.
 
 ---
 
+## 11r. Tenant-facing API (2026-08-20)
+
+1. **Apply `db/tenant-api-keys.sql`** — staging, then prod. One table, `api_keys`.
+2. ⚠️ **SQL first, then deploy.**
+3. The `/api/v1/*` rewrite ships in `netlify.toml` with the code.
+
+**What it unlocks.** A subscriber could arrive two ways: the sign-up form, or a CSV. A shop taking a
+marketing tick at checkout, a booking system, a Zapier step — all of them had to become a person
+exporting a spreadsheet once a week, which is how a list goes stale and how the consent evidence
+gets lost between the tick and the import.
+
+    GET    /api/v1                             what this API can do — no key needed
+    POST   /api/v1/contacts                    add or update one subscriber
+    GET    /api/v1/contacts/{email}            their status, source and consent basis
+    POST   /api/v1/contacts/{email}/unsubscribe
+    DELETE /api/v1/contacts/{email}            refused — see below
+
+### ⚠️ The one rule this exists to not break
+
+**A call can never resurrect an unsubscribe.** The characteristic disaster of every subscriber API
+is a nightly sync from a CRM that does not know who opted out, posting the whole customer table as
+`subscribed` and quietly re-subscribing everybody who left. That is not hypothetical — it is the
+default behaviour of a naive integration, and it emails people who said no from the tenant's own
+domain.
+
+`upsertContact`'s status ratchet already refuses it, and the API does not carry a second copy of
+that rule. What it adds is that it **reports** the refusal: the response returns the status the
+contact actually has, plus `statusHonoured: false` and a sentence, so the caller's own system can
+see its request was declined instead of assuming it landed. The index says so before anybody
+integrates.
+
+A caller also cannot announce `bounced` or `complained`. Those are things that HAPPENED to a
+contact; a caller asserting one would be writing a fact it cannot know.
+
+### Consent is declared per call
+
+`consent.basis` is required on every write, from the same closed list the rest of the product uses.
+Same rule as the CSV import, for the same reason: "who said these people agreed?" has to have an
+answer attached to the ACT, not to a setting somebody ticked in March. Every write records a consent
+event with `channel: 'api'` and the key's id, and the event names what actually happened
+(`confirmed` vs `subscribe_requested`) rather than what was asked for.
+
+### The key
+
+⚠️ **Stored as a sha256 hash, shown once at creation, and returned by no endpoint afterwards** —
+that is arithmetic, not policy. `key_prefix` is kept in clear only so two keys can be told apart in
+a list. A plain hash rather than bcrypt is deliberate and justified in the code: 32 bytes of CSPRNG
+output has nothing to brute-force, and a slow hash on the hot path of a checkout would be a
+self-inflicted rate limit.
+
+⚠️ **A key cannot mint another key.** Key management is session-authenticated and owner/admin only —
+otherwise one leak is permanent. **Revoked, never deleted**: "this key existed and was turned off on
+the 3rd" is the question asked after something goes wrong.
+
+⚠️ **Every authentication failure is the same 401 with the same body.** "That key is revoked" tells
+the holder of a stolen key that it was real; "no such key" tells them to keep looking. The tenant
+gets the diagnostic value from their own key list instead.
+
+Rate limited **per key**, not per IP: a tenant's server has one address and may legitimately be
+busy, while a runaway loop is the thing actually being bounded.
+
+### What it refuses to do
+
+**DELETE is refused with a 405 that names the alternative.** Erasing a contact also writes a
+permanent block on that address (THE DELETE RULE in audience-contacts.ts), and doing that silently
+from a nightly sync would leave a tenant with a growing opt-out list they never chose and cannot
+explain. Erasure is a decision, not a sync artefact.
+
+**Unsubscribing an address we do not hold is a success, not a 404.** "Make sure this person is not
+subscribed" is satisfied by an address we never had, and a 404 there pushes callers into ignoring
+the response entirely.
+
+### ⚠️ Outbound webhooks are NOT in this
+
+Appendix B's row names an API *or webhooks*, and only the API is built. Webhooks need an endpoint
+registry, a signing secret, delivery attempts with backoff, and a retry worker — and a retry worker
+is a schedule whose failure is silent, which is the thing this codebase has been bitten by twice.
+The inbound half is what the row's own description asks for ("subscribers can only arrive through
+the form or a CSV"), and it stands on its own. The outbound half should be built when somebody
+actually needs it, with the retry story designed first rather than bolted on.
+
+---
+
 ## 11q. Send time and timezones (2026-08-20)
 
 1. **Apply `db/newsletter-send-time.sql`** — staging, then prod. `send_timezone`, `send_mode` and
@@ -1171,7 +1254,7 @@ business tool and not worth chasing.
 | ~~**No per-link click reporting**~~ ✅ **CLOSED 2026-08-20** | `last_clicked_url` held one url per recipient, so "which link worked" was unanswerable. Every issue now reports its links by how many PEOPLE clicked each (and how many times), with every recipient's unsubscribe url collapsed to a single labelled row rather than thousands. | Done — `db/newsletter-link-clicks.sql` |
 | ~~**No custom fields in practice**~~ ✅ **CLOSED 2026-08-20** | `custom_fields` existed on the contact and nothing read or wrote it. A tenant can now define their own columns, fill them from an import or by hand, filter segments on them, and personalise an email with them — with a bare custom merge tag refused rather than rendered blank. Text only; number and date are reserved in the schema and refused by the API. | Done — `db/audience-custom-fields.sql` |
 | ~~**No send-time/timezone handling**~~ ✅ **CLOSED 2026-08-20** | Everything sent on a UTC clock, so a scheduled "9:00" was 09:00 UTC and nothing said so. A scheduled time is now read and stamped in the tenant's own zone, and an issue can optionally be delivered at each subscriber's local time — with "we do not know their zone" kept as an honest, counted answer rather than guessed from an IP. | Done — `db/newsletter-send-time.sql`, `src/utils/newsletter-schedule.ts` |
-| **No tenant-facing API or webhooks** | Subscribers can only arrive through the form or a CSV. | Medium |
+| **No tenant-facing API or webhooks** → ✅ **API BUILT 2026-08-20**, webhooks deliberately not | Subscribers could only arrive through the form or a CSV. `/api/v1/contacts` now takes them from a shop, a booking system or a Zapier step — with a declared consent basis on every write, and a refusal to resurrect anybody who opted out that is REPORTED rather than silent. ⚠️ Outbound webhooks are still open: they need a retry worker, and a retry worker is a schedule whose failure is silent. | API done — `db/tenant-api-keys.sql`; webhooks unbuilt |
 | **No deliverability tooling** | No spam-score preview, no seed test, no warm-up guidance for a new domain. | Medium |
 
 ### Where we are already ahead, and should stay

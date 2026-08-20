@@ -93,6 +93,15 @@
     <div id="aud-fields" class="flex flex-wrap gap-2">
       <p class="text-sm text-gray-400">Loading…</p>
     </div>
+
+    <!-- Keys that let the tenant's own systems write into their audience. ⚠️ A key is shown once,
+         at creation: the stored form is a hash, so there is nothing to show later. -->
+    <div class="flex items-center justify-between mt-4 mb-2">
+      <p class="text-sm font-bold text-gray-900">API keys</p>
+      <button type="button" id="aud-new-key"
+        class="text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer">+ New key</button>
+    </div>
+    <div id="aud-keys" class="space-y-2"></div>
   </div>
 
   <!-- Filters -->

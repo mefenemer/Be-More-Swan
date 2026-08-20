@@ -4198,6 +4198,28 @@ export const audienceConsentEvents = pgTable("audience_consent_events", {
 // The tenant's own columns. ⚠️ `key` is immutable once created — it is the JSONB key on every
 // contact and the value in every saved segment rule; renaming it would orphan both. `label` is the
 // human name and may change freely. See db/audience-custom-fields.sql.
+// Keys that let a tenant's own systems write into their audience. ⚠️ Stored as a HASH — a bearer
+// credential that can subscribe people must not be readable from a row or a backup. `keyPrefix` is
+// kept in clear only so two keys can be told apart in a list. See db/tenant-api-keys.sql.
+export const apiKeys = pgTable("api_keys", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  name: text("name").notNull().default("API key"),
+  keyHash: text("key_hash").notNull(),
+  keyPrefix: text("key_prefix").notNull(),
+  scopes: text("scopes").notNull().default("audience:write"),
+  lastUsedAt: timestamp("last_used_at"),
+  // ⚠️ Revoked, never deleted: "this key existed and was turned off on the 3rd" is the question
+  // asked after something goes wrong, and a deleted row answers it the same way as a key that was
+  // never ours.
+  revokedAt: timestamp("revoked_at"),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("api_keys_hash_uidx").on(t.keyHash),
+  index("api_keys_org_idx").on(t.organisationId, t.createdAt),
+]);
+
 export const audienceCustomFields = pgTable("audience_custom_fields", {
   id: serial("id").primaryKey(),
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),

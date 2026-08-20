@@ -26,6 +26,7 @@
     selected: new Set(),
     filters: { q: '', status: '', segmentId: '' },
     customFields: [],
+    apiKeys: [],
     searchTimer: null,
     needsSetup: false,
   };
@@ -433,6 +434,65 @@
           body: JSON.stringify({ action: 'delete', id }),
         });
         await loadCustomFields();
+    await loadApiKeys();
+      } catch (err) { window.showToast(err.message); }
+    }));
+  }
+
+  // ── API keys ───────────────────────────────────────────────────────────────
+
+  const KEYS_API = '/.netlify/functions/api-keys';
+
+  async function loadApiKeys() {
+    const host = $('aud-keys');
+    if (!host) return;
+    try {
+      const { keys, needsSetup } = await api(KEYS_API);
+      if (needsSetup) { host.innerHTML = '<p class="text-sm text-gray-400">API keys are not set up on this environment yet.</p>'; return; }
+      state.apiKeys = keys || [];
+    } catch (err) {
+      host.innerHTML = `<p class="text-sm text-red-600">${esc(err.message)}</p>`;
+      return;
+    }
+    renderApiKeys();
+  }
+
+  function renderApiKeys() {
+    const host = $('aud-keys');
+    if (!host) return;
+    if (!state.apiKeys.length) {
+      host.innerHTML = `<p class="text-sm text-gray-400">No keys yet. Create one to add subscribers from your own website, shop or booking system.</p>
+        <p class="text-[11px] text-gray-400 mt-1">Base URL: <span class="font-mono">${esc(location.origin)}/api/v1</span> — <a href="${esc(location.origin)}/api/v1" target="_blank" rel="noopener" class="text-emerald-700 hover:underline">see what it accepts</a></p>`;
+      return;
+    }
+    host.innerHTML = state.apiKeys.map((k) => `
+      <div class="flex items-center gap-3 px-3 py-2 rounded-xl border ${k.revokedAt ? 'border-gray-200 bg-gray-50' : 'border-gray-200'}">
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-bold ${k.revokedAt ? 'text-gray-400 line-through' : 'text-gray-900'}">${esc(k.name)}</p>
+          <p class="text-[11px] text-gray-500 font-mono">${esc(k.keyPrefix)}…</p>
+          <p class="text-[11px] text-gray-400">
+            ${k.revokedAt ? `Revoked ${esc(fmtDate(k.revokedAt))}`
+              : k.lastUsedAt ? `Last used ${esc(fmtDate(k.lastUsedAt))}` : 'Never used'}
+          </p>
+        </div>
+        ${k.revokedAt ? '' : `<button type="button" data-key-revoke="${k.id}"
+          class="px-3 py-1.5 text-xs font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Revoke</button>`}
+      </div>`).join('')
+      + `<p class="text-[11px] text-gray-400 mt-1">Base URL: <span class="font-mono">${esc(location.origin)}/api/v1</span></p>`;
+
+    host.querySelectorAll('[data-key-revoke]').forEach((btn) => btn.addEventListener('click', async () => {
+      const id = Number(btn.getAttribute('data-key-revoke'));
+      const k = state.apiKeys.find((x) => x.id === id);
+      const ok = await window.confirmModal(
+        `Revoke “${k ? k.name : ''}”? Anything using it stops working immediately, and a key cannot be un-revoked.`,
+        { title: 'Revoke this key?', confirmLabel: 'Revoke key' });
+      if (!ok) return;
+      try {
+        await api(KEYS_API, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'revoke', id }),
+        });
+        await loadApiKeys();
       } catch (err) { window.showToast(err.message); }
     }));
   }
@@ -1180,6 +1240,25 @@
       });
     });
 
+    $('aud-new-key')?.addEventListener('click', async () => {
+      const name = await window.promptModal('What is this key for?', {
+        title: 'New API key', placeholder: 'Shop checkout', confirmLabel: 'Create key',
+      });
+      if (!name) return;
+      try {
+        const res = await api(KEYS_API, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'create', name }),
+        });
+        await loadApiKeys();
+        // ⚠️ Shown once, and said to be once. The stored form is a hash — there is no endpoint that
+        // could return it later, and telling somebody to "check it in settings" would be a lie.
+        await window.alertModal(
+          `Copy this now — it is not shown again:\n\n${res.key}\n\nUse it as an Authorization: Bearer header against ${location.origin}/api/v1`,
+          { title: 'Your new API key' });
+      } catch (err) { window.showToast(err.message); }
+    });
+
     $('aud-new-field')?.addEventListener('click', async () => {
       const label = await window.promptModal('What is this field called?', {
         title: 'New custom field', placeholder: 'City', confirmLabel: 'Add field',
@@ -1194,6 +1273,7 @@
         // {{contact.custom.…}} and the one thing they cannot change afterwards.
         window.showToast(`Added. Use {{contact.custom.${field.key}}} in an email.`, { duration: 7000 });
         await loadCustomFields();
+    await loadApiKeys();
       } catch (err) { window.showToast(err.message); }
     });
 
@@ -1423,6 +1503,7 @@
     state.filters = { q: '', status: '', segmentId: '' };
     wire();
     await loadCustomFields();
+    await loadApiKeys();
     await loadSegments();
     await loadContacts();
   };
