@@ -114,11 +114,18 @@
       msg.textContent = '';
       msg.className = 'bms-m';
 
+      // The visitor's own timezone, so an issue can be delivered at a sensible hour where they
+      // are. Best effort and never fatal: older browsers and locked-down ones throw here, and the
+      // server treats an absent or unrecognised zone as "we do not know" rather than guessing.
+      var tz = '';
+      try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (tzErr) { tz = ''; }
+
       var payload = {
         key: key,
         hp: (shadow.getElementById('bms-website') || {}).value || '',
         ms: Date.now() - shownAt,
-        url: location.href
+        url: location.href,
+        timezone: tz
       };
       for (var i = 0; i < fields.length; i++) {
         var f = String(fields[i]);

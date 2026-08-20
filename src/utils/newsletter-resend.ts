@@ -98,7 +98,13 @@ export async function unopenedRecipientPage(
     args: { originalIssueId: number; organisationId: number; afterContactId: number; limit: number },
 ): Promise<{ id: number; email: string }[]> {
     return db
-        .select({ id: audienceContacts.id, email: audienceContacts.email })
+        .select({
+            id: audienceContacts.id,
+            email: audienceContacts.email,
+            // Carried so a resend can honour per-recipient send times too — the same shape the
+            // ordinary audience page returns, so materialiseRecipients cannot tell them apart.
+            timezone: audienceContacts.timezone,
+        })
         .from(newsletterSends)
         .innerJoin(audienceContacts, eq(audienceContacts.id, newsletterSends.contactId))
         .where(and(

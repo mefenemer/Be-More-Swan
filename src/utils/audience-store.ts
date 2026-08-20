@@ -80,6 +80,8 @@ export interface UpsertContactInput {
     sourceDetail?: Record<string, unknown>;
     consentBasis?: ConsentBasis | null;
     confirmedAt?: Date | null;
+    /** IANA zone from the subscriber's browser at sign-up. NULL is the normal state. */
+    timezone?: string | null;
     customFields?: Record<string, unknown>;
 }
 
@@ -123,6 +125,7 @@ export async function upsertContact(db: Db, input: UpsertContactInput): Promise<
             sourceDetail: input.sourceDetail ?? {},
             consentBasis: input.consentBasis ?? null,
             confirmedAt: input.confirmedAt ?? null,
+            timezone: input.timezone ?? null,
             customFields: input.customFields ?? {},
         })
         .onConflictDoUpdate({
@@ -133,6 +136,11 @@ export async function upsertContact(db: Db, input: UpsertContactInput): Promise<
                 lastName: sql`COALESCE(${audienceContacts.lastName}, EXCLUDED.last_name)`,
                 company: sql`COALESCE(${audienceContacts.company}, EXCLUDED.company)`,
                 phone: sql`COALESCE(${audienceContacts.phone}, EXCLUDED.phone)`,
+                // ⚠️ The NEWER zone wins, unlike the gap-filling above. People move, and a stale
+                // zone is worse than no zone: it sends confidently at the wrong hour rather than
+                // falling back to the sender's time. COALESCE the other way round so a sign-up that
+                // reports nothing cannot erase one we already hold.
+                timezone: sql`COALESCE(EXCLUDED.timezone, ${audienceContacts.timezone})`,
                 // The one-way ratchet. 'pending' may become 'subscribed'; nothing escapes
                 // unsubscribed/bounced/complained/suppressed without an explicit human decision.
                 status: sql`CASE

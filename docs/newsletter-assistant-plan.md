@@ -504,6 +504,65 @@ first three can all look healthy while the writing wears people out.
 
 ---
 
+## 11q. Send time and timezones (2026-08-20)
+
+1. **Apply `db/newsletter-send-time.sql`** — staging, then prod. `send_timezone`, `send_mode` and
+   `send_local_time` on `newsletter_issues`; `due_at` on `newsletter_sends`; `timezone` on
+   `audience_contacts`.
+2. ⚠️ **SQL first, then deploy.**
+3. **No new scheduled function**, again.
+
+### The bug half
+
+A tenant who scheduled "9:00" got **09:00 UTC**, because the server parsed the bare wall-clock
+string a `datetime-local` input produces with no zone attached to it. For a British sender in summer
+that is ten in the morning; for one in Sydney it is the evening of the day before. Nothing anywhere
+said so, which is what made it a bug rather than a setting.
+
+Now the typed time is read in the tenant's zone, and ⚠️ **that zone is STAMPED on the issue** rather
+than resolved at send time — an assistant's `posting_timezone` can change between scheduling and
+sending, and "9am on Tuesday" has to stay the moment the human agreed to. The browser is sent both
+the zone and the wall-clock and converts neither: somebody editing from another country would
+otherwise see, and re-save, a different time from the one the issue goes out at. The zone is named
+under the field, because "9:00" with nothing beside it is the whole ambiguity.
+
+### The feature half
+
+An issue can be sent **at each subscriber's own local time** instead of all at once. Each
+`newsletter_sends` row carries its own `due_at`; the batch query takes only rows that are due; the
+issue stays in `'sending'` until none are left. That is the same mechanism the A/B wait uses, and it
+needs no new worker.
+
+⚠️ **We know a subscriber's timezone only if their browser told us at sign-up.** It cannot be read
+from an email address, and reading it from a sign-up IP would be a guess presented as a fact in the
+one place where being wrong means arriving at three in the morning. So "unknown" is a first-class
+answer: those people are sent at the SENDER's chosen time, and the count of how many that is goes in
+front of the tenant as soon as they switch the mode on. Both sign-up surfaces (the hosted page and
+the embeddable widget) now report `Intl.DateTimeFormat().resolvedOptions().timeZone`, best-effort
+and never fatal, and the value is VALIDATED before storage — an unknown zone reaching `Intl` inside
+the send worker would throw and fail a whole batch over one row.
+
+**Two rules in `dueAtForRecipient`:**
+
+- ⚠️ **It never goes backwards.** If the target hour has already passed where they are, they are
+  sent as the issue starts, not tomorrow. An issue being sent now is news now; holding it 23 hours
+  to hit a nicer clock face would deliver yesterday's newsletter.
+- ⚠️ **It never runs away.** Anything beyond 24 hours from the start is clamped, so one odd zone
+  cannot leave a copy queued for days.
+
+**A newer zone replaces an older one** (people move, and a stale zone sends confidently at the wrong
+hour), but an absent one erases nothing — `COALESCE(EXCLUDED.timezone, existing)`.
+
+**A local-time send freezes its audience** once it starts, like an A/B test: it stays open for up to
+a day, and re-scanning would sweep in people who subscribed after the issue began.
+
+⚠️ **A local-time send and an A/B test refuse to run together**, in both directions. A test decides
+from the first few hours of opens; a local-time send spreads the sample across a day. Individually
+sound, together they produce something that looks like a subject-line finding and is really a map of
+where a list lives.
+
+---
+
 ## 11p. Hosted sign-up page (2026-08-20)
 
 1. **Apply `db/audience-hosted-pages.sql`** — staging, then prod. Three columns on
@@ -1111,7 +1170,7 @@ business tool and not worth chasing.
 | ~~**No A/B subject testing**~~ ✅ **CLOSED 2026-08-20** | Two subject lines, a sample split evenly between them, and the winner to everyone held back — decided on unique opens inside the existing send sweep rather than on a cron of its own. A margin too small to mean anything is reported as "too close to call" rather than as a winner. | Done — `db/newsletter-ab-subjects.sql`, `src/utils/newsletter-ab.ts` |
 | ~~**No per-link click reporting**~~ ✅ **CLOSED 2026-08-20** | `last_clicked_url` held one url per recipient, so "which link worked" was unanswerable. Every issue now reports its links by how many PEOPLE clicked each (and how many times), with every recipient's unsubscribe url collapsed to a single labelled row rather than thousands. | Done — `db/newsletter-link-clicks.sql` |
 | ~~**No custom fields in practice**~~ ✅ **CLOSED 2026-08-20** | `custom_fields` existed on the contact and nothing read or wrote it. A tenant can now define their own columns, fill them from an import or by hand, filter segments on them, and personalise an email with them — with a bare custom merge tag refused rather than rendered blank. Text only; number and date are reserved in the schema and refused by the API. | Done — `db/audience-custom-fields.sql` |
-| **No send-time/timezone handling** | Everything sends on a UTC clock. | Medium |
+| ~~**No send-time/timezone handling**~~ ✅ **CLOSED 2026-08-20** | Everything sent on a UTC clock, so a scheduled "9:00" was 09:00 UTC and nothing said so. A scheduled time is now read and stamped in the tenant's own zone, and an issue can optionally be delivered at each subscriber's local time — with "we do not know their zone" kept as an honest, counted answer rather than guessed from an IP. | Done — `db/newsletter-send-time.sql`, `src/utils/newsletter-schedule.ts` |
 | **No tenant-facing API or webhooks** | Subscribers can only arrive through the form or a CSV. | Medium |
 | **No deliverability tooling** | No spam-score preview, no seed test, no warm-up guidance for a new domain. | Medium |
 

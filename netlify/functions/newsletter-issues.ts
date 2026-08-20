@@ -12,6 +12,7 @@
 //   POST   { action: 'reject' }    → back to draft, with the reason recorded
 //   POST   { action: 'resend' }    → a NEW issue repeating this one to whoever did not open it
 //   POST   { action: 'abTest' }    → set up (or clear) a two-subject test on this issue
+//   POST   { action: 'sendTime' }  → send at one instant, or at each subscriber's local time
 //   DELETE ?id=<n>                 → archive (never destroyed)
 //
 // ⚠️ THE SNAPSHOT IS TAKEN AT APPROVAL, and nothing after that reads body_markdown. A human
@@ -32,8 +33,32 @@ import { resendEligibility } from '../../src/utils/newsletter-resend';
 import { buildSegmentCondition } from '../../src/utils/audience-segment-rules';
 import { loadCustomFieldDefs, loadCustomFieldKeys } from '../../src/utils/audience-custom-fields';
 import { linkReportForIssue } from '../../src/utils/newsletter-link-clicks';
+import { LOCAL_TIME_RE, instantToWallClock, resolveSendTimezone, wallClockToInstant } from '../../src/utils/newsletter-schedule';
 import { sampleMergeContext } from '../../src/config/newsletter-merge-vars';
 import { withLambda } from '@netlify/aws-lambda-compat';
+
+/**
+ * The zone a wall-clock time on this issue means.
+ *
+ * ⚠️ The issue's own stamped zone wins, then the authoring assistant's posting_timezone, then the
+ * default. Stamping matters: an assistant's timezone can change between scheduling and sending, and
+ * "9am on Tuesday" has to stay the moment the human agreed to rather than following a setting.
+ */
+async function issueTimezone(
+    db: ReturnType<typeof getDb>,
+    issue: { sendTimezone?: string | null; assistantId?: number | null },
+    orgId: number,
+): Promise<string> {
+    if (issue.sendTimezone) return resolveSendTimezone(issue.sendTimezone);
+    if (!issue.assistantId) return resolveSendTimezone(null);
+    const [assistant] = await db
+        .select({ onboardingContext: aiAssistants.onboardingContext })
+        .from(aiAssistants)
+        .where(and(eq(aiAssistants.id, issue.assistantId), eq(aiAssistants.organisationId, orgId)))
+        .limit(1);
+    const ctx = (assistant?.onboardingContext as Record<string, unknown> | null) ?? {};
+    return resolveSendTimezone(typeof ctx.posting_timezone === 'string' ? ctx.posting_timezone : null);
+}
 
 const json = (statusCode: number, obj: unknown) => ({
     statusCode,
@@ -144,8 +169,15 @@ export default withLambda(async (event: HandlerEvent) => {
                     .limit(1)
                 : [];
 
+            const tz = await issueTimezone(db, issue, orgId);
             return json(200, {
                 issue,
+                // ⚠️ The zone and the wall-clock, sent together. The browser must NOT convert the
+                // instant with its own clock: the person editing an issue may be travelling, or on
+                // a laptop still set to another country, and the time they see has to be the time
+                // the issue actually goes out where the business is.
+                sendTimezone: tz,
+                scheduledForLocal: issue.scheduledFor ? instantToWallClock(issue.scheduledFor, tz) : '',
                 sourcePost: sourcePost ?? null,
                 // Only for an issue that has been sent — before that there is nothing to report,
                 // and an empty "which link worked" table on a draft reads as a broken feature.
@@ -343,6 +375,63 @@ export default withLambda(async (event: HandlerEvent) => {
         return json(200, { issue: resend, recipients: eligibility.unopened });
     }
 
+    if (action === 'sendTime') {
+        if (LOCKED.includes(issue.status)) {
+            return json(409, { error: 'This issue has already been sent.' });
+        }
+        const mode = body.mode === 'recipient_local' ? 'recipient_local' : 'at_once';
+
+        if (mode === 'at_once') {
+            await db.update(newsletterIssues)
+                .set({ sendMode: 'at_once', sendLocalTime: null, updatedAt: new Date() })
+                .where(and(eq(newsletterIssues.id, id), eq(newsletterIssues.organisationId, orgId)));
+            return json(200, { sendMode: 'at_once' });
+        }
+
+        // ⚠️ NOT ALONGSIDE AN A/B TEST. A local-time send spreads the sample across 24 hours, so a
+        // four-hour decision window would pick a winner from whoever happened to be due first —
+        // which is to say from one set of timezones. The two features are individually sound and
+        // compose into a result that looks like a subject-line finding and is actually a map of
+        // where a list lives.
+        if (issue.abState === 'testing') {
+            return json(409, {
+                error: 'This issue is running a subject-line test. A test decides its winner from the first few hours of opens, which cannot work when the send is spread across a day — turn one of them off.',
+            });
+        }
+
+        const localTime = String(body.localTime || '09:00').trim();
+        if (!LOCAL_TIME_RE.test(localTime)) {
+            return json(400, { error: 'Give a time of day like 09:00.' });
+        }
+
+        const [updated] = await db.update(newsletterIssues).set({
+            sendMode: 'recipient_local',
+            sendLocalTime: localTime,
+            updatedAt: new Date(),
+        }).where(and(eq(newsletterIssues.id, id), eq(newsletterIssues.organisationId, orgId))).returning();
+
+        // How many people this can actually be honoured for. ⚠️ Put in front of the tenant BEFORE
+        // they send: we know a subscriber's zone only if their browser told us at sign-up, so on
+        // most lists this is a minority, and everyone else is sent at the sender's own time.
+        const [{ known }] = await db
+            .select({ known: sql<number>`count(*)::int` })
+            .from(audienceContacts)
+            .where(and(
+                eq(audienceContacts.organisationId, orgId),
+                eq(audienceContacts.status, 'subscribed'),
+                sql`${audienceContacts.timezone} IS NOT NULL`,
+            ));
+        const [{ total }] = await db
+            .select({ total: sql<number>`count(*)::int` })
+            .from(audienceContacts)
+            .where(and(
+                eq(audienceContacts.organisationId, orgId),
+                eq(audienceContacts.status, 'subscribed'),
+            ));
+
+        return json(200, { issue: updated, knownTimezones: Number(known) || 0, subscribers: Number(total) || 0 });
+    }
+
     if (action === 'abTest') {
         // Setting up the test is drafting; it commits to nothing until the issue is approved, so it
         // shares the ordinary write roles rather than the approver's.
@@ -350,6 +439,12 @@ export default withLambda(async (event: HandlerEvent) => {
             return json(409, { error: 'This issue has already been sent.' });
         }
         const enabled = body.enabled !== false;
+        // The mirror of the refusal in 'sendTime' — whichever is set up second is the one refused.
+        if (enabled && issue.sendMode === 'recipient_local') {
+            return json(409, {
+                error: 'This issue is set to send at each subscriber\'s local time, which spreads it across a day. A subject-line test decides from the first few hours of opens, so the two cannot run together — turn one of them off.',
+            });
+        }
         if (!enabled) {
             await db.update(newsletterIssues)
                 .set({ abState: 'off', subjectB: null, updatedAt: new Date() })
@@ -424,9 +519,15 @@ export default withLambda(async (event: HandlerEvent) => {
             } else patch.segmentId = null;
         }
         if ('scheduledFor' in body) {
-            const when = body.scheduledFor ? new Date(body.scheduledFor) : null;
-            if (when && Number.isNaN(when.getTime())) return json(400, { error: 'Invalid send date.' });
+            // ⚠️ READ IN THE TENANT'S ZONE. A datetime-local input sends '2026-08-25T09:00' with no
+            // zone on it, and `new Date()` on a UTC server made that 09:00 UTC — ten in the morning
+            // for a British sender in summer, and nothing anywhere said so. The zone is stamped
+            // onto the issue at the same time, so the moment cannot move afterwards.
+            const tz = await issueTimezone(db, issue, orgId);
+            const when = body.scheduledFor ? wallClockToInstant(String(body.scheduledFor), tz) : null;
+            if (body.scheduledFor && !when) return json(400, { error: 'Invalid send date.' });
             patch.scheduledFor = when;
+            if (when) patch.sendTimezone = tz;
         }
         // Any edit invalidates the approved snapshot: the words a human signed off no longer match
         // the words on file, so the issue goes back to draft rather than silently keeping approval.
@@ -504,13 +605,17 @@ export default withLambda(async (event: HandlerEvent) => {
             senderName: org?.name || 'Your business',
         });
 
-        const when = body.scheduledFor ? new Date(body.scheduledFor) : issue.scheduledFor;
-        if (when && Number.isNaN(when.getTime())) return json(400, { error: 'Invalid send date.' });
+        const approveTz = await issueTimezone(db, issue, orgId);
+        const when = body.scheduledFor
+            ? wallClockToInstant(String(body.scheduledFor), approveTz)
+            : issue.scheduledFor;
+        if (body.scheduledFor && !when) return json(400, { error: 'Invalid send date.' });
 
         const [updated] = await db.update(newsletterIssues).set({
             renderedPayload: snapshot,
             status: when ? 'scheduled' : 'approved',
             scheduledFor: when ?? null,
+            sendTimezone: when ? approveTz : issue.sendTimezone,
             ownerId: ctx.userId,
             updatedAt: new Date(),
         }).where(and(eq(newsletterIssues.id, id), eq(newsletterIssues.organisationId, orgId)))

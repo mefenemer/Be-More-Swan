@@ -154,7 +154,10 @@ await check('the two groups are interleaved, not the first half and the second',
 
 await check('the remainder is materialised up front, so the audience is frozen', () => {
     assert.match(SQL, /Why 'held' is a send status and not an absence of rows/);
-    assert.match(SEND, /const frozen = claimed\.abState === 'testing' && !!claimed\.abSampleSentAt/);
+    // Matched as its own clause: a local-time send freezes for the same reason and shares the
+    // expression, so anchoring on `const frozen = ` would break every time another mode is added.
+    assert.match(SEND, /claimed\.abState === 'testing' && !!claimed\.abSampleSentAt/);
+    assert.match(SEND, /const frozen =/);
 });
 
 // ── 3. No new schedule ──────────────────────────────────────────────────────

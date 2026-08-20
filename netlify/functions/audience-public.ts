@@ -5,7 +5,7 @@
 //
 //   GET  /s/:key                   → the HOSTED sign-up page, for tenants with no website
 //   GET  /api/audience/form/:key   → the form's public config (what subscribe.js renders)
-//   POST /api/audience/subscribe   → a sign-up  { key, email, firstName?, lastName?, company?, hp, ms, url }
+//   POST /api/audience/subscribe   → a sign-up  { key, email, firstName?, lastName?, company?, timezone?, hp, ms, url }
 //   GET  /api/audience/confirm?t=  → the confirmation PAGE (renders a form; changes nothing)
 //   POST /api/audience/confirm     → the confirmation itself
 //
@@ -40,6 +40,7 @@ import {
 import { checkRateLimit, getClientIp } from '../../src/utils/rate-limit';
 import { pseudonymiseIp } from '../../src/utils/ip-pseudonymise';
 import { resolveBaseUrl } from '../../src/utils/base-url';
+import { isValidTimezone } from '../../src/utils/newsletter-schedule';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /** Per-IP: a person signs up once. Ten a minute is already a script. */
@@ -163,7 +164,9 @@ button:hover{background:#047857}button[disabled]{opacity:.6;cursor:default}
   f.addEventListener('submit', function (e) {
     e.preventDefault();
     err.style.display = 'none';
-    var data = new FormData(f), payload = { key: ${JSON.stringify(key)}, ms: Date.now() - started, url: location.href };
+    var tz = '';
+    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e0) { tz = ''; }
+    var data = new FormData(f), payload = { key: ${JSON.stringify(key)}, ms: Date.now() - started, url: location.href, timezone: tz };
     data.forEach(function (v, k) { payload[k] = v; });
     // Sent as the API's own field names, so this page and the embeddable widget are two callers of
     // one endpoint rather than two contracts.
@@ -553,6 +556,14 @@ export default withLambda(async (event: HandlerEvent) => {
                 consentBasis: form.doubleOptIn ? 'double_opt_in' : 'single_opt_in',
                 confirmedAt: form.doubleOptIn ? null : new Date(),
                 sourceDetail: { formId: form.id, page: sourceUrl },
+                // ⚠️ The subscriber's own zone, as their BROWSER reports it — validated here, not
+                // trusted: anyone can post anything to this endpoint, and an unknown zone reaching
+                // Intl inside the send worker would throw and fail a whole batch over one row.
+                // Absent or unrecognised simply means we do not know, which is a first-class answer
+                // (they are sent at the sender's time). It is never inferred from the IP: a guess
+                // presented as a fact is worse here than an honest gap, because being wrong means
+                // arriving at three in the morning.
+                timezone: isValidTimezone(body.timezone) ? body.timezone : null,
             });
             contactId = res.id;
         }

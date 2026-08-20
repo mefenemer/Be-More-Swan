@@ -4121,6 +4121,10 @@ export const audienceContacts = pgTable("audience_contacts", {
   // need a sweep to clear it, and a sweep that stops running mutes people for ever. Both columns
   // are read by src/utils/audience-consent.ts (the pause, which binds EVERY assistant) and by the
   // newsletter's own recipient selection (the frequency cap, which is newsletter-only).
+  // ⚠️ The subscriber's OWN zone, reported by their browser at sign-up. NULL is normal — it cannot
+  // be inferred from an address, and inferring it from an IP would be a guess presented as a fact
+  // in the one place where being wrong means arriving at 3am.
+  timezone: text("timezone"),
   pausedUntil: timestamp("paused_until"),
   emailFrequency: text("email_frequency").notNull().default("all"),
   preferencesUpdatedAt: timestamp("preferences_updated_at"),
@@ -4331,6 +4335,13 @@ export const newsletterIssues = pgTable("newsletter_issues", {
   // Why a send stopped. A failed issue with no reason is undiagnosable — the gap that
   // scheduled_posts.failure_reason exists to close on the social side.
   failureReason: text("failure_reason"),
+  // ── When it goes out. See db/newsletter-send-time.sql.
+  // ⚠️ The zone the tenant was looking at when they scheduled, STAMPED — an assistant's
+  // posting_timezone can change between scheduling and sending, and the issue must go out at the
+  // moment the human agreed to.
+  sendTimezone: text("send_timezone"),
+  sendMode: text("send_mode").notNull().default("at_once"),
+  sendLocalTime: text("send_local_time"),
   // ── A/B subject test. See db/newsletter-ab-subjects.sql.
   subjectB: text("subject_b"),
   abState: text("ab_state").notNull().default("off"),
@@ -4389,6 +4400,8 @@ export const newsletterSends = pgTable("newsletter_sends", {
   // Which subject line THIS recipient was sent. Stamped, never inferred: the record of what
   // somebody received must survive a later edit to the issue.
   variant: text("variant"),
+  // When this recipient's copy becomes due. NULL = with everybody else.
+  dueAt: timestamp("due_at"),
   error: text("error"),
   sentAt: timestamp("sent_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),

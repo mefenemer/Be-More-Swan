@@ -15,7 +15,7 @@
   function show(el, display = 'flex') { if (el) { el.classList.remove('hidden'); el.style.display = display; } }
   function hide(el) { if (el) { el.classList.add('hidden'); el.style.display = 'none'; } }
 
-  const state = { issues: [], segments: [], customFields: [], current: null, dirty: false };
+  const state = { issues: [], segments: [], customFields: [], sendTimezone: '', current: null, dirty: false };
 
   const STATUS = {
     draft:            { label: 'Draft',            cls: 'bg-gray-100 text-gray-600 border-gray-200' },
@@ -175,7 +175,7 @@
 
   async function openIssue(id) {
     try {
-      const { issue, audienceEstimate, sourcePost, resend, links } = await api(`${ISSUES_API}?id=${encodeURIComponent(id)}`);
+      const { issue, audienceEstimate, sourcePost, resend, links, sendTimezone, scheduledForLocal } = await api(`${ISSUES_API}?id=${encodeURIComponent(id)}`);
       state.current = issue;
       state.dirty = false;
       hide($('nl-empty'));
@@ -185,7 +185,12 @@
       $('nl-preheader').value = issue.preheader || '';
       $('nl-body').value = issue.bodyMarkdown || '';
       $('nl-segment').value = issue.segmentId ? String(issue.segmentId) : '';
-      $('nl-schedule').value = issue.scheduledFor ? new Date(issue.scheduledFor).toISOString().slice(0, 16) : '';
+      // ⚠️ The wall-clock the SERVER worked out, in the business's zone — not this browser's idea of
+      // it. Somebody editing from another country would otherwise see (and re-save) a different
+      // time from the one the issue goes out at.
+      state.sendTimezone = sendTimezone || '';
+      $('nl-schedule').value = scheduledForLocal || '';
+      renderScheduleZone();
 
       const st = STATUS[issue.status] || { label: issue.status, cls: 'bg-gray-100 text-gray-600 border-gray-200' };
       const badge = $('nl-status');
@@ -196,6 +201,7 @@
       renderSource(issue, sourcePost);
       renderResend(issue, resend);
       renderAb(issue);
+      renderSendMode(issue);
       renderLinks(issue, links);
       hide($('nl-warnings'));
       renderFailure(issue);
@@ -316,6 +322,81 @@
   }
 
   // ── A/B subject test ───────────────────────────────────────────────────────
+
+  function renderSendMode(issue) {
+    const el = $('nl-sendmode');
+    if (!el) return;
+    if (['sending', 'sent'].includes(issue.status)) {
+      // After the fact this is a statement about what happened, not a control.
+      el.innerHTML = issue.sendMode === 'recipient_local'
+        ? `<p class="text-[11px] text-gray-500">Sent at ${esc(issue.sendLocalTime || '')} in each subscriber's own timezone, where we knew it.</p>`
+        : '';
+      return;
+    }
+
+    const local = issue.sendMode === 'recipient_local';
+    el.innerHTML = `<div class="px-4 py-3 rounded-xl border ${local ? 'bg-sky-50 border-sky-200' : 'bg-gray-50 border-gray-200'} text-sm">
+      <label class="flex items-start gap-2 cursor-pointer">
+        <input type="checkbox" id="nl-local-on" ${local ? 'checked' : ''} class="mt-0.5">
+        <span>
+          <span class="font-bold text-gray-900">Send at each subscriber's local time</span>
+          <span class="block text-[11px] text-gray-500">Instead of everyone at once. We only know a timezone for people who signed up through a form — everyone else gets it at your time.</span>
+        </span>
+      </label>
+      ${local ? `
+        <div class="flex items-center gap-2 mt-3">
+          <label class="text-xs text-gray-700">Their local time
+            <input type="time" id="nl-local-time" value="${esc(issue.sendLocalTime || '09:00')}"
+              class="ml-1 px-2 py-1.5 rounded-lg border border-sky-300 text-sm">
+          </label>
+          <button type="button" id="nl-local-save"
+            class="ml-auto px-3 py-1.5 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-lg cursor-pointer">Save</button>
+        </div>
+        <p id="nl-local-known" class="text-[11px] text-sky-700 mt-2"></p>` : ''}
+    </div>`;
+
+    $('nl-local-on')?.addEventListener('change', async (e) => {
+      if (!e.target.checked) {
+        try {
+          await api(ISSUES_API, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'sendTime', id: issue.id, mode: 'at_once' }),
+          });
+          await openIssue(issue.id);
+        } catch (err) { window.showToast(err.message); }
+        return;
+      }
+      await saveSendMode(issue, '09:00');
+    });
+    $('nl-local-save')?.addEventListener('click', () => saveSendMode(issue, $('nl-local-time').value));
+  }
+
+  async function saveSendMode(issue, localTime) {
+    try {
+      const res = await api(ISSUES_API, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'sendTime', id: issue.id, mode: 'recipient_local', localTime }),
+      });
+      await openIssue(issue.id);
+      // ⚠️ The honest number, shown after saving rather than promised before it: on most lists we
+      // know a timezone for a minority, and everyone else is sent at the sender's own time.
+      const known = Number(res.knownTimezones || 0), total = Number(res.subscribers || 0);
+      const el = $('nl-local-known');
+      if (el) {
+        el.textContent = total
+          ? `We know a timezone for ${known.toLocaleString()} of your ${total.toLocaleString()} subscribers. The other ${(total - known).toLocaleString()} will get it at ${localTime} your time.`
+          : '';
+      }
+    } catch (err) { window.showToast(err.message); }
+  }
+
+  function renderScheduleZone() {
+    const el = $('nl-schedule-zone');
+    if (!el) return;
+    // Named, always. "9:00" with no zone beside it is the ambiguity this whole feature exists to
+    // remove, and a label costs nothing.
+    el.textContent = state.sendTimezone ? `Times are ${state.sendTimezone.replace(/_/g, ' ')}.` : '';
+  }
 
   function renderAb(issue) {
     const el = $('nl-ab');
@@ -502,7 +583,9 @@
       preheader: $('nl-preheader').value,
       bodyMarkdown: $('nl-body').value,
       segmentId: Number($('nl-segment').value || '') || null,
-      scheduledFor: $('nl-schedule').value ? new Date($('nl-schedule').value).toISOString() : null,
+      // Sent as typed. The server reads it in the issue's own zone — converting here would use
+      // this browser's clock, which is the bug rather than the fix.
+      scheduledFor: $('nl-schedule').value || null,
     };
   }
 

@@ -113,8 +113,14 @@
             <input type="datetime-local" id="nl-schedule"
               class="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-700 focus:ring-2 focus:ring-emerald-600 outline-none">
             <p class="text-[11px] text-gray-400 mt-1">Leave empty to approve it now and send manually.</p>
+            <!-- ⚠️ The zone the typed time is read in. "9:00" with nothing beside it is exactly the
+                 ambiguity that made this a bug rather than a setting. -->
+            <p id="nl-schedule-zone" class="text-[11px] text-gray-500 mt-0.5"></p>
           </div>
         </div>
+
+        <!-- One instant for everybody, or the same wall-clock time where each person is. -->
+        <div id="nl-sendmode" class="mt-4"></div>
 
         <div class="flex flex-wrap items-center gap-2 mt-6 pt-5 border-t border-gray-100">
           <button type="button" id="nl-generate"

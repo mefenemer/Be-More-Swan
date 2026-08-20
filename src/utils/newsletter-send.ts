@@ -30,6 +30,7 @@ import { unopenedRecipientPage } from './newsletter-resend';
 import { MONTHLY_GAP_DAYS } from './audience-preferences';
 import { buildSegmentCondition, parseRules } from './audience-segment-rules';
 import { decideAndRelease, prepareAbSample } from './newsletter-ab';
+import { dueAtForRecipient, resolveSendTimezone } from './newsletter-schedule';
 import { checkAudienceConsentBulk, type AudienceSkipReason } from './audience-consent';
 import { renderForRecipient, newsletterUnsubscribeUrl, type IssueSnapshot } from './newsletter-render';
 import { buildFromAddress } from './sending-domain';
@@ -150,7 +151,11 @@ export function mintUnsubscribeToken(): string {
  */
 export async function materialiseRecipients(
     db: Db,
-    issue: { id: number; organisationId: number; segmentId: number | null; resendOfIssueId?: number | null },
+    issue: {
+        id: number; organisationId: number; segmentId: number | null; resendOfIssueId?: number | null;
+        sendMode?: string | null; sendLocalTime?: string | null; sendTimezone?: string | null;
+        sendingStartedAt?: Date | null;
+    },
 ): Promise<number> {
     const CHUNK = 500;
     let created = 0;
@@ -187,7 +192,7 @@ export async function materialiseRecipients(
         // again would be harmless today and wrong the moment somebody edits the segment between
         // the two sends. See src/utils/newsletter-resend.ts for the definition of "did not open",
         // which the count on the button shares with this query.
-        const rows = issue.resendOfIssueId
+        const rows: { id: number; email: string; timezone?: string | null }[] = issue.resendOfIssueId
             ? await unopenedRecipientPage(db, {
                 originalIssueId: issue.resendOfIssueId,
                 organisationId: issue.organisationId,
@@ -199,6 +204,10 @@ export async function materialiseRecipients(
         if (!rows.length) break;
         cursor = rows[rows.length - 1].id;
 
+        // ⚠️ Computed per ROW at materialisation, not looked up at send time. The issue's start is
+        // fixed the moment it begins sending, so every recipient's due time is decided against one
+        // reference point — recomputing per tick would drift the target as the clock moved.
+        const startedAt = issue.sendingStartedAt ?? new Date();
         const inserted = await db.insert(newsletterSends)
             .values(rows.map((r) => ({
                 organisationId: issue.organisationId,
@@ -206,6 +215,14 @@ export async function materialiseRecipients(
                 contactId: r.id,
                 email: r.email,
                 unsubscribeToken: mintUnsubscribeToken(),
+                dueAt: issue.sendMode === 'recipient_local' && issue.sendLocalTime
+                    ? dueAtForRecipient({
+                        startedAt,
+                        localTime: issue.sendLocalTime,
+                        senderTimezone: resolveSendTimezone(issue.sendTimezone),
+                        recipientTimezone: r.timezone ?? null,
+                    })
+                    : null,
             })))
             .onConflictDoNothing()
             .returning({ id: newsletterSends.id });
@@ -237,6 +254,8 @@ async function materialiseFromAudience(
         .select({
             id: audienceContacts.id,
             email: audienceContacts.email,
+            // Read here so the due time can be computed in the same pass that creates the row.
+            timezone: audienceContacts.timezone,
         })
         .from(audienceContacts);
 
@@ -361,7 +380,13 @@ export async function processIssueBatch(
             variant: newsletterSends.variant,
         })
         .from(newsletterSends)
-        .where(and(eq(newsletterSends.issueId, issue.id), eq(newsletterSends.status, 'queued')))
+        .where(and(
+            eq(newsletterSends.issueId, issue.id),
+            eq(newsletterSends.status, 'queued'),
+            // NULL = due with everybody else, which is every row of every issue sent before
+            // per-recipient timing existed.
+            sql`(${newsletterSends.dueAt} IS NULL OR ${newsletterSends.dueAt} <= ${nowIso()})`,
+        ))
         .orderBy(newsletterSends.id)
         .limit(BATCH_PER_TICK);
 
@@ -460,6 +485,10 @@ export async function processIssueBatch(
         }
     }
 
+    // ⚠️ Counts every queued row, DUE OR NOT. A local-time send has rows waiting hours ahead, and
+    // reporting the issue done because none of them is due yet would mark it 'sent' with most of
+    // the list still unsent. Not-yet-due rows keep the issue in 'sending', which is what brings it
+    // back to the sweep — the same mechanism an A/B test's wait uses, and no new worker either.
     const [{ remaining }] = await db
         .select({ remaining: sql<number>`count(*)::int` })
         .from(newsletterSends)
@@ -532,7 +561,12 @@ export async function sendDueIssues(db: Db, opts: { baseUrl: string; now?: Date;
             // (a four-hour wait ticks every few minutes, and each pass would walk the whole
             // audience) but is what makes "who is this issue going to" one answer rather than one
             // per tick.
-            const frozen = claimed.abState === 'testing' && !!claimed.abSampleSentAt;
+            // ⚠️ Also frozen for a local-time send, once it has started. That send stays open for up
+            // to a day, and re-scanning every few minutes would both walk the whole audience each
+            // pass AND sweep in people who subscribed after the issue began — who would receive
+            // yesterday's newsletter, at a due time computed from a start they were not part of.
+            const frozen = (claimed.abState === 'testing' && !!claimed.abSampleSentAt)
+                || (claimed.sendMode === 'recipient_local' && !!claimed.sendingStartedAt);
             const created = frozen ? 0 : await materialiseRecipients(db, claimed);
             const [{ total }] = await db
                 .select({ total: sql<number>`count(*)::int` })

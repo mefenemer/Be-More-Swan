@@ -280,7 +280,7 @@ function tzCalendarParts(date: Date, timeZone: string): { year: number; month: n
 }
 
 /** The UTC offset (ms) of a timezone at a given instant. utcWall - tzWall. */
-function tzOffsetMs(date: Date, timeZone: string): number {
+export function tzOffsetMs(date: Date, timeZone: string): number {
     const dtf = new Intl.DateTimeFormat('en-US', {
         timeZone, hour12: false,
         year: 'numeric', month: '2-digit', day: '2-digit',
@@ -294,8 +294,14 @@ function tzOffsetMs(date: Date, timeZone: string): number {
     return asUtc - date.getTime();
 }
 
-/** Convert a wall-clock (year, month0, day, hour, minute) in a timezone to the UTC instant. */
-function zonedWallTimeToUtc(year: number, month0: number, day: number, hour: number, minute: number, timeZone: string): Date {
+/**
+ * Convert a wall-clock (year, month0, day, hour, minute) in a timezone to the UTC instant.
+ *
+ * Exported since 2026-08-20 for the newsletter's send-time handling: "9:00 on Tuesday in
+ * Europe/London" has to become one instant, and a second implementation of that arithmetic is the
+ * one that would disagree with the posting scheduler about what 9:00 means.
+ */
+export function zonedWallTimeToUtc(year: number, month0: number, day: number, hour: number, minute: number, timeZone: string): Date {
     const guessUtc = Date.UTC(year, month0, day, hour, minute, 0);
     const offset = tzOffsetMs(new Date(guessUtc), timeZone);
     return new Date(guessUtc - offset);
