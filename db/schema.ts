@@ -4117,6 +4117,13 @@ export const audienceContacts = pgTable("audience_contacts", {
   confirmedAt: timestamp("confirmed_at"),
   unsubscribedAt: timestamp("unsubscribed_at"),
   lastSentAt: timestamp("last_sent_at"),
+  // ⚠️ Preference centre. A pause is a TIMESTAMP, not a flag, so it ends on its own — a flag would
+  // need a sweep to clear it, and a sweep that stops running mutes people for ever. Both columns
+  // are read by src/utils/audience-consent.ts (the pause, which binds EVERY assistant) and by the
+  // newsletter's own recipient selection (the frequency cap, which is newsletter-only).
+  pausedUntil: timestamp("paused_until"),
+  emailFrequency: text("email_frequency").notNull().default("all"),
+  preferencesUpdatedAt: timestamp("preferences_updated_at"),
   customFields: jsonb("custom_fields").notNull().default({}),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -4135,7 +4142,7 @@ export const audienceSegments = pgTable("audience_segments", {
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   description: text("description"),
-  kind: text("kind").notNull().default("manual"),               // 'manual' shipped; 'dynamic' reserved
+  kind: text("kind").notNull().default("manual"),               // 'manual' | 'dynamic' | 'tag'
   rules: jsonb("rules").notNull().default({}),
   createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -4143,7 +4150,10 @@ export const audienceSegments = pgTable("audience_segments", {
 }, (t) => [
   // Case-insensitive: "Newsletter" and "newsletter" as two segments is a support ticket.
   uniqueIndex("audience_segments_org_name_unique").on(t.organisationId, sql`lower(${t.name})`),
-  check("audience_segments_kind_check", sql`${t.kind} IN ('manual','dynamic')`),
+  // 'tag' is a manual segment shown separately — see db/audience-tags.sql for why a tag is not a
+  // table of its own. ⚠️ Widened in that file with DROP + ADD; db/audience.sql still declares the
+  // narrower list and adds it only IF NOT EXISTS.
+  check("audience_segments_kind_check", sql`${t.kind} IN ('manual','dynamic','tag')`),
 ]);
 
 export const audienceContactSegments = pgTable("audience_contact_segments", {
@@ -4178,7 +4188,7 @@ export const audienceConsentEvents = pgTable("audience_consent_events", {
 }, (t) => [
   index("audience_consent_events_org_email_idx").on(t.organisationId, t.email, t.createdAt),
   index("audience_consent_events_contact_idx").on(t.contactId, t.createdAt),
-  check("audience_consent_events_event_check", sql`${t.event} IN ('subscribe_requested','confirmed','unsubscribed','bounced','complained','imported','promoted','manual_added','erased','resubscribed')`),
+  check("audience_consent_events_event_check", sql`${t.event} IN ('subscribe_requested','confirmed','unsubscribed','bounced','complained','imported','promoted','manual_added','erased','resubscribed','paused','resumed','frequency_changed')`),
 ]);
 
 export const audienceImportJobs = pgTable("audience_import_jobs", {
@@ -4276,7 +4286,21 @@ export const newsletterIssues = pgTable("newsletter_issues", {
   factualClaims: jsonb("factual_claims"),
   jobId: text("job_id"),
   blueprintId: integer("blueprint_id").references(() => aiBlueprints.id, { onDelete: "set null" }),
+  // The blog post this issue was drafted from, when a Blog Writer handed off to a Newsletter
+  // Assistant. ⚠️ Also the idempotency key: unpublish → republish is a supported round trip and
+  // fires the hand-off again, so a unique index on (assistant_id, source_blog_post_id) is what
+  // stops a republish drafting a second issue about the same post. SET NULL, not CASCADE — an
+  // issue may already have been sent, and deleting the post must not delete the record of it.
+  sourceBlogPostId: integer("source_blog_post_id").references(() => blogPosts.id, { onDelete: "set null" }),
+  // Set on an issue that IS a resend, pointing at the one it repeats. ⚠️ Unique where not null:
+  // one resend per issue, ever — a retry or a double-click must not mail the same people twice.
+  // The resend carries its OWN counters, so "did the second subject line do better?" is a
+  // comparison of two rows rather than a number nobody can pull apart.
+  resendOfIssueId: integer("resend_of_issue_id").references((): AnyPgColumn => newsletterIssues.id, { onDelete: "set null" }),
   // Denormalised on purpose: KPI cards must not COUNT(*) a ledger of hundreds of thousands of rows.
+  // ⚠️ Could this issue report engagement at all? True on the Resend route with tracking on, false
+  // from a tenant's own mailbox. Without it, "0% opened" and "we cannot see opens" look identical.
+  engagementTracked: boolean("engagement_tracked").notNull().default(false),
   // Why a send stopped. A failed issue with no reason is undiagnosable — the gap that
   // scheduled_posts.failure_reason exists to close on the social side.
   failureReason: text("failure_reason"),
@@ -4314,6 +4338,13 @@ export const newsletterSends = pgTable("newsletter_sends", {
   skipReason: text("skip_reason"),
   provider: text("provider"),
   providerMessageId: text("provider_message_id"),
+  // FIRST touch per recipient (db/newsletter-engagement.sql). ⚠️ Rates are computed from these,
+  // never from the counts below — one person opening five times is one person.
+  openedAt: timestamp("opened_at"),
+  clickedAt: timestamp("clicked_at"),
+  openCount: integer("open_count").notNull().default(0),
+  clickCount: integer("click_count").notNull().default(0),
+  lastClickedUrl: text("last_clicked_url"),
   // Per-(issue, contact) unsubscribe credential. Mirrors leadThreads.replyToken: unique, NOT NULL,
   // ROTATED rather than cleared.
   unsubscribeToken: text("unsubscribe_token").notNull(),
@@ -4328,7 +4359,7 @@ export const newsletterSends = pgTable("newsletter_sends", {
   index("newsletter_sends_provider_idx").on(t.providerMessageId),
   index("newsletter_sends_org_email_idx").on(t.organisationId, t.email),
   check("newsletter_sends_status_check", sql`${t.status} IN ('queued','sent','delivered','bounced','complained','failed','skipped')`),
-  check("newsletter_sends_skip_reason_check", sql`${t.skipReason} IS NULL OR ${t.skipReason} IN ('opted_out','suppressed','unconfirmed','not_in_audience','bounced_previously','complained_previously','consent_check_failed','invalid_address','do_not_contact')`),
+  check("newsletter_sends_skip_reason_check", sql`${t.skipReason} IS NULL OR ${t.skipReason} IN ('opted_out','suppressed','unconfirmed','not_in_audience','bounced_previously','complained_previously','consent_check_failed','invalid_address','do_not_contact','paused')`),
 ]);
 
 // ── Newsletter dispatch (db/newsletter-dispatch.sql) ────────────────────────────────────────────
@@ -4348,6 +4379,10 @@ export const newsletterSendingDomains = pgTable("newsletter_sending_domains", {
   fromName: text("from_name"),
   fromLocalPart: text("from_local_part").notNull().default("hello"),
   replyTo: text("reply_to"),
+  // Tenant's choice. Off ⇒ the provider embeds no pixel and rewrites no links, and every issue
+  // sent from this domain records engagementTracked = false.
+  openTracking: boolean("open_tracking").notNull().default(true),
+  clickTracking: boolean("click_tracking").notNull().default(true),
   lastCheckedAt: timestamp("last_checked_at"),
   verifiedAt: timestamp("verified_at"),
   createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
@@ -4357,6 +4392,81 @@ export const newsletterSendingDomains = pgTable("newsletter_sending_domains", {
   unique("newsletter_sending_domains_org_domain_unique").on(t.organisationId, t.domain),
   index("newsletter_sending_domains_org_idx").on(t.organisationId, t.status),
   check("newsletter_sending_domains_status_check", sql`${t.status} IN ('pending','verified','failed','disabled')`),
+]);
+
+// ── Welcome sequence (db/newsletter-sequences.sql) ──────────────────────────────────────────────
+// ⚠️ NOT outreach_sequences. That model's enrolment is keyed on lead_threads.id NOT NULL — the halt
+// key its worker re-reads inside the claiming transaction. An audience contact has no thread.
+export const newsletterSequences = pgTable("newsletter_sequences", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  assistantId: integer("assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  name: text("name").notNull().default("Welcome sequence"),
+  triggerEvent: text("trigger_event").notNull().default("subscribed"),
+  // ⚠️ OFF until a human turns it on — drafted steps must not start sending to real subscribers
+  // the moment they are written.
+  isEnabled: boolean("is_enabled").notNull().default(false),
+  enabledAt: timestamp("enabled_at"),
+  enabledBy: integer("enabled_by").references(() => users.id, { onDelete: "set null" }),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("newsletter_sequences_assistant_trigger_uidx").on(t.assistantId, t.triggerEvent).where(sql`assistant_id IS NOT NULL`),
+  check("newsletter_sequences_trigger_check", sql`${t.triggerEvent} IN ('subscribed')`),
+]);
+
+export const newsletterSequenceSteps = pgTable("newsletter_sequence_steps", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  sequenceId: integer("sequence_id").notNull().references(() => newsletterSequences.id, { onDelete: "cascade" }),
+  stepNumber: integer("step_number").notNull(),
+  // From the PREVIOUS step, not from enrolment — inserting a step shifts what follows rather than
+  // bunching two emails onto one day.
+  delayDays: integer("delay_days").notNull().default(0),
+  subject: text("subject").notNull(),
+  preheader: text("preheader"),
+  // ⚠️ A FIXED body, unlike sequenceSteps.bodyPrompt on the outreach side. A welcome series goes to
+  // people who have never spoken to the business and is reviewed once — drafting per send would put
+  // unreviewed copy in front of strangers on a schedule.
+  bodyMarkdown: text("body_markdown").notNull().default(""),
+  // Snapshot, rebuilt on save. An edit made after somebody enrolled must not change what they get
+  // mid-sequence — same rule as newsletterIssues.renderedPayload.
+  renderedPayload: jsonb("rendered_payload"),
+  isEnabled: boolean("is_enabled").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("newsletter_sequence_steps_seq_step_uidx").on(t.sequenceId, t.stepNumber),
+  check("newsletter_sequence_steps_number_check", sql`${t.stepNumber} > 0 AND ${t.delayDays} >= 0`),
+]);
+
+export const newsletterSequenceEnrolments = pgTable("newsletter_sequence_enrolments", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  sequenceId: integer("sequence_id").notNull().references(() => newsletterSequences.id, { onDelete: "cascade" }),
+  contactId: integer("contact_id").notNull().references(() => audienceContacts.id, { onDelete: "cascade" }),
+  email: text("email").notNull(),
+  // ⚠️ Minted once per enrolment and stable for the whole series — a welcome step has no
+  // newsletter_sends row to carry one, and a footer link that resolves to nothing is worse than
+  // no link. newsletter-unsubscribe.ts falls back to this after newsletter_sends.
+  unsubscribeToken: text("unsubscribe_token"),
+  state: text("state").notNull().default("active"),
+  haltReason: text("halt_reason"),
+  lastStepSent: integer("last_step_sent").notNull().default(0),
+  nextSendAt: timestamp("next_send_at"),
+  lastError: text("last_error"),
+  attempt: integer("attempt").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  // ⚠️ ONE ENROLMENT PER CONTACT, EVER. Somebody who unsubscribes and later re-subscribes must not
+  // restart the welcome series — that reads as a company which has forgotten it already met them.
+  uniqueIndex("newsletter_sequence_enrolments_contact_uidx").on(t.sequenceId, t.contactId),
+  uniqueIndex("newsletter_sequence_enrolments_token_uidx").on(t.unsubscribeToken).where(sql`unsubscribe_token IS NOT NULL`),
+  index("newsletter_sequence_enrolments_due_idx").on(t.state, t.nextSendAt),
+  check("newsletter_sequence_enrolments_state_check", sql`${t.state} IN ('active','completed','halted')`),
+  check("newsletter_sequence_enrolments_halt_check", sql`${t.haltReason} IS NULL OR ${t.haltReason} IN ('unsubscribed','bounced','complained','suppressed','consent_check_failed','no_route','send_failed','sequence_disabled','no_steps','manual')`),
 ]);
 
 // Relational-query definitions for the chat tables live in db/relations.ts

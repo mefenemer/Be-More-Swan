@@ -167,8 +167,8 @@ await check('every KPI card has a field behind it', () => {
     const expected: [string, string][] = [
         ['Subscribers', 'subscribers'],
         ['Issues Sent', 'issuesSent'],
-        ['Delivery Rate', 'deliveryRate'],
-        ['Unsubscribe Rate', 'unsubscribeRate'],
+        ['Open Rate', 'openRate'],
+        ['Click Rate', 'clickRate'],
     ];
     for (const [title, field] of expected) {
         assert.ok(block.includes(`title: '${title}'`), `the card "${title}" should be in the registry`);
@@ -178,15 +178,59 @@ await check('every KPI card has a field behind it', () => {
         'without this the role reads the social post_insights endpoint, which holds none of its data');
 });
 
-await check('opens and clicks are NOT claimed anywhere', () => {
-    // Neither is measured: no tracking pixel, no link rewriting. A card that can never populate is
-    // worse than no card, and the copy is read as a specification.
-    const declared = withoutComments(REGISTRY);
-    const start = landmark(declared, `${ROLE}: {`);
-    const block = declared.slice(start, landmark(declared, 'blog_writer: {'));
-    for (const claim of ['Open Rate', 'Opens', 'Click Rate', 'Click-Through']) {
-        assert.ok(!block.includes(claim), `"${claim}" is not measured — it must not appear on a card`);
-    }
+await check('the open rate never claims to be a measurement', () => {
+    // Opens are a 1x1 image and Apple Mail Privacy Protection pre-fetches it whether or not a human
+    // looks. The number is a trend; a card presenting it as readership is a lie with a decimal point
+    // on it, so the caveat is asserted rather than left to a future edit's discretion.
+    const start = landmark(REGISTRY, `${ROLE}: {`);
+    const block = REGISTRY.slice(start, landmark(REGISTRY, 'blog_writer: {'));
+    const desc = block.slice(landmark(block, "title: 'Open Rate'"), landmark(block, "title: 'Click Rate'"));
+    assert.match(desc, /Indicative only/i, 'the card description must carry the caveat');
+    assert.match(desc, /Apple Mail/i, 'and name the specific reason, not just hedge');
+});
+
+await check('an unmeasurable send reports that, rather than 0%', () => {
+    // An issue sent from a connected mailbox rewrites no links and embeds no pixel, so a 0% open
+    // rate there is a statement about our instrumentation dressed up as one about the reader.
+    assert.match(PERF, /engagementMeasurable/);
+    assert.match(PERF, /FILTER \(WHERE \$\{newsletterIssues\.engagementTracked\}\)/,
+        'untracked issues must leave the denominator, not just the numerator');
+    assert.match(ASSISTANTS, /Not measurable on these sends/);
+    assert.match(read('newsletter.js'), /were not measurable on this send/);
+});
+
+await check('opens count PEOPLE, not events', () => {
+    // One subscriber opening five times is one person. Counting events would push the rate past
+    // 100% the first time somebody scrolled back to an issue.
+    const hook = read('netlify/functions/newsletter-webhook.ts');
+    const branch = hook.slice(landmark(hook, "type === 'email.opened'"));
+    assert.match(branch, /isNull\(newsletterSends\.openedAt\)/, 'first touch only');
+    assert.match(branch, /isNull\(newsletterSends\.clickedAt\)/);
+    assert.match(branch, /if \(first\)/, 'and only a first touch may increment the issue');
+});
+
+await check('the ROI strip has real hours behind it', () => {
+    // roiSource re-reveals the Time Saved / Money Saved strip. Setting it while roi-activity.ts
+    // priced nothing would have shown a confident, permanent zero.
+    const start = landmark(REGISTRY, `${ROLE}: {`);
+    const block = REGISTRY.slice(start, landmark(REGISTRY, 'blog_writer: {'));
+    assert.match(block, /roiSource: 'newsletter'/);
+
+    const roi = read('src/utils/roi-activity.ts');
+    assert.match(roi, /newsletterIssues/, 'the module must actually count issues');
+    // Counted in BOTH passes — org-wide and the per-assistant grouping. With only one, the hero
+    // strip and the itemised modal disagree about the same window.
+    assert.equal((roi.match(/mult\.newsletter_drafted/g) || []).length, 2);
+    assert.match(read('src/utils/platform-config.ts'), /newsletter_drafted: \d+/);
+});
+
+await check('a failed send is still priced as work done', () => {
+    // The draft happened. Pricing it at zero would tell a customer their assistant did nothing on
+    // the week their sending domain lapsed.
+    const roi = read('src/utils/roi-activity.ts');
+    const at = landmark(roi, 'export const DISCARDED_NEWSLETTER_STATUSES');
+    assert.ok(!roi.slice(at, at + 120).includes("'failed'"),
+        'a failed send must not be treated as discarded work');
 });
 
 await check('the catalogue copy promises only what the pipeline does', () => {
@@ -299,13 +343,13 @@ await check('the chat knows what it is, and what it cannot do', () => {
     const chat = read('netlify/functions/chat-orchestrator.ts');
     assert.ok(chat.includes('newsletter_editor: {'), 'without a route it falls through to the generic one');
     const route = chat.slice(landmark(chat, 'newsletter_editor: {'), landmark(chat, 'blog_writer: {'));
-    // The three things a chat can get catastrophically wrong for this role.
-    assert.match(route, /never say an issue has been saved/i, 'it cannot send, and must not imply it can');
+    // The three things a chat can get catastrophically wrong for this role. ⚠️ The first is about
+    // SENDING, which the chat can never do — distinct from saving, which it now can (via the card,
+    // pressed by a human). tests/newsletter-chat-draft.test.ts covers the save contract itself.
+    assert.match(route, /NEVER say the issue has been saved/i, 'the card is an offer, not a filing');
+    assert.match(route, /cannot send, schedule or approve from this chat/i, 'sending is never available here');
     assert.match(route, /WHAT YOU CANNOT SEE/, 'it cannot see the audience or past issues');
     assert.match(route, /do not write an unsubscribe line/i, 'the footer is appended in code — writing it twice is the failure');
-    // And it must NOT offer a draft card, because nothing exists to honour one.
-    assert.ok(!route.includes('uiElement": {') && !route.includes('newsletter_issue_draft'),
-        'a Save card here would be an offer the product cannot honour');
 });
 
 console.log(`\n${passed} checks passed.`);

@@ -35,7 +35,7 @@
 
 import { and, count, eq, gte, inArray, ne, notInArray, sql } from 'drizzle-orm';
 import {
-    aiAssistants, assistantRecords, blogPosts, scheduledPosts, taskRuns,
+    aiAssistants, assistantRecords, blogPosts, newsletterIssues, scheduledPosts, taskRuns,
 } from '../../db/schema';
 import { getTimeMultipliers, type TimeMultipliers } from './platform-config';
 
@@ -95,6 +95,15 @@ export const DISCARDED_POST_STATUSES = ['rejected', 'cancelled', 'admin_test'];
 
 /** blog_posts statuses that represent a discarded draft. */
 export const DISCARDED_BLOG_STATUSES = ['rejected', 'cancelled', 'archived'];
+
+/**
+ * newsletter_issues statuses that represent an issue the user discarded rather than received.
+ *
+ * ⚠️ 'failed' is NOT here. A send that failed still cost the assistant the whole draft, and the
+ * work is sitting there ready to retry — pricing it at zero would tell a customer their assistant
+ * did nothing on the week its sending domain lapsed.
+ */
+export const DISCARDED_NEWSLETTER_STATUSES = ['rejected', 'archived'];
 
 /** Record types this module prices, exported so the itemised modal selects the same set. */
 export const COUNTED_RECORD_TYPES_LIST: readonly string[] = Object.keys(RECORD_TYPE_MULTIPLIER);
@@ -239,6 +248,18 @@ export async function countRoiActivity(db: Db, opts: CountRoiActivityOptions): P
             gte(blogPosts.createdAt, windowStart),
         ));
 
+    // Counted on CREATION, like blog posts — an issue drafted and waiting for approval is work the
+    // assistant has already done, and a customer who reads the figure before pressing Approve
+    // should not see it jump afterwards.
+    const newsletterQ = db.select({ count: count() })
+        .from(newsletterIssues)
+        .where(and(
+            eq(newsletterIssues.organisationId, organisationId),
+            inArray(newsletterIssues.assistantId, assistantIds),
+            notInArray(newsletterIssues.status, DISCARDED_NEWSLETTER_STATUSES),
+            gte(newsletterIssues.createdAt, windowStart),
+        ));
+
     // One grouped query rather than seven counts: the record types share an index
     // (assistant_records_org_assistant_type_idx) and the grain we want out is exactly its prefix.
     const recordQ = db
@@ -253,10 +274,11 @@ export async function countRoiActivity(db: Db, opts: CountRoiActivityOptions): P
         ))
         .groupBy(assistantRecords.recordType);
 
-    const [taskRunCount, postCount, blogCount, recordRows] = await Promise.all([
+    const [taskRunCount, postCount, blogCount, newsletterCount, recordRows] = await Promise.all([
         safeCount(taskRunQ, markDegraded),
         safeCount(postQ, markDegraded),
         safeCount(blogQ, markDegraded),
+        safeCount(newsletterQ, markDegraded),
         (async (): Promise<{ recordType: string; count: number }[]> => {
             try { return await recordQ; } catch (err) {
                 console.error('[roi-activity] assistant_records count failed, defaulting to none', err);
@@ -273,6 +295,7 @@ export async function countRoiActivity(db: Db, opts: CountRoiActivityOptions): P
     push('posts', 'Social posts drafted', postCount, mult.content_drafted);
     push('task_runs', 'Tasks completed', taskRunCount, mult.tasks_completed);
     push('blog', 'Blog posts written', blogCount, mult.blog_drafted);
+    push('newsletter', 'Newsletter issues written', newsletterCount, mult.newsletter_drafted);
     for (const row of recordRows) {
         const key = String(row.recordType);
         const multKey = RECORD_TYPE_MULTIPLIER[key];
@@ -332,7 +355,7 @@ export async function countRoiActivityByAssistant(
         }
     };
 
-    const [postRows, taskRows, blogRows, recordRows] = await Promise.all([
+    const [postRows, taskRows, blogRows, newsletterRows, recordRows] = await Promise.all([
         safeGroup(db.select({ assistantId: scheduledPosts.assistantId, c: sql<number>`count(*)::int` })
             .from(scheduledPosts)
             .where(and(
@@ -362,6 +385,16 @@ export async function countRoiActivityByAssistant(
                 gte(blogPosts.createdAt, windowStart),
             ))
             .groupBy(blogPosts.assistantId)),
+
+        safeGroup(db.select({ assistantId: newsletterIssues.assistantId, c: sql<number>`count(*)::int` })
+            .from(newsletterIssues)
+            .where(and(
+                eq(newsletterIssues.organisationId, organisationId),
+                inArray(newsletterIssues.assistantId, assistantIds),
+                notInArray(newsletterIssues.status, DISCARDED_NEWSLETTER_STATUSES),
+                gte(newsletterIssues.createdAt, windowStart),
+            ))
+            .groupBy(newsletterIssues.assistantId)),
 
         (async (): Promise<{ assistantId: number; recordType: string; c: number }[]> => {
             try {
@@ -396,6 +429,7 @@ export async function countRoiActivityByAssistant(
     postRows.forEach(r => add(r.assistantId, 'posts', 'Social posts drafted', Number(r.c), mult.content_drafted));
     taskRows.forEach(r => add(r.assistantId, 'task_runs', 'Tasks completed', Number(r.c), mult.tasks_completed));
     blogRows.forEach(r => add(r.assistantId, 'blog', 'Blog posts written', Number(r.c), mult.blog_drafted));
+    newsletterRows.forEach(r => add(r.assistantId, 'newsletter', 'Newsletter issues written', Number(r.c), mult.newsletter_drafted));
     for (const r of recordRows) {
         const type = String(r.recordType);
         const multKey = RECORD_TYPE_MULTIPLIER[type];

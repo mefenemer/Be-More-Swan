@@ -172,21 +172,26 @@
           desc: 'Newsletter issues drafted, approved by you, and delivered.',
         },
         {
-          // Delivered / recipients, from the provider's own events. Only meaningful once the
-          // webhook is configured — the endpoint reports it as unavailable rather than as 0%.
-          label: 'Deliverability',
-          title: 'Delivery Rate',
-          desc: 'Share of the last issue that reached an inbox, as reported by the mail provider.',
+          // ⚠️ INDICATIVE, and the description says so on purpose. An open is a 1×1 image, and Apple
+          // Mail Privacy Protection pre-fetches it whether or not a human looks — so the figure is
+          // inflated for Apple Mail readers and invisible for anyone blocking images. It is a trend
+          // worth watching and not a measurement, and the card must never imply otherwise.
+          label: 'Engagement',
+          title: 'Open Rate',
+          desc: 'Share of recipients whose mail client loaded the issue. Indicative only — Apple Mail and image blockers both distort it, so watch the trend rather than the number.',
         },
         {
-          // The quality counterweight, and the one that matters most for an AI writer: the three
-          // cards above can all look healthy while the writing is wearing people out. A rising
-          // unsubscribe rate is the first and cheapest signal of that.
-          label: 'Reader Response',
-          title: 'Unsubscribe Rate',
-          desc: 'Share of recipients who opted out of your last issue. Under 0.5% is normal; a jump means the content or the frequency is wrong.',
+          // The honest half of the pair: a click is a deliberate act by a person, so this is the
+          // number to trust when the two disagree.
+          label: 'Engagement',
+          title: 'Click Rate',
+          desc: 'Share of recipients who followed a link. Unlike opens this is a deliberate action, so it is the more reliable of the two.',
         },
       ],
+      // ⚠️ Delivery rate, unsubscribes and spam complaints are NOT on these four cards — the grid is
+      // exactly four and opens/clicks earned two of the slots. They are not lost: every issue's own
+      // Results line in the Newsletter Studio carries sent / delivered / bounced / marked-as-spam /
+      // unsubscribed, which is the per-issue grain where those figures are actually actionable.
       // Routes _loadAssistantMetrics to _loadNewsletterMetrics / get-newsletter-performance.
       // Without it this role falls through to the social post_insights endpoint, which holds
       // none of its data.
@@ -204,6 +209,12 @@
         hasReviewCadence: true,
         hasContentPublishing: true,
       },
+      // ⊕ The hero's "Time Saved / Money Saved" strip. A SECOND, independent switch from
+      // modules.hasImpactRoi — same pairing as the Blog Writer and the Lead Generator. hasImpactRoi
+      // stays false so the post-based "Content by platform" breakdown stays off a role that writes
+      // no posts; roiSource re-reveals the strip alone, now that src/utils/roi-activity.ts prices
+      // newsletter issues (it did not until 2026-08-20, so the strip would have read a flat zero).
+      roiSource: 'newsletter',
       // Opens the Newsletter Studio, the same way the Blog Writer opens Blog Studio — special-cased
       // in assistants.js because both are bespoke pipelines rather than a chat intake.
       primaryAction: { kind: 'newsletter_studio', label: 'Write Newsletter' },

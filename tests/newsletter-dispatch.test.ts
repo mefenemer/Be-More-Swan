@@ -106,6 +106,25 @@ await check('a verified domain is used, and the From line is the tenant\'s own',
     assert.equal(res.route.from, 'Acme Ltd <hello@mail.acme.com>');
 });
 
+await check('the mailbox route reports that it CANNOT measure engagement', async () => {
+    // "Nobody opened it" and "we cannot see opens" are the same 0% on a dashboard. A mailbox send
+    // rewrites no links and embeds no pixel, so the issue has to record which of the two it is.
+    const { db } = fakeDb({ rows: {
+        'select:newsletter_sending_domains': [],
+        'select:workspace_integrations': [{ provider: 'gmail' }],
+    } });
+    const res = await resolveSendRoute(db, 7, { recipientCount: 20, senderName: 'Acme Ltd' });
+    assert.ok('route' in res);
+    assert.equal(res.route.engagementTracked, false);
+
+    const tracked = fakeDb({ rows: { 'select:newsletter_sending_domains': [
+        { domain: 'mail.acme.com', fromLocalPart: 'hello', openTracking: true, clickTracking: false, verifiedAt: new Date() },
+    ] } });
+    const r2 = await resolveSendRoute(tracked.db, 7, { recipientCount: 20, senderName: 'Acme Ltd' });
+    assert.ok('route' in r2);
+    assert.equal(r2.route.engagementTracked, true, 'either signal alone is enough to report something');
+});
+
 await check('with no domain, a connected mailbox sends a SMALL list', async () => {
     const { db } = fakeDb({ rows: {
         'select:newsletter_sending_domains': [],
@@ -155,7 +174,7 @@ await check('a recipient who unsubscribed after approval is SKIPPED, with the re
     } });
     const res = await processIssueBatch(db,
         { id: 5, organisationId: 7, subject: 'Hello', renderedPayload: snapshot, fromAddress: null, sendProvider: null },
-        { route: { provider: 'resend', from: 'Acme <hello@mail.acme.com>', replyTo: null }, senderName: 'Acme Ltd', postalAddress: null, baseUrl: 'https://bemoreswan.com' });
+        { route: { provider: 'resend', from: 'Acme <hello@mail.acme.com>', replyTo: null, engagementTracked: true }, senderName: 'Acme Ltd', postalAddress: null, baseUrl: 'https://bemoreswan.com' });
 
     assert.equal(res.sent, 0, 'nothing may be sent to them');
     assert.equal(res.skipped, 1);

@@ -12,6 +12,11 @@
       <h1 class="text-3xl font-extrabold text-gray-900">Newsletter</h1>
       <p class="text-gray-500 mt-1">Draft an issue, see exactly what lands in the inbox, then approve it for sending.</p>
     </div>
+    <button type="button" id="nl-welcome"
+      class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-gray-700 bg-white hover:bg-gray-50 rounded-lg transition-colors border border-gray-300 cursor-pointer">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>
+      Welcome sequence
+    </button>
     <button type="button" id="nl-sending"
       class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-gray-700 bg-white hover:bg-gray-50 rounded-lg transition-colors border border-gray-300 cursor-pointer">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
@@ -51,6 +56,10 @@
           <span id="nl-saved" class="text-xs text-gray-400"></span>
         </div>
 
+        <!-- Where this issue came from, when it was not started by hand. A draft that appeared on
+             its own has to say why it exists before the reviewer reads a word of it. -->
+        <div id="nl-source" class="hidden mb-4 px-4 py-3 rounded-xl bg-sky-50 border border-sky-200 text-sm text-sky-900" style="display:none"></div>
+
         <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Subject line</label>
         <input type="text" id="nl-subject" maxlength="200"
           class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm font-bold mb-1">
@@ -75,6 +84,10 @@
 
         <!-- Outcome of a send, once there is one. -->
         <div id="nl-stats" class="hidden mt-3 px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-700" style="display:none"></div>
+
+        <!-- Resend to the people who never opened it. Drawn from the server's own verdict, so the
+             button is never offered for an issue the server would refuse. -->
+        <div id="nl-resend" class="hidden mt-3 px-4 py-3 rounded-xl border text-sm" style="display:none"></div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-5">
           <div>
@@ -109,6 +122,21 @@
             class="hidden px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer" style="display:none">Send now</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Welcome sequence: what a new subscriber hears in the days after they confirm. -->
+  <div id="nl-welcome-modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4" style="display:none">
+    <div class="absolute inset-0 bg-black/40" data-nl-welcome-close></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
+      <div class="flex items-start justify-between mb-1">
+        <h2 class="text-lg font-extrabold text-gray-900">Welcome sequence</h2>
+        <button type="button" data-nl-welcome-close class="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 cursor-pointer">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="text-sm text-gray-500 mb-5">Sent automatically after someone confirms their subscription — the moment they are most interested.</p>
+      <div id="nl-welcome-body"></div>
     </div>
   </div>
 

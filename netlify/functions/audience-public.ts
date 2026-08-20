@@ -27,6 +27,7 @@ import {
 } from '../../db/schema';
 import { looksLikeEmail, normaliseEmail, cleanName } from '../../src/utils/audience-contacts';
 import { addToSegment, recordConsentEvent, setContactStatus, upsertContact } from '../../src/utils/audience-store';
+import { enrolInWelcomeSequence } from '../../src/utils/newsletter-sequence';
 import {
     FORM_KEY_RE, MIN_FILL_MS, originAllowed,
     DEFAULT_CONSENT_TEXT, DEFAULT_SUCCESS_MESSAGE, SINGLE_OPT_IN_SUCCESS_MESSAGE,
@@ -225,6 +226,17 @@ export default withLambda(async (event: HandlerEvent) => {
                     try { await addToSegment(db, row.contactId, form.segmentId, null); }
                     catch (err) { console.error('[audience-public] confirmed but segment assignment failed', { formId: row.formId }, err); }
                 }
+            }
+
+            // The moment of maximum interest. Best-effort by design: enrolInWelcomeSequence never
+            // throws, because a confirmation that 500s over a welcome email would leave somebody
+            // who just clicked "confirm" believing they had failed to subscribe.
+            if (row.contactId) {
+                await enrolInWelcomeSequence(db, {
+                    organisationId: row.organisationId,
+                    contactId: row.contactId,
+                    email: row.email,
+                });
             }
 
             return page(200, 'You are subscribed', `<p>Thanks — you will hear from ${who} soon. Every email carries an unsubscribe link.</p>`);

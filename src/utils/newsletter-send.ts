@@ -23,9 +23,12 @@ import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 import { randomBytes } from 'crypto';
 import type { getDb } from '../../db/client';
 import {
-    audienceContactSegments, audienceContacts, newsletterIssues, newsletterSendingDomains,
-    newsletterSends, organisations,
+    audienceContactSegments, audienceContacts, audienceSegments, newsletterIssues,
+    newsletterSendingDomains, newsletterSends, organisations,
 } from '../../db/schema';
+import { unopenedRecipientPage } from './newsletter-resend';
+import { MONTHLY_GAP_DAYS } from './audience-preferences';
+import { buildSegmentCondition, parseRules } from './audience-segment-rules';
 import { checkAudienceConsentBulk, type AudienceSkipReason } from './audience-consent';
 import { renderForRecipient, newsletterUnsubscribeUrl, type IssueSnapshot } from './newsletter-render';
 import { buildFromAddress } from './sending-domain';
@@ -62,6 +65,12 @@ export interface SendRoute {
     replyTo: string | null;
     /** The verified domain, when there is one. For reporting only. */
     domain?: string | null;
+    /**
+     * Can this route report opens and clicks at all? True only on the provider route with tracking
+     * enabled. ⚠️ Stamped onto the issue, because "nobody opened it" and "we cannot see opens" are
+     * the same 0% on a dashboard otherwise, and a tenant would read the first when it is the second.
+     */
+    engagementTracked: boolean;
 }
 
 /**
@@ -93,6 +102,9 @@ export async function resolveSendRoute(
                 from: buildFromAddress(domain, opts.senderName),
                 replyTo: domain.replyTo || null,
                 domain: domain.domain,
+                // Either signal alone is enough to report something; both off means the issue can
+                // report neither, and says so rather than showing two honest-looking zeroes.
+                engagementTracked: !!(domain.openTracking || domain.clickTracking),
             },
         };
     }
@@ -118,7 +130,9 @@ export async function resolveSendRoute(
         };
     }
 
-    return { route: { provider: mailbox, from: null, replyTo: null } };
+    // A tenant's own mailbox rewrites no links and embeds no pixel: this route can never report
+    // opens or clicks, which is one of the reasons it is capped at a small list.
+    return { route: { provider: mailbox, from: null, replyTo: null, engagementTracked: false } };
 }
 
 /** Unguessable, URL-safe, and the same shape lead_threads.replyToken uses. */
@@ -135,39 +149,51 @@ export function mintUnsubscribeToken(): string {
  */
 export async function materialiseRecipients(
     db: Db,
-    issue: { id: number; organisationId: number; segmentId: number | null },
+    issue: { id: number; organisationId: number; segmentId: number | null; resendOfIssueId?: number | null },
 ): Promise<number> {
     const CHUNK = 500;
     let created = 0;
     let cursor = 0;
 
-    for (;;) {
-        const base = db
-            .select({
-                id: audienceContacts.id,
-                email: audienceContacts.email,
-            })
-            .from(audienceContacts);
+    // A DYNAMIC segment has no membership rows — it is a saved rule, compiled here. Loaded once
+    // rather than per page, so a rule edited mid-send cannot change the audience halfway through.
+    let segment: { kind: string; name: string; rules: unknown } | null = null;
+    if (issue.segmentId && !issue.resendOfIssueId) {
+        const [row] = await db
+            .select({ kind: audienceSegments.kind, name: audienceSegments.name, rules: audienceSegments.rules })
+            .from(audienceSegments)
+            .where(and(
+                eq(audienceSegments.id, issue.segmentId),
+                eq(audienceSegments.organisationId, issue.organisationId),
+            ))
+            .limit(1);
+        // ⚠️ A missing segment is a hard stop, not "send to everyone". The tenant chose an audience
+        // narrower than their whole list; losing that choice must never widen it silently.
+        if (!row) {
+            throw new Error('The segment this issue was targeted at no longer exists. Choose an audience and approve it again — nothing was sent.');
+        }
+        segment = row;
+        if (row.kind === 'dynamic' && !buildSegmentCondition(issue.organisationId, row.rules)) {
+            const why = parseRules(row.rules);
+            throw new Error(`The rules for the segment "${row.name}" could not be read: ${why.ok ? 'unknown problem' : why.error} Fix the segment and approve this issue again — nothing was sent.`);
+        }
+    }
 
-        const rows = issue.segmentId
-            ? await base
-                .innerJoin(audienceContactSegments, eq(audienceContactSegments.contactId, audienceContacts.id))
-                .where(and(
-                    eq(audienceContacts.organisationId, issue.organisationId),
-                    eq(audienceContacts.status, 'subscribed'),
-                    eq(audienceContactSegments.segmentId, issue.segmentId),
-                    sql`${audienceContacts.id} > ${cursor}`,
-                ))
-                .orderBy(audienceContacts.id)
-                .limit(CHUNK)
-            : await base
-                .where(and(
-                    eq(audienceContacts.organisationId, issue.organisationId),
-                    eq(audienceContacts.status, 'subscribed'),
-                    sql`${audienceContacts.id} > ${cursor}`,
-                ))
-                .orderBy(audienceContacts.id)
-                .limit(CHUNK);
+    for (;;) {
+        // ⚠️ A RESEND IGNORES THE SEGMENT ENTIRELY. Its audience is not "who is in this segment"
+        // but "who was sent the original and never opened it" — a list that is already the
+        // intersection of the segment and the people we actually reached. Applying the segment
+        // again would be harmless today and wrong the moment somebody edits the segment between
+        // the two sends. See src/utils/newsletter-resend.ts for the definition of "did not open",
+        // which the count on the button shares with this query.
+        const rows = issue.resendOfIssueId
+            ? await unopenedRecipientPage(db, {
+                originalIssueId: issue.resendOfIssueId,
+                organisationId: issue.organisationId,
+                afterContactId: cursor,
+                limit: CHUNK,
+            })
+            : await materialiseFromAudience(db, issue, segment, cursor, CHUNK);
 
         if (!rows.length) break;
         cursor = rows[rows.length - 1].id;
@@ -188,6 +214,72 @@ export async function materialiseRecipients(
     }
 
     return created;
+}
+
+/**
+ * ISO strings, not Dates — see the note in sendDueIssues. A raw sql`` template binds a JS Date as
+ * timestamptz, and these columns are plain TIMESTAMP, so the comparison would be coerced through
+ * the server's TimeZone.
+ */
+const nowIso = () => new Date().toISOString();
+const monthlyCutoffIso = () => new Date(Date.now() - MONTHLY_GAP_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+/** The ordinary audience: everyone subscribed, narrowed to the issue's segment when it has one. */
+async function materialiseFromAudience(
+    db: Db,
+    issue: { organisationId: number; segmentId: number | null },
+    segment: { kind: string; name: string; rules: unknown } | null,
+    cursor: number,
+    CHUNK: number,
+): Promise<{ id: number; email: string }[]> {
+    const base = db
+        .select({
+            id: audienceContacts.id,
+            email: audienceContacts.email,
+        })
+        .from(audienceContacts);
+
+    // ⚠️ PREFERENCES ARE APPLIED HERE, not only at send time. A paused or frequency-capped
+    // subscriber never gets a ledger row, so they are not counted in recipient_count and the
+    // tenant's "this reached N people" is true. The consent resolver refuses them again at send
+    // time — this is the honest number, that is the guarantee.
+    const preferenceFilter = and(
+        eq(audienceContacts.organisationId, issue.organisationId),
+        eq(audienceContacts.status, 'subscribed'),
+        // Not paused, or the pause has already lapsed. No sweep clears it; the comparison is the
+        // whole mechanism.
+        sql`(${audienceContacts.pausedUntil} IS NULL OR ${audienceContacts.pausedUntil} <= ${nowIso()})`,
+        // "At most one a month", measured from the last time we actually emailed them. A contact
+        // we have never emailed has a NULL last_sent_at and is due by definition.
+        sql`(${audienceContacts.emailFrequency} <> 'monthly'
+             OR ${audienceContacts.lastSentAt} IS NULL
+             OR ${audienceContacts.lastSentAt} <= ${monthlyCutoffIso()})`,
+        sql`${audienceContacts.id} > ${cursor}`,
+    );
+
+    // A dynamic segment is a WHERE clause, so it needs no join at all. The caller has already
+    // refused to get this far with rules it could not compile.
+    const dynamic = segment?.kind === 'dynamic'
+        ? buildSegmentCondition(issue.organisationId, segment.rules)
+        : null;
+
+    const rows = dynamic
+        ? await base
+            .where(and(preferenceFilter, dynamic))
+            .orderBy(audienceContacts.id)
+            .limit(CHUNK)
+        : issue.segmentId
+            ? await base
+                .innerJoin(audienceContactSegments, eq(audienceContactSegments.contactId, audienceContacts.id))
+                .where(and(preferenceFilter, eq(audienceContactSegments.segmentId, issue.segmentId)))
+                .orderBy(audienceContacts.id)
+                .limit(CHUNK)
+            : await base
+                .where(preferenceFilter)
+                .orderBy(audienceContacts.id)
+                .limit(CHUNK);
+
+    return rows;
 }
 
 async function deliver(
@@ -377,6 +469,13 @@ export interface SendSweepResult {
  */
 export async function sendDueIssues(db: Db, opts: { baseUrl: string; now?: Date; maxIssues?: number }): Promise<SendSweepResult> {
     const now = opts.now ?? new Date();
+    // ⚠️ RAW sql`` TEMPLATES BIND THIS, NOT THE DATE. postgres-js infers a JS Date as 1184
+    // (timestamptz), and `scheduled_for` / `sending_started_at` are plain TIMESTAMP — so the
+    // comparison would be coerced using the server's TimeZone setting, and an issue would go out
+    // an hour early or late on any server that is not UTC. An ISO string binds as unspecified and
+    // is cast straight to timestamp, which is exactly what the query builder does everywhere else
+    // (drizzle's own mapToDriverValue is `value.toISOString()`).
+    const nowIso = now.toISOString();
     const out: SendSweepResult = { claimed: 0, sent: 0, skipped: 0, failed: 0, completed: 0, errors: [] };
 
     // Reclaim anything a killed worker left mid-flight. Safe because the ledger rows carry the
@@ -391,7 +490,7 @@ export async function sendDueIssues(db: Db, opts: { baseUrl: string; now?: Date;
     const due = await db
         .select({ id: newsletterIssues.id, status: newsletterIssues.status })
         .from(newsletterIssues)
-        .where(sql`(${newsletterIssues.status} = 'scheduled' AND ${newsletterIssues.scheduledFor} <= ${now})
+        .where(sql`(${newsletterIssues.status} = 'scheduled' AND ${newsletterIssues.scheduledFor} <= ${nowIso})
                    OR ${newsletterIssues.status} = 'sending'`)
         .orderBy(newsletterIssues.scheduledFor)
         .limit(opts.maxIssues ?? 5);
@@ -401,7 +500,7 @@ export async function sendDueIssues(db: Db, opts: { baseUrl: string; now?: Date;
         // overlapping ticks both "claim" the same issue and both send to the same people.
         const [claimed] = await db
             .update(newsletterIssues)
-            .set({ status: 'sending', sendingStartedAt: sql`COALESCE(${newsletterIssues.sendingStartedAt}, ${now})`, updatedAt: new Date() })
+            .set({ status: 'sending', sendingStartedAt: sql`COALESCE(${newsletterIssues.sendingStartedAt}, ${nowIso})`, updatedAt: new Date() })
             .where(and(eq(newsletterIssues.id, id), eq(newsletterIssues.status, status)))
             .returning();
         if (!claimed) continue;   // another tick got there first
@@ -426,7 +525,12 @@ export async function sendDueIssues(db: Db, opts: { baseUrl: string; now?: Date;
                 // and quietly hide an empty segment.
                 await db.update(newsletterIssues).set({
                     status: 'failed',
-                    failureReason: 'Nobody in this audience is subscribed, so there was nobody to send to.',
+                    // A resend fails for a different reason than an empty segment, and telling a
+                    // tenant "nobody is subscribed" when their list is fine would send them
+                    // hunting through the audience page for a problem that is not there.
+                    failureReason: claimed.resendOfIssueId
+                        ? 'Everyone who did not open the original has since opened it or unsubscribed, so there was nobody left to resend to.'
+                        : 'Nobody in this audience is subscribed, so there was nobody to send to.',
                     updatedAt: new Date(),
                 }).where(eq(newsletterIssues.id, claimed.id));
                 out.errors.push({ issueId: claimed.id, error: 'no recipients' });
@@ -451,6 +555,7 @@ export async function sendDueIssues(db: Db, opts: { baseUrl: string; now?: Date;
                     recipientCount: total,
                     sendProvider: route.provider,
                     fromAddress: route.from,
+                    engagementTracked: route.engagementTracked,
                     updatedAt: new Date(),
                 }).where(eq(newsletterIssues.id, claimed.id));
             }

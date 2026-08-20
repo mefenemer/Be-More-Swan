@@ -16,7 +16,7 @@
 // try/catch or fire-and-forget wrapper.
 
 import { randomUUID } from 'crypto';
-import { and, count, desc, eq, gte, inArray } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
     orchestrationLinks,
@@ -27,6 +27,7 @@ import {
     notifications,
 } from '../../db/schema';
 import { createNotification } from './notify';
+import { draftIssueFromPost } from './newsletter-from-post';
 import { getActiveTierKeyByOrg } from './plan-features';
 
 type Db = ReturnType<typeof getDb>;
@@ -59,10 +60,23 @@ export interface FireOrchestrationsOpts {
     event: OrchestrationEvent;
     sourcePostId?: number | null;   // the post whose draft/publish triggered the hand-off
     sourceCaption?: string | null;  // grounds the target's generation
+    /**
+     * Which id space sourcePostId belongs to — 'blog_post' or 'social_post'. Only the blog path
+     * sets it today, and only the newsletter branch below reads it: an issue drafted from a blog
+     * post can be grounded in the post's actual words, where a social hand-off has a caption and
+     * nothing else. Absent means "assume nothing and use the caption".
+     */
+    sourcePostKind?: 'blog_post' | 'social_post' | null;
 }
 
+/** ai_assistants.configuration.type for the Newsletter Assistant — see db/seed-catalog.ts. */
+const NEWSLETTER_ROLE = 'newsletter_editor';
+
 export async function fireOrchestrations(db: Db, opts: FireOrchestrationsOpts): Promise<void> {
-    const { sourceAssistantId, orgId, userId, event, sourcePostId = null, sourceCaption = null } = opts;
+    const {
+        sourceAssistantId, orgId, userId, event,
+        sourcePostId = null, sourceCaption = null, sourcePostKind = null,
+    } = opts;
     try {
         // 1. Active links from this source for this event.
         const links = await db.select().from(orchestrationLinks).where(and(
@@ -75,9 +89,18 @@ export async function fireOrchestrations(db: Db, opts: FireOrchestrationsOpts): 
 
         // Resolve assistant names once (source + all targets) for the notification copy.
         const ids = Array.from(new Set([sourceAssistantId, ...links.map(l => l.targetAssistantId)]));
-        const names = await db.select({ id: aiAssistants.id, name: aiAssistants.name })
-            .from(aiAssistants).where(inArray(aiAssistants.id, ids));
+        const names = await db.select({
+            id: aiAssistants.id,
+            name: aiAssistants.name,
+            // The TARGET'S ROLE DECIDES WHAT A HAND-OFF PRODUCES. Every other target here gets a
+            // content_generation_job, which drafts a social post — the wrong artifact entirely for
+            // a Newsletter Assistant, which produces newsletter_issues. The hub has always offered
+            // every assistant as a target, so this link could already be built and quietly made a
+            // social draft nobody would ever look for.
+            roleType: sql<string | null>`${aiAssistants.configuration} ->> 'type'`,
+        }).from(aiAssistants).where(inArray(aiAssistants.id, ids));
         const nameById = new Map(names.map(n => [n.id, n.name] as const));
+        const roleById = new Map(names.map(n => [n.id, n.roleType] as const));
         const sourceName = nameById.get(sourceAssistantId) ?? 'An assistant';
 
         // 2. Resolve today's hand-off cap and how many we've already fired (UTC day). Runs we
@@ -140,9 +163,62 @@ export async function fireOrchestrations(db: Db, opts: FireOrchestrationsOpts): 
 
             firedToday++; // this hand-off counts toward the cap
 
-            // 5. Enqueue a draft for the target (reuses the generation pipeline). Requires the
-            //    target's compiled blueprint; if it has none yet, we still record the hand-off
-            //    (run row + notification) but produce no draft.
+            // 5a. A NEWSLETTER TARGET PRODUCES A NEWSLETTER ISSUE, not a content job. It needs no
+            //     compiled blueprint (generateIssueBody builds its own brief from the org and the
+            //     assistant), and the issue lands in 'pending_approval' — a hand-off must not be
+            //     the one path that sends email without a person reading it first.
+            let issueId: number | null = null;
+            if (roleById.get(link.targetAssistantId) === NEWSLETTER_ROLE) {
+                // ⚠️ ONLY ON A PUBLISH. An issue drafted when the post was merely DRAFTED would
+                // point at a URL that does not exist yet — or carry no link at all, which is an
+                // email about a post nobody can read. The API refuses to create such a link; this
+                // is the runtime half of the same rule, for links built before it existed.
+                // Falling through to the content-job path is not an option: that produces a social
+                // post draft, which is the wrong artifact for this assistant entirely.
+                if (event !== 'publishes_a_post') {
+                    await db.update(orchestrationRuns)
+                        .set({ status: 'skipped' })
+                        .where(eq(orchestrationRuns.id, run.id));
+                    firedToday--;
+                    continue;
+                }
+                const drafted = await draftIssueFromPost(db, {
+                    organisationId: orgId,
+                    userId,
+                    assistantId: link.targetAssistantId,
+                    sourcePostId,
+                    sourcePostKind,
+                    sourceCaption,
+                    targetAction: link.targetAction,
+                });
+                issueId = drafted.issueId;
+                const targetName = nameById.get(link.targetAssistantId) ?? 'another assistant';
+                // No issue means an expected no-op: this post already has one (a rebuilt link
+                // firing for a post the previous link covered), the hand-off carried nothing to
+                // write about, or the draft failed and cleaned up after itself. Record what
+                // actually happened rather than logging a hand-off that produced nothing — "why is
+                // there no issue for that post?" has to be answerable from this row. It also gives
+                // the daily cap back, since no model call was made.
+                if (!issueId) {
+                    await db.update(orchestrationRuns)
+                        .set({ status: 'skipped' })
+                        .where(eq(orchestrationRuns.id, run.id));
+                    firedToday--;
+                    continue;
+                }
+                try {
+                    await createNotification(db, 'orchestration_handoff', {
+                        userId,
+                        context: { handoff: { source_name: sourceName, target_name: targetName, target_action: link.targetAction } },
+                        metadata: { linkId: link.id, runId: run.id, sourcePostId, newsletterIssueId: issueId },
+                    });
+                } catch { /* notification failure must not abort the remaining hand-offs */ }
+                continue;
+            }
+
+            // 5b. Every other target: enqueue a draft (reuses the generation pipeline). Requires
+            //     the target's compiled blueprint; if it has none yet, we still record the hand-off
+            //     (run row + notification) but produce no draft.
             const [bp] = await db.select({ id: aiBlueprints.id })
                 .from(aiBlueprints)
                 .where(and(

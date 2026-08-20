@@ -3,9 +3,14 @@
 // Org-scoped via requireTenant. See docs/newsletter-assistant-plan.md.
 //
 //   GET                            → the org's segments, each with its SUBSCRIBED member count
-//   POST { action: 'create' }      → new segment
+//   POST { action: 'create' }      → new segment, or a TAG (kind: 'tag')
 //   POST { action: 'rename' }      → rename / re-describe
 //   POST { action: 'delete' }      → remove the segment (membership rows cascade; contacts stay)
+//   POST { action: 'preview' }     → how many people a rule matches, and what it says in English
+//   POST { action: 'setRules' }    → turn a segment into a rule, or change the rule
+//
+// ⚠️ A DYNAMIC SEGMENT HAS NO MEMBERSHIP ROWS. It is a saved rule compiled to a WHERE clause at the
+// moment somebody asks — see src/utils/audience-segment-rules.ts for why nothing is materialised.
 //
 // ⚠️ Deleting a segment must never delete contacts. The join table cascades, the people do not —
 // a tenant tidying up their labels has not asked to lose their audience.
@@ -13,8 +18,11 @@
 import { HandlerEvent } from '@netlify/functions';
 import { and, eq, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { audienceContactSegments, audienceContacts, audienceSegments } from '../../db/schema';
+import { audienceContactSegments, audienceContacts, audienceForms, audienceSegments } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import {
+    buildSegmentCondition, checkRuleReferences, describeRules, parseRules,
+} from '../../src/utils/audience-segment-rules';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, obj: unknown) => ({
@@ -48,6 +56,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 name: audienceSegments.name,
                 description: audienceSegments.description,
                 kind: audienceSegments.kind,
+                rules: audienceSegments.rules,
                 createdAt: audienceSegments.createdAt,
                 memberCount: sql<number>`count(${audienceContactSegments.contactId})::int`,
                 subscribedCount: sql<number>`count(*) FILTER (WHERE ${audienceContacts.status} = 'subscribed')::int`,
@@ -67,7 +76,51 @@ export default withLambda(async (event: HandlerEvent) => {
             return json(200, { segments: [], needsSetup: true });
         }
 
-        return json(200, { segments: rows });
+        // ⚠️ A DYNAMIC SEGMENT HAS NO MEMBERSHIP ROWS, so the join above counts 0 for it — which
+        // would read as "this segment is empty" for a rule matching four hundred people. Counted
+        // here through the same compiler the send uses, one query per dynamic segment (a tenant has
+        // a handful, not thousands).
+        // Form names, so a "signed up through …" rule reads as the form's name rather than "form #3".
+        // One query for the org, not one per segment.
+        const tagNames = new Map<number, string>(rows.map((r) => [r.id, r.name] as const));
+        const formNames = new Map<number, string>();
+        try {
+            const forms = await db.select({ id: audienceForms.id, name: audienceForms.name })
+                .from(audienceForms).where(eq(audienceForms.organisationId, ctx.organisationId));
+            for (const f of forms) formNames.set(f.id, f.name);
+        } catch { /* the description degrades to "form #3"; not worth failing the list over */ }
+
+        const segments = [];
+        for (const r of rows) {
+            if (r.kind !== 'dynamic') { segments.push({ ...r, rulesError: null, description: null }); continue; }
+            const parsed = parseRules(r.rules);
+            const rule = parsed.ok ? buildSegmentCondition(ctx.organisationId, r.rules) : null;
+            if (!rule) {
+                // Named, not hidden. A segment whose rules stopped making sense must say so here,
+                // because the alternative is a tenant discovering it when a send fails.
+                segments.push({ ...r, memberCount: 0, subscribedCount: 0, description: null, rulesError: parsed.ok ? 'These rules could not be read.' : parsed.error });
+                continue;
+            }
+            const [count] = await db
+                .select({ n: sql<number>`count(*)::int` })
+                .from(audienceContacts)
+                .where(and(
+                    eq(audienceContacts.organisationId, ctx.organisationId),
+                    eq(audienceContacts.status, 'subscribed'),
+                    rule,
+                ));
+            segments.push({
+                ...r,
+                memberCount: count?.n ?? 0,
+                subscribedCount: count?.n ?? 0,
+                // The sentence, next to the number. A count alone is not checkable — "412 people"
+                // looks equally right whatever the rule says.
+                description: describeRules(r.rules, formNames, tagNames),
+                rulesError: null,
+            });
+        }
+
+        return json(200, { segments });
     }
 
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method Not Allowed' });
@@ -81,16 +134,65 @@ export default withLambda(async (event: HandlerEvent) => {
     catch { return json(400, { error: 'Invalid JSON body.' }); }
     const action = String(body.action || '');
 
+    // How many people a rule matches, and what it says in English — before it is saved. The count
+    // and the send come from one compiler, so this is a preview of the real audience rather than an
+    // estimate of it.
+    if (action === 'preview') {
+        const parsed = parseRules(body.rules);
+        if (!parsed.ok) return json(400, { error: parsed.error });
+        const refError = await checkRuleReferences(db, orgId, body.rules);
+        if (refError) return json(400, { error: refError });
+        const rule = buildSegmentCondition(orgId, body.rules)!;
+        const [count] = await db
+            .select({ n: sql<number>`count(*)::int` })
+            .from(audienceContacts)
+            .where(and(
+                eq(audienceContacts.organisationId, orgId),
+                eq(audienceContacts.status, 'subscribed'),
+                rule,
+            ));
+        const previewForms = new Map<number, string>();
+        try {
+            const forms = await db.select({ id: audienceForms.id, name: audienceForms.name })
+                .from(audienceForms).where(eq(audienceForms.organisationId, orgId));
+            for (const f of forms) previewForms.set(f.id, f.name);
+        } catch { /* degrades to "form #3" */ }
+        const previewTags = new Map<number, string>();
+        try {
+            const tags = await db.select({ id: audienceSegments.id, name: audienceSegments.name })
+                .from(audienceSegments).where(eq(audienceSegments.organisationId, orgId));
+            for (const t of tags) previewTags.set(t.id, t.name);
+        } catch { /* degrades to "#3" */ }
+        return json(200, { matches: count?.n ?? 0, description: describeRules(body.rules, previewForms, previewTags) });
+    }
+
     if (action === 'create') {
         const name = String(body.name || '').trim().slice(0, MAX_NAME);
         if (!name) return json(400, { error: 'Give the segment a name.' });
+
+        // ⚠️ Rules are validated BEFORE the row exists. A dynamic segment saved with rules that do
+        // not compile is a segment that looks selectable in the newsletter's audience picker and
+        // fails the issue at send time.
+        const dynamic = body.kind === 'dynamic';
+        // A tag is a manual segment shown separately — same membership table, same writes. See
+        // db/audience-tags.sql for why it is not a table of its own.
+        const kind = dynamic ? 'dynamic' : body.kind === 'tag' ? 'tag' : 'manual';
+        const parsed = dynamic ? parseRules(body.rules) : null;
+        if (parsed && !parsed.ok) return json(400, { error: parsed.error });
+        if (dynamic) {
+            const refError = await checkRuleReferences(db, orgId, body.rules);
+            if (refError) return json(400, { error: refError });
+        }
+
         try {
             const [seg] = await db.insert(audienceSegments).values({
                 organisationId: orgId,
                 name,
                 description: String(body.description || '').trim().slice(0, 300) || null,
+                kind,
+                rules: parsed?.ok ? parsed.rules : {},
                 createdBy: ctx.userId,
-            }).returning({ id: audienceSegments.id, name: audienceSegments.name });
+            }).returning({ id: audienceSegments.id, name: audienceSegments.name, kind: audienceSegments.kind });
             return json(200, { segment: seg });
         } catch (err) {
             // audience_segments_org_name_unique is case-insensitive — "Newsletter" and "newsletter"
@@ -100,6 +202,24 @@ export default withLambda(async (event: HandlerEvent) => {
             if (code === '23505') return json(409, { error: 'You already have a segment with that name.' });
             throw err;
         }
+    }
+
+    // Editing the rule of an existing dynamic segment. Kept separate from 'rename' because they are
+    // different decisions: renaming is cosmetic, and changing a rule changes who gets emailed.
+    if (action === 'setRules') {
+        const id = Number(body.id || '');
+        if (!Number.isFinite(id) || !id) return json(400, { error: 'Invalid segment.' });
+        const parsed = parseRules(body.rules);
+        if (!parsed.ok) return json(400, { error: parsed.error });
+        const refError = await checkRuleReferences(db, orgId, body.rules);
+        if (refError) return json(400, { error: refError });
+
+        const [updated] = await db.update(audienceSegments)
+            .set({ kind: 'dynamic', rules: parsed.rules, updatedAt: new Date() })
+            .where(and(eq(audienceSegments.id, id), eq(audienceSegments.organisationId, orgId)))
+            .returning({ id: audienceSegments.id });
+        if (!updated) return json(404, { error: 'Segment not found.' });
+        return json(200, { updated: true, description: describeRules(parsed.rules) });
     }
 
     if (action === 'rename') {

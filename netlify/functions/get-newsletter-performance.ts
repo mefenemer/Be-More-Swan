@@ -8,8 +8,15 @@
 // figures from a completely different product surface. The Blog Writer shipped in exactly that
 // state for months.
 //
-// What it deliberately does NOT report: opens and clicks. Measuring either needs a tracking pixel
-// or link rewriting; neither is built, and a card that can never populate is worse than no card.
+// ⚠️ OPENS AND CLICKS ARE COMPUTED OVER TRACKED ISSUES ONLY. An issue sent from a tenant's own
+// mailbox embeds no pixel and rewrites no links, so it can report neither — folding those sends
+// into the denominator would drag the rate down in proportion to how many issues we could not
+// measure, which reads as failing content when it is missing instrumentation. Issues where
+// engagement_tracked = false are excluded, and `engagementMeasurable` tells the UI whether there
+// was anything to measure at all.
+//
+// ⚠️ AN OPEN IS NOT A READ. It is a 1×1 image, and Apple Mail Privacy Protection pre-fetches it
+// whether or not a human looks. The card copy says "indicative" for that reason.
 
 import { HandlerEvent } from '@netlify/functions';
 import { and, desc, eq, sql } from 'drizzle-orm';
@@ -58,6 +65,13 @@ export default withLambda(async (event: HandlerEvent) => {
                 delivered: sql<number>`COALESCE(SUM(${newsletterIssues.deliveredCount}), 0)::int`,
                 unsubscribed: sql<number>`COALESCE(SUM(${newsletterIssues.unsubscribedCount}), 0)::int`,
                 complained: sql<number>`COALESCE(SUM(${newsletterIssues.complainedCount}), 0)::int`,
+                // Engagement sums and their OWN denominator, restricted to issues that could be
+                // measured. FILTER, not a second query: one pass, and the two denominators can
+                // never drift apart the way they would if a later edit touched only one of them.
+                trackedIssues: sql<number>`count(*) FILTER (WHERE ${newsletterIssues.engagementTracked})::int`,
+                trackedRecipients: sql<number>`COALESCE(SUM(${newsletterIssues.recipientCount}) FILTER (WHERE ${newsletterIssues.engagementTracked}), 0)::int`,
+                opened: sql<number>`COALESCE(SUM(${newsletterIssues.openedCount}) FILTER (WHERE ${newsletterIssues.engagementTracked}), 0)::int`,
+                clicked: sql<number>`COALESCE(SUM(${newsletterIssues.clickedCount}) FILTER (WHERE ${newsletterIssues.engagementTracked}), 0)::int`,
             })
             .from(newsletterIssues)
             .where(and(...issueFilters));
@@ -89,6 +103,13 @@ export default withLambda(async (event: HandlerEvent) => {
         const lastRecipients = last?.recipientCount ?? 0;
         const unsubscribeRate = lastRecipients > 0 ? (last?.unsubscribedCount ?? 0) / lastRecipients : null;
 
+        // The denominator is recipients of TRACKED issues, and both rates are null when there is
+        // nothing measurable — never 0%, which would read as "nobody opened it".
+        const trackedRecipients = totals?.trackedRecipients ?? 0;
+        const engagementMeasurable = (totals?.trackedIssues ?? 0) > 0 && trackedRecipients > 0;
+        const openRate = engagementMeasurable ? (totals?.opened ?? 0) / trackedRecipients : null;
+        const clickRate = engagementMeasurable ? (totals?.clicked ?? 0) / trackedRecipients : null;
+
         return json(200, {
             hasData: (totals?.issuesSent ?? 0) > 0 || (audience?.subscribers ?? 0) > 0,
             subscribers: audience?.subscribers ?? 0,
@@ -96,12 +117,16 @@ export default withLambda(async (event: HandlerEvent) => {
             deliveryRate,
             deliveryUnknown,
             unsubscribeRate,
+            openRate,
+            clickRate,
+            engagementMeasurable,
+            trackedIssues: totals?.trackedIssues ?? 0,
             complained: totals?.complained ?? 0,
             lastIssue: last ? { subject: last.subject, sentAt: last.sentAt, recipients: lastRecipients } : null,
         });
     } catch (err) {
         if (isMissingTable(err)) {
-            return json(200, { hasData: false, needsSetup: true, subscribers: 0, issuesSent: 0, deliveryRate: null, unsubscribeRate: null });
+            return json(200, { hasData: false, needsSetup: true, subscribers: 0, issuesSent: 0, deliveryRate: null, unsubscribeRate: null, openRate: null, clickRate: null, engagementMeasurable: false });
         }
         console.error('[get-newsletter-performance] failed', { orgId }, err);
         return json(500, { error: 'Could not load newsletter performance.' });

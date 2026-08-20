@@ -105,6 +105,10 @@
             <p class="text-sm font-bold text-gray-900 truncate">${esc(i.subject || 'Untitled issue')}</p>
             <span class="shrink-0 inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border ${st.cls}">${esc(st.label)}</span>
           </div>
+          ${i.generationReason === 'blog_post_handoff'
+            ? '<p class="text-[11px] font-bold text-sky-700 mt-0.5">From your blog</p>' : ''}
+          ${i.resendOfIssueId
+            ? '<p class="text-[11px] font-bold text-emerald-700 mt-0.5">Resend to non-openers</p>' : ''}
           <p class="text-xs text-gray-500 mt-0.5">
             ${i.sentAt ? `Sent ${esc(fmtDate(i.sentAt))} · ${Number(i.recipientCount || 0).toLocaleString()} recipients`
               : i.scheduledFor ? `Scheduled ${esc(fmtDate(i.scheduledFor))}`
@@ -118,8 +122,15 @@
   function fillSegments() {
     const sel = $('nl-segment');
     if (!sel) return;
+    // Grouped, because a tag and a segment are the same thing to the send but not to the person
+    // choosing: an audience built to be sent to should not be buried among forty descriptive
+    // labels. Both remain selectable — a tag IS a valid audience.
+    const opt = (s) => `<option value="${s.id}">${esc(s.name)}</option>`;
+    const segs = state.segments.filter((s) => s.kind !== 'tag');
+    const tags = state.segments.filter((s) => s.kind === 'tag');
     sel.innerHTML = '<option value="">Everyone subscribed</option>'
-      + state.segments.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+      + (segs.length ? `<optgroup label="Segments">${segs.map(opt).join('')}</optgroup>` : '')
+      + (tags.length ? `<optgroup label="Tags">${tags.map(opt).join('')}</optgroup>` : '');
   }
 
   function renderVarChips() {
@@ -146,7 +157,7 @@
 
   async function openIssue(id) {
     try {
-      const { issue, audienceEstimate } = await api(`${ISSUES_API}?id=${encodeURIComponent(id)}`);
+      const { issue, audienceEstimate, sourcePost, resend } = await api(`${ISSUES_API}?id=${encodeURIComponent(id)}`);
       state.current = issue;
       state.dirty = false;
       hide($('nl-empty'));
@@ -164,6 +175,8 @@
       badge.className = `inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border ${st.cls}`;
 
       renderAudience(audienceEstimate);
+      renderSource(issue, sourcePost);
+      renderResend(issue, resend);
       hide($('nl-warnings'));
       renderFailure(issue);
       renderStats(issue);
@@ -195,6 +208,21 @@
     el.textContent = `About ${Number(n).toLocaleString()} ${n === 1 ? 'person' : 'people'} will receive this.`;
   }
 
+  function renderSource(issue, sourcePost) {
+    const el = $('nl-source');
+    if (!el) return;
+    if (issue.generationReason !== 'blog_post_handoff') { hide(el); return; }
+    // Named, and linked. "Drafted automatically" on its own invites the reader to hunt for what it
+    // was drafted FROM, and the answer is one click away.
+    const title = sourcePost && sourcePost.title ? sourcePost.title : 'a post you published';
+    const link = sourcePost && sourcePost.canonicalUrl
+      ? ` <a href="${esc(sourcePost.canonicalUrl)}" target="_blank" rel="noopener" class="font-bold underline">Read it</a>.`
+      : '';
+    el.innerHTML = `<p>Drafted from your blog post <span class="font-bold">${esc(title)}</span>.${link}</p>
+      <p class="text-[11px] text-sky-700 mt-1">The link at the end of the email points there. Nothing is sent until you approve it.</p>`;
+    show(el, 'block');
+  }
+
   function renderFailure(issue) {
     const el = $('nl-failure');
     if (!el) return;
@@ -204,6 +232,69 @@
     show(el, 'block');
   }
 
+  // The cheapest reach increase in email, and the easiest to turn into spam — so the panel states
+  // who it would go to before it offers the button, and every refusal says what would make it
+  // possible instead of hiding.
+  function renderResend(issue, verdict) {
+    const el = $('nl-resend');
+    if (!el) return;
+    if (!verdict || issue.status !== 'sent') { hide(el); return; }
+
+    if (!verdict.canResend) {
+      // 'not_sent' on a sent issue cannot happen; the rest are worth explaining. A resend of a
+      // resend says nothing at all — the panel would just be noise on every second issue.
+      if (verdict.reason === 'is_resend') { hide(el); return; }
+      el.className = 'mt-3 px-4 py-3 rounded-xl border text-sm bg-gray-50 border-gray-200 text-gray-600';
+      const when = verdict.availableAt
+        ? `<p class="text-[11px] text-gray-500 mt-1">Available from ${esc(fmtDate(verdict.availableAt))}.</p>` : '';
+      el.innerHTML = `<p class="font-bold mb-1 text-gray-700">Resend to people who didn't open it</p>
+        <p>${esc(verdict.message || '')}</p>${when}`;
+      show(el, 'block');
+      return;
+    }
+
+    const n = Number(verdict.unopened || 0);
+    el.className = 'mt-3 px-4 py-3 rounded-xl border text-sm bg-emerald-50 border-emerald-200 text-emerald-900';
+    el.innerHTML = `<p class="font-bold mb-1">Resend to people who didn't open it</p>
+      <p>${n.toLocaleString()} ${n === 1 ? 'person was' : 'people were'} sent this and never opened it.
+      The email stays exactly as it was approved — only the subject line changes.</p>
+      <div class="flex flex-wrap items-end gap-2 mt-3">
+        <div class="flex-1 min-w-[14rem]">
+          <label class="block text-[11px] font-bold text-emerald-800 uppercase tracking-wide mb-1">New subject line</label>
+          <input type="text" id="nl-resend-subject" maxlength="200" value="${esc(issue.subject || '')}"
+            class="w-full px-3 py-2 rounded-lg border border-emerald-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
+        </div>
+        <button type="button" id="nl-resend-go"
+          class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Resend</button>
+      </div>
+      <p class="text-[11px] text-emerald-700 mt-2">A different subject line is the whole point — the same one arriving twice reads as a mistake.</p>`;
+    show(el, 'block');
+
+    $('nl-resend-go')?.addEventListener('click', async () => {
+      const subject = $('nl-resend-subject').value.trim();
+      if (!subject) { window.showToast('Give the resend a subject line.'); return; }
+      const ok = await window.confirmModal(
+        `This sends to ${n.toLocaleString()} ${n === 1 ? 'person' : 'people'} who did not open the original. It goes out straight away, and an issue can only be resent once.`,
+        { title: 'Resend this issue?', confirmLabel: 'Resend now', confirmColor: '#059669' });
+      if (!ok) return;
+      const btn = $('nl-resend-go');
+      btn.disabled = true;
+      try {
+        const res = await api(ISSUES_API, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'resend', id: issue.id, subject }),
+        });
+        window.showToast(`Resending to ${Number(res.recipients || 0).toLocaleString()} people.`);
+        // Open the RESEND, not the original: the thing that is now sending is the thing the user
+        // should be looking at.
+        await loadIssues(res.issue.id);
+      } catch (err) {
+        btn.disabled = false;
+        window.showToast(err.message);
+      }
+    });
+  }
+
   function renderStats(issue) {
     const el = $('nl-stats');
     if (!el) return;
@@ -211,9 +302,18 @@
     const n = (v) => Number(v || 0).toLocaleString();
     // Bounces, complaints and unsubscribes shown alongside the good numbers, always. A dashboard
     // that reports only deliveries is how a list quietly degrades for months.
+    // Opens and clicks are shown only when the issue could report them. An issue sent from a
+    // connected mailbox rewrites no links and embeds no pixel, so "0 opened" there would be a
+    // statement about our instrumentation dressed up as a statement about the reader.
+    const engagement = issue.engagementTracked
+      ? ` · ${n(issue.openedCount)} opened · ${n(issue.clickedCount)} clicked`
+      : '';
     el.innerHTML = `<p class="font-bold mb-1">Results</p>
-      <p>${n(issue.recipientCount)} sent · ${n(issue.deliveredCount)} delivered · ${n(issue.bouncedCount)} bounced ·
-      ${n(issue.complainedCount)} marked as spam · ${n(issue.unsubscribedCount)} unsubscribed</p>`;
+      <p>${n(issue.recipientCount)} sent · ${n(issue.deliveredCount)} delivered${engagement} · ${n(issue.bouncedCount)} bounced ·
+      ${n(issue.complainedCount)} marked as spam · ${n(issue.unsubscribedCount)} unsubscribed</p>
+      ${issue.engagementTracked
+        ? '<p class="text-[11px] text-gray-400 mt-1">Opens are indicative — Apple Mail loads the tracking image whether or not anyone reads it.</p>'
+        : issue.sentAt ? '<p class="text-[11px] text-gray-400 mt-1">Opens and clicks were not measurable on this send.</p>' : ''}`;
     show(el, 'block');
   }
 
@@ -495,6 +595,187 @@
     });
   }
 
+  // ── Welcome sequence ───────────────────────────────────────────────────────
+
+  const SEQ_API = '/.netlify/functions/newsletter-sequences';
+  let seqState = { sequence: null, steps: [], enrolments: {} };
+
+  async function openWelcomeModal() {
+    const modal = $('nl-welcome-modal');
+    const body = $('nl-welcome-body');
+    if (!modal || !body) return;
+    show(modal, 'flex');
+    body.innerHTML = '<p class="text-sm text-gray-500">Loading…</p>';
+    try {
+      const data = await api(SEQ_API);
+      if (data.needsSetup) {
+        body.innerHTML = '<p class="text-sm text-gray-600">Welcome sequences are not set up on this environment yet — the database migration has not been applied.</p>';
+        return;
+      }
+      seqState = { sequence: data.sequence, steps: data.steps || [], enrolments: data.enrolments || {} };
+      renderWelcome();
+    } catch (err) {
+      body.innerHTML = `<p class="text-sm text-red-600">${esc(err.message)}</p>`;
+    }
+  }
+
+  function renderWelcome() {
+    const body = $('nl-welcome-body');
+    const seq = seqState.sequence;
+
+    if (!seq) {
+      body.innerHTML = `
+        <div class="text-center py-8">
+          <p class="text-sm text-gray-600 mb-1">You do not have a welcome sequence yet.</p>
+          <p class="text-xs text-gray-400 mb-4">Right now a new subscriber hears nothing until your next issue.</p>
+          <button type="button" id="nl-seq-create"
+            class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Create a welcome sequence</button>
+        </div>`;
+      $('nl-seq-create')?.addEventListener('click', async () => {
+        try {
+          const { sequence } = await api(SEQ_API, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'create' }),
+          });
+          seqState.sequence = sequence;
+          renderWelcome();
+        } catch (err) { window.showToast(err.message); }
+      });
+      return;
+    }
+
+    const active = Number(seqState.enrolments.active || 0);
+    const completed = Number(seqState.enrolments.completed || 0);
+
+    body.innerHTML = `
+      <div class="flex items-center justify-between rounded-xl border border-gray-200 p-4 mb-4">
+        <div>
+          <span class="inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border ${seq.isEnabled
+            ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+            : 'bg-gray-100 text-gray-600 border-gray-200'}">${seq.isEnabled ? 'On' : 'Off'}</span>
+          <p class="text-sm text-gray-600 mt-2">${seq.isEnabled
+            ? `${active.toLocaleString()} part way through · ${completed.toLocaleString()} finished`
+            : 'Nothing is sent while this is off. New subscribers are not enrolled either.'}</p>
+        </div>
+        <button type="button" id="nl-seq-toggle"
+          class="px-4 py-2 text-sm font-bold rounded-lg cursor-pointer ${seq.isEnabled
+            ? 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'
+            : 'text-white bg-emerald-600 hover:bg-emerald-700'}">${seq.isEnabled ? 'Switch off' : 'Switch on'}</button>
+      </div>
+
+      <div class="space-y-2 mb-4">
+        ${seqState.steps.length ? seqState.steps.map((st) => `
+          <div class="flex items-start gap-3 rounded-xl border border-gray-200 p-3">
+            <div class="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-600 shrink-0">${st.stepNumber}</div>
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-bold text-gray-900 truncate">${esc(st.subject)}</p>
+              <p class="text-[11px] text-gray-500">${st.delayDays === 0 ? 'Straight away' : `${st.delayDays} day${st.delayDays === 1 ? '' : 's'} after the previous email`}</p>
+            </div>
+            <button type="button" data-seq-edit="${st.stepNumber}" class="text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer">Edit</button>
+            <button type="button" data-seq-delete="${st.stepNumber}" class="text-xs font-bold text-red-600 hover:text-red-700 cursor-pointer">Delete</button>
+          </div>`).join('')
+          : '<p class="text-sm text-gray-400 py-4 text-center">No emails yet. Add the first one below.</p>'}
+      </div>
+
+      <div class="rounded-xl border border-gray-200 p-4">
+        <p class="text-sm font-bold text-gray-900 mb-3" id="nl-seq-form-title">Add an email</p>
+        <input type="hidden" id="nl-seq-step-number" value="${seqState.steps.length + 1}">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Subject</label>
+            <input type="text" id="nl-seq-subject" class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Send after</label>
+            <select id="nl-seq-delay" class="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-700 focus:ring-2 focus:ring-emerald-600 outline-none cursor-pointer">
+              <option value="0">Straight away</option>
+              <option value="1">1 day</option>
+              <option value="2">2 days</option>
+              <option value="3">3 days</option>
+              <option value="7">1 week</option>
+              <option value="14">2 weeks</option>
+            </select>
+          </div>
+        </div>
+        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Email</label>
+        <textarea id="nl-seq-body" rows="8" class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm font-mono"></textarea>
+        <p class="text-[11px] text-gray-400 mt-1">Markdown. The unsubscribe line and your address are added automatically. Use {{contact.first_name | "there"}} to greet them by name.</p>
+        <div class="flex justify-end gap-2 mt-3">
+          <button type="button" id="nl-seq-cancel" class="hidden px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer" style="display:none">Cancel</button>
+          <button type="button" id="nl-seq-save" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Save email</button>
+        </div>
+      </div>`;
+
+    body.querySelectorAll('[data-seq-edit]').forEach((btn) => btn.addEventListener('click', () => {
+      const n = Number(btn.getAttribute('data-seq-edit'));
+      const st = seqState.steps.find((x) => x.stepNumber === n);
+      if (!st) return;
+      $('nl-seq-form-title').textContent = `Edit email ${n}`;
+      $('nl-seq-step-number').value = String(n);
+      $('nl-seq-subject').value = st.subject || '';
+      $('nl-seq-body').value = st.bodyMarkdown || '';
+      $('nl-seq-delay').value = String(st.delayDays ?? 0);
+      show($('nl-seq-cancel'), 'inline-flex');
+      $('nl-seq-subject').focus();
+    }));
+
+    body.querySelectorAll('[data-seq-delete]').forEach((btn) => btn.addEventListener('click', async () => {
+      const n = Number(btn.getAttribute('data-seq-delete'));
+      const ok = await window.confirmModal(
+        'Delete this email from the sequence? Anyone who has already received it keeps it — this only affects people who have not reached it yet.',
+        { title: `Delete email ${n}?`, confirmLabel: 'Delete' });
+      if (!ok) return;
+      try {
+        await api(SEQ_API, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'deleteStep', stepNumber: n }),
+        });
+        await openWelcomeModal();
+      } catch (err) { window.showToast(err.message); }
+    }));
+
+    $('nl-seq-cancel')?.addEventListener('click', () => renderWelcome());
+
+    $('nl-seq-save')?.addEventListener('click', async () => {
+      try {
+        await api(SEQ_API, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'saveStep',
+            stepNumber: Number($('nl-seq-step-number').value || 1),
+            subject: $('nl-seq-subject').value,
+            bodyMarkdown: $('nl-seq-body').value,
+            delayDays: Number($('nl-seq-delay').value || 0),
+          }),
+        });
+        window.showToast('Saved.');
+        await openWelcomeModal();
+      } catch (err) { window.showToast(err.message); }
+    });
+
+    $('nl-seq-toggle')?.addEventListener('click', async () => {
+      const turningOn = !seq.isEnabled;
+      const ok = await window.confirmModal(
+        turningOn
+          ? 'From now on, everyone who confirms their subscription will receive these emails automatically, without anyone reading them again first.'
+          : `Switch off the welcome sequence? ${active.toLocaleString()} ${active === 1 ? 'person is' : 'people are'} part way through and will not receive the rest.`,
+        {
+          title: turningOn ? 'Switch on the welcome sequence?' : 'Switch it off?',
+          confirmLabel: turningOn ? 'Switch on' : 'Switch off',
+          confirmColor: turningOn ? '#059669' : '#dc2626',
+        });
+      if (!ok) return;
+      try {
+        const res = await api(SEQ_API, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'enable', enabled: turningOn }),
+        });
+        if (res.note) window.showToast(res.note, { duration: 7000 });
+        await openWelcomeModal();
+      } catch (err) { window.showToast(err.message); }
+    });
+  }
+
   // ── Wiring ─────────────────────────────────────────────────────────────────
 
   function wire() {
@@ -541,6 +822,8 @@
     $('nl-preview')?.addEventListener('click', preview);
     $('nl-send')?.addEventListener('click', sendNow);
     $('nl-sending')?.addEventListener('click', openSendingModal);
+    $('nl-welcome')?.addEventListener('click', openWelcomeModal);
+    document.querySelectorAll('[data-nl-welcome-close]').forEach((el) => el.addEventListener('click', () => hide($('nl-welcome-modal'))));
     document.querySelectorAll('[data-nl-sending-close]').forEach((el) => el.addEventListener('click', () => hide($('nl-sending-modal'))));
     $('nl-approve')?.addEventListener('click', approve);
 

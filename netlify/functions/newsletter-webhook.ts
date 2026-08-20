@@ -11,14 +11,23 @@
 // not merely left a list; they have told this organisation to stop emailing them. Recording it only
 // against the audience would leave the Lead Generator free to cold-email them next week.
 //
-// Events handled (Resend names): email.delivered, email.bounced, email.complained,
-// email.delivery_delayed (ignored — a delay is not an outcome).
+// Events handled (Resend names): email.delivered, email.bounced, email.complained, email.opened,
+// email.clicked. email.delivery_delayed is ignored — a delay is not an outcome.
+//
+// ⚠️ OPENS AND CLICKS COUNT PEOPLE, NOT EVENTS. Each recipient's FIRST open moves opened_at from
+// NULL and increments the issue once; every later open only bumps open_count on their own ledger
+// row. Counting events instead would produce open rates over 100% the first time somebody scrolled
+// back to an issue twice, and the number would quietly stop meaning anything.
+//
+// ⚠️ AN OPEN IS NOT A READ. The mechanism is a 1×1 image, and Apple Mail Privacy Protection
+// pre-fetches it for every message whether or not a human looks. Treat the figure as a trend.
 
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { audienceContacts, leadOptOuts, newsletterIssues, newsletterSends } from '../../db/schema';
 import { setContactStatus } from '../../src/utils/audience-store';
 import { normaliseEmail } from '../../src/utils/audience-contacts';
+import { haltEnrolmentsForContact } from '../../src/utils/newsletter-sequence';
 import { verifySvixSignature } from '../../src/utils/webhook-verify';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -119,6 +128,10 @@ export default withLambda(async (event) => {
                     issueId: row.issueId,
                     evidence: `Hard bounce reported by the mail provider${bounceType ? ` (${bounceType})` : ''}.`,
                 });
+                // And stop any welcome series they are part way through. The consent check would
+                // catch them at the next step anyway; halting now makes the reason readable from
+                // the row instead of inferable from an absence.
+                await haltEnrolmentsForContact(db, { organisationId: orgId, email: address, reason: 'bounced' });
             }
             return { statusCode: 200, body: 'ok' };
         }
@@ -141,6 +154,8 @@ export default withLambda(async (event) => {
                 evidence: 'Reported as spam by the recipient.',
             });
 
+            await haltEnrolmentsForContact(db, { organisationId: orgId, email: address, reason: 'complained' });
+
             // ⚠️ THE CROSS-ASSISTANT BINDING. A complaint is the strongest possible "stop emailing
             // me", and it must reach the cold-outreach side too — lead_opt_outs is the table every
             // send path already consults. Failing to write it would leave the Lead Generator free
@@ -158,6 +173,48 @@ export default withLambda(async (event) => {
                 // The audience is already blocked, so this is a gap in coverage, not an open door.
                 // Loud, because the gap is on the assistant that cold-emails strangers.
                 console.error('[newsletter-webhook] complaint recorded on the audience but NOT in lead_opt_outs', { orgId }, err);
+            }
+            return { statusCode: 200, body: 'ok' };
+        }
+
+        if (type === 'email.opened' || type === 'email.clicked') {
+            const isClick = type === 'email.clicked';
+            const now = new Date();
+
+            // ⚠️ THE FIRST-TOUCH GUARD. The WHERE clause requires the timestamp to still be NULL,
+            // so only the first event per recipient updates a row — and `returning()` tells us
+            // whether this event was that first one. Incrementing the issue on every event would
+            // let one enthusiastic reader push the open rate past 100%.
+            const [first] = isClick
+                ? await db.update(newsletterSends).set({
+                    clickedAt: now,
+                    clickCount: sql`${newsletterSends.clickCount} + 1`,
+                    lastClickedUrl: String(data?.click?.link || data?.link || '').slice(0, 500) || null,
+                    updatedAt: now,
+                }).where(and(eq(newsletterSends.id, row.id), isNull(newsletterSends.clickedAt)))
+                    .returning({ id: newsletterSends.id })
+                : await db.update(newsletterSends).set({
+                    openedAt: now,
+                    openCount: sql`${newsletterSends.openCount} + 1`,
+                    updatedAt: now,
+                }).where(and(eq(newsletterSends.id, row.id), isNull(newsletterSends.openedAt)))
+                    .returning({ id: newsletterSends.id });
+
+            if (first) {
+                await db.update(newsletterIssues)
+                    .set(isClick
+                        ? { clickedCount: sql`${newsletterIssues.clickedCount} + 1` }
+                        : { openedCount: sql`${newsletterIssues.openedCount} + 1` })
+                    .where(eq(newsletterIssues.id, row.issueId));
+            } else {
+                // A repeat. Only their own row moves — the issue-level count already has them.
+                await db.update(newsletterSends).set(isClick
+                    ? {
+                        clickCount: sql`${newsletterSends.clickCount} + 1`,
+                        lastClickedUrl: String(data?.click?.link || data?.link || '').slice(0, 500) || null,
+                    }
+                    : { openCount: sql`${newsletterSends.openCount} + 1` })
+                    .where(eq(newsletterSends.id, row.id));
             }
             return { statusCode: 200, body: 'ok' };
         }

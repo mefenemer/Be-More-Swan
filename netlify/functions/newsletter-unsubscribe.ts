@@ -2,8 +2,13 @@
 // The front door for a SUBSCRIBER leaving a tenant's newsletter.
 //
 //   HEAD                  → 200, records nothing (link scanners pre-fetch)
-//   GET  ?t=<token>       → a page with a button
-//   POST ?t=<token>       → the unsubscribe itself, and RFC 8058 one-click
+//   GET  ?t=<token>       → the preference page: pause, cap the frequency, or leave
+//   POST ?t=<token>       → applies the chosen preference, and RFC 8058 one-click
+//
+// ⚠️ THE ONE-CLICK POST IGNORES THE CHOICES AND ALWAYS UNSUBSCRIBES. RFC 8058 requires a
+// List-Unsubscribe-Post request to unsubscribe with no further interaction, and mail clients fire
+// it on the reader's behalf from a button labelled "unsubscribe". Answering it with a preference
+// menu would be a spec violation and a dark pattern in the same move.
 //
 // ⚠️ THREE UNSUBSCRIBE ROUTES NOW EXIST and they are not interchangeable:
 //   • win-back-unsubscribe.ts  — Be More Swan's own marketing to our own USERS (win_back_opt_outs)
@@ -19,8 +24,10 @@
 
 import { and, eq, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { audienceContacts, newsletterIssues, newsletterSends, organisations } from '../../db/schema';
+import { newsletterIssues, newsletterSends, newsletterSequenceEnrolments, organisations } from '../../db/schema';
 import { setContactStatus } from '../../src/utils/audience-store';
+import { applyPreference, parseChoice, PREFERENCE_OPTIONS } from '../../src/utils/audience-preferences';
+import { haltEnrolmentsForContact } from '../../src/utils/newsletter-sequence';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /** Mirrors the token minted in the send worker — a loose pattern would send junk to the lookup. */
@@ -42,7 +49,10 @@ function page(statusCode: number, heading: string, bodyHtml: string, icon = '✅
 <style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f9fafb;padding:1rem}
 .card{background:#fff;border-radius:1rem;padding:2.5rem;max-width:460px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.08)}
 h1{font-size:1.25rem;margin:0 0 .5rem}p{color:#6b7280;font-size:.925rem;line-height:1.6;margin:.5rem 0}
-button{cursor:pointer;background:#111827;color:#fff;border:none;font-size:.95rem;font-weight:700;padding:.75rem 1.25rem;border-radius:.6rem;margin-top:1rem}</style></head>
+button{cursor:pointer;background:#111827;color:#fff;border:none;font-size:.95rem;font-weight:700;padding:.75rem 1.25rem;border-radius:.6rem;margin-top:1rem}
+.opt{display:flex;gap:.65rem;align-items:flex-start;text-align:left;border:1px solid #e5e7eb;border-radius:.6rem;padding:.75rem .85rem;margin-top:.6rem;cursor:pointer}
+.opt:hover{background:#f9fafb}.opt input{margin-top:.25rem}
+.opt small{color:#6b7280;line-height:1.45}</style></head>
 <body><div class="card">
   <div style="font-size:2rem;margin-bottom:1rem">${icon}</div>
   <h1>${esc(heading)}</h1>
@@ -74,7 +84,8 @@ export default withLambda(async (event) => {
     try {
         const db = getDb();
 
-        const [row] = await db
+        // Issue sends first — the common case by volume.
+        const [sendRow] = await db
             .select({
                 sendId: newsletterSends.id,
                 organisationId: newsletterSends.organisationId,
@@ -86,6 +97,30 @@ export default withLambda(async (event) => {
             .leftJoin(organisations, eq(organisations.id, newsletterSends.organisationId))
             .where(eq(newsletterSends.unsubscribeToken, token))
             .limit(1);
+
+        // ⚠️ THEN welcome-sequence enrolments. A sequence step has no newsletter_sends row, so its
+        // footer carries the ENROLMENT's token — and without this branch every welcome email in the
+        // product would offer an unsubscribe link that answers "we couldn't find that
+        // subscription". That reads as a company refusing to let you leave, which is worse than
+        // sending no link at all.
+        const [seqRow] = sendRow ? [] : await db
+            .select({
+                enrolmentId: newsletterSequenceEnrolments.id,
+                organisationId: newsletterSequenceEnrolments.organisationId,
+                contactId: newsletterSequenceEnrolments.contactId,
+                email: newsletterSequenceEnrolments.email,
+                senderName: organisations.name,
+            })
+            .from(newsletterSequenceEnrolments)
+            .leftJoin(organisations, eq(organisations.id, newsletterSequenceEnrolments.organisationId))
+            .where(eq(newsletterSequenceEnrolments.unsubscribeToken, token))
+            .limit(1);
+
+        const row = sendRow
+            ? { ...sendRow, contactId: null as number | null, fromSequence: false }
+            : seqRow
+                ? { sendId: null as number | null, issueId: null as number | null, ...seqRow, fromSequence: true }
+                : null;
 
         if (!row || !row.email) {
             // Never "not found" — from the reader's side that reads as "your request failed", and
@@ -99,13 +134,44 @@ export default withLambda(async (event) => {
         const who = esc(row.senderName || 'this sender');
 
         if (method === 'GET') {
-            return page(200, 'Unsubscribe',
-                `<p>Stop receiving emails from ${who} at <strong>${esc(row.email)}</strong>?</p>
+            // ⚠️ The preference page, NOT a wall between the reader and the exit. "Stop all emails"
+            // is one of the options, on the same page, styled as plainly as the rest — a centre
+            // that makes leaving harder than it was is worse than none at all, because the reader
+            // who cannot find the exit presses "report spam", and that costs the sending domain far
+            // more than one lost subscriber.
+            const options = PREFERENCE_OPTIONS.map((o, i) => `
+                <label class="opt">
+                  <input type="radio" name="choice" value="${esc(o.choice)}"${i === 0 ? ' checked' : ''}>
+                  <span><strong>${esc(o.label)}</strong><br><small>${esc(o.detail)}</small></span>
+                </label>`).join('');
+            return page(200, 'Your email preferences',
+                `<p>Emails from ${who} to <strong>${esc(row.email)}</strong>.</p>
                  <form method="POST" action="/api/newsletter/unsubscribe">
                    <input type="hidden" name="t" value="${esc(token)}">
                    <input type="hidden" name="confirmed" value="1">
-                   <button type="submit">Unsubscribe me</button>
+                   ${options}
+                   <button type="submit">Save my choice</button>
                  </form>`, '✉️');
+        }
+
+        // ⚠️ ONE-CLICK IS NEVER A PREFERENCE. RFC 8058 requires a List-Unsubscribe-Post request to
+        // unsubscribe immediately with no further interaction, and mail clients send it on the
+        // reader's behalf. Only a submitted form can carry a choice; anything else unsubscribes.
+        const choice = oneClick ? 'unsubscribe' : (parseChoice(new URLSearchParams(event.body || '').get('choice')) ?? 'unsubscribe');
+
+        if (choice !== 'unsubscribe') {
+            const result = await applyPreference(db, {
+                organisationId: row.organisationId,
+                email: row.email,
+                contactId: row.contactId,
+                choice,
+                channel: 'email_link',
+                issueId: row.issueId,
+            });
+            // No contact row means the person was erased. Nothing to pause, and nothing that could
+            // email them either — so this is a success from where they are standing.
+            return page(200, 'That is saved',
+                `<p>${esc(result?.message ?? 'You will not hear from us.')}</p>`);
         }
 
         // ⚠️ The audience row is the source of truth for every assistant, so this is the write that
@@ -123,17 +189,30 @@ export default withLambda(async (event) => {
                 : 'Clicked the unsubscribe link in a newsletter',
         });
 
+        // Stop anything already queued. The consent check at send time would catch them anyway —
+        // this closes the enrolment at the same moment, so "why did this stop?" is answerable from
+        // the row rather than inferable from an absence.
+        await haltEnrolmentsForContact(db, {
+            organisationId: row.organisationId,
+            contactId: row.contactId,
+            email: row.email,
+            reason: 'unsubscribed',
+        });
+
         // Best-effort reporting. The person is already unsubscribed; a failure here costs a number
         // on a dashboard, and must not turn a completed unsubscribe into an error page.
-        try {
-            await db.update(newsletterIssues)
-                .set({ unsubscribedCount: sql`${newsletterIssues.unsubscribedCount} + 1` })
-                .where(and(
-                    eq(newsletterIssues.id, row.issueId),
-                    eq(newsletterIssues.organisationId, row.organisationId),
-                ));
-        } catch (err) {
-            console.error('[newsletter-unsubscribe] recorded, but the issue counter was not updated', { sendId: row.sendId }, err);
+        // A sequence step belongs to no issue, so there is no counter to move for one.
+        if (row.issueId) {
+            try {
+                await db.update(newsletterIssues)
+                    .set({ unsubscribedCount: sql`${newsletterIssues.unsubscribedCount} + 1` })
+                    .where(and(
+                        eq(newsletterIssues.id, row.issueId),
+                        eq(newsletterIssues.organisationId, row.organisationId),
+                    ));
+            } catch (err) {
+                console.error('[newsletter-unsubscribe] recorded, but the issue counter was not updated', { sendId: row.sendId }, err);
+            }
         }
 
         if (oneClick) return { statusCode: 200, body: 'ok' };

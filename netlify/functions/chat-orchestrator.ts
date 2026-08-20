@@ -34,6 +34,7 @@ import { normalizePlatform, platformFormat, type SocialPlatform } from '../../sr
 import { normalizeMediaSources } from '../../src/utils/media-sources';
 import { replyClaimsPostSaved, honestDraftReply, type DraftClaimFailure } from '../../src/utils/chat-draft-claims';
 import { blogPostDraftFromUiElement, BLOG_POST_DRAFT_TYPE } from '../../src/utils/blog-chat-draft';
+import { newsletterDraftFromUiElement, NEWSLETTER_ISSUE_DRAFT_TYPE } from '../../src/utils/newsletter-chat-draft';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -1402,31 +1403,51 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
     // already refuses to claim it saved anything) but blind: it does not know it is a newsletter
     // assistant, that the Studio exists, or that the audience is shared with every other assistant.
     //
-    // ⚠️ DELIBERATELY PLAIN TEXT, unlike blog_writer. That route offers a Save/Discard draft card,
-    // which needs a uiElement type, a renderer in disruptive-ui-registry.js and a client-side save
-    // path. None of that exists for issues, so a card here would be an offer the product cannot
-    // honour — the exact failure the blog route's own comments were written to prevent. Copy
-    // drafted here is copy the user pastes into the Studio, and this prompt says so plainly rather
-    // than implying otherwise.
+    // Emits a Save/Discard card, exactly like blog_writer — the card holds the only copy of the
+    // issue until the user presses Save, and the CLIENT writes it (disruptive-ui-registry.js →
+    // 'newsletter:createDraft' → chat-session.js → newsletter-issues POST). It does NOT write on
+    // the turn: three redrafts in one conversation would otherwise be three rows in the Studio.
     newsletter_editor: {
         model: DEFAULT_MODEL,
         // Same library that shapes an autopilot issue (draft-newsletter-issues → generateIssueBody),
         // so copy written in chat sounds like copy written overnight.
         usesInspo: true,
-        maxTokens: 2048,
+        // A whole issue JSON-escaped inside one envelope. Truncation means the JSON never parses,
+        // parseStructuredReply degrades to the fallback, and the issue the model just wrote is
+        // discarded in front of the user. max_tokens is a ceiling, not a spend.
+        maxTokens: 3072,
         buildRolePrompt: (rc) => [
             sharedContextBlock(rc),
             `You are this business's newsletter writer. You help them decide what goes in an issue, and you draft the copy for it in a friendly, readable way — short sections, plain sentences, nothing that reads like a press release.`,
-            `WHERE THINGS ACTUALLY HAPPEN — everything real happens in the Newsletter Studio, not in this chat. That is where an issue is drafted against their audience, previewed exactly as a subscriber will see it, approved, and sent. You cannot draft into it, save into it, schedule from here or send anything, and nothing you write in this conversation is stored anywhere else in the app.
+            // The one thing this route must never get wrong. The card is an OFFER, so a reply
+            // that reports the issue as filed is false at the exact moment the user reads it.
+            `WHAT HAPPENS TO THE DRAFT — including the draft object below does NOT save anything. It puts the issue on screen underneath your reply with two buttons on it: "Save this draft" and "Discard". Pressing Save is what puts it in their newsletter drafts; pressing Discard throws it away. Until they press one, the issue exists only in this conversation.
 
-So never say an issue has been saved, created, queued, scheduled or sent. If they want what you have written to become a real issue, tell them to open the Newsletter Studio and start one there — the assistant can write the whole thing from a brief, so they do not need to paste your text unless they want to.`,
+So: NEVER say the issue has been saved, filed, created, scheduled, queued or sent — not even loosely. Say it is ready and that they can keep it or bin it with the buttons. Never tell them to copy the text out or re-create it themselves — the button does that.
+
+Once saved, the issue appears in this assistant's "Issues" tab and opens in the Newsletter Studio, where they edit it, pick who it goes to, preview it exactly as a subscriber will see it, approve it and send it. Sending is NOT something you can do: you cannot send, schedule or approve from this chat, so if they ask, say so plainly and point at the Studio — after they have saved the draft, which is the step that gets it there.
+
+ONE ISSUE PER REPLY. The draft object holds exactly one issue, so one reply can only ever offer one.
+
+NEVER claim you have written an issue unless THIS reply carries the draft object. If it is null, nothing was written, and a reply saying otherwise leaves the user looking for something that does not exist.`,
             `WHAT YOU CANNOT SEE — this conversation gives you no sight of their audience or their issues: not how many subscribers they have, not who is on a segment, not what has been sent, opened or unsubscribed. If they ask, say plainly that you cannot see it from here and point them at the right place — subscriber numbers and segments are on the Audience page, and past issues and their results are in the Newsletter Studio and on this assistant's Overview tab. Never guess at a number, and never describe a screen you have not been told about.`,
             `WHAT NEVER GOES IN THE COPY — do not write an unsubscribe line, a footer, a postal address or any "you are receiving this because…" text. Those are added automatically to every issue when it sends, and writing them yourself would put them in twice. Do not invent statistics, customer numbers, testimonials, prices or dates: if the brief does not give you a fact, write around it.`,
             `PERSONALISATION — you may use {{contact.first_name | "there"}} where a first name belongs, and always with a fallback like that, so a subscriber whose name they do not hold still reads a natural sentence. Do not invent other tags: the only ones that work are the contact's first name, last name, company and email, and the business's own name.`,
+            // Before the JSON contract, deliberately — the block ends with exemplar copy, so it
+            // must not be the last thing shaping the reply's SHAPE.
             rc.inspoBlock ?? '',
-            'Reply conversationally in plain text. When you draft copy, put it in the reply itself — there is no draft card here to carry it. Do not use markdown headings above the copy itself.',
+            `Return STRICT JSON and NOTHING else — no markdown, no code fences, no prose before or after the object. Keep "reply" to one or two short sentences: the issue itself belongs in bodyMarkdown, never in the reply. Every string must be valid JSON — escape the quotes and newlines inside bodyMarkdown:
+{
+  "reply": "your conversational message to the user",
+  "uiElement": {                      // or null when there is nothing to write yet
+    "type": "newsletter_issue_draft",
+    "subject": "<the subject line, plain text, under 60 characters>",
+    "preheader": "<the inbox preview line — one sentence that adds to the subject>",
+    "bodyMarkdown": "<the complete issue in Markdown: a greeting, 2-4 short ## sections, a closing line. No H1.>"
+  }
+}`,
         ].filter(Boolean).join('\n\n'),
-        parseResponse: (raw) => ({ content: raw.trim(), uiElement: null }),
+        parseResponse: parseStructuredReply,
     },
 
     blog_writer: {
@@ -2011,6 +2032,16 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             uiElement = blogDraft ? { type: BLOG_POST_DRAFT_TYPE, ...blogDraft } : null;
         }
 
+        // Same contract for the newsletter route, and the same reason: uiElementJson is persisted
+        // verbatim and re-rendered on every reload, so a half-formed draft object would come back
+        // as a broken card with a Save button on it for as long as the transcript lives. The
+        // normaliser also scrubs merge tags the send worker could not resolve — a draft saved with
+        // {{first_name}} in it would read "Hi ," in every inbox.
+        const newsletterDraft = route === ROUTES.newsletter_editor ? newsletterDraftFromUiElement(uiElement) : null;
+        if (route === ROUTES.newsletter_editor) {
+            uiElement = newsletterDraft ? { type: NEWSLETTER_ISSUE_DRAFT_TYPE, ...newsletterDraft } : null;
+        }
+
         // ── Reply ↔ persistence reconciliation ────────────────────────────────────
         // The reply text and the scheduled_posts row come from the same model response but by
         // independent paths, and nothing used to compare them — so "all three posts are drafted
@@ -2041,6 +2072,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         if (route === ROUTES.blog_writer && !blogDraft && replyClaimsPostSaved(content)) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked blog draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
+            );
+            content = honestDraftReply('blog_no_draft');
+        }
+
+        // And the newsletter route's. Identical shape: it never persists on the turn, so the only
+        // unbacked claim available to it is claiming an issue it did not write.
+        if (route === ROUTES.newsletter_editor && !newsletterDraft && replyClaimsPostSaved(content)) {
+            console.warn(
+                `[chat-orchestrator] suppressed unbacked newsletter draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );
             content = honestDraftReply('blog_no_draft');
         }

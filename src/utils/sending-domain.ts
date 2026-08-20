@@ -125,8 +125,34 @@ export function isSubdomain(domain: string): boolean {
     return domain.split('.').filter(Boolean).length >= 3;
 }
 
+/**
+ * Ask the provider to turn open/click tracking on or off for a domain.
+ *
+ * ⚠️ Both are OPT-OUTABLE and both have a cost the tenant should get to weigh. Open tracking embeds
+ * a 1×1 image; click tracking REWRITES every link so it passes through the provider's domain first,
+ * which some spam filters treat as a signal and which makes the URL a reader hovers over not the URL
+ * they are going to. Defaulting them on matches every mainstream ESP, but the toggle is real.
+ */
+export async function setDomainTracking(
+    providerDomainId: string,
+    opts: { openTracking: boolean; clickTracking: boolean },
+): Promise<SendingDomainResult> {
+    if (!providerDomainId) return { ok: false, error: 'This domain has not been registered with the mail provider yet.' };
+    const { status, body } = await call(`/domains/${encodeURIComponent(providerDomainId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ open_tracking: opts.openTracking, click_tracking: opts.clickTracking }),
+    });
+    if (status < 200 || status >= 300) return classify(status, body);
+    return { ok: true, providerDomainId };
+}
+
 export async function createSendingDomain(domain: string): Promise<SendingDomainResult> {
-    const { status, body } = await call('/domains', { method: 'POST', body: JSON.stringify({ name: domain }) });
+    const { status, body } = await call('/domains', {
+        method: 'POST',
+        // Tracking on at creation, matching the stored defaults — a domain created with tracking off
+        // while the row says on would report engagementTracked: true over figures that stay at zero.
+        body: JSON.stringify({ name: domain, open_tracking: true, click_tracking: true }),
+    });
     if (status < 200 || status >= 300) return classify(status, body);
     return {
         ok: true,

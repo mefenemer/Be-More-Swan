@@ -141,6 +141,11 @@ export interface TimeMultipliers {
     // Added when the ROI cards were repointed off the `leads` table onto assistant_records —
     // until then every assistant except the Social Media Manager contributed exactly zero.
     blog_drafted: number;
+    // Added when the Newsletter Assistant went live. Weighted BELOW a blog post: an issue is
+    // shorter and draws on the same business context, but it carries work a blog post does not —
+    // picking the segment, checking who it reaches, and reading it once more before it becomes
+    // unrecallable. An estimate, and admin-tunable like every other figure here.
+    newsletter_drafted: number;
     meeting_summarised: number;
     invoice_processed: number;
     ticket_handled: number;
@@ -159,6 +164,7 @@ export const DEFAULT_TIME_MULTIPLIERS: TimeMultipliers = {
     content_drafted: 5,
     tasks_completed: 2,
     blog_drafted: 25,
+    newsletter_drafted: 20,
     meeting_summarised: 15,
     invoice_processed: 5,
     ticket_handled: 8,

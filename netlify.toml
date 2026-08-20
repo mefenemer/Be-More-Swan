@@ -706,6 +706,12 @@ node_bundler = "esbuild"
 [functions.draft-newsletter-issues]
   schedule = "20 6 * * *"
 
+# Welcome sequence: send the next due step to newly-confirmed subscribers — every 15 minutes.
+# ⚠️ Not */5 like the issue sender: a welcome email is scheduled in DAYS, so a quarter-hour of
+# latency is invisible to the recipient and costs a third of the Neon wake-ups.
+[functions.process-newsletter-sequences]
+  schedule = "*/15 * * * *"
+
 # US 5.1: ingest Search Console metrics + flag decayed blog posts — 06:00 UTC every day
 [functions.ingest-gsc-metrics]
   schedule = "0 6 * * *"

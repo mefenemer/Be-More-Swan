@@ -7588,28 +7588,28 @@ async function _loadNewsletterMetrics(assistantId) {
         setDot('reach', d.issuesSent > 0 ? 'live' : 'flat');
         _setKpiCard('reach', { empty: !d.issuesSent });
 
-        // Card 3 — Delivery rate. The unknown case says so, in words.
-        if (valEl('ctr')) valEl('ctr').textContent = pct(d.deliveryRate);
+        // Card 3 — Open rate. ⚠️ Null when nothing measurable has been sent, and the trend line
+        // says WHY rather than showing 0% — "nobody opened it" and "we cannot see opens" must never
+        // look the same. A mailbox send can never be measured; a domain send with tracking off is
+        // the tenant's own choice.
+        if (valEl('ctr')) valEl('ctr').textContent = pct(d.openRate);
         if (trendEl('ctr')) {
-            trendEl('ctr').textContent = d.deliveryUnknown
-                ? 'Delivery reporting not connected'
-                : d.deliveryRate === null ? 'Nothing sent yet' : 'Reported by your mail provider';
+            trendEl('ctr').textContent = d.openRate !== null
+                ? 'Indicative — Apple Mail inflates this'
+                : d.issuesSent > 0 ? 'Not measurable on these sends' : 'After your first issue';
         }
-        setDot('ctr', d.deliveryRate === null ? 'flat' : d.deliveryRate >= 0.95 ? 'up' : 'down');
-        _setKpiCard('ctr', { empty: d.deliveryRate === null });
+        setDot('ctr', d.openRate === null ? 'flat' : d.openRate >= 0.2 ? 'up' : 'down');
+        _setKpiCard('ctr', { empty: d.openRate === null });
 
-        // Card 4 — Unsubscribe rate. DOWN is good here, so the tone is inverted deliberately.
-        if (valEl('value')) valEl('value').textContent = pct(d.unsubscribeRate);
+        // Card 4 — Click rate. The deliberate act, and so the one to trust of the two.
+        if (valEl('value')) valEl('value').textContent = pct(d.clickRate);
         if (trendEl('value')) {
-            trendEl('value').textContent = d.unsubscribeRate === null
-                ? 'After your first issue'
-                : d.unsubscribeRate <= 0.005 ? 'Healthy — under 0.5%' : 'Higher than usual — check content or frequency';
+            trendEl('value').textContent = d.clickRate !== null
+                ? 'Readers who followed a link'
+                : d.issuesSent > 0 ? 'Not measurable on these sends' : 'After your first issue';
         }
-        setDot('value', d.unsubscribeRate === null ? 'flat' : d.unsubscribeRate <= 0.005 ? 'up' : 'down');
-        _setKpiCard('value', {
-            empty: d.unsubscribeRate === null,
-            tone: d.unsubscribeRate !== null && d.unsubscribeRate > 0.005 ? 'down' : 'brand',
-        });
+        setDot('value', d.clickRate === null ? 'flat' : d.clickRate >= 0.02 ? 'up' : 'down');
+        _setKpiCard('value', { empty: d.clickRate === null });
     } catch (err) {
         console.error('[newsletter metrics]', err);
         _setMetricsEmptyState('cards');

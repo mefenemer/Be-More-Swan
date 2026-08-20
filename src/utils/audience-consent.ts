@@ -49,7 +49,11 @@ export type AudienceSkipReason =
     | 'suppressed'
     | 'bounced_previously'
     | 'complained_previously'
-    | 'consent_check_failed';
+    | 'consent_check_failed'
+    // ⚠️ TEMPORARY, unlike every other reason here. The address is fine and the person is still
+    // subscribed — they asked for quiet until a date. Callers that queue future work (the welcome
+    // sequence) must DEFER on this verdict rather than stop, which is what `retryAfter` is for.
+    | 'paused';
 
 export interface AudienceVerdict {
     sendable: boolean;
@@ -58,6 +62,14 @@ export interface AudienceVerdict {
     detail?: string | null;
     /** True when the verdict is a fail-closed guess rather than a completed lookup. */
     unknown?: boolean;
+    /**
+     * When a TEMPORARY refusal expires. Set only for 'paused'.
+     *
+     * The difference between "stop" and "not yet" is invisible in a boolean, and a caller that
+     * cannot see it has to guess — the welcome-sequence worker would halt an enrolment for ever
+     * over a 30-day pause. Anything scheduling future work reschedules to this instead.
+     */
+    retryAfter?: Date | null;
 }
 
 /** Copy for the Audience UI and the send report. Keep in step with AudienceSkipReason. */
@@ -70,6 +82,7 @@ export const SKIP_REASON_LABEL: Record<AudienceSkipReason, string> = {
     bounced_previously:    'Previous email bounced',
     complained_previously: 'Marked a previous email as spam',
     consent_check_failed:  'Consent could not be checked — not sent',
+    paused:                'Paused their emails',
 };
 
 const SENDABLE: AudienceVerdict = { sendable: true, reason: null };
@@ -137,7 +150,7 @@ export async function checkAudienceConsentBulk(
 
     // ── 1. The audience itself. A POSITIVE gate: an address with no contact row is not mailable,
     // which is also what makes a missing table safe — it degrades to "nobody is subscribed".
-    const contacts = new Map<string, { status: string; unsubscribedAt: Date | null }>();
+    const contacts = new Map<string, { status: string; unsubscribedAt: Date | null; pausedUntil: Date | null }>();
     try {
         for (const part of chunk(valid)) {
             const rows = await db
@@ -145,13 +158,14 @@ export async function checkAudienceConsentBulk(
                     email: audienceContacts.email,
                     status: audienceContacts.status,
                     unsubscribedAt: audienceContacts.unsubscribedAt,
+                    pausedUntil: audienceContacts.pausedUntil,
                 })
                 .from(audienceContacts)
                 .where(and(
                     eq(audienceContacts.organisationId, organisationId),
                     inArray(audienceContacts.email, part),
                 ));
-            for (const r of rows) contacts.set(r.email, { status: r.status, unsubscribedAt: r.unsubscribedAt });
+            for (const r of rows) contacts.set(r.email, { status: r.status, unsubscribedAt: r.unsubscribedAt, pausedUntil: r.pausedUntil });
         }
     } catch (err) {
         // No 42P01 exemption here, unlike the two lists below. Those answer "is this address
@@ -254,6 +268,26 @@ export async function checkAudienceConsentBulk(
                 sendable: false,
                 reason: 'suppressed',
                 detail: suppressedDomains.get(domain) || null,
+            });
+            continue;
+        }
+
+        // ⚠️ LAST, and that ordering is deliberate. A pause is the only TEMPORARY refusal here, so
+        // every permanent one outranks it: recording 'paused' for somebody who actually opted out
+        // of outreach would misreport a consent decision on the send ledger, and would make the
+        // welcome-sequence worker defer for 30 days before halting on what it should have halted
+        // on immediately.
+        //
+        // A PAUSE BINDS EVERY ASSISTANT, because this function is what every assistant asks.
+        // Somebody who asks for quiet and then gets a welcome-sequence email two days later has
+        // been told no. Checked against the clock on each call, so the pause lifts itself — nothing
+        // has to run for it to end.
+        if (contact.pausedUntil && contact.pausedUntil.getTime() > Date.now()) {
+            verdicts.set(email, {
+                sendable: false,
+                reason: 'paused',
+                detail: `Paused until ${contact.pausedUntil.toISOString().slice(0, 10)}`,
+                retryAfter: contact.pausedUntil,
             });
             continue;
         }

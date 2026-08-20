@@ -34,6 +34,8 @@
         <input id="orch-action" type="text" maxlength="200" placeholder="e.g. design the visual"
           class="flex-1 min-w-[12rem] border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
       </div>
+      <!-- Set when the chosen pair only works one way — see _orchSyncTargetRules. -->
+      <p id="orch-target-note" class="hidden text-xs text-gray-500" style="display:none"></p>
       <div class="flex items-center gap-3 pt-1">
         <button id="orch-create-btn" type="button" onclick="window._createOrchestration()"
           class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition cursor-pointer">
@@ -98,7 +100,29 @@
     const src = document.getElementById('orch-source');
     const tgt = document.getElementById('orch-target');
     if (src) src.innerHTML = opts;
-    if (tgt) tgt.innerHTML = opts;
+    if (tgt) { tgt.innerHTML = opts; tgt.addEventListener('change', _orchSyncTargetRules); }
+    _orchSyncTargetRules();
+  }
+
+  // A Newsletter Assistant writes an issue ABOUT the post and links to it, so there has to be a
+  // published post to link to. The API refuses the other events; this stops the form offering a
+  // combination it will reject, which is the difference between a rule and a rejection.
+  function _orchSyncTargetRules() {
+    const tgt = document.getElementById('orch-target');
+    const ev = document.getElementById('orch-event');
+    const note = document.getElementById('orch-target-note');
+    if (!tgt || !ev || !note) return;
+    const chosen = _orchAssistants.find(a => String(a.id) === String(tgt.value));
+    const newsletter = chosen && chosen.roleKey === 'newsletter_editor';
+    Array.from(ev.options).forEach(o => { o.disabled = newsletter && o.value !== 'publishes_a_post'; });
+    if (newsletter) {
+      ev.value = 'publishes_a_post';
+      note.textContent = `${chosen.name} writes an issue about the post and links to it, so it can only pick one up once the post is published.`;
+      note.classList.remove('hidden'); note.style.display = 'block';
+    } else {
+      note.textContent = '';
+      note.classList.add('hidden'); note.style.display = 'none';
+    }
   }
 
   window._renderOrchestrations = async function () {

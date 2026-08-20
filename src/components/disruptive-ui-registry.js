@@ -1618,6 +1618,121 @@
     return el;
   }
 
+  // ── Built-in: Newsletter Issue Draft Card ───────────────────────────────────
+  // Renderer for the newsletter_editor route's wire shape (chat-orchestrator.ts, normalised by
+  // src/utils/newsletter-chat-draft.ts): { type: 'newsletter_issue_draft', subject, preheader,
+  // bodyMarkdown, warnings }.
+  //
+  // Same contract as the blog card and for the same reason — it holds the only copy of the issue
+  // until Save is pressed — with one addition: `warnings`. The normaliser strips personalisation
+  // tags the send worker could not resolve, and a card that edited someone's copy silently would
+  // be worse than one that refused it.
+  function renderNewsletterIssueDraftCard(ui, esc) {
+    const bodyMarkdown = typeof ui.bodyMarkdown === 'string' ? ui.bodyMarkdown.trim() : '';
+    if (!bodyMarkdown) return null;
+    const subject = typeof ui.subject === 'string' && ui.subject.trim() ? ui.subject.trim() : 'Untitled issue';
+    const preheader = typeof ui.preheader === 'string' ? ui.preheader.trim() : '';
+    const warnings = (Array.isArray(ui.warnings) ? ui.warnings : []).filter((w) => typeof w === 'string' && w.trim());
+    const words = bodyMarkdown.split(/\s+/).filter(Boolean).length;
+
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <div class="flex items-start gap-3 mb-3">
+        <div class="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-xl shrink-0">✉️</div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase" data-nid-eyebrow>Newsletter draft · Not saved yet</p>
+          <p class="font-bold text-gray-900 break-words">${esc(subject)}</p>
+          ${preheader ? `<p class="text-xs text-gray-500 break-words">${esc(preheader)}</p>` : ''}
+        </div>
+      </div>
+
+      <div class="bg-white border border-indigo-100 rounded-lg p-3 mb-3 max-h-64 overflow-y-auto">
+        <p class="text-sm text-gray-700 whitespace-pre-wrap break-words">${esc(bodyMarkdown)}</p>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-1.5 mb-3">
+        <span class="text-[11px] font-semibold text-gray-500">${esc(String(words))} words</span>
+      </div>
+
+      ${warnings.length ? `<div class="bg-amber-50 border border-amber-200 rounded-lg p-2.5 mb-3">
+        <p class="text-[11px] font-bold text-amber-900 mb-0.5">We tidied this before showing it</p>
+        <ul class="text-[11px] text-amber-900 list-disc pl-4">${warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>
+      </div>` : ''}
+
+      <div class="flex items-center gap-2" data-nid-actions>
+        <button type="button" data-nid-save
+          class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          Save this draft
+        </button>
+        <button type="button" data-nid-discard
+          class="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          Discard
+        </button>
+      </div>
+      <p class="mt-2 text-xs font-semibold text-indigo-700" data-nid-status>Saving keeps it as a draft you can edit and send later. Nothing is sent to anyone until you approve it in the Studio.</p>
+    `;
+
+    const status = el.querySelector('[data-nid-status]');
+    function say(text, tone) {
+      status.textContent = text;
+      status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`;
+    }
+    function setBusy(busy) {
+      el.querySelectorAll('[data-nid-save], [data-nid-discard]').forEach((b) => { b.disabled = busy; });
+    }
+    function setEyebrow(text) {
+      const eyebrow = el.querySelector('[data-nid-eyebrow]');
+      if (eyebrow) eyebrow.textContent = text;
+    }
+
+    el.addEventListener('click', (e) => {
+      const save = e.target.closest('[data-nid-save]');
+      const discard = e.target.closest('[data-nid-discard]');
+      if (!save && !discard) return;
+
+      if (discard) {
+        setBusy(true);
+        setEyebrow('Newsletter draft · Discarded');
+        say('Discarded — nothing was saved. Ask me for another angle any time.');
+        return;
+      }
+
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('newsletter:createDraft', {
+        bubbles: true,
+        detail: {
+          subject,
+          preheader,
+          bodyMarkdown,
+          // Re-enabling on failure is the point: this card holds the only copy of the issue, so a
+          // transient error must never strand it behind two dead buttons.
+          respond({ ok, deduped, error }) {
+            if (ok) {
+              setEyebrow('Newsletter draft · Saved');
+              // "Issues" and "Newsletter Studio" are the REAL names of those surfaces
+              // (assistant-dashboard-registry.js newsletter_editor.hubTab.label and the detail
+              // page's primary button), pinned by tests so this sentence cannot drift off them.
+              say(deduped
+                ? 'Already saved — it is in your Issues tab.'
+                : 'Saved to your Issues tab — open it in the Newsletter Studio to edit, choose who it goes to, and send it.');
+              return;
+            }
+            setBusy(false);
+            setEyebrow('Newsletter draft · Not saved yet');
+            say(error || 'Could not save that draft — please try again.', 'error');
+          },
+        },
+      }));
+    });
+
+    return el;
+  }
+
+  register('newsletter_issue_draft', renderNewsletterIssueDraftCard);
+  register('NewsletterIssueDraftCard', renderNewsletterIssueDraftCard);
+
   register('blog_post_draft', renderBlogPostDraftCard);
   register('BlogPostDraftCard', renderBlogPostDraftCard);
 

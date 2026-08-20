@@ -164,20 +164,235 @@
     show(el, 'block');
   }
 
-  function renderSegments() {
-    const host = $('aud-segments');
+  // ── Rule-based segments ────────────────────────────────────────────────────
+  // The field list mirrors RULE_FIELDS in src/utils/audience-segment-rules.ts. The SERVER is the
+  // authority — it validates every rule and refuses ones it cannot read — so a mismatch here shows
+  // up as a refusal with a reason rather than as a segment that quietly means something else.
+  const RULE_FIELDS = {
+    source:       { label: 'How they joined',    ops: { is: 'is', is_not: 'is not' }, value: 'source' },
+    joined:       { label: 'Joined',             ops: { within: 'in the last', not_within: 'more than' }, value: 'days' },
+    opened:       { label: 'Opened an email',    ops: { within: 'in the last', not_within: 'not in the last' }, value: 'days' },
+    emailed:      { label: 'Has been emailed',   ops: { never: 'never', ever: 'at least once' }, value: null },
+    form:         { label: 'Signed up through',  ops: { is: 'is' }, value: 'form' },
+    tag:          { label: 'Tagged',             ops: { in: 'is', not_in: 'is not' }, value: 'tag' },
+    email_domain: { label: 'Email domain',       ops: { is: 'is', is_not: 'is not' }, value: 'domain' },
+  };
+  const SOURCE_OPTS = {
+    web_form: 'a sign-up form', csv_import: 'an import', manual: 'being added by hand',
+    lead_promotion: 'the Lead Generator', api: 'the API',
+  };
+
+  let ruleState = { id: null, name: '', match: 'all', conditions: [{ field: 'opened', op: 'within', value: 90 }] };
+  // Loaded when the builder opens: without the form list there is nothing to choose between, so
+  // the "signed up through" condition is only offered once a tenant actually has a form.
+  let ruleForms = [];
+
+  function openRuleModal(segment) {
+    const modal = $('aud-rule-modal');
+    if (!modal) return;
+    ruleState = segment
+      ? {
+          id: segment.id,
+          name: segment.name,
+          match: (segment.rules && segment.rules.match) === 'any' ? 'any' : 'all',
+          conditions: (segment.rules && Array.isArray(segment.rules.conditions) && segment.rules.conditions.length)
+            ? JSON.parse(JSON.stringify(segment.rules.conditions))
+            : [{ field: 'opened', op: 'within', value: 90 }],
+        }
+      : { id: null, name: '', match: 'all', conditions: [{ field: 'opened', op: 'within', value: 90 }] };
+    $('aud-rule-title').textContent = segment ? `Rule for “${segment.name}”` : 'New rule-based segment';
+    show(modal, 'flex');
+    renderRuleBuilder();
+    previewRule();
+    // Repaint once the forms arrive; the builder is usable in the meantime.
+    fetch(FORMS_API).then((r) => (r.ok ? r.json() : { forms: [] })).then((d) => {
+      ruleForms = d.forms || [];
+      if (ruleForms.length) renderRuleBuilder();
+    }).catch(() => { /* the condition is simply not offered */ });
+  }
+
+  function renderRuleBuilder() {
+    const body = $('aud-rule-body');
+    if (!body) return;
+    const rows = ruleState.conditions.map((c, i) => {
+      const spec = RULE_FIELDS[c.field] || RULE_FIELDS.source;
+      const ops = Object.entries(spec.ops)
+        .map(([k, lbl]) => `<option value="${k}" ${c.op === k ? 'selected' : ''}>${esc(lbl)}</option>`).join('');
+      let valueInput = '';
+      if (spec.value === 'source') {
+        valueInput = `<select data-rule-value="${i}" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
+          ${Object.entries(SOURCE_OPTS).map(([k, lbl]) => `<option value="${k}" ${c.value === k ? 'selected' : ''}>${esc(lbl)}</option>`).join('')}
+        </select>`;
+      } else if (spec.value === 'days') {
+        valueInput = `<input type="number" min="1" max="3650" data-rule-value="${i}" value="${Number(c.value) || 30}"
+          class="w-24 px-2 py-2 rounded-lg border border-gray-300 text-sm"><span class="text-sm text-gray-500">days</span>`;
+      } else if (spec.value === 'tag') {
+        // Tags and manual segments only — a rule built on another rule is a cycle, and the server
+        // refuses it with a sentence naming the segment.
+        const targets = state.segments.filter((x) => x.kind !== 'dynamic');
+        valueInput = `<select data-rule-value="${i}" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
+          ${targets.map((t) => `<option value="${t.id}" ${String(c.value) === String(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
+        </select>`;
+      } else if (spec.value === 'form') {
+        valueInput = `<select data-rule-value="${i}" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
+          ${ruleForms.map((f) => `<option value="${f.id}" ${String(c.value) === String(f.id) ? 'selected' : ''}>${esc(f.name)}</option>`).join('')}
+        </select>`;
+      } else if (spec.value === 'domain') {
+        valueInput = `<input type="text" data-rule-value="${i}" value="${esc(c.value || '')}" placeholder="gmail.com"
+          class="px-2 py-2 rounded-lg border border-gray-300 text-sm">`;
+      }
+      return `<div class="flex flex-wrap items-center gap-2 py-2">
+        <select data-rule-field="${i}" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">
+          ${Object.entries(RULE_FIELDS)
+            .filter(([k]) => (k !== 'form' || ruleForms.length)
+              && (k !== 'tag' || state.segments.some((x) => x.kind !== 'dynamic')))
+            .map(([k, f]) => `<option value="${k}" ${c.field === k ? 'selected' : ''}>${esc(f.label)}</option>`).join('')}
+        </select>
+        <select data-rule-op="${i}" class="px-2 py-2 rounded-lg border border-gray-300 text-sm">${ops}</select>
+        ${valueInput}
+        <button type="button" data-rule-remove="${i}" class="ml-auto text-xs font-bold text-gray-400 hover:text-red-600 cursor-pointer">Remove</button>
+      </div>`;
+    }).join('');
+
+    body.innerHTML = `
+      <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Name</label>
+      <input type="text" id="aud-rule-name" maxlength="80" value="${esc(ruleState.name)}" placeholder="Recently engaged"
+        class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-4"
+        ${ruleState.id ? 'disabled' : ''}>
+
+      <div class="flex items-center gap-2 mb-1">
+        <span class="text-sm text-gray-700">Match</span>
+        <select id="aud-rule-match" class="px-2 py-1.5 rounded-lg border border-gray-300 text-sm">
+          <option value="all" ${ruleState.match === 'all' ? 'selected' : ''}>all of these</option>
+          <option value="any" ${ruleState.match === 'any' ? 'selected' : ''}>any of these</option>
+        </select>
+      </div>
+      <div class="divide-y divide-gray-100">${rows}</div>
+      <button type="button" id="aud-rule-add" class="mt-2 text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer">+ Add a condition</button>
+
+      <div id="aud-rule-preview" class="mt-5 px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-700">Working it out…</div>
+
+      <div class="flex justify-end gap-2 mt-4">
+        <button type="button" data-aud-rule-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
+        <button type="button" id="aud-rule-save" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Save segment</button>
+      </div>`;
+
+    body.querySelectorAll('[data-rule-field]').forEach((el) => el.addEventListener('change', () => {
+      const i = Number(el.getAttribute('data-rule-field'));
+      const field = el.value;
+      // Changing the field changes which comparisons exist, so the row is rebuilt from the new
+      // field's first op rather than keeping one that no longer applies.
+      const spec = RULE_FIELDS[field];
+      ruleState.conditions[i] = {
+        field,
+        op: Object.keys(spec.ops)[0],
+        value: spec.value === 'days' ? 30
+          : spec.value === 'source' ? 'web_form'
+          : spec.value === 'form' ? (ruleForms[0] && ruleForms[0].id)
+          : spec.value === 'tag' ? (state.segments.find((x) => x.kind !== 'dynamic') || {}).id
+          : spec.value === 'domain' ? '' : undefined,
+      };
+      renderRuleBuilder(); previewRule();
+    }));
+    body.querySelectorAll('[data-rule-op]').forEach((el) => el.addEventListener('change', () => {
+      ruleState.conditions[Number(el.getAttribute('data-rule-op'))].op = el.value;
+      previewRule();
+    }));
+    body.querySelectorAll('[data-rule-value]').forEach((el) => el.addEventListener('change', () => {
+      const i = Number(el.getAttribute('data-rule-value'));
+      ruleState.conditions[i].value = el.type === 'number' ? Number(el.value) : el.value;
+      previewRule();
+    }));
+    body.querySelectorAll('[data-rule-remove]').forEach((el) => el.addEventListener('click', () => {
+      ruleState.conditions.splice(Number(el.getAttribute('data-rule-remove')), 1);
+      renderRuleBuilder(); previewRule();
+    }));
+    $('aud-rule-match')?.addEventListener('change', (e) => { ruleState.match = e.target.value; previewRule(); });
+    $('aud-rule-name')?.addEventListener('input', (e) => { ruleState.name = e.target.value; });
+    $('aud-rule-add')?.addEventListener('click', () => {
+      ruleState.conditions.push({ field: 'source', op: 'is', value: 'web_form' });
+      renderRuleBuilder(); previewRule();
+    });
+    body.querySelectorAll('[data-aud-rule-close]').forEach((el) => el.addEventListener('click', () => hide($('aud-rule-modal'))));
+    $('aud-rule-save')?.addEventListener('click', saveRuleSegment);
+  }
+
+  // ⚠️ The preview asks the SERVER, which counts through the same compiler the send uses. A count
+  // worked out in the browser would be a second implementation of "who is in this segment", and
+  // the one that drifts is the one that emails people.
+  async function previewRule() {
+    const host = $('aud-rule-preview');
     if (!host) return;
-    if (!state.segments.length) {
-      host.innerHTML = '<p class="text-sm text-gray-400">No segments yet. Create one to target a newsletter at part of your audience.</p>';
+    try {
+      const { matches, description } = await api(SEGMENTS_API, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'preview', rules: { match: ruleState.match, conditions: ruleState.conditions } }),
+      });
+      host.className = 'mt-5 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 text-sm text-emerald-900';
+      host.innerHTML = `<p class="font-bold">${Number(matches).toLocaleString()} ${matches === 1 ? 'person matches' : 'people match'} right now.</p>
+        <p class="text-[12px] mt-1">${esc(description || '')}</p>
+        <p class="text-[11px] text-emerald-700 mt-1">This is worked out again every time — the number will move as your audience does.</p>`;
+    } catch (err) {
+      // The refusal, verbatim. It names the condition it could not read.
+      host.className = 'mt-5 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-900';
+      host.textContent = err.message;
+    }
+  }
+
+  async function saveRuleSegment() {
+    const rules = { match: ruleState.match, conditions: ruleState.conditions };
+    try {
+      if (ruleState.id) {
+        await api(SEGMENTS_API, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'setRules', id: ruleState.id, rules }),
+        });
+      } else {
+        if (!ruleState.name.trim()) { window.showToast('Give the segment a name.'); return; }
+        await api(SEGMENTS_API, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'create', name: ruleState.name.trim(), kind: 'dynamic', rules }),
+        });
+      }
+      hide($('aud-rule-modal'));
+      await loadSegments();
+      await loadContacts();
+    } catch (err) { window.showToast(err.message); }
+  }
+
+  function renderSegments() {
+    // Same data, two rows: a tag IS a manual segment (db/audience-tags.sql), and the split is
+    // presentational so forty labels do not bury four sendable audiences.
+    renderChips($('aud-segments'), state.segments.filter((s) => s.kind !== 'tag'), true,
+      'No segments yet. Create one to target a newsletter at part of your audience.');
+    renderChips($('aud-tags'), state.segments.filter((s) => s.kind === 'tag'), false,
+      'No tags yet. Tag people to describe them, then build a segment from the tag.');
+  }
+
+  function renderChips(host, list, withEveryone, emptyText) {
+    if (!host) return;
+    if (!list.length) {
+      host.innerHTML = `<p class="text-sm text-gray-400">${esc(emptyText)}</p>`;
       return;
     }
-    const all = `<button type="button" data-segment="" class="px-3 py-1.5 text-xs font-bold rounded-full border transition cursor-pointer ${!state.filters.segmentId ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'}">Everyone</button>`;
-    host.innerHTML = all + state.segments.map((s) => {
+    const all = withEveryone
+      ? `<button type="button" data-segment="" class="px-3 py-1.5 text-xs font-bold rounded-full border transition cursor-pointer ${!state.filters.segmentId ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'}">Everyone</button>`
+      : '';
+    host.innerHTML = all + list.map((s) => {
       const active = String(state.filters.segmentId) === String(s.id);
-      return `<span class="inline-flex items-center rounded-full border ${active ? 'bg-emerald-600 border-emerald-600' : 'bg-white border-gray-300'}">
+      const dyn = s.kind === 'dynamic';
+      // The rule in words, on hover. A count alone is not checkable — "412" looks equally right
+      // whatever the rule says.
+      const title = dyn ? ` title="${esc(s.rulesError || s.description || '')}"` : '';
+      return `<span class="inline-flex items-center rounded-full border ${s.rulesError ? 'bg-red-50 border-red-300' : active ? 'bg-emerald-600 border-emerald-600' : 'bg-white border-gray-300'}"${title}>
         <button type="button" data-segment="${s.id}" class="px-3 py-1.5 text-xs font-bold rounded-full cursor-pointer ${active ? 'text-white' : 'text-gray-700'}">
-          ${esc(s.name)} <span class="${active ? 'text-emerald-100' : 'text-gray-400'}">${Number(s.subscribedCount || 0).toLocaleString()}</span>
+          ${dyn ? `<span class="${active ? 'text-emerald-100' : 'text-emerald-600'}">◆</span> ` : ''}${esc(s.name)}
+          ${s.rulesError
+            ? '<span class="text-red-600">rules broken</span>'
+            : `<span class="${active ? 'text-emerald-100' : 'text-gray-400'}">${Number(s.subscribedCount || 0).toLocaleString()}</span>`}
         </button>
+        ${dyn ? `<button type="button" data-segment-rules="${s.id}" title="Edit the rule"
+          class="px-1 text-xs ${active ? 'text-emerald-100 hover:text-white' : 'text-gray-400 hover:text-emerald-700'} cursor-pointer">edit</button>` : ''}
         <button type="button" data-segment-delete="${s.id}" title="Delete segment"
           class="pr-3 pl-1 text-xs ${active ? 'text-emerald-100 hover:text-white' : 'text-gray-300 hover:text-red-500'} cursor-pointer">&times;</button>
       </span>`;
@@ -271,9 +486,19 @@
       if (title) title.textContent = name;
       const st = STATUS[contact.status] || { label: contact.status, cls: 'bg-gray-100 text-gray-600 border-gray-200' };
 
+      // A pause is not a status — the contact is still subscribed — so it sits beside the badge
+      // rather than replacing it. Without this a tenant sees "Subscribed" next to somebody the
+      // send worker is correctly skipping, and reports it as a bug.
+      const paused = contact.pausedUntil && new Date(contact.pausedUntil) > new Date()
+        ? `<span class="inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border bg-amber-100 text-amber-800 border-amber-200 ml-1">Paused until ${esc(fmtDate(contact.pausedUntil))}</span>`
+        : '';
+      const capped = contact.emailFrequency === 'monthly'
+        ? '<span class="inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border bg-sky-100 text-sky-800 border-sky-200 ml-1">Monthly at most</span>'
+        : '';
+
       body.innerHTML = `
         <div>
-          <span class="inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border ${st.cls}">${esc(st.label)}</span>
+          <span class="inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border ${st.cls}">${esc(st.label)}</span>${paused}${capped}
           <p class="text-sm text-gray-900 font-bold mt-3">${esc(contact.email)}</p>
           ${contact.company ? `<p class="text-sm text-gray-500">${esc(contact.company)}</p>` : ''}
           ${contact.phone ? `<p class="text-sm text-gray-500">${esc(contact.phone)}</p>` : ''}
@@ -385,6 +610,16 @@
     firstName: ['first name', 'firstname', 'first', 'given name', 'name'],
     lastName: ['last name', 'lastname', 'last', 'surname', 'family name'],
     company: ['company', 'organisation', 'organization', 'business', 'account'],
+    // ⚠️ The column that stops us emailing somebody who already left. A Mailchimp or Kit export
+    // lists the people who unsubscribed alongside everyone else; without reading this, importing
+    // that file re-subscribes them and we mail people who opted out, from the tenant's own domain.
+    //
+    // This side only decides WHICH COLUMN to read. What the values MEAN is decided on the server
+    // (src/config/audience-import-status.ts) — "cleaned" is Mailchimp for a hard bounce, and a
+    // second copy of that table in the browser is the one that would drift. Picking the wrong
+    // column here is safe: the server refuses values it does not recognise rather than guessing.
+    status: ['status', 'state', 'subscription status', 'subscriber status', 'member status',
+      'unsubscribed', 'opted out', 'opt out', 'do not email', 'email marketing consent'],
   };
 
   function mapHeaders(header) {
@@ -422,14 +657,23 @@
         firstName: idx.firstName >= 0 ? (r[idx.firstName] || '').trim() : '',
         lastName: idx.lastName >= 0 ? (r[idx.lastName] || '').trim() : '',
         company: idx.company >= 0 ? (r[idx.company] || '').trim() : '',
+        // Raw, verbatim. The server maps it — see HEADER_ALIASES.status.
+        status: idx.status >= 0 ? (r[idx.status] || '').trim() : '',
       })).filter((r) => r.email);
 
       if (preview) {
         // Deliberately does NOT say "valid addresses". The server is the only validator — a second
         // copy of that rule in the browser is the drift trap that lets a form go green on something
         // the server then refuses. Anything undeliverable comes back in the import's own report.
+        const hasStatus = idx.status >= 0;
         preview.innerHTML = `<p><strong>${importRows.length.toLocaleString()}</strong> rows to import.
-          Columns matched: ${Object.entries(idx).filter(([, v]) => v >= 0).map(([k]) => `<span class="font-mono text-xs bg-gray-100 px-1 rounded">${k}</span>`).join(' ')}</p>`;
+          Columns matched: ${Object.entries(idx).filter(([, v]) => v >= 0).map(([k]) => `<span class="font-mono text-xs bg-gray-100 px-1 rounded">${k}</span>`).join(' ')}</p>`
+          // Said BEFORE they press the button, not after. Somebody migrating a list needs to know
+          // their unsubscribes are being carried over — and, if there is no such column, that they
+          // are NOT, because that is the case where importing quietly re-subscribes people.
+          + (hasStatus
+            ? '<p class="mt-1 text-emerald-800">Anyone marked as unsubscribed, bounced or spam in this file will be brought over that way and will not be emailed.</p>'
+            : '<p class="mt-1 text-amber-800">No status column found, so every row will be imported as subscribed. If this file came from another email tool, re-export it with the subscription status included — otherwise people who unsubscribed there will be emailed again from here.</p>');
         show(preview, 'block');
       }
       updateImportButton();
@@ -454,6 +698,8 @@
     let imported = 0;
     let skipped = 0;
     let failed = 0;
+    let optedOut = 0;
+    const unreadable = new Set();
 
     try {
       for (let i = 0; i < importRows.length; i += IMPORT_CHUNK) {
@@ -480,14 +726,27 @@
         imported += res.imported || 0;
         skipped += res.skipped || 0;
         failed += res.failed || 0;
+        optedOut += res.unsubscribedFromFile || 0;
+        (res.unreadableStatuses || []).forEach((v) => unreadable.add(v));
       }
 
       // Report all three numbers, always. "Imported 4,000" while 600 were skipped is the kind of
       // half-truth that turns into "why did only 4,000 people get it?" a week later.
       const parts = [`${imported.toLocaleString()} imported`];
-      if (skipped) parts.push(`${skipped.toLocaleString()} skipped (already unsubscribed)`);
-      if (failed) parts.push(`${failed.toLocaleString()} rejected (not a valid address)`);
-      window.showToast(parts.join(' · '));
+      // Carried-over opt-outs get their own number rather than being folded into "skipped" — a
+      // tenant migrating a list needs to SEE that their unsubscribes came across, or they will
+      // reasonably assume they did not.
+      if (optedOut) parts.push(`${optedOut.toLocaleString()} kept as unsubscribed`);
+      if (skipped) parts.push(`${skipped.toLocaleString()} already unsubscribed here`);
+      if (failed) parts.push(`${failed.toLocaleString()} rejected`);
+      window.showToast(parts.join(' · '), { duration: 8000 });
+      if (unreadable.size) {
+        await window.alertModal(
+          `Some rows had a subscription status we could not read, so they were not imported: ${[...unreadable].map(esc).join(', ')}. `
+          + 'Fix those values in the file and import it again — we do not guess whether somebody has agreed to be emailed.',
+          { title: 'Some rows were not imported' },
+        );
+      }
       hide($('aud-import-modal'));
       await loadContacts();
       await loadSegments();
@@ -712,8 +971,8 @@
       });
     }
 
-    const segHost = $('aud-segments');
-    if (segHost) {
+    // Both chip rows share one handler: they render the same markup and mean the same thing.
+    [$('aud-segments'), $('aud-tags')].filter(Boolean).forEach((segHost) => {
       segHost.addEventListener('click', async (e) => {
         const del = e.target.closest('[data-segment-delete]');
         if (del) {
@@ -734,6 +993,12 @@
           await loadContacts();
           return;
         }
+        const edit = e.target.closest('[data-segment-rules]');
+        if (edit) {
+          const seg = state.segments.find((x) => x.id === Number(edit.getAttribute('data-segment-rules')));
+          if (seg) openRuleModal(seg);
+          return;
+        }
         const pick = e.target.closest('[data-segment]');
         if (!pick) return;
         state.filters.segmentId = pick.getAttribute('data-segment') || '';
@@ -741,7 +1006,41 @@
         renderSegments();
         loadContacts();
       });
-    }
+    });
+
+    $('aud-new-rule-segment')?.addEventListener('click', () => openRuleModal(null));
+
+    $('aud-new-tag')?.addEventListener('click', async () => {
+      const name = await window.promptModal('Name this tag', {
+        title: 'New tag', placeholder: 'Bought something', confirmLabel: 'Create tag',
+      });
+      if (!name) return;
+      try {
+        await api(SEGMENTS_API, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'create', name, kind: 'tag' }),
+        });
+        await loadSegments();
+      } catch (err) { window.showToast(err.message); }
+    });
+
+    $('aud-bulk-tag')?.addEventListener('click', async () => {
+      const tags = state.segments.filter((s) => s.kind === 'tag');
+      if (!tags.length) { window.showToast('Create a tag first.'); return; }
+      const choice = await window.choiceModal('Tag the selected contacts as…',
+        tags.map((t) => ({ label: t.name, value: String(t.id) })));
+      if (!choice) return;
+      try {
+        await api(CONTACTS_API, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'segment', segmentId: Number(choice), contactIds: [...state.selected] }),
+        });
+        window.showToast('Tagged.');
+        await loadSegments();
+        await loadContacts();
+      } catch (err) { window.showToast(err.message); }
+    });
+    document.querySelectorAll('[data-aud-rule-close]').forEach((el) => el.addEventListener('click', () => hide($('aud-rule-modal'))));
 
     const newSeg = $('aud-new-segment');
     if (newSeg) {
@@ -811,9 +1110,12 @@
     const bulkSegment = $('aud-bulk-segment');
     if (bulkSegment) {
       bulkSegment.addEventListener('click', async () => {
-        if (!state.segments.length) { window.showToast('Create a segment first.'); return; }
+        // Manual segments only: a dynamic one works its members out for itself, and a tag has its
+        // own button. Offering either here would be a control that reports success and does nothing.
+        const targets = state.segments.filter((s) => s.kind !== 'dynamic' && s.kind !== 'tag');
+        if (!targets.length) { window.showToast('Create a segment first.'); return; }
         const choice = await window.choiceModal('Add the selected contacts to…',
-          state.segments.map((s) => ({ label: s.name, value: String(s.id) })));
+          targets.map((s) => ({ label: s.name, value: String(s.id) })));
         if (!choice) return;
         await api(CONTACTS_API, {
           method: 'POST',

@@ -19,6 +19,9 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 
 const SOURCE_EVENTS = ['drafts_a_post', 'publishes_a_post', 'completes_a_task'];
 
+/** ai_assistants.configuration.type for the Newsletter Assistant — see db/seed-catalog.ts. */
+const NEWSLETTER_ROLE = 'newsletter_editor';
+
 export default withLambda(async (event) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
@@ -94,7 +97,10 @@ export default withLambda(async (event) => {
         }
 
         // Both assistants must belong to the caller's org.
-        const owned = await db.select({ id: aiAssistants.id })
+        const owned = await db.select({
+            id: aiAssistants.id,
+            roleType: sql<string | null>`${aiAssistants.configuration} ->> 'type'`,
+        })
             .from(aiAssistants)
             .where(and(
                 inArray(aiAssistants.id, [sourceAssistantId, targetAssistantId]),
@@ -102,6 +108,21 @@ export default withLambda(async (event) => {
             ));
         if (owned.length !== 2) {
             return { statusCode: 404, body: JSON.stringify({ error: 'Assistant not found.' }) };
+        }
+
+        // ⚠️ A Newsletter Assistant drafts an issue ABOUT the post and links to it, so the post has
+        // to be live. Refused at creation rather than skipped at runtime: a link the hub lists as
+        // active and that can never do anything is worse than an error the user reads while they
+        // are still looking at the form.
+        const targetIsNewsletter = owned.find(a => a.id === targetAssistantId)?.roleType === NEWSLETTER_ROLE;
+        if (targetIsNewsletter && sourceEvent !== 'publishes_a_post') {
+            return {
+                statusCode: 400,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    error: 'A Newsletter Assistant writes an issue about a post and links to it, so it can only pick one up once it is published. Choose "publishes a post".',
+                }),
+            };
         }
 
         const [link] = await db.insert(orchestrationLinks).values({

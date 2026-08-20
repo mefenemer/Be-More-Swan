@@ -27,7 +27,13 @@ let passed = 0, total = 0;
 function check(name: string, fn: () => void) {
     total++;
     try { fn(); passed++; console.log(`  ✓ ${name}`); }
-    catch (e) { console.log(`  ✗ ${name}\n    ${(e as Error).message}`); }
+    catch (e) {
+        console.log(`  ✗ ${name}\n    ${(e as Error).message}`);
+        // ⚠️ THIS LINE IS THE POINT OF THE FILE. Without it the process still exits 0, the runner
+        // reports the file as passing, and the ✗ scrolls past inside a green run — which is how
+        // three live sites sat flagged here while the suite reported all files passing.
+        process.exitCode = 1;
+    }
 }
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -124,7 +130,20 @@ check('no raw sql`...` template interpolates a Date-shaped identifier', () => {
         'bind `x.toISOString()` instead — postgres-js throws ERR_INVALID_ARG_TYPE in Bind, before the query is sent');
 });
 
-check('the two known sites bind an ISO string, not the Date', () => {
+check('the newsletter and audience sites bind an ISO string too', () => {
+    // Found by the scan above, on 2026-08-20, after it had been reporting them into a green run.
+    // These three are a slightly different failure from the billing ones: postgres-js infers a JS
+    // Date as 1184 (timestamptz), and all three columns are plain TIMESTAMP, so the value was
+    // coerced through the server's TimeZone rather than throwing. On a UTC server it is invisible;
+    // on any other it moves a scheduled send and a confirmation timestamp by the offset.
+    const send = readFileSync(path.join(ROOT, 'src/utils/newsletter-send.ts'), 'utf8');
+    assert.match(send, /const nowIso = now\.toISOString\(\)/);
+    assert.ok(!/\$\{now\}/.test(send), 'sendDueIssues must not bind the Date itself');
+    const store = readFileSync(path.join(ROOT, 'src/utils/audience-store.ts'), 'utf8');
+    assert.ok(!/\$\{now\}/.test(store), 'setContactStatus must not bind the Date itself');
+});
+
+check('the two known billing sites bind an ISO string, not the Date', () => {
     const cap = readFileSync(path.join(ROOT, 'src/utils/atomic-cap-check.ts'), 'utf8');
     assert.match(cap, /const periodStartParam = periodStart\.toISOString\(\)/, 'atomic-cap-check converts first');
     assert.match(cap, /AND period_start = \$\{periodStartParam\}/, 'and binds the converted value');

@@ -23,7 +23,10 @@ export type ContactSource = 'web_form' | 'csv_import' | 'manual' | 'lead_promoti
 export type ConsentBasis = 'double_opt_in' | 'single_opt_in' | 'imported_declared' | 'soft_opt_in' | 'manual_entry';
 export type ConsentEventName =
     | 'subscribe_requested' | 'confirmed' | 'unsubscribed' | 'bounced' | 'complained'
-    | 'imported' | 'promoted' | 'manual_added' | 'erased' | 'resubscribed';
+    | 'imported' | 'promoted' | 'manual_added' | 'erased' | 'resubscribed'
+    // Preference-centre decisions. Evidence, not settings: "they asked for a pause on 3 May" is
+    // the same kind of fact as "they unsubscribed on 3 May", and belongs in the same table.
+    | 'paused' | 'resumed' | 'frequency_changed';
 
 export interface ConsentEventInput {
     organisationId: number;
@@ -181,6 +184,10 @@ export async function setContactStatus(
 ): Promise<{ changed: boolean; contactId: number | null }> {
     const email = normaliseEmail(args.email);
     const now = new Date();
+    // The raw COALESCE below binds this, not `now`. A JS Date binds as timestamptz and confirmed_at
+    // is a plain TIMESTAMP, so the value written would depend on the server's TimeZone; an ISO
+    // string is cast straight to timestamp, matching every other write on this row.
+    const nowIso = now.toISOString();
 
     return db.transaction(async (tx: any) => {
         const [updated] = await tx
@@ -188,7 +195,7 @@ export async function setContactStatus(
             .set({
                 status: args.status,
                 unsubscribedAt: args.status === 'unsubscribed' ? now : undefined,
-                confirmedAt: args.status === 'subscribed' ? sql`COALESCE(${audienceContacts.confirmedAt}, ${now})` : undefined,
+                confirmedAt: args.status === 'subscribed' ? sql`COALESCE(${audienceContacts.confirmedAt}, ${nowIso})` : undefined,
                 updatedAt: now,
             })
             .where(and(
@@ -242,6 +249,16 @@ export interface BulkUpsertRow {
     company?: string | null;
     phone?: string | null;
     customFields?: Record<string, unknown>;
+    /**
+     * Per-row state, overriding the batch default.
+     *
+     * ⚠️ THE WHOLE REASON THIS IS PER ROW. A Mailchimp or Kit export carries the people who
+     * unsubscribed alongside the people who did not. Writing one status for the batch turned every
+     * one of them back into a subscriber — see src/config/audience-import-status.ts.
+     */
+    status?: ContactStatus;
+    /** Per-row basis. Null for a row that did not consent — an unsubscribe has no lawful basis to claim. */
+    consentBasis?: ConsentBasis | null;
 }
 
 export interface BulkUpsertResult {
@@ -291,10 +308,13 @@ export async function bulkUpsertContacts(
             lastName: cleanName(r.lastName),
             company: cleanName(r.company),
             phone: cleanName(r.phone),
-            status: args.status,
+            status: r.status ?? args.status,
             source: args.source,
             sourceDetail: args.sourceDetail ?? {},
-            consentBasis: args.consentBasis,
+            // A row that arrives already unsubscribed claims no consent, so it carries no basis.
+            // `?? args.consentBasis` would quietly stamp "they told us we could" on somebody who
+            // had explicitly said the opposite.
+            consentBasis: r.consentBasis === null ? null : (r.consentBasis ?? args.consentBasis),
             customFields: r.customFields ?? {},
         });
     }
@@ -311,6 +331,11 @@ export async function bulkUpsertContacts(
                 lastName: sql`COALESCE(${audienceContacts.lastName}, EXCLUDED.last_name)`,
                 company: sql`COALESCE(${audienceContacts.company}, EXCLUDED.company)`,
                 phone: sql`COALESCE(${audienceContacts.phone}, EXCLUDED.phone)`,
+                // The ratchet, and it works in BOTH directions now that rows carry their own state:
+                // an existing terminal state is never raised, and an incoming 'unsubscribed' still
+                // lands on a contact we currently hold as subscribed — because EXCLUDED.status is
+                // that row's own value. Importing somebody's opt-out must be able to STOP mail we
+                // would otherwise have sent.
                 status: sql`CASE
                     WHEN ${audienceContacts.status} IN ('unsubscribed','bounced','complained','suppressed')
                         THEN ${audienceContacts.status}

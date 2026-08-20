@@ -29,8 +29,11 @@ import {
 import { cleanName, looksLikeEmail, normaliseEmail } from '../../src/utils/audience-contacts';
 import {
     addToSegment, bulkUpsertContacts, recordConsentEvent, recordConsentEvents, removeFromSegment,
-    setContactStatus, upsertContact, type ContactStatus,
+    setContactStatus, upsertContact, type BulkUpsertRow, type ContactStatus,
 } from '../../src/utils/audience-store';
+import { resolveImportStatus } from '../../src/config/audience-import-status';
+import { haltEnrolmentsForContact } from '../../src/utils/newsletter-sequence';
+import { buildSegmentCondition } from '../../src/utils/audience-segment-rules';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -139,9 +142,40 @@ export default withLambda(async (event: HandlerEvent) => {
         // these with 42P01. That is a real misconfiguration and the page says so — but a raw 500
         // with a Postgres message in it tells a customer nothing and looks like an outage.
         // Reported, not hidden: `needsSetup` is what the UI renders.
+        // Browsing a DYNAMIC segment asks its rule, not the join table — the same compiler the send
+        // uses, so "who is in this segment" and "who would this reach" can never be two answers.
+        let dynamicRule: ReturnType<typeof buildSegmentCondition> = null;
+        let segmentIsDynamic = false;
+        if (Number.isFinite(segmentId) && segmentId) {
+            try {
+                const [seg] = await db
+                    .select({ kind: audienceSegments.kind, rules: audienceSegments.rules })
+                    .from(audienceSegments)
+                    .where(and(eq(audienceSegments.id, segmentId), eq(audienceSegments.organisationId, orgId)))
+                    .limit(1);
+                if (seg?.kind === 'dynamic') {
+                    segmentIsDynamic = true;
+                    dynamicRule = buildSegmentCondition(orgId, seg.rules);
+                }
+            } catch { /* the 42P01 path below reports it */ }
+        }
+        // Rules that will not compile list NOBODY rather than everybody. Showing the whole audience
+        // under a segment's name is how somebody sends to a list they believe is filtered.
+        if (segmentIsDynamic && !dynamicRule) {
+            return json(200, {
+                contacts: [], counts: {}, total: 0, truncated: false, cap: LIST_CAP,
+                segmentRulesError: 'The rules for this segment could not be read, so nobody is being shown. Edit the segment to fix them.',
+            });
+        }
+
         let rows;
         try {
-            rows = Number.isFinite(segmentId) && segmentId
+            rows = segmentIsDynamic && dynamicRule
+                ? await base
+                    .where(and(...filters, dynamicRule))
+                    .orderBy(desc(audienceContacts.createdAt))
+                    .limit(LIST_CAP + 1)
+                : Number.isFinite(segmentId) && segmentId
                 ? await base
                     .innerJoin(audienceContactSegments, eq(audienceContactSegments.contactId, audienceContacts.id))
                     .where(and(...filters, eq(audienceContactSegments.segmentId, segmentId)))
@@ -339,6 +373,19 @@ export default withLambda(async (event: HandlerEvent) => {
                 evidence: `Set to ${status} by user ${ctx.userId} from the Audience page.`,
             });
             if (res.changed) changed++;
+
+            // Keep the welcome series in step with the status change. ⚠️ Unsubscribing HALTS; being
+            // marked subscribed by hand does NOT enrol — the unique index would refuse a second
+            // enrolment anyway, but the reason matters: a person added by an admin has not just
+            // raised their hand, and a "welcome, thanks for subscribing" arriving because somebody
+            // tidied a spreadsheet is a message the recipient never asked for.
+            if (status === 'unsubscribed' && res.contactId) {
+                await haltEnrolmentsForContact(db, {
+                    organisationId: orgId,
+                    contactId: res.contactId,
+                    reason: 'unsubscribed',
+                });
+            }
         }
         return json(200, { changed });
     }
@@ -350,9 +397,18 @@ export default withLambda(async (event: HandlerEvent) => {
         if (!Number.isFinite(segmentId) || !segmentId) return json(400, { error: 'Invalid segment.' });
         if (!contactIds.length) return json(400, { error: 'No contacts selected.' });
 
-        const [seg] = await db.select({ id: audienceSegments.id }).from(audienceSegments)
+        const [seg] = await db.select({ id: audienceSegments.id, kind: audienceSegments.kind, name: audienceSegments.name })
+            .from(audienceSegments)
             .where(and(eq(audienceSegments.id, segmentId), eq(audienceSegments.organisationId, orgId))).limit(1);
         if (!seg) return json(404, { error: 'Segment not found.' });
+        // ⚠️ Membership rows are not read for a dynamic segment, so writing one would be a button
+        // that reports success and changes nothing — the tenant then sends to a segment they
+        // believe contains somebody it does not.
+        if (seg.kind === 'dynamic') {
+            return json(409, {
+                error: `"${seg.name}" decides its own members from its rules, so people cannot be added to it by hand. Edit the rules, or use a manual segment.`,
+            });
+        }
 
         // Re-check every id against the org. contactIds arrive from the browser, and a segment
         // membership row carries no organisation_id of its own — the tenancy check has to happen
@@ -391,29 +447,85 @@ export default withLambda(async (event: HandlerEvent) => {
         }
 
         const segmentId = Number(body.segmentId || '');
+
+        // ⚠️ READ THE STATUS COLUMN. A Mailchimp/Kit export carries the people who UNSUBSCRIBED
+        // alongside everyone else. Importing them as subscribed — which this did until 2026-08-20 —
+        // re-mails people who opted out, from the tenant's own domain. An unrecognised value is
+        // REFUSED rather than guessed: see src/config/audience-import-status.ts.
+        const prepared: BulkUpsertRow[] = [];
+        const unreadable: string[] = [];
+        let unsubscribedRows = 0;
+
+        for (const r of rows) {
+            const verdict = resolveImportStatus(r.status);
+            if (verdict.unrecognised) {
+                unreadable.push(String(r.status ?? '').slice(0, 40));
+                continue;
+            }
+            const status = verdict.status;
+            if (status && status !== 'subscribed') unsubscribedRows++;
+            prepared.push({
+                email: r.email,
+                firstName: r.firstName,
+                lastName: r.lastName,
+                company: r.company,
+                phone: r.phone,
+                // No status column, or an empty cell → the import's own default, which is what a
+                // plain "here are some people to add" list means.
+                ...(status ? { status } : {}),
+                // Somebody who arrives already unsubscribed claims no consent basis. Stamping
+                // 'imported_declared' on them would record "they told us we could email them"
+                // against a person who had said the opposite.
+                ...(status && status !== 'subscribed' ? { consentBasis: null } : {}),
+            });
+        }
+
+        if (!prepared.length) {
+            return json(400, {
+                error: unreadable.length
+                    ? 'None of these rows could be read — the status column contains values we do not recognise.'
+                    : 'No rows to import.',
+                unreadableStatuses: [...new Set(unreadable)].slice(0, 10),
+            });
+        }
+
         const { contacts, invalid } = await bulkUpsertContacts(db, {
             organisationId: orgId,
-            rows,
+            rows: prepared,
             status: 'subscribed',
             source: 'csv_import',
             consentBasis: 'imported_declared',
             sourceDetail: { importJobId: jobId, importedBy: ctx.userId },
         });
 
-        await recordConsentEvents(db, contacts.map((c) => ({
-            organisationId: orgId,
-            contactId: c.id,
-            email: c.email,
-            event: 'imported' as const,
-            channel: 'admin',
-            evidence: `CSV import #${jobId} by user ${ctx.userId}; the importer declared they hold consent.`,
-        })));
+        // The event says what the row actually was. An address imported as unsubscribed gets an
+        // 'unsubscribed' event, not an 'imported' one — otherwise the consent timeline would show
+        // "imported" against somebody we are never allowed to email, with nothing to explain why.
+        const statusByEmail = new Map(prepared.map((r) => [String(r.email).trim().toLowerCase(), r.status]));
+        await recordConsentEvents(db, contacts.map((c) => {
+            const rowStatus = statusByEmail.get(c.email);
+            const optedOut = !!rowStatus && rowStatus !== 'subscribed';
+            return {
+                organisationId: orgId,
+                contactId: c.id,
+                email: c.email,
+                event: optedOut ? ('unsubscribed' as const) : ('imported' as const),
+                channel: 'admin',
+                evidence: optedOut
+                    ? `CSV import #${jobId}: this address was already ${rowStatus} in the file it came from, and will not be emailed.`
+                    : `CSV import #${jobId} by user ${ctx.userId}; the importer declared they hold consent.`,
+            };
+        }));
 
         if (Number.isFinite(segmentId) && segmentId) {
             const [seg] = await db.select({ id: audienceSegments.id }).from(audienceSegments)
                 .where(and(eq(audienceSegments.id, segmentId), eq(audienceSegments.organisationId, orgId))).limit(1);
             if (seg) {
-                for (const c of contacts) await addToSegment(db, c.id, segmentId, ctx.userId);
+                // Only the mailable ones. A segment whose count includes people we may never email
+                // overstates every send built from it.
+                for (const c of contacts) {
+                    if (c.status === 'subscribed') await addToSegment(db, c.id, segmentId, ctx.userId);
+                }
             }
         }
 
@@ -433,7 +545,18 @@ export default withLambda(async (event: HandlerEvent) => {
             errorSummary: invalid.length ? sql`${audienceImportJobs.errorSummary} || ${JSON.stringify(invalid.slice(0, 20))}::jsonb` : undefined,
         }).where(and(eq(audienceImportJobs.id, jobId), eq(audienceImportJobs.organisationId, orgId)));
 
-        return json(200, { importJobId: jobId, imported, skipped, failed: invalid.length, invalid: invalid.slice(0, 20) });
+        return json(200, {
+            importJobId: jobId,
+            imported,
+            skipped,
+            failed: invalid.length + unreadable.length,
+            invalid: invalid.slice(0, 20),
+            // Reported separately from `skipped`, which also covers people we already held as
+            // unsubscribed. These two numbers answer different questions and a tenant migrating a
+            // list needs both: what came over as opted out, and what we could not read at all.
+            unsubscribedFromFile: unsubscribedRows,
+            unreadableStatuses: [...new Set(unreadable)].slice(0, 10),
+        });
     }
 
     return json(400, { error: `Unknown action: ${action}` });

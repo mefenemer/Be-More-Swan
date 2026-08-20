@@ -85,11 +85,12 @@ export function replyClaimsPostSaved(reply: string): boolean {
  *                    still reaches the user via the uiElement, so the message points at it.
  *   not_saved_here — drafting INTO a post the user has open. Persisting is correct-by-design
  *                    here; only the claim is wrong, and the client renders an apply button.
- *   blog_no_draft  — the blog route's version of no_draft. Long-form drafts are never written
- *                    by the turn (the user keeps or discards them from the card), so the only
- *                    unbacked claim available to that route is claiming a post that was never
- *                    drafted at all — and it lands in the Blogs tab, not the Review Queue, so
- *                    it needs its own sentence rather than a reused one pointing somewhere else.
+ *   blog_no_draft  — the DRAFT-CARD routes' version of no_draft, shared by blog_writer and
+ *                    newsletter_editor. Neither writes on the turn (the user keeps or discards
+ *                    from the card), so the only unbacked claim available to them is claiming
+ *                    something that was never drafted at all. Its sentence deliberately names no
+ *                    surface, which is what lets one string serve both — if it ever gains a
+ *                    "check your Blogs tab", the newsletter route needs its own member.
  */
 export type DraftClaimFailure = 'no_draft' | 'persist_failed' | 'not_saved_here' | 'blog_no_draft';
 

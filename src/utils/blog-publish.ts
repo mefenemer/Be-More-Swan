@@ -222,6 +222,9 @@ export async function publishBlogPost(db: any, post: BlogPostRow, organisationId
             // assistant is either long-form or social, never both, so the spaces never mix.
             sourcePostId: updated.id,
             sourceCaption: updated.title,
+            // Which id space that is. A Newsletter Assistant target reads it to decide whether it
+            // can ground the issue in the post's own words or only in its title.
+            sourcePostKind: 'blog_post',
         });
     }
 

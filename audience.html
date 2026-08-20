@@ -60,10 +60,26 @@
   <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-4">
     <div class="flex items-center justify-between mb-3">
       <p class="text-sm font-bold text-gray-900">Segments</p>
-      <button type="button" id="aud-new-segment"
-        class="text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer">+ New segment</button>
+      <div class="flex items-center gap-3">
+        <button type="button" id="aud-new-rule-segment"
+          class="text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer">+ Rule-based segment</button>
+        <button type="button" id="aud-new-segment"
+          class="text-xs font-bold text-gray-600 hover:text-gray-800 cursor-pointer">+ Manual segment</button>
+      </div>
     </div>
     <div id="aud-segments" class="flex flex-wrap gap-2">
+      <p class="text-sm text-gray-400">Loading…</p>
+    </div>
+
+    <!-- Tags are the same membership table as a manual segment — see db/audience-tags.sql. They are
+         drawn separately because a tenant with forty labels and four sendable audiences should not
+         be shown forty-four identical chips. -->
+    <div class="flex items-center justify-between mt-4 mb-2">
+      <p class="text-sm font-bold text-gray-900">Tags</p>
+      <button type="button" id="aud-new-tag"
+        class="text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer">+ New tag</button>
+    </div>
+    <div id="aud-tags" class="flex flex-wrap gap-2">
       <p class="text-sm text-gray-400">Loading…</p>
     </div>
   </div>
@@ -94,6 +110,7 @@
     <p class="text-sm font-bold text-emerald-900"><span id="aud-bulk-count">0</span> selected</p>
     <div class="flex-1"></div>
     <button type="button" id="aud-bulk-segment" class="px-3 py-1.5 text-xs font-bold text-emerald-800 bg-white border border-emerald-300 rounded-lg hover:bg-emerald-50 cursor-pointer">Add to segment</button>
+      <button type="button" id="aud-bulk-tag" class="px-3 py-1.5 text-xs font-bold text-emerald-800 bg-white border border-emerald-300 rounded-lg hover:bg-emerald-50 cursor-pointer">Tag</button>
     <button type="button" id="aud-bulk-unsub" class="px-3 py-1.5 text-xs font-bold text-amber-800 bg-white border border-amber-300 rounded-lg hover:bg-amber-50 cursor-pointer">Unsubscribe</button>
   </div>
 
@@ -118,6 +135,23 @@
       </table>
     </div>
     <div id="aud-pager"></div>
+  </div>
+
+  <!-- Rule-based segment builder. A dynamic segment stores no membership: the rule is compiled to
+       a WHERE clause when somebody asks, so the count below is the real audience rather than an
+       estimate of it. -->
+  <div id="aud-rule-modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4" style="display:none">
+    <div class="absolute inset-0 bg-black/40" data-aud-rule-close></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
+      <div class="flex items-start justify-between mb-1">
+        <h2 class="text-lg font-extrabold text-gray-900" id="aud-rule-title">Rule-based segment</h2>
+        <button type="button" data-aud-rule-close class="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 cursor-pointer">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="text-sm text-gray-500 mb-5">Members are worked out from the rule every time, so this segment can never go stale.</p>
+      <div id="aud-rule-body"></div>
+    </div>
   </div>
 
   <!-- Add-contact modal. In-page markup rather than a JS-built dialog: dialogs.js owns the

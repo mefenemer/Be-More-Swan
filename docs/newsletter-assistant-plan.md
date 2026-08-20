@@ -504,6 +504,300 @@ first three can all look healthy while the writing wears people out.
 
 ---
 
+## 11l. Tags (2026-08-20)
+
+1. **Apply `db/audience-tags.sql`** — staging, then prod. It widens one CHECK constraint
+   (`audience_segments_kind_check` gains `'tag'`) with DROP + ADD, and adds an
+   `(organisation_id, kind)` index.
+2. ⚠️ **SQL first, then deploy.** The app writes `kind = 'tag'` as soon as it ships, and a bare
+   `db.select()` on audience_segments names every column.
+
+⚠️ **THERE IS NO `audience_tags` TABLE, and that is the decision.** A tag is a label attached to
+some contacts. A manual segment is a label attached to some contacts. They are the same data, and
+`audience_contact_segments` already stores it — with the tenancy re-check on every write, the
+cascade rules, and the four readers that answer "who is in this group" already built against it. A
+second table would be a second answer to that question, and here that question means *who receives
+an email*. So a tag is a segment with `kind = 'tag'`, and the new kind changes only presentation.
+
+**What it buys.** "Everyone tagged *bought something* who has not opened an email in 60 days" is a
+dynamic segment with two conditions — Kit's model (tags are the primitive, segments are saved rules
+over them) reached without a new table. The rule builder gains a **Tagged is / is not** condition.
+
+⚠️ **A rule may not be built on a dynamic segment.** A rule over a rule is a cycle waiting to be
+written, and the first one would be found by whichever send hit it. `checkRuleReferences` refuses it
+with a sentence naming the segment, on all three write paths (preview, create, setRules) — a shape
+check alone would let it through, because the id is structurally valid.
+
+⚠️ **The tag subquery re-asserts the organisation inside the EXISTS**, through the segment row. A
+rule carrying another tenant's id would match nobody today, because membership is written
+org-checked on both sides — but "safe because of what another file does" is not a guarantee the
+rule compiler should rely on.
+
+**Presentation, which is the only thing the new kind changes:**
+
+- The Audience page draws Segments and Tags as two rows, rendered by one function from one list.
+- The newsletter's audience picker groups them — and a tag remains fully selectable, because a tag
+  IS a valid audience. Grouping is for the person choosing, not a restriction.
+- "Add to segment" offers manual segments only. A tag has its own button, and a dynamic segment
+  works its own members out — offering either would be a control that reports success and does
+  nothing.
+
+---
+
+## 11k. Dynamic segments (2026-08-20)
+
+**No migration.** `audience_segments.kind` already allowed `'dynamic'` and `rules JSONB` already
+existed — reserved when the table was written precisely so this would not be a migration of every
+existing row. It is code only, and ships with the next push.
+
+**What a tenant gets.** Audience → *+ Rule-based segment*: match all or any of up to ten
+conditions over how somebody joined, which form they used, how long ago, whether they have opened
+an email in the last N days, whether they have ever been emailed, and their email domain. The
+builder shows the live count and the rule as an English sentence before it is saved.
+
+**Nothing is materialised.** There is no membership table for a dynamic segment: the rule is
+compiled to a WHERE clause at the moment somebody asks. A stored membership would need a refresh,
+and a refresh that stops running leaves a segment quietly describing last month — ⚠️ this codebase
+has already had two nightly sweeps that never ran once. A dynamic segment cannot be stale because
+there is nothing to be stale.
+
+⚠️ **Every refusal points the same way: never wider than the tenant believes.** This compiles the
+audience of a send, so the two rules below are the opposite of what an ordinary parser does.
+
+- **An empty rule set is refused, not read as "everyone".** Someone who deletes their last
+  condition and presses save has not asked to email their whole list.
+- **A condition we cannot read fails the WHOLE rule**, naming which one. Skipping it is the
+  dangerous default: dropping "opened in the last 90 days" from a three-condition rule silently
+  triples the audience. Same reasoning as the CSV import status (§11f).
+- **`match` defaults to `all`**, the narrower joiner, when it is absent or unrecognised.
+- **A missing segment, or rules that will not compile, FAIL the send** with the reason written to
+  `failure_reason` — never a fallback to the whole audience.
+- **A broken rule lists nobody** in the audience page rather than everybody, and the segment chip
+  says "rules broken" instead of showing a count.
+
+**One compiler, four callers** — the send, the pre-send estimate, the segment list count, and
+browsing the segment all call `buildSegmentCondition`. A preview that disagrees with the send is
+only ever discovered by the recipients.
+
+⚠️ **Contacts cannot be added to a dynamic segment by hand.** Membership rows are not read for one,
+so the button would report success and change nothing — the API refuses with a sentence naming the
+segment.
+
+⚠️ **The engagement condition is org-scoped INSIDE the EXISTS subquery.** `newsletter_sends` carries
+its own `organisation_id`, and a segment that could see another tenant's ledger would be a
+cross-tenant read in the one place nobody would think to look for one.
+
+---
+
+## 11j. Preference centre (2026-08-20)
+
+1. **Apply `db/newsletter-preferences.sql`** — staging, then prod. Adds `paused_until`,
+   `email_frequency` and `preferences_updated_at` to `audience_contacts`, and **widens two existing
+   CHECK constraints**.
+2. ⚠️ **SQL first, then deploy.** The contact-detail GET in `audience-contacts.ts` uses a bare
+   `db.select()`, so it names every column of `audience_contacts`.
+3. ⚠️ **Two vocabularies are re-created, not appended to** — `audience_consent_events_event_check`
+   and `newsletter_sends_skip_reason_check` already exist with narrower lists, and their home files
+   add them only `IF NOT EXISTS`, so a plain "add if missing" here would silently do nothing and the
+   first pause would fail at 23514. A test extracts both original lists from `db/audience.sql` and
+   `db/newsletter.sql` and asserts every value survives the widening.
+4. ⚠️ **Fresh-install order:** alphabetically this file sorts before `newsletter.sql`, so on a brand
+   new database apply `audience.sql` and `newsletter.sql` first. The guard refuses to run otherwise.
+
+**What the reader gets.** The unsubscribe link now opens a preference page with four choices on one
+page: pause 30 days, pause 3 months, at most one email a month, or stop all emails.
+
+⚠️ **The exit is not hidden, moved, or made to look like the lesser option.** A preference centre
+that makes leaving harder than it was is worse than none at all: the reader who cannot find the exit
+presses "report spam" instead, and that costs the sending domain far more than one lost subscriber.
+
+⚠️ **The one-click POST still unsubscribes, unconditionally.** RFC 8058 requires a
+List-Unsubscribe-Post request to unsubscribe with no further interaction, and mail clients fire it
+from a button labelled "unsubscribe". Answering it with a menu would be a spec violation and a dark
+pattern in one move. The choices exist on the GET page only, and an unrecognised choice on the form
+unsubscribes rather than being ignored.
+
+**Three things that make the pause real rather than cosmetic:**
+
+- **It binds every assistant.** Enforced in `src/utils/audience-consent.ts` — the one place that
+  answers "may this organisation email this address right now" — so the welcome sequence and Lead
+  Generator outreach stop too. Somebody who asks for quiet and gets a "welcome!" two days later has
+  been told no.
+- **It ends by itself.** `paused_until` is a timestamp every reader compares against the clock, not
+  a flag some sweep has to clear. Two nightly sweeps in this codebase never ran once; a pause that
+  depended on one would mute people permanently.
+- **A welcome sequence DEFERS rather than halts.** A halted enrolment is never resumed by anything,
+  so the verdict carries `retryAfter` and the worker reschedules to the moment the pause lifts.
+
+**And the frequency cap is newsletter-only**, applied when recipients are materialised — a capped
+subscriber never gets a ledger row, so `recipient_count` stays an honest count of who this send
+actually reached. "At most one a month" is measured from `last_sent_at`; a contact we have never
+emailed is due by definition.
+
+⚠️ **Deliberately NOT a topic picker.** Segments here are hand-maintained, so "only send me the
+product news" would be a promise whose accuracy depends on somebody keeping a list up to date. That
+becomes honest when dynamic segments exist, and not before.
+
+---
+
+## 11i. Resend to non-openers (2026-08-20)
+
+1. ⚠️ **`db/newsletter-engagement.sql` must be applied first** (§11e). Without `newsletter_sends.
+   opened_at` there is no such thing as "did not open", so `db/newsletter-resend.sql` refuses to
+   run and names it in the hint rather than leaving a half-built feature.
+2. **Apply `db/newsletter-resend.sql`** — staging, then prod. Adds
+   `newsletter_issues.resend_of_issue_id`, the unique index that makes one resend per issue
+   structural, and a partial index for the "sent but never opened" lookup.
+3. ⚠️ **SQL first, then deploy** — same reason as §11h: two bare `db.select()` reads on
+   newsletter_issues name every column.
+4. No new function and no new schedule. A resend is an ordinary issue with `scheduled_for = now`,
+   so `process-newsletter-sends` picks it up on its next tick.
+
+**What it does.** On a sent issue, an owner or admin sees how many people were sent it and never
+opened it, edits the subject line, and confirms. That creates a NEW issue that copies the approved
+snapshot verbatim, targets only those people, and sends. Its own counters make "did the second
+subject line do better?" a comparison of two rows.
+
+⚠️ **The guard that matters most: `engagement_tracked`.** An issue sent from a tenant's own Gmail or
+Outlook mailbox rewrites no links and embeds no pixel, so every recipient looks unopened. Resending
+that is not a resend to non-openers — it is a second unrequested email to the entire list, sent in
+the belief that nobody read the first. The panel refuses with the reason and points at verifying a
+sending domain.
+
+⚠️ **And tracking being switched on is not the same as opens arriving.** `engagement_tracked` records
+that we asked the provider to track this domain; subscribing the webhook to `email.opened` /
+`email.clicked` is a separate manual step (§11e step 2). Miss it and every recipient of every issue
+reads as a non-opener — the same whole-list resend, through a door the flag does not watch. So a
+resend is also refused when the account has **never recorded a single open on any issue**, after the
+48-hour wait so a new tenant is told to wait rather than shown a warning about instrumentation they
+cannot see. The refusal is logged as an error, because the fix is ours; the tenant is asked to get in
+touch rather than sent hunting through settings they have no access to.
+
+**The other four rules, all enforced rather than advised:**
+
+- **48 hours minimum.** Opens arrive over days; somebody who reads on Sunday has not declined it on
+  Friday. The refusal says when it becomes available.
+- **One resend per issue, ever** — a unique index, not a check a double-click can get around — and a
+  resend can never itself be resent.
+- **Only recipients whose send actually succeeded.** A `skipped` or `failed` row never received the
+  email, so it is not a non-opener; sweeping those in would quietly turn this into "retry the
+  addresses that bounced".
+- **The segment is not re-applied.** "Who did not open" is already the intersection of the segment
+  and the people we reached, and re-applying a segment somebody has edited since would drop
+  recipients the original did reach.
+
+**The count on the button and the rows the worker materialises come from one predicate**
+(`unopenedFilter` in `src/utils/newsletter-resend.ts`). A preview that disagrees with the send is
+only ever discovered by the recipients.
+
+---
+
+## 11h. Blog post → newsletter issue (2026-08-20)
+
+1. **Apply `db/newsletter-from-blog.sql`** — staging, then prod, as the DB owner. It adds
+   `newsletter_issues.source_blog_post_id` and a unique index on
+   `(assistant_id, source_blog_post_id)`.
+2. ⚠️ **SQL FIRST, then deploy.** `db/schema.ts` names the new column, and two reads in
+   `newsletter-issues.ts` use a bare `db.select()`, which names every column in the table: opening
+   an issue and saving one. On an environment where the column does not exist both 500, and the
+   symptom is "the newsletter page won't open an issue", not "a migration is missing".
+3. Nothing else. No new function, no new schedule: the hand-off runs inside the publish that
+   triggers it.
+
+**How a tenant switches it on.** Orchestrations → *New workflow*: "When **Blog Writer** publishes a
+post, send to **Newsletter Assistant** to *write a short issue about it*". The freeform action is
+passed into the brief, so it is the tenant's own instruction that steers the draft.
+
+⚠️ **A Newsletter Assistant target only accepts "publishes a post".** An issue drafted at
+*drafts_a_post* would point at a URL that does not exist yet. The API refuses to create such a link
+(the hub disables the other two events when the target is a newsletter role), and the runtime
+refuses it again for links built before that rule existed.
+
+⚠️ **The target's ROLE decides what a hand-off produces.** Every other target enqueues a
+`content_generation_jobs` row, which drafts a SOCIAL post. The hub has always offered every
+assistant as a target, so a Blog Writer → Newsletter Assistant link could already be built — and
+until now it produced a social draft in a newsletter assistant's queue, which is not a thing that
+surface even shows.
+
+**What is guaranteed:**
+
+- **It drafts; it never sends.** The issue lands in `pending_approval` like every other draft.
+- **The link to the post is appended in code**, and the model is told not to write one — the same
+  rule as the unsubscribe footer. An issue about a post that does not link to the post is the one
+  outcome that makes the feature pointless, and models paraphrase URLs.
+- **One issue per post per assistant, enforced by the index.** Unpublish → republish is a supported
+  round trip and fires the hand-off again; without the index the second publish drafts a duplicate
+  of an email the tenant already reviewed.
+- **A failed draft leaves nothing behind** — the placeholder row is deleted, which also frees the
+  unique key so the next republish can try again.
+- **A hand-off that drafted nothing is recorded as `skipped`**, not as a hand-off, and gives the
+  daily cap back.
+
+**Interaction with the autopilot, worth knowing:** `draft-newsletter-issues.ts` skips an assistant
+that already has an issue awaiting a human, and `pending_approval` counts. So a blog hand-off
+suppresses that period's autopilot draft rather than stacking a second one on top of it.
+
+---
+
+## 11g. Welcome sequence deploy steps (2026-08-20)
+
+1. **Apply `db/newsletter-sequences.sql`** — staging, then prod, as the DB owner. Three tables:
+   `newsletter_sequences`, `newsletter_sequence_steps`, `newsletter_sequence_enrolments`. It guards
+   on `audience_contacts` existing and raises with a hint if the audience migration has not run.
+2. **Nothing else.** The `*/15` schedule for `process-newsletter-sequences` is in `netlify.toml` and
+   ships with the deploy; the function degrades to `{ due: 0, needsSetup: true }` on `42P01`, so
+   deploying the code before applying the SQL is safe and quiet.
+
+The file creates a unique index on `(organisation_id, trigger_event)` — nothing to de-duplicate
+first, because these tables are new in this migration.
+
+⚠️ **Nothing sends until a human switches a sequence on**, and the switch refuses while the
+sequence has no steps. An org that never opens the panel is exactly as it was before this shipped:
+`enrolInWelcomeSequence` finds no sequence and returns.
+
+⚠️ **Existing subscribers are not enrolled retroactively, deliberately.** Enrolment hangs off the
+double opt-in confirmation. Back-filling everyone who ever subscribed would send "welcome, thanks
+for subscribing" to a list that has been reading you for a year.
+
+⚠️ **`unsubscribe_token` lives on the enrolment**, not on a send — a sequence step writes no
+`newsletter_sends` row. `newsletter-unsubscribe.ts` resolves `newsletter_sends` first and then
+enrolments, so both link shapes work through the same endpoint and the same one-click POST.
+
+---
+## 11f. CSV import status (2026-08-20)
+
+**No migration.** The importer now reads a subscription-status column from the file and writes each
+row's own state. Nothing to apply — it is code only.
+
+⚠️ **Behaviour change worth knowing about.** A file that carries a status column the importer
+cannot read no longer imports those rows at all: it reports the values it did not understand and
+asks for a corrected file. Guessing "subscribed" would re-open the breach this closes; guessing
+"unsubscribed" would silently bin an import over one unexpected column match. Refusing the row and
+naming the value is the only option that does neither.
+
+Recognised out of the box: Mailchimp (`subscribed` / `unsubscribed` / `cleaned` / `pending`), Kit
+(`active` / `unsubscribed` / `bounced` / `complained`), Shopify (`not_subscribed`), and the
+yes/no/true/false/1/0 columns a hand-kept spreadsheet produces. ⚠️ `cleaned` is Mailchimp's word for
+a HARD BOUNCE — reading it as a healthy subscriber is the single most likely way to import a dead
+address and then damage a sending domain with it.
+
+---
+
+## 11e. Engagement + chat-draft deploy steps (2026-08-20, after Phase 5)
+
+1. **Apply `db/newsletter-engagement.sql`** — staging, then prod. Adds per-recipient `opened_at` /
+   `clicked_at` (first touch), the repeat counters, `newsletter_issues.engagement_tracked` and the
+   per-domain tracking switches. It guards on `newsletter_sends` existing.
+2. **Add `email.opened` and `email.clicked`** to the Resend webhook's event list. Without them the
+   columns stay empty and both cards read "not measurable".
+3. Nothing else. Tracking is requested from the provider at domain creation; existing domains keep
+   whatever they were created with until the tenant toggles it.
+
+⚠️ **Existing sent issues will show no engagement, correctly.** `engagement_tracked` defaults to
+false, so issues sent before this shipped report "not measurable" rather than a misleading 0%.
+
+---
+
 ## 11d. Phase 5 deploy steps
 
 1. **Apply `db/newsletter-role-live.sql`** — staging, then prod. Until this runs the role stays
@@ -566,6 +860,84 @@ ledger row to `delivered`.
    recipients/month ceiling.
 5. **Lead → audience promotion**: single-record button only, or a bulk action with a consent
    declaration? (Recommend single-record for launch.)
+
+---
+
+## Appendix B — measured against Kit (ConvertKit)
+
+Written 2026-08-20. ⚠️ Vendor specifics move; this describes Kit's *model* — the shape of what it
+does — rather than a feature list captured on a date. Re-check before quoting any of it publicly.
+
+Kit is the closest comparator to what the Newsletter Assistant is becoming: not a campaign blaster
+like Mailchimp, but a subscriber-centric tool where the list, the automations and the content are
+one product. Its model has four parts worth naming, because three of them we do not have.
+
+**1. Tags, not lists.** ✅ **Closed 2026-08-20** (§11k, §11l). A Kit subscriber is one record
+carrying tags and "segments" are saved rules over those tags — which is now exactly what this is: a
+tag is a label (`kind = 'tag'`), and a dynamic segment is a rule that can compose tags with the
+columns we hold. The example this paragraph originally used to describe the gap — "everyone who
+signed up through the shop form and has opened something in 90 days" — is two conditions in the
+builder. ⚠️ The remaining difference is not the model but the vocabulary: Kit's rules can also
+reach custom fields, and `audience_contacts.custom_fields` is still written by nothing.
+
+**2. Sequences, not just broadcasts.** Kit's centre of gravity is the automated series — above all
+the welcome sequence that fires when someone subscribes. ✅ **Built 2026-08-20** (§11g): confirming
+a subscription now enrols the contact, and the steps go out on their own schedule.
+
+⚠️ It is NOT built on `outreach_sequences`, which the row below originally proposed. That table's
+`sequence_enrolments.lead_thread_id` is NOT NULL and is the halt key the outreach worker re-reads
+inside its claiming transaction so a follow-up cannot land after a prospect replied. An audience
+contact has no thread, so reusing it meant either making that key nullable — weakening a guarantee
+another product depends on — or minting fake threads for subscribers. A second, simpler set of
+tables for a genuinely different job was cheaper than either.
+
+**3. Hosted landing pages.** Kit will host the sign-up page, so a creator with no website can still
+collect subscribers. We ship an embeddable form, which assumes a website to embed it in — an
+assumption a good number of Be More Swan's customers do not meet.
+
+**4. Creator Network / recommendations.** Cross-promotion between senders. Out of scope for a
+business tool and not worth chasing.
+
+### Gaps, ordered by what they cost the customer
+
+| Gap | Why it matters | Cost to close |
+|---|---|---|
+| ~~**No welcome sequence**~~ ✅ **CLOSED 2026-08-20** | The moment of maximum interest was the moment we said nothing. Confirming a subscription now enrols the contact; steps are written once, approved once, and then fixed. Off until an owner or admin switches it on, and the worker re-reads that switch on every send so switching it off stops mail already queued. Consent is re-resolved per step, so leaving on day two stops step three. | Done — `db/newsletter-sequences.sql`, `src/utils/newsletter-sequence.ts` |
+| ~~**Imports do not carry unsubscribe status**~~ ✅ **CLOSED 2026-08-20** | Was a correctness gap, not a feature gap: a tenant migrating from Mailchimp would have had their *unsubscribes* silently become subscribed again. The importer now reads the status column (`src/config/audience-import-status.ts`), refuses values it cannot recognise rather than guessing, and reports carried-over opt-outs as their own number. | Done |
+| ~~**No dynamic segments**~~ ✅ **CLOSED 2026-08-20** | Every segment was hand-maintained, so they rotted. A segment can now be a saved rule — including "opened something in the last 90 days" — evaluated at the moment it is asked, so it cannot go stale. No migration: the column was reserved when the table was written. | Done — `src/utils/audience-segment-rules.ts` |
+| ~~**No resend-to-unopens**~~ ✅ **CLOSED 2026-08-20** | The cheapest reach increase in email. Same approved words, new subject line, only the people who never opened it — refused outright on an issue that could not measure opens, because there "unopened" means the whole list. | Done — `db/newsletter-resend.sql`, `src/utils/newsletter-resend.ts` |
+| ~~**No preference centre**~~ ✅ **CLOSED 2026-08-20** | The only exit was total unsubscribe. The link now offers a 30-day or 3-month pause and an at-most-monthly cap alongside it — the pause binding every assistant, not just the newsletter, and lifting itself. The exit stays on the same page, in the same words. | Done — `db/newsletter-preferences.sql`, `src/utils/audience-preferences.ts` |
+| **No hosted sign-up page** | Customers without a website cannot collect subscribers at all. | Medium |
+| **No A/B subject testing** | `blog_ab_stats` is the pattern to copy. | Medium |
+| **No per-link click reporting** | We store `last_clicked_url` only, so "which link worked" is unanswerable. | Small–medium |
+| **No custom fields in practice** | `custom_fields` exists on the contact and nothing reads or writes it. | Small |
+| **No send-time/timezone handling** | Everything sends on a UTC clock. | Medium |
+| **No tenant-facing API or webhooks** | Subscribers can only arrive through the form or a CSV. | Medium |
+| **No deliverability tooling** | No spam-score preview, no seed test, no warm-up guidance for a new domain. | Medium |
+
+### Where we are already ahead, and should stay
+
+- **The assistant writes the issue.** Kit gives you a blank editor with AI assistance around the
+  edges; here the draft exists before you sit down. That is the product.
+- **One audience across every assistant.** An unsubscribe binds the Lead Generator too. Kit has no
+  equivalent because Kit is not also doing your cold outreach.
+- **Consent evidence as a first-class record.** `audience_consent_events` answers "when did they
+  agree, from what page, and what did the form say". Most ESPs answer that with a timestamp.
+
+### The three I would build next, and why in this order
+
+1. ~~**Import unsubscribe status.**~~ ✅ **Built 2026-08-20** — see the table above.
+2. ~~**Welcome sequence.**~~ ✅ **Built 2026-08-20** — see §11g. It reused less than expected (see
+   the note under *Sequences* above) and was worth building anyway.
+3. ~~**Blog post → newsletter issue.**~~ ✅ **Built 2026-08-20** — see §11h. ⚠️ This one is not on Kit's list at all, which is the point:
+   `orchestration_links` already exists, the Blog Writer already produces the content, and "your
+   blog post went out to your subscribers on Thursday without you doing anything" is a sentence Kit
+   structurally cannot say. Chasing Kit's roadmap wins parity; this wins the argument.
+
+   What it cost, now that it is built: one column, one index, and a branch in the orchestration
+   runtime. `orchestration_links` did carry it — but only after the runtime learned that the
+   TARGET'S ROLE decides what a hand-off produces. Reusing the links table was right; assuming
+   every hand-off ends in a `content_generation_job` was the part that was wrong.
 
 ---
 

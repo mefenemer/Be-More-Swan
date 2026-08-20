@@ -10,6 +10,7 @@
 //   POST   { action: 'preview' }   → the rendered email, merged against sample data
 //   POST   { action: 'approve' }   → snapshot rendered_payload and move to approved/scheduled
 //   POST   { action: 'reject' }    → back to draft, with the reason recorded
+//   POST   { action: 'resend' }    → a NEW issue repeating this one to whoever did not open it
 //   DELETE ?id=<n>                 → archive (never destroyed)
 //
 // ⚠️ THE SNAPSHOT IS TAKEN AT APPROVAL, and nothing after that reads body_markdown. A human
@@ -20,12 +21,14 @@ import { HandlerEvent } from '@netlify/functions';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
-    aiAssistants, audienceContactSegments, audienceContacts, audienceSegments,
+    aiAssistants, audienceContactSegments, audienceContacts, audienceSegments, blogPosts,
     newsletterIssues, organisations,
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
-import { generateIssueBody, IssueNotFoundError, scrubMergeTags } from '../../src/utils/newsletter-generate';
+import { generateIssueBody, IssueNotFoundError, scrubMergeTags, NEWSLETTER_DRAFT_REASON } from '../../src/utils/newsletter-generate';
 import { renderForRecipient, renderIssueSnapshot } from '../../src/utils/newsletter-render';
+import { resendEligibility } from '../../src/utils/newsletter-resend';
+import { buildSegmentCondition } from '../../src/utils/audience-segment-rules';
 import { sampleMergeContext } from '../../src/config/newsletter-merge-vars';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -34,6 +37,9 @@ const json = (statusCode: number, obj: unknown) => ({
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(obj),
 });
+
+/** generation_reason on a resend, so the list can label it without a join. */
+const RESEND_REASON = 'resend_unopened';
 
 const WRITE_ROLES = ['owner', 'admin', 'member'];
 /** Approving an issue is the decision to email real people. Kept with the account's decision-makers. */
@@ -53,6 +59,30 @@ const MAX_BODY = 40000;
 async function estimateAudience(db: ReturnType<typeof getDb>, orgId: number, segmentId: number | null): Promise<number> {
     try {
         if (segmentId) {
+            const [segment] = await db
+                .select({ kind: audienceSegments.kind, rules: audienceSegments.rules })
+                .from(audienceSegments)
+                .where(and(eq(audienceSegments.id, segmentId), eq(audienceSegments.organisationId, orgId)))
+                .limit(1);
+
+            // A dynamic segment is a rule, not a membership list. Counted through the SAME compiler
+            // the send uses — a preview that disagrees with the send is only ever discovered by the
+            // recipients. Rules that will not compile count as 0, matching the send's refusal
+            // rather than showing a number for an issue that cannot go out.
+            if (segment?.kind === 'dynamic') {
+                const rule = buildSegmentCondition(orgId, segment.rules);
+                if (!rule) return 0;
+                const [row] = await db
+                    .select({ n: sql<number>`count(*)::int` })
+                    .from(audienceContacts)
+                    .where(and(
+                        eq(audienceContacts.organisationId, orgId),
+                        eq(audienceContacts.status, 'subscribed'),
+                        rule,
+                    ));
+                return row?.n ?? 0;
+            }
+
             const [row] = await db
                 .select({ n: sql<number>`count(*)::int` })
                 .from(audienceContactSegments)
@@ -95,7 +125,31 @@ export default withLambda(async (event: HandlerEvent) => {
                 .where(and(eq(newsletterIssues.id, id), eq(newsletterIssues.organisationId, orgId)))
                 .limit(1);
             if (!issue) return json(404, { error: 'Issue not found.' });
-            return json(200, { issue, audienceEstimate: await estimateAudience(db, orgId, issue.segmentId) });
+
+            // The post this issue was drafted from, when it came from a blog hand-off. Org-scoped
+            // again rather than trusted from the issue row: the id is a foreign key we wrote, but
+            // reading it back through the tenant filter costs nothing and keeps one rule for
+            // every read on this endpoint.
+            const [sourcePost] = issue.sourceBlogPostId
+                ? await db
+                    .select({ id: blogPosts.id, title: blogPosts.title, canonicalUrl: blogPosts.canonicalUrl })
+                    .from(blogPosts)
+                    .where(and(
+                        eq(blogPosts.id, issue.sourceBlogPostId),
+                        eq(blogPosts.organisationId, orgId),
+                    ))
+                    .limit(1)
+                : [];
+
+            return json(200, {
+                issue,
+                sourcePost: sourcePost ?? null,
+                // Resolved here rather than guessed in the browser, so the button and the server
+                // are never offering different answers. Cheap: every refusal but the last two
+                // returns before it touches the database.
+                resend: await resendEligibility(db, issue),
+                audienceEstimate: await estimateAudience(db, orgId, issue.segmentId),
+            });
         }
 
         const assistantIdParam = event.queryStringParameters?.assistantId;
@@ -118,6 +172,8 @@ export default withLambda(async (event: HandlerEvent) => {
                 openedCount: newsletterIssues.openedCount,
                 isAutonomous: newsletterIssues.isAutonomous,
                 generationReason: newsletterIssues.generationReason,
+                sourceBlogPostId: newsletterIssues.sourceBlogPostId,
+                resendOfIssueId: newsletterIssues.resendOfIssueId,
                 updatedAt: newsletterIssues.updatedAt,
             })
             .from(newsletterIssues)
@@ -126,7 +182,7 @@ export default withLambda(async (event: HandlerEvent) => {
             .limit(500);
 
         const segments = await db
-            .select({ id: audienceSegments.id, name: audienceSegments.name })
+            .select({ id: audienceSegments.id, name: audienceSegments.name, kind: audienceSegments.kind })
             .from(audienceSegments)
             .where(eq(audienceSegments.organisationId, orgId));
 
@@ -171,14 +227,44 @@ export default withLambda(async (event: HandlerEvent) => {
                 .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId))).limit(1);
             if (!a) return json(404, { error: 'Assistant not found.' });
         }
+        const subject = String(body.subject || 'Untitled issue').trim().slice(0, MAX_SUBJECT) || 'Untitled issue';
+        // Scrubbed on the way in, like every other write path: a chat draft can carry a tag the
+        // send worker cannot resolve just as easily as a generated one.
+        const bodyMarkdown = 'bodyMarkdown' in body
+            ? scrubMergeTags(String(body.bodyMarkdown || '').slice(0, MAX_BODY)).text
+            : '';
+
+        // ⚠️ DEDUPE. A stored uiElement re-renders its buttons on every transcript reload, so the
+        // chat card's Save can be pressed again next week — and the same conversation scrolled back
+        // to twice would otherwise leave two identical issues in the Studio. Matched on exact
+        // (subject, body) within the org, the same grain blog-posts uses.
+        if (bodyMarkdown) {
+            const [existing] = await db
+                .select({ id: newsletterIssues.id })
+                .from(newsletterIssues)
+                .where(and(
+                    eq(newsletterIssues.organisationId, orgId),
+                    eq(newsletterIssues.subject, subject),
+                    eq(newsletterIssues.bodyMarkdown, bodyMarkdown),
+                ))
+                .limit(1);
+            if (existing) return json(200, { issue: existing, deduped: true });
+        }
+
         const [issue] = await db.insert(newsletterIssues).values({
             organisationId: orgId,
             userId: ctx.userId,
             assistantId,
-            subject: String(body.subject || 'Untitled issue').trim().slice(0, MAX_SUBJECT) || 'Untitled issue',
+            subject,
+            preheader: String(body.preheader || '').trim().slice(0, 200) || null,
+            bodyMarkdown,
             segmentId: Number(body.segmentId || '') || null,
+            // ⚠️ A body that arrives with the create was written by the assistant, and an issue
+            // saved without this marker is indistinguishable from one a human typed. Same rule as
+            // blog-posts POST — the AI-provenance stamp is the load-bearing part.
+            ...(bodyMarkdown ? { generationReason: NEWSLETTER_DRAFT_REASON } : {}),
         }).returning();
-        return json(200, { issue });
+        return json(200, { issue, deduped: false });
     }
 
     const id = Number(body.id || '');
@@ -194,8 +280,59 @@ export default withLambda(async (event: HandlerEvent) => {
     // words are already in people's inboxes and editing the row would rewrite history — the
     // opposite of what a record of what we sent is for.
     const LOCKED = ['sending', 'sent'];
-    if (LOCKED.includes(issue.status) && action !== 'preview') {
+    // 'resend' is exempt because it CHANGES NOTHING about the sent issue — it creates a new one
+    // that repeats it. The lock exists so a record of what went out cannot be rewritten, and a
+    // resend does not rewrite it; it is also only ever valid on an issue that has already sent.
+    if (LOCKED.includes(issue.status) && action !== 'preview' && action !== 'resend') {
         return json(409, { error: 'This issue has already been sent and can no longer be changed.' });
+    }
+
+    if (action === 'resend') {
+        // The same gate as approving: a resend is the decision to email real people again.
+        if (!APPROVE_ROLES.includes(ctx.role)) {
+            return json(403, { error: 'Only an owner or admin can resend an issue.' });
+        }
+
+        // ⚠️ Re-checked on the server even though the UI only draws the button when it passes. The
+        // count moves on its own — someone opens the email while the tab is open — and the
+        // engagement_tracked rule is the difference between a resend and a second unrequested
+        // send to the whole list.
+        const eligibility = await resendEligibility(db, issue);
+        if (!eligibility.canResend) {
+            return json(409, { error: eligibility.message, reason: eligibility.reason });
+        }
+
+        const subject = String(body.subject || '').trim().slice(0, MAX_SUBJECT) || issue.subject;
+
+        // The APPROVED SNAPSHOT is copied, not rebuilt. These are the exact words a human signed
+        // off and that some of the list has already received; re-rendering from body_markdown here
+        // would let an intervening edit change what the non-openers get.
+        const [resend] = await db.insert(newsletterIssues).values({
+            organisationId: orgId,
+            userId: ctx.userId,
+            assistantId: issue.assistantId,
+            subject,
+            preheader: issue.preheader,
+            bodyMarkdown: issue.bodyMarkdown,
+            renderedPayload: issue.renderedPayload,
+            // Not the original's segment: the audience is "who did not open", which is already
+            // narrower than any segment. See materialiseRecipients.
+            segmentId: null,
+            resendOfIssueId: issue.id,
+            generationReason: RESEND_REASON,
+            // Straight to scheduled, now. The confirm dialog named the number of people, and that
+            // was the human decision — a second "send now" step here would leave a resend sitting
+            // in the list looking as though the button had not worked.
+            status: 'scheduled',
+            scheduledFor: new Date(),
+        }).onConflictDoNothing().returning();
+
+        // The unique index refused it: another admin, or a retried request, got there first.
+        if (!resend) {
+            return json(409, { error: 'This issue has already been resent once.', reason: 'already_resent' });
+        }
+
+        return json(200, { issue: resend, recipients: eligibility.unopened });
     }
 
     if (action === 'update') {

@@ -56,6 +56,16 @@ export interface GenerateIssueOptions {
     notes?: string;
     /** Fallback voice, used only when the authoring assistant has no tone_of_voice of its own. */
     tone?: string;
+    /**
+     * A link this issue exists to point at — today, the blog post it was drafted from.
+     *
+     * ⚠️ APPENDED IN CODE, AND THE MODEL IS TOLD NOT TO WRITE IT. An issue about a post that does
+     * not link to the post is the one outcome that makes the whole hand-off pointless, and a
+     * drafting model will sometimes paraphrase a URL, truncate it, or invent a prettier one. The
+     * same reasoning as the unsubscribe footer: anything that MUST be exactly right is not asked
+     * for, it is added.
+     */
+    sourceLink?: { url: string; title: string } | null;
 }
 
 export interface GenerateIssueResult {
@@ -104,6 +114,23 @@ export function scrubMergeTags(text: string): { text: string; warnings: string[]
     // Whatever survives gets its declared fallback, so the editor shows what a nameless
     // subscriber will actually read.
     return { text: applyDefaultFallbacks(out), warnings };
+}
+
+/**
+ * Append the "read the full post" line, once, at the end of the body.
+ *
+ * Refuses anything that is not an http(s) URL: a canonical_url is normally absolute, but a tenant
+ * whose blog is served from a path would otherwise get a relative link in an email, where there is
+ * no page to be relative to. Better a draft with no link — which a human sees — than one with a
+ * link that goes nowhere.
+ */
+export function appendSourceLink(body: string, link?: { url: string; title: string } | null): string {
+    if (!link?.url || !/^https?:\/\//i.test(link.url)) return body;
+    if (body.includes(link.url)) return body.trimEnd() + '\n';   // the model wrote it anyway
+    // Square brackets in a title would break out of the markdown link and leave visible syntax.
+    const label = (link.title || 'Read the full post').replace(/[\[\]]/g, '').trim().slice(0, 120)
+        || 'Read the full post';
+    return `${body.trimEnd()}\n\n[${label}](${link.url})\n`;
 }
 
 /**
@@ -204,6 +231,12 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
             // The two things a drafting model reliably adds unasked, both of which are wrong here.
             'Do NOT write an unsubscribe line, a footer, a postal address, or any "you are receiving ' +
             'this because…" text — those are added automatically and would appear twice.\n' +
+            (opts.sourceLink
+                ? 'Do NOT write the link to the post or any "read more" line — the link is added ' +
+                  'automatically as the closing line, and yours would be a second, probably wrong copy ' +
+                  'of it. Write about what the post says; do not simply summarise it paragraph by ' +
+                  'paragraph, because someone who reads both should not read the same thing twice.\n'
+                : '') +
             'Do NOT invent statistics, customer numbers, testimonials, prices or dates. If the brief ' +
             'does not supply a fact, write around it.' +
             (guardrailsBlock ? `\n\n${guardrailsBlock}` : '') +
@@ -226,6 +259,8 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
     if (!bodyRaw) throw new Error('The draft came back in a form we could not read. Try again.');
 
     const body = scrubMergeTags(bodyRaw);
+    // After the scrub, so the URL is never mistaken for a malformed merge tag and stripped.
+    const bodyText = appendSourceLink(body.text, opts.sourceLink);
     const subject = scrubMergeTags(str(parsed?.subject, MAX_SUBJECT_CHARS) || issue.subject || 'Your newsletter');
     const preheader = scrubMergeTags(str(parsed?.preheader, MAX_PREHEADER_CHARS));
 
@@ -235,7 +270,7 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
         .set({
             subject: subject.text,
             preheader: preheader.text || null,
-            bodyMarkdown: body.text,
+            bodyMarkdown: bodyText,
             // COALESCE, not a plain set: an autopilot run stamps its own, more specific reason
             // before calling this. First writer wins — same rule as blog-generate.ts.
             generationReason: sql`COALESCE(${newsletterIssues.generationReason}, ${NEWSLETTER_DRAFT_REASON})`,
@@ -243,5 +278,5 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
         })
         .where(and(eq(newsletterIssues.id, issueId), eq(newsletterIssues.organisationId, organisationId)));
 
-    return { subject: subject.text, preheader: preheader.text, bodyMarkdown: body.text, tone, warnings };
+    return { subject: subject.text, preheader: preheader.text, bodyMarkdown: bodyText, tone, warnings };
 }

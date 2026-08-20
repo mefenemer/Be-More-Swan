@@ -20,7 +20,7 @@
 // So this suite is mostly about what happens when things are missing or broken, not when they work.
 
 import assert from 'node:assert';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { audienceContacts, leadOptOuts, suppressionList } from '../db/schema';
@@ -286,11 +286,22 @@ async function main() {
         // The ledger stores the verdict verbatim. A reason this module can produce but the CHECK
         // constraint rejects turns a skipped recipient into a failed INSERT mid-send — a whole batch
         // lost to a value nobody thought of as a schema change.
-        const sql = read('db/newsletter.sql');
-        const start = landmark(sql, 'newsletter_sends_skip_reason_check');
-        const clause = sql.slice(start, landmark(sql, 'END $$;', start));
+        // ⚠️ The constraint has TWO homes now: db/newsletter.sql creates it, and a later migration
+        // DROPs and re-ADDs it to widen the list (db/newsletter-preferences.sql added 'paused').
+        // The effective vocabulary is therefore the re-created one, not the original — reading only
+        // db/newsletter.sql would fail every time the list is legitimately widened, and reading only
+        // the widening file would miss a reason added to the original.
+        const files = readdirSync(join(root, 'db'))
+            .filter((f) => f.endsWith('.sql'))
+            .map((f) => ({ name: f, src: readFileSync(join(root, 'db', f), 'utf8') }))
+            .filter((f) => f.src.includes('newsletter_sends_skip_reason_check'));
+        assert.ok(files.length, 'the constraint must be defined somewhere');
+        const widening = files.filter((f) => f.src.includes('DROP CONSTRAINT IF EXISTS newsletter_sends_skip_reason_check'));
+        const effective = widening.length ? widening[widening.length - 1] : files[0];
+        const start = landmark(effective.src, 'ADD CONSTRAINT newsletter_sends_skip_reason_check');
+        const clause = effective.src.slice(start, start + 800);
         for (const reason of Object.keys(SKIP_REASON_LABEL)) {
-            assert.ok(clause.includes(`'${reason}'`), `db/newsletter.sql must allow skip_reason '${reason}'`);
+            assert.ok(clause.includes(`'${reason}'`), `db/${effective.name} must allow skip_reason '${reason}'`);
         }
         // And the drizzle mirror, which is what actually runs in the app.
         const schema = read('db/schema.ts');
