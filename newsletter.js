@@ -195,6 +195,7 @@
       renderAudience(audienceEstimate);
       renderSource(issue, sourcePost);
       renderResend(issue, resend);
+      renderAb(issue);
       renderLinks(issue, links);
       hide($('nl-warnings'));
       renderFailure(issue);
@@ -311,6 +312,100 @@
         btn.disabled = false;
         window.showToast(err.message);
       }
+    });
+  }
+
+  // ── A/B subject test ───────────────────────────────────────────────────────
+
+  function renderAb(issue) {
+    const el = $('nl-ab');
+    if (!el) return;
+    const locked = ['sending', 'sent'].includes(issue.status);
+
+    // A finished test shows what it found, in the words the server wrote — including "too close to
+    // call", which is often the honest answer and which a bare winner would hide.
+    if (issue.abState === 'decided' || (locked && issue.abState === 'testing')) {
+      const waiting = issue.abState === 'testing';
+      el.innerHTML = `<div class="px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-700">
+        <p class="font-bold mb-1">Subject line test</p>
+        <p class="text-gray-600"><span class="font-bold">A:</span> ${esc(issue.subject || '')}</p>
+        <p class="text-gray-600"><span class="font-bold">B:</span> ${esc(issue.subjectB || '')}</p>
+        ${waiting
+          ? `<p class="mt-2 text-gray-500">The sample has gone out. The winner goes to everyone else about ${Number(issue.abDecideAfterHours || 4)} hours later.</p>`
+          : `<p class="mt-2">${esc(issue.abNote || '')}</p>`}
+      </div>`;
+      return;
+    }
+    if (locked) { el.innerHTML = ''; return; }
+
+    if (issue.abState !== 'testing') {
+      el.innerHTML = `<button type="button" id="nl-ab-on"
+        class="text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer">+ Test a second subject line</button>`;
+      $('nl-ab-on')?.addEventListener('click', () => {
+        // Rendered as though it were already on, so the form appears without a round trip. Nothing
+        // is saved until they press Save, and the issue's own state is what the next load reads.
+        renderAbForm({ ...issue, abState: 'testing' });
+      });
+      return;
+    }
+    renderAbForm(issue);
+  }
+
+  function renderAbForm(issue) {
+    const el = $('nl-ab');
+    el.innerHTML = `<div class="px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 text-sm">
+      <div class="flex items-center justify-between mb-2">
+        <p class="font-bold text-emerald-900">Test a second subject line</p>
+        <button type="button" id="nl-ab-off" class="text-xs font-bold text-emerald-800 hover:text-emerald-900 cursor-pointer">Remove</button>
+      </div>
+      <input type="text" id="nl-ab-subject" maxlength="200" value="${esc(issue.subjectB || '')}"
+        placeholder="The other subject line"
+        class="w-full px-3 py-2.5 rounded-lg border border-emerald-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-2">
+      <div class="flex flex-wrap items-end gap-3">
+        <label class="text-xs text-emerald-900">Send to
+          <select id="nl-ab-percent" class="ml-1 px-2 py-1.5 rounded-lg border border-emerald-300 text-sm">
+            ${[10, 20, 30, 40, 50].map((p) => `<option value="${p}" ${Number(issue.abSamplePercent || 30) === p ? 'selected' : ''}>${p}%</option>`).join('')}
+          </select>
+        </label>
+        <label class="text-xs text-emerald-900">Decide after
+          <select id="nl-ab-hours" class="ml-1 px-2 py-1.5 rounded-lg border border-emerald-300 text-sm">
+            ${[1, 2, 4, 8, 24, 48].map((h) => `<option value="${h}" ${Number(issue.abDecideAfterHours || 4) === h ? 'selected' : ''}>${h} ${h === 1 ? 'hour' : 'hours'}</option>`).join('')}
+          </select>
+        </label>
+        <button type="button" id="nl-ab-save"
+          class="ml-auto px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Save test</button>
+      </div>
+      <p class="text-[11px] text-emerald-700 mt-2">Half the sample gets each subject. Whichever more people OPEN is sent to everyone held back — and if the difference is too small to mean anything, we say so and send the first one.</p>
+    </div>`;
+
+    $('nl-ab-off')?.addEventListener('click', async () => {
+      try {
+        await api(ISSUES_API, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'abTest', id: issue.id, enabled: false }),
+        });
+        await openIssue(issue.id);
+      } catch (err) { window.showToast(err.message); }
+    });
+
+    $('nl-ab-save')?.addEventListener('click', async () => {
+      try {
+        const res = await api(ISSUES_API, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'abTest',
+            id: issue.id,
+            subjectB: $('nl-ab-subject').value,
+            samplePercent: Number($('nl-ab-percent').value),
+            decideAfterHours: Number($('nl-ab-hours').value),
+          }),
+        });
+        // The warning is the whole reason this returns anything: without a verified domain the test
+        // cannot be decided, and that is worth knowing now rather than in four hours.
+        if (res.warning) window.showToast(res.warning, { duration: 9000 });
+        else window.showToast('Test saved.');
+        await openIssue(issue.id);
+      } catch (err) { window.showToast(err.message); }
     });
   }
 

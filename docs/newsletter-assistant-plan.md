@@ -504,6 +504,103 @@ first three can all look healthy while the writing wears people out.
 
 ---
 
+## 11p. Hosted sign-up page (2026-08-20)
+
+1. **Apply `db/audience-hosted-pages.sql`** — staging, then prod. Three columns on
+   `audience_forms`: `hosted_enabled`, `hosted_headline`, `hosted_intro`.
+2. ⚠️ **SQL first, then deploy** — `audience-forms.ts` reads them with a bare `db.select()`.
+3. The `/s/*` rewrite ships in `netlify.toml` with the code.
+
+**What it is.** `/s/<public_key>` — a page we serve, for the customers who have no website to paste
+the snippet into. A link for a bio, a poster, a QR code.
+
+⚠️ **THERE IS NO SECOND FORM RECORD.** The page is another way to reach a form that already exists,
+with its own consent text, double opt-in setting, segment and key. A hosted-page table would mean
+two records that both decide what a subscriber agreed to, and the one that drifts is the one shown
+to the person signing up. It is rendered by `audience-public.ts` — the file that already holds the
+one description of what a form says — and posts to the same `/api/audience/subscribe` endpoint the
+embeddable widget does.
+
+⚠️ **OFF BY DEFAULT, and the flag does two jobs.** It is what makes `/s/<key>` answer at all, and it
+is what lets that page past `allowed_origins`. A tenant who locked their form to their own website
+would otherwise find the page we serve for them refused — but relaxing the origin check for our own
+domain *unconditionally* would mean any form, including one deliberately locked to an intranet,
+could be posted to from a page anyone can open. So our origin is accepted only for a form whose
+owner switched the page on.
+
+⚠️ **A switched-off page answers exactly like a key that never existed** — same 404 body, same
+function. Otherwise the URL is an oracle for which tenants have a sign-up page.
+
+⚠️ **It carries the SAME anti-bot pair as the embed**: the honeypot field and the minimum fill time.
+A public URL on our own domain is a *more* attractive target than a form on one small business's
+website, not a less attractive one, so the protections cannot be the ones the embed happens to have
+and this page happens to skip.
+
+**noindex, deliberately.** The value is a link somebody shares, and search adds nothing a bare form
+page could realistically rank for — while an abandoned or half-configured page indexed under our
+domain, carrying a tenant's name, is a real cost. The link works exactly as well either way.
+
+**Every tenant-written string on the page is escaped** — org name, headline, intro, consent text.
+They all land in a page served from our domain, where one unescaped angle bracket is stored XSS.
+The tests render the page and read the output rather than scanning the source for the escape calls.
+
+**The page loads nothing from anywhere else**: `default-src 'none'`, `connect-src 'self'`, no remote
+script, no web font, no analytics.
+
+---
+
+## 11o. A/B subject testing (2026-08-20)
+
+1. **Apply `db/newsletter-ab-subjects.sql`** — staging, then prod. Columns on `newsletter_issues`
+   (`subject_b`, `ab_state`, sample size, decision delay, winner, note), `variant` on
+   `newsletter_sends`, and it widens the send-status vocabulary with `'held'`.
+2. ⚠️ **SQL first, then deploy.** The status CHECK is re-created with DROP + ADD, and the send
+   worker writes `'held'` the first time a test runs.
+3. **No new scheduled function.** Deliberately — see below.
+
+**The shape.** A sample of the list (10–50%, default 30%) is split evenly between two subject
+lines. After a wait (1–72 hours, default 4) whichever was opened by more PEOPLE goes to everyone
+held back.
+
+⚠️ **THE DECISION RUNS INSIDE `sendDueIssues`.** An A/B decider on a cron of its own would be a
+single point of failure whose failure mode is *70% of a list never receives the issue* — and this
+codebase has had two nightly sweeps that never ran once. The issue stays in `'sending'` between the
+sample and the decision, which is exactly what brings it back to the sweep every few minutes. If
+sending works, deciding works.
+
+⚠️ **The remainder is materialised up front as `'held'` rows.** They could have been created after
+the decision instead — but then "who is this issue going to" would have two answers depending on
+when you asked, the recipient count would jump mid-send, and a list edited during the wait would
+change the audience underneath the test. Held rows freeze the audience at approval, which is what a
+tenant thinks approving means. The audience is not re-scanned while the test waits, for the same
+reason (and because a four-hour wait would otherwise walk the whole audience every few minutes).
+
+**It always decides.** There is no path that leaves an issue half-sent: a tie decides, no opens at
+all decides, and an issue that could not measure opens decides. The fallback is always variant A —
+the subject the human wrote first — and the reason is written to `ab_note` in words the tenant can
+read.
+
+⚠️ **It never claims more than it knows.** A lead under 3 opens, or under 1.2×, is reported as *"too
+close to call"* and subject A is sent. This is a rule of thumb and the code says so in those words:
+opens are inflated for some recipients and invisible for others, so the input is not clean enough
+for a significance test to mean what it would appear to mean. A tenant told "B won" writes next
+month's subject that way, so a small difference must not be dressed up as a finding.
+
+**The subject each person received comes from their own `newsletter_sends.variant`, not from the
+issue.** The row is the record of what was sent, and it has to survive the issue being edited
+afterwards. The winner is stamped onto the held rows when they are released, rather than inferred.
+
+**Two smaller decisions:**
+
+- The sample is **interleaved** (`i % 2`), not halved. Send ids follow contact ids, which follow
+  subscription order — giving the first half of the list one subject and the second half the other
+  would compare two audiences rather than two subject lines.
+- Setting up a test on an org with **no verified sending domain** returns a warning at SETUP: that
+  route cannot report opens, so there would be nothing to decide on and everyone held back would get
+  subject A. Said now rather than discovered four hours later.
+
+---
+
 ## 11n. Per-link click reporting (2026-08-20)
 
 1. **Apply `db/newsletter-link-clicks.sql`** — staging, then prod. One table,
@@ -992,9 +1089,11 @@ contact has no thread, so reusing it meant either making that key nullable — w
 another product depends on — or minting fake threads for subscribers. A second, simpler set of
 tables for a genuinely different job was cheaper than either.
 
-**3. Hosted landing pages.** Kit will host the sign-up page, so a creator with no website can still
-collect subscribers. We ship an embeddable form, which assumes a website to embed it in — an
-assumption a good number of Be More Swan's customers do not meet.
+**3. Hosted landing pages.** ✅ **Closed 2026-08-20** (§11p). Kit hosts the sign-up page so a creator
+with no website can still collect subscribers; any form here can now be switched on as a page at
+`/s/<key>`. ⚠️ What Kit still has and we do not is a page BUILDER — theirs are designed, ours is one
+layout with a headline and an intro. That is the right trade for now: a business with no website
+needs a working link far more than it needs a layout editor.
 
 **4. Creator Network / recommendations.** Cross-promotion between senders. Out of scope for a
 business tool and not worth chasing.
@@ -1008,8 +1107,8 @@ business tool and not worth chasing.
 | ~~**No dynamic segments**~~ ✅ **CLOSED 2026-08-20** | Every segment was hand-maintained, so they rotted. A segment can now be a saved rule — including "opened something in the last 90 days" — evaluated at the moment it is asked, so it cannot go stale. No migration: the column was reserved when the table was written. | Done — `src/utils/audience-segment-rules.ts` |
 | ~~**No resend-to-unopens**~~ ✅ **CLOSED 2026-08-20** | The cheapest reach increase in email. Same approved words, new subject line, only the people who never opened it — refused outright on an issue that could not measure opens, because there "unopened" means the whole list. | Done — `db/newsletter-resend.sql`, `src/utils/newsletter-resend.ts` |
 | ~~**No preference centre**~~ ✅ **CLOSED 2026-08-20** | The only exit was total unsubscribe. The link now offers a 30-day or 3-month pause and an at-most-monthly cap alongside it — the pause binding every assistant, not just the newsletter, and lifting itself. The exit stays on the same page, in the same words. | Done — `db/newsletter-preferences.sql`, `src/utils/audience-preferences.ts` |
-| **No hosted sign-up page** | Customers without a website cannot collect subscribers at all. | Medium |
-| **No A/B subject testing** | `blog_ab_stats` is the pattern to copy. | Medium |
+| ~~**No hosted sign-up page**~~ ✅ **CLOSED 2026-08-20** | Customers without a website could not collect subscribers at all. Any sign-up form can now be switched on as a page at `/s/<key>` — the same form, the same consent text, reached by a link instead of an embed. | Done — `db/audience-hosted-pages.sql` |
+| ~~**No A/B subject testing**~~ ✅ **CLOSED 2026-08-20** | Two subject lines, a sample split evenly between them, and the winner to everyone held back — decided on unique opens inside the existing send sweep rather than on a cron of its own. A margin too small to mean anything is reported as "too close to call" rather than as a winner. | Done — `db/newsletter-ab-subjects.sql`, `src/utils/newsletter-ab.ts` |
 | ~~**No per-link click reporting**~~ ✅ **CLOSED 2026-08-20** | `last_clicked_url` held one url per recipient, so "which link worked" was unanswerable. Every issue now reports its links by how many PEOPLE clicked each (and how many times), with every recipient's unsubscribe url collapsed to a single labelled row rather than thousands. | Done — `db/newsletter-link-clicks.sql` |
 | ~~**No custom fields in practice**~~ ✅ **CLOSED 2026-08-20** | `custom_fields` existed on the contact and nothing read or wrote it. A tenant can now define their own columns, fill them from an import or by hand, filter segments on them, and personalise an email with them — with a bare custom merge tag refused rather than rendered blank. Text only; number and date are reserved in the schema and refused by the API. | Done — `db/audience-custom-fields.sql` |
 | **No send-time/timezone handling** | Everything sends on a UTC clock. | Medium |

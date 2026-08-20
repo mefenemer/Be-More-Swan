@@ -29,6 +29,7 @@ import {
 import { unopenedRecipientPage } from './newsletter-resend';
 import { MONTHLY_GAP_DAYS } from './audience-preferences';
 import { buildSegmentCondition, parseRules } from './audience-segment-rules';
+import { decideAndRelease, prepareAbSample } from './newsletter-ab';
 import { checkAudienceConsentBulk, type AudienceSkipReason } from './audience-consent';
 import { renderForRecipient, newsletterUnsubscribeUrl, type IssueSnapshot } from './newsletter-render';
 import { buildFromAddress } from './sending-domain';
@@ -341,6 +342,8 @@ export async function processIssueBatch(
     issue: {
         id: number; organisationId: number; subject: string; renderedPayload: unknown;
         fromAddress: string | null; sendProvider: string | null;
+        /** The second subject line, when this issue is an A/B test. */
+        subjectB?: string | null;
     },
     ctx: { route: SendRoute; senderName: string; postalAddress: string | null; baseUrl: string },
 ): Promise<IssueTickResult> {
@@ -355,6 +358,7 @@ export async function processIssueBatch(
             email: newsletterSends.email,
             contactId: newsletterSends.contactId,
             token: newsletterSends.unsubscribeToken,
+            variant: newsletterSends.variant,
         })
         .from(newsletterSends)
         .where(and(eq(newsletterSends.issueId, issue.id), eq(newsletterSends.status, 'queued')))
@@ -416,7 +420,9 @@ export async function processIssueBatch(
         try {
             const messageId = await deliver(db, ctx.route, issue.organisationId, {
                 to: row.email,
-                subject: issue.subject,
+                // ⚠️ The variant stamped on THIS row, not the issue's current state. The row is the
+                // record of what this person was sent, and it must not change when the test does.
+                subject: row.variant === 'B' && issue.subjectB ? issue.subjectB : issue.subject,
                 html: rendered.html,
                 text: rendered.text,
                 listUnsubscribe: rendered.listUnsubscribe,
@@ -521,7 +527,13 @@ export async function sendDueIssues(db: Db, opts: { baseUrl: string; now?: Date;
                 .limit(1);
             const senderName = org?.name || 'Your business';
 
-            const created = await materialiseRecipients(db, claimed);
+            // ⚠️ The audience of an A/B test is FROZEN once the sample has gone out — that is the
+            // point of holding the remainder as rows. Skipping the re-scan here is not only cheaper
+            // (a four-hour wait ticks every few minutes, and each pass would walk the whole
+            // audience) but is what makes "who is this issue going to" one answer rather than one
+            // per tick.
+            const frozen = claimed.abState === 'testing' && !!claimed.abSampleSentAt;
+            const created = frozen ? 0 : await materialiseRecipients(db, claimed);
             const [{ total }] = await db
                 .select({ total: sql<number>`count(*)::int` })
                 .from(newsletterSends)
@@ -542,6 +554,12 @@ export async function sendDueIssues(db: Db, opts: { baseUrl: string; now?: Date;
                 }).where(eq(newsletterIssues.id, claimed.id));
                 out.errors.push({ issueId: claimed.id, error: 'no recipients' });
                 continue;
+            }
+
+            // ⚠️ BEFORE the first batch goes out, and only once — prepareAbSample refuses to
+            // re-cut a split that already exists, which is what would send somebody both subjects.
+            if (claimed.abState === 'testing') {
+                await prepareAbSample(db, claimed);
             }
 
             const routed = await resolveSendRoute(db, claimed.organisationId, { recipientCount: total, senderName });
@@ -578,6 +596,40 @@ export async function sendDueIssues(db: Db, opts: { baseUrl: string; now?: Date;
             out.failed += tick.failed;
 
             if (tick.done) {
+                // ⚠️ AN A/B ISSUE IS NOT FINISHED WHEN THE SAMPLE IS. There are held rows waiting on
+                // a winner, so the issue stays in 'sending' — which is also what brings it back
+                // here on the next tick, with no second schedule to fail.
+                if (claimed.abState === 'testing') {
+                    const [{ held }] = await db
+                        .select({ held: sql<number>`count(*)::int` })
+                        .from(newsletterSends)
+                        .where(and(eq(newsletterSends.issueId, claimed.id), eq(newsletterSends.status, 'held')));
+
+                    const sampleSentAt = claimed.abSampleSentAt ?? new Date();
+                    if (!claimed.abSampleSentAt) {
+                        await db.update(newsletterIssues)
+                            .set({ abSampleSentAt: sampleSentAt, updatedAt: new Date() })
+                            .where(eq(newsletterIssues.id, claimed.id));
+                    }
+
+                    const outcome = await decideAndRelease(db, {
+                        ...claimed,
+                        abSampleSentAt: sampleSentAt,
+                    });
+                    // Not yet due, and there is still somebody to send to: leave it sending and
+                    // come back next tick.
+                    if (!outcome && held > 0) {
+                        await db.update(newsletterIssues).set({ updatedAt: new Date() }).where(eq(newsletterIssues.id, claimed.id));
+                        continue;
+                    }
+                    // Decided (or nobody was held back): fall through and finish the issue on the
+                    // next tick once the released rows have gone out.
+                    if (outcome && outcome.released > 0) {
+                        await db.update(newsletterIssues).set({ updatedAt: new Date() }).where(eq(newsletterIssues.id, claimed.id));
+                        continue;
+                    }
+                }
+
                 const [{ delivered }] = await db
                     .select({ delivered: sql<number>`count(*)::int` })
                     .from(newsletterSends)

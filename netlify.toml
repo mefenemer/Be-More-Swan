@@ -270,6 +270,17 @@
   to = "/.netlify/functions/audience-public"
   status = 200
 
+# The HOSTED sign-up page, for tenants with no website to embed the form in: /s/<public_key>.
+# Same function as the API above — it holds the one description of what a form says, and a second
+# copy of the consent text is the copy that would drift from the one people actually agreed to.
+#
+# ⚠️ A rewrite (200), not a redirect: the page has to be served AT the shareable url, because the
+# url is the whole product here — it goes in a bio, on a poster, behind a QR code.
+[[redirects]]
+  from = "/s/*"
+  to = "/.netlify/functions/audience-public"
+  status = 200
+
 # Autonomous Content Engine (US 3.2 §A.4): per-widget RSS 2.0 feed. MUST precede the /api/widget/*
 # catch-all below — Netlify evaluates redirects top-to-bottom, first match wins, so without this an
 # RSS request would fall through to widget-api, which parses "rss" as a resource name and 404s.

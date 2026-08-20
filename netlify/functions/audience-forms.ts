@@ -119,6 +119,13 @@ export default withLambda(async (event: HandlerEvent) => {
         if ('consentText' in body) patch.consentText = String(body.consentText || '').trim().slice(0, 500) || DEFAULT_CONSENT_TEXT;
         if ('successMessage' in body) patch.successMessage = String(body.successMessage || '').trim().slice(0, 300) || DEFAULT_SUCCESS_MESSAGE;
 
+        // The hosted page. ⚠️ Switching it on is what makes /s/<key> answer AND what lets that page
+        // past allowed_origins — so it is an explicit field rather than something inferred from a
+        // headline being filled in.
+        if ('hostedEnabled' in body) patch.hostedEnabled = body.hostedEnabled === true;
+        if ('hostedHeadline' in body) patch.hostedHeadline = String(body.hostedHeadline || '').trim().slice(0, 120) || null;
+        if ('hostedIntro' in body) patch.hostedIntro = String(body.hostedIntro || '').trim().slice(0, 600) || null;
+
         if ('redirectUrl' in body) {
             const url = validateRedirectUrl(body.redirectUrl);
             if (body.redirectUrl && !url) return json(400, { error: 'The redirect must be a full http(s) URL.' });

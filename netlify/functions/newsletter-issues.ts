@@ -11,6 +11,7 @@
 //   POST   { action: 'approve' }   → snapshot rendered_payload and move to approved/scheduled
 //   POST   { action: 'reject' }    → back to draft, with the reason recorded
 //   POST   { action: 'resend' }    → a NEW issue repeating this one to whoever did not open it
+//   POST   { action: 'abTest' }    → set up (or clear) a two-subject test on this issue
 //   DELETE ?id=<n>                 → archive (never destroyed)
 //
 // ⚠️ THE SNAPSHOT IS TAKEN AT APPROVAL, and nothing after that reads body_markdown. A human
@@ -22,7 +23,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     aiAssistants, audienceContactSegments, audienceContacts, audienceSegments, blogPosts,
-    newsletterIssues, organisations,
+    newsletterIssues, newsletterSendingDomains, organisations,
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { generateIssueBody, IssueNotFoundError, scrubMergeTags, NEWSLETTER_DRAFT_REASON } from '../../src/utils/newsletter-generate';
@@ -340,6 +341,65 @@ export default withLambda(async (event: HandlerEvent) => {
         }
 
         return json(200, { issue: resend, recipients: eligibility.unopened });
+    }
+
+    if (action === 'abTest') {
+        // Setting up the test is drafting; it commits to nothing until the issue is approved, so it
+        // shares the ordinary write roles rather than the approver's.
+        if (LOCKED.includes(issue.status)) {
+            return json(409, { error: 'This issue has already been sent.' });
+        }
+        const enabled = body.enabled !== false;
+        if (!enabled) {
+            await db.update(newsletterIssues)
+                .set({ abState: 'off', subjectB: null, updatedAt: new Date() })
+                .where(and(eq(newsletterIssues.id, id), eq(newsletterIssues.organisationId, orgId)));
+            return json(200, { abState: 'off' });
+        }
+
+        const subjectB = scrubMergeTags(
+            String(body.subjectB || '').trim().slice(0, MAX_SUBJECT),
+            await loadCustomFieldKeys(db, orgId),
+        ).text.trim();
+        if (!subjectB) return json(400, { error: 'Write a second subject line to test against.' });
+        if (subjectB === issue.subject.trim()) {
+            // Two identical subjects is a test that cannot teach anything, run on real people.
+            return json(400, { error: 'The two subject lines are the same, so there would be nothing to compare.' });
+        }
+
+        const percent = Math.round(Number(body.samplePercent ?? 30));
+        const hours = Math.round(Number(body.decideAfterHours ?? 4));
+        if (!Number.isFinite(percent) || percent < 10 || percent > 50) {
+            return json(400, { error: 'The sample has to be between 10% and 50% of the list.' });
+        }
+        if (!Number.isFinite(hours) || hours < 1 || hours > 72) {
+            return json(400, { error: 'Decide the winner between 1 and 72 hours after the sample goes out.' });
+        }
+
+        const [updated] = await db.update(newsletterIssues).set({
+            abState: 'testing',
+            subjectB,
+            abSamplePercent: percent,
+            abDecideAfterHours: hours,
+            updatedAt: new Date(),
+        }).where(and(eq(newsletterIssues.id, id), eq(newsletterIssues.organisationId, orgId))).returning();
+
+        // ⚠️ Said at setup, not discovered at decision time. Without a verified sending domain the
+        // route cannot report opens, so there is nothing to decide a winner on — the test still
+        // runs (both subjects go out) and everyone held back gets subject A, which is a worse deal
+        // than the tenant thinks they are agreeing to.
+        const [domain] = await db.select({ id: newsletterSendingDomains.id })
+            .from(newsletterSendingDomains)
+            .where(and(
+                eq(newsletterSendingDomains.organisationId, orgId),
+                eq(newsletterSendingDomains.status, 'verified'),
+            )).limit(1);
+
+        return json(200, {
+            issue: updated,
+            warning: domain ? null
+                : 'This issue will send from your connected mailbox, which cannot report opens — so there will be nothing to pick a winner from and everyone held back will get the first subject line. Verify a sending domain to make the test mean something.',
+        });
     }
 
     if (action === 'update') {

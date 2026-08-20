@@ -3,6 +3,7 @@
 // else's website can write into a tenant's data. Behind a netlify.toml rewrite:
 //   /api/audience/*  →  /.netlify/functions/audience-public
 //
+//   GET  /s/:key                   → the HOSTED sign-up page, for tenants with no website
 //   GET  /api/audience/form/:key   → the form's public config (what subscribe.js renders)
 //   POST /api/audience/subscribe   → a sign-up  { key, email, firstName?, lastName?, company?, hp, ms, url }
 //   GET  /api/audience/confirm?t=  → the confirmation PAGE (renders a form; changes nothing)
@@ -49,6 +50,144 @@ const KEY_LIMIT = { maxAttempts: 200, windowSecs: 3600 };
 const esc = (s: string): string => String(s ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+/** A page that is off, or a key that never was, answer identically. */
+export function hostedMissing() {
+    return {
+        statusCode: 404,
+        headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' },
+        body: `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>Page not found</title></head><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;text-align:center;padding:4rem 1rem;color:#374151">
+<p style="font-size:2rem;margin:0 0 1rem">🔍</p><h1 style="font-size:1.15rem;margin:0 0 .5rem">This sign-up page is not available</h1>
+<p style="color:#6b7280">The link may be old, or the page may have been turned off.</p></body></html>`,
+    };
+}
+
+export interface HostedPageContent {
+    orgName: string;
+    headline: string;
+    intro: string;
+    fields: string[];
+    consentText: string;
+    doubleOptIn: boolean;
+}
+
+/**
+ * The hosted sign-up page.
+ *
+ * ⚠️ NOINDEX, deliberately. The value here is a link somebody puts in a bio, on a poster or behind a
+ * QR code — being found by search adds nothing a form page could realistically rank for, while an
+ * abandoned or half-configured page indexed under our domain, carrying a tenant's name, is a real
+ * cost. The link works exactly as well either way.
+ *
+ * ⚠️ It carries the SAME anti-bot pair as the embeddable widget: a honeypot field and a minimum
+ * fill time. A public url on our own domain is a more attractive target than a form on one small
+ * business's website, not a less attractive one — so the protections cannot be the ones the embed
+ * happens to have and this page happens to skip.
+ */
+export function hostedPage(key: string, c: HostedPageContent) {
+    const field = (name: string, label: string, type = 'text') => `
+      <label>${esc(label)}
+        <input type="${type}" name="${esc(name)}" ${name === 'email' ? 'required autocomplete="email"' : ''}>
+      </label>`;
+
+    const inputs = [
+        field('email', 'Email address', 'email'),
+        c.fields.includes('first_name') ? field('first_name', 'First name') : '',
+        c.fields.includes('last_name') ? field('last_name', 'Last name') : '',
+        c.fields.includes('company') ? field('company', 'Company') : '',
+    ].filter(Boolean).join('');
+
+    return {
+        statusCode: 200,
+        headers: {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'no-store',
+            'X-Robots-Tag': 'noindex',
+            // The page posts to our own origin only, loads no third-party anything, and embeds no
+            // remote script — so the policy can say exactly that.
+            'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'",
+            'Referrer-Policy': 'no-referrer',
+        },
+        body: `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>${esc(c.headline)} — ${esc(c.orgName)}</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f9fafb;color:#111827;margin:0;
+  display:flex;align-items:center;justify-content:center;min-height:100vh;padding:1.5rem;line-height:1.5}
+.card{background:#fff;border-radius:1rem;box-shadow:0 4px 24px rgba(0,0,0,.08);padding:2rem;max-width:26rem;width:100%}
+h1{font-size:1.35rem;margin:0 0 .35rem}
+.who{color:#6b7280;font-size:.85rem;margin:0 0 1rem}
+.intro{color:#374151;font-size:.95rem;margin:0 0 1.25rem;white-space:pre-line}
+label{display:block;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#6b7280;margin-bottom:.75rem}
+input{display:block;width:100%;margin-top:.3rem;padding:.7rem .75rem;font-size:1rem;border:1px solid #d1d5db;border-radius:.6rem;
+  font-family:inherit;color:#111827;background:#fff}
+input:focus{outline:2px solid #059669;outline-offset:1px;border-color:#059669}
+button{width:100%;margin-top:.5rem;padding:.8rem 1rem;font-size:1rem;font-weight:700;color:#fff;background:#059669;border:none;
+  border-radius:.6rem;cursor:pointer;font-family:inherit}
+button:hover{background:#047857}button[disabled]{opacity:.6;cursor:default}
+.consent{color:#6b7280;font-size:.78rem;margin:1rem 0 0}
+.msg{margin-top:1rem;padding:.75rem .85rem;border-radius:.6rem;font-size:.9rem;display:none}
+.ok{background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46}
+.err{background:#fef2f2;border:1px solid #fecaca;color:#991b1b}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.foot{text-align:center;color:#9ca3af;font-size:.72rem;margin-top:1.25rem}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>${esc(c.headline)}</h1>
+  <p class="who">from ${esc(c.orgName)}</p>
+  ${c.intro ? `<p class="intro">${esc(c.intro)}</p>` : ''}
+  <form id="f" novalidate>
+    ${inputs}
+    <div class="hp" aria-hidden="true"><label>Leave this empty<input type="text" name="hp" tabindex="-1" autocomplete="off"></label></div>
+    <button type="submit" id="b">Subscribe</button>
+  </form>
+  <p class="consent">${esc(c.consentText)}</p>
+  <div class="msg ok" id="ok"></div>
+  <div class="msg err" id="err"></div>
+  <noscript><p class="msg err" style="display:block">This form needs JavaScript. Please email ${esc(c.orgName)} directly to subscribe.</p></noscript>
+  <p class="foot">Powered by Be More Swan</p>
+</div>
+<script>
+(function () {
+  var started = Date.now();
+  var f = document.getElementById('f'), b = document.getElementById('b');
+  var ok = document.getElementById('ok'), err = document.getElementById('err');
+  f.addEventListener('submit', function (e) {
+    e.preventDefault();
+    err.style.display = 'none';
+    var data = new FormData(f), payload = { key: ${JSON.stringify(key)}, ms: Date.now() - started, url: location.href };
+    data.forEach(function (v, k) { payload[k] = v; });
+    // Sent as the API's own field names, so this page and the embeddable widget are two callers of
+    // one endpoint rather than two contracts.
+    payload.firstName = payload.first_name || '';
+    payload.lastName = payload.last_name || '';
+    b.disabled = true;
+    fetch('/api/audience/subscribe', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    }).then(function (r) { return r.json().then(function (d) { return { r: r, d: d }; }); })
+      .then(function (res) {
+        if (!res.r.ok) throw new Error(res.d && res.d.error ? res.d.error : 'Something went wrong. Please try again.');
+        if (res.d.redirectUrl) { location.href = res.d.redirectUrl; return; }
+        f.style.display = 'none';
+        ok.textContent = res.d.message || 'Thanks — check your email.';
+        ok.style.display = 'block';
+      })
+      .catch(function (e2) { b.disabled = false; err.textContent = e2.message; err.style.display = 'block'; });
+  });
+})();
+</script>
+</body>
+</html>`,
+    };
+}
 
 function corsHeaders(origin: string | null, methods = 'POST, OPTIONS') {
     return {
@@ -136,6 +275,46 @@ export default withLambda(async (event: HandlerEvent) => {
             redirectUrl: form.redirectUrl,
             senderName: form.orgName || '',
         }, origin);
+    }
+
+    // ── The hosted sign-up page ─────────────────────────────────────────────
+    // For the customers who have no website to embed a form in. Same form, same consent text, same
+    // double opt-in setting — a second description of what somebody agreed to is the one that
+    // drifts from the one they were actually shown.
+    const hostedMatch = path.match(/^\/s\/([^/?#]+)/);
+    if (hostedMatch && method === 'GET') {
+        const key = hostedMatch[1];
+        if (!FORM_KEY_RE.test(key)) return hostedMissing();
+
+        const [form] = await db
+            .select({
+                name: audienceForms.name,
+                fields: audienceForms.fields,
+                consentText: audienceForms.consentText,
+                doubleOptIn: audienceForms.doubleOptIn,
+                status: audienceForms.status,
+                hostedEnabled: audienceForms.hostedEnabled,
+                hostedHeadline: audienceForms.hostedHeadline,
+                hostedIntro: audienceForms.hostedIntro,
+                orgName: organisations.name,
+            })
+            .from(audienceForms)
+            .leftJoin(organisations, eq(organisations.id, audienceForms.organisationId))
+            .where(eq(audienceForms.publicKey, key))
+            .limit(1);
+
+        // A page that is switched off answers exactly like a key that never existed. Whether a
+        // given tenant has a sign-up page is not something a stranger with a url should learn.
+        if (!form || form.status !== 'active' || !form.hostedEnabled) return hostedMissing();
+
+        return hostedPage(key, {
+            orgName: form.orgName || 'this business',
+            headline: form.hostedHeadline || form.name || 'Subscribe',
+            intro: form.hostedIntro || '',
+            fields: Array.isArray(form.fields) ? (form.fields as string[]) : ['email'],
+            consentText: form.consentText || DEFAULT_CONSENT_TEXT,
+            doubleOptIn: form.doubleOptIn,
+        });
     }
 
     // ── Confirmation ────────────────────────────────────────────────────────
@@ -270,6 +449,7 @@ export default withLambda(async (event: HandlerEvent) => {
             successMessage: audienceForms.successMessage,
             redirectUrl: audienceForms.redirectUrl,
             status: audienceForms.status,
+            hostedEnabled: audienceForms.hostedEnabled,
             senderName: organisations.name,
         })
         .from(audienceForms)
@@ -282,7 +462,12 @@ export default withLambda(async (event: HandlerEvent) => {
     // The one error this endpoint states plainly: it is the tenant's own misconfiguration, it
     // leaks nothing about any subscriber, and a silent failure here is a form that "just does
     // nothing" on their website with no way to diagnose it.
-    if (!originAllowed(form.allowedOrigins, origin)) {
+    // ⚠️ OUR OWN PAGE IS AN ALLOWED ORIGIN ONLY WHEN THE TENANT SWITCHED IT ON. A form locked to
+    // the tenant's website would otherwise refuse the hosted page we serve for them — and relaxing
+    // the check for our origin unconditionally would mean any form, including one deliberately
+    // locked down, could be posted to from a page anyone can open.
+    const fromHostedPage = form.hostedEnabled && !!origin && origin === resolveBaseUrl(event.headers as Record<string, string | undefined>);
+    if (!fromHostedPage && !originAllowed(form.allowedOrigins, origin)) {
         return json(403, {
             error: 'This website is not on the allowed list for this sign-up form.',
             code: 'origin_not_allowed',

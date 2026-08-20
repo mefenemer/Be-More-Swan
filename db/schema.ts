@@ -4244,6 +4244,12 @@ export const audienceForms = pgTable("audience_forms", {
   allowedOrigins: text("allowed_origins").array(),
   segmentId: integer("segment_id").references(() => audienceSegments.id, { onDelete: "set null" }),
   doubleOptIn: boolean("double_opt_in").notNull().default(true),
+  // ⚠️ A page WE host at /s/<public_key>, for customers with no website to embed in. Off by
+  // default: a public url on our domain carrying a tenant's name is switched on deliberately. It
+  // is also what allows our own origin past allowed_origins — see db/audience-hosted-pages.sql.
+  hostedEnabled: boolean("hosted_enabled").notNull().default(false),
+  hostedHeadline: text("hosted_headline"),
+  hostedIntro: text("hosted_intro"),
   fields: jsonb("fields").notNull().default(["email", "first_name"]),
   theme: jsonb("theme").notNull().default({}),
   successMessage: text("success_message"),
@@ -4325,6 +4331,17 @@ export const newsletterIssues = pgTable("newsletter_issues", {
   // Why a send stopped. A failed issue with no reason is undiagnosable — the gap that
   // scheduled_posts.failure_reason exists to close on the social side.
   failureReason: text("failure_reason"),
+  // ── A/B subject test. See db/newsletter-ab-subjects.sql.
+  subjectB: text("subject_b"),
+  abState: text("ab_state").notNull().default("off"),
+  abSamplePercent: integer("ab_sample_percent").notNull().default(30),
+  abDecideAfterHours: integer("ab_decide_after_hours").notNull().default(4),
+  abSampleSentAt: timestamp("ab_sample_sent_at"),
+  abWinner: text("ab_winner"),
+  abDecidedAt: timestamp("ab_decided_at"),
+  // ⚠️ WHY that winner, in the tenant's words — including "too close to call", which is often the
+  // honest answer and which a bare winner column cannot say.
+  abNote: text("ab_note"),
   // Which route sent it, and the exact From line used — frozen at send time. A tenant who later
   // changes their sending domain must not rewrite the record of what recipients actually saw.
   sendProvider: text("send_provider"),
@@ -4369,6 +4386,9 @@ export const newsletterSends = pgTable("newsletter_sends", {
   // Per-(issue, contact) unsubscribe credential. Mirrors leadThreads.replyToken: unique, NOT NULL,
   // ROTATED rather than cleared.
   unsubscribeToken: text("unsubscribe_token").notNull(),
+  // Which subject line THIS recipient was sent. Stamped, never inferred: the record of what
+  // somebody received must survive a later edit to the issue.
+  variant: text("variant"),
   error: text("error"),
   sentAt: timestamp("sent_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),

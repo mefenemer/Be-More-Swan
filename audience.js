@@ -876,6 +876,12 @@
   const FORMS_API = '/.netlify/functions/audience-forms';
   let currentForm = null;
 
+  // Built from the browser's own origin rather than a stored base url: the page is served from
+  // wherever this app is, and a hardcoded domain is the thing that breaks on a preview deploy.
+  function hostedUrlFor(form) {
+    return `${location.origin}/s/${form.publicKey}`;
+  }
+
   function snippetFor(form) {
     const origin = location.origin;
     return `<div id="bms-subscribe"></div>\n<script async src="${origin}/subscribe.js"\n        data-bms-form="${form.publicKey}" data-bms-mount="#bms-subscribe"><\/script>`;
@@ -942,6 +948,36 @@
         <button type="button" id="aud-form-copy" class="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Copy snippet</button>
         <button type="button" id="aud-form-rotate" class="px-3 py-1.5 text-xs font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Rotate key</button>
         <span class="text-[11px] text-gray-400">Rotating stops the snippet already on your site until you paste the new one.</span>
+      </div>
+
+      <!-- The page WE host, for a business with no website to paste the snippet into. Off until
+           they switch it on: a public url on our domain carrying their name is a deliberate act. -->
+      <div class="mb-6 px-4 py-3 rounded-xl border ${f.hostedEnabled ? 'bg-emerald-50 border-emerald-200' : 'bg-gray-50 border-gray-200'}">
+        <label class="flex items-start gap-2 cursor-pointer">
+          <input type="checkbox" id="aud-form-hosted" ${f.hostedEnabled ? 'checked' : ''} class="mt-0.5">
+          <span>
+            <span class="text-sm font-bold text-gray-900">Give me a sign-up page</span>
+            <span class="block text-[11px] text-gray-500">No website needed — share the link in a bio, on a poster, or behind a QR code.</span>
+          </span>
+        </label>
+        ${f.hostedEnabled ? `
+          <div class="flex items-center gap-2 mt-3">
+            <input type="text" id="aud-form-hosted-url" readonly value="${esc(hostedUrlFor(f))}"
+              class="flex-1 px-3 py-2 rounded-lg border border-emerald-300 text-xs font-mono text-gray-800 bg-white">
+            <button type="button" id="aud-form-hosted-copy"
+              class="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Copy link</button>
+            <a href="${esc(hostedUrlFor(f))}" target="_blank" rel="noopener"
+              class="px-3 py-1.5 text-xs font-bold text-emerald-700 hover:text-emerald-800">Open</a>
+          </div>
+          <div class="grid grid-cols-1 gap-2 mt-3">
+            <input type="text" id="aud-form-hosted-headline" maxlength="120" value="${esc(f.hostedHeadline || '')}"
+              placeholder="Headline (defaults to the form's name)"
+              class="w-full px-3 py-2 rounded-lg border border-emerald-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
+            <textarea id="aud-form-hosted-intro" rows="2" maxlength="600" placeholder="A line or two about what people are signing up to"
+              class="w-full px-3 py-2 rounded-lg border border-emerald-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">${esc(f.hostedIntro || '')}</textarea>
+          </div>
+          <p class="text-[11px] text-emerald-700 mt-2">The page uses the same consent wording and double opt-in setting as the snippet — it is the same form, reached another way.</p>`
+        : ''}
       </div>
 
       <div class="space-y-4">
@@ -1052,12 +1088,34 @@
             doubleOptIn: !!$('aud-form-doi')?.checked,
             segmentId: Number($('aud-form-segment')?.value || '') || null,
             allowedOrigins: lockedNow ? list : null,
+            hostedEnabled: !!$('aud-form-hosted')?.checked,
+            // Only sent when the panel is showing them — the inputs do not exist while the page is
+            // off, and sending undefined would blank a headline the tenant wrote earlier.
+            ...($('aud-form-hosted-headline') ? { hostedHeadline: $('aud-form-hosted-headline').value } : {}),
+            ...($('aud-form-hosted-intro') ? { hostedIntro: $('aud-form-hosted-intro').value } : {}),
           }),
         });
         currentForm = form;
         window.showToast('Sign-up form saved.');
         renderFormSettings();
       } catch (err) { window.showToast(err.message); }
+    });
+
+    // Delegated: the hosted-link controls only exist while the page is switched on, and the panel
+    // is re-rendered whenever that changes.
+    body.addEventListener('click', async (e) => {
+      if (!e.target.closest('#aud-form-hosted-copy')) return;
+      const input = $('aud-form-hosted-url');
+      if (!input) return;
+      try {
+        await navigator.clipboard.writeText(input.value);
+        window.showToast('Link copied.');
+      } catch {
+        // Clipboard access is refused in some browsers and every insecure context. Selecting the
+        // text is the fallback that always works.
+        input.select();
+        window.showToast('Press Ctrl/Cmd+C to copy the link.');
+      }
     });
   }
 
