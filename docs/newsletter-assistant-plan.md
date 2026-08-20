@@ -504,6 +504,60 @@ first three can all look healthy while the writing wears people out.
 
 ---
 
+## 11s. Deliverability tooling (2026-08-20)
+
+**No migration.** Everything here is computed from data we already hold, plus one DNS lookup.
+
+### ⚠️ What this deliberately is NOT
+
+**There is no spam score, and there must not be one.** A number out of ten implies a model of the
+receiving filter, and nobody outside Google has one: Gmail is not SpamAssassin, it is not public,
+and it weighs sender reputation far above anything visible in the message. A score would be ACTED
+ON — somebody would rewrite working copy to move it — which makes inventing one worse than saying
+nothing. The panel says so in those words rather than quietly omitting it.
+
+**There is no trigger-word list.** "Free", "act now" and the rest are folklore from filters retired
+a decade ago. A warning about the word "free" makes a tenant rewrite a good offer for no benefit.
+A test sends a subject stuffed with all of them and asserts nothing is reported.
+
+**There is no seed testing.** Real seed testing needs mailboxes at every major provider that
+somebody owns, monitors and keeps warm; a fake version that checks one address proves nothing. It
+is not built rather than half-built.
+
+### What IS here, because we genuinely know it
+
+**1. List health, against the thresholds the gatekeepers published.** Complaint rate against
+Gmail's stated 0.3% limit and 0.1% target; bounce rate graded at 2% and 5%. Quoting somebody else's
+published line is the difference between "this looks high to us" and "this is above the level Gmail
+says it will filter you at". ⚠️ Below about 200 sends the rates are not shown at all — two bounces
+out of thirty is 6.7%, which reads as a crisis and is two bounces. Counted from the send LEDGER
+rather than the denormalised issue counters, because a tenant would act on this by deleting part of
+their list.
+
+**2. DMARC, by plain DNS lookup.** SPF and DKIM are set up as part of verifying a domain and the
+provider refuses to verify without them; DMARC is the one nobody adds, because nothing forces it —
+and since 2024 Gmail and Yahoo require bulk senders to publish one. ⚠️ Looked up on the ROOT domain
+as well as the sending subdomain, since a record on `acme.com` covers `mail.acme.com` and reporting
+"none" would send a tenant to add something they do not need. ⚠️ A failed lookup is reported as OUR
+failure, never as a missing record.
+
+**3. Warm-up guidance for a new domain.** A first send of ten thousand from a domain verified
+yesterday looks exactly like a spammer who has just bought one, and the damage lands on the domain
+rather than the campaign. The ceiling starts around 200/day and doubles every couple of days,
+stopping being mentioned after three weeks. ⚠️ **Nothing enforces it** — it is a warning with a
+number, never a refusal, because the tenant may have a genuinely engaged list and we cannot see that
+from here.
+
+**4. Structural findings on the issue itself**, shown while it is still a DRAFT — on a sent issue
+the same words are a post-mortem, on a draft they are a decision. Shouting subject, repeated
+punctuation, an almost-empty body, image-heavy layout, link density. Each is named and explained;
+none is totalled.
+
+The health report is a GET readable by **any role**, not just owner/admin: the person who acts on
+"2.1% of your emails bounced" is usually the one writing the issues, not the one who owns billing.
+
+---
+
 ## 11r. Tenant-facing API (2026-08-20)
 
 1. **Apply `db/tenant-api-keys.sql`** — staging, then prod. One table, `api_keys`.
@@ -1255,7 +1309,7 @@ business tool and not worth chasing.
 | ~~**No custom fields in practice**~~ ✅ **CLOSED 2026-08-20** | `custom_fields` existed on the contact and nothing read or wrote it. A tenant can now define their own columns, fill them from an import or by hand, filter segments on them, and personalise an email with them — with a bare custom merge tag refused rather than rendered blank. Text only; number and date are reserved in the schema and refused by the API. | Done — `db/audience-custom-fields.sql` |
 | ~~**No send-time/timezone handling**~~ ✅ **CLOSED 2026-08-20** | Everything sent on a UTC clock, so a scheduled "9:00" was 09:00 UTC and nothing said so. A scheduled time is now read and stamped in the tenant's own zone, and an issue can optionally be delivered at each subscriber's local time — with "we do not know their zone" kept as an honest, counted answer rather than guessed from an IP. | Done — `db/newsletter-send-time.sql`, `src/utils/newsletter-schedule.ts` |
 | **No tenant-facing API or webhooks** → ✅ **API BUILT 2026-08-20**, webhooks deliberately not | Subscribers could only arrive through the form or a CSV. `/api/v1/contacts` now takes them from a shop, a booking system or a Zapier step — with a declared consent basis on every write, and a refusal to resurrect anybody who opted out that is REPORTED rather than silent. ⚠️ Outbound webhooks are still open: they need a retry worker, and a retry worker is a schedule whose failure is silent. | API done — `db/tenant-api-keys.sql`; webhooks unbuilt |
-| **No deliverability tooling** | No spam-score preview, no seed test, no warm-up guidance for a new domain. | Medium |
+| **No deliverability tooling** → ✅ **the honest half BUILT 2026-08-20** | List health against Gmail's published complaint and bounce thresholds, a DMARC lookup, warm-up guidance for a new domain, and named structural findings on a draft. ⚠️ Deliberately NOT built: a spam score (implies a model of a filter nobody outside Google has) and seed testing (needs real mailboxes somebody owns and warms). Saying so beats shipping a number people would act on. | Done — `src/utils/deliverability.ts`, `src/utils/dmarc-check.ts` |
 
 ### Where we are already ahead, and should stay
 

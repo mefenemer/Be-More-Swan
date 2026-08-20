@@ -89,6 +89,10 @@
         <!-- Outcome of a send, once there is one. -->
         <div id="nl-stats" class="hidden mt-3 px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-700" style="display:none"></div>
 
+        <!-- What is worth knowing before this goes out. ⚠️ Named findings, never a score — see
+             src/utils/deliverability.ts for why there is no number here. -->
+        <div id="nl-deliver" class="hidden mt-3 px-4 py-3 rounded-xl border text-sm" style="display:none"></div>
+
         <!-- Which link worked. Aggregate by choice: the rows underneath name a recipient, so that
              "unique" is exact, but "who clicked what" is a different feature. -->
         <div id="nl-links" class="hidden mt-3 px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-700" style="display:none"></div>

@@ -175,7 +175,7 @@
 
   async function openIssue(id) {
     try {
-      const { issue, audienceEstimate, sourcePost, resend, links, sendTimezone, scheduledForLocal } = await api(`${ISSUES_API}?id=${encodeURIComponent(id)}`);
+      const { issue, audienceEstimate, sourcePost, resend, links, sendTimezone, scheduledForLocal, deliverability } = await api(`${ISSUES_API}?id=${encodeURIComponent(id)}`);
       state.current = issue;
       state.dirty = false;
       hide($('nl-empty'));
@@ -202,6 +202,7 @@
       renderResend(issue, resend);
       renderAb(issue);
       renderSendMode(issue);
+      renderDeliverability(issue, deliverability);
       renderLinks(issue, links);
       hide($('nl-warnings'));
       renderFailure(issue);
@@ -490,6 +491,27 @@
     });
   }
 
+  function renderDeliverability(issue, findings) {
+    const el = $('nl-deliver');
+    if (!el) return;
+    const list = findings || [];
+    // Nothing to say is worth saying nothing about — an always-present empty panel trains people to
+    // ignore the place the real warnings appear.
+    if (!list.length || ['sending', 'sent'].includes(issue.status)) { hide(el); return; }
+
+    const worst = list[0].severity;
+    const cls = worst === 'blocker' ? 'bg-red-50 border-red-200 text-red-900'
+      : worst === 'warning' ? 'bg-amber-50 border-amber-200 text-amber-900'
+      : 'bg-gray-50 border-gray-200 text-gray-700';
+    el.className = `mt-3 px-4 py-3 rounded-xl border text-sm ${cls}`;
+    el.innerHTML = `<p class="font-bold mb-1">Before you send</p>
+      <ul class="list-disc pl-5 space-y-1">
+        ${list.map((f) => `<li>${esc(f.message)}</li>`).join('')}
+      </ul>
+      <p class="text-[11px] opacity-70 mt-2">These are specific things we can see, not a spam score — there is no number here because nobody can honestly give you one.</p>`;
+    show(el, 'block');
+  }
+
   function renderLinks(issue, links) {
     const el = $('nl-links');
     if (!el) return;
@@ -709,8 +731,45 @@
         return;
       }
       renderSending(domains || []);
+      // Loaded after the panel is on screen: the DMARC lookup is a DNS round trip, and holding the
+      // whole modal for it would make setup feel broken.
+      loadDeliverabilityHealth();
     } catch (err) {
       body.innerHTML = `<p class="text-sm text-red-600">${esc(err.message)}</p>`;
+    }
+  }
+
+  async function loadDeliverabilityHealth() {
+    const host = $('nl-sending-body');
+    if (!host) return;
+    const slot = document.createElement('div');
+    slot.className = 'mt-5 pt-4 border-t border-gray-100';
+    slot.innerHTML = '<p class="text-sm text-gray-400">Checking how your sending is doing…</p>';
+    host.appendChild(slot);
+
+    try {
+      // A GET: it is a report, and any role in the org may read it.
+      const res = await api(`${DOMAIN_API}?action=health`);
+      const rows = [];
+      for (const f of res.listHealth || []) rows.push({ severity: f.severity, message: f.message });
+      if (res.dmarc && res.dmarc.advice) rows.push({ severity: res.dmarc.advice.severity, message: res.dmarc.advice.message });
+      if (res.warmupLimit) {
+        rows.push({
+          severity: 'note',
+          message: `This domain is still new, so around ${Number(res.warmupLimit).toLocaleString()} emails a day is a sensible ceiling for now. It rises on its own as the domain ages.`,
+        });
+      }
+
+      const colour = (sev) => sev === 'blocker' ? 'text-red-700' : sev === 'warning' ? 'text-amber-700' : 'text-gray-600';
+      slot.innerHTML = `<p class="text-sm font-bold text-gray-900 mb-2">How your sending is doing</p>
+        <ul class="space-y-1.5">
+          ${rows.map((r) => `<li class="text-sm ${colour(r.severity)}">${esc(r.message)}</li>`).join('')}
+        </ul>
+        <p class="text-[11px] text-gray-400 mt-2">Rates cover ${esc(res.window || 'recent sends')}.</p>`;
+    } catch {
+      // A failed health check must not make the sending setup look broken — the setup above it is
+      // what the tenant came here for.
+      slot.remove();
     }
   }
 

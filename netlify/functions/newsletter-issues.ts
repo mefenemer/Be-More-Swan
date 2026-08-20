@@ -34,6 +34,7 @@ import { buildSegmentCondition } from '../../src/utils/audience-segment-rules';
 import { loadCustomFieldDefs, loadCustomFieldKeys } from '../../src/utils/audience-custom-fields';
 import { linkReportForIssue } from '../../src/utils/newsletter-link-clicks';
 import { LOCAL_TIME_RE, instantToWallClock, resolveSendTimezone, wallClockToInstant } from '../../src/utils/newsletter-schedule';
+import { contentFindings, severityRank, warmupFinding } from '../../src/utils/deliverability';
 import { sampleMergeContext } from '../../src/config/newsletter-merge-vars';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -170,8 +171,36 @@ export default withLambda(async (event: HandlerEvent) => {
                 : [];
 
             const tz = await issueTimezone(db, issue, orgId);
+
+            // Only a verified domain has an age worth warming up; a mailbox send is capped at a
+            // small list anyway and has no reputation of its own to protect.
+            const [verifiedDomain] = await db
+                .select({ verifiedAt: newsletterSendingDomains.verifiedAt })
+                .from(newsletterSendingDomains)
+                .where(and(
+                    eq(newsletterSendingDomains.organisationId, orgId),
+                    eq(newsletterSendingDomains.status, 'verified'),
+                ))
+                .limit(1);
+
+            // ⚠️ Computed on the issue as it stands, BEFORE approval, because that is the only
+            // moment any of it can be acted on. A deliverability report on a sent issue is a
+            // post-mortem; the same words on a draft are a decision.
+            const snap = issue.renderedPayload as { html?: string; text?: string } | null;
+            const audience = await estimateAudience(db, orgId, issue.segmentId);
+            const deliverability = contentFindings({
+                subject: issue.subject || '',
+                text: snap?.text || issue.bodyMarkdown || '',
+                html: snap?.html || '',
+            });
+            const warmup = verifiedDomain
+                ? warmupFinding({ verifiedAt: verifiedDomain.verifiedAt, recipientCount: audience })
+                : null;
+            if (warmup) deliverability.push(warmup);
+
             return json(200, {
                 issue,
+                deliverability: deliverability.sort((a, b) => severityRank(a) - severityRank(b)),
                 // ⚠️ The zone and the wall-clock, sent together. The browser must NOT convert the
                 // instant with its own clock: the person editing an issue may be travelling, or on
                 // a laptop still set to another country, and the time they see has to be the time
@@ -186,7 +215,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 // are never offering different answers. Cheap: every refusal but the last two
                 // returns before it touches the database.
                 resend: await resendEligibility(db, issue),
-                audienceEstimate: await estimateAudience(db, orgId, issue.segmentId),
+                audienceEstimate: audience,
             });
         }
 

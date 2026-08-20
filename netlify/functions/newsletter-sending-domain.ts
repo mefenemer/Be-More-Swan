@@ -9,13 +9,15 @@
 //   POST { action: 'remove' }  → delete it (provider-side too, best effort)
 
 import { HandlerEvent } from '@netlify/functions';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { newsletterSendingDomains, organisations } from '../../db/schema';
+import { newsletterSendingDomains, newsletterSends, organisations } from '../../db/schema';
 import {
     checkSendingDomain, createSendingDomain, deleteSendingDomain, isSubdomain, normaliseSendingDomain,
 } from '../../src/utils/sending-domain';
 import { requireTenant } from '../../src/utils/tenant';
+import { listHealthFindings, warmupLimitFor } from '../../src/utils/deliverability';
+import { checkDmarc, dmarcAdvice } from '../../src/utils/dmarc-check';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, obj: unknown) => ({
@@ -28,6 +30,53 @@ const ROLES = ['owner', 'admin'];
 
 export default withLambda(async (event: HandlerEvent) => {
     const db = getDb();
+
+    // ── Deliverability: what we actually know, and nothing we do not ────────
+    // ⚠️ A GET, and readable by ANY role in the org rather than owner/admin. It is a report about
+    // mail that has already gone out — the person who would act on "2.1% of your emails bounced" is
+    // often the one writing the issues, not the one who owns the billing.
+    if (event.httpMethod === 'GET' && event.queryStringParameters?.action === 'health') {
+        const ctx = await requireTenant(event, db);
+        if ('error' in ctx) return ctx.error;
+        const orgId = ctx.organisationId;
+
+        const [domain] = await db.select().from(newsletterSendingDomains)
+            .where(eq(newsletterSendingDomains.organisationId, orgId))
+            .orderBy(desc(newsletterSendingDomains.createdAt))
+            .limit(1);
+
+        // Recent outcomes across the org's sends. ⚠️ Counted from the LEDGER rather than from the
+        // issue counters: a counter is denormalised and can drift, and this is the number a tenant
+        // would act on by deleting part of their list.
+        const [totals] = await db
+            .select({
+                delivered: sql<number>`count(*) FILTER (WHERE ${newsletterSends.status} IN ('sent','delivered'))::int`,
+                bounced: sql<number>`count(*) FILTER (WHERE ${newsletterSends.status} = 'bounced')::int`,
+                complained: sql<number>`count(*) FILTER (WHERE ${newsletterSends.status} = 'complained')::int`,
+            })
+            .from(newsletterSends)
+            .where(and(
+                eq(newsletterSends.organisationId, orgId),
+                sql`${newsletterSends.createdAt} >= ${new Date(Date.now() - 90 * 86400000).toISOString()}`,
+            ));
+
+        const findings = listHealthFindings({
+            delivered: Number(totals?.delivered ?? 0),
+            bounced: Number(totals?.bounced ?? 0),
+            complained: Number(totals?.complained ?? 0),
+        });
+
+        // The DNS half. Only meaningful once a domain exists; a mailbox sender has nothing to check.
+        const dmarc = domain?.domain ? await checkDmarc(domain.domain) : null;
+
+        return json(200, {
+            listHealth: findings,
+            dmarc: dmarc ? { ...dmarc, advice: dmarcAdvice(dmarc) } : null,
+            domain: domain ? { domain: domain.domain, status: domain.status, verifiedAt: domain.verifiedAt } : null,
+            warmupLimit: domain?.status === 'verified' ? warmupLimitFor(domain.verifiedAt) : null,
+            window: 'the last 90 days',
+        });
+    }
 
     if (event.httpMethod === 'GET') {
         const ctx = await requireTenant(event, db);
