@@ -20,6 +20,9 @@ function encodeMimeHeader(value: string): string {
 
 export interface GmailSendResult { id: string; threadId?: string }
 
+/** Fixed boundary for the multipart/alternative form. Never appears in base64 payloads. */
+const BOUNDARY = 'bms-alt-boundary-8f2c1a';
+
 /**
  * Send an email via the org's connected Gmail account.
  * @throws IntegrationError when Gmail isn't connected (from getFreshAccessToken)
@@ -28,7 +31,16 @@ export interface GmailSendResult { id: string; threadId?: string }
 export async function sendGmailMessage(
     db: Db,
     organisationId: number,
-    msg: { to: string; subject: string; body: string; replyTo?: string; listUnsubscribe?: string },
+    msg: {
+        to: string; subject: string; body: string; replyTo?: string; listUnsubscribe?: string;
+        /**
+         * Optional HTML alternative. When present the message goes out as multipart/alternative,
+         * with `body` as the text part. Added for newsletter sends over the mailbox route — cold
+         * outreach deliberately stays plain text, because a 1:1 email that arrives as a styled
+         * template stops looking like a person wrote it.
+         */
+        html?: string;
+    },
 ): Promise<GmailSendResult> {
     // Strip CR/LF so field values can never smuggle extra MIME headers.
     const to = msg.to.replace(/[\r\n]+/g, ' ').trim();
@@ -59,10 +71,32 @@ export async function sendGmailMessage(
         ] : []),
         `Subject: ${encodeMimeHeader(subject)}`,
         'MIME-Version: 1.0',
-        'Content-Type: text/plain; charset="UTF-8"',
-        'Content-Transfer-Encoding: base64',
-        '',
-        Buffer.from(body, 'utf8').toString('base64'),
+        ...(msg.html
+            // multipart/alternative: the text part first, HTML second — clients render the LAST
+            // part they understand, so the order is what decides which one a person sees.
+            ? [
+                `Content-Type: multipart/alternative; boundary="${BOUNDARY}"`,
+                '',
+                `--${BOUNDARY}`,
+                'Content-Type: text/plain; charset="UTF-8"',
+                'Content-Transfer-Encoding: base64',
+                '',
+                Buffer.from(body, 'utf8').toString('base64'),
+                '',
+                `--${BOUNDARY}`,
+                'Content-Type: text/html; charset="UTF-8"',
+                'Content-Transfer-Encoding: base64',
+                '',
+                Buffer.from(msg.html, 'utf8').toString('base64'),
+                '',
+                `--${BOUNDARY}--`,
+            ]
+            : [
+                'Content-Type: text/plain; charset="UTF-8"',
+                'Content-Transfer-Encoding: base64',
+                '',
+                Buffer.from(body, 'utf8').toString('base64'),
+            ]),
     ].join('\r\n');
 
     const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {

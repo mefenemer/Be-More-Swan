@@ -4277,6 +4277,13 @@ export const newsletterIssues = pgTable("newsletter_issues", {
   jobId: text("job_id"),
   blueprintId: integer("blueprint_id").references(() => aiBlueprints.id, { onDelete: "set null" }),
   // Denormalised on purpose: KPI cards must not COUNT(*) a ledger of hundreds of thousands of rows.
+  // Why a send stopped. A failed issue with no reason is undiagnosable — the gap that
+  // scheduled_posts.failure_reason exists to close on the social side.
+  failureReason: text("failure_reason"),
+  // Which route sent it, and the exact From line used — frozen at send time. A tenant who later
+  // changes their sending domain must not rewrite the record of what recipients actually saw.
+  sendProvider: text("send_provider"),
+  fromAddress: text("from_address"),
   recipientCount: integer("recipient_count").notNull().default(0),
   deliveredCount: integer("delivered_count").notNull().default(0),
   openedCount: integer("opened_count").notNull().default(0),
@@ -4305,6 +4312,7 @@ export const newsletterSends = pgTable("newsletter_sends", {
   status: text("status").notNull().default("queued"),
   // 'skipped' with no reason is the shape of a silent bug.
   skipReason: text("skip_reason"),
+  provider: text("provider"),
   providerMessageId: text("provider_message_id"),
   // Per-(issue, contact) unsubscribe credential. Mirrors leadThreads.replyToken: unique, NOT NULL,
   // ROTATED rather than cleared.
@@ -4321,6 +4329,34 @@ export const newsletterSends = pgTable("newsletter_sends", {
   index("newsletter_sends_org_email_idx").on(t.organisationId, t.email),
   check("newsletter_sends_status_check", sql`${t.status} IN ('queued','sent','delivered','bounced','complained','failed','skipped')`),
   check("newsletter_sends_skip_reason_check", sql`${t.skipReason} IS NULL OR ${t.skipReason} IN ('opted_out','suppressed','unconfirmed','not_in_audience','bounced_previously','complained_previously','consent_check_failed','invalid_address','do_not_contact')`),
+]);
+
+// ── Newsletter dispatch (db/newsletter-dispatch.sql) ────────────────────────────────────────────
+// The tenant's own verified sending domain. ⚠️ NOT organisations.domainVerified, which means
+// "verified for same-domain org auto-join" — a different claim about a different thing.
+export const newsletterSendingDomains = pgTable("newsletter_sending_domains", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  // A SUBDOMAIN by convention ('mail.acme.com'), never the root — a bad campaign must not be able
+  // to take down the domain their invoices come from.
+  domain: text("domain").notNull(),
+  provider: text("provider").notNull().default("resend"),
+  providerDomainId: text("provider_domain_id"),
+  status: text("status").notNull().default("pending"),
+  // Stored as the provider returned them, so the setup screen still works when its API does not.
+  dnsRecords: jsonb("dns_records").notNull().default([]),
+  fromName: text("from_name"),
+  fromLocalPart: text("from_local_part").notNull().default("hello"),
+  replyTo: text("reply_to"),
+  lastCheckedAt: timestamp("last_checked_at"),
+  verifiedAt: timestamp("verified_at"),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  unique("newsletter_sending_domains_org_domain_unique").on(t.organisationId, t.domain),
+  index("newsletter_sending_domains_org_idx").on(t.organisationId, t.status),
+  check("newsletter_sending_domains_status_check", sql`${t.status} IN ('pending','verified','failed','disabled')`),
 ]);
 
 // Relational-query definitions for the chat tables live in db/relations.ts

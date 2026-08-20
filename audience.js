@@ -516,8 +516,15 @@
     body.innerHTML = '<p class="text-sm text-gray-500">Loading…</p>';
 
     try {
-      const { forms } = await api(FORMS_API);
-      currentForm = (forms || []).find((f) => f.status === 'active') || (forms || [])[0] || null;
+      const data = await api(FORMS_API);
+      if (data.needsSetup) {
+        // Not "create your first form" — that button would post into tables that do not exist and
+        // fail with something far less helpful.
+        body.innerHTML = `<p class="text-sm text-gray-600">Audience is not set up on this environment yet. Apply <span class="font-mono text-xs bg-gray-100 px-1 rounded">db/audience.sql</span>, then reload this page.</p>`;
+        return;
+      }
+      const forms = data.forms || [];
+      currentForm = forms.find((f) => f.status === 'active') || forms[0] || null;
     } catch (err) {
       body.innerHTML = `<p class="text-sm text-red-600">${esc(err.message)}</p>`;
       return;

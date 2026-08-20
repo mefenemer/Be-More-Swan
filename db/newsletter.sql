@@ -14,6 +14,25 @@
 --
 -- Idempotent: safe to re-run. Apply MANUALLY as the DB owner — no drizzle-kit push. SQL to BOTH
 -- databases BEFORE the code deploys.
+--
+-- ⚠️ ORDER MATTERS: db/audience.sql FIRST. newsletter_issues.segment_id and
+-- newsletter_sends.contact_id are foreign keys into audience_segments and audience_contacts, and
+-- Postgres answers a missing FK target with `relation "audience_segments" does not exist
+-- (SQLSTATE 42P01)` — which names a table this file never mentions creating and reads like a bug in
+-- the migration rather than a missing prerequisite. The guard below turns that into an instruction.
+-- (The migrate runner applies db/*.sql alphabetically, so a full `apply --execute` gets this right
+-- on its own; a run narrowed with `--only newsletter` does not.)
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.tables
+                 WHERE table_schema = 'public' AND table_name = 'audience_segments') THEN
+    RAISE EXCEPTION USING
+      MESSAGE = 'db/newsletter.sql requires db/audience.sql — apply that first, then re-run this file.',
+      HINT    = 'npm run db:migrate:apply -- --only audience   (then --only newsletter)',
+      ERRCODE = 'undefined_table';
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS newsletter_issues (
   id                    SERIAL PRIMARY KEY,

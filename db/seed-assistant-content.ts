@@ -212,8 +212,14 @@ const AUTHORED: RoleContent[] = [
     {
         roleKey: 'newsletter_editor',
         tagline: 'A newsletter worth opening — without the weekly scramble.',
-        keyFeatures: ['Curated Industry Round-Ups', 'Ready-to-Send Campaign Formatting', 'Human-in-the-loop Review'],
-        integrations: ['Mailchimp', 'Gmail', 'Slack'],                    // Mailchimp not built
+        // ⚠️ Rewritten 2026-08-20 when the role went live. The previous copy promised "Curated
+        // Industry Round-Ups", which is a research capability nothing in the pipeline performs —
+        // the assistant writes from the tenant's own brief and business context, and inventing
+        // industry news is exactly what its prompt forbids. Claim the shipped behaviour only.
+        keyFeatures: ['Drafts in Your Brand Voice', 'Personalised Per Subscriber', 'Sign-Up Form for Your Website', 'You Approve Every Issue'],
+        // Mailchimp is NOT built and was never built. What exists: sending from a domain the
+        // customer verifies, or from their connected Gmail/Outlook for a small list.
+        integrations: ['Your own sending domain', 'Gmail', 'Outlook']
     },
     {
         roleKey: 'rfp_proposal_responder',

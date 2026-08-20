@@ -1,0 +1,165 @@
+<!-- newsletter.html — the Newsletter Studio (view fragment, loaded by workspace.html's router).
+     Controller: newsletter.js (window.initNewsletter).
+
+     Reached today at ?view=newsletter. It gets its entry point from the Newsletter Assistant's
+     detail page in Phase 5, when the role goes live — deliberately NOT a sidebar item: the sidebar
+     was decluttered on purpose, and a link every org sees for an assistant most have not hired is
+     exactly the clutter that was removed. -->
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full pb-20">
+
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+    <div>
+      <h1 class="text-3xl font-extrabold text-gray-900">Newsletter</h1>
+      <p class="text-gray-500 mt-1">Draft an issue, see exactly what lands in the inbox, then approve it for sending.</p>
+    </div>
+    <button type="button" id="nl-sending"
+      class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-gray-700 bg-white hover:bg-gray-50 rounded-lg transition-colors border border-gray-300 cursor-pointer">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+      Sending setup
+    </button>
+    <button type="button" id="nl-new"
+      class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors cursor-pointer">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      New issue
+    </button>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+    <!-- Issue list -->
+    <div class="lg:col-span-1">
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div class="px-4 py-3 border-b border-gray-100">
+          <p class="text-sm font-bold text-gray-900">Issues</p>
+        </div>
+        <ul id="nl-list" class="divide-y divide-gray-100 max-h-[60vh] overflow-auto">
+          <li class="p-6 text-center text-sm text-gray-500">Loading…</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Editor -->
+    <div class="lg:col-span-2">
+      <div id="nl-empty" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-10 text-center">
+        <p class="text-sm font-bold text-gray-900">No issue selected</p>
+        <p class="text-sm text-gray-500 mt-1">Pick an issue on the left, or start a new one.</p>
+      </div>
+
+      <div id="nl-editor" class="hidden bg-white rounded-2xl border border-gray-200 shadow-sm p-6" style="display:none">
+        <div class="flex items-center justify-between mb-4">
+          <span id="nl-status" class="inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border bg-gray-100 text-gray-600 border-gray-200">Draft</span>
+          <span id="nl-saved" class="text-xs text-gray-400"></span>
+        </div>
+
+        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Subject line</label>
+        <input type="text" id="nl-subject" maxlength="200"
+          class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm font-bold mb-1">
+        <p class="text-[11px] text-gray-400 mb-4">Under about 60 characters stays readable on a phone.</p>
+
+        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Preview line</label>
+        <input type="text" id="nl-preheader" maxlength="200" placeholder="The line the inbox shows next to the subject"
+          class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-4">
+
+        <div class="flex items-center justify-between mb-1">
+          <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide">Body</label>
+          <div class="flex items-center gap-1" id="nl-vars"></div>
+        </div>
+        <textarea id="nl-body" rows="16" spellcheck="true"
+          class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm font-mono"></textarea>
+        <p class="text-[11px] text-gray-400 mt-1">Markdown. The unsubscribe line and your address are added automatically — don't write them here.</p>
+
+        <div id="nl-warnings" class="hidden mt-3 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-900" style="display:none"></div>
+
+        <!-- Why a send stopped. Without this a failed issue is a status with no explanation. -->
+        <div id="nl-failure" class="hidden mt-3 px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-900" style="display:none"></div>
+
+        <!-- Outcome of a send, once there is one. -->
+        <div id="nl-stats" class="hidden mt-3 px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-700" style="display:none"></div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-5">
+          <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Send to</label>
+            <select id="nl-segment"
+              class="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-700 focus:ring-2 focus:ring-emerald-600 outline-none cursor-pointer">
+              <option value="">Everyone subscribed</option>
+            </select>
+            <!-- Deliberately "about": opt-out and suppression checks run per address at send time,
+                 so the real figure can only be lower. -->
+            <p id="nl-audience" class="text-[11px] text-gray-500 mt-1"></p>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Send at (optional)</label>
+            <input type="datetime-local" id="nl-schedule"
+              class="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-700 focus:ring-2 focus:ring-emerald-600 outline-none">
+            <p class="text-[11px] text-gray-400 mt-1">Leave empty to approve it now and send manually.</p>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 mt-6 pt-5 border-t border-gray-100">
+          <button type="button" id="nl-generate"
+            class="px-4 py-2 text-sm font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 cursor-pointer">Draft with the assistant</button>
+          <button type="button" id="nl-preview"
+            class="px-4 py-2 text-sm font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Preview email</button>
+          <div class="flex-1"></div>
+          <button type="button" id="nl-save"
+            class="px-4 py-2 text-sm font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Save</button>
+          <button type="button" id="nl-approve"
+            class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Approve for sending</button>
+          <button type="button" id="nl-send"
+            class="hidden px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer" style="display:none">Send now</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sending setup: the tenant's own verified domain, or the mailbox fallback. -->
+  <div id="nl-sending-modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4" style="display:none">
+    <div class="absolute inset-0 bg-black/40" data-nl-sending-close></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
+      <div class="flex items-start justify-between mb-1">
+        <h2 class="text-lg font-extrabold text-gray-900">Where your newsletter sends from</h2>
+        <button type="button" data-nl-sending-close class="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 cursor-pointer">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="text-sm text-gray-500 mb-5">Verifying a domain you own lets you email your whole list, from your own address.</p>
+      <div id="nl-sending-body"></div>
+    </div>
+  </div>
+
+  <!-- Brief modal, for "Draft with the assistant" -->
+  <div id="nl-brief-modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4" style="display:none">
+    <div class="absolute inset-0 bg-black/40" data-nl-brief-close></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
+      <h2 class="text-lg font-extrabold text-gray-900 mb-1">What is this issue about?</h2>
+      <p class="text-sm text-gray-500 mb-5">The assistant writes in your voice using your business information. The more you give it, the less you'll edit.</p>
+      <input type="text" id="nl-brief-topic" placeholder="Topic, e.g. our new opening hours and the autumn range"
+        class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-3">
+      <textarea id="nl-brief-notes" rows="5" placeholder="Anything it should include: news, links, dates, offers. Facts it is not given, it will write around rather than invent."
+        class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm"></textarea>
+      <div class="flex justify-end gap-2 mt-6">
+        <button type="button" data-nl-brief-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
+        <button type="button" id="nl-brief-go" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Write the draft</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Preview modal. The email renders in an iframe: it is a full HTML document with its own
+       styles, and injecting it into this page would let it restyle the app around it. -->
+  <div id="nl-preview-modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4" style="display:none">
+    <div class="absolute inset-0 bg-black/40" data-nl-preview-close></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+      <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+        <div>
+          <p class="text-sm font-bold text-gray-900">Preview</p>
+          <p class="text-[11px] text-gray-400">Shown with sample subscriber details.</p>
+        </div>
+        <button type="button" data-nl-preview-close class="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 cursor-pointer">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <iframe id="nl-preview-frame" title="Email preview" sandbox
+        class="flex-1 w-full rounded-b-2xl bg-gray-50" style="min-height:60vh;border:0"></iframe>
+    </div>
+  </div>
+</div>

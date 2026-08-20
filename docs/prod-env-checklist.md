@@ -31,6 +31,24 @@ against. Registry of record: `netlify/functions/admin-system-status.ts`.
 | Pexels | `PEXELS_API_KEY` | Stock media search unavailable. |
 | Serper | `SERPER_API_KEY` | Lead Generator outbound discovery can't run. |
 
+### Newsletter dispatch (Phase 4 — docs/newsletter-assistant-plan.md)
+
+| Service | Env vars | Degraded behaviour if missing |
+|---------|----------|-------------------------------|
+| Resend domain management | `RESEND_DOMAINS_API_KEY` | Tenants cannot verify their own sending domain, so every newsletter falls back to the connected-mailbox route and is capped at 200 recipients. ⚠️ Must be a **full-access** key — the least-privilege sending key returns `restricted_api_key` on `/domains`. |
+| Resend delivery events | `RESEND_WEBHOOK_SECRET` | Every bounce and spam complaint is rejected 401. The audience never learns an address is dead, `newsletter_sends` never advances past `sent`, and a complaint never reaches `lead_opt_outs` — the list degrades with nothing on screen to show it. |
+
+⚠️ **The webhook endpoint URL must be the APEX with no `www`:**
+`https://bemoreswan.com/api/newsletter/webhook`. The site 308-redirects `www` → apex for every
+path, and webhook senders do not follow redirects — the same trap that kept every Stripe webhook
+failing for a day.
+
+⚠️ **`BASE_URL` must differ per context.** It is what builds the unsubscribe link in every footer.
+If the production value is inherited by `branch-deploy`, a staging test send emails links pointing
+at production, where the token does not exist — the recipient gets "we couldn't find that
+subscription" and stays subscribed. Leave `BASE_URL` unset on `branch-deploy` (`resolveBaseUrl`
+then falls back to `DEPLOY_PRIME_URL`, which is correct per deploy) or set it to the staging URL.
+
 ## ⚙️ Infra — operational hardening (set in prod even though not user-visible)
 
 `CRON_TRIGGER_SECRET`, `WORKER_SECRET`, `NETLIFY_CRON_SECRET` — authenticate internal cron/worker

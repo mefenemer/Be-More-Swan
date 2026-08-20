@@ -336,7 +336,10 @@ export function categoryForType(type: string): PrefCategory {
 // It causes posts and articles to exist, so "it should get content notifications" is a reasonable
 // first instinct — but the drafts are produced BY the Social Media and Blog Writing assistants and
 // already notify against those. Adding it here would send every user two alerts for one draft.
-export const PUBLISHING_ROLE_KEYS: ReadonlySet<string> = new Set(['social_media_manager', 'blog_writer']);
+// newsletter_editor joined 2026-08-20 when the role went live: the autopilot drafts on a cadence and
+// process-newsletter-sends delivers, so it produces exactly the draft/publish notifications this
+// category covers.
+export const PUBLISHING_ROLE_KEYS: ReadonlySet<string> = new Set(['social_media_manager', 'blog_writer', 'newsletter_editor']);
 
 // Assistant-scope categories that only apply to publishing roles, keyed by category key.
 const PUBLISHING_ONLY_CATEGORIES: ReadonlySet<string> = new Set(['content_calendar']);

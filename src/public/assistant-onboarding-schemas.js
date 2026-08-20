@@ -29,6 +29,87 @@
     // assistant-scheduled "Approve & Schedule" (posting_frequency is read from onboarding_context by
     // src/config/posting-cadence.ts via schedule-blog's approve path; draft_horizon_days is promoted
     // out of here onto the ai_assistants.draft_horizon_days COLUMN, which is what every reader uses).
+    newsletter_editor: [
+      {
+        title: 'What is your newsletter about?',
+        description: 'Your Newsletter Assistant drafts each issue in your brand voice from your own business information — you read and approve every one before it sends.',
+        fields: [
+          {
+            key: 'newsletterTopics',
+            label: 'Topics & themes',
+            type: 'text',
+            required: true,
+            placeholder: 'e.g. new stock, opening hours, customer stories, seasonal offers',
+            helpText: 'Comma-separate what your subscribers actually want to hear about.',
+          },
+          {
+            // Same key as the Blog Writer: onboardingContext.tone_of_voice is what
+            // newsletter-generate.ts reads for voice. A different key here would silently
+            // fall back to the default tone.
+            key: 'tone_of_voice',
+            label: 'Writing voice',
+            type: 'radio',
+            required: true,
+            options: [
+              { value: 'Professional', label: 'Professional', description: 'Polished and authoritative.' },
+              { value: 'Casual', label: 'Casual', description: 'Friendly and conversational.' },
+              { value: 'Confident', label: 'Confident', description: 'Bold and direct.' },
+              { value: 'Friendly', label: 'Friendly', description: 'Warm and approachable.' },
+            ],
+          },
+        ],
+      },
+      {
+        title: 'How often should it write one?',
+        description: 'The assistant drafts on this cadence and leaves each issue waiting for you. Nothing is ever sent without your approval.',
+        operational: true,
+        fields: [
+          {
+            // Read by the autopilot cron via POSTING_CADENCES / postsPerWeekFor(). 'On demand'
+            // means the cron never drafts — the user starts each issue themselves.
+            key: 'posting_frequency',
+            label: 'Drafting cadence',
+            type: 'dropdown',
+            required: true,
+            placeholder: 'Choose a cadence…',
+            options: [
+              { value: 'Weekly', label: 'Weekly' },
+              { value: '2 times a week', label: 'Twice a week' },
+              { value: 'Monthly', label: 'Monthly' },
+              { value: 'On demand', label: 'On demand (I start each issue)' },
+            ],
+          },
+          {
+            key: 'newsletterSendDay',
+            label: 'Day you usually send',
+            type: 'dropdown',
+            required: false,
+            placeholder: 'Any day',
+            helpText: 'Only used to time the draft so it is ready before you need it.',
+            options: [
+              { value: 'Monday', label: 'Monday' }, { value: 'Tuesday', label: 'Tuesday' },
+              { value: 'Wednesday', label: 'Wednesday' }, { value: 'Thursday', label: 'Thursday' },
+              { value: 'Friday', label: 'Friday' },
+            ],
+          },
+        ],
+      },
+      {
+        title: 'Who is it for?',
+        description: 'Your audience is shared across every assistant you hire — a sign-up here is a sign-up everywhere, and an unsubscribe stops all of them.',
+        fields: [
+          {
+            key: 'newsletterAudience',
+            label: 'Describe your subscribers',
+            type: 'textarea',
+            required: false,
+            placeholder: 'e.g. existing customers who have bought in the last year, plus people who signed up in the shop',
+            helpText: 'Helps the assistant pitch each issue at the right reader.',
+          },
+        ],
+      },
+    ],
+
     blog_writer: [
       {
         title: 'What should your Blog Writer cover?',

@@ -4757,6 +4757,12 @@ function _applyDashboardRegistry(data) {
     if (data.roleKey === 'blog_writer') {
         if (paLabel) paLabel.textContent = 'Write Blog Post';
         if (paBtn) paBtn.onclick = () => { if (window.openBlogStudio) window.openBlogStudio({ assistantId: data.id }); };
+    } else if (data.roleKey === 'newsletter_editor') {
+        // The Newsletter Studio is a VIEW rather than a modal (unlike Blog Studio): an issue is
+        // edited alongside its list and its audience, which does not fit a dialog. Routed through
+        // the workspace router so it is a view swap, not a page reload that drops app state.
+        if (paLabel) paLabel.textContent = 'Write Newsletter';
+        if (paBtn) paBtn.onclick = () => { window.loadView?.('newsletter'); };
     } else if (pa) {
         if (paLabel) paLabel.textContent = pa.label || 'Assign New Task';
         if (paBtn) {
@@ -7426,6 +7432,96 @@ function _setMetricsEmptyState(mode) {
 
 // ── Blog Writer KPI cards ────────────────────────────────────────────────────
 // Four cards, same markup as every other role, fed by get-blog-performance.ts instead of the
+// The Newsletter Assistant's four Overview cards, from get-newsletter-performance.ts. Routed here
+// by `metricsSource: 'newsletter'` in the dashboard registry.
+//
+// ⚠️ Two figures are deliberately allowed to render as "—" rather than as a number:
+//   • Delivery rate, when the provider webhook has never reported. "0%" there would read as total
+//     delivery failure when the truth is that nobody is telling us — see deliveryUnknown.
+//   • Unsubscribe rate, before the first issue has gone out. A rate over zero recipients is not 0%.
+async function _loadNewsletterMetrics(assistantId) {
+    const valEl   = (k) => document.getElementById(`metric-${k}-value`);
+    const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
+    const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
+
+    // Card 4 on the social layout carries a "low reach, high value" callout with no newsletter
+    // meaning; a role switch on a cached page would otherwise strand it under an unsubscribe rate.
+    document.getElementById('metric-value-wins')?.classList.add('hidden');
+
+    const setDot = (k, state) => {
+        const el = dotEl(k);
+        if (!el) return;
+        el.className = 'w-2 h-2 rounded-full ' + (
+            state === 'up' ? 'bg-emerald-400' : state === 'down' ? 'bg-rose-400' :
+            state === 'live' ? 'bg-emerald-400' : 'bg-gray-200'
+        );
+    };
+
+    try {
+        const res = await fetch(`/.netlify/functions/get-newsletter-performance?assistantId=${encodeURIComponent(assistantId)}`);
+        if (!res.ok) throw new Error(`performance ${res.status}`);
+        const d = await res.json();
+
+        if (d.needsSetup) {
+            _setMetricsEmptyState('cards');
+            _KPI_KEYS.forEach(k => _setKpiCard(k, { empty: true }));
+            return;
+        }
+        if (!d.hasData) {
+            // No subscribers and nothing sent — the honest zero state, not an error.
+            _setMetricsEmptyState('cards');
+            _KPI_KEYS.forEach(k => _setKpiCard(k, { empty: true }));
+            if (valEl('engagement')) valEl('engagement').textContent = '0';
+            if (trendEl('engagement')) trendEl('engagement').textContent = 'Add your first subscribers';
+            return;
+        }
+
+        _setMetricsEmptyState('cards');
+        const pct = (v) => (v === null || v === undefined) ? '—' : `${(v * 100).toFixed(1)}%`;
+
+        // Card 1 — Subscribers.
+        if (valEl('engagement')) valEl('engagement').textContent = Number(d.subscribers || 0).toLocaleString();
+        if (trendEl('engagement')) trendEl('engagement').textContent = 'Shared across your assistants';
+        setDot('engagement', d.subscribers > 0 ? 'live' : 'flat');
+        _setKpiCard('engagement', { empty: !d.subscribers });
+
+        // Card 2 — Issues sent.
+        if (valEl('reach')) valEl('reach').textContent = Number(d.issuesSent || 0).toLocaleString();
+        if (trendEl('reach')) trendEl('reach').textContent = d.lastIssue && d.lastIssue.sentAt
+            ? `Last: ${new Date(d.lastIssue.sentAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`
+            : 'Nothing sent yet';
+        setDot('reach', d.issuesSent > 0 ? 'live' : 'flat');
+        _setKpiCard('reach', { empty: !d.issuesSent });
+
+        // Card 3 — Delivery rate. The unknown case says so, in words.
+        if (valEl('ctr')) valEl('ctr').textContent = pct(d.deliveryRate);
+        if (trendEl('ctr')) {
+            trendEl('ctr').textContent = d.deliveryUnknown
+                ? 'Delivery reporting not connected'
+                : d.deliveryRate === null ? 'Nothing sent yet' : 'Reported by your mail provider';
+        }
+        setDot('ctr', d.deliveryRate === null ? 'flat' : d.deliveryRate >= 0.95 ? 'up' : 'down');
+        _setKpiCard('ctr', { empty: d.deliveryRate === null });
+
+        // Card 4 — Unsubscribe rate. DOWN is good here, so the tone is inverted deliberately.
+        if (valEl('value')) valEl('value').textContent = pct(d.unsubscribeRate);
+        if (trendEl('value')) {
+            trendEl('value').textContent = d.unsubscribeRate === null
+                ? 'After your first issue'
+                : d.unsubscribeRate <= 0.005 ? 'Healthy — under 0.5%' : 'Higher than usual — check content or frequency';
+        }
+        setDot('value', d.unsubscribeRate === null ? 'flat' : d.unsubscribeRate <= 0.005 ? 'up' : 'down');
+        _setKpiCard('value', {
+            empty: d.unsubscribeRate === null,
+            tone: d.unsubscribeRate !== null && d.unsubscribeRate > 0.005 ? 'down' : 'brand',
+        });
+    } catch (err) {
+        console.error('[newsletter metrics]', err);
+        _setMetricsEmptyState('cards');
+        _KPI_KEYS.forEach(k => _setKpiCard(k, { empty: true }));
+    }
+}
+
 // social post_insights endpoint. Routed here by `metricsSource: 'blog'` in the dashboard registry.
 //
 // The old path could never populate: a Blog Writer writes to blog_posts and never to post_insights,
@@ -7725,6 +7821,10 @@ async function _loadAssistantMetrics(assistantId, roleKey) {
     if (source === 'blog') {
         _setMetricsEmptyState('pending');
         return _loadBlogMetrics(assistantId);
+    }
+    if (source === 'newsletter') {
+        _setMetricsEmptyState('pending');
+        return _loadNewsletterMetrics(assistantId);
     }
 
     // Show the explanatory panel BEFORE the fetch, synchronously. The overwhelmingly likely answer

@@ -155,6 +155,76 @@
     // than the social post sheet. Long-form drafts live in blog_posts (surfaced via Blog Studio),
     // NOT assistant_records — so no hubTab. All social-only modules are off (it has its own
     // review/approval + scheduling inside Blog Studio, not the social Review Queue / Posting Schedule).
+    newsletter_editor: {
+      // ⚠️ Four cards the data can actually answer. There are no opens and no clicks here, and that
+      // is deliberate: measuring either needs a tracking pixel or link rewriting, neither of which
+      // is built, and a card labelled "Open Rate" over a number that can never populate is the exact
+      // failure the Blog Writer's KPIs were rebuilt to fix.
+      kpis: [
+        {
+          label: 'Audience',
+          title: 'Subscribers',
+          desc: 'People who confirmed they want to hear from you and have not unsubscribed. Shared with every assistant you hire.',
+        },
+        {
+          label: 'Publishing Consistency',
+          title: 'Issues Sent',
+          desc: 'Newsletter issues drafted, approved by you, and delivered.',
+        },
+        {
+          // Delivered / recipients, from the provider's own events. Only meaningful once the
+          // webhook is configured — the endpoint reports it as unavailable rather than as 0%.
+          label: 'Deliverability',
+          title: 'Delivery Rate',
+          desc: 'Share of the last issue that reached an inbox, as reported by the mail provider.',
+        },
+        {
+          // The quality counterweight, and the one that matters most for an AI writer: the three
+          // cards above can all look healthy while the writing is wearing people out. A rising
+          // unsubscribe rate is the first and cheapest signal of that.
+          label: 'Reader Response',
+          title: 'Unsubscribe Rate',
+          desc: 'Share of recipients who opted out of your last issue. Under 0.5% is normal; a jump means the content or the frequency is wrong.',
+        },
+      ],
+      // Routes _loadAssistantMetrics to _loadNewsletterMetrics / get-newsletter-performance.
+      // Without it this role falls through to the social post_insights endpoint, which holds
+      // none of its data.
+      metricsSource: 'newsletter',
+      modules: {
+        // Every social-only module off: this role writes no posts and has no social strategy.
+        hasReviewQueue: true,
+        hasPostingSchedule: true,
+        hasSocialStrategy: false,
+        hasImpactRoi: false,
+        hasCreativeBrief: false,
+        hasSalesContext: false,
+        hasContentAutomation: true,
+        hasEmptyLibraryFallback: false,
+        hasReviewCadence: true,
+        hasContentPublishing: true,
+      },
+      // Opens the Newsletter Studio, the same way the Blog Writer opens Blog Studio — special-cased
+      // in assistants.js because both are bespoke pipelines rather than a chat intake.
+      primaryAction: { kind: 'newsletter_studio', label: 'Write Newsletter' },
+      defaultMainTab: 'review-queue',
+      reviewQueue: { kind: 'newsletter', source: 'newsletter_issues' },
+      hideDataHub: true,
+      hubTab: {
+        id: 'datahub',
+        kind: 'content_library',
+        source: 'newsletter_issues',
+        label: 'Issues',
+        recordType: null,
+        description: 'Every issue this assistant has written — drafts, scheduled and sent.',
+        columns: [
+          { key: 'subject', label: 'Issue' },
+          { key: 'status', label: 'Status' },
+          { key: 'updatedAt', label: 'Updated' },
+        ],
+      },
+    },
+
     blog_writer: {
       // ⚠️ These four labels must describe what get-blog-performance.ts actually returns. They used
       // to sit over cards fed by get-assistant-performance (engagement rate, reach growth, CTR,

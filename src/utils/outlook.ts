@@ -28,7 +28,11 @@ export interface OutlookSendResult {
 export async function sendOutlookMessage(
     db: Db,
     organisationId: number,
-    msg: { to: string; subject: string; body: string; replyTo?: string; listUnsubscribe?: string },
+    msg: {
+        to: string; subject: string; body: string; replyTo?: string; listUnsubscribe?: string;
+        /** Optional HTML body. See the note in gmail.ts — outreach stays plain text on purpose. */
+        html?: string;
+    },
 ): Promise<OutlookSendResult> {
     // Strip CR/LF for parity with the Gmail path — Graph is JSON so header smuggling isn't
     // possible the same way, but a newline in a recipient is malformed input regardless.
@@ -45,7 +49,7 @@ export async function sendOutlookMessage(
         body: JSON.stringify({
             message: {
                 subject,
-                body: { contentType: 'Text', content: body },
+                body: msg.html ? { contentType: 'HTML', content: msg.html } : { contentType: 'Text', content: body },
                 toRecipients: [{ emailAddress: { address: to } }],
                 // Per-thread inbound alias, so a reply routes back to THIS conversation rather
                 // than to the sender's own mailbox where nothing would observe it.

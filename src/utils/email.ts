@@ -41,10 +41,17 @@ interface SendEmailParams {
     from?: string;
     /** Where replies should go — usually the tenant, when `from` names them. */
     replyTo?: string;
+    /**
+     * Extra MIME headers. The reason this exists is List-Unsubscribe / List-Unsubscribe-Post:
+     * Gmail and Yahoo require the pair from bulk senders, and a header is the only way to give
+     * them the native one-click control. Not a general escape hatch — anything routine belongs as
+     * its own named field.
+     */
+    headers?: Record<string, string>;
 }
 
 // sendEmail is an alias for sendMagicLinkEmail used by most Netlify functions
-export const sendEmail = async ({ to, subject, html, text, from, replyTo }: SendEmailParams) => {
+export const sendEmail = async ({ to, subject, html, text, from, replyTo, headers }: SendEmailParams) => {
     if (!resend) {
         console.warn(`[DEV MODE] RESEND_API_KEY missing. Simulated email to ${to}`);
         return null;
@@ -61,6 +68,7 @@ export const sendEmail = async ({ to, subject, html, text, from, replyTo }: Send
             html,
             ...(text ? { text } : {}),
             ...(replyTo ? { replyTo } : {}),
+            ...(headers ? { headers } : {}),
         })
         .catch((err: any) => ({ data: null, error: { name: 'ResendException', message: err?.message ?? String(err) } }));
 

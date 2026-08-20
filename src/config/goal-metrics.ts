@@ -479,6 +479,37 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         realism: { maxDailyGrowthPct: 5 },
     },
     {
+        // Counted from audience_contacts with status 'subscribed'. Deliberately the SUBSCRIBED
+        // count and not every row: a goal that rises when someone unsubscribes (they still have a
+        // contact row) would be measuring the opposite of what the user means by "grow my list".
+        key: 'newsletter_subscribers',
+        label: 'Newsletter Subscribers',
+        unit: 'subscribers',
+        source: 'internal',
+        direction: 'increase',
+        objective: 'outcome',
+        roles: ['newsletter_editor'],
+        description: 'People who have confirmed they want to hear from you and have not unsubscribed.',
+        available: true,
+        // A sign-up form on a busy site can add a few hundred in a day; a jump beyond that is an
+        // import or a bot, and neither should read as goal progress.
+        realism: { maxDailyDelta: 500 },
+    },
+    {
+        // Issues that actually went out — newsletter_issues.status = 'sent'. NOT issues drafted:
+        // a cadence that drafts weekly and sends nothing is precisely the failure this should show.
+        key: 'newsletter_issues_sent',
+        label: 'Issues Sent',
+        unit: 'issues',
+        source: 'internal',
+        direction: 'increase',
+        objective: 'outcome',
+        roles: ['newsletter_editor'],
+        description: 'Newsletter issues this assistant has drafted, had approved, and sent.',
+        available: true,
+        realism: { maxDailyDelta: 10 },
+    },
+    {
         // Blog Writer's content lives in blog_posts (NOT assistant_records), so this is counted
         // from published blog_posts by poll-goal-telemetry.ts, mirroring 'content_published' for social.
         key: 'posts_published',

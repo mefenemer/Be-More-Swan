@@ -153,11 +153,14 @@ const CATALOG = [
     {
         roleKey: 'newsletter_editor',
         name: 'Newsletter Assistant',
-        description: 'Curates weekly industry news and formats it into a ready-to-send email campaign — your audience stays informed without you reading everything.',
+        description: 'Drafts your newsletter in your brand voice, personalises it for each subscriber, and sends it to the audience you choose — you review and approve every issue before it goes.',
         category: 'Marketing & Sales',
         iconKey: 'mail',
         iconColor: 'teal',
-        comingSoon: true,
+        // ⚠️ This file is INSERT-ONLY (onConflictDoNothing on role_key), so flipping this flag does
+        // NOTHING to a database where the row already exists. db/newsletter-role-live.sql carries
+        // the UPDATE. Both are needed: this one for a fresh database, that one for the live ones.
+        comingSoon: false,   // ← Live: powers the Newsletter Studio + the shared Audience
         isActive: true,
     },
     {

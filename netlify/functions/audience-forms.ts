@@ -43,12 +43,22 @@ export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod === 'GET') {
         const ctx = await requireTenant(event, db);
         if ('error' in ctx) return ctx.error;
-        const forms = await db
-            .select()
-            .from(audienceForms)
-            .where(eq(audienceForms.organisationId, ctx.organisationId))
-            .orderBy(desc(audienceForms.createdAt));
-        return json(200, { forms });
+        try {
+            const forms = await db
+                .select()
+                .from(audienceForms)
+                .where(eq(audienceForms.organisationId, ctx.organisationId))
+                .orderBy(desc(audienceForms.createdAt));
+            return json(200, { forms });
+        } catch (err) {
+            // db/audience.sql not applied here. Same contract as audience-contacts.ts.
+            const code = (err as { code?: string; cause?: { code?: string } })?.code
+                ?? (err as { cause?: { code?: string } })?.cause?.code;
+            if (code !== '42P01') throw err;
+            console.error('[audience-forms] audience tables are missing — db/audience.sql has not been applied here',
+                { orgId: ctx.organisationId });
+            return json(200, { forms: [], needsSetup: true });
+        }
     }
 
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method Not Allowed' });

@@ -2329,6 +2329,9 @@ function formatCurrency(amount, currency) {
       // Org-wide, deliberately NOT inside an assistant: the audience outlives any one hire
       // and is read by every assistant that can send (docs/newsletter-assistant-plan.md).
       'audience': { file: 'audience.html', title: '| Audience' },
+      // Newsletter Studio. No sidebar link yet — it gets its entry point from the Newsletter
+      // Assistant's detail page when that role goes live (Phase 5). Reachable at ?view=newsletter.
+      'newsletter': { file: 'newsletter.html', title: '| Newsletter' },
       'calendar': { file: 'calendar.html', title: '| Content Calendar' },
       'referral': { file: 'referral-content.html', title: '| Refer a Friend' },
       'review-queue': { file: 'review-queue.html', title: '| Review' },
@@ -2525,6 +2528,10 @@ function formatCurrency(amount, currency) {
 
         if (routeKey === 'audience' && typeof window.initAudience === 'function') {
           await window.initAudience();
+        }
+
+        if (routeKey === 'newsletter' && typeof window.initNewsletter === 'function') {
+          await window.initNewsletter();
         }
 
         // Deep-link into a specific draft (e.g. from a "draft ready" notification): open the
@@ -5142,6 +5149,8 @@ function formatCurrency(amount, currency) {
 <script src="/my-content.js"></script>
 <!-- Shared Audience view (audience.html). Org-scoped; reads no assistant context. -->
 <script src="/audience.js"></script>
+<!-- Newsletter Studio (newsletter.html). Org-scoped; drafts, previews and approves issues. -->
+<script src="/newsletter.js"></script>
 <script src="/src/components/platform-post-preview.js"></script>
 <script src="/src/components/image-overlay-editor.js"></script>
 <!-- Browser voice-note capture for the post editor's Sound layer. Capture only: it hands back a

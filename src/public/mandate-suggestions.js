@@ -34,6 +34,12 @@
       { title: 'The Cold Start & Growth Grind', text: "I need to rapidly test different value propositions and engage with niche communities to build our initial audience from scratch, but I don't have the bandwidth." },
     ],
 
+    newsletter_editor: [
+      { title: 'The Monthly Scramble', text: 'I mean to send a newsletter every month, then the month goes and I send nothing — or something rushed at 11pm that I am not proud of.' },
+      { title: 'The List I Never Built', text: 'People ask to hear from us and I write their email on a receipt or lose it in my inbox, so there is no list to send anything to.' },
+      { title: 'The Same Email to Everyone', text: 'I send one identical email to my whole list, so regulars get the beginner stuff and new customers get things that assume they already know us.' },
+      { title: 'The Unsubscribe Worry', text: 'I am nervous about emailing people at all in case I get it wrong legally, so I end up not emailing anyone.' },
+    ],
     blog_writer: [
       { title: 'The Blank-Page Bottleneck', text: 'I know we should be publishing long-form content regularly, but every post means hours of research, drafting and editing that I never find time for.' },
       { title: 'The Inconsistent Cadence', text: 'I want to publish on a steady schedule to build search traffic, but posts come in fits and starts and then dry up for weeks.' },

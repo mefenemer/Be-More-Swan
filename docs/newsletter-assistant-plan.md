@@ -1,6 +1,13 @@
 # Newsletter Assistant + shared Audience layer — implementation brief
 
-Status: **not started**. Written 2026-08-19 against the live `staging` tree.
+Status: **Phases 0–5 built — the plan is complete.** All dispatch SQL applied to staging + prod
+2026-08-20. ⚠️ Remaining before customers see it: `db/newsletter-role-live.sql` + the content seed
+(§11d), and the first real send has not happened yet (§11c).
+Every phase is built: the shared audience and its consent resolver, the capture form and double
+opt-in, drafting and rendering, dispatch with per-tenant sending domains, unsubscribe and delivery
+webhooks, and the go-live wiring that makes the role hireable. Phase 6 (lead → audience promotion,
+dynamic segments, reuse by the Campaign and Onboarding assistants) remains as future work.
+Written 2026-08-19 against the live `staging` tree; status updated 2026-08-20.
 Audience: the engineer/agent implementing it. Read §0 before anything else — the brief this
 replaces was written against a stack Be More Swan does not run.
 
@@ -332,8 +339,23 @@ Three options:
 | **B** | Send via the tenant's Gmail/Outlook grant. | Zero new setup; reuses `gmail.ts`. | Hard daily caps, no delivery telemetry, no bounce handling, reputational damage lands on the tenant's real mailbox. |
 | **C** | Bring-your-own ESP key (tenant's own Resend/SendGrid). | Zero reputation exposure for BMS; unlimited scale. | Every tenant needs an ESP account; support burden; keys to store in `vault_secrets`. |
 
-**Recommendation: A as the default, B as an explicit "small list" fallback (hard-capped at ~200
-recipients/issue and blocked above it), C deferred.** Whichever is chosen, these are non-negotiable:
+**DECIDED 2026-08-20 (founder): option 2 — A as the default, B as an explicit small-list fallback.**
+A verified per-tenant sending domain is the industry-standard answer for broadcast, and the
+tenant's own mailbox is the industry-standard answer for 1:1 outreach; Be More Swan does both, so
+each half keeps the send path its own job calls for. The mailbox route is hard-capped and blocked
+above it, which is what lets a tenant send their first issue on the day they hire the assistant
+rather than after a DNS round trip. C deferred.
+
+⚠️ **Two traps found while specifying A, both to be handled when it is built:**
+- A least-privilege Resend "Sending access" key is REJECTED on `/domains` (`restricted_api_key`) —
+  `admin-system-status.ts` already documents this. Domain provisioning needs a fuller-scoped key;
+  keep the send path on the restricted one.
+- ⚠️ Do NOT reuse `organisations.domain_verified` (db/org-business-domain.sql). It already means
+  "verified for same-domain org auto-join". Sending-domain verification is a different claim and
+  needs its own columns — one boolean with two meanings is the shape of several bugs already in
+  this codebase's history.
+
+Whichever is chosen, these are non-negotiable:
 
 - **Bounces and complaints write back to `audience_contacts.status`.** A hard bounce ⇒ `bounced`
   (never emailed again). A spam complaint ⇒ `complained` **and** an `audience_consent_events` row
@@ -431,12 +453,21 @@ text, live preview, test submission.
 
 | Phase | Scope | Done when |
 |---|---|---|
-| **0** | `db/audience.sql` + `db/newsletter.sql` applied to staging; `db/schema.ts` mirror; `src/utils/audience-consent.ts` + tests | Resolver returns no-send for an address in `lead_opt_outs`, a suppressed domain, and on a forced DB error |
-| **1** | `audience.html` / `audience.js`, CRUD endpoints, segments, CSV import | A contact added by hand appears, can be segmented, and shows a consent timeline |
-| **2** | `subscribe.js`, `audience-public.ts`, double opt-in, confirmation email | A form on an unrelated test page produces a `pending` contact that becomes `subscribed` only after a POST confirm; HEAD changes nothing |
-| **3** | Issue drafting on the blog pipeline, editor, review queue, segment picker | An issue drafts, is approved, and renders with merge vars and a footer |
-| **4** | Dispatch (§6) + bounce/complaint webhooks + `List-Unsubscribe` | A test send delivers, a one-click unsubscribe flips `status` **and** writes `lead_opt_outs`, a hard bounce marks `bounced` |
-| **5** | Autopilot cadence, KPIs (sent / delivered / open / click / unsub), catalogue flip to live | The role is hireable and its Overview cards read from real counts |
+| **0 ✅** | `db/audience.sql` + `db/newsletter.sql` written; `db/schema.ts` mirror; `src/utils/audience-consent.ts` + `audience-contacts.ts` + `audience-store.ts`; `tests/audience-consent.test.ts` (17 checks) | Resolver returns no-send for an address in `lead_opt_outs`, a suppressed domain, and on a forced DB error — ⚠️ **SQL still to be applied** |
+| **1 ✅** | `audience.html` / `audience.js`, `audience-contacts.ts`, `audience-segments.ts`, segments, CSV import, nav entry in `workspace.html` + `components/sidebar.html` | A contact added by hand appears, can be segmented, and shows a consent timeline |
+| **2 ✅** | `subscribe.js`, `audience-public.ts`, `audience-forms.ts`, double opt-in, `audience-email.ts`, `/api/audience/*` rewrite; `tests/audience-capture.test.ts` (24 checks) | A form on an unrelated test page produces a `pending` contact that becomes `subscribed` only after a POST confirm; HEAD changes nothing |
+| **3 ✅** | `newsletter-generate.ts` (drafting), `newsletter-render.ts` (snapshot + per-recipient merge), `src/config/newsletter-merge-vars.ts`, `newsletter-issues.ts`, `newsletter.html` / `newsletter.js` (Studio); `tests/newsletter-drafting.test.ts` (23 checks) | An issue drafts, previews as the email a subscriber receives, and approval freezes a `rendered_payload` with the merge tags still unresolved |
+| **4 ✅** | `newsletter-send.ts` (claim, materialise, batch), `sending-domain.ts`, `process-newsletter-sends.ts` (cron `*/5`), `newsletter-unsubscribe.ts`, `newsletter-webhook.ts`, `newsletter-sending-domain.ts`, HTML/header support on all three senders, Studio sending setup + Send now; `db/newsletter-dispatch.sql`; `tests/newsletter-dispatch.test.ts` (27 checks) | ⚠️ **Not yet proven against a real send** — see §11c |
+
+⚠️ **Phase 5 still owes the Studio its real entry point.** It is routed at `?view=newsletter` with no
+nav item; it belongs on the Newsletter Assistant's detail page when the role goes live.
+| **5 ✅** | Catalogue flip (`db/newsletter-role-live.sql` + seed), onboarding schema, dashboard registry + `get-newsletter-performance.ts`, goal metrics, starter prompts, mandate chips, notification categories, Studio entry point, autopilot cron `draft-newsletter-issues.ts`; `tests/newsletter-role-live.test.ts` (17 checks) | The role is hireable and its Overview cards read from real counts. ⚠️ Needs `db/newsletter-role-live.sql` applied + the content seed re-run |
+
+⚠️ **KPIs are four cards, not five.** Opens and clicks are deliberately absent: measuring either
+needs a tracking pixel or link rewriting, neither is built, and a card that can never populate is
+the failure the Blog Writer's KPI grid had to be rebuilt to fix. The four are Subscribers, Issues
+Sent, Delivery Rate and Unsubscribe Rate — the last being the quality counterweight, since the
+first three can all look healthy while the writing wears people out.
 | **6** (later) | Lead → audience promotion action, dynamic segments, Campaign/Ad Buyer/Onboarding reuse | Promotion writes a `promoted` consent event and requires an explicit human click |
 
 ---
@@ -456,9 +487,75 @@ text, live preview, test submission.
 
 ---
 
+## 11b. Pending deploy steps (nothing here is in a database yet)
+
+1. **Apply `db/audience.sql`, then `db/newsletter.sql`** — staging first, then prod, as the DB owner
+   (`npm run db:migrate:apply`; prod needs `--url-var`). Both are idempotent. Until this runs, the
+   Audience page reports "not set up on this environment" rather than failing — `audience-contacts`
+   catches 42P01 and returns `needsSetup: true` — but nothing can be captured or stored.
+2. **Deploy the code** (this is a `staging` push, which auto-releases prod — promote via PR).
+3. **Create a sign-up form** from Audience → Sign-up form, and paste the snippet on a test page
+   before giving it to a customer.
+4. **Check `RESEND_API_KEY` and `BASE_URL`** are set in the target environment. Without the key the
+   confirmation email is skipped in dev-mode and every sign-up stays `pending`, i.e. unmailable;
+   without `BASE_URL` the endpoint refuses rather than emailing an unusable link.
+5. Nothing new is required for `lead_opt_outs` / `suppression_list` — the resolver reads what is
+   already there, and treats either missing table as empty.
+
+---
+
+## 11d. Phase 5 deploy steps
+
+1. **Apply `db/newsletter-role-live.sql`** — staging, then prod. Until this runs the role stays
+   "Coming Soon" in the catalogue on every existing database, because `db/seed-catalog.ts` is
+   INSERT-ONLY and the flag edit there only affects a fresh one.
+2. **Apply `db/newsletter-role-copy.sql`** so the corrected card copy lands. ⚠️ Do this INSTEAD of
+   re-running `db/seed-assistant-content.ts`: that seed rewrites the copy of all 24 roles it carries,
+   unconditionally, and its own header warns that re-running "restores any admin edit back to these
+   values" — so it would silently revert anything edited in Master Data → Assistants. It also
+   targets `NETLIFY_DATABASE_URL`, which locally points at staging, so it would not have reached
+   production regardless. The previous copy promised "Curated Industry Round-Ups" and a Mailchimp
+   integration — neither exists, and the assistant's own prompt forbids inventing the industry news
+   that first phrase implies.
+3. Two new crons register themselves on deploy: `process-newsletter-sends` (`*/5`) and
+   `draft-newsletter-issues` (daily 06:20 UTC). Check for their single log line per tick before
+   trusting either.
+4. Nothing else. Phase 5 added no new tables.
+
+---
+
+## 11c. Phase 4 deploy steps
+
+1. **Apply `db/newsletter-dispatch.sql`** — staging, then prod. It guards on `newsletter_issues`
+   existing and refuses with an instruction rather than a foreign-key error.
+2. **`RESEND_DOMAINS_API_KEY`** — a FULL-ACCESS Resend key, separate from the sending key. Without
+   it, domain setup returns "the key in use can send email but cannot manage domains" (a 503, since
+   it is our misconfiguration and not the tenant's DNS). The send path keeps using `RESEND_API_KEY`.
+3. **`RESEND_WEBHOOK_SECRET`** (`whsec_…`) and point a Resend webhook at
+   `https://bemoreswan.com/api/newsletter/webhook` for `email.delivered`, `email.bounced` and
+   `email.complained`. ⚠️ Until this exists every event is rejected 401 and no bounce or complaint
+   ever reaches the audience — the list degrades silently, which is the exact failure the mailbox
+   route was rejected for.
+4. **Confirm `BASE_URL`** in each environment. The worker refuses to send without it rather than
+   guessing a host, because every footer needs an absolute unsubscribe link.
+5. The `process-newsletter-sends` cron registers itself from `netlify.toml` on deploy (`*/5`,
+   sharing the warm-compute window with `publish-blog-posts`). ⚠️ GitHub-style throttling does not
+   apply — these are Netlify scheduled functions — but check the function log for the single
+   `[process-newsletter-sends]` line per tick before trusting it.
+
+**Not yet proven end to end.** Everything is unit-tested and the UI is verified against fixtures,
+but no real email has been sent through either route. The first live test should be: verify a
+domain, create an issue, approve it, send it to a segment containing only your own address, and
+confirm (a) it arrives, (b) the one-click unsubscribe in Gmail flips the contact to `unsubscribed`
+**and** writes a `lead_opt_outs` row, (c) `email.delivered` lands on the webhook and moves the
+ledger row to `delivered`.
+
+---
+
 ## 12. Open questions for the founder
 
-1. **Dispatch: A, B or C in §6?** Everything in Phase 4 depends on it, and nothing before Phase 4 does.
+1. ~~**Dispatch: A, B or C in §6?**~~ **ANSWERED 2026-08-20: option 2** — verified per-tenant domain
+   by default, tenant mailbox as a hard-capped small-list fallback. See §6.
 2. **Is the Audience a top-level nav item now**, or does it stay inside the Newsletter Assistant
    until the Campaign Assistant lands? (Recommend top-level immediately — retro-fitting shared data
    into a shared surface is the expensive version.)

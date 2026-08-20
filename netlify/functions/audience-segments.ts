@@ -37,7 +37,12 @@ export default withLambda(async (event: HandlerEvent) => {
         // contacts" that mails 900 people is the number a tenant plans a campaign around and then
         // has to explain. (This still excludes only the audience-side states — the opt-out and
         // suppression checks happen per send, in audience-consent.ts.)
-        const rows = await db
+        // Same 42P01 contract as audience-contacts.ts: on an environment where db/audience.sql has
+        // not been applied, say so rather than 500ing with a Postgres message the customer cannot
+        // act on. Any other error still throws — "not installed" and "broken" must stay distinct.
+        let rows;
+        try {
+            rows = await db
             .select({
                 id: audienceSegments.id,
                 name: audienceSegments.name,
@@ -53,6 +58,14 @@ export default withLambda(async (event: HandlerEvent) => {
             .where(eq(audienceSegments.organisationId, ctx.organisationId))
             .groupBy(audienceSegments.id)
             .orderBy(audienceSegments.name);
+        } catch (err) {
+            const code = (err as { code?: string; cause?: { code?: string } })?.code
+                ?? (err as { cause?: { code?: string } })?.cause?.code;
+            if (code !== '42P01') throw err;
+            console.error('[audience-segments] audience tables are missing — db/audience.sql has not been applied here',
+                { orgId: ctx.organisationId });
+            return json(200, { segments: [], needsSetup: true });
+        }
 
         return json(200, { segments: rows });
     }

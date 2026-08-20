@@ -101,6 +101,42 @@ const SERVICES: ServiceDef[] = [
         },
     },
     {
+        key: 'newsletter-domains', name: 'Newsletter sending domains', category: 'Email', tier: 'core',
+        purpose: 'Registers and verifies each tenant\'s own sending domain, so newsletters send from their address rather than ours. '
+            + 'Needs a FULL-ACCESS Resend key — the least-privilege sending key is rejected on /domains.',
+        consoleUrl: 'https://resend.com/api-keys', envVars: ['RESEND_DOMAINS_API_KEY'],
+        // Deliberately probes /domains rather than pinging a generic endpoint: the whole point of
+        // this entry is to catch a key that CAN send but CANNOT manage domains, which every other
+        // check in this file would report as perfectly healthy.
+        check: async () => {
+            const key = process.env.RESEND_DOMAINS_API_KEY;
+            if (!key) return 'n/a';
+            try {
+                const ctrl = new AbortController();
+                const t = setTimeout(() => ctrl.abort(), 3500);
+                const res = await fetch('https://api.resend.com/domains', {
+                    headers: { Authorization: `Bearer ${key}` },
+                    signal: ctrl.signal,
+                });
+                clearTimeout(t);
+                if (res.ok) return 'ok';
+                // The one failure worth distinguishing: a valid key with the wrong permission.
+                const body: any = await res.json().catch(() => ({}));
+                if (body?.name === 'restricted_api_key') return 'error';
+                return 'error';
+            } catch { return 'error'; }
+        },
+    },
+    {
+        key: 'newsletter-webhook', name: 'Newsletter delivery events', category: 'Email', tier: 'core',
+        purpose: 'Svix signing secret for Resend delivery events. Without it every bounce and spam complaint is rejected 401 — '
+            + 'the audience never learns an address is dead and the list degrades silently.',
+        consoleUrl: 'https://resend.com/webhooks', envVars: ['RESEND_WEBHOOK_SECRET'],
+        // No reachability check possible: the value is write-only on Netlify and only the provider
+        // can prove it matches. Presence is all this can honestly report — see the endpoint's own
+        // "Recent deliveries" for the authoritative answer.
+    },
+    {
         key: 'vault', name: 'Credential vault', category: 'Security', tier: 'critical',
         purpose: 'Key-encryption key for stored OAuth tokens & connection secrets. Without it, saved integrations cannot be decrypted.',
         consoleUrl: 'https://app.netlify.com', envVars: ['VAULT_KEK', 'VAULT_KEK_VERSION'],

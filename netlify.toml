@@ -241,6 +241,21 @@
   to = "/.netlify/functions/integration-scenarios"
   status = 200
 
+# Newsletter unsubscribe — the link in every issue's footer, and the RFC 8058 one-click POST that
+# Gmail and Yahoo fire with no user interaction. Keyed on newsletter_sends.unsubscribe_token.
+# ⚠️ Distinct from /api/audience/* (sign-up + double opt-in) and from lead-unsubscribe (a PROSPECT
+# leaving cold outreach). Three routes, three different tables, three different people.
+[[redirects]]
+  from = "/api/newsletter/unsubscribe"
+  to = "/.netlify/functions/newsletter-unsubscribe"
+  status = 200
+
+# Resend delivery events — bounces and spam complaints written back onto the audience.
+[[redirects]]
+  from = "/api/newsletter/webhook"
+  to = "/.netlify/functions/newsletter-webhook"
+  status = 200
+
 # Shared Audience layer (docs/newsletter-assistant-plan.md): the PUBLIC ingress for the embeddable
 # sign-up form — /api/audience/form/:key, /api/audience/subscribe, /api/audience/confirm. Rewrite
 # (status 200) so the original path survives in event.rawUrl, which audience-public.ts parses.
@@ -675,6 +690,21 @@ node_bundler = "esbuild"
 # US 4.1: publish due scheduled blog posts — every 5 minutes
 [functions.publish-blog-posts]
   schedule = "*/5 * * * *"
+
+# Newsletter dispatch: push every due issue along by one batch of recipients — every 5 minutes.
+# Batched and resumable rather than one long run: a list of thousands cannot be sent inside a
+# function's budget, and newsletter_sends rows carry the real state between ticks.
+# ⚠️ Rides the same :05 window as publish-blog-posts so Neon compute is already warm — an
+# always-on minute cron would keep the shared compute awake and burn the project's allowance.
+[functions.process-newsletter-sends]
+  schedule = "*/5 * * * *"
+
+# Newsletter autopilot: draft the next issue for each assistant on its cadence — daily at 06:20 UTC.
+# ⚠️ It DRAFTS only. Nothing here sends: an issue waits at pending_approval until a person approves
+# it, which is what makes "you approve every issue" structurally true rather than a policy.
+# :20 keeps it clear of the :00/:15/:30 batch so it is not competing for a cold Neon compute.
+[functions.draft-newsletter-issues]
+  schedule = "20 6 * * *"
 
 # US 5.1: ingest Search Console metrics + flag decayed blog posts — 06:00 UTC every day
 [functions.ingest-gsc-metrics]

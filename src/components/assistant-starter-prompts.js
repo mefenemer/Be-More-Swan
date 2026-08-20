@@ -51,6 +51,11 @@
       'Summarize my last meeting as a short executive briefing.',
       'Turn my rough meeting notes into structured minutes.',
     ],
+    newsletter_editor: [
+      'Draft this month\u2019s newsletter — I\u2019ll tell you what to include.',
+      'What should I put in this week\u2019s issue?',
+      'How many people would receive an issue if I sent one today?',
+    ],
     blog_writer: [
       'Draft a blog post on a topic I’ll give you.',
       'Suggest a few article ideas that fit my audience and niche.',
