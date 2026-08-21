@@ -216,18 +216,32 @@
   status = 200
   force = true
 
+# ⚠️ The preview prefix must never be indexed, and this header is the BACKSTOP for that — the
+# primary guard is robotsFor() in swan-index-page.ts, which refuses an indexable meta tag anywhere
+# but the publication's own host.
+#
+# Two independent mechanisms because one was not enough: between the code shipping and DNS cutting
+# over, the front page answered on BOTH theswanindex.com/ and bemoreswan.com/index-preview, each
+# `index,follow` and each self-canonical — two indexable copies of one page on two domains, which is
+# the exact duplicate-content failure this publication exists to spare its authors. A header rule
+# holds even if the function's own logic is changed by someone who does not know why it is there.
+[[headers]]
+  for = "/index-preview*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
 # ⚠️ TWO app-wide rules reach theswanindex.com and neither can be scoped by host:
 #
 #   · The `[[edge_functions]]` binding `path = "/"` for auth-guard. HANDLED IN CODE — auth-guard.ts
 #     early-returns on NON_APP_HOSTS. Without it, turning on maintenance mode to deploy the app
 #     would redirect a public magazine to /maintenance. Add any new host there as well as here.
 #
-#   · `[[headers]] for = "/"` sets Cache-Control: no-cache, which overrides the function's own
-#     `s-maxage=300` on the magazine front page ONLY. Every other magazine path keeps its cache.
-#     KNOWN, not fixed: `for` is path-only, so the app's homepage and the publication's homepage
-#     cannot be given different policies from one site. It costs one Lambda invocation per
-#     front-page view. The fix, when the traffic justifies it, is a second Netlify site pointed at
-#     this same repo — which is also what removes the two collisions above entirely.
+#   · `[[headers]] for = "/"` sets Cache-Control: no-cache, and this file used to claim that
+#     overrode the function's own `s-maxage=300` on the magazine front page. It does NOT — measured
+#     on the live domain 2026-08-21, theswanindex.com/ returns
+#     `cache-control: public,max-age=120,s-maxage=300` and hits the Netlify edge cache. A function
+#     that sets its own Cache-Control keeps it. Recorded because the wrong version of this note was
+#     an argument for a second Netlify site that the evidence does not support.
 
 # US-HELP-1.1.1 AC14: canonical URL aliases for the help centre
 [[redirects]]

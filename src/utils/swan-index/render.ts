@@ -299,6 +299,16 @@ export interface HomeData {
     featured: SwanCard[];   // curated, minus the lead
     latest: SwanCard[];     // chronological, whole network
     baseUrl: string;
+    /**
+     * Supplied by the caller, like every other page here — NOT hardcoded.
+     *
+     * It used to be `'index,follow'` written inline, on the reasoning that the front page is our
+     * own editorial work rather than a syndicated copy. True, and beside the point: the caller is
+     * the only thing that knows whether this request is even arriving on the publication's own
+     * domain. With the code live and DNS mid-cutover the front page answered on two origins, both
+     * claiming index,follow and each self-canonical. See robotsFor() in swan-index-page.ts.
+     */
+    robots: string;
 }
 
 export function renderHome(d: HomeData): string {
@@ -320,9 +330,7 @@ export function renderHome(d: HomeData): string {
             description: PUBLICATION_TAGLINE,
             pageUrl: d.baseUrl,
             canonicalUrl: d.baseUrl,
-            // The front page is an editorial artefact of our own making, not syndicated content —
-            // it is the one surface that indexes by default.
-            robots: 'index,follow',
+            robots: d.robots,
             ogType: 'website',
         },
         sections: d.sections,

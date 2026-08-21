@@ -56,6 +56,32 @@ const xml = (body: string) => ({
 /** The staging prefix. Mirrors the netlify.toml rule and parseSwanRoute's normalisation. */
 const PREVIEW_PREFIX = '/index-preview';
 
+export interface Origin {
+    /** Internal-link prefix: '' in production, '/index-preview' before DNS. */
+    base: string;
+    /** Absolute origin (+ prefix) for canonical, og:url and the feed. */
+    baseUrl: string;
+    isPreview: boolean;
+    onCanonicalHost: boolean;
+    /** Whether this request may emit an indexable robots value at all — see robotsFor(). */
+    indexable: boolean;
+}
+
+/**
+ * Is this request arriving on the publication's own domain?
+ *
+ * Compared against the configured SWAN_INDEX_BASE_URL rather than a hardcoded list, so a staging
+ * publication host is handled by configuration instead of a code change. `www.` is stripped on both
+ * sides: netlify.toml 301s www to apex so it should never reach here, but a comparison that would
+ * silently de-index the whole site if that rule were ever removed is not one to leave sharp.
+ */
+function isCanonicalHost(rawUrl: string | undefined): boolean {
+    const strip = (h: string) => h.toLowerCase().replace(/^www\./, '');
+    let configured: string;
+    try { configured = strip(new URL(swanIndexBaseUrl()).host); } catch { return false; }
+    try { return !!rawUrl && strip(new URL(rawUrl).host) === configured; } catch { return false; }
+}
+
 /**
  * Where this request thinks the publication lives.
  *
@@ -67,12 +93,50 @@ const PREVIEW_PREFIX = '/index-preview';
  * `base` is the internal-link prefix; `baseUrl` is the absolute origin+prefix used for canonical,
  * og:url and the feed. In production base is '' and baseUrl is the configured origin.
  */
-export function resolveOrigin(pathname: string, rawUrl: string | undefined): { base: string; baseUrl: string } {
+export function resolveOrigin(pathname: string, rawUrl: string | undefined): Origin {
     const isPreview = pathname === PREVIEW_PREFIX || pathname.startsWith(`${PREVIEW_PREFIX}/`);
-    if (!isPreview) return { base: '', baseUrl: swanIndexBaseUrl() };
+    const onCanonicalHost = isCanonicalHost(rawUrl);
+
+    if (!isPreview) {
+        return { base: '', baseUrl: swanIndexBaseUrl(), isPreview, onCanonicalHost, indexable: onCanonicalHost };
+    }
     let origin = swanIndexBaseUrl();
     try { if (rawUrl) origin = new URL(rawUrl).origin; } catch { /* keep the configured origin */ }
-    return { base: PREVIEW_PREFIX, baseUrl: `${origin}${PREVIEW_PREFIX}` };
+    // A preview is NEVER indexable, on any host. See the note above.
+    return { base: PREVIEW_PREFIX, baseUrl: `${origin}${PREVIEW_PREFIX}`, isPreview, onCanonicalHost, indexable: false };
+}
+
+/**
+ * Does the configured SWAN_INDEX_BASE_URL already point INTO the preview prefix?
+ *
+ * True on staging, where the publication has no domain of its own and lives at
+ * `…netlify.app/index-preview`. There the prefix is the real path, not a duplicate of one.
+ */
+function configuredBaseHasPreviewPrefix(): boolean {
+    try {
+        const path = new URL(swanIndexBaseUrl()).pathname;
+        return path === PREVIEW_PREFIX || path.startsWith(`${PREVIEW_PREFIX}/`);
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * The crawler directive this request may actually emit.
+ *
+ * Every page below asks for the robots value its CONTENT deserves — 'index,follow' for the front
+ * page and the editorial listings, the stored per-piece value for an article. This is the gate that
+ * decides whether the request is entitled to it.
+ *
+ * It exists because it was not there, and the consequence was live: with the code deployed and DNS
+ * not yet cut over, the front page answered on BOTH theswanindex.com/ and
+ * bemoreswan.com/index-preview, each 'index,follow' and each self-canonical. Two indexable copies
+ * of the same page on two domains — the exact duplicate-content failure this publication exists to
+ * avoid inflicting on its authors, inflicted on itself. `noindex,nofollow` rather than
+ * `noindex,follow`: a URL that should not exist should not be passing equity anywhere either.
+ */
+export function robotsFor(origin: Origin, desired: string): string {
+    return origin.indexable ? desired : 'noindex,nofollow';
 }
 
 /** A 404 in the publication's own clothes. noindex, so a dead link is never crawled as thin content. */
@@ -103,10 +167,24 @@ export default withLambda(async (event: HandlerEvent) => {
     const route = parseSwanRoute(pathname);
 
     const db = getDb();
-    const { base, baseUrl } = resolveOrigin(pathname, event.rawUrl);
+    const origin = resolveOrigin(pathname, event.rawUrl);
+    const { base, baseUrl } = origin;
     const sections = await listSections(db);
 
     if (!route) return notFound(sections, baseUrl, base);
+
+    // Once the domain is attached, /index-preview is a SECOND URL for every page on the
+    // publication's own host — the same duplicate the robots gate above exists to stop, just
+    // within one origin instead of across two.
+    //
+    // ⚠️ "On its own host" is NOT enough on its own, and getting that wrong 404'd staging. Staging
+    // sets SWAN_INDEX_BASE_URL to `https://staging--bemoreswan.netlify.app/index-preview` — the
+    // configured base URL there IS the prefixed path, so the request host matches the canonical
+    // host AND the path is a preview, and a naive check refuses the only way into staging. The
+    // prefix is redundant only where the configured base is a BARE ORIGIN.
+    if (origin.isPreview && origin.onCanonicalHost && !configuredBaseHasPreviewPrefix()) {
+        return notFound(sections, swanIndexBaseUrl(), '');
+    }
 
     // ── home ───────────────────────────────────────────────────────────────────────────────────
     if (route.kind === 'home') {
@@ -121,6 +199,9 @@ export default withLambda(async (event: HandlerEvent) => {
             // story four inches further down reads as a bug, because it is one.
             latest: latest.filter((c) => !featured.some((f) => f.slug === c.slug && f.author.handle === c.author.handle)),
             baseUrl,
+            // The front page is an editorial artefact of our own making, not syndicated content —
+            // it is the one surface that indexes by default. Gated on the host: see robotsFor().
+            robots: robotsFor(origin, 'index,follow'),
         }), true);
     }
 
@@ -140,7 +221,7 @@ export default withLambda(async (event: HandlerEvent) => {
             pageUrl: `${baseUrl}${key ? `/section/${encodeURIComponent(key)}` : '/latest'}`,
             baseUrl,
             // Our own editorial listings, not syndicated content — indexable, unlike the articles.
-            robots: 'index,follow',
+            robots: robotsFor(origin, 'index,follow'),
         }), true);
     }
 
@@ -162,7 +243,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 description: `The business owners and operators writing for ${PUBLICATION_NAME}.`,
                 pageUrl: `${baseUrl}/authors`,
                 canonicalUrl: `${baseUrl}/authors`,
-                robots: 'index,follow',
+                robots: robotsFor(origin, 'index,follow'),
             },
             sections,
             base,
@@ -199,7 +280,7 @@ export default withLambda(async (event: HandlerEvent) => {
             baseUrl,
             // A profile page is OUR index of an author, not a copy of their writing — nothing here
             // is duplicated from their site, so there is nothing for it to compete with.
-            robots: 'index,follow',
+            robots: robotsFor(origin, 'index,follow'),
         }), true);
     }
 
@@ -245,8 +326,9 @@ export default withLambda(async (event: HandlerEvent) => {
             imageAlt: (payload?.featureImage?.alt as string | undefined) || row.title,
             authorCanonicalUrl: row.authorCanonicalUrl,
             pageUrl: `${baseUrl}${articlePath(profile.handle, route.slug)}`,
-            // Per-row, defaulting to noindex. An editor lifts a curated piece to 'index,follow'.
-            robots: row.robots,
+            // Per-row, defaulting to noindex. An editor lifts a curated piece to 'index,follow' —
+            // and robotsFor still refuses to honour that anywhere but the publication's own domain.
+            robots: robotsFor(origin, row.robots),
             aiAssisted: isAiAssisted(row),
             aiNotice: BLOG_AI_NOTICE,
             more,
@@ -287,15 +369,25 @@ ${body}
     // be actively counterproductive: a crawler blocked from an article can never read the noindex on
     // it, so the URL stays eligible to appear in results — the opposite of the intent.
     if (route.kind === 'robots') {
+        // Off the publication's own domain every page already carries noindex,nofollow — but a
+        // meta tag only works on a page a crawler chose to fetch. Disallowing the whole host says
+        // the same thing before it spends the request, and covers the feed and any future
+        // non-HTML surface that has nowhere to put a meta tag.
+        const body = origin.indexable
+            ? `User-agent: *\nAllow: /\n\nSitemap: ${baseUrl}/sitemap.xml\n`
+            : `User-agent: *\nDisallow: /\n`;
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': CACHE },
-            body: `User-agent: *\nAllow: /\n\nSitemap: ${baseUrl}/sitemap.xml\n`,
+            body,
         };
     }
 
     // ── sitemap ────────────────────────────────────────────────────────────────────────────────
     if (route.kind === 'sitemap') {
+        // A sitemap is a request to index, and off-host every URL in it would be a preview URL.
+        // Nothing to publish here — 404 rather than hand a crawler a list it should ignore.
+        if (!origin.indexable) return notFound(sections, baseUrl, base);
         const urls = await getIndexableUrls(db);
         const statics = ['', '/latest', '/authors', ...sections.map((s) => `/section/${s.key}`)];
         const entries = [

@@ -4,6 +4,10 @@
 // Run:  npx tsx tests/swan-index.test.ts
 
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { landmark } from './landmark';
 import { parseSwanRoute } from '../src/utils/swan-index/route';
 import { slugifyHandle, HANDLE_RE, RESERVED_HANDLES, monthStart } from '../src/utils/swan-index/profile';
 import {
@@ -14,6 +18,7 @@ import {
 import { guessSection, toDek } from '../src/utils/blog-destinations/swanindex';
 import { BLOG_DESTINATION_IDS, getBlogAdapter, isBlogDestinationId } from '../src/utils/blog-destinations';
 import { swanIndexBaseUrl, SWAN_INDEX_DEFAULT_ORIGIN } from '../src/utils/swan-index/base-url';
+import { resolveOrigin, robotsFor } from '../netlify/functions/swan-index-page';
 
 let passed = 0;
 function check(name: string, fn: () => void) { fn(); console.log(`  ✓ ${name}`); passed++; }
@@ -260,7 +265,7 @@ check('the body HTML is inserted as markup; everything else is escaped', () => {
 });
 
 check('every internal link carries the preview prefix when one is set', () => {
-    const html = renderHome({ sections, base: '/index-preview', lead: card(), featured: [card({ slug: 'b' })], latest: [card({ slug: 'c' })], baseUrl: 'https://x.test/index-preview' });
+    const html = renderHome({ sections, base: '/index-preview', lead: card(), featured: [card({ slug: 'b' })], latest: [card({ slug: 'c' })], baseUrl: 'https://x.test/index-preview', robots: 'noindex,nofollow' });
     assert.ok(html.includes('href="/index-preview/@acme/cutting-churn"'));
     assert.ok(html.includes('href="/index-preview/section/growth"'), 'the nav too');
     assert.ok(html.includes('href="/index-preview/latest"'), 'and the footer');
@@ -268,13 +273,13 @@ check('every internal link carries the preview prefix when one is set', () => {
 });
 
 check('the front page indexes; it is our own editorial work, not a syndicated copy', () => {
-    const html = renderHome({ sections, base: '', lead: card(), featured: [], latest: [], baseUrl: 'https://theswanindex.com' });
+    const html = renderHome({ sections, base: '', lead: card(), featured: [], latest: [], baseUrl: 'https://theswanindex.com', robots: 'index,follow' });
     assert.ok(html.includes('<meta name="robots" content="index,follow">'));
     assert.ok(html.includes('How we cut churn by a third'));
 });
 
 check('an empty publication renders a front page rather than a broken one', () => {
-    const html = renderHome({ sections, base: '', lead: null, featured: [], latest: [], baseUrl: 'https://theswanindex.com' });
+    const html = renderHome({ sections, base: '', lead: null, featured: [], latest: [], baseUrl: 'https://theswanindex.com', robots: 'index,follow' });
     assert.ok(html.includes('The first issue is in preparation.'));
     assert.ok(html.includes('<html lang="en">'));
 });
@@ -311,7 +316,7 @@ check('list and author pages render and stay self-canonical', () => {
 
 check('the reveal animation cannot hide content when its script does not run', () => {
     // The CSS that hides .reveal is gated on [data-reveal="on"], which only the script sets.
-    const html = renderHome({ sections, base: '', lead: card(), featured: [], latest: [], baseUrl: 'https://x.test' });
+    const html = renderHome({ sections, base: '', lead: card(), featured: [], latest: [], baseUrl: 'https://x.test', robots: 'index,follow' });
     assert.ok(html.includes('[data-reveal="on"] .reveal { opacity: 0'), 'hiding rule is gated');
     assert.ok(!/\n\s*\.reveal \{ opacity: 0/.test(html), 'no ungated rule may hide content');
     assert.ok(html.includes("document.documentElement.setAttribute('data-reveal', 'on')"));
@@ -326,6 +331,114 @@ check('one <h1> per page', () => {
     for (const p of pages) {
         assert.equal((p.match(/<h1[\s>]/g) || []).length, 1, 'exactly one <h1>');
     }
+});
+
+// ── the indexability gate ───────────────────────────────────────────────────
+// This section exists because the bug it describes reached PRODUCTION on 2026-08-21. With the code
+// deployed and DNS mid-cutover, the front page answered on both theswanindex.com/ and
+// bemoreswan.com/index-preview — each 200, each `index,follow`, each self-canonical. Two indexable
+// copies of one page on two domains: the exact duplicate-content failure this publication exists
+// to avoid inflicting on its authors, inflicted on itself.
+console.log('\nIndexability is gated on the host');
+
+const CANON = 'https://theswanindex.com';
+
+check('the publication is indexable on its own domain, at the root', () => {
+    const o = resolveOrigin('/', `${CANON}/`);
+    assert.equal(o.indexable, true);
+    assert.equal(o.onCanonicalHost, true);
+    assert.equal(o.isPreview, false);
+    assert.equal(o.base, '');
+    assert.equal(o.baseUrl, CANON);
+    assert.equal(robotsFor(o, 'index,follow'), 'index,follow');
+});
+
+check('⚠️ the preview prefix on the APP domain is never indexable', () => {
+    const o = resolveOrigin('/index-preview', 'https://bemoreswan.com/index-preview');
+    assert.equal(o.indexable, false, 'this is the exact URL that went live indexable');
+    assert.equal(robotsFor(o, 'index,follow'), 'noindex,nofollow');
+    assert.equal(o.baseUrl, 'https://bemoreswan.com/index-preview', 'links still work — only indexing is refused');
+});
+
+check('nor is it indexable on a deploy-preview host', () => {
+    const o = resolveOrigin('/', 'https://deploy-preview-42--bemoreswan.netlify.app/');
+    assert.equal(o.indexable, false);
+    assert.equal(robotsFor(o, 'index,follow'), 'noindex,nofollow');
+});
+
+check('nor on the publication host under the preview prefix', () => {
+    // Belt and braces: the function 404s this route, but the gate must refuse it regardless.
+    const o = resolveOrigin('/index-preview/latest', `${CANON}/index-preview/latest`);
+    assert.equal(o.onCanonicalHost, true);
+    assert.equal(o.isPreview, true);
+    assert.equal(o.indexable, false, 'a preview is never indexable, even at home');
+});
+
+check('www is treated as the same host, not a different one', () => {
+    // netlify.toml 301s www to apex so this should never arrive — but a comparison that would
+    // silently de-index the whole publication if that rule were removed is not one to leave sharp.
+    assert.equal(resolveOrigin('/', 'https://www.theswanindex.com/').indexable, true);
+});
+
+check('an unparseable or absent URL fails CLOSED', () => {
+    for (const raw of [undefined, '', 'not a url', '://broken']) {
+        assert.equal(resolveOrigin('/', raw).indexable, false, `${raw} must not be indexable`);
+    }
+});
+
+check('the gate downgrades an article\'s own robots too, never upgrades it', () => {
+    const off = resolveOrigin('/index-preview/@a/b', 'https://bemoreswan.com/index-preview/@a/b');
+    // A featured piece carries index,follow in the database. Off-host it still must not.
+    assert.equal(robotsFor(off, 'index,follow'), 'noindex,nofollow');
+    const on = resolveOrigin('/@a/b', `${CANON}/@a/b`);
+    // …and on-host the gate is a pass-through: it must never make a noindex piece indexable.
+    assert.equal(robotsFor(on, 'noindex,follow'), 'noindex,follow');
+    assert.equal(robotsFor(on, 'index,follow'), 'index,follow');
+});
+
+check('the gate honours SWAN_INDEX_BASE_URL rather than a hardcoded host', () => {
+    const prev = process.env.SWAN_INDEX_BASE_URL;
+    process.env.SWAN_INDEX_BASE_URL = 'https://staging-index.example.com';
+    try {
+        assert.equal(resolveOrigin('/', 'https://staging-index.example.com/').indexable, true);
+        assert.equal(resolveOrigin('/', `${CANON}/`).indexable, false, 'the old host is no longer canonical');
+    } finally {
+        if (prev === undefined) delete process.env.SWAN_INDEX_BASE_URL; else process.env.SWAN_INDEX_BASE_URL = prev;
+    }
+});
+
+check('robots is threaded into renderHome, not hardcoded inside it', () => {
+    // It WAS hardcoded, which is why the caller's host check could not reach the front page.
+    const off = renderHome({ sections, base: '/index-preview', lead: null, featured: [], latest: [], baseUrl: 'https://x.test/index-preview', robots: 'noindex,nofollow' });
+    assert.ok(off.includes('<meta name="robots" content="noindex,nofollow">'));
+    const on = renderHome({ sections, base: '', lead: null, featured: [], latest: [], baseUrl: CANON, robots: 'index,follow' });
+    assert.ok(on.includes('<meta name="robots" content="index,follow">'));
+});
+
+check('⚠️ staging lives AT the preview prefix — the dedupe rule must not 404 it', () => {
+    // Staging has no domain of its own: SWAN_INDEX_BASE_URL is
+    // https://staging--bemoreswan.netlify.app/index-preview, so the request host DOES match the
+    // configured host and the path IS a preview. A dedupe rule keyed on those two facts alone
+    // refuses the only way into staging — which is exactly what the first version of it did.
+    const prev = process.env.SWAN_INDEX_BASE_URL;
+    process.env.SWAN_INDEX_BASE_URL = 'https://staging--bemoreswan.netlify.app/index-preview';
+    try {
+        const o = resolveOrigin('/index-preview/latest', 'https://staging--bemoreswan.netlify.app/index-preview/latest');
+        assert.equal(o.onCanonicalHost, true, 'staging IS its own canonical host');
+        assert.equal(o.isPreview, true, 'and the path IS the preview prefix');
+        assert.equal(o.indexable, false, 'staging must never be indexable');
+        assert.equal(o.base, '/index-preview', 'links keep the prefix');
+    } finally {
+        if (prev === undefined) delete process.env.SWAN_INDEX_BASE_URL; else process.env.SWAN_INDEX_BASE_URL = prev;
+    }
+});
+
+check('netlify.toml carries the CDN backstop for the preview prefix', () => {
+    // Two independent mechanisms, because the function-level one alone already failed once.
+    const toml = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'netlify.toml'), 'utf8');
+    const block = toml.slice(landmark(toml, 'for = "/index-preview*"'));
+    assert.match(block.slice(0, 200), /X-Robots-Tag\s*=\s*"noindex, nofollow"/,
+        'the /index-preview* header rule must set X-Robots-Tag');
 });
 
 console.log(`\n${passed} checks passed.`);
