@@ -57,12 +57,25 @@ check('it matches on the contact id OR the address', () => {
     assert.match(QUERY, /or\(eq\(newsletterSends\.contactId, contactId\), eq\(newsletterSends\.email, email\)\)/);
 });
 
-check('a missing newsletter table degrades to an empty list, not a broken drawer', () => {
+check('a missing newsletter table OR column degrades, rather than breaking the drawer', () => {
+    // ⚠️ 42703 as well as 42P01. This is the first REQUEST path to name newsletter_sends.variant
+    // and .due_at — until now only the send worker touched them, and a cron fails invisibly. A DB
+    // without db/newsletter-ab-subjects.sql answers with 42703, and an unguarded one takes the
+    // consent history and the custom fields down with it.
     assert.match(QUERY, /42P01/);
-    assert.match(QUERY, /return \[\]/);
+    assert.match(QUERY, /42703/);
+    assert.match(QUERY, /rows: \[\], unavailable: true/);
     // ⚠️ Its own try/catch. Sharing the handler's would take the consent timeline down with it.
     assert.ok(landmark(QUERY, 'try {') < landmark(QUERY, 'newsletterSends.id'),
         'the query must sit inside the guard');
+});
+
+check('an unavailable history is never reported as "nothing sent"', () => {
+    // The confident falsehood. "No newsletters sent to them yet" about a database that has never
+    // been asked is worse than an error — it is an answer to the question the section exists for.
+    assert.match(FN, /newslettersUnavailable: history\.unavailable/);
+    assert.ok(landmark(RENDER, 'if (unavailable)') < landmark(RENDER, 'No newsletters sent to them yet'),
+        'the unavailable branch must come first');
 });
 
 check('the row count is bounded', () => {
@@ -114,8 +127,8 @@ check('every status the ledger can hold has copy', () => {
 });
 
 check('the drawer asks for the history and renders it', () => {
-    assert.match(UI, /const \{ contact, segments, timeline, newsletters \} = await api\(/);
-    assert.match(UI, /\$\{renderSendHistory\(newsletters\)\}/);
+    assert.match(UI, /const \{ contact, segments, timeline, newsletters, newslettersUnavailable \} = await api\(/);
+    assert.match(UI, /\$\{renderSendHistory\(newsletters, newslettersUnavailable\)\}/);
 });
 
 console.log(`\n${passed} checks passed.`);

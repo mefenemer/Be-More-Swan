@@ -101,10 +101,18 @@ const SEND_HISTORY_LIMIT = 100;
  * ⚠️ `engagementTracked` is carried per ROW because it is a property of the SEND, not of the
  * contact: an issue that went through a connected mailbox rewrote no links and embedded no pixel,
  * so "not opened" there is a statement about our instrumentation. The drawer says so instead.
+ *
+ * ⚠️ THIS IS THE FIRST REQUEST PATH TO NAME `newsletter_sends.variant` AND `.due_at`. Until now
+ * they were touched only by the send worker, which is a cron — and a failing cron is invisible
+ * (see the nightly-sweeps incident). A database that has not run db/newsletter-ab-subjects.sql or
+ * db/newsletter-send-time.sql answers this query with 42703, and without the guard below that
+ * takes down the WHOLE contact drawer: the consent history, the segments and the custom fields,
+ * none of which have anything to do with newsletters. Hence `unavailable` rather than `[]` — an
+ * environment missing the schema must not be reported to the tenant as "we never emailed them".
  */
 async function sendHistory(db: ReturnType<typeof getDb>, orgId: number, contactId: number, email: string) {
     try {
-        return await db
+        const rows = await db
             .select({
                 sendId: newsletterSends.id,
                 issueId: newsletterSends.issueId,
@@ -141,13 +149,15 @@ async function sendHistory(db: ReturnType<typeof getDb>, orgId: number, contactI
                 subject: r.variant === 'B' && subjectB ? subjectB : r.subject,
                 skipLabel: r.skipReason ? SKIP_REASON_LABEL[r.skipReason as AudienceSkipReason] ?? null : null,
             })));
+        return { rows, unavailable: false };
     } catch (err) {
-        // ⚠️ Its own guard, not the drawer's. An environment without db/newsletter.sql still has a
-        // contact worth looking at, and a 42P01 here must not take the consent history down with it.
+        // ⚠️ Its own guard, not the drawer's. An environment missing a newsletter table (42P01) or
+        // a newsletter column (42703) still has a contact worth looking at, and neither may take
+        // the consent history down with it. Any OTHER error is a real fault and rethrows.
         const code = (err as { code?: string; cause?: { code?: string } })?.code
             ?? (err as { cause?: { code?: string } })?.cause?.code;
-        if (code !== '42P01') throw err;
-        return [];
+        if (code !== '42P01' && code !== '42703') throw err;
+        return { rows: [], unavailable: true };
     }
 }
 
@@ -197,9 +207,13 @@ export default withLambda(async (event: HandlerEvent) => {
                 .orderBy(desc(audienceConsentEvents.createdAt))
                 .limit(200);
 
-            const newsletters = await sendHistory(db, orgId, id, contact.email);
+            const history = await sendHistory(db, orgId, id, contact.email);
 
-            return json(200, { contact, segments, timeline, newsletters });
+            return json(200, {
+                contact, segments, timeline,
+                newsletters: history.rows,
+                newslettersUnavailable: history.unavailable,
+            });
         }
 
         // ⚠️ The card on an assistant's Overview wants the SHAPE of the list — how many subscribed,

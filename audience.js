@@ -631,7 +631,7 @@
     body.innerHTML = '<p class="text-sm text-gray-500">Loading…</p>';
 
     try {
-      const { contact, segments, timeline, newsletters } = await api(`${CONTACTS_API}?id=${encodeURIComponent(id)}`);
+      const { contact, segments, timeline, newsletters, newslettersUnavailable } = await api(`${CONTACTS_API}?id=${encodeURIComponent(id)}`);
       // Held for the custom-field save, which is bound on the panel rather than on each input.
       state.detailId = contact.id;
       const name = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || contact.email;
@@ -692,7 +692,7 @@
                Results line on an issue are both AGGREGATES; this is the only per-person view of who
                got what, and "Last emailed" above is the single date it replaces. -->
           <p class="text-xs font-bold text-gray-500 uppercase mb-2">Newsletters</p>
-          ${renderSendHistory(newsletters)}
+          ${renderSendHistory(newsletters, newslettersUnavailable)}
         </div>
 
         <div>
@@ -735,7 +735,14 @@
    * "Not opened" there would be our instrumentation dressed up as the reader's behaviour. Same rule
    * as the Results panel in the Newsletter Studio (newsletter.js renderStats).
    */
-  function renderSendHistory(rows) {
+  function renderSendHistory(rows, unavailable) {
+    // ⚠️ Kept apart from "nothing sent yet", the same way the KPI cards keep an error from a zero.
+    // An environment that has not run the newsletter schema knows nothing about this contact's
+    // history, and reporting that as "we have never emailed them" is a confident falsehood about
+    // the one thing this section exists to answer.
+    if (unavailable) {
+      return '<p class="text-sm text-gray-400">Newsletter history isn\'t available on this environment yet.</p>';
+    }
     if (!Array.isArray(rows) || !rows.length) {
       return '<p class="text-sm text-gray-400">No newsletters sent to them yet.</p>';
     }
