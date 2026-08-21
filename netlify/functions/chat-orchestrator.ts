@@ -32,7 +32,7 @@ import { computeScheduleSlots, resolvePostingSchedule } from '../../src/config/p
 import { EXCLUDE_PROFILE_RULE, SCORING_BANDS, icpBlock } from '../../src/config/icp-profile';
 import { normalizePlatform, platformFormat, type SocialPlatform } from '../../src/config/platform-formats';
 import { normalizeMediaSources } from '../../src/utils/media-sources';
-import { replyClaimsPostSaved, honestDraftReply, type DraftClaimFailure } from '../../src/utils/chat-draft-claims';
+import { replyClaimsPostSaved, honestDraftReply, isHonestDraftReply, type DraftClaimFailure } from '../../src/utils/chat-draft-claims';
 import { blogPostDraftFromUiElement, BLOG_POST_DRAFT_TYPE } from '../../src/utils/blog-chat-draft';
 import { newsletterDraftFromUiElement, NEWSLETTER_ISSUE_DRAFT_TYPE } from '../../src/utils/newsletter-chat-draft';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -2059,7 +2059,23 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // Only asked on the social route, and only when this turn wrote nothing: an honest turn —
         // a clarifying question, an offer to draft, a plain chat answer — never reaches the
         // detector, and a turn that really did save is left exactly as the model wrote it.
-        if (route === ROUTES.social_media_manager && replyClaimsPostSaved(content)) {
+        // Circuit breaker. Every replacement below asks the user to try again, so a cause that
+        // is deterministic — the model cannot see the thing being asked about, and says so every
+        // time — would print the identical apology on every retry, with no way out. A Blog Writer
+        // did exactly that on 2026-08-21: two attempts at the same topic, two byte-identical
+        // "no draft came through" replies. One swap per run of turns; after that the model's own
+        // words go through and the user can read what it is actually telling them.
+        const lastAssistantTurn = history.filter((m) => m.role === 'assistant').slice(-1)[0]?.content ?? '';
+        const alreadyApologised = isHonestDraftReply(lastAssistantTurn);
+
+        // What the model actually wrote, kept for the audit row a swap leaves behind. The
+        // transcript stores the REPLACEMENT, and the replacement is what feeds back into the LLM
+        // window on the next turn — so without this the original is unrecoverable, and the model
+        // reads a confession it never made and carries on from there.
+        const modelReply = content;
+        let suppressed: DraftClaimFailure | null = null;
+
+        if (route === ROUTES.social_media_manager && replyClaimsPostSaved(content) && !alreadyApologised) {
             let breach: DraftClaimFailure | null = null;
             if (draftTarget) breach = 'not_saved_here';                      // saving here is wrong by design
             else if (persistedPosts?.length === 0) breach = 'persist_failed'; // valid draft, the write threw
@@ -2070,26 +2086,29 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                     `[chat-orchestrator] suppressed unbacked draft claim (${breach}) — assistant ${session.aiAssistantId}, session ${session.id}`,
                 );
                 content = honestDraftReply(breach);
+                suppressed = breach;
             }
         }
 
         // The blog route's version of the same reconciliation. It cannot fail to PERSIST (it never
         // persists), so the only unbacked claim available to it is claiming an article it did not
         // write — which is the identical bug: a confident reply about a post that does not exist.
-        if (route === ROUTES.blog_writer && !blogDraft && replyClaimsPostSaved(content)) {
+        if (route === ROUTES.blog_writer && !blogDraft && replyClaimsPostSaved(content) && !alreadyApologised) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked blog draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );
             content = honestDraftReply('blog_no_draft');
+            suppressed = 'blog_no_draft';
         }
 
         // And the newsletter route's. Identical shape: it never persists on the turn, so the only
         // unbacked claim available to it is claiming an issue it did not write.
-        if (route === ROUTES.newsletter_editor && !newsletterDraft && replyClaimsPostSaved(content)) {
+        if (route === ROUTES.newsletter_editor && !newsletterDraft && replyClaimsPostSaved(content) && !alreadyApologised) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked newsletter draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );
             content = honestDraftReply('blog_no_draft');
+            suppressed = 'blog_no_draft';
         }
 
         if (hubLink && uiElement && typeof uiElement === 'object') {
@@ -2106,6 +2125,18 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                     role: 'system',
                     content: `[handoff:${handoffAudit.roleKey}] ${handoffAudit.targetName}: ${handoffAudit.content}`,
                     uiElementJson: handoffAudit.uiElement,
+                });
+            }
+            if (suppressed) {
+                // Role 'system', so it is excluded from the transcript (get-chat-session.ts,
+                // list-chat-sessions.ts) and from the LLM window (the history query above) —
+                // this exists only so the swap can be diagnosed afterwards. Without it the
+                // model's original wording is lost, and a false positive in the detector is
+                // indistinguishable from a genuine unbacked claim when someone comes to look.
+                await tx.insert(chatMessages).values({
+                    chatSessionId: session.id,
+                    role: 'system',
+                    content: `[suppressed:${suppressed}] ${modelReply}`,
                 });
             }
             return tx
