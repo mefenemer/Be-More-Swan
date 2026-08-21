@@ -2,7 +2,7 @@
 // The shared Audience — the organisation's own contacts, owned by the tenant and usable by every
 // assistant it hires (docs/newsletter-assistant-plan.md). Org-scoped via requireTenant.
 //
-//   GET    ?id=<n>                → one contact + its segments + its consent timeline
+//   GET    ?id=<n>                → one contact + its segments + its consent timeline + its issues
 //   GET    [?status=&segmentId=&q=]  → the list, plus per-status counts for the header
 //   POST   { action: 'create' }   → add one contact by hand
 //   POST   { action: 'update' }   → edit name/company/phone
@@ -24,7 +24,7 @@ import { and, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     audienceConsentEvents, audienceContactSegments, audienceContacts, audienceImportJobs,
-    audienceSegments, leadOptOuts,
+    audienceSegments, leadOptOuts, newsletterIssues, newsletterSends,
 } from '../../db/schema';
 import { cleanName, looksLikeEmail, normaliseEmail } from '../../src/utils/audience-contacts';
 import {
@@ -33,6 +33,7 @@ import {
 } from '../../src/utils/audience-store';
 import { resolveImportStatus } from '../../src/config/audience-import-status';
 import { haltEnrolmentsForContact } from '../../src/utils/newsletter-sequence';
+import { SKIP_REASON_LABEL, type AudienceSkipReason } from '../../src/utils/audience-consent';
 import { buildSegmentCondition } from '../../src/utils/audience-segment-rules';
 import { audienceCustomFields } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
@@ -75,6 +76,79 @@ export function pickDefined(raw: unknown, allowed: Set<string>): Record<string, 
         if (value) out[k] = value;
     }
     return out;
+}
+
+/** How many issues one contact's drawer shows. A long-standing subscriber has hundreds. */
+const SEND_HISTORY_LIMIT = 100;
+
+/**
+ * Every issue this address was sent, or deliberately not sent — the ledger, not a summary.
+ *
+ * The consent timeline beside it answers "why is this person on my list"; this answers "what have
+ * we actually sent them", which until now existed only in newsletter_sends and was readable by the
+ * send worker and nobody else. A tenant asked what someone had received and the honest answer was
+ * a single `last_sent_at` date.
+ *
+ * ⚠️ Matched on contactId OR the address, exactly like the consent timeline above, and for the same
+ * reason: `contact_id` is ON DELETE SET NULL, so a removed-and-re-added subscriber keeps their
+ * history on the email alone.
+ *
+ * ⚠️ `skipLabel` is resolved HERE rather than in the browser. SKIP_REASON_LABEL lives in
+ * audience-consent.ts, the module every assistant asks, and it is not in the generated client
+ * mirror — sending the label rather than the key is what stops audience.js becoming a second copy
+ * of that vocabulary. See [[client-constants-generated]] for what the copies cost.
+ *
+ * ⚠️ `engagementTracked` is carried per ROW because it is a property of the SEND, not of the
+ * contact: an issue that went through a connected mailbox rewrote no links and embedded no pixel,
+ * so "not opened" there is a statement about our instrumentation. The drawer says so instead.
+ */
+async function sendHistory(db: ReturnType<typeof getDb>, orgId: number, contactId: number, email: string) {
+    try {
+        return await db
+            .select({
+                sendId: newsletterSends.id,
+                issueId: newsletterSends.issueId,
+                subject: newsletterIssues.subject,
+                subjectB: newsletterIssues.subjectB,
+                purpose: newsletterIssues.purpose,
+                status: newsletterSends.status,
+                skipReason: newsletterSends.skipReason,
+                error: newsletterSends.error,
+                variant: newsletterSends.variant,
+                sentAt: newsletterSends.sentAt,
+                dueAt: newsletterSends.dueAt,
+                openedAt: newsletterSends.openedAt,
+                clickedAt: newsletterSends.clickedAt,
+                openCount: newsletterSends.openCount,
+                clickCount: newsletterSends.clickCount,
+                lastClickedUrl: newsletterSends.lastClickedUrl,
+                engagementTracked: newsletterIssues.engagementTracked,
+                createdAt: newsletterSends.createdAt,
+            })
+            .from(newsletterSends)
+            .innerJoin(newsletterIssues, eq(newsletterIssues.id, newsletterSends.issueId))
+            .where(and(
+                eq(newsletterSends.organisationId, orgId),
+                or(eq(newsletterSends.contactId, contactId), eq(newsletterSends.email, email)),
+            ))
+            .orderBy(desc(sql`COALESCE(${newsletterSends.sentAt}, ${newsletterSends.createdAt})`))
+            .limit(SEND_HISTORY_LIMIT)
+            .then((rows) => rows.map(({ subjectB, ...r }) => ({
+                ...r,
+                // ⚠️ The subject THEY were sent, not the issue's. Under an A/B test half the list
+                // received subject_b, and showing the issue's own line would tell the tenant this
+                // person got an email they never saw.
+                subject: r.variant === 'B' && subjectB ? subjectB : r.subject,
+                skipLabel: r.skipReason ? SKIP_REASON_LABEL[r.skipReason as AudienceSkipReason] ?? null : null,
+            })));
+    } catch (err) {
+        // ⚠️ Its own guard, not the drawer's. An environment without db/newsletter.sql still has a
+        // contact worth looking at, and a 42P01 here must not take the consent history down with it.
+        const code = (err as { code?: string; cause?: { code?: string } })?.code
+            ?? (err as { cause?: { code?: string } })?.cause?.code;
+        if (code !== '42P01') throw err;
+        return [];
+    }
 }
 
 export default withLambda(async (event: HandlerEvent) => {
@@ -123,7 +197,9 @@ export default withLambda(async (event: HandlerEvent) => {
                 .orderBy(desc(audienceConsentEvents.createdAt))
                 .limit(200);
 
-            return json(200, { contact, segments, timeline });
+            const newsletters = await sendHistory(db, orgId, id, contact.email);
+
+            return json(200, { contact, segments, timeline, newsletters });
         }
 
         // ⚠️ The card on an assistant's Overview wants the SHAPE of the list — how many subscribed,

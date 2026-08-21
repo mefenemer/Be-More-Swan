@@ -6885,6 +6885,14 @@ async function _fetchAndRenderNewsletterList() {
         refreshNote.classList.toggle('hidden', !html);
     };
 
+    // The one route to the people behind these numbers. The panel counts them but cannot list them,
+    // and the list is a top-level view rather than a tab on this page (it is org-wide — see the
+    // header comment in audience.html), so naming it in prose left the reader hunting the sidebar.
+    // ⚠️ Built once and used by BOTH the empty state and the footer: two copies drift.
+    const audienceLink = (label) =>
+        `<a href="#" onclick="event.preventDefault(); window.loadView && window.loadView('audience'); return false"`
+        + ` class="font-bold text-emerald-700 hover:underline cursor-pointer">${label}</a>`;
+
     try {
         const res = await fetch('/.netlify/functions/audience-contacts?countsOnly=1', { credentials: 'same-origin' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -6915,7 +6923,7 @@ async function _fetchAndRenderNewsletterList() {
         if (!total) {
             // ⚠️ Its own state, and it is an INSTRUCTION rather than a report. "0 subscribers" on a
             // brand-new workspace is not news; where to get the first one is.
-            list.innerHTML = '<p class="text-xs text-gray-400 py-1">Nobody on your list yet — add a sign-up form to your site, or import the people who have already said yes, from the <span class="font-semibold">Audience</span> page.</p>';
+            list.innerHTML = `<p class="text-xs text-gray-400 py-1">Nobody on your list yet — add a sign-up form to your site, or import the people who have already said yes, from the ${audienceLink('Audience page')}.</p>`;
             setFooter('');
             return;
         }
@@ -6941,7 +6949,8 @@ async function _fetchAndRenderNewsletterList() {
             `${grew
                 ? `<span class="font-semibold text-emerald-700">+${grew.toLocaleString()}</span> subscribed in the last 30 days. `
                 : 'Nobody new in the last 30 days. '}`
-            + 'Your list is shared with every assistant you hire, and is counted fresh each time this page loads.',
+            + 'Your list is shared with every assistant you hire, and is counted fresh each time this page loads. '
+            + audienceLink('See who is on it →'),
             'These come straight from your own audience table — nothing is cached and no background job is involved, so there is nothing to wait for.');
     } catch (err) {
         console.error('[newsletter-list] load failed:', err);

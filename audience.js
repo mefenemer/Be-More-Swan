@@ -52,6 +52,19 @@
     api: 'API',
   };
 
+  // Mirrors newsletter_sends.status. ⚠️ 'sent' means it left here and 'delivered' means the
+  // recipient's server took it — kept apart because the gap between them is where a deliverability
+  // problem shows up first, and collapsing both into "Sent" hides it.
+  const SEND_STATUS = {
+    queued:     { label: 'Scheduled',      cls: 'bg-gray-100 text-gray-600 border-gray-200' },
+    sent:       { label: 'Sent',           cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+    delivered:  { label: 'Delivered',      cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+    bounced:    { label: 'Bounced',        cls: 'bg-red-100 text-red-700 border-red-200' },
+    complained: { label: 'Marked as spam', cls: 'bg-red-100 text-red-700 border-red-200' },
+    skipped:    { label: 'Not sent',       cls: 'bg-amber-100 text-amber-700 border-amber-200' },
+    failed:     { label: 'Failed',         cls: 'bg-red-100 text-red-700 border-red-200' },
+  };
+
   const EVENT_LABEL = {
     subscribe_requested: 'Signed up',
     confirmed: 'Confirmed their subscription',
@@ -618,7 +631,7 @@
     body.innerHTML = '<p class="text-sm text-gray-500">Loading…</p>';
 
     try {
-      const { contact, segments, timeline } = await api(`${CONTACTS_API}?id=${encodeURIComponent(id)}`);
+      const { contact, segments, timeline, newsletters } = await api(`${CONTACTS_API}?id=${encodeURIComponent(id)}`);
       // Held for the custom-field save, which is bound on the panel rather than on each input.
       state.detailId = contact.id;
       const name = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || contact.email;
@@ -675,6 +688,14 @@
         </div>
 
         <div>
+          <!-- What we actually sent them. The counts on the Newsletter Assistant's Overview and the
+               Results line on an issue are both AGGREGATES; this is the only per-person view of who
+               got what, and "Last emailed" above is the single date it replaces. -->
+          <p class="text-xs font-bold text-gray-500 uppercase mb-2">Newsletters</p>
+          ${renderSendHistory(newsletters)}
+        </div>
+
+        <div>
           <!-- The consent timeline is the answer to "why is this person on my list?", and it is the
                only place that answer exists — the contact row gets overwritten, these events do not. -->
           <p class="text-xs font-bold text-gray-500 uppercase mb-2">Consent history</p>
@@ -701,6 +722,68 @@
     } catch (err) {
       body.innerHTML = `<p class="text-sm text-red-600">${esc(err.message)}</p>`;
     }
+  }
+
+  /**
+   * One line per issue this address was on the ledger for — including the ones deliberately NOT
+   * sent, which is the half a tenant cannot get anywhere else. "Why didn't Jane get the November
+   * issue?" has an answer here (she was unconfirmed, or paused, or her domain is suppressed) and
+   * nowhere else in the product.
+   *
+   * ⚠️ Engagement is reported ONLY when the issue could measure it. `engagementTracked` is false
+   * for anything sent through a connected mailbox — no pixel, no rewritten links — and printing
+   * "Not opened" there would be our instrumentation dressed up as the reader's behaviour. Same rule
+   * as the Results panel in the Newsletter Studio (newsletter.js renderStats).
+   */
+  function renderSendHistory(rows) {
+    if (!Array.isArray(rows) || !rows.length) {
+      return '<p class="text-sm text-gray-400">No newsletters sent to them yet.</p>';
+    }
+
+    return `<ol class="space-y-3">${rows.map((r) => {
+      const st = SEND_STATUS[r.status] || { label: r.status, cls: 'bg-gray-100 text-gray-600 border-gray-200' };
+      // ⚠️ Never dueAt: a queued row carries its due date in the detail line below, and
+      // reading it here printed the same timestamp twice.
+      const when = r.sentAt || r.createdAt;
+
+      // Each branch says the one thing that is true of it. A skipped row without its reason is the
+      // shape of a silent bug, which is why the ledger stores skip_reason at all.
+      let detail;
+      if (r.status === 'skipped') {
+        detail = r.skipLabel || 'Not sent';
+      } else if (r.status === 'failed') {
+        detail = r.error ? `Could not be sent — ${r.error}` : 'Could not be sent.';
+      } else if (r.status === 'queued') {
+        detail = r.dueAt ? `Due ${fmtDateTime(r.dueAt)}` : 'Waiting to go out';
+      } else if (!r.engagementTracked) {
+        detail = 'Opens and clicks were not measurable on this send.';
+      } else if (r.openedAt) {
+        const opens = Number(r.openCount || 0) > 1 ? ` (${Number(r.openCount).toLocaleString()} times)` : '';
+        const clicks = r.clickedAt
+          ? ` · Clicked ${fmtDateTime(r.clickedAt)}${Number(r.clickCount || 0) > 1 ? ` (${Number(r.clickCount).toLocaleString()} times)` : ''}`
+          : '';
+        detail = `Opened ${fmtDateTime(r.openedAt)}${opens}${clicks}`;
+      } else {
+        detail = 'Not opened';
+      }
+
+      // Which subject line they were sent is already resolved server-side; the chip says which arm
+      // of the test that was, so two people with different subjects are not a mystery.
+      const variant = r.variant ? `<span class="text-[10px] font-bold text-gray-400 shrink-0">Subject ${esc(r.variant)}</span>` : '';
+
+      return `<li class="text-sm">
+        <div class="flex items-start justify-between gap-2">
+          <p class="font-bold text-gray-800 min-w-0 break-words">${esc(r.subject)}</p>
+          <span class="inline-flex shrink-0 px-2 py-0.5 text-[11px] font-bold rounded-full border ${st.cls}">${esc(st.label)}</span>
+        </div>
+        <div class="flex items-center justify-between gap-2">
+          <p class="text-xs text-gray-500">${esc(when ? fmtDateTime(when) : '')}</p>
+          ${variant}
+        </div>
+        <p class="text-xs text-gray-500 mt-0.5">${esc(detail)}</p>
+        ${r.lastClickedUrl ? `<p class="text-xs text-gray-400 truncate" title="${esc(r.lastClickedUrl)}">Last link: ${esc(r.lastClickedUrl)}</p>` : ''}
+      </li>`;
+    }).join('')}</ol>`;
   }
 
   async function setStatus(emails, status) {
