@@ -59,6 +59,20 @@ export function postsPerWeekFor(value: unknown): number {
     if (/fortnight|every (two|2) weeks|bi[\s-]?weekly/.test(raw)) return 0.5;
     if (/\bdaily\b|every ?day/.test(raw)) return 7;
     if (/\bweekly\b|every ?week/.test(raw)) return 1;
+    // Monthly is a first-class choice in the Newsletter Assistant's own drafting-cadence dropdown
+    // (src/public/assistant-onboarding-schemas.js), so it is NOT free text we failed to understand —
+    // yet it resolved to 0 here, which made draft-newsletter-issues treat it as "on demand" and
+    // never draft an issue, AND made readCadence call it 'unrecognised', which fired the
+    // autopilot_schedule_unreadable alert telling the user to pick a frequency from a list their
+    // value was already on. (Prod, 20 Aug 2026.)
+    //
+    // Deliberately NOT added to POSTING_CADENCES: that array populates the SOCIAL and BLOG
+    // frequency dropdowns, which have never offered monthly. 12 issues a year over 52 weeks — the
+    // rate draft-newsletter-issues turns back into a ~30.4-day period and computeScheduleSlots
+    // into a 4-week stride.
+    const perMonth = raw.match(/(\d+)\s*(?:x|times)?\s*(?:per|a|\/)\s*month/);
+    if (perMonth) return (Number(perMonth[1]) * 12) / 52;
+    if (/\bmonthly\b|every ?month/.test(raw)) return 12 / 52;
 
     // "<n> times a day" / "<n>x day"  → n*7 ;  "<n> times a week" / "<n>x week" → n.
     const perDay  = raw.match(/(\d+)\s*(?:x|times)?\s*(?:per|a|\/)?\s*day/);
@@ -66,10 +80,11 @@ export function postsPerWeekFor(value: unknown): number {
     const perWeek = raw.match(/(\d+)\s*(?:x|times)?\s*(?:per|a|\/)?\s*week/);
     if (perWeek) return Number(perWeek[1]);
 
-    // Word forms: "twice a day", "three times a week".
+    // Word forms: "twice a day", "three times a week", "once a month".
     for (const [word, n] of Object.entries(NUMBER_WORDS)) {
         if (new RegExp(`\\b${word}\\b.*\\bday`).test(raw)) return n * 7;
         if (new RegExp(`\\b${word}\\b.*\\bweek`).test(raw)) return n;
+        if (new RegExp(`\\b${word}\\b.*\\bmonth`).test(raw)) return (n * 12) / 52;
     }
 
     // Bare number → treat as per week.
@@ -364,8 +379,9 @@ export function selectWeeklySlots(days: WeekdayKey[], times: string[], perWeek: 
     // A cadence that asks for more posts than the grid offers is capped by the grid: the user gave
     // us five weekdays and one time, so "daily" can only mean those five. (Unchanged behaviour —
     // the old code returned every candidate whenever the target exceeded them.)
-    // Fortnightly (perWeek 0.5) rounds up to one slot a week here and is thinned to every other
-    // week by computeScheduleSlots, which is the only place that knows WHICH week it is looking at.
+    // A sub-weekly cadence (fortnightly, monthly) rounds up to one slot a week here and is thinned
+    // to every Nth week by computeScheduleSlots, which is the only place that knows WHICH week it
+    // is looking at.
     const count = Math.max(1, Math.min(grid.length, Math.round(perWeek)));
     if (count >= grid.length) return grid;
 
@@ -408,10 +424,10 @@ export function computeScheduleSlots({ schedule, horizonDays, now = new Date() }
         if (list) list.push(slot.time); else timesByDay.set(slot.day, [slot.time]);
     }
 
-    // Cadences slower than weekly (fortnightly) publish on the pattern's day in alternate weeks
-    // only. Keyed on the slot's own calendar week rather than on `now`, so this stays as stable as
-    // the day choice itself.
-    const everyOtherWeek = perWeek < 1;
+    // Cadences slower than weekly publish on the pattern's day in every Nth week only —
+    // fortnightly (0.5) in every 2nd, monthly (12/52) in every 4th. Keyed on the slot's own
+    // calendar week rather than on `now`, so this stays as stable as the day choice itself.
+    const weekStride = perWeek < 1 ? Math.max(2, Math.round(1 / perWeek)) : 1;
 
     const slots: Date[] = [];
     const seenDays = new Set<string>();
@@ -425,7 +441,7 @@ export function computeScheduleSlots({ schedule, horizonDays, now = new Date() }
         const weekday = WEEKDAY_KEYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
         const dayTimes = timesByDay.get(weekday);
         if (!dayTimes) continue;
-        if (everyOtherWeek && weekIndex(year, month - 1, day) % 2 !== 0) continue;
+        if (weekStride > 1 && weekIndex(year, month - 1, day) % weekStride !== 0) continue;
 
         for (const t of dayTimes) {
             const [h, m] = t.split(':').map(Number);

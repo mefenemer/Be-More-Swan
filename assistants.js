@@ -717,7 +717,14 @@ window._syncScheduleOutcome = function () {
     const usedDays = _POSTING_DAY_KEYS.filter(d => pattern.some(p => p.day === d));
     const dayNames = usedDays.map(d => _AUTOPILOT_DAY_LABEL[d]).join(', ');
     const n = pattern.length;
-    outcomeEl.textContent = `${n} post${n === 1 ? '' : 's'} a week — ${dayNames} at ${Array.from(new Set(pattern.map(p => p.time))).sort().join(', ')}.`;
+    const timesLabel = Array.from(new Set(pattern.map(p => p.time))).sort().join(', ');
+    // weeklyPattern rounds a sub-weekly cadence up to one slot; computeScheduleSlots then only uses
+    // it in every Nth week. Saying "1 post a week" for a fortnightly or monthly rate overstates it
+    // by that factor, which is the same kind of gap this whole outcome line exists to close.
+    const stride = reading.postsPerWeek < 1 ? Math.max(2, Math.round(1 / reading.postsPerWeek)) : 1;
+    outcomeEl.textContent = stride > 1
+        ? `${n} post${n === 1 ? '' : 's'} every ${stride} weeks — ${dayNames} at ${timesLabel}.`
+        : `${n} post${n === 1 ? '' : 's'} a week — ${dayNames} at ${timesLabel}.`;
 
     // Ticked more days than the rate can fill. Not an error, but it is the whole misunderstanding,
     // so name the unused days and the control that would use them.
@@ -3751,6 +3758,7 @@ const _AUTOPILOT_FREQ_PHRASE = {
     '3 times a week': '3 times a week',
     '2 times a week': '2 times a week',
     'weekly': 'once a week',
+    'monthly': 'once a month',
 };
 
 // Derive a plain-language schedule summary from onboarding_context, mirroring resolvePostingSchedule's
@@ -3769,8 +3777,12 @@ function _autopilotSummary(ctx) {
     const reading = window.PostingCadence?.read?.(rawFreq) || { postsPerWeek: 0, kind: 'unrecognised' };
     const kind = reading.kind;
     const active = kind === 'scheduled';
+    // A sub-weekly rate (fortnightly, monthly) reads as nonsense as a multiplier — "0.5× a week" —
+    // and the engine publishes it as a week stride anyway (computeScheduleSlots), so say it that way.
     const phrase = _AUTOPILOT_FREQ_PHRASE[low]
-        || (reading.postsPerWeek > 0 ? `${reading.postsPerWeek}× a week` : rawFreq);
+        || (reading.postsPerWeek >= 1 ? `${reading.postsPerWeek}× a week`
+            : reading.postsPerWeek > 0 ? `every ${Math.round(1 / reading.postsPerWeek)} weeks`
+            : rawFreq);
 
     const eligibleDays = (Array.isArray(ctx.posting_days) && ctx.posting_days.length
         ? ctx.posting_days.map(d => String(d).toLowerCase().slice(0, 3)).filter(d => _AUTOPILOT_DAY_LABEL[d])

@@ -82,6 +82,28 @@ check('readCadence separates a real cadence, a deliberate on-demand, and an unre
     assert.deepEqual(readCadence('whenever I feel like it'), { postsPerWeek: 0, kind: 'unrecognised' });
 });
 
+// ── Monthly ───────────────────────────────────────────────────────────────────────────────────
+// The Newsletter Assistant's drafting-cadence dropdown offers Weekly / Twice a week / MONTHLY /
+// On demand (src/public/assistant-onboarding-schemas.js). "Monthly" is not in POSTING_CADENCES —
+// that array feeds the social and blog pickers, which have never offered it — so the parser has to
+// read it as free text. It did not, and the consequences were both halves of the same bug:
+// draft-newsletter-issues saw rate 0 and treated a monthly newsletter as "on demand" (never drafted
+// an issue), while readCadence called it 'unrecognised' and fired the autopilot_schedule_unreadable
+// alert, telling the user to pick a frequency from a list their own answer was already on.
+check('a monthly cadence is a real schedule, not an unreadable one', () => {
+    const monthly = 12 / 52;
+    assert.equal(postsPerWeekFor('Monthly'), monthly);
+    assert.equal(postsPerWeekFor('monthly'), monthly);
+    assert.equal(postsPerWeekFor('once a month'), monthly);
+    assert.equal(postsPerWeekFor('every month'), monthly);
+    assert.equal(postsPerWeekFor('2 times a month'), (2 * 12) / 52);
+    assert.deepEqual(readCadence('Monthly'), { postsPerWeek: monthly, kind: 'scheduled' });
+
+    // The period draft-newsletter-issues derives from the rate has to be about a month.
+    const periodDays = 7 / monthly;
+    assert.ok(periodDays > 30 && periodDays < 31, `monthly period was ${periodDays} days`);
+});
+
 check('an unset frequency is the default cadence, not a failure to parse', () => {
     // resolvePostingSchedule substitutes DEFAULT_POSTING_FREQUENCY, so the reading must agree —
     // an assistant with no frequency set does draft, and must not be flagged as broken.
@@ -212,6 +234,23 @@ check('fortnightly publishes on the pattern day every other week', () => {
         const gapDays = (slots[i].getTime() - slots[i - 1].getTime()) / 86_400_000;
         assert.equal(gapDays, 14, `fortnightly gap was ${gapDays} days`);
     }
+});
+
+check('monthly publishes on the pattern day in every fourth week', () => {
+    // Sub-weekly cadences are thinned by a WEEK STRIDE, generalised from the fortnightly one:
+    // 0.5 → every 2nd week, 12/52 → every 4th. Anything else would silently publish a monthly
+    // newsletter fortnightly.
+    const schedule = scheduleOf({ frequency: 'Monthly' });
+    const slots = computeScheduleSlots({ schedule, horizonDays: 30, now: new Date('2026-08-14T10:00:00Z') });
+
+    assert.ok(slots.length <= 2, `expected at most 2 in 30 days, got ${slots.length}`);
+    for (const s of slots) assert.equal(localSlot(s, schedule.timezone), 'wed 09:00');
+    for (let i = 1; i < slots.length; i++) {
+        const gapDays = (slots[i].getTime() - slots[i - 1].getTime()) / 86_400_000;
+        assert.equal(gapDays, 28, `monthly gap was ${gapDays} days`);
+    }
+    // Fortnightly must be untouched by the generalisation — its own check above still holds.
+    assert.equal(Math.round(1 / postsPerWeekFor('fortnightly')), 2);
 });
 
 check('the wall-clock time survives a DST change', () => {

@@ -191,4 +191,37 @@ check('the copy exists and names the offending value', () => {
     );
 });
 
+// ── The alert has to lead somewhere ──────────────────────────────────────────
+// Reported in prod on 20 Aug 2026: the card's button went to the DASHBOARD. notifications.js falls
+// back to `{ label: 'Review', run: go('dashboard') }` for any action-kind type with no entry of its
+// own, and none of the "your assistant stopped" types had one — so a card that says "open the
+// assistant's settings and pick a frequency" dropped the reader on a page with no such setting.
+check('the alerts deep-link to the setting they tell the user to change', () => {
+    const notif = read('../notifications.js');
+    const i = notif.indexOf("notif.type === 'autopilot_schedule_unreadable'");
+    assert.ok(i > 0, 'no CTA branch — the card falls back to the generic dashboard link');
+    const branch = notif.slice(i, i + 600);
+    for (const sibling of ['autopilot_setup_blocked', 'content_library_empty']) {
+        assert.ok(branch.includes(sibling), `${sibling} still dead-ends on the dashboard`);
+    }
+    assert.ok(branch.includes("_assistantDetailInitialTab = 'operation'"),
+        'the link does not open Operational Setup, where the cadence control lives');
+    assert.ok(branch.includes('meta.assistantId'),
+        'without the assistant id there is nothing to route to');
+});
+
+// ── Only a social assistant is judged against a SOCIAL schedule ──────────────
+// The save path ran every non-blog role through enqueueScheduleGapFill, and resolvePostingSchedule
+// substitutes a default cadence when a role has none — so a Newsletter Assistant (its own engine,
+// its own Monthly option) was told its POSTING schedule could not be read.
+check('the social gap-fill is routed to social assistants, not to everything that is not a blog', () => {
+    for (const path of ['../netlify/functions/update-assistant-context.ts', '../netlify/functions/set-draft-horizon.ts']) {
+        const src = read(path);
+        const start = landmark(src, 'enqueueBlogGapFill(db, common)');
+        const slice = src.slice(start, start + 400);
+        assert.ok(slice.includes('SMM_ROLE_KEYS'),
+            `${path}: the social fill is still the else branch, so every other role runs through it`);
+    }
+});
+
 console.log(`\n${passed} checks passed`);

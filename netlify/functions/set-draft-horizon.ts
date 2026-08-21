@@ -19,7 +19,7 @@ import { getSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
 import { enqueueScheduleGapFill } from '../../src/utils/schedule-gap-fill';
 import { enqueueBlogGapFill } from '../../src/utils/blog-gap-fill';
-import { BLOG_WRITER_ROLE_KEYS } from '../../src/constants/roles';
+import { BLOG_WRITER_ROLE_KEYS, SMM_ROLE_KEYS } from '../../src/constants/roles';
 import { resolveHorizonDays, MIN_HORIZON_DAYS, MAX_HORIZON_DAYS } from '../../src/config/posting-cadence';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -132,9 +132,14 @@ export default withLambda(async (event) => {
             onboardingContext: assistant.onboardingContext,
             draftHorizonDays: days,
         };
+        // Exhaustive role routing, for the reason spelled out in update-assistant-context.ts: the
+        // social gap-fill judges an assistant against a POSTING schedule, which only a Social Media
+        // Manager has. Anything else falls through to its own engine (or to none).
         const result = isBlogWriter
             ? await enqueueBlogGapFill(db, common)
-            : await enqueueScheduleGapFill(db, { ...common, configuration: assistant.configuration });
+            : SMM_ROLE_KEYS.includes(assistant.roleKey ?? '')
+                ? await enqueueScheduleGapFill(db, { ...common, configuration: assistant.configuration })
+                : { enqueued: 0 };
         gapFillEnqueued = result.enqueued;
 
         if (gapFillEnqueued > 0) {

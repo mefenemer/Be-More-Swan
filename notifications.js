@@ -263,6 +263,19 @@ window.NotifKit = (function () {
                 window.routeToAssistantDetail?.(meta.assistantId);
             } };
         }
+        // "Your assistant is not drafting" — every one of these names a setting the user has to
+        // change, and that setting lives on exactly one screen: the assistant's Operational Setup
+        // card. None of them had an entry here, so they fell through to the generic action fallback
+        // at the bottom, which drops the user on the DASHBOARD with no trail back to the control the
+        // message just told them to open. A card that states a fix and then hides it is most of the
+        // way to not notifying anyone. (Reported in prod for a Newsletter Assistant, 20 Aug 2026.)
+        if ((notif.type === 'autopilot_schedule_unreadable' || notif.type === 'autopilot_setup_blocked'
+            || notif.type === 'content_library_empty') && meta.assistantId) {
+            return { label: 'Open settings', run: () => {
+                window._assistantDetailInitialTab = 'operation';
+                window.routeToAssistantDetail?.(meta.assistantId);
+            } };
+        }
         if ((notif.type === 'post_draft_ready' || notif.type === 'ai_review') && meta.postId) {
             return { label: 'Review draft', run: () => window.loadView?.('review-queue', { postId: meta.postId }) };
         }

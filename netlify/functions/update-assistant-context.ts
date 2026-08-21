@@ -8,7 +8,7 @@ import { retryBlockedAssistants } from '../../src/utils/retry-provisioning';
 import { assembleBlueprint } from '../../src/utils/blueprint';
 import { enqueueScheduleGapFill } from '../../src/utils/schedule-gap-fill';
 import { enqueueBlogGapFill } from '../../src/utils/blog-gap-fill';
-import { BLOG_WRITER_ROLE_KEYS } from '../../src/constants/roles';
+import { BLOG_WRITER_ROLE_KEYS, SMM_ROLE_KEYS } from '../../src/constants/roles';
 import { MIN_HORIZON_DAYS, MAX_HORIZON_DAYS } from '../../src/config/posting-cadence';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -213,9 +213,19 @@ export default withLambda(async (event) => {
                     onboardingContext: target.onboardingContext,
                     draftHorizonDays: target.draftHorizonDays,
                 };
+                // Route by role, and route EXHAUSTIVELY: the social gap-fill used to be the else
+                // branch, so every non-blog role — Newsletter, Lead Generator, Campaign — was run
+                // through the social posting engine on every save. It reads posting_frequency, and
+                // resolvePostingSchedule substitutes a default cadence when there isn't one, so a
+                // role that has no posting schedule at all was still judged against one. That is how
+                // a Newsletter Assistant on a monthly cadence was told its POSTING schedule could
+                // not be read (prod, 20 Aug 2026). Roles with their own engine (Newsletter's
+                // draft-newsletter-issues cron) or no drafting at all now enqueue nothing here.
                 const result = BLOG_WRITER_ROLE_KEYS.includes(target.roleKey)
                     ? await enqueueBlogGapFill(db, common)
-                    : await enqueueScheduleGapFill(db, { ...common, configuration: target.configuration });
+                    : SMM_ROLE_KEYS.includes(target.roleKey)
+                        ? await enqueueScheduleGapFill(db, { ...common, configuration: target.configuration })
+                        : { enqueued: 0 };
                 draftsQueued = result.enqueued;
             } catch (e) {
                 console.warn('[update-assistant-context] gap-fill failed (context still saved):',
