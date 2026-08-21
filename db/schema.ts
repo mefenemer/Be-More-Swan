@@ -4201,6 +4201,50 @@ export const audienceConsentEvents = pgTable("audience_consent_events", {
 // Keys that let a tenant's own systems write into their audience. ⚠️ Stored as a HASH — a bearer
 // credential that can subscribe people must not be readable from a row or a backup. `keyPrefix` is
 // kept in clear only so two keys can be told apart in a list. See db/tenant-api-keys.sql.
+// Telling a tenant's own systems what just happened. ⚠️ The signing secret is NOT here — it must be
+// readable to sign with, so it lives in the vault under `secretRef`. See db/webhooks.sql for why the
+// retry story is designed around an existing sweep rather than a new schedule.
+export const webhookEndpoints = pgTable("webhook_endpoints", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  url: text("url").notNull(),
+  description: text("description"),
+  events: text("events").notNull().default("contact.subscribed,contact.unsubscribed"),
+  secretRef: text("secret_ref").notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  // Reset to zero by any success; auto-disable counts this.
+  consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+  disabledAt: timestamp("disabled_at"),
+  disabledReason: text("disabled_reason"),
+  lastSuccessAt: timestamp("last_success_at"),
+  lastError: text("last_error"),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("webhook_endpoints_org_idx").on(t.organisationId, t.isActive),
+]);
+
+export const webhookDeliveries = pgTable("webhook_deliveries", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  endpointId: integer("endpoint_id").notNull().references(() => webhookEndpoints.id, { onDelete: "cascade" }),
+  event: text("event").notNull(),
+  // ⚠️ The exact body that was signed. A retry sends the SAME bytes — rebuilding it later would
+  // re-read a contact who has since changed, and describe a state that never existed.
+  payload: jsonb("payload").notNull(),
+  status: text("status").notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  nextAttemptAt: timestamp("next_attempt_at").defaultNow().notNull(),
+  responseStatus: integer("response_status"),
+  lastError: text("last_error"),
+  deliveredAt: timestamp("delivered_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("webhook_deliveries_due_idx").on(t.status, t.nextAttemptAt),
+  index("webhook_deliveries_endpoint_idx").on(t.endpointId, t.createdAt),
+]);
+
 export const apiKeys = pgTable("api_keys", {
   id: serial("id").primaryKey(),
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),

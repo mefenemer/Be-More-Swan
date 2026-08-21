@@ -31,6 +31,7 @@ import { MONTHLY_GAP_DAYS } from './audience-preferences';
 import { buildSegmentCondition, parseRules } from './audience-segment-rules';
 import { decideAndRelease, prepareAbSample } from './newsletter-ab';
 import { dueAtForRecipient, resolveSendTimezone } from './newsletter-schedule';
+import { deliverPending, emitWebhook } from './webhooks';
 import { checkAudienceConsentBulk, type AudienceSkipReason } from './audience-consent';
 import { renderForRecipient, newsletterUnsubscribeUrl, type IssueSnapshot } from './newsletter-render';
 import { buildFromAddress } from './sending-domain';
@@ -668,13 +669,24 @@ export async function sendDueIssues(db: Db, opts: { baseUrl: string; now?: Date;
                     .select({ delivered: sql<number>`count(*)::int` })
                     .from(newsletterSends)
                     .where(and(eq(newsletterSends.issueId, claimed.id), inArray(newsletterSends.status, ['sent', 'delivered'])));
-                await db.update(newsletterIssues).set({
+                const [finished] = await db.update(newsletterIssues).set({
                     status: 'sent',
                     sentAt: new Date(),
                     recipientCount: delivered,
                     updatedAt: new Date(),
-                }).where(and(eq(newsletterIssues.id, claimed.id), eq(newsletterIssues.status, 'sending')));
+                }).where(and(eq(newsletterIssues.id, claimed.id), eq(newsletterIssues.status, 'sending')))
+                    .returning({ id: newsletterIssues.id });
                 out.completed++;
+
+                // Only when THIS tick was the one that finished it — the status guard above means a
+                // losing race returns nothing, and two ticks must not announce the same send twice.
+                if (finished) {
+                    await emitWebhook(db, {
+                        organisationId: claimed.organisationId,
+                        event: 'newsletter.sent',
+                        data: { issueId: claimed.id, subject: claimed.subject, recipients: delivered },
+                    });
+                }
             } else {
                 // Left in 'sending' on purpose — the next tick resumes at the first queued row.
                 await db.update(newsletterIssues).set({ updatedAt: new Date() }).where(eq(newsletterIssues.id, claimed.id));
@@ -689,6 +701,16 @@ export async function sendDueIssues(db: Db, opts: { baseUrl: string; now?: Date;
             }).where(eq(newsletterIssues.id, id)).catch(() => undefined);
             out.errors.push({ issueId: id, error: message });
         }
+    }
+
+    // ⚠️ WEBHOOK RETRIES RIDE THIS SWEEP rather than a schedule of their own — see the header of
+    // src/utils/webhooks.ts. Last, and never allowed to throw: a webhook backlog must not stop
+    // newsletters going out, which is the thing this function is actually for.
+    try {
+        const webhooks = await deliverPending(db, { now });
+        if (webhooks.attempted) console.log('[newsletter-send] webhook retries', JSON.stringify(webhooks));
+    } catch (err) {
+        console.error('[newsletter-send] webhook drain failed', err);
     }
 
     return out;

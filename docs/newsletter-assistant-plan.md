@@ -504,6 +504,71 @@ first three can all look healthy while the writing wears people out.
 
 ---
 
+## 11t. Outbound webhooks (2026-08-20)
+
+1. **Apply `db/webhooks.sql`** — staging, then prod. Two tables: `webhook_endpoints` and
+   `webhook_deliveries`.
+2. ⚠️ **SQL first, then deploy.**
+3. **No new scheduled function** — that is the point of the design, not a coincidence.
+
+### ⚠️ Why this was deferred twice, and what actually changed
+
+Outbound webhooks need retries; retries need something on a schedule; and a schedule whose failure
+is SILENT has taken two features out in this codebase already. Building them anyway without
+answering that would have been shipping the thing the deferral was about. So the retry story IS the
+design, and it is three properties:
+
+1. **The first attempt is inline**, at the moment of the event. Most deliveries succeed there, so
+   the queue holds failures rather than traffic — which is what makes a backlog mean something.
+2. **Retries drain on an existing sweep** — `sendDueIssues`, every five minutes. Nothing new to stop
+   running. A test asserts `deliverPending` has exactly ONE caller, so a future scheduled function
+   for it fails the suite rather than passing review.
+3. ⚠️ **A failing endpoint becomes the tenant's problem, visibly.** After 20 consecutive failures it
+   is switched off with a reason, and the endpoint list shows the pending/failed/delivered counts
+   for the last week. The failure mode is not "deliveries quietly stop" — it is "you are told your
+   endpoint is broken". Re-enabling clears the counter, or a tenant who has just fixed their server
+   would watch it die again on the next failure for reasons that predate the fix.
+
+The drain runs LAST in the sweep and inside its own try/catch: a webhook backlog must never stop a
+newsletter, which is what that function is actually for.
+
+### One emit point
+
+`setContactStatus` is where the unsubscribe page, the provider's bounce and complaint callbacks, the
+audience page and the API all converge — so that is where events are emitted. Per-caller emitting
+would be four places to remember and one to forget, and the forgotten one would be silent. Emitted
+only when something actually CHANGED (a repeated unsubscribe is one event) and OUTSIDE the
+transaction, because a slow receiver must not hold one open. `newsletter.sent` is emitted from the
+status-guarded completion, so two overlapping ticks cannot announce the same send twice.
+
+### ⚠️ We are POSTing to a URL a stranger typed
+
+`isDeliverableUrl` is a fence, not a validation nicety. Refused: anything but https (these messages
+carry subscriber email addresses); `localhost` and bare hostnames; loopback, RFC1918 and link-local
+literals — `169.254.169.254` being the cloud metadata service and the single most valuable target of
+an SSRF primitive. Checked before the URL is STORED as well as before it is called.
+
+⚠️ **The residual gap is named rather than assumed away**: a hostname that RESOLVES to a private
+address needs a lookup at delivery time and is not caught. It is narrowed by the https requirement,
+since a valid certificate for a name pointing at 10.x is not something a casual attacker obtains.
+
+### Signing
+
+HMAC-SHA256 over `timestamp.body`, sent as `X-BMS-Signature` with `X-BMS-Timestamp`. ⚠️ The timestamp
+is INSIDE the signed string, not merely a header beside it — signing the body alone lets anyone who
+captured one request replay it for ever. `X-BMS-Delivery-Id` is the idempotency key, because
+at-least-once is the honest promise and a receiver needs something stable to deduplicate on.
+
+⚠️ **The signing secret is in the vault, not in the table.** It must be readable to sign with, unlike
+an API key which is only ever compared — so it cannot be hashed. It is shown once at creation and on
+rotation, and an unsigned delivery is never sent: a receiver that cannot verify has no way to tell
+our request from anybody else's.
+
+A retry sends **the same bytes**. Rebuilding the payload later would re-read a contact who has since
+changed and describe a state that never existed at that moment.
+
+---
+
 ## 11s. Deliverability tooling (2026-08-20)
 
 **No migration.** Everything here is computed from data we already hold, plus one DNS lookup.
@@ -630,14 +695,14 @@ explain. Erasure is a decision, not a sync artefact.
 subscribed" is satisfied by an address we never had, and a 404 there pushes callers into ignoring
 the response entirely.
 
-### ⚠️ Outbound webhooks are NOT in this
+### ⚠️ Outbound webhooks are not in THIS section — see §11t
 
 Appendix B's row names an API *or webhooks*, and only the API is built. Webhooks need an endpoint
 registry, a signing secret, delivery attempts with backoff, and a retry worker — and a retry worker
 is a schedule whose failure is silent, which is the thing this codebase has been bitten by twice.
 The inbound half is what the row's own description asks for ("subscribers can only arrive through
-the form or a CSV"), and it stands on its own. The outbound half should be built when somebody
-actually needs it, with the retry story designed first rather than bolted on.
+the form or a CSV"), and it stands on its own. ✅ The outbound half was built afterwards, in §11t,
+with the retry story designed first exactly as this paragraph asked.
 
 ---
 
@@ -1308,7 +1373,7 @@ business tool and not worth chasing.
 | ~~**No per-link click reporting**~~ ✅ **CLOSED 2026-08-20** | `last_clicked_url` held one url per recipient, so "which link worked" was unanswerable. Every issue now reports its links by how many PEOPLE clicked each (and how many times), with every recipient's unsubscribe url collapsed to a single labelled row rather than thousands. | Done — `db/newsletter-link-clicks.sql` |
 | ~~**No custom fields in practice**~~ ✅ **CLOSED 2026-08-20** | `custom_fields` existed on the contact and nothing read or wrote it. A tenant can now define their own columns, fill them from an import or by hand, filter segments on them, and personalise an email with them — with a bare custom merge tag refused rather than rendered blank. Text only; number and date are reserved in the schema and refused by the API. | Done — `db/audience-custom-fields.sql` |
 | ~~**No send-time/timezone handling**~~ ✅ **CLOSED 2026-08-20** | Everything sent on a UTC clock, so a scheduled "9:00" was 09:00 UTC and nothing said so. A scheduled time is now read and stamped in the tenant's own zone, and an issue can optionally be delivered at each subscriber's local time — with "we do not know their zone" kept as an honest, counted answer rather than guessed from an IP. | Done — `db/newsletter-send-time.sql`, `src/utils/newsletter-schedule.ts` |
-| **No tenant-facing API or webhooks** → ✅ **API BUILT 2026-08-20**, webhooks deliberately not | Subscribers could only arrive through the form or a CSV. `/api/v1/contacts` now takes them from a shop, a booking system or a Zapier step — with a declared consent basis on every write, and a refusal to resurrect anybody who opted out that is REPORTED rather than silent. ⚠️ Outbound webhooks are still open: they need a retry worker, and a retry worker is a schedule whose failure is silent. | API done — `db/tenant-api-keys.sql`; webhooks unbuilt |
+| ~~**No tenant-facing API or webhooks**~~ ✅ **BOTH CLOSED 2026-08-20** | Subscribers could only arrive through the form or a CSV. `/api/v1/contacts` now takes them from a shop, a booking system or a Zapier step — with a declared consent basis on every write, and a refusal to resurrect anybody who opted out that is REPORTED rather than silent. Outbound webhooks followed in §11t, once the retry story could be designed around an existing sweep rather than a new schedule. | Done — `db/tenant-api-keys.sql`, `db/webhooks.sql` |
 | **No deliverability tooling** → ✅ **the honest half BUILT 2026-08-20** | List health against Gmail's published complaint and bounce thresholds, a DMARC lookup, warm-up guidance for a new domain, and named structural findings on a draft. ⚠️ Deliberately NOT built: a spam score (implies a model of a filter nobody outside Google has) and seed testing (needs real mailboxes somebody owns and warms). Saying so beats shipping a number people would act on. | Done — `src/utils/deliverability.ts`, `src/utils/dmarc-check.ts` |
 
 ### Where we are already ahead, and should stay

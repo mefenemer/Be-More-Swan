@@ -15,6 +15,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { audienceConsentEvents, audienceContactSegments, audienceContacts } from '../../db/schema';
 import { cleanName, looksLikeEmail, normaliseEmail } from './audience-contacts';
+import { emitWebhook, type WebhookEvent } from './webhooks';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -200,7 +201,7 @@ export async function setContactStatus(
     // string is cast straight to timestamp, matching every other write on this row.
     const nowIso = now.toISOString();
 
-    return db.transaction(async (tx: any) => {
+    const result = await db.transaction(async (tx: any) => {
         const [updated] = await tx
             .update(audienceContacts)
             .set({
@@ -234,7 +235,35 @@ export async function setContactStatus(
 
         return { changed: !!updated, contactId: updated?.id ?? null };
     });
+
+    // ⚠️ ONE EMIT POINT, and this is why it lives here rather than at the five call sites. Every
+    // status change in the product goes through setContactStatus — the unsubscribe page, the
+    // provider webhook's bounces and complaints, the audience page, the API. A webhook emitted per
+    // caller would be four places to remember and one to forget, and the one forgotten would be
+    // silent. Emitted only when something actually CHANGED, so a repeated unsubscribe is one event.
+    //
+    // After the transaction, deliberately: a slow or failing receiver must not hold a database
+    // transaction open, and emitWebhook never throws.
+    if (result.changed) {
+        const event = WEBHOOK_EVENT_FOR_STATUS[args.status];
+        if (event) {
+            await emitWebhook(db, {
+                organisationId: args.organisationId,
+                event,
+                data: { email, status: args.status, contactId: result.contactId, reason: args.event },
+            });
+        }
+    }
+    return result;
 }
+
+/** Only these four statuses are worth telling somebody else about. */
+const WEBHOOK_EVENT_FOR_STATUS: Record<string, WebhookEvent | undefined> = {
+    subscribed: 'contact.subscribed',
+    unsubscribed: 'contact.unsubscribed',
+    bounced: 'contact.bounced',
+    complained: 'contact.complained',
+};
 
 /** Put a contact in a segment. Idempotent — adding twice is not an error anyone should see. */
 export async function addToSegment(db: Db, contactId: number, segmentId: number, addedBy?: number | null): Promise<void> {
