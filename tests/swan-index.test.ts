@@ -433,12 +433,26 @@ check('⚠️ staging lives AT the preview prefix — the dedupe rule must not 4
     }
 });
 
-check('netlify.toml carries the CDN backstop for the preview prefix', () => {
-    // Two independent mechanisms, because the function-level one alone already failed once.
+check('the noindex header is stamped by the FUNCTION, at one exit point', () => {
+    // The first version of this test asserted netlify.toml contained a [[headers]] rule. It did —
+    // and the rule was inert, because Netlify header rules do not reach a response produced by a
+    // function behind a status-200 rewrite. A source-scan that checks a guard EXISTS rather than
+    // that it DOES anything is the false-green trap tests/landmark.ts documents; this one asserts
+    // the mechanism that was measured working.
+    const fn = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..',
+        'netlify/functions/swan-index-page.ts'), 'utf8');
+    assert.match(fn, /'X-Robots-Tag': 'noindex, nofollow'/, 'the function must set the header itself');
+    // One exit point, so a page added later cannot forget it.
+    assert.match(fn, /return origin\.indexable \? res : noindexHeader\(res\);/,
+        'every response must pass through the same gate');
+    assert.ok(
+        landmark(fn, 'const res = await serve(') < landmark(fn, 'return origin.indexable ? res'),
+        'the header is applied after the response is built, not per call site',
+    );
+
     const toml = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'netlify.toml'), 'utf8');
-    const block = toml.slice(landmark(toml, 'for = "/index-preview*"'));
-    assert.match(block.slice(0, 200), /X-Robots-Tag\s*=\s*"noindex, nofollow"/,
-        'the /index-preview* header rule must set X-Robots-Tag');
+    assert.ok(!/for = "\/index-preview\*"/.test(toml),
+        'the inert [[headers]] rule must stay removed — it reads as a guard and is not one');
 });
 
 console.log(`\n${passed} checks passed.`);

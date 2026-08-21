@@ -216,19 +216,19 @@
   status = 200
   force = true
 
-# ⚠️ The preview prefix must never be indexed, and this header is the BACKSTOP for that — the
-# primary guard is robotsFor() in swan-index-page.ts, which refuses an indexable meta tag anywhere
-# but the publication's own host.
+# ⚠️ THERE IS NO [[headers]] RULE FOR /index-preview*, AND ADDING ONE WOULD NOT WORK.
 #
-# Two independent mechanisms because one was not enough: between the code shipping and DNS cutting
-# over, the front page answered on BOTH theswanindex.com/ and bemoreswan.com/index-preview, each
-# `index,follow` and each self-canonical — two indexable copies of one page on two domains, which is
-# the exact duplicate-content failure this publication exists to spare its authors. A header rule
-# holds even if the function's own logic is changed by someone who does not know why it is there.
-[[headers]]
-  for = "/index-preview*"
-  [headers.values]
-    X-Robots-Tag = "noindex, nofollow"
+# One was added here on 2026-08-21 as a CDN-level backstop for the noindex guard, and measuring it
+# on prod showed it never fired: Netlify header rules apply to STATIC files (/assets.html and
+# /help-content.html both return their configured X-Robots-Tag) but NOT to a response produced by a
+# function behind a `status = 200` rewrite — which is every path under /index-preview. The rule read
+# as a guard and guarded nothing, which is worse than its absence.
+#
+# The backstop lives in the function instead: swan-index-page.ts stamps
+# `X-Robots-Tag: noindex, nofollow` on every response whose origin is not indexable, at a single
+# exit point. That covers the RSS feed too, which is XML and has nowhere to put a <meta> tag.
+#
+# Same caveat applies to any future attempt to set headers on /b/*, /blog/:slug or /unsubscribe.
 
 # ⚠️ TWO app-wide rules reach theswanindex.com and neither can be scoped by host:
 #

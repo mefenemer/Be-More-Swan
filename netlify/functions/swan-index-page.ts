@@ -158,16 +158,42 @@ function notFound(sections: Awaited<ReturnType<typeof listSections>>, baseUrl: s
     }));
 }
 
+/** Shape of every response this module returns. */
+interface Result { statusCode: number; headers?: Record<string, string>; body: string }
+
+/**
+ * Stamp `X-Robots-Tag: noindex, nofollow` onto a response.
+ *
+ * The SECOND mechanism behind robotsFor(), and it has to live here rather than in netlify.toml.
+ * A `[[headers]] for = "/index-preview*"` rule was tried first and is INERT: measured on prod
+ * 2026-08-21, header rules apply to static files (/assets.html and /help-content.html both carry
+ * their configured X-Robots-Tag) but NOT to a response produced by a function behind a
+ * `status = 200` rewrite — which is every page here. The rule read as a guard and guarded nothing.
+ *
+ * It earns its place because a `<meta>` tag cannot mark a non-HTML response, and the feed is XML.
+ * /index-preview/feed.xml served the whole publication off-host with no directive of any kind.
+ */
+function noindexHeader(res: Result): Result {
+    return { ...res, headers: { ...(res.headers || {}), 'X-Robots-Tag': 'noindex, nofollow' } };
+}
+
 export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     // A Netlify rewrite is a 200, so rawUrl still carries the URL the visitor actually requested —
     // the only place the real path survives. Same reason blog-page.ts reads it.
     const pathname = event.rawUrl ? new URL(event.rawUrl).pathname : (event.path || '/');
+    const origin = resolveOrigin(pathname, event.rawUrl);
+
+    // One exit point for the header, so a page added later cannot forget it.
+    const res = await serve(event, pathname, origin);
+    return origin.indexable ? res : noindexHeader(res);
+});
+
+async function serve(event: HandlerEvent, pathname: string, origin: Origin): Promise<Result> {
     const route = parseSwanRoute(pathname);
 
     const db = getDb();
-    const origin = resolveOrigin(pathname, event.rawUrl);
     const { base, baseUrl } = origin;
     const sections = await listSections(db);
 
@@ -402,4 +428,4 @@ ${entries}
     }
 
     return notFound(sections, baseUrl, base);
-});
+}
