@@ -1,7 +1,7 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, gte, sql, count, inArray } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, assistantRecords, contentGenerationJobs, goals, masterAssistants, scheduledPosts, userProfiles } from '../../db/schema';
+import { aiAssistants, assistantRecords, blogPosts, contentGenerationJobs, goals, masterAssistants, newsletterIssues, scheduledPosts, userProfiles } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { RETENTION_DELETED_SQL_PATH } from '../../src/config/lead-retention';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
@@ -55,7 +55,7 @@ export default withLambda(async (event) => {
         const periodStart = roiPeriodStart(period);
 
         // Run goals + post metrics + hourly rate in parallel
-        const [goalRows, postRows, recordRows, activeJobRows, profileRow, mult, roiByAssistant] = await Promise.all([
+        const [goalRows, postRows, recordRows, blogRows, newsletterRows, activeJobRows, profileRow, mult, roiByAssistant] = await Promise.all([
             // SMART Goals AC2.1.1 — the goal block on the dashboard / My Assistants card.
             //
             // Selects the ROWS rather than a GROUP BY tally. The card shows one headline goal with a
@@ -132,6 +132,50 @@ export default withLambda(async (event) => {
                   ))
                   .groupBy(assistantRecords.aiAssistantId, assistantRecords.recordType, assistantRecords.approvalStatus)
                 : Promise.resolve([] as { assistantId: number; recordType: string; approvalStatus: string; c: number }[]),
+
+            // Per-assistant blog_posts counts, grouped by status.
+            //
+            // ── Why this query exists ────────────────────────────────────────────────────────
+            // Same shape of hole the recordRows query above was written to close, one role over. A
+            // Blog Writer writes to blog_posts and NEVER to scheduled_posts or assistant_records, so
+            // both existing strips were empty for it — and because the "~Xh saved / £Y ROI" footer
+            // is rendered INSIDE the counts strip, a card with no counts also had no ROI line. The
+            // ROI half was never missing from the data: roi-activity.ts has priced blog posts and
+            // newsletter issues since 2026-08-20 and countRoiActivityByAssistant below already
+            // returns them per assistant. It was behind a question about posts and records.
+            //
+            // Grouped in ONE query for the whole org, like postRows and recordRows.
+            assistantIds.length > 0
+                ? db.select({
+                    assistantId: blogPosts.assistantId,
+                    status: blogPosts.status,
+                    c: sql<number>`count(*)::int`,
+                  })
+                  .from(blogPosts)
+                  .where(and(
+                      eq(blogPosts.organisationId, orgId),
+                      inArray(blogPosts.assistantId, assistantIds),
+                  ))
+                  .groupBy(blogPosts.assistantId, blogPosts.status)
+                : Promise.resolve([] as { assistantId: number | null; status: string; c: number }[]),
+
+            // Per-assistant newsletter_issues counts, grouped by status. Newsletter issues mirror
+            // blog posts deliberately (db/newsletter.sql shares the status vocabulary), so this is
+            // the same query one table over — the only divergence is 'sent'/'sending' where blog
+            // has 'published'/'publishing'.
+            assistantIds.length > 0
+                ? db.select({
+                    assistantId: newsletterIssues.assistantId,
+                    status: newsletterIssues.status,
+                    c: sql<number>`count(*)::int`,
+                  })
+                  .from(newsletterIssues)
+                  .where(and(
+                      eq(newsletterIssues.organisationId, orgId),
+                      inArray(newsletterIssues.assistantId, assistantIds),
+                  ))
+                  .groupBy(newsletterIssues.assistantId, newsletterIssues.status)
+                : Promise.resolve([] as { assistantId: number | null; status: string; c: number }[]),
 
             // Operational signal (Epic 1 AC1.1.2): mid-flight generation jobs per assistant, same
             // "active" statuses the detail page's Recent Activity loader uses (get-assistant-activity.ts)
@@ -284,6 +328,58 @@ export default withLambda(async (event) => {
             }
         }
 
+        // --- Long-form metrics per assistant (blog posts / newsletter issues) ---
+        //
+        // The third shape of activity strip. Kept as ONE code path over two tables because the two
+        // are the same pipeline with different verbs: a draft is written, waits for a human, then
+        // either goes out to a website or to a mailing list. Only the wording differs, and that is
+        // carried by `kind` rather than by a second copy of this loop.
+        //
+        // ⚠️ `total` counts every row, INCLUDING rejected and archived ones — deliberately the same
+        // rule postMetrics applies to scheduled_posts, where a rejected draft still counts as
+        // "created". The assistant did write it. The ROI footer beneath uses the narrower
+        // roi-activity.ts rule (discarded statuses excluded), exactly as it already does on a
+        // Social Media Assistant card, so the two lines mean what they have always meant.
+        //
+        // The "in flight" bucket is the social SCHEDULED_STATUSES set plus this pipeline's own
+        // mid-publish state ('publishing' / 'sending'). Those are transient — a card that dropped
+        // them would show a post as neither waiting nor out.
+        const LONGFORM_IN_FLIGHT = new Set([...SCHEDULED_STATUSES, 'publishing', 'sending']);
+        type LongformMetric = { kind: 'blog' | 'newsletter'; total: number; inFlight: number; delivered: number };
+        const longformMetrics = new Map<number, LongformMetric>();
+
+        const foldLongform = (
+            rows: { assistantId: number | null; status: string; c: number }[],
+            kind: 'blog' | 'newsletter',
+            deliveredStatus: string,
+        ) => {
+            for (const r of rows) {
+                if (r.assistantId == null) continue;
+                let m = longformMetrics.get(r.assistantId);
+                // An assistant only ever writes to one of the two tables, so the first `kind` seen
+                // wins rather than the last — a stray row on the other table cannot relabel a
+                // strip that is already describing the work this assistant actually does.
+                if (!m) {
+                    m = { kind, total: 0, inFlight: 0, delivered: 0 };
+                    longformMetrics.set(r.assistantId, m);
+                } else if (m.kind !== kind) {
+                    continue;
+                }
+                m.total += r.c;
+                if (LONGFORM_IN_FLIGHT.has(r.status)) m.inFlight += r.c;
+                if (r.status === deliveredStatus) m.delivered += r.c;
+
+                // Same fix the records loop above applies: the status pill's "Awaiting Human
+                // Review" sub-state read pending_approval POSTS only, so a Blog Writer with a
+                // dozen drafts waiting on a human said "Idle".
+                if (r.status === 'pending_approval') {
+                    pendingReviewCount.set(r.assistantId, (pendingReviewCount.get(r.assistantId) || 0) + r.c);
+                }
+            }
+        };
+        foldLongform(blogRows, 'blog', 'published');
+        foldLongform(newsletterRows, 'newsletter', 'sent');
+
         const activeJobCount = new Map<number, number>();
         for (const r of activeJobRows) {
             if (r.assistantId == null) continue;
@@ -329,6 +425,10 @@ export default withLambda(async (event) => {
                 // Present only for roles that file records. The card renders one strip or the
                 // other, never both — see generateAssistantCardHTML in assistants.js.
                 recordMetrics: recordMetric,
+                // Present only for the long-form roles (Blog Writer, Newsletter Assistant). Third
+                // and last of the mutually exclusive strips; `kind` tells the card which nouns to
+                // use. Null for every other role.
+                longformMetrics: longformMetrics.get(a.id) ?? null,
                 // Feeds the same "working" sub-state refinement (Executing Task / Awaiting
                 // Human Review / Idle) the assistant-detail pill uses, so the list card matches.
                 opSignals: {

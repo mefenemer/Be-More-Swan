@@ -304,10 +304,48 @@ window.generateAssistantCardHTML = function(assistant) {
                     </span>
                 </div>` : '';
 
+    // ── The activity strip, for the LONG-FORM roles (Blog Writer, Newsletter Assistant) ─────
+    //
+    // ⚠️ The third table this card has to know about, and the reason it was added: a Blog Writer
+    // writes to blog_posts and a Newsletter Assistant to newsletter_issues — never to
+    // scheduled_posts, never to assistant_records. So BOTH strips above stayed empty for them, and
+    // because the "~Xh saved / £Y ROI" footer is rendered inside the strip, their cards carried no
+    // ROI line either, while the Social Media Assistant and Lead Generator beside them carried
+    // everything. The ROI figures were never missing: roi-activity.ts prices blog posts and
+    // newsletter issues, and get-assistants sends hoursSaved/gbpSaved for every role. They were
+    // simply behind a question about posts and records.
+    //
+    // One branch for both roles, keyed on `lm.kind` from the server: they are the same pipeline
+    // (write → wait for a human → send it somewhere), so only the last verb differs.
+    const lm = assistant.longformMetrics || null;
+    const hasLongformActivity = !!lm && lm.total > 0;
+
+    const _LONGFORM_WORDS = {
+        blog:       { total: 'written', inFlight: 'scheduled', delivered: 'published', totalTitle: 'Blog posts drafted by this assistant', deliveredTitle: 'Blog posts live on your site' },
+        newsletter: { total: 'written', inFlight: 'scheduled', delivered: 'sent',      totalTitle: 'Newsletter issues drafted by this assistant', deliveredTitle: 'Issues delivered to your subscribers' },
+    };
+    const lWords = (lm && _LONGFORM_WORDS[lm.kind]) || _LONGFORM_WORDS.blog;
+
+    const longformCountsHtml = hasLongformActivity ? `
+                <div class="flex items-center gap-3 flex-wrap">
+                    <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="${lWords.totalTitle}">
+                        <svg class="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                        ${lm.total} ${lWords.total}
+                    </span>
+                    <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="Scheduled or awaiting your approval">
+                        <svg class="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                        ${lm.inFlight} ${lWords.inFlight}
+                    </span>
+                    <span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-700" title="${lWords.deliveredTitle}">
+                        <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        ${lm.delivered} ${lWords.delivered}
+                    </span>
+                </div>` : '';
+
     // Posts win when an assistant somehow has both: a role that publishes is described by what it
-    // published. In practice the two are mutually exclusive — the registry gives a role either a
-    // posts queue or a records queue, never both.
-    const countsHtml = postCountsHtml || recordCountsHtml;
+    // published. In practice the three are mutually exclusive — the registry gives a role a posts
+    // queue, a records queue or a long-form queue, never two of them.
+    const countsHtml = postCountsHtml || recordCountsHtml || longformCountsHtml;
 
     const metricsHtml = countsHtml ? `
         <div class="mt-3 mb-4 p-3 rounded-xl bg-gray-50 border border-gray-100">
