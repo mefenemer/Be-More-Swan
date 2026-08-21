@@ -8,6 +8,7 @@ import { hashnodeAdapter } from './hashnode';
 import { wordpressAdapter } from './wordpress';
 import { ghostAdapter } from './ghost';
 import { wordpresscomAdapter } from './wordpresscom';
+import { swanindexAdapter } from './swanindex';
 
 const ADAPTERS: Record<BlogDestinationId, BlogDestinationAdapter> = {
     devto: devtoAdapter as BlogDestinationAdapter,
@@ -15,6 +16,8 @@ const ADAPTERS: Record<BlogDestinationId, BlogDestinationAdapter> = {
     wordpress: wordpressAdapter as BlogDestinationAdapter,
     ghost: ghostAdapter as BlogDestinationAdapter,
     wordpresscom: wordpresscomAdapter as BlogDestinationAdapter,
+    // First-party: same database, no credentials. See swanindex.ts for why it is an adapter.
+    swanindex: swanindexAdapter as BlogDestinationAdapter,
 };
 
 export const BLOG_DESTINATION_IDS = Object.keys(ADAPTERS) as BlogDestinationId[];

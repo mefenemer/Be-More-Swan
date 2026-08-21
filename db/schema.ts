@@ -4624,3 +4624,101 @@ export const newsletterSequenceEnrolments = pgTable("newsletter_sequence_enrolme
 // Relational-query definitions for the chat tables live in db/relations.ts
 // (drizzle-orm v2 `defineRelations` API — this drizzle version has no per-table
 // `relations()` export).
+
+// ────────────────────────────────────────────────────────────────────────────
+// The Swan Index — first-party syndication destination (theswanindex.com).
+// Schema + the reasoning behind it: db/swan-index.sql. The short version:
+// swanIndexPosts is a CURATION LAYER over blogPosts, not a copy of it. Only the
+// fields the list queries sort/filter on are denormalised here; the body is read
+// from blogPosts.publishedPayload at render time so an author's edit or unpublish
+// is reflected without a sync job.
+// ────────────────────────────────────────────────────────────────────────────
+export const swanIndexProfiles = pgTable("swan_index_profiles", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().unique().references(() => organisations.id, { onDelete: "cascade" }),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+
+  handle: text("handle").notNull(),                          // URL segment: /@handle
+  displayName: text("display_name").notNull(),
+  roleTitle: text("role_title"),
+  companyName: text("company_name"),
+  bio: text("bio"),
+  avatarAssetId: integer("avatar_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
+  siteUrl: text("site_url"),                                 // the author's own domain — the point of the network
+
+  status: text("status").notNull().default("active"),        // active | suspended | withdrawn
+  frontPageTier: boolean("front_page_tier").notNull().default(false),
+  // Server-side spam-farm control. NULL = uncapped (staff/partner only).
+  monthlyPostCap: integer("monthly_post_cap").default(8),
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  // Case-insensitive: /@AcmeCorp and /@acmecorp must not be two publications.
+  uniqueIndex("swan_index_profiles_handle_unique").on(sql`lower(${t.handle})`),
+  index("swan_index_profiles_status_idx").on(t.status),
+  check("swan_index_profiles_status_check", sql`${t.status} IN ('active','suspended','withdrawn')`),
+  check("swan_index_profiles_handle_check", sql`${t.handle} ~ '^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$'`),
+  check("swan_index_profiles_cap_check", sql`${t.monthlyPostCap} IS NULL OR ${t.monthlyPostCap} > 0`),
+]);
+
+export const swanIndexPosts = pgTable("swan_index_posts", {
+  id: serial("id").primaryKey(),
+  // UNIQUE — re-syndicating updates this row instead of duplicating, which is what makes the
+  // adapter's publish() idempotent in the same way every external adapter's is.
+  blogPostId: integer("blog_post_id").notNull().unique().references(() => blogPosts.id, { onDelete: "cascade" }),
+  profileId: integer("profile_id").notNull().references(() => swanIndexProfiles.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+
+  status: text("status").notNull().default("pending"),       // pending|live|featured|rejected|withdrawn
+  section: text("section"),
+  featuredRank: integer("featured_rank"),                    // front-page order; 1 = lead story
+  editorNote: text("editor_note"),
+  editorScore: integer("editor_score"),                      // 1–5
+
+  // Defaults to noindex — see db/swan-index.sql for why. Curation lifts it to 'index,follow'.
+  robots: text("robots").notNull().default("noindex,follow"),
+
+  slug: text("slug").notNull(),                              // unique per profile, not globally
+  title: text("title").notNull(),
+  dek: text("dek"),                                          // standfirst under the headline
+  tags: jsonb("tags").notNull().default([]),
+  // Copied from blogPosts.canonicalUrl at submit time; emitted as rel=canonical on every page here.
+  authorCanonicalUrl: text("author_canonical_url"),
+
+  submittedAt: timestamp("submitted_at").defaultNow().notNull(),
+  liveAt: timestamp("live_at"),
+  featuredAt: timestamp("featured_at"),
+
+  viewCount: integer("view_count").notNull().default(0),
+  readCount: integer("read_count").notNull().default(0),     // dwell > 15s or > 50% scrolled
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("swan_index_posts_profile_slug_unique").on(t.profileId, t.slug),
+  index("swan_index_posts_profile_live_idx").on(t.profileId, t.status, t.liveAt),
+  index("swan_index_posts_featured_idx").on(t.featuredRank).where(sql`status = 'featured'`),
+  index("swan_index_posts_live_at_idx").on(t.liveAt).where(sql`status IN ('live','featured')`),
+  index("swan_index_posts_section_idx").on(t.section, t.liveAt).where(sql`status IN ('live','featured')`),
+  index("swan_index_posts_pending_idx").on(t.submittedAt).where(sql`status = 'pending'`),
+  check("swan_index_posts_status_check", sql`${t.status} IN ('pending','live','featured','rejected','withdrawn')`),
+  check("swan_index_posts_robots_check", sql`${t.robots} IN ('index,follow','index,nofollow','noindex,follow','noindex,nofollow')`),
+  check("swan_index_posts_score_check", sql`${t.editorScore} IS NULL OR ${t.editorScore} BETWEEN 1 AND 5`),
+  // Featured ⇔ ranked. Either half alone leaves a silently empty front-page slot.
+  check("swan_index_posts_featured_rank_check", sql`(${t.status} = 'featured' AND ${t.featuredRank} IS NOT NULL) OR (${t.status} <> 'featured' AND ${t.featuredRank} IS NULL)`),
+]);
+
+// The masthead's editorial taxonomy — deliberately NOT the authors' free-text tags. Tags are
+// whatever the AI put on a post; a section is a decision, and a fixed set of them is most of what
+// separates a magazine from a feed.
+export const swanIndexSections = pgTable("swan_index_sections", {
+  key: text("key").primaryKey(),                             // URL segment: /section/{key}
+  label: text("label").notNull(),
+  standfirst: text("standfirst"),
+  position: integer("position").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  check("swan_index_sections_key_check", sql`${t.key} ~ '^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$'`),
+]);

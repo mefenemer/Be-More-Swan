@@ -62,6 +62,11 @@ const PERMISSION_MIN_RANK: Record<string, number> = {
     view_audit_log:         3,  // see audit log list (diffs still super_admin only)
     run_test_generation:    3,  // trigger test generations against a blueprint (spends AI budget)
     breach_response:        3,  // breach response workflow
+    // Editorial control of The Swan Index: what appears on a public masthead under third-party
+    // bylines, and — because robots is derived from editorial status — what search engines index.
+    // Rank 3 alongside assistant_catalog and platform_config: the same class of decision, one that
+    // changes what the outside world sees, rather than one that touches customer data.
+    curate_swan_index:      3,
 
     // ── super_admin only ──────────────────────────────────────────────
     audit_log_diff:         4,  // raw before/after state diffs in audit log

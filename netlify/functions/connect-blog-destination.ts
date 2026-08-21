@@ -12,7 +12,7 @@ import { getDb } from '../../db/client';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAuditEvent } from '../../src/utils/audit';
 import { getBlogAdapter, isBlogDestinationId } from '../../src/utils/blog-destinations';
-import { saveBlogDestination, deleteBlogDestination, listBlogDestinations, setBlogPublishMode } from '../../src/utils/blog-destinations/store';
+import { saveBlogDestination, deleteBlogDestination, listBlogDestinations, setBlogPublishMode, connectSwanIndex } from '../../src/utils/blog-destinations/store';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({ statusCode, body: JSON.stringify(body) });
@@ -56,6 +56,14 @@ export default withLambda(async (event: HandlerEvent) => {
     }
 
     if (body.action === 'connect') {
+        // First-party (The Swan Index): no credentials to collect or verify. Connecting means
+        // creating the workspace's publication profile, and the handle it was allocated is the one
+        // thing the UI needs back — it is the author's public URL from here on.
+        if (adapter.authKind === 'firstparty') {
+            const profile = await connectSwanIndex(db, ctx.organisationId, ctx.userId);
+            logAuditEvent({ userId: ctx.userId, actionType: 'CREATE', resourceType: 'blog_destination', resourceId: body.provider });
+            return json(200, { ok: true, accountLabel: `@${profile.handle}`, handle: profile.handle });
+        }
         if (adapter.authKind === 'oauth' && adapter.oauthProvider) {
             return json(400, { error: `${adapter.label} connects via OAuth.`, connectUrl: `/api/oauth/${adapter.oauthProvider}/connect` });
         }

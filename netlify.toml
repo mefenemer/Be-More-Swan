@@ -159,6 +159,76 @@
   status = 301
   force = true
 
+# ── The Swan Index (theswanindex.com) ──────────────────────────────────────────────────────────
+# A second PUBLICATION served by this same deployment: the first-party syndication destination for
+# Blog Writer posts. See db/swan-index.sql and netlify/functions/swan-index-page.ts.
+#
+# HOST-SCOPED, and that is the whole point. Netlify matches a `from` that carries a scheme+host
+# against that host only (the aura-assist rules above are the existing precedent), so these four
+# rules hand every path on theswanindex.com to the magazine function while bemoreswan.com is
+# untouched. Without the host prefix, `from = "/*"` would swallow the entire app.
+#
+# ⚠️ These rules sit BELOW the source-blocking 404s at the top of this file, deliberately. Those
+# are path-only, so they match on EVERY host — which means /db/*, /netlify/* and the rest stay 404
+# on the magazine domain too. Moving this block above them would expose the whole server-only tree
+# on a second domain. First match wins; that ordering is load-bearing.
+#
+# ⚠️ `force = true` IS load-bearing here, for the opposite reason to the blocking rules. Real files
+# exist at the repo root for /robots.txt, /sitemap.xml, / (index.html) and every marketing page. On
+# theswanindex.com those files are the WRONG site, and without force a rewrite loses to a real file
+# — so the magazine domain would quietly serve the Be More Swan marketing site at its front door.
+# The function answers /robots.txt and /sitemap.xml itself for exactly this reason.
+#
+# Status 200 (a rewrite), not a 3xx: the visitor must stay on theswanindex.com, and the function
+# reads the ORIGINAL path out of event.rawUrl, which only survives a rewrite. Same mechanism as the
+# /b/* blog permalink rule further down.
+#
+# ⚠️ Until the domain is attached in the Netlify UI these four rules match nothing and change
+# nothing — they are inert, not broken. Set SWAN_INDEX_BASE_URL=https://theswanindex.com in the
+# site environment at the same time, or every canonical and og:url the publication emits will
+# point at the hardcoded default before DNS resolves.
+[[redirects]]
+  from = "https://theswanindex.com/*"
+  to = "/.netlify/functions/swan-index-page"
+  status = 200
+  force = true
+
+# www 301s to the apex rather than rewriting: two hostnames serving identical content is the
+# duplicate-content problem this publication exists to avoid creating for its authors.
+[[redirects]]
+  from = "https://www.theswanindex.com/*"
+  to = "https://theswanindex.com/:splat"
+  status = 301
+  force = true
+
+# Staging/preview access before DNS exists. Path-prefixed so it cannot collide with the app, and
+# the function tolerates the prefix because parseSwanRoute only ever sees what rawUrl carries —
+# see the `/index-preview` normalisation in swan-index-page.ts.
+[[redirects]]
+  from = "/index-preview/*"
+  to = "/.netlify/functions/swan-index-page"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/index-preview"
+  to = "/.netlify/functions/swan-index-page"
+  status = 200
+  force = true
+
+# ⚠️ TWO app-wide rules reach theswanindex.com and neither can be scoped by host:
+#
+#   · The `[[edge_functions]]` binding `path = "/"` for auth-guard. HANDLED IN CODE — auth-guard.ts
+#     early-returns on NON_APP_HOSTS. Without it, turning on maintenance mode to deploy the app
+#     would redirect a public magazine to /maintenance. Add any new host there as well as here.
+#
+#   · `[[headers]] for = "/"` sets Cache-Control: no-cache, which overrides the function's own
+#     `s-maxage=300` on the magazine front page ONLY. Every other magazine path keeps its cache.
+#     KNOWN, not fixed: `for` is path-only, so the app's homepage and the publication's homepage
+#     cannot be given different policies from one site. It costs one Lambda invocation per
+#     front-page view. The fix, when the traffic justifies it, is a second Netlify site pointed at
+#     this same repo — which is also what removes the two collisions above entirely.
+
 # US-HELP-1.1.1 AC14: canonical URL aliases for the help centre
 [[redirects]]
   from = "/help"

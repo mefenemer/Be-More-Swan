@@ -242,11 +242,35 @@ export async function publishBlogPost(db: any, post: BlogPostRow, organisationId
 //   · content_provenance is left untouched — it attests what WAS published at a point in time,
 //     and retracting the post doesn't unmake that history.
 //
-// Syndicated copies are NOT retracted: the adapter interface has no unpublish (see
-// blog-destinations/types.ts), so external targets keep their own status in `destinations` and the
+// EXTERNAL syndicated copies are not retracted: the adapter interface has no unpublish (see
+// blog-destinations/types.ts), so those targets keep their own status in `destinations` and the
 // caller is responsible for telling the user they're still live.
+//
+// The Swan Index IS retracted, because it is first-party and we can. Leaving a retracted article
+// live under the author's byline on a masthead they do not control is the exact failure the
+// external adapters are forgiven for only because nothing can be done about it.
 export async function unpublishBlogPost(db: any, post: BlogPostRow, organisationId: number): Promise<BlogPostRow> {
-    const destinations = { ...(post.destinations as Record<string, unknown> || {}), widget: 'unpublished' };
+    const destinations: Record<string, unknown> = { ...(post.destinations as Record<string, unknown> || {}), widget: 'unpublished' };
+
+    // FIRST, before the blog_posts write, so its outcome can be recorded in the same `destinations`
+    // blob. That ordering is not cosmetic: unpublish-blog.ts derives its "still live elsewhere"
+    // warning from this blob (stillLiveTargets), and a swanindex entry left reading 'published'
+    // would tell the author their article is still on a masthead we had in fact just taken it off.
+    //
+    // Doing it first also fails in the safe direction — if the blog_posts update then throws, the
+    // magazine copy is already down and the post is still published, which is recoverable. The
+    // reverse leaves a retracted article live under the author's byline.
+    //
+    // Best-effort either way: a magazine row that will not move must not block the retraction.
+    // Lazy import for the same cycle reason as the syndication call above.
+    try {
+        const { withdrawFromSwanIndex } = await import('./swan-index/withdraw');
+        if (await withdrawFromSwanIndex(db, organisationId, post.id)) {
+            destinations.swanindex = { status: 'withdrawn', at: new Date().toISOString() };
+        }
+    } catch (err) {
+        console.warn(`[unpublishBlogPost] Swan Index withdrawal failed for post ${post.id}:`, err instanceof Error ? err.message : err);
+    }
 
     const [updated] = await db
         .update(blogPosts)

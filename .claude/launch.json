@@ -1020,6 +1020,32 @@
       ],
       "port": 4176,
       "autoPort": false
+    },
+    {
+      "name": "swan-index-preview",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4502",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/2a6e894b-37c9-4a37-90b9-0772c7bef548/scratchpad/preview"
+      ],
+      "port": 4502,
+      "autoPort": false
+    },
+    {
+      "name": "swan-index-editor-harness",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4503",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/2a6e894b-37c9-4a37-90b9-0772c7bef548/scratchpad/swanadmin"
+      ],
+      "port": 4503,
+      "autoPort": false
     }
   ]
 }

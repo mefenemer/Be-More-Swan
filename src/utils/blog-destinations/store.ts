@@ -7,6 +7,9 @@ import { and, eq } from 'drizzle-orm';
 import type { getDb } from '../../../db/client';
 import { workspaceIntegrations } from '../../../db/schema';
 import { storeSecret, getSecret, deleteSecret } from '../vault';
+import { getProfileByOrg, ensureProfile } from '../swan-index/profile';
+import { swanIndexProfiles, swanIndexPosts } from '../../../db/schema';
+import { inArray } from 'drizzle-orm';
 import { getFreshAccessToken, deleteIntegration, type IntegrationProvider } from '../workspace-integrations';
 import { getBlogAdapter, BLOG_DESTINATION_IDS } from './index';
 import type { BlogDestinationCreds, BlogDestinationId } from './types';
@@ -112,6 +115,15 @@ export async function resolveDestinationCreds(
     id: BlogDestinationId,
 ): Promise<BlogDestinationCreds | null> {
     const adapter = getBlogAdapter(id);
+    // First-party (The Swan Index): nothing to authenticate. The publication PROFILE is the
+    // connection, so its presence and status are what "connected" means — returning null for a
+    // suspended or withdrawn profile makes the dispatcher record 'not_connected', which is exactly
+    // right: the workspace is not currently publishing there.
+    if (adapter.authKind === 'firstparty') {
+        const profile = await getProfileByOrg(db, organisationId);
+        if (!profile || profile.status !== 'active') return null;
+        return { organisationId } as BlogDestinationCreds;
+    }
     if (adapter.authKind === 'oauth' && adapter.oauthProvider) {
         try {
             const fresh = await getFreshAccessToken(db, organisationId, adapter.oauthProvider as IntegrationProvider);
@@ -127,6 +139,27 @@ export async function resolveDestinationCreds(
 /** Remove the connection and its vault secret (or the OAuth integration for OAuth destinations). */
 export async function deleteBlogDestination(db: Db, organisationId: number, id: BlogDestinationId): Promise<void> {
     const adapter = getBlogAdapter(id);
+    // First-party: disconnecting must actually take the author's articles OFF the publication —
+    // it is the one destination where we can honour that, and an author who disconnects and still
+    // sees their byline on someone else's masthead has been ignored.
+    //
+    // Withdrawn, not deleted. A hard delete would cascade the swan_index_posts rows away and with
+    // them the editorial record of what this publication ran and when, which is the one thing a
+    // publication must be able to answer about itself. Reconnecting restores the profile.
+    if (adapter.authKind === 'firstparty') {
+        const profile = await getProfileByOrg(db, organisationId);
+        if (!profile) return;
+        await db.update(swanIndexPosts)
+            .set({ status: 'withdrawn', featuredRank: null, updatedAt: new Date() })
+            .where(and(
+                eq(swanIndexPosts.profileId, profile.id),
+                inArray(swanIndexPosts.status, ['pending', 'live', 'featured']),
+            ));
+        await db.update(swanIndexProfiles)
+            .set({ status: 'withdrawn', updatedAt: new Date() })
+            .where(eq(swanIndexProfiles.id, profile.id));
+        return;
+    }
     if (adapter.authKind === 'oauth' && adapter.oauthProvider) {
         await deleteIntegration(db, organisationId, adapter.oauthProvider as IntegrationProvider);
         return;
@@ -161,8 +194,26 @@ export async function listBlogDestinations(db: Db, organisationId: number): Prom
         .where(eq(workspaceIntegrations.organisationId, organisationId));
     const byProvider = new Map(rows.map((r) => [r.provider, r]));
     const modes = await getBlogPublishModes(db, organisationId);
+    // First-party connection state lives in the profile table, not workspace_integrations — there is
+    // no vault secret to hang a row off. One extra read for the whole list.
+    const swanProfile = BLOG_DESTINATION_IDS.some((id) => getBlogAdapter(id).authKind === 'firstparty')
+        ? await getProfileByOrg(db, organisationId)
+        : null;
     return BLOG_DESTINATION_IDS.map((id) => {
         const adapter = getBlogAdapter(id);
+        if (adapter.authKind === 'firstparty') {
+            const connected = !!swanProfile && swanProfile.status === 'active';
+            return {
+                id,
+                label: adapter.label,
+                connected,
+                accountLabel: connected ? `@${swanProfile!.handle}` : null,
+                credFields: [],
+                oauth: false,
+                supportsDraft: adapter.supportsDraft,
+                publishMode: modes[id],
+            };
+        }
         const isOAuth = adapter.authKind === 'oauth' && !!adapter.oauthProvider;
         // OAuth destinations live under their oauthProvider row; paste ones under `blog_<id>`.
         const row = byProvider.get(isOAuth ? adapter.oauthProvider! : providerFor(id));
@@ -180,4 +231,26 @@ export async function listBlogDestinations(db: Db, organisationId: number): Prom
             publishMode: adapter.supportsDraft ? modes[id] : 'live',
         };
     });
+}
+
+
+/**
+ * Connect the first-party destination: create (or reinstate) the workspace's publication profile.
+ *
+ * Separate from saveBlogDestination because there is nothing to validate and nothing to encrypt —
+ * routing it through the vault path would store an empty secret and an integration row that no
+ * code reads, purely to make one function signature cover two unlike things.
+ */
+export async function connectSwanIndex(
+    db: Db,
+    organisationId: number,
+    userId: number,
+): Promise<{ handle: string; displayName: string }> {
+    const profile = await ensureProfile(db, organisationId, { userId });
+    if (profile.status !== 'active') {
+        await db.update(swanIndexProfiles)
+            .set({ status: 'active', updatedAt: new Date() })
+            .where(eq(swanIndexProfiles.id, profile.id));
+    }
+    return { handle: profile.handle, displayName: profile.displayName };
 }

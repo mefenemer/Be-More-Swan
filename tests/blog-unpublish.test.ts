@@ -18,13 +18,20 @@ function check(name: string, fn: () => void | Promise<void>) {
 }
 
 // Minimal drizzle-shaped stub: captures the .set() payload and hands back a row from .returning().
-function stubDb() {
-    const calls: { set?: Record<string, unknown> } = {};
+//
+// unpublishBlogPost now issues TWO updates — the Swan Index withdrawal first, then blog_posts — so
+// `calls.set` is the blog_posts payload only because it is the LAST one written. `rowsPerUpdate`
+// controls what .returning() yields, which is how withdrawFromSwanIndex reports whether it actually
+// moved a row; 0 models a post that was never syndicated to the magazine.
+function stubDb(rowsPerUpdate = 1) {
+    const calls: { set?: Record<string, unknown>; sets: Record<string, unknown>[] } = { sets: [] };
     const db = {
         update() { return this; },
-        set(values: Record<string, unknown>) { calls.set = values; return this; },
+        set(values: Record<string, unknown>) { calls.set = values; calls.sets.push(values); return this; },
         where() { return this; },
-        returning() { return Promise.resolve([{ ...calls.set, id: 1 }]); },
+        returning() {
+            return Promise.resolve(rowsPerUpdate ? [{ ...calls.set, id: 1 }] : []);
+        },
     };
     return { db, calls };
 }
@@ -63,6 +70,37 @@ async function run() {
         for (const field of ['slug', 'publishedPayload', 'publishedAt']) {
             assert.ok(!(field in calls.set!), `unpublish must not write ${field}`);
         }
+    });
+
+    // The Swan Index is FIRST-PARTY, so unlike Dev.to or Ghost it is actually retracted — and the
+    // retraction has to be recorded in `destinations`, or stillLiveTargets tells the author their
+    // article is still on a masthead we just took it off.
+    await check('withdraws the Swan Index copy and records that in destinations', async () => {
+        const { db, calls } = stubDb();
+        await unpublishBlogPost(db, publishedPost, 7);
+
+        const withdrawal = calls.sets.find((v) => v.status === 'withdrawn');
+        assert.ok(withdrawal, 'the magazine row is set to withdrawn');
+        assert.equal(withdrawal!.featuredRank, null, 'and gives up its front-page slot');
+
+        const dests = calls.set!.destinations as Record<string, unknown>;
+        assert.equal((dests.swanindex as { status: string }).status, 'withdrawn');
+        assert.deepEqual(stillLiveTargets(dests), [{ target: 'devto', url: 'https://dev.to/x' }],
+            'the magazine must not be reported as still live');
+    });
+
+    await check('a post that was never syndicated gets no swanindex entry invented for it', async () => {
+        const { db, calls } = stubDb(0);
+        await unpublishBlogPost(db, publishedPost, 7);
+        assert.ok(!('swanindex' in (calls.set!.destinations as Record<string, unknown>)));
+    });
+
+    await check('the blog_posts write is LAST, so a failed withdrawal cannot strand a live copy', async () => {
+        const { db, calls } = stubDb();
+        await unpublishBlogPost(db, publishedPost, 7);
+        assert.equal(calls.sets.length, 2);
+        assert.equal(calls.sets[0].status, 'withdrawn', 'magazine first');
+        assert.equal(calls.sets[1].status, 'draft', 'blog_posts second');
     });
 
     await check('stillLive reports external published copies with their url', () => {

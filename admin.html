@@ -59,7 +59,7 @@
       </button>
       <button data-cat="assistants" onclick="adminCatNav('assistants')"
         class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
-        aria-label="Assistants" title="Assistants — catalog, blueprints, models and publishing">
+        aria-label="Assistants" title="Assistants — catalog, blueprints, models, publishing and The Swan Index">
         <span class="text-xl">🤖</span>
         <span class="admin-cat-label group-hover:text-white">Assistants</span>
       </button>
@@ -1477,6 +1477,93 @@
         </div>
       </section>
 
+      <!-- ══ The Swan Index — editorial desk ══════════════════════════════════════════════════ -->
+      <!-- Three views, one API (admin-swan-index.ts). The counts strip is shared markup rendered
+           into each view's own #swan-counts-* host, so whichever page you land on opens with the
+           same picture of the publication. -->
+
+      <section id="view-swan-queue" class="admin-view hidden space-y-5 overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div class="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h2 class="text-xl font-extrabold text-gray-900">The Swan Index — Review Queue</h2>
+            <p class="text-sm text-gray-500 mt-0.5">Submissions from Blog Writer, oldest first. Read a piece before deciding on it.</p>
+          </div>
+          <a id="swan-queue-site-link" href="#" target="_blank" rel="noopener"
+             class="text-xs font-bold text-emerald-700 hover:text-emerald-800 underline cursor-pointer">View the publication →</a>
+        </div>
+
+        <div id="swan-counts-queue" class="grid grid-cols-2 lg:grid-cols-5 gap-3"></div>
+
+        <div id="swan-queue-filters" class="flex flex-wrap gap-2"></div>
+
+        <div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div id="swan-queue-list" class="divide-y divide-gray-100">
+            <p class="text-gray-400 text-xs animate-pulse p-5">Loading…</p>
+          </div>
+        </div>
+        <p id="swan-queue-truncated" class="hidden text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3"></p>
+
+        <!-- The reading desk. A pending piece is not public — by design — so this slide-over is the
+             only place an editor can read one. Wider than the issue panel (max-w-3xl vs max-w-lg)
+             because judging an article on a 32rem column is judging a different article. -->
+        <div id="swan-read-panel" class="hidden fixed inset-0 z-40">
+          <div class="absolute inset-0 bg-black/40" onclick="closeSwanRead()"></div>
+          <div class="absolute right-0 top-0 bottom-0 w-full max-w-3xl bg-white shadow-2xl overflow-y-auto">
+            <div class="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between gap-3 z-10">
+              <h2 id="swan-read-title" class="font-bold text-gray-900 truncate">Reading</h2>
+              <button onclick="closeSwanRead()" class="text-gray-400 hover:text-gray-700 text-2xl shrink-0" aria-label="Close">&times;</button>
+            </div>
+            <div id="swan-read-body" class="p-6 space-y-5"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-swan-front-page" class="admin-view hidden space-y-5 overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div>
+          <h2 class="text-xl font-extrabold text-gray-900">The Swan Index — Front Page</h2>
+          <!-- Stated on the page, not just in a code comment: this control is the publication's
+               entire indexing policy, and an editor has to know that before they use it. -->
+          <p class="text-sm text-gray-500 mt-0.5">
+            The running order at theswanindex.com. Position 1 is the lead story.
+            <span class="font-semibold text-gray-700">Featuring a piece is what makes it indexable by search engines</span> —
+            everything else on the publication is <code class="text-xs bg-gray-100 px-1 rounded">noindex,follow</code>, so the
+            author keeps all the search value on their own site.
+          </p>
+        </div>
+
+        <div id="swan-counts-front" class="grid grid-cols-2 lg:grid-cols-5 gap-3"></div>
+
+        <div class="bg-white border border-gray-200 rounded-xl p-5">
+          <h3 class="font-bold text-gray-900 mb-3">Running order</h3>
+          <div id="swan-front-list" class="space-y-2">
+            <p class="text-gray-400 text-xs animate-pulse">Loading…</p>
+          </div>
+        </div>
+
+        <div class="bg-white border border-gray-200 rounded-xl p-5">
+          <h3 class="font-bold text-gray-900 mb-1">Eligible to promote</h3>
+          <p class="text-xs text-gray-500 mb-3">Live pieces not currently on the front page, newest first.</p>
+          <div id="swan-front-eligible" class="space-y-2">
+            <p class="text-gray-400 text-xs animate-pulse">Loading…</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-swan-contributors" class="admin-view hidden space-y-5 overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div>
+          <h2 class="text-xl font-extrabold text-gray-900">The Swan Index — Contributors</h2>
+          <p class="text-sm text-gray-500 mt-0.5">Every workspace publishing to the Index, with its monthly allowance and standing.</p>
+        </div>
+
+        <div id="swan-counts-contrib" class="grid grid-cols-2 lg:grid-cols-5 gap-3"></div>
+
+        <div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div id="swan-contributors-list" class="divide-y divide-gray-100">
+            <p class="text-gray-400 text-xs animate-pulse p-5">Loading…</p>
+          </div>
+        </div>
+      </section>
+
       <section id="view-workspaces" class="admin-view hidden">
         <div class="flex items-center justify-between flex-wrap gap-3 mb-6">
           <div>
@@ -2177,6 +2264,41 @@
   .admin-more-item:hover, .admin-more-item.active { color: #10b981; }
   .admin-more-item span.more-icon { font-size: 20px; width: 28px; text-align: center; }
 
+  /* ── The Swan Index reading desk ─────────────────────────────────────
+     The article body in the review panel is the post's own published_payload HTML — real <h2>,
+     <blockquote>, <ul>, <figure>. Tailwind's preflight resets all of them to plain paragraphs, so
+     without these rules an editor judges a structured article as one undifferentiated slab of text
+     and cannot see where it turns. Scoped to .swan-read-prose so nothing else in the portal moves.
+
+     Written here rather than as utility classes on the elements, because the markup is not ours to
+     annotate — it arrives from the database. */
+  .swan-read-prose > * + * { margin-top: 1em; }
+  .swan-read-prose h1, .swan-read-prose h2, .swan-read-prose h3 {
+    font-weight: 700; color: #111827; line-height: 1.25; margin-top: 1.6em;
+  }
+  .swan-read-prose h1 { font-size: 1.35rem; }
+  .swan-read-prose h2 { font-size: 1.15rem; }
+  .swan-read-prose h3 { font-size: 1rem; }
+  .swan-read-prose p { margin: 0; }
+  .swan-read-prose a { color: #047857; text-decoration: underline; }
+  .swan-read-prose ul, .swan-read-prose ol { padding-left: 1.4em; }
+  .swan-read-prose ul { list-style: disc; }
+  .swan-read-prose ol { list-style: decimal; }
+  .swan-read-prose li + li { margin-top: .35em; }
+  .swan-read-prose blockquote {
+    margin: 1.25em 0; padding: .25em 0 .25em 1rem;
+    border-left: 3px solid #d1d5db; color: #4b5563; font-style: italic;
+  }
+  .swan-read-prose img, .swan-read-prose video { max-width: 100%; height: auto; border-radius: .5rem; }
+  .swan-read-prose figure { margin: 1.5em 0; }
+  .swan-read-prose figcaption { font-size: .8rem; color: #6b7280; margin-top: .4rem; text-align: center; }
+  .swan-read-prose code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; background: #f3f4f6; padding: .1em .3em; border-radius: .25rem; }
+  .swan-read-prose pre { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: .5rem; padding: .9rem; overflow-x: auto; font-size: .8rem; }
+  .swan-read-prose pre code { background: none; padding: 0; }
+  .swan-read-prose hr { border: 0; border-top: 1px solid #e5e7eb; margin: 2em 0; }
+  .swan-read-prose table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  .swan-read-prose th, .swan-read-prose td { border: 1px solid #e5e7eb; padding: .4rem .6rem; text-align: left; }
+
   @media (max-width: 767px) {
     #admin-bottom-tabs { display: block; }
   }
@@ -2287,6 +2409,8 @@ const VIEW_LABELS = {
   'send-notification': 'Send a Message',
   systems: 'Systems & Connections',
   'issue-reports': 'Issue Reports', 'feature-roadmap': 'Feature Requests',
+  'swan-queue': 'Swan Index — Review Queue', 'swan-front-page': 'Swan Index — Front Page',
+  'swan-contributors': 'Swan Index — Contributors',
 };
 
 // Category → child items mapping.
@@ -2328,14 +2452,23 @@ const ADMIN_CATS = {
     { view: 'cogs',           icon: '💰', label: 'COGS Dashboard',        perm: 'view_cogs' },
   ]},
   assistants: { label: 'Assistants', children: [
-    { view: 'catalog',              icon: '🤖', label: 'Assistant Catalog',   perm: 'assistant_catalog' },
+    { view: 'catalog',              icon: '🤖', label: 'Assistant Catalog',   perm: 'assistant_catalog', group: 'Configuration' },
     // Assistant Features moved to Master Data → Assistant Features, where its catalog is now
     // DB-driven and sits alongside the assistant copy fields it relates to.
-    { view: 'blueprint-inspector',  icon: '🔬', label: 'Blueprint Inspector', perm: 'assistant_catalog' },
-    { view: 'model-config',         icon: '⚙️', label: 'AI Model Config',     perm: 'platform_config' },
+    { view: 'blueprint-inspector',  icon: '🔬', label: 'Blueprint Inspector', perm: 'assistant_catalog', group: 'Configuration' },
+    { view: 'model-config',         icon: '⚙️', label: 'AI Model Config',     perm: 'platform_config',   group: 'Configuration' },
     // Publishing is what the content assistants actually do, so its pipeline reads
     // better next to them than buried in a ten-deep Platform list.
-    { view: 'publish-pipeline',     icon: '📡', label: 'Publishing Pipeline', perm: 'platform_config' },
+    { view: 'publish-pipeline',     icon: '📡', label: 'Publishing Pipeline', perm: 'platform_config',   group: 'Configuration' },
+    // The Swan Index — the editorial desk for theswanindex.com. Curation is a genuinely different
+    // job from configuring an assistant, and on its own it would argue for an eighth rail entry.
+    // It does not get one: the rail was deliberately cut from ten categories to seven because it
+    // is the scarcest space in the portal (see the note above this object), and a `group` heading
+    // buys the separation without spending rail. Promote it later if the desk gets daily use —
+    // that is one category object plus a button in the sidebar and the More drawer.
+    { view: 'swan-queue',        icon: '📥', label: 'Review Queue',  perm: 'curate_swan_index', group: 'The Swan Index' },
+    { view: 'swan-front-page',   icon: '🗞️', label: 'Front Page',    perm: 'curate_swan_index', group: 'The Swan Index' },
+    { view: 'swan-contributors', icon: '✍️', label: 'Contributors',  perm: 'curate_swan_index', group: 'The Swan Index' },
   ]},
   platform: { label: 'Platform', children: [
     { view: 'master-data',          icon: '🗂️', label: 'Master Data',           perm: 'platform_config',         group: 'Configuration' },
@@ -2668,6 +2801,9 @@ function adminNav(view) {
   if (view === 'send-notification')   resetSendNotification();
   if (view === 'issue-reports')       loadIssueReports();
   if (view === 'feature-roadmap')     loadFeatureRoadmap();
+  if (view === 'swan-queue')          loadSwanQueue();
+  if (view === 'swan-front-page')     loadSwanFrontPage();
+  if (view === 'swan-contributors')   loadSwanContributors();
 }
 
 // ── US-COMMS-1: Manage Emails (template editor) ──────────────────────────────
@@ -9006,6 +9142,503 @@ function toggleMoreDrawer() {
 function closeMoreDrawer() {
   document.getElementById('admin-more-drawer').classList.remove('open');
   document.getElementById('admin-more-btn').setAttribute('aria-expanded', 'false');
+}
+
+
+// ══ The Swan Index — editorial desk ═══════════════════════════════════════════
+// Three views (Review Queue, Front Page, Contributors) over one API. See
+// netlify/functions/admin-swan-index.ts for the endpoints and the audit trail.
+//
+// ⚠️ ROBOTS IS NOT A CONTROL HERE, AND MUST NOT BECOME ONE. Indexability is derived from editorial
+// status in src/utils/swan-index/curation.ts — featured pieces index, everything else does not. A
+// checkbox on this page would be a second source of truth for the publication's whole SEO posture,
+// and the two would part company the first time someone featured a piece without ticking it. The UI
+// SHOWS the resulting value; it never sends one.
+const SWAN_API = '/.netlify/functions/admin-swan-index';
+
+const SWAN_STATUS_LABEL = {
+  pending: 'Awaiting review', live: 'Live', featured: 'Front page',
+  rejected: 'Declined', withdrawn: 'Withdrawn by author',
+};
+const SWAN_STATUS_CLS = {
+  pending: 'bg-amber-100 text-amber-800', live: 'bg-emerald-100 text-emerald-700',
+  featured: 'bg-violet-100 text-violet-700', rejected: 'bg-gray-200 text-gray-500',
+  withdrawn: 'bg-red-100 text-red-700',
+};
+
+let _swanQueueFilter = 'pending';   // survives a reload of the list; reset only by the filter chips
+let _swanSections = [];
+let _swanBaseUrl = '';
+let _swanReadId = null;
+
+const _swanEsc = (v) => window.escapeHtml(v);
+
+function _swanDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+/** "3 days" — how long a submission has been sitting there. The queue's real metric. */
+function _swanAge(iso) {
+  if (!iso) return '';
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  if (Number.isNaN(days)) return '';
+  if (days <= 0) return 'today';
+  return days === 1 ? '1 day' : `${days} days`;
+}
+
+function _swanBadge(status) {
+  return `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${SWAN_STATUS_CLS[status] || 'bg-gray-100 text-gray-600'}">${_swanEsc(SWAN_STATUS_LABEL[status] || status)}</span>`;
+}
+
+// ── shared header strip ───────────────────────────────────────────────────────
+// Rendered into whichever of the three views is asking, so every page opens with the same picture
+// of the publication rather than each one counting a different slice of it.
+async function _swanLoadOverview(hostId) {
+  const host = document.getElementById(hostId);
+  if (!host) return null;
+  try {
+    const data = await api(`${SWAN_API}?resource=overview`);
+    _swanSections = data.sections || [];
+    _swanBaseUrl = data.baseUrl || '';
+    const c = data.counts || {};
+    const cards = [
+      ['Awaiting review', c.pending || 0, 'text-amber-600'],
+      ['On the front page', c.featured || 0, 'text-violet-600'],
+      ['Live', c.live || 0, 'text-emerald-600'],
+      ['Declined', c.rejected || 0, 'text-gray-500'],
+      ['Contributors', data.contributors || 0, 'text-gray-900'],
+    ];
+    host.innerHTML = cards.map(([label, value, cls]) => `
+      <div class="bg-white border border-gray-200 rounded-xl p-4 space-y-1">
+        <p class="text-xs text-gray-400 font-semibold uppercase tracking-wide">${_swanEsc(label)}</p>
+        <p class="text-2xl font-extrabold ${cls}">${value}</p>
+      </div>`).join('');
+    const link = document.getElementById('swan-queue-site-link');
+    if (link && _swanBaseUrl) link.href = _swanBaseUrl;
+    return data;
+  } catch (e) {
+    host.innerHTML = `<p class="col-span-full text-sm text-red-600">Could not load the Index: ${_swanEsc(e.message)}</p>`;
+    return null;
+  }
+}
+
+// ── Review Queue ──────────────────────────────────────────────────────────────
+async function loadSwanQueue() {
+  await _swanLoadOverview('swan-counts-queue');
+  _swanRenderFilters();
+  await _swanRenderQueue();
+}
+
+function _swanRenderFilters() {
+  const host = document.getElementById('swan-queue-filters');
+  if (!host) return;
+  const chips = [
+    ['pending', 'Awaiting review'], ['live', 'Live'], ['featured', 'Front page'],
+    ['rejected', 'Declined'], ['', 'Everything'],
+  ];
+  host.innerHTML = chips.map(([value, label]) => {
+    const active = _swanQueueFilter === value;
+    return `<button onclick="swanSetQueueFilter('${value}')"
+      class="px-3 py-1.5 text-xs font-bold rounded-full border transition cursor-pointer ${active
+        ? 'bg-gray-900 text-white border-gray-900'
+        : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}">${_swanEsc(label)}</button>`;
+  }).join('');
+}
+
+function swanSetQueueFilter(value) {
+  _swanQueueFilter = value;
+  _swanRenderFilters();
+  _swanRenderQueue();
+}
+
+async function _swanRenderQueue() {
+  const host = document.getElementById('swan-queue-list');
+  const trunc = document.getElementById('swan-queue-truncated');
+  if (!host) return;
+  host.innerHTML = '<p class="text-gray-400 text-xs animate-pulse p-5">Loading…</p>';
+  try {
+    const qs = _swanQueueFilter ? `&status=${encodeURIComponent(_swanQueueFilter)}` : '';
+    const data = await api(`${SWAN_API}?resource=queue${qs}`);
+    const items = data.items || [];
+
+    trunc?.classList.toggle('hidden', !data.truncated);
+    if (data.truncated) {
+      trunc.textContent = 'Showing the first 200 submissions. The queue was never expected to get this long — worth checking whether something upstream is over-submitting.';
+    }
+
+    if (!items.length) {
+      host.innerHTML = `<p class="p-8 text-center text-sm text-gray-400">Nothing here.</p>`;
+      return;
+    }
+
+    host.innerHTML = items.map((p) => {
+      // A piece whose source post is no longer published cannot be put on the site — the public
+      // article query filters on it. Flagged in the row rather than discovered on click.
+      const orphaned = p.sourceStatus !== 'published';
+      return `
+      <div class="p-4 sm:p-5 hover:bg-gray-50 transition">
+        <div class="flex items-start justify-between gap-4 flex-wrap">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2 flex-wrap mb-1">
+              ${_swanBadge(p.status)}
+              ${p.sectionLabel ? `<span class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">${_swanEsc(p.sectionLabel)}</span>` : '<span class="text-[11px] font-bold text-amber-600 uppercase tracking-wide">No section</span>'}
+              ${p.editorScore ? `<span class="text-[11px] font-bold text-gray-500">${'★'.repeat(p.editorScore)}</span>` : ''}
+              ${orphaned ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">Author's post is ${_swanEsc(p.sourceStatus)}</span>` : ''}
+            </div>
+            <p class="font-bold text-gray-900 leading-snug">${_swanEsc(p.title)}</p>
+            ${p.dek ? `<p class="text-sm text-gray-500 mt-0.5 line-clamp-2">${_swanEsc(p.dek)}</p>` : ''}
+            <p class="text-xs text-gray-400 mt-1.5">
+              @${_swanEsc(p.handle)} · ${_swanEsc(p.displayName)}
+              · waiting ${_swanEsc(_swanAge(p.submittedAt))}
+              ${p.status === 'featured' ? ` · position ${p.featuredRank}` : ''}
+            </p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <button onclick="openSwanRead(${p.id})"
+              class="px-3 py-1.5 text-xs font-bold border border-gray-300 text-gray-700 rounded-lg hover:bg-white transition cursor-pointer">Read &amp; decide</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    host.innerHTML = `<p class="p-5 text-sm text-red-600">${_swanEsc(e.message)}</p>`;
+  }
+}
+
+// ── Reading desk ──────────────────────────────────────────────────────────────
+async function openSwanRead(id) {
+  _swanReadId = id;
+  const panel = document.getElementById('swan-read-panel');
+  const body = document.getElementById('swan-read-body');
+  panel.classList.remove('hidden');
+  body.innerHTML = '<p class="text-gray-400 text-xs animate-pulse">Loading…</p>';
+
+  try {
+    const d = await api(`${SWAN_API}?resource=post&id=${id}`);
+    const p = d.post;
+    document.getElementById('swan-read-title').textContent = p.title;
+
+    // The piece's CURRENT section is always an option, even if it has since been deactivated.
+    // Without it the select would render showing "— no section —", and the next save would send
+    // that back as the editor's answer — silently clearing a section nobody touched.
+    const sectionList = _swanSections.filter((sx) => sx.active);
+    if (p.section && !sectionList.some((sx) => sx.key === p.section)) {
+      sectionList.push({ key: p.section, label: `${p.sectionLabel || p.section} (retired)` });
+    }
+    const sectionOpts = ['<option value="">— no section —</option>']
+      .concat(sectionList.map((sx) =>
+        `<option value="${_swanEsc(sx.key)}"${sx.key === p.section ? ' selected' : ''}>${_swanEsc(sx.label)}</option>`))
+      .join('');
+    // Same failure, worse cause: if the overview request failed we hold no section list at all, and
+    // rendering the control would offer exactly one choice — "none" — then save it. Omit the
+    // control entirely; swanDecide only sends `section` when the element is present.
+    const sectionsKnown = _swanSections.length > 0;
+    const scoreOpts = ['<option value="">— not scored —</option>']
+      .concat([1, 2, 3, 4, 5].map((n) =>
+        `<option value="${n}"${p.editorScore === n ? ' selected' : ''}>${'★'.repeat(n)}</option>`))
+      .join('');
+
+    const orphaned = p.sourceStatus !== 'published';
+
+    body.innerHTML = `
+      <div class="flex items-center gap-2 flex-wrap">
+        ${_swanBadge(p.status)}
+        <span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${p.robots === 'index,follow' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}">${_swanEsc(p.robots)}</span>
+        ${d.aiAssisted ? '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">AI-assisted</span>' : ''}
+        ${d.confidenceScore ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">confidence: ${_swanEsc(d.confidenceScore)}</span>` : ''}
+      </div>
+
+      ${orphaned ? `<div class="text-sm bg-red-50 border border-red-200 text-red-800 rounded-lg p-3">
+        The author's post is <strong>${_swanEsc(p.sourceStatus)}</strong>, not published. It cannot go on the site — the article page reads the author's live post, so the link would 404. Declining is the only move here until they republish.
+      </div>` : ''}
+
+      <div class="text-sm text-gray-600 space-y-1 bg-gray-50 border border-gray-200 rounded-lg p-3">
+        <p><span class="text-gray-400">Author</span> — <a href="${_swanEsc(_swanBaseUrl)}/@${encodeURIComponent(p.handle)}" target="_blank" rel="noopener" class="font-semibold text-gray-900 underline">@${_swanEsc(p.handle)}</a> · ${_swanEsc(p.displayName)}${p.frontPageTier ? ' <span class="text-[11px] font-bold text-violet-600">FRONT-PAGE TIER</span>' : ''}</p>
+        <p><span class="text-gray-400">Submitted</span> — ${_swanEsc(_swanDate(p.submittedAt))} (${_swanEsc(_swanAge(p.submittedAt))} ago)</p>
+        <p><span class="text-gray-400">First published on</span> — ${p.authorCanonicalUrl
+            ? `<a href="${_swanEsc(p.authorCanonicalUrl)}" target="_blank" rel="noopener" class="underline">${_swanEsc(p.authorCanonicalUrl)}</a>`
+            : '<span class="text-amber-700 font-semibold">nowhere — this piece has no canonical URL, so our copy will self-canonicalise</span>'}</p>
+      </div>
+
+      <div class="border-t border-gray-100 pt-4">
+        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Standfirst</label>
+        <p class="text-[11px] text-gray-400 mb-1.5">Shown under the headline. Generated from the post's meta description, which is written for search engines and often reads like it.</p>
+        <textarea id="swan-read-dek" rows="2" maxlength="300"
+          class="w-full text-sm border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">${_swanEsc(p.dek || '')}</textarea>
+      </div>
+
+      ${d.imageUrl ? `<img src="${_swanEsc(d.imageUrl)}" alt="" class="w-full rounded-lg border border-gray-200">` : ''}
+
+      <article id="swan-read-article" class="swan-read-prose text-[15px] leading-relaxed text-gray-800"></article>
+
+      <div class="border-t border-gray-100 pt-4 grid sm:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Section</label>
+          ${sectionsKnown
+            ? `<select id="swan-read-section" class="w-full text-sm border border-gray-300 rounded-lg p-2">${sectionOpts}</select>`
+            : `<p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">Section list unavailable — reload to change it. Saving now will leave the current section as it is.</p>`}
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Editor score</label>
+          <select id="swan-read-score" class="w-full text-sm border border-gray-300 rounded-lg p-2">${scoreOpts}</select>
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Editor note</label>
+        <p class="text-[11px] text-gray-400 mb-1.5">Internal, and recorded in the admin audit log alongside the decision. Write the reason you would give the author if they asked.</p>
+        <textarea id="swan-read-note" rows="3" maxlength="2000"
+          class="w-full text-sm border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">${_swanEsc(p.editorNote || '')}</textarea>
+      </div>
+
+      <div class="sticky bottom-0 bg-white border-t border-gray-100 pt-4 pb-1 flex flex-wrap gap-2">
+        <button onclick="swanDecide(${p.id}, 'featured')" ${orphaned ? 'disabled' : ''}
+          class="px-3 py-2 text-sm font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">★ Front page</button>
+        <button onclick="swanDecide(${p.id}, 'live')" ${orphaned ? 'disabled' : ''}
+          class="px-3 py-2 text-sm font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">✓ Publish to author page</button>
+        <button onclick="swanDecide(${p.id}, 'rejected')"
+          class="px-3 py-2 text-sm font-bold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition cursor-pointer">Decline</button>
+        <button onclick="swanDecide(${p.id}, null)"
+          class="px-3 py-2 text-sm font-bold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition cursor-pointer">Save notes only</button>
+      </div>`;
+
+    // The body is the post's own sanitised published_payload snapshot — allowlisted server-side at
+    // publish time, and the same markup the public page renders. Assigned as HTML deliberately, and
+    // ONLY here: everything else in this panel goes through _swanEsc.
+    document.getElementById('swan-read-article').innerHTML = d.bodyHtml || '<p class="text-gray-400 text-sm">This post has no body.</p>';
+  } catch (e) {
+    body.innerHTML = `<p class="text-sm text-red-600">${_swanEsc(e.message)}</p>`;
+  }
+}
+
+function closeSwanRead() {
+  document.getElementById('swan-read-panel')?.classList.add('hidden');
+  _swanReadId = null;
+}
+
+/**
+ * Apply a decision. `status` null means "save the editorial metadata, decide later" — the common
+ * case when an editor is triaging a long queue and wants to section and score without committing.
+ */
+async function swanDecide(id, status) {
+  // A field is sent only when its control actually rendered. `undefined` is dropped by
+  // JSON.stringify, and the endpoint treats an absent key as "leave it alone" — which is what makes
+  // it safe for openSwanRead to omit a control it could not populate.
+  const payload = {
+    section: document.getElementById('swan-read-section')?.value ?? undefined,
+    editorScore: document.getElementById('swan-read-score')?.value ?? undefined,
+    editorNote: document.getElementById('swan-read-note')?.value ?? undefined,
+    dek: document.getElementById('swan-read-dek')?.value ?? undefined,
+  };
+  if (status) payload.status = status;
+
+  // Declining is the one decision an author feels, and the note is what makes it answerable.
+  if (status === 'rejected' && !String(payload.editorNote || '').trim()) {
+    window.showToast?.('Add an editor note saying why before declining — it is the only record of the reason.', { icon: '⚠️' });
+    document.getElementById('swan-read-note')?.focus();
+    return;
+  }
+
+  try {
+    await api(`${SWAN_API}?resource=post&id=${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    window.showToast?.(status ? `Moved to ${SWAN_STATUS_LABEL[status] || status}.` : 'Saved.', { icon: '✅' });
+    closeSwanRead();
+    // Refresh whichever desk the editor is standing at — a decision made from the queue changes the
+    // front page too, and vice versa.
+    if (_activeView === 'swan-front-page') loadSwanFrontPage();
+    else loadSwanQueue();
+  } catch (e) {
+    window.showToast?.(e.message, { icon: '⚠️' });
+  }
+}
+
+// ── Front Page ────────────────────────────────────────────────────────────────
+async function loadSwanFrontPage() {
+  await _swanLoadOverview('swan-counts-front');
+  const list = document.getElementById('swan-front-list');
+  const elig = document.getElementById('swan-front-eligible');
+  if (!list) return;
+  try {
+    const data = await api(`${SWAN_API}?resource=featured`);
+    const items = data.items || [];
+
+    list.innerHTML = items.length ? items.map((p, i) => `
+      <div class="flex items-center gap-3 border border-gray-200 rounded-lg p-3 bg-white">
+        <div class="flex flex-col gap-0.5 shrink-0">
+          <button onclick="swanMove(${p.id}, 'up')" ${i === 0 ? 'disabled' : ''} aria-label="Move up"
+            class="w-7 h-6 text-xs border border-gray-300 rounded hover:bg-gray-50 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed">▲</button>
+          <button onclick="swanMove(${p.id}, 'down')" ${i === items.length - 1 ? 'disabled' : ''} aria-label="Move down"
+            class="w-7 h-6 text-xs border border-gray-300 rounded hover:bg-gray-50 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed">▼</button>
+        </div>
+        <div class="w-8 shrink-0 text-center">
+          <span class="text-lg font-extrabold ${i === 0 ? 'text-violet-600' : 'text-gray-300'}">${p.featuredRank}</span>
+        </div>
+        <div class="min-w-0 flex-1">
+          <p class="font-bold text-gray-900 text-sm leading-snug truncate">${_swanEsc(p.title)}</p>
+          <p class="text-xs text-gray-400 mt-0.5">
+            ${i === 0 ? '<span class="font-bold text-violet-600">LEAD STORY</span> · ' : ''}@${_swanEsc(p.handle)}${p.sectionLabel ? ` · ${_swanEsc(p.sectionLabel)}` : ''}
+          </p>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <button onclick="openSwanRead(${p.id})"
+            class="px-2.5 py-1.5 text-xs font-bold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer">Read</button>
+          <button onclick="swanUnfeature(${p.id})"
+            class="px-2.5 py-1.5 text-xs font-bold border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 cursor-pointer">Take off</button>
+        </div>
+      </div>`).join('')
+      : '<p class="text-sm text-gray-400">The front page is empty. Promote something from below.</p>';
+
+    elig.innerHTML = (data.eligible || []).length ? data.eligible.map((p) => `
+      <div class="flex items-center gap-3 border border-gray-200 rounded-lg p-3 bg-white">
+        <div class="min-w-0 flex-1">
+          <p class="font-bold text-gray-900 text-sm leading-snug truncate">${_swanEsc(p.title)}</p>
+          <p class="text-xs text-gray-400 mt-0.5">@${_swanEsc(p.handle)}${p.sectionLabel ? ` · ${_swanEsc(p.sectionLabel)}` : ''} · live ${_swanEsc(_swanDate(p.liveAt))}</p>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <button onclick="openSwanRead(${p.id})"
+            class="px-2.5 py-1.5 text-xs font-bold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer">Read</button>
+          <button onclick="swanFeature(${p.id})"
+            class="px-2.5 py-1.5 text-xs font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 cursor-pointer">★ Promote</button>
+        </div>
+      </div>`).join('')
+      : '<p class="text-sm text-gray-400">Nothing live and unfeatured.</p>';
+  } catch (e) {
+    list.innerHTML = `<p class="text-sm text-red-600">${_swanEsc(e.message)}</p>`;
+  }
+}
+
+async function swanMove(id, direction) {
+  try {
+    await api(`${SWAN_API}?resource=move&id=${id}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ direction }),
+    });
+    loadSwanFrontPage();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+async function _swanSetStatus(id, status, done) {
+  try {
+    await api(`${SWAN_API}?resource=post&id=${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    window.showToast?.(done, { icon: '✅' });
+    loadSwanFrontPage();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+const swanFeature = (id) => _swanSetStatus(id, 'featured', 'Added to the front page. It is now indexable.');
+const swanUnfeature = (id) => _swanSetStatus(id, 'live', 'Taken off the front page. Back to noindex.');
+
+// ── Contributors ──────────────────────────────────────────────────────────────
+async function loadSwanContributors() {
+  await _swanLoadOverview('swan-counts-contrib');
+  const host = document.getElementById('swan-contributors-list');
+  if (!host) return;
+  try {
+    const data = await api(`${SWAN_API}?resource=contributors`);
+    const items = data.items || [];
+    if (!items.length) {
+      host.innerHTML = '<p class="p-8 text-center text-sm text-gray-400">Nobody has connected The Swan Index yet.</p>';
+      return;
+    }
+    host.innerHTML = items.map((c) => {
+      const capped = c.monthlyPostCap != null && c.thisMonth >= c.monthlyPostCap;
+      return `
+      <div class="p-4 sm:p-5">
+        <div class="flex items-start justify-between gap-4 flex-wrap">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2 flex-wrap mb-1">
+              <a href="${_swanEsc(_swanBaseUrl)}/@${encodeURIComponent(c.handle)}" target="_blank" rel="noopener"
+                 class="font-bold text-gray-900 underline">@${_swanEsc(c.handle)}</a>
+              <span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${c.status === 'active' ? 'bg-emerald-100 text-emerald-700' : c.status === 'suspended' ? 'bg-red-100 text-red-700' : 'bg-gray-200 text-gray-500'}">${_swanEsc(c.status)}</span>
+              ${c.frontPageTier ? '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">Front-page tier</span>' : ''}
+              ${capped ? '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">At monthly limit</span>' : ''}
+            </div>
+            <p class="text-sm text-gray-700">${_swanEsc(c.displayName)}${c.roleTitle ? `, ${_swanEsc(c.roleTitle)}` : ''}${c.companyName ? ` at ${_swanEsc(c.companyName)}` : ''}</p>
+            <p class="text-xs text-gray-400 mt-1">
+              ${c.livePieces} live · ${c.pendingPieces} awaiting · ${c.rejectedPieces} declined
+              · this month ${c.thisMonth}${c.monthlyPostCap != null ? ` of ${c.monthlyPostCap}` : ' (uncapped)'}
+            </p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0 flex-wrap">
+            <label class="text-xs text-gray-500 flex items-center gap-1">
+              Cap
+              <input type="number" min="1" max="500" value="${c.monthlyPostCap ?? ''}" placeholder="∞"
+                onchange="swanSetCap(${c.id}, this.value)" ${c.status === 'withdrawn' ? 'disabled' : ''}
+                class="w-16 text-xs border border-gray-300 rounded-lg px-2 py-1 disabled:opacity-40 disabled:bg-gray-50">
+            </label>
+            <button onclick="swanToggleTier(${c.id}, ${c.frontPageTier ? 'false' : 'true'})"
+              ${c.status === 'withdrawn' ? 'disabled title="This contributor has disconnected The Swan Index."' : ''}
+              class="px-2.5 py-1.5 text-xs font-bold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+              ${c.frontPageTier ? 'Remove tier' : 'Grant tier'}
+            </button>
+            ${c.status === 'withdrawn'
+              ? '<span class="text-xs text-gray-400 px-2">Disconnected by the author</span>'
+              : `<button onclick="swanToggleSuspend(${c.id}, '${c.status === 'suspended' ? 'active' : 'suspended'}', '${_swanEsc(c.handle)}', ${c.livePieces})"
+                  class="px-2.5 py-1.5 text-xs font-bold rounded-lg cursor-pointer ${c.status === 'suspended'
+                    ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                    : 'border border-red-300 text-red-700 hover:bg-red-50'}">
+                  ${c.status === 'suspended' ? 'Reinstate' : 'Suspend'}</button>`}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    host.innerHTML = `<p class="p-5 text-sm text-red-600">${_swanEsc(e.message)}</p>`;
+  }
+}
+
+async function _swanPatchProfile(id, patch, done) {
+  try {
+    await api(`${SWAN_API}?resource=profile&id=${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    window.showToast?.(done, { icon: '✅' });
+    loadSwanContributors();
+  } catch (e) {
+    window.showToast?.(e.message, { icon: '⚠️' });
+    loadSwanContributors(); // the input still shows the rejected value; re-read the truth
+  }
+}
+
+const swanSetCap = (id, value) =>
+  _swanPatchProfile(id, { monthlyPostCap: value === '' ? null : Number(value) }, 'Monthly limit updated.');
+
+const swanToggleTier = (id, on) =>
+  _swanPatchProfile(id, { frontPageTier: on }, on ? 'Front-page tier granted.' : 'Front-page tier removed.');
+
+/**
+ * Suspending is a bigger action than it looks: the public queries filter on profile status, so it
+ * takes the contributor's ENTIRE back catalogue off the site at once, not just their next
+ * submission. Confirm with the count, because "suspend" reads like "stop new posts".
+ */
+async function swanToggleSuspend(id, next, handle, livePieces) {
+  if (next === 'suspended') {
+    // confirmModal, not confirm(): dialogs.js exists precisely to replace the browser's grey box,
+    // and this message needs the emphasis. It is innerHTML'd, so the handle is escaped — it comes
+    // from the database, and a handle is a user-supplied string even though the CHECK constraint
+    // makes this particular one boring.
+    const ok = await window.confirmModal(
+      `This immediately removes <strong>all ${livePieces} of their published piece${livePieces === 1 ? '' : 's'}</strong> ` +
+      `from The Swan Index, including anything on the front page, and their author page will 404.<br><br>` +
+      `Their posts on their own site are unaffected.`,
+      // Option names matter here: showConfirmModal reads title / confirmLabel / cancelLabel, and an
+      // invented key is silently ignored — leaving a destructive action behind a button that just
+      // says "Confirm". dialogs.js has the scar tissue for exactly this in its own comments.
+      { title: `Suspend @${_swanEsc(handle)}?`, confirmLabel: 'Suspend', cancelLabel: 'Keep active' },
+    );
+    if (!ok) return;
+  }
+  _swanPatchProfile(id, { status: next }, next === 'suspended' ? 'Contributor suspended.' : 'Contributor reinstated.');
 }
 
 // Boot: restore from URL param or default to dashboard. Must stay last in this script — it is

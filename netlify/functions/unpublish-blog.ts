@@ -3,9 +3,14 @@
 // publish-blog.ts). Thin wrapper: loads + org-scopes the post, then delegates to unpublishBlogPost
 // (src/utils/blog-publish.ts).
 //
-// Scope is the NATIVE copy only. Syndicated copies stay live — the blog connector adapters have no
-// unpublish (see src/utils/blog-destinations/types.ts) — so the response reports which external
-// targets are still up under `stillLive` for the UI to surface. Retracting those is a follow-up.
+// Scope is the native copy plus The Swan Index. EXTERNAL syndicated copies stay live — those
+// adapters have no unpublish (see src/utils/blog-destinations/types.ts) — so the response reports
+// which are still up under `stillLive` for the UI to surface. Retracting those is a follow-up.
+//
+// The Swan Index is the exception because it is first-party: unpublishBlogPost withdraws it and
+// records `destinations.swanindex = { status: 'withdrawn' }`, which is what keeps it OUT of the
+// stillLive list below. Reporting a magazine we had just retracted from as "still live" would be a
+// worse lie than not retracting it at all.
 //
 // POST { id }  →  { post, stillLive: [{ target, url }] }
 

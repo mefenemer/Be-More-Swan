@@ -6,7 +6,7 @@
 // (Dev.to, Hashnode) take body_markdown directly; HTML platforms (WordPress, Ghost — later) take the
 // sanitised published_payload HTML. No new rendering.
 
-export type BlogDestinationId = 'devto' | 'hashnode' | 'wordpress' | 'ghost' | 'wordpresscom';
+export type BlogDestinationId = 'devto' | 'hashnode' | 'wordpress' | 'ghost' | 'wordpresscom' | 'swanindex';
 
 /** The published blog data an adapter needs, projected from a blog_posts row + its snapshot. */
 export interface BlogDestinationPost {
@@ -83,7 +83,17 @@ export interface WordpresscomCreds {
     siteId: string;
 }
 
-export type BlogDestinationCreds = DevtoCreds | HashnodeCreds | WordpressCreds | GhostCreds | WordpresscomCreds;
+/**
+ * The Swan Index is FIRST-PARTY: same database, same deployment, so there is nothing to
+ * authenticate against. The "creds" are only the tenant the dispatcher is already acting for, which
+ * store.ts synthesises from the profile row. Modelled as creds anyway so the adapter interface
+ * stays uniform and the dispatcher needs no special case.
+ */
+export interface SwanIndexCreds {
+    organisationId: number;
+}
+
+export type BlogDestinationCreds = DevtoCreds | HashnodeCreds | WordpressCreds | GhostCreds | WordpresscomCreds | SwanIndexCreds;
 
 export interface BlogDestinationAdapter<C extends BlogDestinationCreds = BlogDestinationCreds> {
     id: BlogDestinationId;
@@ -91,9 +101,10 @@ export interface BlogDestinationAdapter<C extends BlogDestinationCreds = BlogDes
     /**
      * How the workspace connects this destination. 'paste' (default) collects `credFields` and
      * stores them in the vault; 'oauth' connects via the shared /api/oauth flow, and creds are
-     * resolved from the OAuth integration instead.
+     * resolved from the OAuth integration instead; 'firstparty' has nothing to authenticate — the
+     * destination is this same deployment, and connecting means creating a publication profile.
      */
-    authKind?: 'paste' | 'oauth';
+    authKind?: 'paste' | 'oauth' | 'firstparty';
     /** For authKind 'oauth': the IntegrationProvider the creds live under. */
     oauthProvider?: string;
     /** Fields the connect form collects (paste only); the secret ones are encrypted into the vault. */

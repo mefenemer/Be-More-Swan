@@ -44,7 +44,12 @@ export type AdminAction =
     | 'notification_template_edit'
     | 'notification_template_restore'
     | 'notification_sent'
-    | 'session_timeout_config_update';
+    | 'session_timeout_config_update'
+    // The Swan Index: an editorial decision published under a customer's byline on our masthead.
+    // Auditable for the same reason a tier change is — the author can ask why, and "an editor
+    // rejected it" is only an answer if we can say which editor, when, and on what note.
+    | 'swan_index_curation'
+    | 'swan_index_profile_change';
 
 export interface AdminAuditParams {
     adminId: number;

@@ -29,9 +29,33 @@ export const PROTECTED_PATHS = ['/workspace', '/onboarding', '/dashboard', '/bil
 /** Reachable without a session — the pages you need in order to get one. */
 const ALWAYS_ALLOWED = ['/maintenance', '/login', '/logout', '/check-email', '/register'];
 
+/**
+ * Hosts served by this deployment that are NOT the Be More Swan app.
+ *
+ * The Swan Index (netlify/functions/swan-index-page.ts) is a separate public publication answered
+ * by the same Netlify site via the host-scoped rewrites in netlify.toml. This guard is bound to
+ * `path = "/"`, and a Netlify edge binding is host-agnostic — so the magazine's front page lands
+ * here too, on a function that exists to gate an application it is not part of.
+ *
+ * That is not merely wasted work, though it is that: every front-page hit would pay a round trip
+ * to platform-config-public before rendering. The failure that matters is maintenance mode. Turning
+ * it on to deploy the app would redirect theswanindex.com to /maintenance and take a public
+ * magazine, with third-party authors' bylines on it, offline for a reason that has nothing to do
+ * with the magazine.
+ *
+ * Matched on hostname, not on path: the publication owns every path on its own domain, including
+ * ones that collide with app pages.
+ */
+const NON_APP_HOSTS = ['theswanindex.com', 'www.theswanindex.com'];
+
 export default async (request: Request, context: Context) => {
     const url = new URL(request.url);
     const path = normalisePath(url.pathname);
+
+    // Not the app — see NON_APP_HOSTS. Must be the first thing checked, before any config fetch.
+    if (NON_APP_HOSTS.includes(url.hostname.toLowerCase())) {
+        return context.next();
+    }
 
     // Skip assets. The netlify.toml bindings mean little else reaches this function, but a
     // request for /style.css or /images/hero.webp must never reach the config fetch below —
