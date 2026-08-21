@@ -57,6 +57,45 @@
     e.textContent = msg;
   }
 
+  var BUSY_BUTTONS = ['bs-approve', 'bs-pick-time', 'bs-publish', 'bs-schedule',
+    'bs-unschedule', 'bs-unpublish', 'bs-repush', 'bs-discard'];
+
+  // Whole-modal busy state for the long-running lifecycle actions (publish). Shows the OS wait
+  // cursor and disables every button in the footer, so a second click cannot fire a second publish
+  // while the first is still in flight — publish-blog is not idempotent from the author's point of
+  // view (it re-renders the payload and re-runs syndication).
+  function setBusy(on) {
+    var root = el('bms-blog-backdrop');
+    if (root) root.classList.toggle('bs-busy', !!on);
+    // An explicit list, not a container sweep: the lifecycle row has no wrapper id, and the ones
+    // that were ALREADY disabled (Unschedule/Unpublish are hidden+idle on a draft) must come back
+    // disabled — hence the marker attribute rather than a blanket re-enable.
+    BUSY_BUTTONS.forEach(function (id) {
+      var b = el(id);
+      if (!b) return;
+      if (on) { if (!b.disabled) { b.dataset.bsBusyDisabled = '1'; b.disabled = true; } }
+      else if (b.dataset.bsBusyDisabled) { delete b.dataset.bsBusyDisabled; b.disabled = false; }
+    });
+  }
+
+  // ── Where a published post actually landed ─────────────────────────────────────────────────────
+  // publish-blog and publish-blog-destinations both return `syndication`: one entry per connected
+  // destination that was attempted, already labelled. An EMPTY array is the meaningful case and the
+  // one that used to be invisible — it means nothing else is connected, so the post went to the
+  // org's own site alone. That is a perfectly normal outcome, and it is also exactly what a
+  // workspace that MEANT to syndicate looks like, so it has to be said out loud either way.
+  function syndicationFailures(entries) {
+    return (entries || []).filter(function (d) { return d.status === 'error' || d.status === 'not_connected'; });
+  }
+
+  // "The Swan Index (for review), Dev.to" — the destination plus, where it differs from what the
+  // author just pressed, what state it arrived in over there.
+  function syndicationNames(entries) {
+    return (entries || []).map(function (d) {
+      return d.label + (d.status === 'draft' ? ' (as a draft for review)' : '');
+    }).join(', ');
+  }
+
   // Live length readout for the body — the long-form equivalent of Create Post's per-platform
   // counter chips. Thin posts are the blog failure mode, so the chip warns under 300 words.
   function refreshReadout(md) {
@@ -211,6 +250,11 @@
     + '.bs-btn-outline{background:#fff;color:#be185d;border:1px solid #f9a8d4;}'
     + '.bs-btn-outline:hover{background:#fdf2f8;}'
     + '.bs-btn:disabled{opacity:.5;cursor:not-allowed;}'
+    // Publishing is the one action here that runs long enough for the author to wonder whether
+    // the click landed, and the banner alone sits below the fold on a long post. `cursor:progress`
+    // over the WHOLE modal is the signal they already expect from the OS. !important because
+    // .bs-btn:disabled (set on the buttons for the same beat) otherwise wins on the buttons.
+    + '#bms-blog-backdrop.bs-busy,#bms-blog-backdrop.bs-busy *{cursor:progress !important;}'
     + '.bs-ready-q{font-size:14px;font-weight:600;color:#1f2937;margin:0 0 8px;}'
     + '.bs-stack{display:flex;flex-direction:column;gap:8px;}';
 
@@ -439,6 +483,7 @@
     + '        </div>'
     + '        <div class="bs-row" style="margin-top:12px;">'
     + '          <button id="bs-unschedule" class="bs-btn bs-btn-ghost bs-hidden">Unschedule</button>'
+    + '          <button id="bs-repush" class="bs-btn bs-btn-ghost bs-hidden">Send to connected platforms</button>'
     + '          <button id="bs-unpublish" class="bs-btn bs-btn-ghost bs-hidden">Unpublish</button>'
     + '          <button id="bs-discard" class="bs-btn bs-btn-danger">Archive draft</button>'
     + '        </div>'
@@ -594,6 +639,7 @@
     // A blank post starts with a clean workspace: no stale schedule/publish affordances.
     el('bs-unschedule').classList.add('bs-hidden');
     el('bs-unpublish').classList.add('bs-hidden');
+    el('bs-repush').classList.add('bs-hidden');
     el('bs-schedule-picker').classList.add('bs-hidden');
     el('bs-schedule-at').value = '';
     setStatus('bs-save-status', 'Creating…');
@@ -643,7 +689,10 @@
       // A post already on the calendar can be pulled back off it.
       if (post.status === 'scheduled') el('bs-unschedule').classList.remove('bs-hidden');
       // A live post can be taken back off the site.
-      if (post.status === 'published') el('bs-unpublish').classList.remove('bs-hidden');
+      if (post.status === 'published') {
+        el('bs-unpublish').classList.remove('bs-hidden');
+        el('bs-repush').classList.remove('bs-hidden');
+      }
     }).catch(function () { setStatus('bs-save-status', ''); });
   }
 
@@ -1405,17 +1454,52 @@
     el('bs-ai-draft-go').addEventListener('click', runAiDraft);
     el('bs-ai-draft-cancel').addEventListener('click', function () { el('bs-ai-draft-form').classList.add('bs-hidden'); });
 
+    // Publish now. The slowest action in the Studio — it re-renders the payload, stamps provenance
+    // and awaits syndication to every connected destination — so it runs behind the wait cursor and
+    // a disabled button row rather than leaving the author staring at a click that appears to have
+    // done nothing.
+    //
+    // On success the modal CLOSES and hands the host the Published column to open: the post has left
+    // every state this screen can still act on, so keeping it up (as it used to, with a green banner
+    // and a live Unpublish button) invited the author to undo the thing they had just asked for. The
+    // toast carries the confirmation the banner used to.
     el('bs-publish').addEventListener('click', function () {
       if (!state.postId || blockedAsEmpty()) return;
       setBanner('bs-action-status', 'Publishing…');
+      setBusy(true);
       flushDraft().then(function () {
         return api('publish-blog', { method: 'POST', body: JSON.stringify({ id: state.postId }) });
       }).then(function (res) {
-        if (res.ok) {
-          setBanner('bs-action-status', 'Published ✓ (' + res.body.post.slug + ')');
+        setBusy(false);
+        if (!res.ok) {
+          setBanner('bs-action-status', (res.body && res.body.error) || 'Could not publish — please try again.', 'error');
+          return;
+        }
+        var slug = (res.body.post && res.body.post.slug) || '';
+        var sent = res.body.syndication || [];
+        var failed = syndicationFailures(sent);
+        // Refresh the list underneath either way — the post IS published, so the counts behind have
+        // moved whether or not every destination took it.
+        notifyChanged({ focusStatus: 'posted' });
+        if (failed.length) {
+          // A destination that refused is not a transient thing to flash in a toast on a screen the
+          // author is being navigated away from: the post is live on their own site and NOT where
+          // they expected it. Stay put and name what happened, with the server's own reason.
+          setBanner('bs-action-status', 'Published to your site ✓ — but ' + failed.map(function (d) {
+            return d.label + ' (' + (d.error || 'not connected') + ')';
+          }).join('; '), 'error');
           el('bs-unschedule').classList.add('bs-hidden');
           el('bs-unpublish').classList.remove('bs-hidden');
-        } else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not publish — please try again.', 'error');
+          el('bs-repush').classList.remove('bs-hidden');   // retry the leg that failed, without republishing
+          return;
+        }
+        closeBlogStudio();
+        window.showToast && window.showToast(sent.length
+          ? 'Published ✓ — also sent to ' + syndicationNames(sent) + '.'
+          : 'Published ✓ — on your own site only. No other platforms are connected.');
+      }).catch(function () {
+        setBusy(false);
+        setBanner('bs-action-status', 'Could not publish — please try again.', 'error');
       });
     });
 
@@ -1490,12 +1574,43 @@
         if (res.ok) {
           setBanner('bs-action-status', 'Schedule cleared — back to draft.');
           el('bs-unschedule').classList.add('bs-hidden');
+          notifyChanged();   // Scheduled → Review: two counts move, same as approve/schedule
         } else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not clear the schedule.', 'error');
       });
     });
 
     // Unpublish — takes the post off the org's own site only. Syndicated copies stay live (no
     // adapter can retract them), so name the ones that do in the confirm AND in the result banner.
+    // Re-push to the connected blogs, without republishing. Idempotent server-side (each
+    // destination is edited through its stored externalId), so this is safe to press twice — and it
+    // is the only way to syndicate a post to a destination connected AFTER the post went live.
+    el('bs-repush').addEventListener('click', function () {
+      if (!state.postId) return;
+      setBanner('bs-action-status', 'Sending…');
+      setBusy(true);
+      api('publish-blog-destinations', { method: 'POST', body: JSON.stringify({ postId: state.postId }) })
+        .then(function (res) {
+          setBusy(false);
+          if (!res.ok) {
+            setBanner('bs-action-status', (res.body && res.body.error) || 'Could not send this post.', 'error');
+            return;
+          }
+          var sent = res.body.syndication || [];
+          var failed = syndicationFailures(sent);
+          if (failed.length) {
+            setBanner('bs-action-status', failed.map(function (d) {
+              return d.label + ': ' + (d.error || 'not connected');
+            }).join('; '), 'error');
+          } else if (!sent.length) {
+            setBanner('bs-action-status', 'No other platforms are connected — connect one from your '
+              + 'assistant\u2019s Connections tab first.', 'error');
+          } else {
+            setBanner('bs-action-status', 'Sent to ' + syndicationNames(sent) + '.');
+          }
+        })
+        .catch(function () { setBusy(false); setBanner('bs-action-status', 'Could not send this post.', 'error'); });
+    });
+
     el('bs-unpublish').addEventListener('click', async function () {
       if (!state.postId) return;
       if (!(await window.confirmModal(
@@ -1514,6 +1629,8 @@
           ? 'Off your site — back to draft. Still live on ' + live.join(', ') + ' — remove there separately.'
           : 'Off your site — back to draft.');
         el('bs-unpublish').classList.add('bs-hidden');
+    el('bs-repush').classList.add('bs-hidden');
+        notifyChanged();   // Published → Review: same lifecycle move, same stale counts without it
       });
     });
 
@@ -1966,8 +2083,11 @@
   // value until the user switches tabs or reloads. The list card's own Archive button always
   // refreshed; the modal never did, which is why archiving from inside Blog Studio left the Review
   // count one too high.
-  function notifyChanged() {
-    try { window._onBlogStudioChanged && window._onBlogStudioChanged(); }
+  //
+  // `opts.focusStatus` names a lifecycle column for the host to OPEN as it refreshes (Publish sends
+  // 'posted'). Optional, and an older host that ignores the argument still refreshes in place.
+  function notifyChanged(opts) {
+    try { window._onBlogStudioChanged && window._onBlogStudioChanged(opts || {}); }
     catch (e) { /* the host page is optional — the modal must still close */ }
   }
 

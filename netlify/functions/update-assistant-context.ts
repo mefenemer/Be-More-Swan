@@ -10,6 +10,7 @@ import { enqueueScheduleGapFill } from '../../src/utils/schedule-gap-fill';
 import { enqueueBlogGapFill } from '../../src/utils/blog-gap-fill';
 import { BLOG_WRITER_ROLE_KEYS, SMM_ROLE_KEYS } from '../../src/constants/roles';
 import { MIN_HORIZON_DAYS, MAX_HORIZON_DAYS } from '../../src/config/posting-cadence';
+import { normaliseAssistantColor } from '../../src/config/assistant-colors';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /** Everything the post-save gap-fill needs, captured from inside the write transaction. */
@@ -35,7 +36,7 @@ export default withLambda(async (event) => {
     const { userId: currentUserId, organisationId: orgId } = ctx;
 
     // 2. Payload Extraction
-    const { assistantId, newContext, newConfiguration, newName, appliedDefaults, disclosureText } = JSON.parse(event.body || '{}');
+    const { assistantId, newContext, newConfiguration, newName, appliedDefaults, disclosureText, avatarColor } = JSON.parse(event.body || '{}');
 
     if (!assistantId || !newContext) return { statusCode: 400, body: JSON.stringify({ error: 'Missing parameters.' }) };
 
@@ -100,9 +101,9 @@ export default withLambda(async (event) => {
                 // would be promoted over a newer value set via set-draft-horizon.ts.
                 mergedContext.draft_horizon_days = clamped;
             }
+            const existingConfig = (existingAssistant.configuration as any) || {};
             if (appliedDefaults !== undefined) {
                 // Merge appliedDefaults into existing configuration rather than overwrite
-                const existingConfig = existingAssistant.configuration as any || {};
                 updatePayload.configuration = {
                     ...existingConfig,
                     ...(newConfiguration || {}),
@@ -110,6 +111,34 @@ export default withLambda(async (event) => {
                         ...(existingConfig.appliedDefaults || {}),
                         ...appliedDefaults,
                     },
+                };
+            }
+
+            // ── The assistant's icon colour ────────────────────────────────────────────────────
+            // Lives in `configuration.avatarColor`, which means it shares the fate of a field this
+            // endpoint REPLACES wholesale: every caller that builds a fresh `newConfiguration` from
+            // its own form (the detail page's autosave, the onboarding wizard, integrations.js)
+            // would silently wipe the user's colour on the next unrelated save. So the colour is
+            // carried across whenever the caller didn't mention it, the same way publishPolicy is
+            // carried across in onboardingContext above.
+            //
+            // An EXPLICIT null is a reset to the automatic id-derived colour, and is honoured;
+            // anything outside the palette is dropped rather than stored, because the value is
+            // interpolated straight into a style attribute on the surfaces that render it.
+            if (avatarColor !== undefined) {
+                const chosen = normaliseAssistantColor(avatarColor);
+                const base = updatePayload.configuration ?? newConfiguration ?? existingConfig;
+                const next = { ...(base as any) };
+                if (chosen) next.avatarColor = chosen; else delete next.avatarColor;
+                updatePayload.configuration = next;
+            } else if (
+                Object.prototype.hasOwnProperty.call(existingConfig, 'avatarColor')
+                && updatePayload.configuration
+                && !Object.prototype.hasOwnProperty.call(updatePayload.configuration, 'avatarColor')
+            ) {
+                updatePayload.configuration = {
+                    ...updatePayload.configuration,
+                    avatarColor: existingConfig.avatarColor,
                 };
             }
             await tx.update(aiAssistants)

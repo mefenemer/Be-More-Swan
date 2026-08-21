@@ -34,6 +34,10 @@ export default withLambda(async (event) => {
             // roleKey drives the connection-relevance map (connection-map.js).
             // Stored in configuration.type at creation (onboarding.ts).
             roleKey: sql<string | null>`(${aiAssistants.configuration} ->> 'type')`,
+            // The user's chosen icon colour (assistant detail → the swatch beside the name). Null
+            // when they've never picked one, in which case every surface falls back to the same
+            // id-derived colour — see src/config/assistant-colors.ts / window.AssistantColors.
+            avatarColor: sql<string | null>`(${aiAssistants.configuration} ->> 'avatarColor')`,
             status: aiAssistants.provisioningStatus,
             isActive: aiAssistants.isActive,
             // Canonical lifecycle state machine (assistant-lifecycle-epic).

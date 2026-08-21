@@ -49,6 +49,9 @@ import {
 } from '../src/config/lead-email-kind';
 import { LEAD_OUTREACH_CHIPS, leadOutreachState } from '../src/config/lead-outreach-state';
 import {
+    ASSISTANT_COLORS, ASSISTANT_COLOR_VALUES, ASSISTANT_COLOR_NEUTRAL,
+} from '../src/config/assistant-colors';
+import {
     LEAD_RETENTION_DAYS, RETENTION_FIELD, RETENTION_DELETED_FIELD, RETENTION_REASONS,
     RETENTION_REASON_LABELS, RETENTION_REASON_NOTES, RETENTION_NOTICE, RETENTION_DELETED_NOTICE,
     isRetentionDeleted, retentionReasonOf, retentionClockStart,
@@ -628,6 +631,24 @@ ${formatRows}
   var BLOG_FONTS = [
 ${fontRows}
   ];
+
+  // ── Assistant icon colours ─────────────────────────────────────────────────
+  // The palette a user picks their assistant's icon colour from, and the id-derived colour an
+  // assistant that has never been styled falls back to. Generated rather than retyped because the
+  // fallback has to agree exactly between the two sides: the server decides what a stored colour
+  // normalises to, the browser decides what an unstyled assistant looks like, and any drift between
+  // them repaints assistants at random. Consumed by /assistant-colors.js (window.AssistantColors),
+  // which is what every surface actually calls.
+  window.AssistantColorPalette = {
+    /** [{ value, name }] — swatch order is the order the picker renders them in. */
+    colors: ${JSON.stringify(ASSISTANT_COLORS)},
+
+    /** The hex values in the same order — the membership test both sides validate against. */
+    values: ${JSON.stringify(ASSISTANT_COLOR_VALUES)},
+
+    /** Drawn for rows belonging to no assistant (the "Be More Swan" actor). Never assignable. */
+    neutral: ${JSON.stringify(ASSISTANT_COLOR_NEUTRAL)},
+  };
 
   window.BlogFonts = {
     all: BLOG_FONTS,

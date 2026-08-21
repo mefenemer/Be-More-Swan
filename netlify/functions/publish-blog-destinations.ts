@@ -16,7 +16,7 @@ import { getDb } from '../../db/client';
 import { blogPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAuditEvent } from '../../src/utils/audit';
-import { syndicatePublishedPost } from '../../src/utils/blog-destinations/syndicate';
+import { summariseSyndication, syndicatePublishedPost } from '../../src/utils/blog-destinations/syndicate';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({ statusCode, body: JSON.stringify(body) });
@@ -56,5 +56,8 @@ export default withLambda(async (event: HandlerEvent) => {
         newState: results,
     });
 
-    return json(200, { results });
+    // `syndication` is the same outcomes flattened and LABELLED, so the caller can say "sent to The
+    // Swan Index" without shipping the adapter registry to the browser. `results` is kept for any
+    // existing caller reading the raw map.
+    return json(200, { results, syndication: summariseSyndication(results) });
 });

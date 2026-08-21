@@ -91,15 +91,16 @@ check('neither surface tells the user archiving cannot be undone', () => {
 });
 
 check('the modal notifies the host page on every lifecycle move', () => {
-    assert.ok(modal.includes('function notifyChanged()'), 'no notify hook exists');
-    // Archive, approve and manual schedule each move a post between columns.
-    const calls = modal.split('notifyChanged()').length - 1;
-    assert.ok(calls >= 4, `expected the definition plus 3 call sites, found ${calls} occurrences`);
+    assert.ok(modal.includes('function notifyChanged('), 'no notify hook exists');
+    // Archive, approve, manual schedule, unschedule, unpublish and publish each move a post
+    // between columns. Counted on the bare name so an argument at any site still registers.
+    const calls = modal.split(/\bnotifyChanged\(/).length - 1;
+    assert.ok(calls >= 7, `expected the definition plus 6 call sites, found ${calls} occurrences`);
 });
 
 check('the host page turns that into a real refresh of list AND badge', () => {
-    const start = landmark(js, 'window._onBlogStudioChanged = function()');
-    const slice = js.slice(start, start + 900);
+    const start = landmark(js, 'window._onBlogStudioChanged = function(');
+    const slice = js.slice(start, start + 1800);
     assert.ok(/detailRqRefresh/.test(slice), 'the list and its counts are never re-rendered');
     // detailRqRefresh is what recomputes the column counts and the Review tab badge.
     const refresh = js.slice(landmark(js, 'window.detailRqRefresh = function()'), landmark(js, 'window.detailRqRefresh = function()') + 400);
@@ -110,8 +111,8 @@ check('the host page turns that into a real refresh of list AND badge', () => {
 check('the autopilot card refreshes through its own renderer, not a hardcoded flag', () => {
     // _loadBlogAutopilotStats's 2nd arg gates the "Next post" line on the schedule being active;
     // passing true would advertise a next post for an on-demand assistant that has no schedule.
-    const start = landmark(js, 'window._onBlogStudioChanged = function()');
-    const slice = js.slice(start, start + 900);
+    const start = landmark(js, 'window._onBlogStudioChanged = function(');
+    const slice = js.slice(start, start + 1800);
     assert.ok(/_renderAutopilotCard\?\.\(\)/.test(slice), 'the card is not refreshed via its renderer');
     assert.ok(!/_loadBlogAutopilotStats\([^)]*,\s*true\)/.test(slice),
         'scheduleActive is hardcoded true — on-demand assistants would show a phantom next post');

@@ -384,11 +384,15 @@ window.NotifKit = (function () {
     // ── Actor identity (who is asking) ─────────────────────────────────────────
     // Every card leads with its actor: the assistant that produced it (avatar = coloured
     // initial + name), or the BMS system (semantic category icon + "Be More Swan"). The
-    // server attaches notif.actor = { assistantId, name, jobRole } | null. The palette mirrors
-    // calendar.js so an assistant reads the same colour across the app; colour is derived from
-    // the id (stable, load-order-independent) rather than stored per assistant.
-    const ASSISTANT_PALETTE = ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#06b6d4', '#8b5cf6', '#ef4444', '#14b8a6', '#f97316', '#3b82f6'];
-    const actorColor = (id) => (id == null ? '#9ca3af' : ASSISTANT_PALETTE[Math.abs(Number(id)) % ASSISTANT_PALETTE.length]);
+    // server attaches notif.actor = { assistantId, name, jobRole, avatarColor } | null.
+    //
+    // The colour comes from window.AssistantColors (/assistant-colors.js) — the user's own choice
+    // where they've made one, else the same id-derived fallback this file always used. Every actor
+    // seen is cached there too, so a surface that renders before its own assistants fetch lands
+    // still draws the right colour.
+    // The `??` arm covers assistant-colors.js failing to load at all; it is the same neutral grey
+    // the module itself returns for an unknown assistant.
+    const actorColor = (id, explicit) => window.AssistantColors?.colorFor(id, explicit) ?? '#9ca3af';
     const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     // Allow-list sanitiser for stored notification title/message before they hit innerHTML.
     // Notification copy is authored server-side as: admin template markup + HTML-ESCAPED user
@@ -421,7 +425,7 @@ window.NotifKit = (function () {
     const avatarHTML = (notif, st) => {
         const a = notif.actor;
         if (a && a.name) {
-            const color = actorColor(a.assistantId);
+            const color = actorColor(a.assistantId, a.avatarColor);
             return `<div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-white text-sm font-bold" style="background:${color}" title="${escHtml(a.name)}">${actorInitial(a.name)}</div>`;
         }
         return `<div class="w-10 h-10 rounded-full ${st.ring} border flex items-center justify-center shrink-0">${st.icon}</div>`;
@@ -430,7 +434,7 @@ window.NotifKit = (function () {
     const actorEyebrowHTML = (notif) => {
         const a = notif.actor;
         if (a && a.name) {
-            return `<p class="text-xs font-bold mb-0.5 truncate" style="color:${actorColor(a.assistantId)}">${escHtml(a.name)}</p>`;
+            return `<p class="text-xs font-bold mb-0.5 truncate" style="color:${actorColor(a.assistantId, a.avatarColor)}">${escHtml(a.name)}</p>`;
         }
         return `<p class="text-xs font-bold mb-0.5 text-gray-400">Be More Swan</p>`;
     };
@@ -449,7 +453,7 @@ window.initNotifications = async function() {
     const searchInput = document.getElementById('notif-search');
     const markAllBtn = document.getElementById('btn-mark-all-read');
     const groupBySelect = document.getElementById('notif-group-by');
-    const groupByAssistantOpt = document.getElementById('notif-group-by-assistant-opt');
+    const expandAllBtn = document.getElementById('notif-expand-all');
 
     if (!listEl) return;
 
@@ -467,12 +471,32 @@ window.initNotifications = async function() {
         actorColor, escHtml,
     } = window.NotifKit;
     let activeTab = 'action';
-    // 'none' | 'type' | 'assistant'. Grouping by assistant is only offered to workspaces that have
-    // more than one — with a single assistant every card lands in the same group.
+    // 'none' | 'type' | 'assistant'. Remembered per browser: picking a grouping and then navigating
+    // away and back used to silently drop you into an ungrouped list, which reads as "grouping does
+    // nothing" — the choice is restored below once the select is known to be present.
+    const GROUP_BY_STORAGE_KEY = 'bms_notifGroupBy';
+    const GROUP_MODES = ['none', 'type', 'assistant'];
     let groupBy = 'none';
     // Persists across re-renders so a group stays collapsed while notifications update/resolve.
     // Keys are namespaced by grouping mode, so switching mode can't collapse an unrelated group.
     const collapsedGroups = new Set();
+    // The group keys the last render actually drew, so "Collapse all" knows what it is acting on
+    // (and can tell "everything is collapsed" from "there are no groups").
+    let renderedGroupKeys = [];
+
+    // One control for both directions: it offers "Collapse all" while anything is open and
+    // "Expand all" once everything is shut, and hides itself entirely when nothing is grouped.
+    const syncExpandAllBtn = () => {
+        if (!expandAllBtn) return;
+        const hasGroups = renderedGroupKeys.length > 0;
+        expandAllBtn.classList.toggle('hidden', !hasGroups);
+        // `hidden` loses to the button's own inline-flex utility, so drive display too.
+        expandAllBtn.style.display = hasGroups ? '' : 'none';
+        if (!hasGroups) return;
+        const allCollapsed = renderedGroupKeys.every(k => collapsedGroups.has(k));
+        expandAllBtn.textContent = allCollapsed ? 'Expand all' : 'Collapse all';
+        expandAllBtn.dataset.action = allCollapsed ? 'expand' : 'collapse';
+    };
 
     const tabActionBtn = document.getElementById('tab-action');
     const tabUpdatesBtn = document.getElementById('tab-updates');
@@ -486,47 +510,33 @@ window.initNotifications = async function() {
         if (tabUpdatesBtn) tabUpdatesBtn.className = activeTab === 'updates' ? active : inactive;
     };
 
-    // How many assistants the workspace has. Archived/failed ones are left out: they can't produce
-    // anything new, so they shouldn't turn a one-assistant workspace into a grouped one. Returns 0
-    // on any failure — the option simply stays hidden rather than the page erroring.
-    const countAssistants = async () => {
-        try {
-            const res = await fetch('/.netlify/functions/get-assistants', { credentials: 'same-origin' });
-            if (!res.ok) return 0;
-            const data = await res.json();
-            return (data.assistants || []).filter(a =>
-                a.status !== 'failed' && a.lifecycleStatus !== 'archived').length;
-        } catch {
-            return 0;
-        }
+    // "Group by assistant" used to be REMOVED from the select whenever the workspace had a single
+    // assistant, on the reasoning that one assistant means one group. That was wrong on both counts:
+    // system notifications ("Be More Swan") are their own bucket, so even a one-assistant workspace
+    // gets a real split — and an option that silently vanishes is indistinguishable, to the user,
+    // from grouping that does not work. The option now always stands.
+    const restoreGroupBy = () => {
+        if (!groupBySelect) return;
+        let saved = null;
+        try { saved = localStorage.getItem(GROUP_BY_STORAGE_KEY); } catch { saved = null; }
+        if (!GROUP_MODES.includes(saved)) return;
+        groupBy = saved;
+        groupBySelect.value = saved;
     };
 
-    // Offer "Group by assistant" only when there's more than one assistant to separate. The actor
-    // count is a second source: it covers an archived assistant whose notifications are still in
-    // the list, and the case where the assistants fetch failed outright.
-    const applyAssistantGrouping = (assistantCount) => {
-        const distinctActors = new Set(
-            notificationsData.map(n => n.actor && n.actor.assistantId).filter(id => id != null)).size;
-        const allowed = assistantCount > 1 || distinctActors > 1;
-        if (allowed) return;
-        // Remove rather than hide: Safari renders option[hidden] as a selectable row.
-        if (groupByAssistantOpt && groupByAssistantOpt.isConnected) groupByAssistantOpt.remove();
-        if (groupBy === 'assistant') {
-            groupBy = 'none';
-            if (groupBySelect) groupBySelect.value = 'none';
-        }
+    const rememberGroupBy = (mode) => {
+        try { localStorage.setItem(GROUP_BY_STORAGE_KEY, mode); } catch { /* private mode — in-memory only */ }
     };
 
     const loadData = async () => {
         try {
-            const [response, assistantCount] = await Promise.all([
-                fetch('/.netlify/functions/notifications'),
-                countAssistants(),
-            ]);
+            const response = await fetch('/.netlify/functions/notifications');
             if (response.ok) {
                 const data = await response.json();
                 notificationsData = data.notifications || [];
-                applyAssistantGrouping(assistantCount);
+                // Cache each actor's chosen colour so surfaces that only hold an id (the header
+                // popover, group dots) resolve to the same colour the cards draw.
+                window.AssistantColors?.rememberAll(notificationsData.map(n => n.actor).filter(Boolean));
                 // Open the tab that has something waiting: unresolved actions first, else updates.
                 activeTab = notificationsData.some(n => kindOf(n) === 'action' && !isResolved(n)) ? 'action' : 'updates';
                 renderList();
@@ -694,6 +704,10 @@ window.initNotifications = async function() {
                 if (title) title.textContent = activeTab === 'action' ? "You're all caught up" : 'No updates';
                 if (sub) sub.textContent = activeTab === 'action' ? 'Nothing needs your attention right now.' : "We'll let you know when something happens.";
             }
+            // Nothing was drawn, so there is nothing to collapse — otherwise switching to an empty
+            // tab while grouped leaves "Collapse all" sitting above the empty state.
+            renderedGroupKeys = [];
+            syncExpandAllBtn();
             return;
         }
         if (emptyStateEl) emptyStateEl.classList.add('hidden');
@@ -702,6 +716,8 @@ window.initNotifications = async function() {
 
         if (groupBy === 'none') {
             list.forEach(notif => listEl.appendChild(renderItem(notif)));
+            renderedGroupKeys = [];
+            syncExpandAllBtn();
             return;
         }
 
@@ -712,7 +728,7 @@ window.initNotifications = async function() {
             if (groupBy === 'assistant') {
                 const a = notif.actor;
                 return a && a.name
-                    ? { key: `assistant:${a.assistantId}`, label: a.name, color: actorColor(a.assistantId) }
+                    ? { key: `assistant:${a.assistantId}`, label: a.name, color: actorColor(a.assistantId, a.avatarColor) }
                     : { key: 'assistant:system', label: 'Be More Swan', color: null };
             }
             const type = notif.type || 'other';
@@ -726,31 +742,62 @@ window.initNotifications = async function() {
             if (!groups.has(g.key)) groups.set(g.key, { ...g, items: [] });
             groups.get(g.key).items.push(notif);
         });
+
+        // Each group is ONE <li> holding its own header + nested <ul> of cards, rather than a flat
+        // run of sibling <li>s. Two reasons: the list's `divide-y` then draws a rule between GROUPS
+        // (not between a header and its first card, which read as an unrelated row), and collapsing
+        // is a class toggle on the nested list instead of a full re-render — so the scroll position,
+        // focus and any in-flight card state survive a collapse.
         groups.forEach(({ key, label, color, items }) => {
             const isCollapsed = collapsedGroups.has(key);
-            const header = document.createElement('li');
-            header.className = 'px-4 pt-4 pb-1 bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide flex items-center justify-between cursor-pointer select-none hover:bg-gray-100 transition-colors';
-            header.setAttribute('role', 'button');
-            header.setAttribute('tabindex', '0');
+            const bodyId = `notif-group-body-${key.replace(/[^a-z0-9]+/gi, '-')}`;
+
+            const section = document.createElement('li');
+            section.className = 'notif-group';
+            section.dataset.groupKey = key;
+
+            // A real <button> so Enter/Space, focus ring and screen-reader semantics come for free.
+            // Sticky so the group a card belongs to stays on screen while its items scroll past.
+            const header = document.createElement('button');
+            header.type = 'button';
+            header.className = 'notif-group-header w-full sticky top-0 z-10 px-4 py-2.5 bg-gray-50 border-y border-gray-200 text-xs font-bold text-gray-600 uppercase tracking-wide flex items-center justify-between gap-2 cursor-pointer select-none hover:bg-gray-100 focus:outline-none ring-inset focus-visible:ring-2 focus-visible:ring-emerald-200 transition-colors';
             header.setAttribute('aria-expanded', String(!isCollapsed));
+            header.setAttribute('aria-controls', bodyId);
             // The dot repeats the assistant's card colour, so a group reads as the same identity.
             const dot = color ? `<span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${color}"></span>` : '';
             header.innerHTML = `
-                <span class="flex items-center gap-2 min-w-0">${dot}<span class="truncate">${escHtml(label)} (${items.length})</span></span>
-                <svg class="w-4 h-4 text-gray-400 transition-transform shrink-0 ${isCollapsed ? '' : 'rotate-180'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <span class="flex items-center gap-2 min-w-0">
+                    ${dot}<span class="truncate">${escHtml(label)}</span>
+                    <span class="shrink-0 normal-case tracking-normal font-bold text-[11px] px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-600">${items.length}</span>
+                </span>
+                <svg class="notif-group-chevron w-4 h-4 text-gray-400 transition-transform shrink-0 ${isCollapsed ? '' : 'rotate-180'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
                 </svg>`;
-            const toggle = () => {
-                if (collapsedGroups.has(key)) collapsedGroups.delete(key); else collapsedGroups.add(key);
-                renderList();
-            };
-            header.addEventListener('click', toggle);
-            header.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+
+            const body = document.createElement('ul');
+            body.id = bodyId;
+            body.className = 'divide-y divide-gray-100';
+            // `hidden` alone loses to the utility classes the cards carry, so drive display directly.
+            if (isCollapsed) body.style.display = 'none';
+            items.forEach(notif => body.appendChild(renderItem(notif)));
+
+            header.addEventListener('click', () => {
+                const nowCollapsed = !collapsedGroups.has(key);
+                if (nowCollapsed) collapsedGroups.add(key); else collapsedGroups.delete(key);
+                body.style.display = nowCollapsed ? 'none' : '';
+                header.setAttribute('aria-expanded', String(!nowCollapsed));
+                header.querySelector('.notif-group-chevron')?.classList.toggle('rotate-180', !nowCollapsed);
+                syncExpandAllBtn();
             });
-            listEl.appendChild(header);
-            if (!isCollapsed) items.forEach(notif => listEl.appendChild(renderItem(notif)));
+
+            section.appendChild(header);
+            section.appendChild(body);
+            listEl.appendChild(section);
         });
+
+        // "Collapse all" flips to "Expand all" once everything is shut, so one control covers both.
+        renderedGroupKeys = [...groups.keys()];
+        syncExpandAllBtn();
     };
 
     const setRead = async (id, isRead) => {
@@ -834,8 +881,22 @@ window.initNotifications = async function() {
     if (tabActionBtn) tabActionBtn.addEventListener('click', () => { activeTab = 'action'; renderList(); });
     if (tabUpdatesBtn) tabUpdatesBtn.addEventListener('click', () => { activeTab = 'updates'; renderList(); });
     if (searchInput) searchInput.addEventListener('input', renderList);
-    if (groupBySelect) groupBySelect.addEventListener('change', () => { groupBy = groupBySelect.value; renderList(); });
+    if (groupBySelect) groupBySelect.addEventListener('change', () => {
+        groupBy = GROUP_MODES.includes(groupBySelect.value) ? groupBySelect.value : 'none';
+        // Switching mode starts every group open — carrying collapsed keys across modes would hide
+        // items under a heading the user has not seen yet.
+        collapsedGroups.clear();
+        rememberGroupBy(groupBy);
+        renderList();
+    });
 
+    if (expandAllBtn) expandAllBtn.addEventListener('click', () => {
+        if (expandAllBtn.dataset.action === 'collapse') renderedGroupKeys.forEach(k => collapsedGroups.add(k));
+        else collapsedGroups.clear();
+        renderList();
+    });
+
+    restoreGroupBy();
     loadData();
 };
 

@@ -197,7 +197,16 @@ export async function publishBlogPost(db: any, post: BlogPostRow, organisationId
     // must never fail the publish itself. Lazy import breaks the blog-publish ↔ syndicate cycle.
     try {
         const { syndicatePublishedPost } = await import('./blog-destinations/syndicate');
-        await syndicatePublishedPost(db, organisationId, updated);
+        const results = await syndicatePublishedPost(db, organisationId, updated);
+        // ⚠️ `updated` was RETURNED by the update above, i.e. read before syndication wrote its
+        // outcomes into the same `destinations` column. Without this merge the row handed back to
+        // every caller reports the PRE-syndication blob — which is why publish-blog could only ever
+        // answer "Published ✓", with no way to say that a destination errored or was skipped as
+        // not-connected. Merged in memory rather than re-read: syndicatePublishedPost has just
+        // written exactly this, and a second SELECT would cost a round trip to learn nothing new.
+        if (results && Object.keys(results).length) {
+            updated.destinations = { ...(updated.destinations as Record<string, unknown> || {}), ...results };
+        }
     } catch (err) {
         console.warn(`[publishBlogPost] syndication failed for post ${id}:`, err instanceof Error ? err.message : err);
     }

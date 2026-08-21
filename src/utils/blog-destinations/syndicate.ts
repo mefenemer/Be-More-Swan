@@ -13,7 +13,7 @@
 import { and, eq } from 'drizzle-orm';
 import type { getDb } from '../../../db/client';
 import { blogPosts, widgetConfigs } from '../../../db/schema';
-import { getBlogAdapter } from './index';
+import { BLOG_DESTINATION_IDS, getBlogAdapter } from './index';
 import { resolveDestinationCreds, listBlogDestinations } from './store';
 import { stripMediaForSyndication } from '../blog-publish';
 import { renderMarkdown } from '../markdown-render';
@@ -79,6 +79,45 @@ export async function projectPost(
         coverImageUrl: null,
         metaDescription: post.metaDescription ?? null,
     };
+}
+
+/** One destination's outcome, flattened for the UI: what it is called and what happened to it. */
+export interface SyndicationSummaryEntry {
+    id: string;
+    label: string;
+    status: SyndicationTargetResult['status'];
+    url?: string;
+    error?: string;
+}
+
+/**
+ * Flatten a blog_posts.destinations blob into the per-destination outcomes a UI can read out.
+ *
+ * The blob is a grab-bag: it also holds `widget` (a bare status string, not an object) and the
+ * reserved `selected` array, and BOTH would otherwise be rendered as if they were platforms the
+ * author had pushed to. Only real destination ids with a recorded object survive.
+ *
+ * Why this exists at all: publishing reported "Published ✓" whether five destinations took the post
+ * or none did — and the one case that matters, a destination that is not connected and is therefore
+ * skipped in silence, looked exactly like total success. See publishBlogPost.
+ */
+export function summariseSyndication(destinations: unknown): SyndicationSummaryEntry[] {
+    const blob = (destinations as Record<string, unknown>) || {};
+    const out: SyndicationSummaryEntry[] = [];
+    for (const id of BLOG_DESTINATION_IDS) {
+        const entry = blob[id];
+        if (!entry || typeof entry !== 'object') continue;
+        const r = entry as SyndicationTargetResult;
+        if (!r.status) continue;
+        out.push({
+            id,
+            label: getBlogAdapter(id as BlogDestinationId).label,
+            status: r.status,
+            ...(r.url ? { url: r.url } : {}),
+            ...(r.error ? { error: r.error } : {}),
+        });
+    }
+    return out;
 }
 
 /**

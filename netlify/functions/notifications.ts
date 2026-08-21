@@ -1,6 +1,6 @@
 // netlify/functions/notifications.ts
 import { HandlerEvent } from '@netlify/functions';
-import { eq, and, desc, isNull, inArray } from 'drizzle-orm';
+import { eq, and, desc, isNull, inArray, sql } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
 import { users, notifications, userProfiles, aiAssistants } from '../../db/schema';
@@ -135,13 +135,16 @@ export default withLambda(async (event: HandlerEvent) => {
                 return typeof num === 'number' && Number.isInteger(num) && num > 0 ? num : null;
             };
             const actorIds = [...new Set(allNotes.map(numericAssistantId).filter((id): id is number => id !== null))];
-            let actorById = new Map<number, { name: string; jobRole: string | null }>();
+            let actorById = new Map<number, { name: string; jobRole: string | null; avatarColor: string | null }>();
             if (actorIds.length > 0) {
                 try {
                     const rows = await db.select({
                         id: aiAssistants.id, name: aiAssistants.name, jobRole: aiAssistants.aiAssistantJobRole,
+                        // The user's chosen icon colour, so the inbox draws the same assistant in the
+                        // same colour as the cards and the calendar. Null ⇒ automatic (id-derived).
+                        avatarColor: sql<string | null>`(${aiAssistants.configuration} ->> 'avatarColor')`,
                     }).from(aiAssistants).where(inArray(aiAssistants.id, actorIds));
-                    actorById = new Map(rows.map(r => [r.id, { name: r.name, jobRole: r.jobRole }]));
+                    actorById = new Map(rows.map(r => [r.id, { name: r.name, jobRole: r.jobRole, avatarColor: r.avatarColor }]));
                 } catch { /* assistant lookup best-effort; degrade to system attribution */ }
             }
 
@@ -160,7 +163,7 @@ export default withLambda(async (event: HandlerEvent) => {
                     priority: priorityOf(n.type),
                     isDismissible: isDismissibleType(n.type),
                     resolvesOnClick: resolvesOnClick(n.type),
-                    actor: asst ? { assistantId: aid, name: asst.name, jobRole: asst.jobRole } : null,
+                    actor: asst ? { assistantId: aid, name: asst.name, jobRole: asst.jobRole, avatarColor: asst.avatarColor } : null,
                 };
             });
             return { statusCode: 200, body: JSON.stringify({ notifications: annotated }) };

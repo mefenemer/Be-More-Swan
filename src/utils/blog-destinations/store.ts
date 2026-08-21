@@ -8,6 +8,7 @@ import type { getDb } from '../../../db/client';
 import { workspaceIntegrations } from '../../../db/schema';
 import { storeSecret, getSecret, deleteSecret } from '../vault';
 import { getProfileByOrg, ensureProfile } from '../swan-index/profile';
+import { swanIndexBaseUrl } from '../swan-index/base-url';
 import { swanIndexProfiles, swanIndexPosts } from '../../../db/schema';
 import { inArray } from 'drizzle-orm';
 import { getFreshAccessToken, deleteIntegration, type IntegrationProvider } from '../workspace-integrations';
@@ -184,6 +185,20 @@ export interface BlogDestinationStatus {
     supportsDraft: boolean;
     /** How this destination receives an auto-syndicated post on publish (draft unless set to live). */
     publishMode: BlogPublishMode;
+    /**
+     * True for the FIRST-PARTY destination (The Swan Index) — same database, no credentials, and a
+     * connect that provisions a public publication profile rather than storing a secret.
+     *
+     * Sent explicitly rather than left for the client to infer from `credFields.length === 0`: a
+     * future paste destination that happens to need no fields would be misread as first-party and
+     * offered a one-click connect that stores nothing. The UI needs to know WHICH it is, not how
+     * many boxes to draw.
+     */
+    firstParty: boolean;
+    /** First-party only: the profile handle, so the card can link to the author's public page. */
+    handle?: string | null;
+    /** First-party only: origin of the publication, for that link. */
+    siteUrl?: string | null;
 }
 
 /** Connection state for every adapter, for the integrations/settings UI. */
@@ -212,6 +227,9 @@ export async function listBlogDestinations(db: Db, organisationId: number): Prom
                 oauth: false,
                 supportsDraft: adapter.supportsDraft,
                 publishMode: modes[id],
+                firstParty: true,
+                handle: connected ? swanProfile!.handle : null,
+                siteUrl: swanIndexBaseUrl(),
             };
         }
         const isOAuth = adapter.authKind === 'oauth' && !!adapter.oauthProvider;
@@ -229,6 +247,7 @@ export async function listBlogDestinations(db: Db, organisationId: number): Prom
             supportsDraft: adapter.supportsDraft,
             // Hashnode can't draft, so it always reports live regardless of the stored preference.
             publishMode: adapter.supportsDraft ? modes[id] : 'live',
+            firstParty: false,
         };
     });
 }

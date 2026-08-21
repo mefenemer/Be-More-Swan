@@ -370,7 +370,7 @@ console.log('\n(12) AI image generation is preflighted, not discovered from a 40
 const caps = modal.slice(landmark(modal, 'function loadMediaCapabilities()'),
                          landmark(modal, 'function openAiForm()'));
 const openStudio = modal.slice(landmark(modal, 'function openBlogStudio('),
-                               landmark(modal, 'function notifyChanged()'));
+                               landmark(modal, 'function notifyChanged('));
 const aiGenerate = modal.slice(landmark(modal, "mediaEls.aiGo.addEventListener('click'"),
                                landmark(modal, 'mediaEls.pexelsGo.addEventListener'));
 

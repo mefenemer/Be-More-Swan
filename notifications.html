@@ -32,16 +32,23 @@
             </div>
             <input type="text" id="notif-search" placeholder="Search notifications..." class="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm transition-all">
         </div>
-        <!-- Grouping. The "Assistant" option is removed by notifications.js unless the workspace
-             has more than one assistant — with a single one it would only ever draw one group. -->
-        <label class="flex items-center gap-2 text-sm font-medium text-gray-600 shrink-0 cursor-pointer select-none">
-            Group by
-            <select id="notif-group-by" class="py-2.5 pl-3 pr-8 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-700 focus:ring-2 focus:ring-emerald-600 outline-none transition-all cursor-pointer">
-                <option value="none">Nothing</option>
-                <option value="type">Type</option>
-                <option value="assistant" id="notif-group-by-assistant-opt">Assistant</option>
-            </select>
-        </label>
+        <!-- Grouping. Every option always stands: even a single-assistant workspace splits into
+             that assistant and "Be More Swan" (system notifications). The choice is remembered in
+             localStorage by notifications.js, so it survives navigating away and back. -->
+        <div class="flex items-center gap-3 shrink-0">
+            <label class="flex items-center gap-2 text-sm font-medium text-gray-600 cursor-pointer select-none">
+                Group by
+                <select id="notif-group-by" class="py-2.5 pl-3 pr-8 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-700 focus:ring-2 focus:ring-emerald-600 outline-none transition-all cursor-pointer">
+                    <option value="none">Nothing</option>
+                    <option value="type">Type</option>
+                    <option value="assistant">Assistant</option>
+                </select>
+            </label>
+            <!-- Shown by notifications.js only while a grouping is active; its label flips between
+                 "Collapse all" and "Expand all" to match what the click will do. -->
+            <button type="button" id="notif-expand-all" style="display:none"
+                class="hidden shrink-0 whitespace-nowrap px-3 py-2.5 text-sm font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer">Collapse all</button>
+        </div>
     </div>
 
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">

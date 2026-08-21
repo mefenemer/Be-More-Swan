@@ -592,6 +592,24 @@
     {"label":"Space Mono","stack":"'Space Mono', monospace","category":"Monospace","url":"https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap"},
   ];
 
+  // ── Assistant icon colours ─────────────────────────────────────────────────
+  // The palette a user picks their assistant's icon colour from, and the id-derived colour an
+  // assistant that has never been styled falls back to. Generated rather than retyped because the
+  // fallback has to agree exactly between the two sides: the server decides what a stored colour
+  // normalises to, the browser decides what an unstyled assistant looks like, and any drift between
+  // them repaints assistants at random. Consumed by /assistant-colors.js (window.AssistantColors),
+  // which is what every surface actually calls.
+  window.AssistantColorPalette = {
+    /** [{ value, name }] — swatch order is the order the picker renders them in. */
+    colors: [{"value":"#6366f1","name":"Indigo"},{"value":"#10b981","name":"Green"},{"value":"#f59e0b","name":"Amber"},{"value":"#ec4899","name":"Pink"},{"value":"#06b6d4","name":"Cyan"},{"value":"#8b5cf6","name":"Violet"},{"value":"#ef4444","name":"Red"},{"value":"#14b8a6","name":"Teal"},{"value":"#f97316","name":"Orange"},{"value":"#3b82f6","name":"Blue"}],
+
+    /** The hex values in the same order — the membership test both sides validate against. */
+    values: ["#6366f1","#10b981","#f59e0b","#ec4899","#06b6d4","#8b5cf6","#ef4444","#14b8a6","#f97316","#3b82f6"],
+
+    /** Drawn for rows belonging to no assistant (the "Be More Swan" actor). Never assignable. */
+    neutral: "#9ca3af",
+  };
+
   window.BlogFonts = {
     all: BLOG_FONTS,
     categories: ["System","Sans serif","Serif","Display","Monospace"],

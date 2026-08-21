@@ -197,14 +197,19 @@ let _scheduledRecords = [];
 let _followUps = [];
 let _leadOutreach = false;
 
-// Stable colour palette assigned to assistants by load order (inline styles → no Tailwind
-// arbitrary-class compile issues). Null/unknown assistant → neutral grey.
-const ASSISTANT_PALETTE = ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#06b6d4', '#8b5cf6', '#ef4444', '#14b8a6', '#f97316', '#3b82f6'];
+// An assistant's identity colour — the user's own choice where they've made one, otherwise the
+// stable id-derived fallback. Resolved through window.AssistantColors (/assistant-colors.js) so the
+// calendar, the My Assistants cards, the detail hero and the notification inbox all agree.
+//
+// ⚠️ This used to key the palette by the assistant's INDEX in _assistants (load order), while
+// notifications.js keyed the same palette by `id % length`. Both files claimed to mirror the other;
+// they only agreed when load order happened to match id order, so one assistant could be indigo in
+// the inbox and amber here. Inline styles, not Tailwind classes — arbitrary colour classes don't
+// compile. Null/unknown assistant → neutral grey.
 function _assistantColor(id) {
-    if (id == null) return '#9ca3af';
-    const idx = _assistants.findIndex(a => a.id === id);
-    const i = idx >= 0 ? idx : (Math.abs(Number(id)) % ASSISTANT_PALETTE.length);
-    return ASSISTANT_PALETTE[i % ASSISTANT_PALETTE.length];
+    if (id == null) return window.AssistantColors?.NEUTRAL || '#9ca3af';
+    const a = _assistants.find(x => x.id === id);
+    return window.AssistantColors?.colorFor(id, a && a.avatarColor) || '#9ca3af';
 }
 function _assistantName(id) {
     if (id == null) return 'Unassigned';
@@ -372,7 +377,12 @@ async function _loadAndRender() {
 
         if (posts) _posts = posts;
         if (activities) _activities = activities;
-        if (assistants) _assistants = assistants;
+        if (assistants) {
+            _assistants = assistants;
+            // Seed the shared colour cache so chips/dots that only carry an assistantId resolve to
+            // the user's chosen colour rather than the id-derived fallback.
+            window.AssistantColors?.rememberAll(assistants);
+        }
         if (blogPosts) _blogPosts = blogPosts;
         _scheduledRecords = records;
         _followUps = followUps;

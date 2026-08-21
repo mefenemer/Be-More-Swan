@@ -786,11 +786,77 @@ async function _loadBlogDestinations() {
 // Hashnode) or an OAuth redirect (WordPress.com). Once connected it shows the account, a
 // draft/live control (how auto-syndication publishes on this blog), and Disconnect. Blog
 // connections are org-wide (shared across assistants), like inbound sources.
-function _blogDestCard(d) {
+// The FIRST-PARTY destination (The Swan Index) is not a connector in the sense the others are:
+// there are no credentials to paste, and "connecting" provisions a public publication profile with
+// an allocated handle on a masthead we run. Routing it through _blogDestCard's paste path produced
+// the worst of both — a "Connect The Swan Index" button that opened an EMPTY form (credFields is
+// []) containing a second "Connect" button, with nothing on screen saying what connecting would do.
+//
+// It gets its own card: one click, and copy that names the editorial step, because "your post is
+// queued for a human editor" is the single most surprising thing about this destination and it was
+// stated nowhere in the product.
+function _firstPartyDestCard(d) {
     const connected = !!d.connected;
     const primaryBtn = 'w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl shadow-sm hover:shadow transition cursor-pointer';
     const ghostPill = 'inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
-    const disconnectBtn = `<button onclick="window._blogDestDisconnect('${d.id}')" class="${ghostPill} text-red-600 bg-white hover:bg-red-600 hover:text-white border-red-200 hover:border-red-600" type="button">Disconnect</button>`;
+    const profileUrl = d.handle && d.siteUrl ? `${d.siteUrl}/@${d.handle}` : null;
+
+    const capPill = connected
+        ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">✓ Connected</span>`
+        : `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-500 border-gray-200">Not connected</span>`;
+
+    // Draft/live means something different here than on Dev.to: 'draft' is OUR editorial queue, not
+    // a private draft the author can see and release themselves. Say which, in those words.
+    const modeControl = `<label class="flex items-center justify-between gap-2 mt-2 text-xs font-semibold text-gray-600">
+               <span>On publish, submit as</span>
+               <select onchange="window._blogDestSetMode('${d.id}', this.value)" class="text-xs font-bold border border-gray-200 rounded-lg px-2 py-1 bg-white cursor-pointer">
+                   <option value="draft"${d.publishMode !== 'live' ? ' selected' : ''}>For editorial review</option>
+                   <option value="live"${d.publishMode === 'live' ? ' selected' : ''}>Straight to your profile</option>
+               </select>
+           </label>
+           <p class="mt-1 text-xs text-gray-500">${d.publishMode === 'live'
+                ? 'Posts appear on your profile page as soon as you publish them. Editors can still feature them on the front page.'
+                : 'Posts wait in the editors’ queue and go live once approved. Nothing appears publicly until then.'}</p>`;
+
+    const body = connected
+        ? `<div class="flex items-center gap-1.5 w-fit max-w-full text-xs font-semibold text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-2.5 py-1.5 mt-2">
+               <span class="truncate">Publishing as ${_esc(d.accountLabel || '')}</span>
+           </div>
+           ${profileUrl ? `<a href="${_esc(profileUrl)}" target="_blank" rel="noopener" class="text-xs font-bold text-emerald-700 hover:text-emerald-800 underline w-fit">View your profile page</a>` : ''}
+           ${modeControl}
+           <details class="mt-1"><summary class="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 select-none">Manage connection</summary>
+               <div class="mt-2 pt-3 border-t border-gray-100 flex items-center gap-2 flex-wrap">
+                   <button onclick="window._blogDestDisconnect('${d.id}', true)" class="${ghostPill} text-red-600 bg-white hover:bg-red-600 hover:text-white border-red-200 hover:border-red-600" type="button">Disconnect</button>
+               </div>
+               <p class="mt-2 text-xs text-gray-500">Disconnecting withdraws your published pieces from the magazine. Your own blog is untouched.</p>
+           </details>`
+        : `<div class="mt-auto pt-4 border-t border-gray-100">
+               <button onclick="window._blogDestConnectFirstParty('${d.id}')" class="${primaryBtn}" type="button">Connect ${_esc(d.label)}</button>
+               <div id="blogdest-err-${d.id}" class="hidden text-xs font-semibold text-red-600 mt-2"></div>
+               <p class="mt-2 text-xs text-gray-500">No login needed — we’ll create your author profile and pick a handle from your workspace name.</p>
+           </div>`;
+
+    return `
+      <div class="bg-white border border-gray-200 rounded-2xl p-5 flex flex-col gap-2">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-3 min-w-0">
+            <span class="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center text-lg shrink-0">🦢</span>
+            <p class="text-sm font-bold text-gray-900 truncate">${_esc(d.label)}</p>
+          </div>
+          ${capPill}
+        </div>
+        <p class="text-xs text-gray-500">Our own magazine. Published posts are submitted under your byline, with a link back to
+          your site as the original — so the piece works for your search ranking, not ours.</p>
+        ${body}
+      </div>`;
+}
+
+function _blogDestCard(d) {
+    if (d.firstParty) return _firstPartyDestCard(d);
+    const connected = !!d.connected;
+    const primaryBtn = 'w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl shadow-sm hover:shadow transition cursor-pointer';
+    const ghostPill = 'inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
+    const disconnectBtn = `<button onclick="window._blogDestDisconnect('${d.id}', false)" class="${ghostPill} text-red-600 bg-white hover:bg-red-600 hover:text-white border-red-200 hover:border-red-600" type="button">Disconnect</button>`;
 
     // Connect control: OAuth destinations redirect; paste destinations reveal an inline form.
     const connectBtn = d.oauth
@@ -883,10 +949,52 @@ window._blogDestConnect = async function (id) {
     }
 };
 
+// One-click connect for the first-party destination: no creds to collect, so there is no form step.
+// connect-blog-destination routes `firstparty` adapters to connectSwanIndex, which provisions the
+// profile and allocates the handle server-side.
+window._blogDestConnectFirstParty = async function (id) {
+    const errEl = document.getElementById(`blogdest-err-${id}`);
+    if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; }
+    try {
+        const res = await fetch('/.netlify/functions/connect-blog-destination', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'connect', provider: id, creds: {} }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            if (errEl) { errEl.textContent = data.error || 'Could not connect — please try again.'; errEl.classList.remove('hidden'); }
+            return;
+        }
+        // Say the handle out loud: it is the author's public URL from here on, and the grid redraw
+        // below is the only other place it would ever have appeared.
+        window.showToast?.(`Connected as ${data.accountLabel || 'your new profile'}.`, { icon: '🦢' });
+        await _loadConnections();
+    } catch {
+        if (errEl) { errEl.textContent = 'Could not reach the server. Try again.'; errEl.classList.remove('hidden'); }
+    }
+};
+
 // Disconnect a blog destination (org-wide), then refresh the grid.
-window._blogDestDisconnect = async function (id) {
+window._blogDestDisconnect = async function (id, firstParty) {
     const d = _blogDestinations.find(x => x.id === id);
-    if (!window.confirm(`Disconnect ${d ? d.label : 'this blog'}? Your posts will stop syndicating there.`)) return;
+    const label = d ? d.label : 'this blog';
+    // The card passes `firstParty` explicitly. Falling back to the list lookup alone was wrong in
+    // the direction that matters: a miss (the grid redrawn from a list that has since reloaded)
+    // would show the mild "future posts stop going there" sentence for the ONE destination where
+    // confirming retracts the author's published back catalogue.
+    const isFirstParty = firstParty != null ? !!firstParty : !!(d && d.firstParty);
+    // ⚠️ The first-party disconnect is NOT "future posts stop going there" — deleteBlogDestination
+    // withdraws every pending, live and featured piece and withdraws the profile with them. Saying
+    // the generic sentence here would have someone retract their own back catalogue by accident.
+    // window.confirm is also the browser's grey box; every other dialog goes through /dialogs.js.
+    if (!(await window.confirmModal(
+        isFirstParty
+            ? 'Your published pieces are withdrawn from the magazine and your profile page comes down. '
+              + 'Your own blog is untouched, and reconnecting restores the profile.'
+            : 'New posts stop syndicating there. Copies already published on that platform stay live — '
+              + 'remove those over there if you want them gone.',
+        { title: `Disconnect ${label}?`, confirmLabel: 'Yes, disconnect', cancelLabel: 'Keep it connected' },
+    ))) return;
     try {
         await fetch('/.netlify/functions/connect-blog-destination', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },

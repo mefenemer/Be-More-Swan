@@ -5143,8 +5143,12 @@ function formatCurrency(amount, currency) {
 <script src="/src/components/list-pager.js"></script>
 <script src="/integrations.js"></script>
 <script src="/assets.js"></script>
-<script src="/notifications.js?v=20260711-notif-actor-popover"></script>
-<script src="/assistants.js?v=20260805-cadence-parser"></script>
+<!-- One source of truth for assistant icon colours (user-chosen, with the old id-derived
+     colour as the fallback). Must precede notifications.js / assistants.js / calendar.js,
+     all three of which resolve their icon colours through window.AssistantColors. -->
+<script src="/assistant-colors.js?v=20260821-assistant-colour"></script>
+<script src="/notifications.js?v=20260821-notif-grouping"></script>
+<script src="/assistants.js?v=20260821-assistant-colour"></script>
 <script src="/help.js"></script>
 <script src="/my-content.js"></script>
 <!-- Shared Audience view (audience.html). Org-scoped; reads no assistant context. -->
@@ -5255,7 +5259,7 @@ function formatCurrency(amount, currency) {
      email). Must load BEFORE calendar.js is USED, not before it is parsed — calendar.js only
      looks the component up inside a click handler — but keeping it above avoids the question. -->
 <script src="/src/components/lead-calendar-modal.js"></script>
-<script src="/calendar.js?v=20260816-lead-outreach"></script>
+<script src="/calendar.js?v=20260821-assistant-colour"></script>
 <!-- Per-assistant Calendar tab on assistant-detail.html — reuses calendar.js rendering
      scoped to the current assistant (scheduled posts + records with scheduled_for + task runs,
      plus the pending outreach emails on the lead roles). -->

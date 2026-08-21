@@ -12,6 +12,7 @@ import { getDb } from '../../db/client';
 import { blogPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { publishBlogPost } from '../../src/utils/blog-publish';
+import { summariseSyndication } from '../../src/utils/blog-destinations/syndicate';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -43,5 +44,9 @@ export default withLambda(async (event: HandlerEvent) => {
 
     const baseUrl = resolveBaseUrl(event.headers as Record<string, string | undefined>);
     const updated = await publishBlogPost(db, post, ctx.organisationId, baseUrl);
-    return { statusCode: 200, body: JSON.stringify({ post: updated }) };
+    // Where it actually went, alongside the fact that it went. Blog Studio reads this to say whether
+    // the post reached the connected platforms, failed on one, or went to the org's own site alone —
+    // a distinction "Published ✓" could not draw, so a destination that was never connected (and is
+    // therefore skipped without an error) was indistinguishable from a clean sweep.
+    return { statusCode: 200, body: JSON.stringify({ post: updated, syndication: summariseSyndication(updated.destinations) }) };
 });

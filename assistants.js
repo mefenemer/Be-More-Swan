@@ -4,6 +4,25 @@
 window.activeAssistantId = null;
 window.cachedContext = {};
 
+// ── Assistant identity colour, applied to the detail page's hero avatar ────
+// Split out as a global because three places repaint it: the initial load, the colour picker, and
+// the name-generator/rename path that rewrites the avatar's letter. window._detailAvatarColor holds
+// the RESOLVED colour (an explicit choice, or the id-derived fallback for an assistant nobody has
+// styled), so this function never has to know which of the two it is drawing.
+window._applyDetailAvatarColor = function () {
+    const el = document.getElementById('detail-avatar');
+    if (!el) return;
+    const color = window._detailAvatarColor;
+    const swatch = document.getElementById('assistant-color-current');
+    if (swatch && color) swatch.style.background = color;
+    if (!color) return;
+    // The markup ships an emerald default so the avatar isn't blank before the record loads; both
+    // of those classes have to come off or they'd win over the inline background/text colour.
+    el.classList.remove('bg-emerald-100', 'text-emerald-700');
+    el.classList.add('text-white');
+    el.style.background = color;
+};
+
 // ── Magic Wand click sound — synthesized "magical whoosh" (Web Audio API, no
 // binary asset needed) played whenever the Swan & Wand icon is clicked, on
 // every page it appears on (delegated listener, so drawer/detail content
@@ -209,6 +228,11 @@ window._buildAssistantCardGoals = function (assistant) {
 window.generateAssistantCardHTML = function(assistant) {
     const initial = assistant.name ? assistant.name.charAt(0).toUpperCase() : 'A';
     const role = assistant.role || 'Custom Assistant';
+    // The card icon carries the assistant's identity colour — the same one its detail hero, its
+    // calendar chips and its notifications use. Cached here as well as read, because the calendar
+    // and the inbox often render before/without their own assistants fetch and resolve by id.
+    window.AssistantColors?.remember(assistant);
+    const iconColor = window.AssistantColors?.colorFor(assistant.id, assistant.avatarColor) || '#9ca3af';
 
     const db = window._resolveAssistantBadge(assistant, assistant.opSignals);
     const statusHtml = `<span class="inline-flex items-center gap-1.5 py-1 px-2.5 rounded-md text-xs font-bold ${db.cls}"><span class="w-1.5 h-1.5 rounded-full ${db.dot}"></span> ${db.label}</span>`;
@@ -385,7 +409,7 @@ window.generateAssistantCardHTML = function(assistant) {
     return `
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow p-6 flex flex-col cursor-pointer group" onclick="window.routeToAssistantDetail('${assistant.id}')">
         <div class="flex justify-between items-start mb-4">
-            <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-lg shadow-sm">
+            <div class="w-12 h-12 rounded-xl text-white flex items-center justify-center font-bold text-lg shadow-sm" style="background:${iconColor}">
                 ${initial}
             </div>
             ${statusHtml}
@@ -1012,8 +1036,17 @@ window.detailRqRefresh = function() {
 // the SAME render pass, so skipping it leaves every one of them showing the pre-action state until
 // the user switches tabs or reloads. The list card's own Archive button always refreshed; the modal
 // never did, which is exactly the mismatch a user notices.
-window._onBlogStudioChanged = function() {
-    window.detailRqRefresh?.();
+window._onBlogStudioChanged = function(opts) {
+    // `focusStatus` names a column the modal wants opened as part of the refresh — Publish sends
+    // 'posted', so the author lands on the tab their post just moved to instead of being left on
+    // Review looking at a list it is no longer in. detailRqOpenStatus re-renders, and the blog
+    // renderer repaints EVERY lifecycle count as it draws, so this is also the refresh.
+    const focus = opts && opts.focusStatus;
+    if (focus && _DETAIL_RQ_COLUMNS[focus] && document.getElementById('detail-rq-groups')) {
+        window.detailRqOpenStatus?.(focus);
+    } else {
+        window.detailRqRefresh?.();
+    }
     // The calendar caches its feed; drop the ready flag so it refetches on next view.
     const calHost = document.getElementById('assistant-calendar-host');
     if (calHost) calHost.dataset.ready = '';
@@ -1156,6 +1189,9 @@ window._detailRqRefreshColumnCounts = async function() {
     // which also sets the tab's own total. Blog queues still count from their own renderer.
     const rq = window._detailReviewQueue || {};
     if (rq.kind === 'records') return _detailRqRefreshRecordCounts();
+    // Blog queues count every column inside their renderer instead (_detailRqPaintBlogCounts): it
+    // already holds the whole set from one request, so counting here would re-fetch it per column.
+    // Every caller of this pairs it with a _detailRqRenderGroups pass, so the badges still move.
     if (rq.source === 'blog_posts') return;
     // Same as blog: the newsletter renderer sets its own review badge as it draws.
     if (rq.source === 'newsletter_issues') return;
@@ -3236,6 +3272,11 @@ function _rqBlogActions(p, statusKey) {
     } else if (statusKey === 'posted') {
         // Live on the site — it can be taken back off (native copy only; see unpublish-blog.ts).
         actions.push(btn('open', 'Open in Blog Studio', primary));
+        // Syndication only ever ran from publishBlogPost, at the instant of publishing. Connect a
+        // destination AFTER a post went live and there was no way to send it there — the endpoint
+        // for it (publish-blog-destinations.ts) existed, its own header named this exact scenario,
+        // and NOTHING in the product called it. The only route was unpublish-and-republish.
+        actions.push(btn('repush', 'Send to connected platforms', secondary));
         actions.push(btn('unpublish', 'Unpublish', secondary));
     } else {
         actions.push(btn('open', 'Open in Blog Studio', secondary));
@@ -3351,6 +3392,36 @@ async function _detailRqRenderNewsletter(statusKey) {
         : `<p class="text-sm text-gray-400 py-10 text-center">${statusKey === 'review' ? 'No issues awaiting review.' : 'Nothing here yet.'}</p>`;
 }
 
+/**
+ * Paint EVERY visible lifecycle column's count from one already-fetched list of the assistant's
+ * blog posts.
+ *
+ * Blog queues are the only ones that fetch the whole set in a single request (blog-posts returns
+ * them all and the renderer filters client-side), so counting every column costs nothing extra —
+ * and the alternative was what shipped: only `review` was ever written, and only while the Review
+ * column happened to be the one on screen. Scheduling a post therefore left Scheduled blank and
+ * publishing left Published blank, on a screen whose whole job is telling the author where their
+ * post went. _detailRqRefreshColumnCounts deliberately delegates here rather than counting again.
+ */
+function _detailRqPaintBlogCounts(all) {
+    let review = 0;
+    for (const key of Object.keys(_DETAIL_RQ_COLUMNS)) {
+        const btn = document.querySelector(`.detail-rq-col[data-status="${key}"]`);
+        if (!btn || btn.classList.contains('hidden')) continue;
+        // A column with no blog statuses ('attention' — a post has a publish attempt to fail, a blog
+        // post does not) counts zero, which clears any badge a previous role left behind.
+        const wanted = _RQ_BLOG_STATUS[key] || [];
+        const n = wanted.length ? all.filter((p) => wanted.includes(p.status)).length : 0;
+        _detailRqSetColumnBadge(key, n);
+        if (key === 'review') review = n;
+    }
+    // The amber tab pill and the Autopilot card track Review, and they must move whichever column
+    // the user is standing on — approving from the Scheduled tab still empties the review queue.
+    _setDetailRqTabBadge(review);
+    window._setPendingReviewCount?.(review);
+    window._updateOpSignals?.({ pendingReview: review });
+}
+
 async function _detailRqRenderBlog(statusKey) {
     const container = document.getElementById('detail-rq-groups');
     if (!container) return;
@@ -3359,22 +3430,20 @@ async function _detailRqRenderBlog(statusKey) {
 
     container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Loading…</p>';
     if (!aid) { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">No assistant selected.</p>'; return; }
-    if (!wanted.length) { container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Blog posts don’t have this state.</p>'; return; }
 
-    let posts = [];
+    // Fetched BEFORE the "no such state" bail-out: the counts on the other columns are still true
+    // and still need repainting even when the open column can never hold a blog post.
+    let all = [];
     try {
         const res = await fetch(`/.netlify/functions/blog-posts?assistantId=${aid}`);
         if (!res.ok) throw new Error();
-        posts = ((await res.json()).posts || []).filter((p) => wanted.includes(p.status));
+        all = (await res.json()).posts || [];
     } catch { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">Failed to load.</p>'; return; }
 
-    if (statusKey === 'review') {
-        const colBadge = document.getElementById('detail-rq-col-count-review');
-        if (colBadge) { colBadge.textContent = posts.length || ''; colBadge.classList.toggle('hidden', !posts.length); }
-        _setDetailRqTabBadge(posts.length);
-        window._setPendingReviewCount?.(posts.length);
-        window._updateOpSignals?.({ pendingReview: posts.length });
-    }
+    _detailRqPaintBlogCounts(all);
+
+    if (!wanted.length) { container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Blog posts don’t have this state.</p>'; return; }
+    const posts = all.filter((p) => wanted.includes(p.status));
 
     container.innerHTML = posts.length
         ? `<div class="divide-y divide-gray-100">${posts.map((p) => _detailRqBlogCard(p, statusKey)).join('')}</div>`
@@ -3413,6 +3482,37 @@ window._detailRqBlogAct = async function (btn, action) {
             buttons.forEach((b) => { b.disabled = false; });
             showErr(e.message || 'Something went wrong.');
         }
+        return;
+    }
+
+    // Re-push to the connected blogs. Idempotent server-side: each destination is updated through
+    // its stored externalId rather than posted again, so pressing this twice cannot duplicate a
+    // syndicated copy. Reports what happened per destination rather than a bare "done" — the whole
+    // reason this button exists is that silence about syndication was indistinguishable from success.
+    if (action === 'repush') {
+        const buttons = card.querySelectorAll('button');
+        buttons.forEach((b) => { b.disabled = true; });
+        try {
+            const res = await fetch('/.netlify/functions/publish-blog-destinations', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId: id }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body.error || 'Could not send this post.');
+            const sent = body.syndication || [];
+            const failed = sent.filter((d) => d.status === 'error' || d.status === 'not_connected');
+            if (failed.length) {
+                showErr(failed.map((d) => `${d.label}: ${d.error || 'not connected'}`).join('; '));
+            } else if (!sent.length) {
+                // The case that started all this: nothing connected, so nothing happened, and the
+                // old code path said nothing at all.
+                showErr('No other platforms are connected — connect one from the Connections tab first.');
+            } else {
+                window.showToast?.(`Sent to ${sent.map((d) => d.label).join(', ')}.`);
+            }
+        } catch (e) {
+            showErr(e.message || 'Something went wrong.');
+        }
+        buttons.forEach((b) => { b.disabled = false; });
         return;
     }
 
@@ -5795,6 +5895,10 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
             const body = { assistantId: parseInt(assistantId), newContext, newConfiguration };
             if (newName) body.newName = newName;
             if (disclosureText !== undefined) body.disclosureText = disclosureText;
+            // Always stated, never inferred: newConfiguration REPLACES configuration server-side, so
+            // an autosave that stayed silent about the colour would depend on the endpoint's
+            // carry-across to survive. `null` is the explicit "back to automatic" reset.
+            if (window._detailChosenColor !== undefined) body.avatarColor = window._detailChosenColor;
             const res = await fetch('/.netlify/functions/update-assistant-context', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -5810,6 +5914,11 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                     document.getElementById('detail-avatar').textContent = newName.charAt(0).toUpperCase();
                     currentData.name = newName;
                 }
+                // Keep the in-memory record in step, so a later save that rebuilds newConfiguration
+                // from currentData carries the colour rather than a stale one.
+                currentData.configuration = { ...(currentData.configuration || {}) };
+                if (window._detailChosenColor) currentData.configuration.avatarColor = window._detailChosenColor;
+                else delete currentData.configuration.avatarColor;
                 _detailSetSaveStatus('✓ Saved', 'text-emerald-600');
                 setTimeout(() => _detailSetSaveStatus(''), 3000);
                 // Refresh the Kick Off readiness so "AI disclosure acknowledged" (and any
@@ -5948,6 +6057,15 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
 
         const avatarEl = document.getElementById('detail-avatar');
         if (avatarEl) avatarEl.textContent = (currentData.name || 'A').charAt(0).toUpperCase();
+        // Identity colour: cache what this assistant's record says, then paint the hero avatar and
+        // the picker from the single resolver every other surface uses. _detailChosenColor is the
+        // EXPLICIT choice (null = automatic) and is what gets saved; _detailAvatarColor is what is
+        // actually drawn, which for an unstyled assistant is the id-derived fallback.
+        const _storedColor = (currentData.configuration || {}).avatarColor;
+        window.AssistantColors?.remember({ id: currentData.id ?? assistantId, avatarColor: _storedColor });
+        window._detailChosenColor = window.AssistantColors?.isValid(_storedColor) ? _storedColor.toLowerCase() : null;
+        window._detailAvatarColor = window.AssistantColors?.colorFor(currentData.id ?? assistantId, _storedColor) || null;
+        window._applyDetailAvatarColor();
 
         const roleEl = document.getElementById('detail-role');
         if (roleEl) roleEl.textContent = currentData.role || 'Digital Assistant';
@@ -6201,6 +6319,86 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     if (currentData.roleKey === 'social_media_manager') {
         document.getElementById('connections-status-card')?.classList.remove('hidden');
         window._syncStatusRow?.();
+    }
+
+    // ── Icon colour picker ────────────────────────────────────────
+    // Sits beside the name because the name and the colour are the same thing to a user: which
+    // assistant this is. The chosen colour is stored on the assistant (configuration.avatarColor)
+    // and read back by every surface that draws its icon — the My Assistants cards, this hero
+    // avatar, the calendar's chips/legend/filters and the notification inbox — through the one
+    // resolver in /assistant-colors.js. Nothing here knows the palette; it renders whatever
+    // window.AssistantColors offers.
+    const colorBtn = document.getElementById('btn-assistant-color');
+    const colorMenu = document.getElementById('assistant-color-menu');
+    const swatchWrap = document.getElementById('assistant-color-swatches');
+    const AC = window.AssistantColors;
+
+    if (colorBtn && colorMenu && swatchWrap && AC) {
+        const closeMenu = () => {
+            colorMenu.classList.add('hidden');
+            colorMenu.style.display = 'none';
+            colorBtn.setAttribute('aria-expanded', 'false');
+        };
+        const openMenu = () => {
+            colorMenu.classList.remove('hidden');
+            colorMenu.style.display = '';
+            colorBtn.setAttribute('aria-expanded', 'true');
+        };
+
+        // Marks the live swatch so the menu says which colour is currently in force, including the
+        // "automatic" case where no swatch is selected at all.
+        const paintSelection = () => {
+            const chosen = window._detailChosenColor || null;
+            swatchWrap.querySelectorAll('[data-color]').forEach(el => {
+                const on = chosen && el.dataset.color === chosen;
+                el.setAttribute('aria-pressed', String(!!on));
+                // The selected ring is an inline box-shadow rather than ring-2/ring-offset-2:
+                // ring-offset-* isn't in the prebuilt style.css, so the utility would render as a
+                // flat swatch with no indication of which colour is actually in force.
+                el.style.boxShadow = on
+                    ? '0 0 0 2px #fff, 0 0 0 4px #111827'
+                    : 'inset 0 0 0 1px rgba(0,0,0,0.1)';
+            });
+        };
+
+        swatchWrap.innerHTML = AC.PALETTE.map(c =>
+            `<button type="button" data-color="${c.value}" title="${c.name}" aria-label="${c.name}"
+                 aria-pressed="false" class="w-8 h-8 rounded-lg cursor-pointer"
+                 style="background:${c.value};box-shadow:inset 0 0 0 1px rgba(0,0,0,0.1)"></button>`).join('');
+
+        // A colour change is saved through the SAME debounced autosave as the name, so the header's
+        // "Saving… / ✓ Saved" status covers it and a rename plus a recolour land in one request.
+        const choose = (value) => {
+            window._detailChosenColor = value;
+            // Update the shared cache BEFORE resolving: "reset to automatic" passes null, and
+            // colorFor falls back to the cache when it has no explicit colour — so resolving first
+            // would hand back the very colour the user just cleared.
+            AC.remember({ id: assistantId, avatarColor: value });
+            window._detailAvatarColor = AC.colorFor(assistantId, value);
+            window._applyDetailAvatarColor();
+            paintSelection();
+            triggerAutoSave();
+            closeMenu();
+        };
+
+        swatchWrap.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-color]');
+            if (btn) choose(btn.dataset.color);
+        });
+        // Explicit null, not undefined: the endpoint reads null as "reset to the automatic colour"
+        // and undefined as "the caller said nothing", which would keep the old choice.
+        document.getElementById('btn-assistant-color-auto')?.addEventListener('click', () => choose(null));
+
+        colorBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (colorMenu.classList.contains('hidden')) { paintSelection(); openMenu(); } else closeMenu();
+        });
+        document.addEventListener('click', (e) => {
+            if (!colorMenu.classList.contains('hidden') && !colorMenu.contains(e.target) && e.target !== colorBtn) closeMenu();
+        });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+
+        paintSelection();
     }
 
     // ── Name generator ────────────────────────────────────────────
