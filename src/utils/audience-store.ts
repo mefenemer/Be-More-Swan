@@ -20,7 +20,12 @@ import { emitWebhook, type WebhookEvent } from './webhooks';
 type Db = ReturnType<typeof getDb>;
 
 export type ContactStatus = 'pending' | 'subscribed' | 'unsubscribed' | 'bounced' | 'complained' | 'suppressed';
-export type ContactSource = 'web_form' | 'csv_import' | 'manual' | 'lead_promotion' | 'api';
+// ⚠️ There is deliberately no 'lead_promotion'. A lead is never promoted into the audience
+// (decided 2026-08-21): Lead Generator contacts are speculative, with no permission to send them a
+// newsletter or a blog, so the two populations stay separate. A REFUSAL still crosses, both ways —
+// see src/utils/audience-objection.ts. The value survives only in the CHECK constraint, because
+// dropping it there needs DDL on two databases for no gain.
+export type ContactSource = 'web_form' | 'csv_import' | 'manual' | 'api';
 export type ConsentBasis = 'double_opt_in' | 'single_opt_in' | 'imported_declared' | 'soft_opt_in' | 'manual_entry';
 export type ConsentEventName =
     | 'subscribe_requested' | 'confirmed' | 'unsubscribed' | 'bounced' | 'complained'

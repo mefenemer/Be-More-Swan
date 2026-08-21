@@ -169,8 +169,11 @@
           <button type="button" id="nl-preview"
             class="px-4 py-2 text-sm font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Preview email</button>
           <div class="flex-1"></div>
-          <button type="button" id="nl-save"
-            class="px-4 py-2 text-sm font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Save</button>
+          <!-- ⚠️ NO SAVE BUTTON, and do not reinstate one. Every field here writes itself back —
+               see the auto-save block in newsletter.js. The state of that is reported by
+               #nl-saved at the top of this card, which is where somebody looks to find out
+               whether their work is safe. A Save button beside it would be a second, contradictory
+               answer to the same question. -->
           <button type="button" id="nl-approve"
             class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Approve for sending</button>
           <button type="button" id="nl-send"
@@ -294,7 +297,9 @@
   </div>
 
   <!-- Preview modal. The email renders in an iframe: it is a full HTML document with its own
-       styles, and injecting it into this page would let it restyle the app around it. -->
+       styles, and injecting it into this page would let it restyle the app around it.
+       ⚠️ The frame is filled with a `data:` URL, never `srcdoc` — see showPreview() in
+       newsletter.js for why a sandboxed frame plus srcdoc left Edge showing an empty white box. -->
   <div id="nl-preview-modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4" style="display:none">
     <div class="absolute inset-0 bg-black/40" data-nl-preview-close></div>
     <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">

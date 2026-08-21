@@ -44,11 +44,13 @@
     suppressed:   { label: 'Suppressed',   cls: 'bg-gray-100 text-gray-600 border-gray-200' },
   };
 
+  // ⚠️ No 'From a lead' row. A lead is never promoted into the audience — the two populations are
+  // deliberately separate (see the ContactSource note in src/utils/audience-store.ts). Both readers
+  // fall back to the raw value, so a source this map does not know still renders.
   const SOURCE_LABEL = {
     web_form: 'Sign-up form',
     csv_import: 'Imported',
     manual: 'Added by hand',
-    lead_promotion: 'From a lead',
     api: 'API',
   };
 
@@ -193,9 +195,11 @@
     custom:       { label: 'Custom field',       ops: { is: 'is', is_not: 'is not', contains: 'contains', is_set: 'has any value', is_not_set: 'is empty' }, value: 'custom' },
     email_domain: { label: 'Email domain',       ops: { is: 'is', is_not: 'is not' }, value: 'domain' },
   };
+  // Mirrors SOURCE_LABEL in src/utils/audience-segment-rules.ts — the server validates against
+  // SOURCE_VALUES there, so offering an option it would reject builds a segment nobody can save.
   const SOURCE_OPTS = {
     web_form: 'a sign-up form', csv_import: 'an import', manual: 'being added by hand',
-    lead_promotion: 'the Lead Generator', api: 'the API',
+    api: 'the API',
   };
 
   let ruleState = { id: null, name: '', match: 'all', conditions: [{ field: 'opened', op: 'within', value: 90 }] };

@@ -245,7 +245,7 @@
       class="px-2 py-1 text-[11px] font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer">+ ${esc(v.label)}</button>`).join('');
   }
 
-  function insertVar(key) { insertVarInto($('nl-body'), key); }
+  function insertVar(key) { insertVarInto($('nl-body'), key); scheduleSave(); }
 
   /** ⚠️ Takes the textarea: the sequence step editor has its own, and there must be one insert. */
   function insertVarInto(ta, key) {
@@ -259,13 +259,18 @@
     ta.value = ta.value.slice(0, start) + tag + ta.value.slice(end);
     ta.focus();
     ta.selectionStart = ta.selectionEnd = start + tag.length;
-    state.dirty = true;
+    // ⚠️ Deliberately does NOT mark anything dirty: the sequence step editor shares this and has
+    // its own Save. Each caller says which editor changed.
   }
 
   async function openIssue(id) {
     try {
       const { issue, audienceEstimate, sourcePost, resend, links, sendTimezone, scheduledForLocal, deliverability } = await api(`${ISSUES_API}?id=${encodeURIComponent(id)}`);
       state.current = issue;
+      // ⚠️ Whatever was queued belonged to the issue being closed, and payload() reads
+      // state.current — leaving the timer armed would write the old subject onto this issue.
+      // The caller flushes BEFORE getting here; anything still pending is already stale.
+      cancelPending();
       state.dirty = false;
       hide($('nl-empty'));
       show($('nl-editor'), 'block');
@@ -313,12 +318,15 @@
       // than letting someone type into a thing the server will refuse to save.
       const locked = ['sending', 'sent'].includes(issue.status);
       ['nl-subject', 'nl-preheader', 'nl-body', 'nl-segment', 'nl-schedule'].forEach((k) => { $(k).disabled = locked; });
-      ['nl-generate', 'nl-improve', 'nl-save', 'nl-approve', 'nl-send', 'nl-purpose',
+      ['nl-generate', 'nl-improve', 'nl-approve', 'nl-send', 'nl-purpose',
         'nl-design-on', 'nl-design-off', 'nl-design-template'].forEach((k) => { const el = $(k); if (el) el.disabled = locked; });
       // ⚠️ The canvas is interactive HTML, so `disabled` means nothing to it. A sent issue's design
       // is unmounted entirely and shown as the plain prose it produced — a record, not an editor.
       if (locked && state.designer) { state.designer.destroy(); state.designer = null; hide($('nl-design-host')); show($('nl-body'), 'block'); $('nl-body').disabled = true; }
-      $('nl-saved').textContent = locked ? 'This issue has been sent and can no longer be edited.' : '';
+      // The same line carries both answers to "is my work safe?" — it cannot be edited, or it is
+      // saved. Blank while nothing has been typed yet: "Saved" on an untouched issue is noise.
+      if (locked) setSavedNote('This issue has been sent and can no longer be edited.');
+      else setSavedNote('');
 
       renderList();
     } catch (err) {
@@ -422,7 +430,7 @@
       design,
       assistantName: assistantName(),
       onChange: () => {
-        state.dirty = true;
+        scheduleSave();
         // ⚠️ The word count and the findings read the DESIGN's prose now, not the textarea, or a
         // designed issue would report zero words while being full of them.
         renderWordCount();
@@ -595,6 +603,8 @@
   function renderSendMode(issue) {
     const el = $('nl-sendmode');
     if (!el) return;
+    localTimeSaver?.cancel();
+    localTimeSaver = null;
     if (['sending', 'sent'].includes(issue.status)) {
       // After the fact this is a statement about what happened, not a control.
       el.innerHTML = issue.sendMode === 'recipient_local'
@@ -618,45 +628,68 @@
             <input type="time" id="nl-local-time" value="${esc(issue.sendLocalTime || '09:00')}"
               class="ml-1 px-2 py-1.5 rounded-lg border border-sky-300 text-sm">
           </label>
-          <button type="button" id="nl-local-save"
-            class="ml-auto px-3 py-1.5 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-lg cursor-pointer">Save</button>
+          <span id="nl-local-status" class="ml-auto"></span>
         </div>
         <p id="nl-local-known" class="text-[11px] text-sky-700 mt-2"></p>` : ''}
     </div>`;
 
+    // Turning the mode on or off changes the SHAPE of this panel, so those two re-render it. The
+    // time itself does not, and must not — see saveSendMode.
     $('nl-local-on')?.addEventListener('change', async (e) => {
-      if (!e.target.checked) {
-        try {
+      localTimeSaver?.cancel();
+      try {
+        if (!e.target.checked) {
           await api(ISSUES_API, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'sendTime', id: issue.id, mode: 'at_once' }),
           });
           await openIssue(issue.id);
-        } catch (err) { window.showToast(err.message); }
-        return;
-      }
-      await saveSendMode(issue, '09:00');
+          return;
+        }
+        await saveSendMode(issue, '09:00', true);
+      } catch (err) { window.showToast(err.message); }
     });
-    $('nl-local-save')?.addEventListener('click', () => saveSendMode(issue, $('nl-local-time').value));
+
+    localTimeSaver = makeAutosaver({
+      note: panelNote('nl-local-status'),
+      write: () => {
+        const t = $('nl-local-time') ? $('nl-local-time').value : '';
+        if (!isWallClock(t)) return null;
+        return saveSendMode(issue, t, false);
+      },
+    });
+    $('nl-local-time')?.addEventListener('input', () => localTimeSaver.schedule());
+    $('nl-local-time')?.addEventListener('change', () => localTimeSaver.now());
+    $('nl-local-time')?.addEventListener('blur', () => localTimeSaver.flush());
   }
 
-  async function saveSendMode(issue, localTime) {
-    try {
-      const res = await api(ISSUES_API, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'sendTime', id: issue.id, mode: 'recipient_local', localTime }),
-      });
-      await openIssue(issue.id);
-      // ⚠️ The honest number, shown after saving rather than promised before it: on most lists we
-      // know a timezone for a minority, and everyone else is sent at the sender's own time.
-      const known = Number(res.knownTimezones || 0), total = Number(res.subscribers || 0);
-      const el = $('nl-local-known');
-      if (el) {
-        el.textContent = total
-          ? `We know a timezone for ${known.toLocaleString()} of your ${total.toLocaleString()} subscribers. The other ${(total - known).toLocaleString()} will get it at ${localTime} your time.`
-          : '';
-      }
-    } catch (err) { window.showToast(err.message); }
+  /**
+   * ⚠️ THROWS. The caller decides whether that is a toast (the checkbox) or the panel's own status
+   * line (the time field) — swallowing it here is how a refused write becomes an invisible one.
+   */
+  async function saveSendMode(issue, localTime, reopen) {
+    const res = await api(ISSUES_API, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'sendTime', id: issue.id, mode: 'recipient_local', localTime }),
+    });
+    // ⚠️ ONLY when the panel changes shape. Re-opening the issue after a time change would replace
+    // the input somebody is still typing into — which is exactly what the Save button used to make
+    // safe, and what has to be handled some other way now there isn't one.
+    if (reopen) await openIssue(issue.id);
+    else if (state.current) {
+      state.current.sendMode = 'recipient_local';
+      state.current.sendLocalTime = localTime;
+    }
+    // ⚠️ The honest number, shown after saving rather than promised before it: on most lists we
+    // know a timezone for a minority, and everyone else is sent at the sender's own time.
+    const known = Number(res.knownTimezones || 0), total = Number(res.subscribers || 0);
+    const el = $('nl-local-known');
+    if (el) {
+      el.textContent = total
+        ? `We know a timezone for ${known.toLocaleString()} of your ${total.toLocaleString()} subscribers. The other ${(total - known).toLocaleString()} will get it at ${localTime} your time.`
+        : '';
+    }
+    return res;
   }
 
   function renderScheduleZone() {
@@ -670,6 +703,8 @@
   function renderAb(issue) {
     const el = $('nl-ab');
     if (!el) return;
+    abSaver?.cancel();
+    abSaver = null;
     const locked = ['sending', 'sent'].includes(issue.status);
 
     // A finished test shows what it found, in the words the server wrote — including "too close to
@@ -693,7 +728,8 @@
         class="text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer">+ Test a second subject line</button>`;
       $('nl-ab-on')?.addEventListener('click', () => {
         // Rendered as though it were already on, so the form appears without a round trip. Nothing
-        // is saved until they press Save, and the issue's own state is what the next load reads.
+        // is saved until there is a second subject line to save, and the issue's own state is what
+        // the next load reads — so abandoning a half-opened form leaves no test behind.
         renderAbForm({ ...issue, abState: 'testing' });
       });
       return;
@@ -722,13 +758,16 @@
             ${[1, 2, 4, 8, 24, 48].map((h) => `<option value="${h}" ${Number(issue.abDecideAfterHours || 4) === h ? 'selected' : ''}>${h} ${h === 1 ? 'hour' : 'hours'}</option>`).join('')}
           </select>
         </label>
-        <button type="button" id="nl-ab-save"
-          class="ml-auto px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Save test</button>
+        <span id="nl-ab-status" class="ml-auto"></span>
       </div>
       <p class="text-[11px] text-emerald-700 mt-2">Half the sample gets each subject. Whichever more people OPEN is sent to everyone held back — and if the difference is too small to mean anything, we say so and send the first one.</p>
+      <!-- ⚠️ Painted, never toasted. With no Save button this writes while somebody types, and one
+           toast per keystroke would bury the one thing worth reading here. -->
+      <p id="nl-ab-warn" class="hidden text-[11px] font-bold text-amber-800 mt-2" style="display:none"></p>
     </div>`;
 
     $('nl-ab-off')?.addEventListener('click', async () => {
+      abSaver?.cancel();
       try {
         await api(ISSUES_API, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -738,25 +777,46 @@
       } catch (err) { window.showToast(err.message); }
     });
 
-    $('nl-ab-save')?.addEventListener('click', async () => {
-      try {
+    abSaver = makeAutosaver({
+      note: panelNote('nl-ab-status'),
+      write: async () => {
+        const subjectB = ($('nl-ab-subject') ? $('nl-ab-subject').value : '').trim();
+        // ⚠️ Nothing is written until there IS a second subject line. The server refuses an empty
+        // one, and a red refusal under a field nobody has filled in yet is not a message, it is
+        // nagging somebody for not having finished typing.
+        if (!subjectB) return null;
         const res = await api(ISSUES_API, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'abTest',
             id: issue.id,
-            subjectB: $('nl-ab-subject').value,
+            subjectB,
             samplePercent: Number($('nl-ab-percent').value),
             decideAfterHours: Number($('nl-ab-hours').value),
           }),
         });
         // The warning is the whole reason this returns anything: without a verified domain the test
         // cannot be decided, and that is worth knowing now rather than in four hours.
-        if (res.warning) window.showToast(res.warning, { duration: 9000 });
-        else window.showToast('Test saved.');
-        await openIssue(issue.id);
-      } catch (err) { window.showToast(err.message); }
+        const warn = $('nl-ab-warn');
+        if (warn) {
+          warn.textContent = res.warning || '';
+          if (res.warning) show(warn, 'block'); else hide(warn);
+        }
+        // ⚠️ Patched in place, NOT re-opened. openIssue() re-runs renderAb, which replaces the
+        // field being typed into — the reason this panel had a Save button.
+        if (state.current) {
+          state.current.abState = 'testing';
+          state.current.subjectB = subjectB;
+          state.current.abSamplePercent = Number($('nl-ab-percent').value);
+          state.current.abDecideAfterHours = Number($('nl-ab-hours').value);
+        }
+        return res;
+      },
     });
+    $('nl-ab-subject')?.addEventListener('input', () => abSaver.schedule());
+    $('nl-ab-subject')?.addEventListener('blur', () => abSaver.flush());
+    // A picked value is a decision, not a burst of typing — there is nothing to debounce.
+    ['nl-ab-percent', 'nl-ab-hours'].forEach((k) => $(k)?.addEventListener('change', () => abSaver.now()));
   }
 
   /**
@@ -910,28 +970,236 @@
     };
   }
 
-  async function save(quiet) {
+  /** The one write. Everything that saves goes through here — never `api(update)` directly. */
+  async function save() {
     if (!state.current) return null;
     const res = await api(ISSUES_API, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'update', ...payload() }),
     });
-    state.dirty = false;
-    $('nl-saved').textContent = 'Saved';
-    setTimeout(() => { if ($('nl-saved')) $('nl-saved').textContent = ''; }, 2000);
-    // The server drops approval when the words change. Say so — an issue that quietly went back
-    // to draft would sit unsent while the tenant believed it was approved.
-    if (res.approvalCleared) window.showToast('Edited after approval, so this needs approving again.');
-    if (!quiet) await refreshList();
+    // The sidebar reads the stored row. It comes back with this response, so keep the list in step
+    // from the answer we already have rather than a second GET per burst of typing — refreshList()
+    // on every autosave would be one round trip a second while somebody writes a subject line.
+    if (res.issue) {
+      state.current = { ...state.current, ...res.issue };
+      const i = state.issues.findIndex((x) => x.id === res.issue.id);
+      if (i >= 0) state.issues[i] = { ...state.issues[i], ...res.issue };
+      renderList();
+    }
+    setSavedNote('Saved');
+    // The server drops approval when the words change. ⚠️ With no Save button this happens while
+    // somebody types, so it is not enough to say it — the badge and the Send button have to STOP
+    // describing an approved issue in the same tick, or the page keeps offering to send something
+    // the server has already put back into draft.
+    if (res.approvalCleared) {
+      if (res.issue) renderStatusBadge(res.issue);
+      hide($('nl-send'));
+      window.showToast('Edited after approval, so this needs approving again.');
+    }
     return res;
   }
+
+  // ── Auto-save ──────────────────────────────────────────────────────────────
+  //
+  // ⚠️ THERE IS NO SAVE BUTTON. Every field in the editor writes itself back, which moves a job
+  // that used to be the author's — press Save before you preview, before you approve, before you
+  // click another issue — onto the code. Three rules make that safe:
+  //
+  //   · A short debounce, so a burst of typing is one write and not one per keystroke.
+  //   · ONE write in flight at a time. Two overlapping updates can land out of order and leave
+  //     the older text on the server, which is the failure nobody notices until it is sent.
+  //   · flushPending() before anything that reads the STORED row — preview, approve, drafting,
+  //     refining, sending, opening another issue. The server works from the row, not the screen,
+  //     so "the debounce has not fired yet" would mean previewing the paragraph before last.
+  //
+  // A failed write leaves the issue dirty and SAYS SO. Clearing dirty on failure would mean the
+  // next keystroke saves happily and the missing sentence never comes back.
+
+  const AUTOSAVE_DELAY = 900;
+  let autosaveTimer = null;
+  let saving = null;
+  let leaveWired = false;
+
+  function setSavedNote(text, cls) {
+    const el = $('nl-saved');
+    if (!el) return;
+    el.textContent = text;
+    el.className = `text-xs ${cls || 'text-gray-400'}`;
+  }
+
+  /** An issue is open and the server would accept a write for it. A sent issue is a record. */
+  function editable() {
+    return !!state.current && !['sending', 'sent'].includes(state.current.status);
+  }
+
+  function cancelPending() { clearTimeout(autosaveTimer); autosaveTimer = null; }
+
+  /** Something changed on screen. Called by every input, the designer, and the merge-tag chips. */
+  function scheduleSave() {
+    if (!editable()) return;
+    state.dirty = true;
+    setSavedNote('Saving…');
+    clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(() => { autosaveTimer = null; runSave(); }, AUTOSAVE_DELAY);
+  }
+
+  /** The background writer. Never rejects — it reports failure in the note and a toast. */
+  function runSave() {
+    if (saving) return saving;
+    saving = (async () => {
+      try {
+        // Loops rather than fires once: a keystroke landing mid-write sets dirty again, and that
+        // edit must not sit until the next debounce.
+        while (state.dirty && editable()) {
+          state.dirty = false;
+          try {
+            await save();
+          } catch (err) {
+            state.dirty = true;
+            setSavedNote('Not saved — we will try again.', 'text-amber-700 font-bold');
+            window.showToast(err.message);
+            return;
+          }
+        }
+      } finally { saving = null; }
+    })();
+    return saving;
+  }
+
+  /**
+   * Write anything outstanding, now, and let the caller know if it failed.
+   *
+   * ⚠️ This one THROWS. Preview, approve, draft and send all read the stored row, and running any
+   * of them on top of a write that did not land is how somebody approves the previous draft.
+   */
+  async function flushPending() {
+    cancelPending();
+    if (saving) await saving;
+    if (!state.dirty || !editable()) return;
+    state.dirty = false;
+    try {
+      await save();
+    } catch (err) {
+      state.dirty = true;
+      setSavedNote('Not saved — we will try again.', 'text-amber-700 font-bold');
+      throw err;
+    }
+  }
+
+  /** Flushing where nobody is waiting on the result — leaving a field, hiding the tab. */
+  const backgroundFlush = () => flushPending().catch((err) => window.showToast(err.message));
+
+  // ── Auto-save for the panels that write through their own action ───────────
+  //
+  // The issue editor above is one row and one payload, so it has one saver. The A/B test, the
+  // send-time mode, the sending domain and a sequence step each POST a DIFFERENT server action with
+  // its own validation, so each gets its own — but they all need the same three things: a debounce,
+  // one write in flight, and somewhere to say what happened.
+  //
+  // ⚠️ Each keeps its OWN status line rather than sharing #nl-saved. A failure here is about that
+  // panel ("the two subject lines are the same"), not about whether the issue is safe, and putting
+  // the two in one place makes both unreadable.
+  //
+  // ⚠️ And none of them re-open the issue or re-render their own panel on a successful write, which
+  // is the thing the Save buttons used to make safe: re-rendering replaces the input somebody is
+  // still typing into. Only a change that alters the SHAPE of a panel re-renders it.
+
+  /**
+   * @param opts.write  Does the write and returns the response, or `null` for "not enough typed
+   *                    yet" — a quiet state, not an error. Nothing else may call the endpoint.
+   * @param opts.note   Paints the panel's status line.
+   */
+  function makeAutosaver(opts) {
+    const delay = opts.delay || AUTOSAVE_DELAY;
+    let timer = null;
+    let inFlight = null;
+    let dirty = false;
+    const say = (text, tone) => { if (opts.note) opts.note(text, tone); };
+
+    function run() {
+      if (inFlight) return inFlight;
+      inFlight = (async () => {
+        try {
+          // Loops for the same reason the issue editor's does: an edit landing mid-write must not
+          // wait out another debounce.
+          while (dirty) {
+            dirty = false;
+            let res;
+            try {
+              res = await opts.write();
+            } catch (err) {
+              // ⚠️ Left dirty so the next edit retries, and the message is the SERVER'S. On these
+              // panels the refusal is the useful part — "the two subject lines are the same, so
+              // there would be nothing to compare" is the whole feature talking.
+              dirty = true;
+              say(err.message, 'error');
+              return;
+            }
+            if (res === null) say('', 'idle');
+            else say(opts.savedNote ? opts.savedNote(res) : 'Saved', 'ok');
+          }
+        } finally { inFlight = null; }
+      })();
+      return inFlight;
+    }
+
+    return {
+      schedule() {
+        dirty = true;
+        say('Saving…', 'busy');
+        clearTimeout(timer);
+        timer = setTimeout(() => { timer = null; run(); }, delay);
+      },
+      /**
+       * Write NOW, whether or not a keystroke marked this dirty.
+       *
+       * ⚠️ For controls where the change IS the decision — a select, a time picker. `flush()` only
+       * writes what is already outstanding, and a `change` event does not always arrive behind an
+       * `input` one, so binding a select to flush() silently dropped the value it was picked for.
+       */
+      now() {
+        dirty = true;
+        clearTimeout(timer);
+        timer = null;
+        say('Saving…', 'busy');
+        return run();
+      },
+      /** Write anything OUTSTANDING — leaving a field, closing the modal, hiding the tab. */
+      flush() {
+        clearTimeout(timer);
+        timer = null;
+        if (!dirty && !inFlight) return Promise.resolve();
+        return run();
+      },
+      cancel() { clearTimeout(timer); timer = null; dirty = false; },
+    };
+  }
+
+  /** The status line inside a panel. Three states everywhere: busy, saved, what went wrong. */
+  function panelNote(id, cls) {
+    return (text, tone) => {
+      const el = $(id);
+      if (!el) return;
+      el.textContent = text || '';
+      el.className = `text-[11px] ${cls || ''} ${tone === 'error' ? 'text-red-700 font-bold' : 'text-gray-500'}`;
+    };
+  }
+
+  /** ⚠️ Cancelled when their panel re-renders, or a stale timer writes over the fresh form. */
+  let abSaver = null;
+  let localTimeSaver = null;
+  let domainSaver = null;
+  let seqSaver = null;
+
+  /** Type=time reports '' until both halves are set — an unfinished time is not a value. */
+  const isWallClock = (v) => /^\d{2}:\d{2}$/.test(String(v || ''));
 
   async function generate(topic, notes) {
     const go = $('nl-brief-go');
     if (go) { go.disabled = true; go.textContent = 'Writing…'; }
     try {
       // Save first: the server drafts from the stored row, so an unsaved subject would be ignored.
-      await save(true);
+      await flushPending();
       const res = await api(ISSUES_API, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -954,7 +1222,11 @@
       window.showToast(`Draft ready — read it before you approve it.`);
       // List only. Re-opening the issue here would replace the draft that was just written into
       // the fields, and would hide the warnings the author has not read yet.
+      // ⚠️ The server wrote these words, so the fields already match the stored row — cancel the
+      // debounce rather than letting it fire and write the same thing back.
+      cancelPending();
       state.dirty = false;
+      setSavedNote('Saved');
       await refreshList();
     } catch (err) {
       window.showToast(err.message);
@@ -1003,7 +1275,7 @@
     try {
       // Saved first, for the same reason drafting is: the server rewrites the STORED copy, so an
       // unsaved edit would be revised out of existence.
-      await save(true);
+      await flushPending();
       const res = await api(ISSUES_API, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'refine', id: state.current.id, mode, instruction }),
@@ -1067,7 +1339,9 @@
         state.revision = null;
         hide($('nl-revision'));
         if (res.issue && res.issue.design && state.designer) state.designer.setDesign(res.issue.design);
+        cancelPending();
         state.dirty = false;
+        setSavedNote('Saved');
         renderWordCount();
         recomputeFindings();
         if (res.approvalCleared) window.showToast('Edited after approval, so this needs approving again.');
@@ -1084,7 +1358,7 @@
     if (!state.current) return;
     try {
       // Saved first so "convert" builds blocks from what is on screen, not from what was last saved.
-      await save(true);
+      await flushPending();
       const res = await api(ISSUES_API, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'design', id: state.current.id, mode, template }),
@@ -1202,19 +1476,42 @@
     }
   }
 
+  /**
+   * Put a rendered email in the preview modal.
+   *
+   * ⚠️ A `data:` URL, NOT `srcdoc`, and do not change it back. The frame is fully sandboxed
+   * (`sandbox` with no value — no scripts, no forms, no top-level navigation), and a sandboxed
+   * frame is exactly the case where `srcdoc` is not reliably honoured: in Edge it left the iframe
+   * laid out at the right size with no document in it, so the modal opened onto a white box. A
+   * `data:` URL is an ordinary navigation to an always-opaque origin, so the isolation is the same
+   * or stronger, and every browser loads it.
+   *
+   * It is also the more honest preview. `srcdoc` inherits the app's own URL as its base, so a
+   * relative image src would quietly resolve here and break in the inbox — which is the one thing
+   * this modal exists to catch. A `data:` URL has no base, so a relative src breaks in BOTH places.
+   */
+  function showPreview(html) {
+    const frame = $('nl-preview-frame');
+    if (frame) {
+      // Nothing rendered is a real answer, not a blank screen to interpret: an issue whose blocks
+      // are all still empty has nothing to show, and the modal should say so.
+      const doc = (html && html.trim())
+        ? html
+        : `<!DOCTYPE html><html><body style="margin:0;padding:32px;font:15px/1.6 -apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#6b7280;background:#f6f7f9;text-align:center;">There is nothing to preview yet \u2014 this issue has no words in it.</body></html>`;
+      frame.src = `data:text/html;charset=utf-8,${encodeURIComponent(doc)}`;
+    }
+    show($('nl-preview-modal'), 'flex');
+  }
+
   async function preview() {
     if (!state.current) return;
     try {
-      await save(true);
+      await flushPending();
       const res = await api(ISSUES_API, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'preview', id: state.current.id }),
       });
-      const frame = $('nl-preview-frame');
-      // srcdoc into a sandboxed iframe: the preview is a full HTML document and must not be able
-      // to restyle or script the app around it.
-      if (frame) frame.srcdoc = res.html || '';
-      show($('nl-preview-modal'), 'flex');
+      showPreview(res.html);
     } catch (err) { window.showToast(err.message); }
   }
 
@@ -1228,7 +1525,7 @@
     );
     if (!ok) return;
     try {
-      await save(true);
+      await flushPending();
       const res = await api(ISSUES_API, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1324,6 +1621,8 @@
   function renderSending(domains) {
     const body = $('nl-sending-body');
     const domain = domains[0] || null;
+    domainSaver?.cancel();
+    domainSaver = null;
 
     if (!domain) {
       body.innerHTML = `
@@ -1399,10 +1698,9 @@
         </div>
       </div>
 
-      <div class="flex flex-wrap justify-end gap-2 mt-6">
+      <div class="flex flex-wrap items-center justify-end gap-2 mt-6">
         <button type="button" id="nl-domain-remove" class="px-3 py-2 text-xs font-bold text-red-700 bg-white border border-red-200 rounded-lg hover:bg-red-50 cursor-pointer">Remove</button>
-        <div class="flex-1"></div>
-        <button type="button" id="nl-domain-save" class="px-4 py-2 text-sm font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Save</button>
+        <span id="nl-domain-status" class="flex-1"></span>
         ${verified ? '' : '<button type="button" id="nl-domain-check" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Check DNS</button>'}
       </div>`;
 
@@ -1422,21 +1720,35 @@
       finally { if (btn) { btn.disabled = false; btn.textContent = 'Check DNS'; } }
     });
 
-    $('nl-domain-save')?.addEventListener('click', async () => {
-      try {
+    domainSaver = makeAutosaver({
+      note: panelNote('nl-domain-status'),
+      write: async () => {
+        // The server strips everything but letters, numbers, dots, dashes and underscores, then
+        // refuses what is left if it is empty. Mid-word that is a real state, not a mistake.
+        const local = ($('nl-from-local') ? $('nl-from-local').value : '').replace(/[^a-z0-9._-]/gi, '');
+        if (!local) return null;
         const res = await api(DOMAIN_API, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'update', id: domain.id,
-            fromName: $('nl-from-name')?.value, fromLocalPart: $('nl-from-local')?.value,
+            fromName: $('nl-from-name') ? $('nl-from-name').value : '',
+            fromLocalPart: local,
           }),
         });
-        window.showToast('Saved.');
-        renderSending([res.domain]);
-      } catch (err) { window.showToast(err.message); }
+        // ⚠️ NOT renderSending(res.domain) — that rebuilds this whole panel, including the field
+        // being typed into. Keep the local copy in step instead; the next open reads the server.
+        if (res.domain) { domain.fromName = res.domain.fromName; domain.fromLocalPart = res.domain.fromLocalPart; }
+        return res;
+      },
+    });
+    ['nl-from-name', 'nl-from-local'].forEach((k) => {
+      $(k)?.addEventListener('input', () => domainSaver.schedule());
+      $(k)?.addEventListener('blur', () => domainSaver.flush());
+      $(k)?.addEventListener('change', () => domainSaver.flush());
     });
 
     $('nl-domain-remove')?.addEventListener('click', async () => {
+      domainSaver?.cancel();
       const ok = await window.confirmModal(
         'Remove this sending domain? New issues will fall back to your connected mailbox, which is capped at a small list.',
         { title: 'Remove the domain?', confirmLabel: 'Remove' });
@@ -1493,9 +1805,79 @@
     }
   }
 
+  /**
+   * The list of emails in the sequence, on its own.
+   *
+   * ⚠️ Separate from renderWelcome() because the step editor autosaves: adding an email has to show
+   * up in the list WITHOUT repainting the form underneath the person still writing it. Nothing here
+   * may touch #nl-seq-step-number either — that is what decides whether the next write updates this
+   * email or creates another one.
+   */
+  function renderSeqList() {
+    const host = $('nl-seq-list');
+    if (!host) return;
+    host.innerHTML = seqState.steps.length ? seqState.steps.map((st) => `
+      <div class="flex items-start gap-3 rounded-xl border border-gray-200 p-3">
+        <div class="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-600 shrink-0">${st.stepNumber}</div>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-bold text-gray-900 truncate">${esc(st.subject)}</p>
+          <p class="text-[11px] text-gray-500">${st.delayDays === 0 ? 'Straight away' : `${st.delayDays} day${st.delayDays === 1 ? '' : 's'} after the previous email`}</p>
+        </div>
+        <button type="button" data-seq-edit="${st.stepNumber}" class="text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer">Edit</button>
+        <button type="button" data-seq-delete="${st.stepNumber}" class="text-xs font-bold text-red-600 hover:text-red-700 cursor-pointer">Delete</button>
+      </div>`).join('')
+      : '<p class="text-sm text-gray-400 py-4 text-center">No emails yet. Add the first one below.</p>';
+
+    host.querySelectorAll('[data-seq-edit]').forEach((btn) => btn.addEventListener('click', async () => {
+      const n = Number(btn.getAttribute('data-seq-edit'));
+      // ⚠️ Flush BEFORE loading another step: the form is the only copy of what is typed into it,
+      // and #nl-seq-step-number is about to point somewhere else.
+      if (seqSaver) await seqSaver.flush();
+      const st = seqState.steps.find((x) => x.stepNumber === n);
+      if (!st) return;
+      $('nl-seq-form-title').textContent = `Edit email ${n}`;
+      $('nl-seq-step-number').value = String(n);
+      $('nl-seq-subject').value = st.subject || '';
+      $('nl-seq-preheader').value = st.preheader || '';
+      $('nl-seq-body').value = st.bodyMarkdown || '';
+      $('nl-seq-delay').value = String(st.delayDays ?? 0);
+      seqState.editing = { stepNumber: n, design: st.design || null, revision: null };
+      hide($('nl-seq-revision'));
+      mountSeqDesign(st.design || null);
+      renderSeqWordCount();
+      recomputeSeqFindings();
+      show($('nl-seq-cancel'), 'inline-flex');
+      $('nl-seq-subject').focus();
+    }));
+
+    host.querySelectorAll('[data-seq-delete]').forEach((btn) => btn.addEventListener('click', async () => {
+      const n = Number(btn.getAttribute('data-seq-delete'));
+      const ok = await window.confirmModal(
+        'Delete this email from the sequence? Anyone who has already received it keeps it — this only affects people who have not reached it yet.',
+        { title: `Delete email ${n}?`, confirmLabel: 'Delete' });
+      if (!ok) return;
+      // ⚠️ Deleting the email that is open in the form: a queued write would recreate it a second
+      // later. Any OTHER step's pending edit is still owed a save.
+      if (seqSaver) {
+        if (Number($('nl-seq-step-number').value || 0) === n) seqSaver.cancel();
+        else await seqSaver.flush();
+      }
+      try {
+        await api(SEQ_API, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'deleteStep', stepNumber: n }),
+        });
+        await openWelcomeModal();
+      } catch (err) { window.showToast(err.message); }
+    }));
+
+  }
+
   function renderWelcome() {
     const body = $('nl-welcome-body');
     const seq = seqState.sequence;
+    seqSaver?.cancel();
+    seqSaver = null;
 
     if (!seq) {
       body.innerHTML = `
@@ -1539,19 +1921,7 @@
             : 'text-white bg-emerald-600 hover:bg-emerald-700'}">${seq.isEnabled ? 'Switch off' : 'Switch on'}</button>
       </div>
 
-      <div class="space-y-2 mb-4">
-        ${seqState.steps.length ? seqState.steps.map((st) => `
-          <div class="flex items-start gap-3 rounded-xl border border-gray-200 p-3">
-            <div class="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-600 shrink-0">${st.stepNumber}</div>
-            <div class="min-w-0 flex-1">
-              <p class="text-sm font-bold text-gray-900 truncate">${esc(st.subject)}</p>
-              <p class="text-[11px] text-gray-500">${st.delayDays === 0 ? 'Straight away' : `${st.delayDays} day${st.delayDays === 1 ? '' : 's'} after the previous email`}</p>
-            </div>
-            <button type="button" data-seq-edit="${st.stepNumber}" class="text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer">Edit</button>
-            <button type="button" data-seq-delete="${st.stepNumber}" class="text-xs font-bold text-red-600 hover:text-red-700 cursor-pointer">Delete</button>
-          </div>`).join('')
-          : '<p class="text-sm text-gray-400 py-4 text-center">No emails yet. Add the first one below.</p>'}
-      </div>
+      <div class="space-y-2 mb-4" id="nl-seq-list"></div>
 
       <div class="rounded-xl border border-gray-200 p-4">
         <p class="text-sm font-bold text-gray-900 mb-3" id="nl-seq-form-title">Add an email</p>
@@ -1607,54 +1977,25 @@
             class="px-3 py-1.5 text-xs font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Preview email</button>
         </div>
 
-        <div class="flex justify-end gap-2 mt-3">
-          <button type="button" id="nl-seq-cancel" class="hidden px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer" style="display:none">Cancel</button>
-          <button type="button" id="nl-seq-save" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Save email</button>
+        <div class="flex items-center justify-end gap-3 mt-3">
+          <!-- ⚠️ Was "Cancel", and it cannot be any more: this form saves itself, so by the time
+               somebody reaches this button the email is already in the sequence. It means "leave
+               this one alone and start a new one", and it says that. Deleting is the row above. -->
+          <span id="nl-seq-status" class="mr-auto"></span>
+          <button type="button" id="nl-seq-cancel" class="hidden px-4 py-2 text-sm font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer" style="display:none">Add another email</button>
         </div>
       </div>`;
 
     // Every label that names the assistant, including the two just rendered into this modal.
     applyAssistantNaming();
+    renderSeqList();
     renderSeqVarChips();
     mountSeqDesign(seqState.editing.design);
     renderSeqWordCount();
     recomputeSeqFindings();
 
-    body.querySelectorAll('[data-seq-edit]').forEach((btn) => btn.addEventListener('click', () => {
-      const n = Number(btn.getAttribute('data-seq-edit'));
-      const st = seqState.steps.find((x) => x.stepNumber === n);
-      if (!st) return;
-      $('nl-seq-form-title').textContent = `Edit email ${n}`;
-      $('nl-seq-step-number').value = String(n);
-      $('nl-seq-subject').value = st.subject || '';
-      $('nl-seq-preheader').value = st.preheader || '';
-      $('nl-seq-body').value = st.bodyMarkdown || '';
-      $('nl-seq-delay').value = String(st.delayDays ?? 0);
-      seqState.editing = { stepNumber: n, design: st.design || null, revision: null };
-      hide($('nl-seq-revision'));
-      mountSeqDesign(st.design || null);
-      renderSeqWordCount();
-      recomputeSeqFindings();
-      show($('nl-seq-cancel'), 'inline-flex');
-      $('nl-seq-subject').focus();
-    }));
-
-    body.querySelectorAll('[data-seq-delete]').forEach((btn) => btn.addEventListener('click', async () => {
-      const n = Number(btn.getAttribute('data-seq-delete'));
-      const ok = await window.confirmModal(
-        'Delete this email from the sequence? Anyone who has already received it keeps it — this only affects people who have not reached it yet.',
-        { title: `Delete email ${n}?`, confirmLabel: 'Delete' });
-      if (!ok) return;
-      try {
-        await api(SEQ_API, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'deleteStep', stepNumber: n }),
-        });
-        await openWelcomeModal();
-      } catch (err) { window.showToast(err.message); }
-    }));
-
-    $('nl-seq-cancel')?.addEventListener('click', () => {
+    $('nl-seq-cancel')?.addEventListener('click', async () => {
+      if (seqSaver) await seqSaver.flush();
       seqState.editing = { stepNumber: seqState.steps.length + 1, design: null, revision: null };
       renderWelcome();
     });
@@ -1664,7 +2005,9 @@
     });
     $('nl-seq-vars')?.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-var]');
-      if (btn) insertVarInto($('nl-seq-body'), btn.getAttribute('data-var'));
+      if (!btn) return;
+      insertVarInto($('nl-seq-body'), btn.getAttribute('data-var'));
+      seqSaver?.schedule();
     });
 
     $('nl-seq-generate')?.addEventListener('click', seqGenerate);
@@ -1681,6 +2024,7 @@
       };
       seqState.editing.design = design;
       mountSeqDesign(design);
+      seqSaver?.schedule();
       renderSeqWordCount();
       recomputeSeqFindings();
     });
@@ -1692,21 +2036,29 @@
       $('nl-seq-body').value = seqProse();
       seqState.editing.design = null;
       mountSeqDesign(null);
+      seqSaver?.schedule();
       renderSeqWordCount();
       recomputeSeqFindings();
     });
 
-    $('nl-seq-save')?.addEventListener('click', async () => {
-      const btn = $('nl-seq-save');
-      if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
-      try {
+    // ⚠️ This form CREATES as well as edits, so its autosave has a threshold rather than a
+    // debounce alone: the server needs a subject and a body, and half a subject line typed into a
+    // blank form is not an email somebody meant to add to a live welcome sequence. Below the
+    // threshold nothing is written and nothing is complained about — walk away and there is no
+    // step. Above it, the step exists from that moment on and the list says so.
+    seqSaver = makeAutosaver({
+      note: panelNote('nl-seq-status'),
+      write: async () => {
+        const subject = ($('nl-seq-subject') ? $('nl-seq-subject').value : '').trim();
+        if (!subject || !seqProse().trim()) return null;
         const design = seqState.designer ? seqState.designer.getDesign() : null;
-        await api(SEQ_API, {
+        const stepNumber = Number($('nl-seq-step-number').value || 1);
+        const { step } = await api(SEQ_API, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'saveStep',
-            stepNumber: Number($('nl-seq-step-number').value || 1),
-            subject: $('nl-seq-subject').value,
+            stepNumber,
+            subject,
             preheader: $('nl-seq-preheader').value,
             // Either/or, for the same reason an issue sends one or the other: the design is
             // authoritative when it exists, and the server derives the prose from it.
@@ -1714,15 +2066,26 @@
             delayDays: Number($('nl-seq-delay').value || 0),
           }),
         });
-        window.showToast('Saved.');
-        seqState.editing = { stepNumber: 1, design: null, revision: null };
-        await openWelcomeModal();
-      } catch (err) {
-        window.showToast(err.message);
-      } finally {
-        if (btn) { btn.disabled = false; btn.textContent = 'Save email'; }
-      }
+        // ⚠️ The LIST only. openWelcomeModal() rebuilds the form, which would take the words out
+        // from under whoever is writing them — and it would also renumber #nl-seq-step-number,
+        // so the next keystroke would add a SECOND email instead of updating this one.
+        if (step) {
+          const i = seqState.steps.findIndex((x) => x.stepNumber === step.stepNumber);
+          if (i >= 0) seqState.steps[i] = step; else seqState.steps.push(step);
+          seqState.steps.sort((x, y) => x.stepNumber - y.stepNumber);
+          renderSeqList();
+        }
+        // Now that this email exists, there is somewhere to go from here.
+        show($('nl-seq-cancel'), 'inline-flex');
+        return step || {};
+      },
     });
+
+    ['nl-seq-subject', 'nl-seq-preheader', 'nl-seq-body'].forEach((k) => {
+      $(k)?.addEventListener('input', () => seqSaver.schedule());
+      $(k)?.addEventListener('blur', () => seqSaver.flush());
+    });
+    $('nl-seq-delay')?.addEventListener('change', () => seqSaver.now());
 
     $('nl-seq-toggle')?.addEventListener('click', async () => {
       const turningOn = !seq.isEnabled;
@@ -1808,7 +2171,7 @@
     seqState.editing.design = live;
     seqState.designer = window.NewsletterDesigner.mount({
       host, design: live, assistantName: assistantName(),
-      onChange: () => { renderSeqWordCount(); recomputeSeqFindings(); },
+      onChange: () => { seqSaver?.schedule(); renderSeqWordCount(); recomputeSeqFindings(); },
     });
   }
 
@@ -1866,6 +2229,7 @@
         seqState.designer.setDesign({ ...design, blocks: blocksFromMarkdownClient(res.bodyMarkdown || '') });
       }
       if (res.warnings && res.warnings.length) window.showToast(res.warnings[0], { duration: 8000 });
+      seqSaver?.schedule();
       renderSeqWordCount();
       recomputeSeqFindings();
       window.showToast('Drafted — read it before you switch the sequence on.');
@@ -1919,7 +2283,7 @@
         <button type="button" id="nl-seq-rev-keep" class="px-3 py-1.5 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-lg cursor-pointer">Use this version</button>
         <button type="button" id="nl-seq-rev-drop" class="px-3 py-1.5 text-xs font-bold text-sky-800 bg-white border border-sky-300 rounded-lg hover:bg-sky-50 cursor-pointer">Keep mine</button>
       </div>
-      <p class="text-[11px] text-sky-700 mt-2">Nothing is saved until you press <span class="font-bold">Save email</span>.</p>`;
+      <p class="text-[11px] text-sky-700 mt-2">Choosing a version saves it. Keeping yours changes nothing.</p>`;
     show(el, 'block');
 
     $('nl-seq-rev-keep')?.addEventListener('click', () => {
@@ -1932,6 +2296,7 @@
       }
       seqState.editing.revision = null;
       hide(el);
+      seqSaver?.schedule();
       renderSeqWordCount();
       recomputeSeqFindings();
     });
@@ -1949,9 +2314,7 @@
           ...(design ? { design } : { bodyMarkdown: $('nl-seq-body').value }),
         }),
       });
-      const frame = $('nl-preview-frame');
-      if (frame) frame.srcdoc = res.html || '';
-      show($('nl-preview-modal'), 'flex');
+      showPreview(res.html);
     } catch (err) { window.showToast(err.message); }
   }
 
@@ -1966,9 +2329,15 @@
     document.querySelectorAll('[data-nl-newissue-close]').forEach((el) => el.addEventListener('click', () => hide($('nl-newissue-modal'))));
     $('nl-new-subject')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') createIssue(); });
 
-    $('nl-list')?.addEventListener('click', (e) => {
+    $('nl-list')?.addEventListener('click', async (e) => {
       const btn = e.target.closest('[data-issue]');
-      if (btn) openIssue(Number(btn.getAttribute('data-issue')));
+      if (!btn) return;
+      // ⚠️ Flush BEFORE switching, and do not switch if the flush failed. payload() reads
+      // state.current, so a pending write has to land against the issue it was typed into — and
+      // moving off an issue whose last edit never reached the server loses it silently.
+      try { await flushPending(); }
+      catch (err) { window.showToast(err.message); return; }
+      openIssue(Number(btn.getAttribute('data-issue')));
     });
 
     $('nl-vars')?.addEventListener('click', (e) => {
@@ -1976,8 +2345,17 @@
       if (btn) insertVar(btn.getAttribute('data-var'));
     });
 
+    // Every field that payload() sends. Typing debounces; leaving a field writes immediately,
+    // because clicking from the subject line straight into Preview must not outrun the timer.
     ['nl-subject', 'nl-preheader', 'nl-body', 'nl-segment', 'nl-schedule'].forEach((k) => {
-      $(k)?.addEventListener('input', () => { state.dirty = true; });
+      $(k)?.addEventListener('input', scheduleSave);
+      // nl-segment has its own change handler (it re-asks for the audience estimate) and flushes
+      // there — a second listener would write the same row twice.
+      // ⚠️ scheduleSave() first: a `change` does not always arrive behind an `input`, and
+      // flushPending() only writes what is already outstanding — binding a picker straight to it
+      // drops the value it was picked for.
+      if (k !== 'nl-segment') $(k)?.addEventListener('change', () => { scheduleSave(); backgroundFlush(); });
+      $(k)?.addEventListener('blur', () => { backgroundFlush(); });
     });
     // The two inputs the findings actually read. Recomputed on every keystroke — see
     // recomputeFindings for why the warm-up warning is carried over rather than recomputed.
@@ -2010,21 +2388,27 @@
       // Re-ask the server rather than counting locally: the number depends on contact status,
       // which this page does not hold.
       try {
-        await save(true);
+        state.dirty = true;
+        await flushPending();
         const { audienceEstimate } = await api(`${ISSUES_API}?id=${encodeURIComponent(state.current.id)}`);
         renderAudience(audienceEstimate);
       } catch { /* the estimate is a nicety; a failure here must not block editing */ }
     });
 
-    $('nl-save')?.addEventListener('click', async () => {
-      try { await save(false); } catch (err) { window.showToast(err.message); }
-    });
     $('nl-preview')?.addEventListener('click', preview);
     $('nl-send')?.addEventListener('click', sendNow);
     $('nl-sending')?.addEventListener('click', openSendingModal);
     $('nl-welcome')?.addEventListener('click', openWelcomeModal);
-    document.querySelectorAll('[data-nl-welcome-close]').forEach((el) => el.addEventListener('click', () => hide($('nl-welcome-modal'))));
-    document.querySelectorAll('[data-nl-sending-close]').forEach((el) => el.addEventListener('click', () => hide($('nl-sending-modal'))));
+    // ⚠️ Flush on the way out. Closing a modal is the one moment these forms lose their only copy
+    // of what was typed, and there is no Save button left to have caught it on the way past.
+    document.querySelectorAll('[data-nl-welcome-close]').forEach((el) => el.addEventListener('click', () => {
+      if (seqSaver) seqSaver.flush();
+      hide($('nl-welcome-modal'));
+    }));
+    document.querySelectorAll('[data-nl-sending-close]').forEach((el) => el.addEventListener('click', () => {
+      if (domainSaver) domainSaver.flush();
+      hide($('nl-sending-modal'));
+    }));
     $('nl-approve')?.addEventListener('click', approve);
 
     $('nl-generate')?.addEventListener('click', () => {
@@ -2036,10 +2420,40 @@
     $('nl-brief-go')?.addEventListener('click', () => generate($('nl-brief-topic').value, $('nl-brief-notes').value));
 
     document.querySelectorAll('[data-nl-preview-close]').forEach((el) => el.addEventListener('click', () => hide($('nl-preview-modal'))));
+
+    // ── Leaving before the debounce fires ────────────────────────────────────
+    //
+    // ⚠️ Registered ONCE, not per wire(). wire() runs on every view swap, and a listener added
+    // each time would send the same write four times over on the fourth visit.
+    //
+    // Hiding the tab is an ordinary flush — there is time for a response. Closing the page is not,
+    // so that one rides `keepalive`: the request outlives the document and nobody reads the answer.
+    if (!leaveWired) {
+      leaveWired = true;
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'hidden') return;
+        backgroundFlush();
+        [abSaver, localTimeSaver, domainSaver, seqSaver].forEach((sv) => { if (sv) sv.flush(); });
+      });
+      window.addEventListener('pagehide', () => {
+        [abSaver, localTimeSaver, domainSaver, seqSaver].forEach((sv) => { if (sv) sv.flush(); });
+        if (!state.dirty || !editable()) return;
+        cancelPending();
+        state.dirty = false;
+        fetch(ISSUES_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'update', ...payload() }),
+          keepalive: true,
+        }).catch(() => { /* the page is going; there is nowhere to report this */ });
+      });
+    }
   }
 
   window.initNewsletter = async function initNewsletter() {
     state.current = null;
+    // The view was swapped out and back: nothing on the new page belongs to the old issue.
+    cancelPending();
     state.dirty = false;
     state.revision = null;
     if (state.designer) { state.designer.destroy(); state.designer = null; }

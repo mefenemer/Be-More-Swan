@@ -73,14 +73,28 @@ const CUSTOM_NO_VALUE_OPS = ['is_set', 'is_not_set'];
 /** Mirrors audience_custom_fields_key_check. */
 export const CUSTOM_KEY_RE = /^[a-z][a-z0-9_]{0,39}$/;
 
-/** Mirrors audience_contacts.source — the CHECK constraint is the authority. */
-export const SOURCE_VALUES = ['web_form', 'csv_import', 'manual', 'lead_promotion', 'api'] as const;
+/**
+ * Mirrors audience_contacts.source — the CHECK constraint is the authority, with ONE exception.
+ *
+ * ⚠️ A LEAD IS NEVER PROMOTED INTO THE AUDIENCE. Decided 2026-08-21: Lead Generator
+ * contacts are speculative — there is no permission to send them a newsletter or a blog — so the
+ * two populations stay separate and nothing ever writes `lead_promotion`. The value stayed in the
+ * CHECK constraint (dropping it needs DDL on two databases for no gain) but it is gone from every
+ * list a person sees, and from the accepted set, because an offered filter that can only ever match
+ * nobody is worse than no filter. A refusal DOES still cross between the two — see
+ * src/utils/audience-objection.ts.
+ *
+ * ⚠️ Retiring a value has a consequence, and it is the safe one: parseRules runs on READ as well as
+ * on write, so a segment saved with this filter now REFUSES rather than compiling without it. Such
+ * a rule could only ever have matched nobody — or, in its `is_not` form, silently everybody, which
+ * is exactly the widening this module refuses on principle.
+ */
+export const SOURCE_VALUES = ['web_form', 'csv_import', 'manual', 'api'] as const;
 
 export const SOURCE_LABEL: Record<string, string> = {
     web_form:       'a sign-up form',
     csv_import:     'an import',
     manual:         'being added by hand',
-    lead_promotion: 'the Lead Generator',
     api:            'the API',
 };
 

@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { landmark } from './landmark';
 import {
-    buildSegmentCondition, describeRules, parseRules, MAX_CONDITIONS, MAX_DAYS,
+    buildSegmentCondition, describeRules, parseRules, MAX_CONDITIONS, MAX_DAYS, SOURCE_VALUES,
 } from '../src/utils/audience-segment-rules';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -219,6 +219,29 @@ await check('the segment list counts dynamic segments through the rule', () => {
 await check('nothing is materialised, so nothing can go stale', () => {
     assert.match(RULES, /never stored/i);
     assert.ok(!/INSERT INTO audience_contact_segments/i.test(RULES));
+});
+
+await check('a lead is never offered as a way somebody joined the audience', () => {
+    // Decided 2026-08-21: leads and the audience are separate POPULATIONS — a speculative prospect
+    // has given no permission to be sent a newsletter — so nothing writes `lead_promotion` and it
+    // must not be offered as a filter. It was, for a while: "How they joined IS the Lead Generator"
+    // was a rule a tenant could build that could only ever return zero people.
+    //
+    // ⚠️ Every surface, because the value had FOUR homes and two of them were in the same file.
+    assert.ok(!SOURCE_VALUES.includes('lead_promotion' as never), 'SOURCE_VALUES must not accept it');
+    assert.ok(!/lead_promotion:/.test(RULES), 'no label in the rule vocabulary');
+    assert.ok(!/lead_promotion:/.test(read('audience.js')), 'no label in audience.js (SOURCE_LABEL *or* SOURCE_OPTS)');
+    // The TYPE line, not the file — the comment above it names the value on purpose, so that
+    // anyone grepping for why it is gone lands on the reason rather than on nothing.
+    const STORE = read('src/utils/audience-store.ts');
+    const contactSource = STORE.slice(landmark(STORE, 'export type ContactSource'), landmark(STORE, 'export type ConsentBasis'));
+    assert.ok(!contactSource.includes('lead_promotion'), 'not a writable ContactSource');
+
+    // ⚠️ But it STAYS in the CHECK constraint, in both of its homes. Dropping a value from a CHECK
+    // needs DROP + ADD on two live databases, and buys nothing: no row can have it.
+    for (const f of ['db/audience.sql', 'db/schema.ts']) {
+        assert.ok(read(f).includes('lead_promotion'), `${f} should still carry the constraint value`);
+    }
 });
 
 console.log(`\n${passed} checks passed.`);
