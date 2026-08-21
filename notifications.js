@@ -448,7 +448,8 @@ window.initNotifications = async function() {
     const emptyStateEl = document.getElementById('notif-empty-state');
     const searchInput = document.getElementById('notif-search');
     const markAllBtn = document.getElementById('btn-mark-all-read');
-    const groupByTypeToggle = document.getElementById('notif-group-by-type');
+    const groupBySelect = document.getElementById('notif-group-by');
+    const groupByAssistantOpt = document.getElementById('notif-group-by-assistant-opt');
 
     if (!listEl) return;
 
@@ -463,10 +464,14 @@ window.initNotifications = async function() {
     const {
         getNotificationAction, styleOf, catOf, prioOf, isResolved, resolvesClick,
         dismissBtnHTML, kindOf, fmtDate, typeLabel, avatarHTML, actorEyebrowHTML, sanitizeText,
+        actorColor, escHtml,
     } = window.NotifKit;
     let activeTab = 'action';
-    let groupByType = false;
+    // 'none' | 'type' | 'assistant'. Grouping by assistant is only offered to workspaces that have
+    // more than one — with a single assistant every card lands in the same group.
+    let groupBy = 'none';
     // Persists across re-renders so a group stays collapsed while notifications update/resolve.
+    // Keys are namespaced by grouping mode, so switching mode can't collapse an unrelated group.
     const collapsedGroups = new Set();
 
     const tabActionBtn = document.getElementById('tab-action');
@@ -481,12 +486,47 @@ window.initNotifications = async function() {
         if (tabUpdatesBtn) tabUpdatesBtn.className = activeTab === 'updates' ? active : inactive;
     };
 
+    // How many assistants the workspace has. Archived/failed ones are left out: they can't produce
+    // anything new, so they shouldn't turn a one-assistant workspace into a grouped one. Returns 0
+    // on any failure — the option simply stays hidden rather than the page erroring.
+    const countAssistants = async () => {
+        try {
+            const res = await fetch('/.netlify/functions/get-assistants', { credentials: 'same-origin' });
+            if (!res.ok) return 0;
+            const data = await res.json();
+            return (data.assistants || []).filter(a =>
+                a.status !== 'failed' && a.lifecycleStatus !== 'archived').length;
+        } catch {
+            return 0;
+        }
+    };
+
+    // Offer "Group by assistant" only when there's more than one assistant to separate. The actor
+    // count is a second source: it covers an archived assistant whose notifications are still in
+    // the list, and the case where the assistants fetch failed outright.
+    const applyAssistantGrouping = (assistantCount) => {
+        const distinctActors = new Set(
+            notificationsData.map(n => n.actor && n.actor.assistantId).filter(id => id != null)).size;
+        const allowed = assistantCount > 1 || distinctActors > 1;
+        if (allowed) return;
+        // Remove rather than hide: Safari renders option[hidden] as a selectable row.
+        if (groupByAssistantOpt && groupByAssistantOpt.isConnected) groupByAssistantOpt.remove();
+        if (groupBy === 'assistant') {
+            groupBy = 'none';
+            if (groupBySelect) groupBySelect.value = 'none';
+        }
+    };
+
     const loadData = async () => {
         try {
-            const response = await fetch('/.netlify/functions/notifications');
+            const [response, assistantCount] = await Promise.all([
+                fetch('/.netlify/functions/notifications'),
+                countAssistants(),
+            ]);
             if (response.ok) {
                 const data = await response.json();
                 notificationsData = data.notifications || [];
+                applyAssistantGrouping(assistantCount);
                 // Open the tab that has something waiting: unresolved actions first, else updates.
                 activeTab = notificationsData.some(n => kindOf(n) === 'action' && !isResolved(n)) ? 'action' : 'updates';
                 renderList();
@@ -660,32 +700,48 @@ window.initNotifications = async function() {
 
         const renderItem = (notif) => activeTab === 'action' ? renderActionItem(notif) : renderUpdateItem(notif);
 
-        if (!groupByType) {
+        if (groupBy === 'none') {
             list.forEach(notif => listEl.appendChild(renderItem(notif)));
             return;
         }
 
-        // Group by type, preserving the existing sort order both across and within groups.
+        // Which bucket a notification falls into. By assistant, the actor IS the group — items with
+        // no actor are the system's own (same "Be More Swan" identity the cards use), so they get
+        // their own bucket rather than being dropped or lumped under an arbitrary assistant.
+        const groupOf = (notif) => {
+            if (groupBy === 'assistant') {
+                const a = notif.actor;
+                return a && a.name
+                    ? { key: `assistant:${a.assistantId}`, label: a.name, color: actorColor(a.assistantId) }
+                    : { key: 'assistant:system', label: 'Be More Swan', color: null };
+            }
+            const type = notif.type || 'other';
+            return { key: `type:${type}`, label: typeLabel(type), color: null };
+        };
+
+        // Group, preserving the existing sort order both across and within groups.
         const groups = new Map();
         list.forEach(notif => {
-            const key = notif.type || 'other';
-            if (!groups.has(key)) groups.set(key, []);
-            groups.get(key).push(notif);
+            const g = groupOf(notif);
+            if (!groups.has(g.key)) groups.set(g.key, { ...g, items: [] });
+            groups.get(g.key).items.push(notif);
         });
-        groups.forEach((items, type) => {
-            const isCollapsed = collapsedGroups.has(type);
+        groups.forEach(({ key, label, color, items }) => {
+            const isCollapsed = collapsedGroups.has(key);
             const header = document.createElement('li');
             header.className = 'px-4 pt-4 pb-1 bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide flex items-center justify-between cursor-pointer select-none hover:bg-gray-100 transition-colors';
             header.setAttribute('role', 'button');
             header.setAttribute('tabindex', '0');
             header.setAttribute('aria-expanded', String(!isCollapsed));
+            // The dot repeats the assistant's card colour, so a group reads as the same identity.
+            const dot = color ? `<span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${color}"></span>` : '';
             header.innerHTML = `
-                <span>${typeLabel(type)} (${items.length})</span>
-                <svg class="w-4 h-4 text-gray-400 transition-transform ${isCollapsed ? '' : 'rotate-180'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <span class="flex items-center gap-2 min-w-0">${dot}<span class="truncate">${escHtml(label)} (${items.length})</span></span>
+                <svg class="w-4 h-4 text-gray-400 transition-transform shrink-0 ${isCollapsed ? '' : 'rotate-180'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
                 </svg>`;
             const toggle = () => {
-                if (collapsedGroups.has(type)) collapsedGroups.delete(type); else collapsedGroups.add(type);
+                if (collapsedGroups.has(key)) collapsedGroups.delete(key); else collapsedGroups.add(key);
                 renderList();
             };
             header.addEventListener('click', toggle);
@@ -778,7 +834,7 @@ window.initNotifications = async function() {
     if (tabActionBtn) tabActionBtn.addEventListener('click', () => { activeTab = 'action'; renderList(); });
     if (tabUpdatesBtn) tabUpdatesBtn.addEventListener('click', () => { activeTab = 'updates'; renderList(); });
     if (searchInput) searchInput.addEventListener('input', renderList);
-    if (groupByTypeToggle) groupByTypeToggle.addEventListener('change', () => { groupByType = groupByTypeToggle.checked; renderList(); });
+    if (groupBySelect) groupBySelect.addEventListener('change', () => { groupBy = groupBySelect.value; renderList(); });
 
     loadData();
 };

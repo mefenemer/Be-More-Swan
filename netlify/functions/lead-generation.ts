@@ -1177,11 +1177,16 @@ ${OUTREACH_SUBJECT_RULES}`;
             // because "we must not email this company at all" outranks "who at this company".
             const suppression = await checkSuppression(db, orgId, recipient);
             if (suppression.suppressed) {
+                // The audience arm: this same call now reports an unsubscribe or a preference-centre
+                // pause, so a person who told the newsletter to stop is never cold-emailed either.
                 return json(200, {
                     sent: false,
-                    reason: suppression.unknown ? 'suppression_check_failed' : 'suppressed',
+                    reason: suppression.unknown ? 'suppression_check_failed'
+                        : suppression.retryAfter ? 'paused'
+                        : suppression.source === 'audience' ? 'unsubscribed' : 'suppressed',
                     to: recipient,
                     suppressionReason: suppression.reason ?? null,
+                    pausedUntil: suppression.retryAfter ? suppression.retryAfter.toISOString() : null,
                 });
             }
 

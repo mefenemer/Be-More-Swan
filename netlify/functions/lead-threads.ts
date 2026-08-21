@@ -833,13 +833,24 @@ export default withLambda(async (event) => {
 
             const suppression = await checkSuppression(db, orgId, recipient);
             if (suppression.suppressed) {
+                // ⚠️ Three different refusals, three different sentences. Telling somebody their
+                // own suppression list blocked a send that was actually stopped by the recipient
+                // unsubscribing sends them to look in the wrong place — and the difference is the
+                // one thing they can act on.
+                const message = suppression.unknown
+                    ? 'Nothing was sent: we could not check your lists just now. Try again in a moment.'
+                    : suppression.retryAfter
+                        ? `Nothing was sent: this person asked for no emails until ${suppression.retryAfter.toISOString().slice(0, 10)}. The cadence resumes on its own after that.`
+                        : suppression.source === 'audience'
+                            ? 'Nothing was sent: this person unsubscribed from your emails, so no assistant may contact them.'
+                            : 'Nothing was sent: this address has asked not to be contacted, or is on your suppression list.';
                 return json(200, {
                     sent: false,
-                    reason: suppression.unknown ? 'suppression_check_failed' : 'suppressed',
+                    reason: suppression.unknown ? 'suppression_check_failed'
+                        : suppression.retryAfter ? 'paused'
+                        : suppression.source === 'audience' ? 'unsubscribed' : 'suppressed',
                     to: recipient,
-                    message: suppression.unknown
-                        ? 'Nothing was sent: we could not check your suppression list just now. Try again in a moment.'
-                        : 'Nothing was sent: this address has asked not to be contacted, or is on your suppression list.',
+                    message,
                 });
             }
 

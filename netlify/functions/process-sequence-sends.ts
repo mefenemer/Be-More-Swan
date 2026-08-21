@@ -320,11 +320,32 @@ async function processEnrolment(
         return 'halted';
     }
 
-    // (4) Suppression, per send. A domain can join the tenant's list days after the cadence began.
+    // (4) Suppression, per send. A domain can join the tenant's list days after the cadence began —
+    // and since 2026-08-21 this same call also carries the AUDIENCE's refusals, so an unsubscribe
+    // or a preference-centre pause reaches the cadence too (src/utils/audience-objection.ts).
     const suppression = await checkSuppression(db, row.organisation_id, recipient);
     if (suppression.suppressed) {
         if (suppression.unknown) return 'skipped';   // lookup failed — retry next tick, do not halt
-        await haltEnrolment(db, ref, 'suppressed', suppression.reason ?? null);
+
+        // ⚠️ A PAUSE IS NOT A STOP. Halting would end this cadence for ever because somebody asked
+        // for thirty days of quiet, and nothing ever resumes a halted enrolment. Deferred to the
+        // moment the pause lifts instead — the verdict carries the date, so this worker does not
+        // have to know what a pause is. Same shape as the welcome-sequence worker in
+        // src/utils/newsletter-sequence.ts; the two must not diverge.
+        if (suppression.retryAfter) {
+            await db.update(sequenceEnrolments)
+                .set({ attempt: 0, nextSendAt: suppression.retryAfter, updatedAt: new Date() })
+                .where(eq(sequenceEnrolments.id, row.id));
+            return 'skipped';
+        }
+
+        // ⚠️ `do_not_contact` for an audience refusal, `suppressed` for a list hit — the person
+        // said stop, versus the tenant's own list said don't. Both keys are already in the
+        // halt_reason CHECK, so neither needs DDL; inventing one would make the halt UPDATE fail
+        // and leave the enrolment ACTIVE and still sending ([[outreach-do-not-contact-gate]]).
+        await haltEnrolment(db, ref,
+            suppression.source === 'audience' ? 'do_not_contact' : 'suppressed',
+            suppression.reason ?? null);
         return 'halted';
     }
 

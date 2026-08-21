@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "notifications-grouping-harness",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4501",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/82cc101d-70db-46c6-bdef-65306cf5fe5a/scratchpad/notifharness"
+      ],
+      "port": 4501,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-newsletter-studio",
       "runtimeExecutable": "python3",
       "runtimeArgs": [
