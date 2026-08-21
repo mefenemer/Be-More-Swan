@@ -8,7 +8,7 @@
 
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
-import { replyClaimsPostSaved, honestDraftReply } from '../src/utils/chat-draft-claims';
+import { replyClaimsPostSaved, honestDraftReply, isHonestDraftReply } from '../src/utils/chat-draft-claims';
 import { landmark } from './landmark';
 
 let passed = 0;
@@ -81,6 +81,67 @@ check('empty and whitespace replies are not claims', () => {
     assert.equal(replyClaimsPostSaved('   \n '), false);
 });
 
+// ── 2026-08-21: the detector matched TOPICS, not claims ──────────────────────
+// A Blog Writer was asked for a post about "the new features that have been ADDED to Be More
+// Swan during August". It replied honestly — it cannot see a changelog and cannot take
+// screenshots — and every clause of that reply was scored as a claim: `added` (the user's own
+// subject matter) and `I'll write it up` (a promise conditional on their answer). The guard
+// then apologised for a claim the model never made, and because the cause was deterministic it
+// did so identically on the retry. These lock the distinction the fix rests on: a claim is
+// about what the ASSISTANT did, not about what the sentence is about.
+
+check("the user's own topic vocabulary is not a claim", () => {
+    for (const reply of [
+        'The post will cover the features you added in August and the scheduling changes.',
+        'Your customers care about what was added, not how it was built.',
+        'Creating a good headline takes practice.',
+        'Everything created last month belongs in the second section.',
+    ]) {
+        assert.equal(replyClaimsPostSaved(reply), false, `false positive: ${reply}`);
+    }
+});
+
+check('a promise conditional on the user is a request, not a claim', () => {
+    for (const reply of [
+        "I can't take screenshots — I have no sight of your product. Tell me which features you added and I'll write the post around them.",
+        "I don't have visibility of what shipped in August. Give me the list and I'll get it written.",
+        "Send me the feature list and I'll draft around it.",
+        "Once you tell me the angle, I'll put it together.",
+    ]) {
+        assert.equal(replyClaimsPostSaved(reply), false, `false positive: ${reply}`);
+    }
+});
+
+check('an unconditional promise IS still a claim', () => {
+    // The distinction is the ask. Without one, "I'll draft that now" describes a phase that does
+    // not exist — the turn is over and nothing further happens.
+    assert.equal(replyClaimsPostSaved("I'll draft that one now."), true);
+    assert.equal(replyClaimsPostSaved("I'll write it up right away."), true);
+});
+
+check('a completed claim is not rescued by a trailing request', () => {
+    // The request exemption applies ONLY to the promise form. A finished-work assertion is false
+    // whatever follows it, and "let me know if you want changes" is the commonest thing to follow.
+    assert.equal(replyClaimsPostSaved("I've saved it to your queue, let me know if you want changes."), true);
+    assert.equal(replyClaimsPostSaved('The post has been saved to your blog drafts.'), true);
+    assert.equal(replyClaimsPostSaved("I'm drafting it now."), true);
+});
+
+// ── The circuit breaker ──────────────────────────────────────────────────────
+check('the guard recognises its own replacements', () => {
+    for (const kind of ['no_draft', 'persist_failed', 'not_saved_here', 'blog_no_draft'] as const) {
+        assert.equal(isHonestDraftReply(honestDraftReply(kind)), true, kind);
+        assert.equal(isHonestDraftReply(`  ${honestDraftReply(kind)}  `), true, `${kind} (padded)`);
+    }
+});
+
+check('ordinary replies are not mistaken for a replacement', () => {
+    assert.equal(isHonestDraftReply(''), false);
+    assert.equal(isHonestDraftReply('Sorry — what would you like the post to be about?'), false);
+    // A near-miss must not count: only the exact strings suppress the next swap.
+    assert.equal(isHonestDraftReply(honestDraftReply('blog_no_draft').replace('Sorry', 'Apologies')), false);
+});
+
 // ── Mixed replies: one true sentence is enough ───────────────────────────────
 check('a claim buried after a question still counts', () => {
     assert.equal(
@@ -114,6 +175,32 @@ check('all three breach kinds are still distinguished', () => {
     for (const kind of ['not_saved_here', 'persist_failed', 'no_draft']) {
         assert.ok(orchestrator.includes(`'${kind}'`), `${kind} branch is gone`);
     }
+});
+
+check('all three routes carry the loop breaker', () => {
+    // Without this the guard re-fires on the retry it just asked for, and the user reads the
+    // same apology forever. Observed on a Blog Writer, 2026-08-21.
+    assert.ok(orchestrator.includes('isHonestDraftReply(lastAssistantTurn)'), 'the breaker is not computed');
+    const guards = orchestrator.match(/&& replyClaimsPostSaved\(content\)[^)]*\)/g) ?? [];
+    assert.equal(guards.length, 3, `expected 3 claim guards, found ${guards.length}`);
+    for (const g of guards) {
+        assert.ok(g.includes('!alreadyApologised'), `a guard can still loop: ${g}`);
+    }
+});
+
+check('the model\'s original reply survives a swap as an audit row', () => {
+    // The transcript stores the REPLACEMENT and feeds it back into the LLM window, so the
+    // original is gone unless it is kept — and a detector false positive then looks exactly
+    // like a genuine unbacked claim.
+    assert.ok(orchestrator.includes('`[suppressed:${suppressed}] ${modelReply}`'), 'the original reply is not kept');
+    // Sliced to the end of the insert call, not a character count: the block is mostly comment
+    // and a fixed window silently cuts before the line that matters.
+    const audit = orchestrator.slice(
+        landmark(orchestrator, 'if (suppressed) {'),
+        landmark(orchestrator, 'return tx'),
+    );
+    assert.match(audit, /role: 'system'/, 'the audit row is visible in the transcript');
+    assert.ok(audit.includes('tx.insert(chatMessages)'), 'the audit row is outside the reply transaction');
 });
 
 check('the social route keeps enough tokens for a whole envelope', () => {
