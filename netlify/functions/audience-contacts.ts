@@ -126,6 +126,43 @@ export default withLambda(async (event: HandlerEvent) => {
             return json(200, { contact, segments, timeline });
         }
 
+        // ⚠️ The card on an assistant's Overview wants the SHAPE of the list — how many subscribed,
+        // how many left, how many never confirmed — and none of the contacts. Without this it had
+        // to fetch a capped page of up to LIST_CAP rows and throw every one of them away, on a
+        // dashboard that loads on every visit.
+        if (event.queryStringParameters?.countsOnly === '1') {
+            try {
+                const rows = await db
+                    .select({ status: audienceContacts.status, n: sql<number>`count(*)::int` })
+                    .from(audienceContacts)
+                    .where(eq(audienceContacts.organisationId, orgId))
+                    .groupBy(audienceContacts.status);
+                const byStatus: Record<string, number> = {};
+                let all = 0;
+                for (const c of rows) { byStatus[c.status] = c.n; all += c.n; }
+
+                // Growth over the last 30 days, subscribed only. ⚠️ Joined on created_at, not on
+                // confirmed_at: somebody who signed up three weeks ago and confirmed yesterday is a
+                // subscriber this month either way, and the two dates disagree by design under
+                // double opt-in.
+                const [recent] = await db
+                    .select({ n: sql<number>`count(*)::int` })
+                    .from(audienceContacts)
+                    .where(and(
+                        eq(audienceContacts.organisationId, orgId),
+                        eq(audienceContacts.status, 'subscribed'),
+                        sql`${audienceContacts.createdAt} > now() - interval '30 days'`,
+                    ));
+
+                return json(200, { counts: byStatus, total: all, newLast30Days: recent?.n ?? 0 });
+            } catch (err) {
+                const code = (err as { code?: string; cause?: { code?: string } })?.code
+                    ?? (err as { cause?: { code?: string } })?.cause?.code;
+                if (code !== '42P01') throw err;
+                return json(200, { counts: {}, total: 0, newLast30Days: 0, needsSetup: true });
+            }
+        }
+
         const status = (event.queryStringParameters?.status || '').trim();
         const segmentId = Number(event.queryStringParameters?.segmentId || '');
         const q = (event.queryStringParameters?.q || '').trim();

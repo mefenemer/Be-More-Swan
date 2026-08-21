@@ -7,6 +7,9 @@
 //   POST   { action: 'create' }    → a new draft
 //   POST   { action: 'update' }    → subject / preheader / body / segment
 //   POST   { action: 'generate' }  → draft it with the assistant (src/utils/newsletter-generate.ts)
+//   POST   { action: 'refine' }    → rewrite the existing draft to an instruction. RETURNS ONLY —
+//                                    the author accepts it with an ordinary 'update'.
+//   POST   { action: 'design' }    → start a layout from a template, or drop back to plain Markdown
 //   POST   { action: 'preview' }   → the rendered email, merged against sample data
 //   POST   { action: 'approve' }   → snapshot rendered_payload and move to approved/scheduled
 //   POST   { action: 'reject' }    → back to draft, with the reason recorded
@@ -27,7 +30,17 @@ import {
     newsletterIssues, newsletterSendingDomains, organisations,
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
-import { generateIssueBody, IssueNotFoundError, scrubMergeTags, NEWSLETTER_DRAFT_REASON } from '../../src/utils/newsletter-generate';
+import {
+    generateIssueBody, IssueNotFoundError, NothingToRefineError, refineIssueBody, scrubMergeTags,
+    NEWSLETTER_DRAFT_REASON,
+} from '../../src/utils/newsletter-generate';
+import {
+    applyProseToDesign, blocksFromMarkdown, designToMarkdown, DEFAULT_THEME, findingsHtmlHint,
+    normaliseDesign, type NewsletterDesign,
+} from '../../src/utils/newsletter-design';
+import { designFromTemplate, NEWSLETTER_TEMPLATES } from '../../src/config/newsletter-templates';
+import { NEWSLETTER_PURPOSES, purposeOrDefault } from '../../src/config/newsletter-purposes';
+import { resolveBaseUrl } from '../../src/utils/base-url';
 import { renderForRecipient, renderIssueSnapshot } from '../../src/utils/newsletter-render';
 import { resendEligibility } from '../../src/utils/newsletter-resend';
 import { buildSegmentCondition } from '../../src/utils/audience-segment-rules';
@@ -191,7 +204,11 @@ export default withLambda(async (event: HandlerEvent) => {
             const deliverability = contentFindings({
                 subject: issue.subject || '',
                 text: snap?.text || issue.bodyMarkdown || '',
-                html: snap?.html || '',
+                // Before approval there is no snapshot, so a designed draft would report zero
+                // pictures and zero links — the two things the image-heavy and link-dense findings
+                // exist to see. The hint supplies exactly those counts and nothing else, and the
+                // browser builds the same string from the same blocks so the live panel agrees.
+                html: snap?.html || findingsHtmlHint(normaliseDesign(issue.design)),
             });
             const warmup = verifiedDomain
                 ? warmupFinding({ verifiedAt: verifiedDomain.verifiedAt, recipientCount: audience })
@@ -239,6 +256,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 openedCount: newsletterIssues.openedCount,
                 isAutonomous: newsletterIssues.isAutonomous,
                 generationReason: newsletterIssues.generationReason,
+                purpose: newsletterIssues.purpose,
                 sourceBlogPostId: newsletterIssues.sourceBlogPostId,
                 resendOfIssueId: newsletterIssues.resendOfIssueId,
                 updatedAt: newsletterIssues.updatedAt,
@@ -255,7 +273,21 @@ export default withLambda(async (event: HandlerEvent) => {
 
         // The editor's "insert a personalisation tag" menu is built from this — the vocabulary has
         // to come from the server now that part of it is per-organisation.
-        return json(200, { issues, segments, customFields: await loadCustomFieldDefs(db, orgId) });
+        //
+        // The purposes and templates ride along for the same reason the merge vars do: they are
+        // config the browser must not hold its own copy of. A template's BLOCKS are not sent — the
+        // server builds those on request, so a stale tab cannot create a layout from a template
+        // that has since changed.
+        return json(200, {
+            issues,
+            segments,
+            customFields: await loadCustomFieldDefs(db, orgId),
+            purposes: NEWSLETTER_PURPOSES.map((p) => ({
+                key: p.key, label: p.label, description: p.description, chipClass: p.chipClass,
+                defaultTemplate: p.defaultTemplate,
+            })),
+            templates: NEWSLETTER_TEMPLATES.map((t) => ({ key: t.key, label: t.label, description: t.description })),
+        });
     }
 
     if (event.httpMethod === 'DELETE') {
@@ -297,6 +329,11 @@ export default withLambda(async (event: HandlerEvent) => {
             if (!a) return json(404, { error: 'Assistant not found.' });
         }
         const subject = String(body.subject || 'Untitled issue').trim().slice(0, MAX_SUBJECT) || 'Untitled issue';
+        const purpose = purposeOrDefault(body.purpose);
+        // A template is opted INTO. An issue created with no template is a plain Markdown issue —
+        // which is what the chat card creates, what the blog hand-off creates, and what the
+        // autopilot creates, and none of those should acquire a layout they did not ask for.
+        const seeded = body.template ? designFromTemplate(body.template) : null;
         // Scrubbed on the way in, like every other write path: a chat draft can carry a tag the
         // send worker cannot resolve just as easily as a generated one.
         const bodyMarkdown = 'bodyMarkdown' in body
@@ -326,7 +363,12 @@ export default withLambda(async (event: HandlerEvent) => {
             assistantId,
             subject,
             preheader: String(body.preheader || '').trim().slice(0, 200) || null,
-            bodyMarkdown,
+            // ⚠️ With a template, the prose mirror comes FROM the design. Storing the placeholder
+            // copy twice — once in the blocks and once here — is how the two start disagreeing on
+            // the first edit.
+            bodyMarkdown: seeded ? designToMarkdown(seeded) : bodyMarkdown,
+            design: seeded,
+            purpose,
             segmentId: Number(body.segmentId || '') || null,
             // ⚠️ A body that arrives with the create was written by the assistant, and an issue
             // saved without this marker is indistinguishable from one a human typed. Same rule as
@@ -530,13 +572,42 @@ export default withLambda(async (event: HandlerEvent) => {
         const patch: Record<string, unknown> = { updatedAt: new Date() };
         if ('subject' in body) patch.subject = String(body.subject || '').trim().slice(0, MAX_SUBJECT) || 'Untitled issue';
         if ('preheader' in body) patch.preheader = String(body.preheader || '').trim().slice(0, 200) || null;
-        if ('bodyMarkdown' in body) {
+        if ('purpose' in body) patch.purpose = purposeOrDefault(body.purpose);
+
+        // ── The design, and the one rule that keeps this from becoming two sources of truth ──────
+        //
+        // ⚠️ WHEN A DESIGN IS PRESENT IT IS AUTHORITATIVE, AND body_markdown IS DERIVED FROM IT.
+        // The prose mirror is what the text part, the word-count findings, the assistant and every
+        // existing body_markdown reader see, so it is rewritten on every design save rather than
+        // maintained by hoping the author edits both. See src/utils/newsletter-design.ts.
+        const customKeys = await loadCustomFieldKeys(db, orgId);
+        const existingDesign = normaliseDesign(issue.design);
+        let design: NewsletterDesign | null = existingDesign;
+
+        if ('design' in body) {
+            design = normaliseDesign(body.design);
+            patch.design = design;
+            // Dropping the layout keeps the words: bodyMarkdown already holds the prose mirror, so
+            // "back to plain text" loses the pictures (which it must) and nothing else.
+            if (design) patch.bodyMarkdown = scrubMergeTags(designToMarkdown(design), customKeys).text;
+        }
+
+        if ('bodyMarkdown' in body && !('design' in body)) {
             // Scrubbed on the way in as well as at generation: a human can paste a tag the send
             // worker cannot resolve just as easily as a model can invent one.
             // The org's own columns are part of the allowed vocabulary, or pasting a tag the
             // assistant just wrote would strip it back out again.
-            const customKeys = await loadCustomFieldKeys(db, orgId);
-            patch.bodyMarkdown = scrubMergeTags(String(body.bodyMarkdown || '').slice(0, MAX_BODY), customKeys).text;
+            const md = scrubMergeTags(String(body.bodyMarkdown || '').slice(0, MAX_BODY), customKeys).text;
+            if (design) {
+                // Prose arriving at a designed issue — accepting an assistant revision, or a
+                // hand-off. Re-flowed into the layout rather than stored beside it, so the pictures
+                // and buttons stay where the author put them.
+                const next = applyProseToDesign(design, md);
+                patch.design = next;
+                patch.bodyMarkdown = designToMarkdown(next);
+            } else {
+                patch.bodyMarkdown = md;
+            }
         }
         if ('segmentId' in body) {
             const segId = Number(body.segmentId || '');
@@ -560,7 +631,7 @@ export default withLambda(async (event: HandlerEvent) => {
         }
         // Any edit invalidates the approved snapshot: the words a human signed off no longer match
         // the words on file, so the issue goes back to draft rather than silently keeping approval.
-        if (['approved', 'scheduled'].includes(issue.status) && ('bodyMarkdown' in body || 'subject' in body)) {
+        if (['approved', 'scheduled'].includes(issue.status) && ('bodyMarkdown' in body || 'subject' in body || 'design' in body)) {
             patch.status = 'draft';
             patch.renderedPayload = null;
         }
@@ -579,7 +650,20 @@ export default withLambda(async (event: HandlerEvent) => {
                 topic: body.topic,
                 notes: body.notes,
                 tone: body.tone,
+                purpose: body.purpose,
             });
+
+            // ⚠️ generateIssueBody writes body_markdown directly, which is right for a plain issue
+            // and would leave a DESIGNED one showing the old copy in its blocks while the mirror
+            // said something else. Re-flow it, keeping the pictures and buttons in place.
+            const design = normaliseDesign(issue.design);
+            if (design) {
+                const next = applyProseToDesign(design, result.bodyMarkdown);
+                await db.update(newsletterIssues)
+                    .set({ design: next, bodyMarkdown: designToMarkdown(next), updatedAt: new Date() })
+                    .where(and(eq(newsletterIssues.id, id), eq(newsletterIssues.organisationId, orgId)));
+                return json(200, { ...result, design: next, bodyMarkdown: designToMarkdown(next) });
+            }
             return json(200, result);
         } catch (err) {
             if (err instanceof IssueNotFoundError) return json(404, { error: err.message });
@@ -588,14 +672,72 @@ export default withLambda(async (event: HandlerEvent) => {
         }
     }
 
+    if (action === 'refine') {
+        try {
+            // ⚠️ RETURNS, DOES NOT SAVE. The author reads the revision and presses Keep, which is an
+            // ordinary 'update'. A rewrite written straight over the top of copy somebody has
+            // already read and edited is a change they cannot see and cannot undo.
+            const result = await refineIssueBody(db, {
+                issueId: id,
+                organisationId: orgId,
+                userId: ctx.userId,
+                mode: body.mode,
+                instruction: body.instruction,
+            });
+            return json(200, result);
+        } catch (err) {
+            if (err instanceof IssueNotFoundError) return json(404, { error: err.message });
+            if (err instanceof NothingToRefineError) return json(409, { error: err.message });
+            console.error('[newsletter-issues] refine failed', { orgId, id }, err);
+            return json(502, { error: 'The assistant could not revise this issue. Try again in a moment.' });
+        }
+    }
+
+    if (action === 'design') {
+        // Three moves, one action: start a layout from a template, convert the Markdown that is
+        // already there into blocks, or drop the layout and go back to plain text.
+        if (body.mode === 'off') {
+            // The words survive — body_markdown is the prose mirror and is already current.
+            const [updated] = await db.update(newsletterIssues)
+                .set({ design: null, updatedAt: new Date() })
+                .where(and(eq(newsletterIssues.id, id), eq(newsletterIssues.organisationId, orgId)))
+                .returning();
+            return json(200, { issue: updated, design: null });
+        }
+
+        const design = body.mode === 'convert'
+            // ⚠️ Converting keeps the author's words and only adds structure — the alternative
+            // (start from a template) would silently discard a draft they may have spent an hour on.
+            ? { version: 1, template: 'custom', theme: { ...DEFAULT_THEME }, blocks: blocksFromMarkdown(issue.bodyMarkdown) }
+            : designFromTemplate(body.template);
+
+        const normalised = normaliseDesign(design);
+        if (!normalised) return json(400, { error: 'That template produced nothing to edit.' });
+
+        const [updated] = await db.update(newsletterIssues).set({
+            design: normalised,
+            bodyMarkdown: designToMarkdown(normalised),
+            // A layout change is a change to the words as they will be read. Same rule as an edit.
+            ...(['approved', 'scheduled'].includes(issue.status) ? { status: 'draft', renderedPayload: null } : {}),
+            updatedAt: new Date(),
+        }).where(and(eq(newsletterIssues.id, id), eq(newsletterIssues.organisationId, orgId))).returning();
+
+        return json(200, { issue: updated, design: normalised });
+    }
+
     if (action === 'preview') {
         const [org] = await db.select({ name: organisations.name }).from(organisations)
             .where(eq(organisations.id, orgId)).limit(1);
         const senderName = org?.name || 'Your business';
         const snapshot = await renderIssueSnapshot({
             bodyMarkdown: issue.bodyMarkdown,
+            design: issue.design,
             preheader: issue.preheader,
             senderName,
+            // ⚠️ The SAME signed media URLs the real send will use, not a preview-only presign. The
+            // whole point of the preview is that a broken picture shows up here rather than in
+            // fifteen hundred inboxes, and it cannot do that if the two resolve differently.
+            baseUrl: resolveBaseUrl(event.headers as Record<string, string | undefined>),
         });
         // Rendered against SAMPLE data, and the footer is included — the reviewer should see the
         // email a subscriber sees, unsubscribe line and all, not a fragment of it.
@@ -628,10 +770,21 @@ export default withLambda(async (event: HandlerEvent) => {
         const [org] = await db.select({ name: organisations.name }).from(organisations)
             .where(eq(organisations.id, orgId)).limit(1);
 
+        const baseUrl = resolveBaseUrl(event.headers as Record<string, string | undefined>);
+        const approveDesign = normaliseDesign(issue.design);
+        // ⚠️ A designed issue with pictures and no resolvable origin would snapshot WITHOUT them and
+        // send that, silently. Refused instead: the snapshot is what recipients get, and an email
+        // that quietly loses its images is not something the approver agreed to.
+        if (approveDesign && !baseUrl && approveDesign.blocks.some((b) => b.type === 'image' && b.assetId)) {
+            return json(500, { error: 'This deployment cannot build image links right now, so the pictures would be missing. Try again shortly.' });
+        }
+
         const snapshot = await renderIssueSnapshot({
             bodyMarkdown: issue.bodyMarkdown,
+            design: issue.design,
             preheader: issue.preheader,
             senderName: org?.name || 'Your business',
+            baseUrl,
         });
 
         const approveTz = await issueTimezone(db, issue, orgId);

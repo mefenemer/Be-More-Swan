@@ -119,7 +119,8 @@ await check('a reply claiming a draft it did not write is replaced', () => {
 await check('the card asks the client to write, and reports the outcome back', () => {
     const card = REGISTRY_UI.slice(landmark(REGISTRY_UI, 'function renderNewsletterIssueDraftCard'), landmark(REGISTRY_UI, "register('newsletter_issue_draft'"));
     assert.match(card, /newsletter:createDraft/);
-    assert.match(card, /respond\(\{ ok, deduped, error \}\)/, 'a create can fail, and a card that always claims success is worse than none');
+    assert.match(card, /respond\(\{ ok, deduped, error, scheduled, scheduleError \}\)/,
+        'a create can fail, and a card that always claims success is worse than none');
     assert.match(card, /setBusy\(false\)/, 'a transient failure must not strand the only copy behind two dead buttons');
     // The two surface names it promises have to be the real ones.
     const reg = read('src/components/assistant-dashboard-registry.js');

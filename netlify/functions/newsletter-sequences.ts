@@ -6,6 +6,15 @@
 //   POST { action: 'saveStep' }    → add or edit a step; re-renders its snapshot
 //   POST { action: 'deleteStep' }  → remove a step
 //   POST { action: 'enable' }      → turn it on / off
+//   POST { action: 'generate' }    → draft a step with the assistant
+//   POST { action: 'refine' }      → revise a step's copy. RETURNS ONLY; the author accepts it.
+//   POST { action: 'preview' }     → the step rendered exactly as a subscriber will see it
+//
+// ⚠️ A WELCOME EMAIL IS AN EMAIL. It was for a long time the one email in the product with no
+// preview, no layout, no pictures and no assistant — a plain textarea, sent unattended to people
+// who have just met the business, which is the highest-stakes email a small sender writes. It now
+// has the same four capabilities an issue has, through the same modules, so there is one behaviour
+// to learn and one place each of them is implemented.
 //
 // ⚠️ ENABLING IS THE CONSEQUENTIAL ACTION and it is owner/admin only. Everything before it is
 // drafting; enabling is the decision that these words go to every future subscriber automatically,
@@ -19,9 +28,14 @@ import {
     organisations,
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
-import { renderIssueSnapshot } from '../../src/utils/newsletter-render';
-import { scrubMergeTags } from '../../src/utils/newsletter-generate';
-import { loadCustomFieldKeys } from '../../src/utils/audience-custom-fields';
+import { renderForRecipient, renderIssueSnapshot } from '../../src/utils/newsletter-render';
+import {
+    draftSequenceEmail, refineEmailCopy, refineInstructionFor, scrubMergeTags,
+} from '../../src/utils/newsletter-generate';
+import { loadCustomFieldDefs, loadCustomFieldKeys } from '../../src/utils/audience-custom-fields';
+import { designToMarkdown, normaliseDesign } from '../../src/utils/newsletter-design';
+import { designFromTemplate } from '../../src/config/newsletter-templates';
+import { resolveBaseUrl } from '../../src/utils/base-url';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, obj: unknown) => ({
@@ -125,48 +139,150 @@ export default withLambda(async (event: HandlerEvent) => {
         const subject = String(body.subject || '').trim().slice(0, 200);
         if (!subject) return json(400, { error: 'Give the email a subject line.' });
 
+        // ⚠️ SAME RULE AS AN ISSUE: when a design is present it is authoritative and body_markdown
+        // is derived from it. See src/utils/newsletter-design.ts — one source of truth, and the
+        // prose mirror is what the text part and the deliverability findings read.
+        const customKeys = await loadCustomFieldKeys(db, orgId);
+        const design = normaliseDesign(body.design);
+        const rawBody = design ? designToMarkdown(design) : String(body.bodyMarkdown || '').slice(0, MAX_BODY);
         // Scrubbed like every other write path — a step can carry a tag the send worker cannot
         // resolve just as easily as an issue can, and this one goes out unattended.
-        const bodyMarkdown = scrubMergeTags(
-            String(body.bodyMarkdown || '').slice(0, MAX_BODY),
-            await loadCustomFieldKeys(db, orgId),
-        ).text;
+        const bodyMarkdown = scrubMergeTags(rawBody, customKeys).text;
         if (!bodyMarkdown.trim()) return json(400, { error: 'Write the email before saving it.' });
 
         const [org] = await db.select({ name: organisations.name }).from(organisations)
             .where(eq(organisations.id, orgId)).limit(1);
+
+        const baseUrl = resolveBaseUrl(event.headers as Record<string, string | undefined>);
+        // ⚠️ A step is snapshotted at SAVE and sent unattended for months afterwards, so an image
+        // with no resolvable origin would be silently missing from every welcome email from now on
+        // — with nobody watching. Refused, exactly as approving an issue is.
+        if (design && !baseUrl && design.blocks.some((b) => b.type === 'image' && b.assetId)) {
+            return json(500, { error: 'This deployment cannot build image links right now, so the pictures would be missing. Try again shortly.' });
+        }
 
         // ⚠️ The snapshot is rebuilt HERE, at save. The worker never renders from body_markdown, so
         // an edit made while somebody is part way through the series changes what they receive from
         // the NEXT step onward and never rewrites one already sent.
         const rendered = await renderIssueSnapshot({
             bodyMarkdown,
+            design,
             preheader: String(body.preheader || '').trim().slice(0, 200) || null,
             senderName: org?.name || 'Your business',
+            baseUrl,
         });
+
+        const delayDays = Math.max(0, Math.min(90, Number(body.delayDays ?? 0) || 0));
+        const preheader = String(body.preheader || '').trim().slice(0, 200) || null;
 
         const [step] = await db.insert(newsletterSequenceSteps).values({
             organisationId: orgId,
             sequenceId: sequence.id,
             stepNumber,
-            delayDays: Math.max(0, Math.min(90, Number(body.delayDays ?? 0) || 0)),
+            delayDays,
             subject,
-            preheader: String(body.preheader || '').trim().slice(0, 200) || null,
+            preheader,
             bodyMarkdown,
+            design,
             renderedPayload: rendered,
         }).onConflictDoUpdate({
             target: [newsletterSequenceSteps.sequenceId, newsletterSequenceSteps.stepNumber],
             set: {
-                delayDays: Math.max(0, Math.min(90, Number(body.delayDays ?? 0) || 0)),
+                delayDays,
                 subject,
-                preheader: String(body.preheader || '').trim().slice(0, 200) || null,
+                preheader,
                 bodyMarkdown,
+                design,
                 renderedPayload: rendered,
                 updatedAt: new Date(),
             },
         }).returning();
 
         return json(200, { step });
+    }
+
+    if (action === 'generate') {
+        try {
+            const steps = await db.select({ subject: newsletterSequenceSteps.subject, stepNumber: newsletterSequenceSteps.stepNumber })
+                .from(newsletterSequenceSteps)
+                .where(eq(newsletterSequenceSteps.sequenceId, sequence.id))
+                .orderBy(asc(newsletterSequenceSteps.stepNumber));
+            const stepNumber = Math.max(1, Math.min(MAX_STEPS, Number(body.stepNumber || 1) || 1));
+            const result = await draftSequenceEmail(db, {
+                organisationId: orgId,
+                userId: ctx.userId,
+                assistantId: sequence.assistantId,
+                stepNumber,
+                delayDays: Math.max(0, Math.min(90, Number(body.delayDays ?? 0) || 0)),
+                notes: body.notes,
+                // The other subjects, so email three does not open by introducing the business again.
+                existingSubjects: steps.filter((st) => st.stepNumber !== stepNumber).map((st) => st.subject),
+            });
+            // ⚠️ Returned, not saved. Same contract as everywhere else copy is written by a model:
+            // the author reads it and presses Save, which is the step that makes it real.
+            return json(200, result);
+        } catch (err) {
+            console.error('[newsletter-sequences] draft failed', { orgId }, err);
+            return json(502, { error: 'The assistant could not draft this email. Try again in a moment.' });
+        }
+    }
+
+    if (action === 'refine') {
+        const bodyMarkdown = String(body.bodyMarkdown || '');
+        if (!bodyMarkdown.trim()) return json(409, { error: 'There is nothing written yet — draft the email first, then ask for changes.' });
+        const instruction = refineInstructionFor(body.mode, body.instruction).trim();
+        if (!instruction) return json(400, { error: 'Say what you would like changed.' });
+        try {
+            const result = await refineEmailCopy(db, {
+                organisationId: orgId,
+                userId: ctx.userId,
+                assistantId: sequence.assistantId,
+                subject: String(body.subject || ''),
+                preheader: String(body.preheader || ''),
+                bodyMarkdown,
+                instruction,
+            });
+            return json(200, result);
+        } catch (err) {
+            console.error('[newsletter-sequences] refine failed', { orgId }, err);
+            return json(502, { error: 'The assistant could not revise this email. Try again in a moment.' });
+        }
+    }
+
+    if (action === 'preview') {
+        // Rendered through the SAME path as a real send, against sample data — an unattended email
+        // is exactly the one whose preview has to be honest, because nobody will be watching when
+        // it goes out.
+        const [org] = await db.select({ name: organisations.name }).from(organisations)
+            .where(eq(organisations.id, orgId)).limit(1);
+        const senderName = org?.name || 'Your business';
+        const design = normaliseDesign(body.design);
+        const bodyMarkdown = design ? designToMarkdown(design) : String(body.bodyMarkdown || '').slice(0, MAX_BODY);
+        const snapshot = await renderIssueSnapshot({
+            bodyMarkdown,
+            design,
+            preheader: String(body.preheader || '').trim().slice(0, 200) || null,
+            senderName,
+            baseUrl: resolveBaseUrl(event.headers as Record<string, string | undefined>),
+        });
+        const merged = renderForRecipient({
+            snapshot,
+            contact: {
+                firstName: 'Jane', lastName: 'Okafor', company: 'Acme Ltd', email: 'jane@example.com',
+                customFields: Object.fromEntries((await loadCustomFieldDefs(db, orgId)).map((f) => [f.key, f.label])),
+            },
+            senderName,
+            unsubscribeUrl: '#preview-unsubscribe',
+            postalAddress: null,
+        });
+        return json(200, { html: merged.html, text: merged.text });
+    }
+
+    if (action === 'template') {
+        // The same starting layouts an issue gets. Not saved here — the step form holds it until
+        // the author presses Save, so abandoning a template does not leave one behind.
+        const design = designFromTemplate(body.template);
+        return json(200, { design, bodyMarkdown: designToMarkdown(design) });
     }
 
     if (action === 'deleteStep') {

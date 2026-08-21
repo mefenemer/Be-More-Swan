@@ -24,6 +24,10 @@ import { renderMarkdown } from './markdown-render';
 import { escapeHtml, htmlToPlainText, renderMergeVars, sanitiseBodyHtml } from './email-template';
 import { isUsablePostalAddress } from '../config/outreach-footer';
 import { contactMergeContext } from '../config/newsletter-merge-vars';
+import {
+    DEFAULT_THEME, designToHtml, designToPlainText, normaliseDesign, type NewsletterDesign,
+} from './newsletter-design';
+import { newsletterMediaUrl } from './newsletter-media-url';
 
 /**
  * The unsubscribe route for a newsletter recipient. Keyed on newsletter_sends.unsubscribe_token,
@@ -42,6 +46,42 @@ export interface IssueSnapshot {
 }
 
 /**
+ * The shell colours for an issue with NO design.
+ *
+ * ⚠️ Deliberately the pre-Studio values, not DEFAULT_THEME — every issue ever sent used these, and
+ * a plain Markdown issue must not silently change appearance because a feature it does not use
+ * shipped. DEFAULT_THEME is what a NEW design starts from.
+ */
+const DEFAULT_THEME_SHELL = {
+    ...DEFAULT_THEME,
+    accent: '#111827',
+    background: '#f6f7f9',
+    cardBackground: '#ffffff',
+    rounded: true,
+};
+
+/**
+ * A design's blocks as email HTML.
+ *
+ * ⚠️ Image URLs are resolved to the signed, permanent /api/newsletter/media route HERE, at snapshot
+ * time — not at send time and never to a presigned R2 URL. See src/utils/newsletter-media-url.ts:
+ * an email is rendered once and read for years.
+ */
+async function renderDesignBody(design: NewsletterDesign, baseUrl: string | null): Promise<string> {
+    return designToHtml(design, {
+        renderMarkdown: (md) => renderMarkdown(md),
+        imageUrl: (assetId) => {
+            // No origin to build an absolute URL from. Rendering the picture with a relative src
+            // would put a broken image in every inbox; leaving it out loses the picture and keeps
+            // the email intact, and the Studio warns before it gets this far.
+            if (!baseUrl) return null;
+            try { return newsletterMediaUrl(baseUrl, assetId); }
+            catch { return null; }          // JWT_SECRET unset — same trade, fail quiet not broken
+        },
+    });
+}
+
+/**
  * Render the approved body once. Called at approval, not at send.
  *
  * `accent` themes the links and nothing else — an email client will strip most CSS anyway, and a
@@ -52,18 +92,38 @@ export async function renderIssueSnapshot(input: {
     preheader?: string | null;
     senderName: string;
     accent?: string | null;
+    /**
+     * The laid-out issue, when there is one (newsletter_issues.design). Absent or empty = the
+     * Markdown body, which is what every issue was before the Design Studio existed.
+     */
+    design?: unknown;
+    /**
+     * The app's own origin, for image URLs. ⚠️ REQUIRED if the design contains pictures: an email
+     * has no base to be relative to, and a relative src is a broken image in every client. A design
+     * with images and no baseUrl renders WITHOUT them rather than with dead ones.
+     */
+    baseUrl?: string | null;
 }): Promise<IssueSnapshot> {
-    const rendered = await renderMarkdown(input.bodyMarkdown || '');
-    // Belt and braces: renderMarkdown already sanitises for the blog widget, and this passes
-    // through the email allowlist as well. The body can contain anything a tenant pasted in.
-    const bodyHtml = sanitiseBodyHtml(rendered);
-    const accent = /^#[0-9a-f]{6}$/i.test(String(input.accent || '')) ? String(input.accent) : '#111827';
+    const design = normaliseDesign(input.design);
+    // ⚠️ The theme's accent wins over the caller's when a design is present: the author chose it in
+    // the Studio, and the two must not disagree about the colour of a link.
+    const themeAccent = design ? design.theme.accent : null;
+    const bodyHtml = design
+        ? sanitiseBodyHtml(await renderDesignBody(design, input.baseUrl ?? null))
+        // Belt and braces: renderMarkdown already sanitises for the blog widget, and this passes
+        // through the email allowlist as well. The body can contain anything a tenant pasted in.
+        : sanitiseBodyHtml(await renderMarkdown(input.bodyMarkdown || ''));
+    const accentSource = themeAccent || input.accent || '';
+    const accent = /^#[0-9a-f]{6}$/i.test(String(accentSource)) ? String(accentSource) : '#111827';
 
     // The preheader: hidden in the body, shown by the inbox next to the subject. Without one, most
     // clients show the first words of the body instead, which is usually "Hi there".
     const preheader = input.preheader
         ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;">${escapeHtml(input.preheader)}</div>`
         : '';
+
+    // A Markdown issue keeps the shell it has always had; a designed one takes the author's theme.
+    const shell = design ? design.theme : DEFAULT_THEME_SHELL;
 
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -72,14 +132,22 @@ export async function renderIssueSnapshot(input: {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="x-apple-disable-message-reformatting">
 <title>${escapeHtml(input.senderName)}</title>
+<style>
+a{color:${accent};}
+/* ⚠️ The ONLY thing this stylesheet is load-bearing for is stacking a two-column block on a phone.
+   Every colour, size and space in the body is inline, because Outlook drops this block entirely —
+   a design that needs it renders as a wall of unstyled text for a third of business recipients. */
+@media only screen and (max-width:520px){
+  td.bms-col{display:block !important;width:100% !important;padding:0 0 12px !important;}
+}
+</style>
 </head>
-<body style="margin:0;padding:0;background:#f6f7f9;">
+<body style="margin:0;padding:0;background:${shell.background};">
 ${preheader}
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f7f9;padding:24px 0;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${shell.background};padding:24px 0;">
   <tr><td align="center">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
-      <tr><td style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;padding:32px;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#111827;">
-        <style>a{color:${accent};}</style>
+      <tr><td style="background:${shell.cardBackground};border:1px solid #e5e7eb;border-radius:${shell.rounded ? '12px' : '0'};padding:32px;font-family:${shell.fontFamily};font-size:16px;line-height:1.6;color:${shell.text};">
         ${bodyHtml}
       </td></tr>
       <tr><td id="bms-footer" style="padding:20px 24px;text-align:center;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;line-height:1.6;color:#6b7280;"></td></tr>
@@ -89,7 +157,13 @@ ${preheader}
 </body>
 </html>`;
 
-    return { html, text: htmlToPlainText(bodyHtml) };
+    // ⚠️ THE TEXT PART OF A DESIGNED ISSUE COMES FROM THE PROSE MIRROR, not from stripping the HTML.
+    // htmlToPlainText discards an <img> entirely — including its alt text, which is the ONLY thing
+    // a reader whose client blocks images was ever going to get from that picture. The mirror keeps
+    // it (designToMarkdown falls back to alt), so the plain-text reader and the image-blocked
+    // reader end up with the same email.
+    const text = design ? designToPlainText(design) : htmlToPlainText(bodyHtml);
+    return { html, text };
 }
 
 export interface RecipientRenderInput {

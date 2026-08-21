@@ -4367,6 +4367,16 @@ export const newsletterIssues = pgTable("newsletter_issues", {
   subject: text("subject").notNull(),
   preheader: text("preheader"),
   bodyMarkdown: text("body_markdown").notNull().default(""),
+  // The laid-out issue (db/newsletter-design.sql): { version, theme, blocks[] }. NULL = plain
+  // Markdown, which is what every issue was before the Design Studio and what the assistant still
+  // writes by default. ⚠️ It does NOT replace bodyMarkdown — the prose stays canonical (the text
+  // part, the assistant and the word-count findings all read it) and src/utils/newsletter-design.ts
+  // keeps the two in step.
+  design: jsonb("design"),
+  // What kind of email this is — src/config/newsletter-purposes.ts. Steers the starting template,
+  // the drafting brief and the label in the list. ⚠️ Deliberately unconstrained in SQL: the
+  // vocabulary grows, and an unknown value degrades to 'newsletter' rather than failing a write.
+  purpose: text("purpose").notNull().default("newsletter"),
   // Snapshot taken at APPROVAL: { html, text }. ⚠️ Sending never re-renders from bodyMarkdown — a
   // human approved these exact words, and an edit landing mid-send would ship two versions.
   renderedPayload: jsonb("rendered_payload"),
@@ -4568,6 +4578,10 @@ export const newsletterSequenceSteps = pgTable("newsletter_sequence_steps", {
   // people who have never spoken to the business and is reviewed once — drafting per send would put
   // unreviewed copy in front of strangers on a schedule.
   bodyMarkdown: text("body_markdown").notNull().default(""),
+  // Same laid-out-issue shape as newsletterIssues.design, for the same reason: a welcome email is
+  // read in the same inboxes as an issue and was the one email in the product that could not carry
+  // a picture. NULL = plain Markdown.
+  design: jsonb("design"),
   // Snapshot, rebuilt on save. An edit made after somebody enrolled must not change what they get
   // mid-sequence — same rule as newsletterIssues.renderedPayload.
   renderedPayload: jsonb("rendered_payload"),

@@ -12,13 +12,20 @@
 // "Clean base" = overlay_base_asset_id when set (the pre-bake original, so re-edits never composite
 // onto an already-flattened image), otherwise the post's current first image asset.
 //
-// GET ?postId=<id> → { dataUrl, assetId, mimeType, overlays }              — photo
-//                  → { isVideo: true, mediaUrl, assetId, mimeType, overlays } — video
-//   Auth: aura_session (requireTenant). The post must belong to the caller's org.
+// GET ?postId=<id>  → { dataUrl, assetId, mimeType, overlays }              — photo
+//                   → { isVideo: true, mediaUrl, assetId, mimeType, overlays } — video
+// GET ?assetId=<id> → { dataUrl, assetId, mimeType, overlays: [] }
+//   Auth: aura_session (requireTenant). The post — or the asset — must belong to the caller's org.
+//
+// ⚠️ THE assetId FORM EXISTS FOR THE NEWSLETTER DESIGN STUDIO, which puts text and stickers on an
+// image that belongs to no scheduled post at all. Everything about the canvas-taint problem above
+// is identical there, so it reuses this rather than growing a second data-URL endpoint with its own
+// size cap and its own idea of what "clean base" means. The overlays come back empty because a
+// newsletter's overlays live on the design block, not on a row in this database.
 
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts, scheduledPostAssets } from '../../db/schema';
+import { contentAssets, scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { resolvePostImage, resolvePostVideo, fetchImageBytes } from '../../src/utils/social-publish';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -35,8 +42,20 @@ export default withLambda(async (event) => {
     if ('error' in ctx) return ctx.error;
     const { organisationId: orgId } = ctx;
 
+    // ── The bare-asset form. Org-scoped by the same rule as everything else on this endpoint.
+    const bareAssetId = Number(event.queryStringParameters?.assetId);
+    if (Number.isInteger(bareAssetId) && bareAssetId > 0) {
+        const [owned] = await db
+            .select({ id: contentAssets.id })
+            .from(contentAssets)
+            .where(and(eq(contentAssets.id, bareAssetId), eq(contentAssets.organisationId, orgId)))
+            .limit(1);
+        if (!owned) return { statusCode: 404, body: JSON.stringify({ error: 'Image not found.' }) };
+        return dataUrlFor(db, bareAssetId, `asset ${bareAssetId}`);
+    }
+
     const postId = Number(event.queryStringParameters?.postId);
-    if (!Number.isInteger(postId)) return { statusCode: 400, body: JSON.stringify({ error: 'postId required.' }) };
+    if (!Number.isInteger(postId)) return { statusCode: 400, body: JSON.stringify({ error: 'postId or assetId required.' }) };
 
     // Ownership + the pinned clean base (if any).
     const [post] = await db
@@ -83,6 +102,16 @@ export default withLambda(async (event) => {
         };
     }
 
+    return dataUrlFor(db, assetId, `post ${postId}`, Array.isArray(post.imageOverlays) ? post.imageOverlays : []);
+});
+
+/** The bytes as a same-origin data: URL — the only form an HTML canvas can bake without tainting. */
+async function dataUrlFor(
+    db: ReturnType<typeof getDb>,
+    assetId: number,
+    label: string,
+    overlays: unknown[] = [],
+) {
     const image = await resolvePostImage(db, [assetId]);
     if (!image) return { statusCode: 404, body: JSON.stringify({ error: 'Image could not be resolved.' }) };
 
@@ -96,10 +125,10 @@ export default withLambda(async (event) => {
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-            body: JSON.stringify({ dataUrl, assetId, mimeType: image.mimeType, overlays: Array.isArray(post.imageOverlays) ? post.imageOverlays : [] }),
+            body: JSON.stringify({ dataUrl, assetId, mimeType: image.mimeType, overlays }),
         };
     } catch (err) {
-        console.error(`[get-post-image] post ${postId} error:`, err instanceof Error ? err.message : err);
+        console.error(`[get-post-image] ${label} error:`, err instanceof Error ? err.message : err);
         return { statusCode: 502, body: JSON.stringify({ error: 'Could not load the image bytes.' }) };
     }
-});
+}

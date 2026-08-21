@@ -196,6 +196,14 @@
       // Without it this role falls through to the social post_insights endpoint, which holds
       // none of its data.
       metricsSource: 'newsletter',
+      // ⚠️ The Overview's Audience block is FOLLOWER COUNTS, one bar per connected social platform.
+      // This role has no connected platforms and never will: its audience is an email list that
+      // lives in this product, not a following on somebody else's. The block sat there reporting
+      // "no connected accounts yet — connect a platform to track your follower growth here" on the
+      // one assistant whose entire job is a mailing list, which reads as a broken dashboard and
+      // sends people looking for an Instagram connector they do not need.
+      // Routes _fetchAndRenderAssistantAudience → the list's own shape and its growth.
+      audienceSource: 'newsletter_list',
       modules: {
         // Every social-only module off: this role writes no posts and has no social strategy.
         hasReviewQueue: true,

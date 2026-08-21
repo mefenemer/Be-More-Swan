@@ -13,14 +13,15 @@
 //   2. How old the sending domain is, and therefore how much volume is reasonable today.
 //   3. Structural facts about the message itself — is there text, are there more links than words.
 
-export type FindingSeverity = 'blocker' | 'warning' | 'note';
+// ⚠️ Section 3 (the message itself) LIVES IN src/public/newsletter-findings.js, not here. The
+// browser has to recompute those findings as the author types — "there are only 0 words of text"
+// is worse than useless if it only updates on reload — and a hand-written browser copy of this
+// logic drifts. Plain .js, UMD-ish, imported here and <script>-loaded there: one implementation,
+// two runtimes. Same pattern as src/public/marked-bms-directives.js.
+export type { Finding, FindingSeverity } from '../public/newsletter-findings.js';
+export { contentFindings, severityRank, countWords } from '../public/newsletter-findings.js';
 
-export interface Finding {
-    code: string;
-    severity: FindingSeverity;
-    /** Written for the tenant. Says what is wrong AND why it matters. */
-    message: string;
-}
+import type { Finding } from '../public/newsletter-findings.js';
 
 // ── 1. List health ──────────────────────────────────────────────────────────
 //
@@ -140,85 +141,7 @@ export function warmupFinding(args: {
 }
 
 // ── 3. The message itself ───────────────────────────────────────────────────
-
-const WORDS = (s: string) => (String(s || '').trim().match(/\S+/g) || []).length;
-
-/**
- * Structural findings about one issue. Explainable, individually arguable, and never totalled.
- *
- * ⚠️ NO TRIGGER-WORD LIST. "Free", "act now" and the rest are folklore from filters that were
- * retired a decade ago; modern filtering weighs sender reputation and engagement far above
- * vocabulary. A warning about the word "free" would make a tenant rewrite a perfectly good offer
- * for no benefit, which is worse than saying nothing.
- */
-export function contentFindings(issue: {
-    subject: string;
-    text: string;
-    html: string;
-}): Finding[] {
-    const out: Finding[] = [];
-    const subject = String(issue.subject || '');
-    const letters = subject.replace(/[^A-Za-z]/g, '');
-    const capsRatio = letters ? letters.replace(/[^A-Z]/g, '').length / letters.length : 0;
-
-    if (letters.length >= 8 && capsRatio > 0.6) {
-        out.push({
-            code: 'subject_shouting',
-            severity: 'warning',
-            message: 'The subject line is mostly capitals. It reads as shouting to a person and is one of the few surface features filters still weigh.',
-        });
-    }
-    if (/[!?]{2,}/.test(subject)) {
-        out.push({
-            code: 'subject_punctuation',
-            severity: 'warning',
-            message: 'The subject line has repeated exclamation or question marks. One is emphasis; three is a pattern filters associate with bulk mail.',
-        });
-    }
-    if (subject.trim().length > 90) {
-        out.push({
-            code: 'subject_long',
-            severity: 'note',
-            message: 'The subject line is long enough that most phones will cut it off. It will not hurt delivery, but the end of it will not be read.',
-        });
-    }
-    if (!subject.trim()) {
-        out.push({
-            code: 'subject_missing',
-            severity: 'blocker',
-            message: 'There is no subject line.',
-        });
-    }
-
-    const textWords = WORDS(issue.text);
-    const images = (String(issue.html || '').match(/<img\b/gi) || []).length;
-    const links = (String(issue.html || '').match(/<a\b[^>]*href=/gi) || []).length;
-
-    if (textWords < 20) {
-        out.push({
-            code: 'thin_text',
-            severity: 'warning',
-            message: `There are only ${textWords} words of text. A message that is almost all pictures, or almost empty, is a shape filters treat with suspicion — and it reads as broken to anyone whose client blocks images.`,
-        });
-    }
-    if (images >= 3 && textWords < images * 25) {
-        out.push({
-            code: 'image_heavy',
-            severity: 'note',
-            message: 'There is a lot of image compared to text. Anyone whose email client blocks images by default — which is most work accounts — will see very little.',
-        });
-    }
-    if (links >= 10 && links > textWords / 25) {
-        out.push({
-            code: 'link_dense',
-            severity: 'note',
-            message: `There are ${links} links in a fairly short email. Link-heavy messages are more likely to be filtered, and readers click less when given more choices.`,
-        });
-    }
-    return out;
-}
-
-/** Everything, in one call, for the surface that shows it. */
-export function severityRank(f: Finding): number {
-    return f.severity === 'blocker' ? 0 : f.severity === 'warning' ? 1 : 2;
-}
+//
+// See the re-export at the top of this file: contentFindings() and severityRank() are defined in
+// src/public/newsletter-findings.js so the Studio can run them live in the browser. Everything
+// that made them what they are — no score, no trigger-word list — is documented there.

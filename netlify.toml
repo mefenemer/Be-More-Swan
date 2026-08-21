@@ -256,6 +256,16 @@
   to = "/.netlify/functions/newsletter-webhook"
   status = 200
 
+# Images inside a sent issue. PUBLIC and unauthenticated by necessity — a recipient's mail client
+# has no session — and signed for exactly that reason: ?a=<assetId>&s=<HMAC of the id>, so the id
+# space cannot be walked. ⚠️ A 302 rather than a rewrite: the function resolves a FRESH presigned
+# R2 URL on every fetch, which is the whole point (a presigned URL baked into an email dies within
+# the hour, and the email does not). See src/utils/newsletter-media-url.ts.
+[[redirects]]
+  from = "/api/newsletter/media"
+  to = "/.netlify/functions/newsletter-media"
+  status = 200
+
 # Shared Audience layer (docs/newsletter-assistant-plan.md): the PUBLIC ingress for the embeddable
 # sign-up form — /api/audience/form/:key, /api/audience/subscribe, /api/audience/confirm. Rewrite
 # (status 200) so the original path survives in event.rawUrl, which audience-public.ts parses.

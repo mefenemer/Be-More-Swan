@@ -5149,7 +5149,13 @@ function formatCurrency(amount, currency) {
 <script src="/my-content.js"></script>
 <!-- Shared Audience view (audience.html). Org-scoped; reads no assistant context. -->
 <script src="/audience.js"></script>
-<!-- Newsletter Studio (newsletter.html). Org-scoped; drafts, previews and approves issues. -->
+<!-- Newsletter Studio (newsletter.html). Org-scoped; drafts, previews and approves issues.
+     ⚠️ newsletter-findings.js is the SAME artifact src/utils/deliverability.ts imports on the
+     server — loaded here so the "before you send" panel updates as the author types instead of
+     only on reload. Never replace it with a hand-written browser copy. The designer needs
+     image-overlay-editor.js (already loaded below) to put text and stickers on a picture. -->
+<script src="/src/public/newsletter-findings.js"></script>
+<script src="/src/components/newsletter-designer.js"></script>
 <script src="/newsletter.js"></script>
 <script src="/src/components/platform-post-preview.js"></script>
 <script src="/src/components/image-overlay-editor.js"></script>

@@ -15,7 +15,7 @@
     <button type="button" id="nl-welcome"
       class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-gray-700 bg-white hover:bg-gray-50 rounded-lg transition-colors border border-gray-300 cursor-pointer">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>
-      Welcome sequence
+      Automatic emails
     </button>
     <button type="button" id="nl-sending"
       class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-gray-700 bg-white hover:bg-gray-50 rounded-lg transition-colors border border-gray-300 cursor-pointer">
@@ -51,8 +51,14 @@
       </div>
 
       <div id="nl-editor" class="hidden bg-white rounded-2xl border border-gray-200 shadow-sm p-6" style="display:none">
-        <div class="flex items-center justify-between mb-4">
-          <span id="nl-status" class="inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border bg-gray-100 text-gray-600 border-gray-200">Draft</span>
+        <div class="flex items-center justify-between gap-2 mb-4">
+          <div class="flex items-center gap-2 min-w-0">
+            <span id="nl-status" class="inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border bg-gray-100 text-gray-600 border-gray-200">Draft</span>
+            <!-- What this email is FOR. A terms notice and a monthly round-up are different jobs,
+                 and the chip is also the control: clicking it changes the brief the assistant is
+                 given. See src/config/newsletter-purposes.ts. -->
+            <button type="button" id="nl-purpose" class="inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border bg-gray-100 text-gray-600 border-gray-200 cursor-pointer hover:brightness-95"></button>
+          </div>
           <span id="nl-saved" class="text-xs text-gray-400"></span>
         </div>
 
@@ -73,13 +79,40 @@
         <input type="text" id="nl-preheader" maxlength="200" placeholder="The line the inbox shows next to the subject"
           class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-4">
 
-        <div class="flex items-center justify-between mb-1">
+        <div class="flex items-center justify-between gap-2 mb-1">
           <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide">Body</label>
-          <div class="flex items-center gap-1" id="nl-vars"></div>
+          <div class="flex items-center gap-1 flex-wrap justify-end" id="nl-vars"></div>
         </div>
+
+        <!-- TWO editors, one at a time. Plain Markdown is the default and stays the default: it is
+             what the assistant writes, what every issue before the Design Studio is, and what most
+             newsletters should be. The designer is opted into per issue and can be left again
+             without losing the words — body_markdown is the prose mirror either way. -->
         <textarea id="nl-body" rows="16" spellcheck="true"
           class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm font-mono"></textarea>
-        <p class="text-[11px] text-gray-400 mt-1">Markdown. The unsubscribe line and your address are added automatically — don't write them here.</p>
+        <div id="nl-design-host" class="hidden" style="display:none"></div>
+
+        <div class="flex items-center justify-between gap-3 mt-1 flex-wrap">
+          <p id="nl-body-note" class="text-[11px] text-gray-400">Markdown. The unsubscribe line and your address are added automatically — don't write them here.</p>
+          <!-- ⚠️ Live, and recomputed on every keystroke. It used to come back only from the server
+               on load, so "there are only 0 words of text" sat under a finished draft until the
+               page was reloaded — a warning that was wrong about the thing the author was looking at. -->
+          <p id="nl-wordcount" class="text-[11px] text-gray-400 shrink-0"></p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 mt-2">
+          <button type="button" id="nl-design-on"
+            class="px-3 py-1.5 text-xs font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Design this email</button>
+          <button type="button" id="nl-design-template"
+            class="hidden px-3 py-1.5 text-xs font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer" style="display:none">Start from a template</button>
+          <button type="button" id="nl-design-off"
+            class="hidden px-3 py-1.5 text-xs font-bold text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer" style="display:none">Back to plain text</button>
+        </div>
+
+        <!-- A revision the assistant has offered but nobody has accepted yet. ⚠️ It is deliberately
+             NOT written over the draft: the words on screen are words a human has read, and a
+             rewrite applied silently is a change they cannot see and cannot undo. -->
+        <div id="nl-revision" class="hidden mt-3 px-4 py-3 rounded-xl bg-sky-50 border border-sky-200 text-sm text-sky-900" style="display:none"></div>
 
         <div id="nl-warnings" class="hidden mt-3 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-900" style="display:none"></div>
 
@@ -127,8 +160,12 @@
         <div id="nl-sendmode" class="mt-4"></div>
 
         <div class="flex flex-wrap items-center gap-2 mt-6 pt-5 border-t border-gray-100">
-          <button type="button" id="nl-generate"
-            class="px-4 py-2 text-sm font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 cursor-pointer">Draft with the assistant</button>
+          <!-- ⚠️ data-nl-assistant is what stops this page saying "the assistant" about somebody the
+               user hired and named themselves. One writer (applyAssistantNaming) fills every one. -->
+          <button type="button" id="nl-generate" data-nl-assistant="draft"
+            class="px-4 py-2 text-sm font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 cursor-pointer">Ask your assistant to draft</button>
+          <button type="button" id="nl-improve" data-nl-assistant="improve"
+            class="px-4 py-2 text-sm font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 cursor-pointer">Ask your assistant to improve</button>
           <button type="button" id="nl-preview"
             class="px-4 py-2 text-sm font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Preview email</button>
           <div class="flex-1"></div>
@@ -143,18 +180,84 @@
     </div>
   </div>
 
-  <!-- Welcome sequence: what a new subscriber hears in the days after they confirm. -->
+  <!-- Automatic emails: the welcome sequence, and the pointer to how the OTHER scenarios are sent.
+       ⚠️ Deliberately not "one sequence per scenario". A welcome series has a trigger — somebody
+       confirmed — so it can run itself. "We are changing our terms on the 1st" has no trigger; it
+       is one email, to a list, on a date, and it is an ISSUE with a purpose (the New issue dialog).
+       Building a second, manually-fired sequence engine for it would be a drip campaign with one
+       step, which is an issue with extra steps. -->
   <div id="nl-welcome-modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4" style="display:none">
     <div class="absolute inset-0 bg-black/40" data-nl-welcome-close></div>
-    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl p-6 max-h-[92vh] overflow-auto">
       <div class="flex items-start justify-between mb-1">
-        <h2 class="text-lg font-extrabold text-gray-900">Welcome sequence</h2>
+        <h2 class="text-lg font-extrabold text-gray-900">Automatic emails</h2>
         <button type="button" data-nl-welcome-close class="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 cursor-pointer">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
-      <p class="text-sm text-gray-500 mb-5">Sent automatically after someone confirms their subscription — the moment they are most interested.</p>
+      <p class="text-sm text-gray-500 mb-5">The welcome sequence goes out on its own after someone confirms their subscription — the moment they are most interested. Everything else you might want to send — a product update, a notice that something is fixed, a change to your terms — is a one-off, and you write it as a new issue and pick what kind of email it is.</p>
       <div id="nl-welcome-body"></div>
+    </div>
+  </div>
+
+  <!-- New issue: what it is about, what kind of email it is, and where the layout starts. -->
+  <div id="nl-newissue-modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4" style="display:none">
+    <div class="absolute inset-0 bg-black/40" data-nl-newissue-close></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
+      <div class="flex items-start justify-between mb-1">
+        <h2 class="text-lg font-extrabold text-gray-900">New issue</h2>
+        <button type="button" data-nl-newissue-close class="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 cursor-pointer">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="text-sm text-gray-500 mb-5">Nothing here is final — you can change all of it afterwards.</p>
+
+      <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Working subject line</label>
+      <input type="text" id="nl-new-subject" maxlength="200" placeholder="This month at…"
+        class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-5">
+
+      <p class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">What kind of email is this?</p>
+      <div id="nl-new-purposes" class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-5"></div>
+
+      <p class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Start from</p>
+      <div id="nl-new-templates" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+
+      <div class="flex justify-end gap-2 mt-6">
+        <button type="button" data-nl-newissue-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
+        <button type="button" id="nl-new-go" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- "Ask <name> to improve": the presets, and room to say it in your own words. -->
+  <div id="nl-improve-modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4" style="display:none">
+    <div class="absolute inset-0 bg-black/40" data-nl-improve-close></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
+      <h2 class="text-lg font-extrabold text-gray-900 mb-1" id="nl-improve-title">What should change?</h2>
+      <p class="text-sm text-gray-500 mb-5">You'll see the revision before anything is replaced — nothing is written over your draft until you say so.</p>
+      <div id="nl-improve-modes" class="flex flex-wrap gap-2 mb-4"></div>
+      <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Or say it in your own words</label>
+      <textarea id="nl-improve-text" rows="3" placeholder="e.g. mention that the shop is shut on the Monday, and lose the last section"
+        class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm"></textarea>
+      <div class="flex justify-end gap-2 mt-6">
+        <button type="button" data-nl-improve-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
+        <button type="button" id="nl-improve-go" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Ask for the change</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Template picker, for an issue that already exists. -->
+  <div id="nl-template-modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4" style="display:none">
+    <div class="absolute inset-0 bg-black/40" data-nl-template-close></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
+      <h2 class="text-lg font-extrabold text-gray-900 mb-1">Start from a template</h2>
+      <!-- Said before the click, not after it. A template REPLACES the blocks, and somebody who has
+           written three paragraphs deserves to know that before they lose them. -->
+      <p class="text-sm text-gray-500 mb-5">This replaces what is in the email now. To keep your words and only add a layout, close this and press <span class="font-bold">Design this email</span> instead.</p>
+      <div id="nl-template-list" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+      <div class="flex justify-end mt-6">
+        <button type="button" data-nl-template-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
+      </div>
     </div>
   </div>
 
@@ -178,7 +281,7 @@
     <div class="absolute inset-0 bg-black/40" data-nl-brief-close></div>
     <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
       <h2 class="text-lg font-extrabold text-gray-900 mb-1">What is this issue about?</h2>
-      <p class="text-sm text-gray-500 mb-5">The assistant writes in your voice using your business information. The more you give it, the less you'll edit.</p>
+      <p class="text-sm text-gray-500 mb-5"><span data-nl-assistant="name">Your assistant</span> writes in your voice using your business information. The more you give it, the less you'll edit.</p>
       <input type="text" id="nl-brief-topic" placeholder="Topic, e.g. our new opening hours and the autumn range"
         class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-3">
       <textarea id="nl-brief-notes" rows="5" placeholder="Anything it should include: news, links, dates, offers. Facts it is not given, it will write around rather than invent."

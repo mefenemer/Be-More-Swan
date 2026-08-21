@@ -1634,6 +1634,12 @@
     const preheader = typeof ui.preheader === 'string' ? ui.preheader.trim() : '';
     const warnings = (Array.isArray(ui.warnings) ? ui.warnings : []).filter((w) => typeof w === 'string' && w.trim());
     const words = bodyMarkdown.split(/\s+/).filter(Boolean).length;
+    // A send time the assistant has PROPOSED (src/utils/newsletter-chat-draft.ts validated the
+    // shape). It adds a button; it does not schedule anything. The bare wall-clock is shown back
+    // verbatim and never reformatted through Date(), which would silently re-read it in whatever
+    // timezone this browser happens to be set to — the exact bug newsletter-send-time.sql fixed.
+    const sendAt = typeof ui.sendAt === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(ui.sendAt) ? ui.sendAt : '';
+    const sendAtLabel = sendAt ? sendAt.replace('T', ' at ') : '';
 
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
@@ -1660,17 +1666,23 @@
         <ul class="text-[11px] text-amber-900 list-disc pl-4">${warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>
       </div>` : ''}
 
-      <div class="flex items-center gap-2" data-nid-actions>
+      <div class="flex flex-wrap items-center gap-2" data-nid-actions>
         <button type="button" data-nid-save
           class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
           Save this draft
         </button>
+        ${sendAt ? `<button type="button" data-nid-schedule
+          class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          Save and schedule
+        </button>` : ''}
         <button type="button" data-nid-discard
           class="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
           Discard
         </button>
       </div>
-      <p class="mt-2 text-xs font-semibold text-indigo-700" data-nid-status>Saving keeps it as a draft you can edit and send later. Nothing is sent to anyone until you approve it in the Studio.</p>
+      <p class="mt-2 text-xs font-semibold text-indigo-700" data-nid-status>${sendAt
+        ? `Saving keeps it as a draft. <span class="font-bold">Save and schedule</span> also approves it and sets it to go out on ${esc(sendAtLabel)}, your time — approving records that you have read it.`
+        : 'Saving keeps it as a draft you can edit and send later. Nothing is sent to anyone until you approve it in the Studio.'}</p>
     `;
 
     const status = el.querySelector('[data-nid-status]');
@@ -1686,10 +1698,11 @@
       if (eyebrow) eyebrow.textContent = text;
     }
 
-    el.addEventListener('click', (e) => {
+    el.addEventListener('click', async (e) => {
       const save = e.target.closest('[data-nid-save]');
+      const schedule = e.target.closest('[data-nid-schedule]');
       const discard = e.target.closest('[data-nid-discard]');
-      if (!save && !discard) return;
+      if (!save && !discard && !schedule) return;
 
       if (discard) {
         setBusy(true);
@@ -1698,22 +1711,45 @@
         return;
       }
 
+      // ⚠️ Scheduling is the decision to email real people on a date, so it is confirmed even
+      // though the whole issue is on screen above the button. Saving is not — a draft harms nobody.
+      if (schedule && typeof window.confirmModal === 'function') {
+        const ok = await window.confirmModal(
+          `This approves the issue and sets it to send on ${sendAtLabel}, in your business's timezone. It goes to everyone subscribed unless you change that in the Studio first. Approving records that you have read it.`,
+          { title: 'Approve and schedule?', confirmLabel: 'Approve and schedule', confirmColor: '#059669' });
+        if (!ok) return;
+      }
+
       setBusy(true);
-      say('Saving…');
+      say(schedule ? 'Saving and scheduling…' : 'Saving…');
       el.dispatchEvent(new CustomEvent('newsletter:createDraft', {
         bubbles: true,
         detail: {
           subject,
           preheader,
           bodyMarkdown,
+          // Only present when the SCHEDULE button was the one pressed: saving from the plain button
+          // must never schedule, even on a card that carries a proposed time.
+          scheduleFor: schedule ? sendAt : null,
           // Re-enabling on failure is the point: this card holds the only copy of the issue, so a
           // transient error must never strand it behind two dead buttons.
-          respond({ ok, deduped, error }) {
+          respond({ ok, deduped, error, scheduled, scheduleError }) {
             if (ok) {
-              setEyebrow('Newsletter draft · Saved');
+              setEyebrow(scheduled ? 'Newsletter draft · Scheduled' : 'Newsletter draft · Saved');
               // "Issues" and "Newsletter Studio" are the REAL names of those surfaces
               // (assistant-dashboard-registry.js newsletter_editor.hubTab.label and the detail
               // page's primary button), pinned by tests so this sentence cannot drift off them.
+              if (scheduled) {
+                say(`Approved and scheduled for ${sendAtLabel}, your time. You can still change or cancel it in the Newsletter Studio until it starts sending.`);
+                return;
+              }
+              // ⚠️ A half-success is reported as one. The issue IS saved; only the scheduling was
+              // refused (almost always because approving needs an owner or an admin), and a card
+              // that said "could not save" would send them looking for a draft that is right there.
+              if (scheduleError) {
+                say(`Saved to your Issues tab, but not scheduled: ${scheduleError}`, 'error');
+                return;
+              }
               say(deduped
                 ? 'Already saved — it is in your Issues tab.'
                 : 'Saved to your Issues tab — open it in the Newsletter Studio to edit, choose who it goes to, and send it.');

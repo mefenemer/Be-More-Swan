@@ -24,6 +24,44 @@ export interface NewsletterChatDraft {
     bodyMarkdown: string;
     /** Tags the scrub removed, so the card can say what it changed rather than silently editing. */
     warnings: string[];
+    /**
+     * A send time the assistant is PROPOSING, as a bare wall-clock string ('2026-09-01T09:00').
+     *
+     * ⚠️ A PROPOSAL, NOT A SCHEDULE. Nothing here schedules anything: it turns the card's one button
+     * into two, and the second one — which a human presses, having just read the whole issue above
+     * it — is what approves and schedules. The server still enforces that only an owner or admin
+     * may approve, so the model cannot arrange a send that the person in front of it could not.
+     *
+     * ⚠️ Deliberately zone-LESS. It is read in the business's own timezone at the moment it is
+     * approved, exactly like the Studio's date field, and stamped onto the issue there. A model
+     * inventing a UTC offset is how "nine in the morning" becomes ten.
+     */
+    sendAt: string | null;
+}
+
+/**
+ * 'YYYY-MM-DDTHH:mm' and nothing else.
+ *
+ * ⚠️ Rejected rather than coerced. A half-parsed date is how an issue goes out at the wrong hour on
+ * the wrong day, and the cost of refusing is that the card shows no schedule button — which is the
+ * state it was in yesterday, and which the user can fix in the Studio in four seconds.
+ */
+const WALL_CLOCK = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
+
+export function normaliseSendAt(value: unknown): string | null {
+    // ⚠️ NOT slice(0, 16) first. Truncating '2026-09-01T09:00:00Z' to '2026-09-01T09:00' would
+    // silently discard a timezone the model had attached — turning "9am UTC" into "9am wherever the
+    // business is" with nothing anywhere saying so. The whole string has to be the wall clock.
+    const s = typeof value === 'string' ? value.trim() : '';
+    if (!WALL_CLOCK.test(s)) return null;
+    // Real calendar date, not just the right shape: '2026-02-31T09:00' matches the pattern.
+    const [date, time] = s.split('T');
+    const [y, m, d] = date.split('-').map(Number);
+    const [hh, mm] = time.split(':').map(Number);
+    const probe = new Date(Date.UTC(y, m - 1, d, hh, mm));
+    if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== m - 1 || probe.getUTCDate() !== d) return null;
+    if (hh > 23 || mm > 59) return null;
+    return s;
 }
 
 /** First non-empty line, stripped of Markdown heading marks — the fallback when no subject came back. */
@@ -52,5 +90,6 @@ export function newsletterDraftFromUiElement(uiElement: unknown): NewsletterChat
         preheader: preheader.text,
         bodyMarkdown: body.text,
         warnings: [...new Set([...subject.warnings, ...preheader.warnings, ...body.warnings])],
+        sendAt: normaliseSendAt(ui.sendAt),
     };
 }

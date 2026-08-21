@@ -35,6 +35,9 @@ function check(name: string, fn: () => void) {
 }
 
 const MOD = read('src/utils/deliverability.ts');
+// ⚠️ The structural findings MOVED here (plain .js, UMD-ish) so the browser recomputes them live
+// with the same code the server runs. The "no score" reasoning moved with them.
+const FINDINGS = read('src/public/newsletter-findings.js');
 const DMARC = read('src/utils/dmarc-check.ts');
 const DOMAIN_FN = read('netlify/functions/newsletter-sending-domain.ts');
 const ISSUES = read('netlify/functions/newsletter-issues.ts');
@@ -48,23 +51,35 @@ console.log('\nDeliverability\n');
 
 check('nothing produces a score, and the reason is written down', () => {
     assert.match(MOD, /THERE IS NO SPAM SCORE HERE, AND THERE MUST NOT BE ONE/);
+    assert.match(FINDINGS, /THERE IS NO SPAM SCORE HERE AND THERE MUST NEVER BE ONE/);
     for (const f of contentFindings({ subject: 'HELLO!!!', text: 'hi', html: '' })) {
         assert.ok(!('score' in f), 'a finding must not carry a number');
     }
-    assert.ok(!/\bscore\b/i.test(UI.slice(landmark(UI, 'function renderDeliverability'), landmark(UI, 'function renderLinks')).replace(/not a spam score/gi, '')),
+    // The panel neither shows a score nor mentions one — see the next check for why the
+    // explanatory footnote was removed as well.
+    assert.ok(!/\bscore\b/i.test(UI.slice(landmark(UI, 'function paintDeliverability'), landmark(UI, 'function renderLinks'))),
         'the panel must not present one either');
 });
 
-check('the panel says out loud that there is no number', () => {
-    const fn = UI.slice(landmark(UI, 'function renderDeliverability'), landmark(UI, 'function renderLinks'));
-    assert.match(fn, /not a spam score/);
-    assert.match(fn, /nobody can honestly give you one/);
+check('the reason there is no number lives in the code, not under every warning', () => {
+    // ⚠️ THE FOOTNOTE WAS REMOVED ON PURPOSE. The panel used to end every list of findings with
+    // "these are specific things we can see, not a spam score — there is no number here because
+    // nobody can honestly give you one". True, and an answer to a question the reader had not
+    // asked: somebody looking at "your subject line is all capitals" wants to fix the subject line.
+    // The reasoning belongs where it stops a developer adding a score, which is the module.
+    const fn = UI.slice(landmark(UI, 'function paintDeliverability'), landmark(UI, 'function renderLinks'));
+    assert.ok(!/nobody can honestly give you one/.test(fn),
+        'the explanatory footnote must not be shown to the user');
+    assert.match(fn, /NO FOOTNOTE UNDER THE LIST, and do not reinstate one/,
+        'and whoever reads this next must find out why it is not there');
+    // The reasoning itself, in the module that would have to change for a score to exist.
+    assert.match(FINDINGS, /nobody outside Google has one/);
 });
 
 check('there is no trigger-word list', () => {
     // "Free", "act now" and the rest are folklore from filters retired a decade ago. A warning
     // about the word "free" makes a tenant rewrite a good offer for no benefit.
-    assert.match(MOD, /NO TRIGGER-WORD LIST/);
+    assert.match(FINDINGS, /NO TRIGGER-WORD LIST/);
     const findings = contentFindings({
         subject: 'Free money, act now, click here, guaranteed winner',
         text: 'x '.repeat(60),
@@ -180,7 +195,31 @@ check('the report is shown while it can still be acted on', () => {
     // On a sent issue it is a post-mortem; on a draft it is a decision.
     const fn = UI.slice(landmark(UI, 'function renderDeliverability'), landmark(UI, 'function renderLinks'));
     assert.match(fn, /\['sending', 'sent'\]\.includes\(issue\.status\)/);
-    assert.match(fn, /if \(!list\.length/, 'and nothing to say shows nothing');
+    assert.match(fn, /if \(!list \|\| !list\.length\)/, 'and nothing to say shows nothing');
+});
+
+check('the structural findings are recomputed as the author types', () => {
+    // ⚠️ THE BUG THIS CLOSES: "there are only 0 words of text" arrived with the issue and never
+    // moved again, so it sat under a finished draft until somebody reloaded the page — a warning
+    // that was wrong about the very thing the author was looking at.
+    assert.match(UI, /function recomputeFindings/);
+    assert.match(UI, /\['nl-subject', 'nl-body'\]\.forEach[\s\S]{0,220}recomputeFindings\(\)/,
+        'the subject and the body both drive it');
+    // ⚠️ And so does the design canvas, or a designed issue reports the word count it had on load.
+    assert.match(UI, /onChange: \(\) => \{[\s\S]{0,400}recomputeFindings\(\);/);
+    // ⚠️ And it recomputes with the SAME module the server runs, not a hand-written copy.
+    assert.match(UI, /window\.NewsletterFindings\.contentFindings/);
+    assert.match(read('src/utils/deliverability.ts'), /from '\.\.\/public\/newsletter-findings\.js'/);
+    assert.match(read('workspace.html'), /src\/public\/newsletter-findings\.js/, 'and the browser loads that exact file');
+});
+
+check('the warm-up warning survives a keystroke', () => {
+    // It depends on the audience size and the age of the sending domain, which the browser cannot
+    // recompute. Dropping it on the first keystroke would make a real warning vanish exactly when
+    // somebody started working — so the structural codes are named and everything else is kept.
+    assert.match(UI, /STRUCTURAL_CODES/);
+    assert.match(UI, /serverOnlyFindings = list\.filter/);
+    assert.ok(!/warmup_exceeded/.test(UI), 'by listing what IS structural, not what is not');
 });
 
 // ── 5. DMARC ────────────────────────────────────────────────────────────────

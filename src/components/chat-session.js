@@ -565,13 +565,37 @@
         .then(async (res) => {
           const data = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(data.error || `Save failed (HTTP ${res.status}).`);
-          respond({ ok: true, deduped: data.deduped === true });
+          const issueId = (data.issue && data.issue.id) || null;
+
+          // ⚠️ TWO CALLS, DELIBERATELY, and the second one is allowed to fail on its own. Approving
+          // is owner/admin only and creating is not, so a member pressing "Save and schedule" must
+          // end up with a SAVED DRAFT and an explanation — not a lost issue and a 403. There is no
+          // combined endpoint for the same reason: approval is a separate decision with a separate
+          // permission, and collapsing them would be collapsing that.
+          if (d.scheduleFor && issueId) {
+            try {
+              const ap = await fetch('/.netlify/functions/newsletter-issues', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ action: 'approve', id: issueId, scheduledFor: d.scheduleFor }),
+              });
+              const apData = await ap.json().catch(() => ({}));
+              if (!ap.ok) throw new Error(apData.error || `Could not schedule it (HTTP ${ap.status}).`);
+              respond({ ok: true, deduped: data.deduped === true, scheduled: true });
+            } catch (err) {
+              respond({ ok: true, deduped: data.deduped === true, scheduleError: err.message });
+            }
+          } else {
+            respond({ ok: true, deduped: data.deduped === true });
+          }
+
           // Same reason as blog:created — the Issues tab is sitting behind this chat modal,
           // already rendered, with no other way to learn about a write made from in here.
           document.dispatchEvent(new CustomEvent('newsletter:created', {
             detail: {
               assistantId,
-              issueId: (data.issue && data.issue.id) || null,
+              issueId,
               deduped: data.deduped === true,
             },
           }));

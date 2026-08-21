@@ -3277,6 +3277,9 @@ function _detailRqNewsletterCard(issue, statusKey) {
 // The Studio is a view, not a modal, so this routes rather than opening a dialog.
 window._detailRqNewsletterOpen = function (issueId) {
     window._newsletterInitialIssueId = issueId;
+    // Same reason as the "Write Newsletter" button: the Studio names the assistant on every button
+    // that asks it to do something, and it can only do that if it is told who it is.
+    window._newsletterAssistantId = window._currentAssistantId || null;
     window.loadView?.('newsletter');
 };
 
@@ -4762,7 +4765,7 @@ function _applyDashboardRegistry(data) {
     } else if (rqIsNewsletter) {
         setText('detail-rq-primary-label', 'Write Newsletter');
         const rqBtn = document.getElementById('detail-rq-primary-btn');
-        if (rqBtn) rqBtn.onclick = () => { window.loadView?.('newsletter'); };
+        if (rqBtn) rqBtn.onclick = () => { window._newsletterAssistantId = window._currentAssistantId || null; window.loadView?.('newsletter'); };
     } else if (!rqIsRecords) {
         // Posts queues: keep the in-queue CTA in step with the header ("Create a Post" for SMM).
         setText('detail-rq-primary-label', cfg.primaryAction?.label || 'Create a Post');
@@ -4869,7 +4872,11 @@ function _applyDashboardRegistry(data) {
         // edited alongside its list and its audience, which does not fit a dialog. Routed through
         // the workspace router so it is a view swap, not a page reload that drops app state.
         if (paLabel) paLabel.textContent = 'Write Newsletter';
-        if (paBtn) paBtn.onclick = () => { window.loadView?.('newsletter'); };
+        // ⚠️ Hand the Studio the assistant on the way in. Without it the Studio has no name to put
+        // on its buttons ("the assistant" about somebody the user named themselves) AND every issue
+        // it creates has a null assistant_id — invisible on the Issues tab of the very page the
+        // user just left, which filters by it.
+        if (paBtn) paBtn.onclick = () => { window._newsletterAssistantId = data.id; window.loadView?.('newsletter'); };
     } else if (pa) {
         if (paLabel) paLabel.textContent = pa.label || 'Assign New Task';
         if (paBtn) {
@@ -6187,8 +6194,11 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     // card is already complete without them and the block reveals itself when they land.
     // Registry-driven, like metricsSource: a role whose audience isn't social gets its own renderer
     // rather than another roleKey compared inline here.
-    if (window.AssistantDashboardRegistry?.get?.(currentData.roleKey)?.audienceSource === 'blog_destinations') {
+    const _audienceSource = window.AssistantDashboardRegistry?.get?.(currentData.roleKey)?.audienceSource;
+    if (_audienceSource === 'blog_destinations') {
         _fetchAndRenderBlogDestinations();
+    } else if (_audienceSource === 'newsletter_list') {
+        _fetchAndRenderNewsletterList();
     } else {
         _fetchAndRenderFollowerCounts();
     }
@@ -6829,6 +6839,114 @@ async function _fetchAndRenderBlogDestinations() {
         // Its own copy, for the same reason the KPI cards keep error and no-data apart: a network
         // blip must never be reported to the user as "you have nothing connected".
         list.innerHTML = '<p class="text-xs text-gray-400 py-1">Couldn\'t load your publishing destinations just now.</p>';
+        setFooter('');
+    }
+}
+
+/**
+ * Your list — the Audience block's Newsletter Assistant variant.
+ *
+ * Reuses the same panel (heading, list, footer note) because it answers the same question for this
+ * role: how many people does this assistant's work actually reach, and is that growing. What it
+ * does NOT do is ask a social platform, because there isn't one — a newsletter's audience is an
+ * email list that lives in this product, and the follower-count block on this role could only ever
+ * say "no connected accounts yet", which reads as a broken dashboard on the one assistant whose
+ * whole job is a mailing list.
+ *
+ * Four bars, and they are the four that matter to a sender:
+ *   · Subscribed  — who an issue actually goes to
+ *   · Not confirmed — signed up, never clicked the confirmation link. Invisible everywhere else,
+ *     and on a double opt-in list it is routinely a third of sign-ups. It is also the only one of
+ *     these the tenant can DO something about.
+ *   · Unsubscribed — kept, and shown, because a list that only reports growth degrades quietly
+ *   · Bounced or blocked — the addresses that damage the sending domain
+ *
+ * ⚠️ The audience is ORG-WIDE, shared with every assistant, and the footer says so. Scoping it to
+ * one assistant would report a smaller number than that assistant's own send will reach.
+ */
+async function _fetchAndRenderNewsletterList() {
+    const block = document.getElementById('autopilot-audience');
+    const list = document.getElementById('audience-by-platform');
+    if (!block || !list) return;
+
+    const heading = block.querySelector('h4');
+    const updatedNote = document.getElementById('audience-updated-note');
+    const refreshNote = document.getElementById('audience-refresh-note');
+    // Retitled: "Audience" over an email list is not wrong, but "Your list" is what the person who
+    // owns it calls it, and it distinguishes this panel from the social one at a glance.
+    if (heading) heading.textContent = 'Your list';
+    if (updatedNote) { updatedNote.textContent = 'Everyone you can email'; updatedNote.title = ''; }
+    block.classList.remove('hidden');
+
+    const setFooter = (html, title) => {
+        if (!refreshNote) return;
+        refreshNote.innerHTML = html || '';
+        refreshNote.title = title || '';
+        refreshNote.classList.toggle('hidden', !html);
+    };
+
+    try {
+        const res = await fetch('/.netlify/functions/audience-contacts?countsOnly=1', { credentials: 'same-origin' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.needsSetup) {
+            list.innerHTML = '<p class="text-xs text-gray-400 py-1">The audience tables have not been set up on this environment yet.</p>';
+            setFooter('');
+            return;
+        }
+
+        const c = data.counts || {};
+        const rows = [
+            { key: 'subscribed', label: 'Subscribed', n: Number(c.subscribed || 0), bar: 'bg-emerald-500',
+              note: 'People who confirmed they want to hear from you. This is who an issue goes to.' },
+            { key: 'pending', label: 'Not confirmed', n: Number(c.pending || 0), bar: 'bg-amber-400',
+              note: 'They signed up but never clicked the confirmation link, so nothing can be sent to them. A reminder from the Audience page usually recovers some.' },
+            { key: 'unsubscribed', label: 'Unsubscribed', n: Number(c.unsubscribed || 0), bar: 'bg-gray-300',
+              note: 'They asked to stop. Kept so the address can never be added back by accident.' },
+            {
+                key: 'blocked', label: 'Bounced or blocked',
+                n: Number(c.bounced || 0) + Number(c.complained || 0) + Number(c.suppressed || 0),
+                bar: 'bg-red-400',
+                note: 'Addresses that failed, marked you as spam, or are suppressed. These are the ones that damage your sending domain, so they are never retried.',
+            },
+        ];
+
+        const total = Number(data.total || 0);
+        if (!total) {
+            // ⚠️ Its own state, and it is an INSTRUCTION rather than a report. "0 subscribers" on a
+            // brand-new workspace is not news; where to get the first one is.
+            list.innerHTML = '<p class="text-xs text-gray-400 py-1">Nobody on your list yet — add a sign-up form to your site, or import the people who have already said yes, from the <span class="font-semibold">Audience</span> page.</p>';
+            setFooter('');
+            return;
+        }
+
+        // Normalised to the largest row, exactly like "Content by platform" beside it, so the two
+        // read as one chart pair. Max(1, …) keeps the divisor safe.
+        const max = Math.max(1, ...rows.map(r => r.n));
+        list.innerHTML = `<div class="space-y-2.5">${rows.map(r => {
+            const pct = Math.round((r.n / max) * 100);
+            return `<div title="${_escapeHtml(r.label)}: ${r.n.toLocaleString()} — ${_escapeHtml(r.note)}">
+                <div class="flex items-center justify-between gap-3 mb-1">
+                    <span class="text-xs font-semibold text-gray-700 truncate">${_escapeHtml(r.label)}</span>
+                    <span class="text-sm font-black text-gray-900" style="font-variant-numeric:tabular-nums">${r.n.toLocaleString()}</span>
+                </div>
+                <div class="rounded-full overflow-hidden" style="height:8px;background:#f3f4f6;">
+                    ${r.n ? `<div class="${r.bar} h-full rounded-full" style="width:${pct}%"></div>` : ''}
+                </div>
+            </div>`;
+        }).join('')}</div>`;
+
+        const grew = Number(data.newLast30Days || 0);
+        setFooter(
+            `${grew
+                ? `<span class="font-semibold text-emerald-700">+${grew.toLocaleString()}</span> subscribed in the last 30 days. `
+                : 'Nobody new in the last 30 days. '}`
+            + 'Your list is shared with every assistant you hire, and is counted fresh each time this page loads.',
+            'These come straight from your own audience table — nothing is cached and no background job is involved, so there is nothing to wait for.');
+    } catch (err) {
+        console.error('[newsletter-list] load failed:', err);
+        // A network blip must never be reported to the user as "your list is empty".
+        list.innerHTML = '<p class="text-xs text-gray-400 py-1">Couldn\'t load your list just now.</p>';
         setFooter('');
     }
 }
