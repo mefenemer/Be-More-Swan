@@ -210,19 +210,36 @@ ON CONFLICT (key) DO NOTHING;
 -- article under its own byline. Composite FKs are the only way to make that unrepresentable, so
 -- blog_posts gets the unique key the reference needs. (Redundant with its PK by design; that is
 -- what a composite FK target requires.)
-ALTER TABLE blog_posts DROP CONSTRAINT IF EXISTS blog_posts_id_org_unique;
-ALTER TABLE blog_posts ADD  CONSTRAINT blog_posts_id_org_unique UNIQUE (id, organisation_id);
+--
+-- ⚠️ ADD-IF-ABSENT, never DROP-then-ADD. The original version of this block opened with
+--   ALTER TABLE blog_posts DROP CONSTRAINT IF EXISTS blog_posts_id_org_unique;
+-- which is fine exactly once. On the SECOND run the foreign keys below already exist and depend on
+-- that unique key, so Postgres refuses the drop (42P07 / "cannot drop ... because other objects
+-- depend on it") and the file dies HERE — silently taking every statement after it with it, since
+-- this file owns no outer transaction. Measured on prod 2026-08-22: the section INSERT above had
+-- committed, and nothing below this line had run, so a migration reported as applied had added
+-- neither the socials column nor the safety columns. A file that claims to be re-runnable and is
+-- not is worse than one that never claimed it.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'blog_posts_id_org_unique' AND conrelid = 'blog_posts'::regclass) THEN
+    ALTER TABLE blog_posts ADD CONSTRAINT blog_posts_id_org_unique UNIQUE (id, organisation_id);
+  END IF;
 
-ALTER TABLE swan_index_posts DROP CONSTRAINT IF EXISTS swan_index_posts_post_org_fk;
-ALTER TABLE swan_index_posts ADD  CONSTRAINT swan_index_posts_post_org_fk
-  FOREIGN KEY (blog_post_id, organisation_id) REFERENCES blog_posts (id, organisation_id) ON DELETE CASCADE;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'swan_index_profiles_id_org_unique' AND conrelid = 'swan_index_profiles'::regclass) THEN
+    ALTER TABLE swan_index_profiles ADD CONSTRAINT swan_index_profiles_id_org_unique UNIQUE (id, organisation_id);
+  END IF;
 
-ALTER TABLE swan_index_profiles DROP CONSTRAINT IF EXISTS swan_index_profiles_id_org_unique;
-ALTER TABLE swan_index_profiles ADD  CONSTRAINT swan_index_profiles_id_org_unique UNIQUE (id, organisation_id);
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'swan_index_posts_post_org_fk' AND conrelid = 'swan_index_posts'::regclass) THEN
+    ALTER TABLE swan_index_posts ADD CONSTRAINT swan_index_posts_post_org_fk
+      FOREIGN KEY (blog_post_id, organisation_id) REFERENCES blog_posts (id, organisation_id) ON DELETE CASCADE;
+  END IF;
 
-ALTER TABLE swan_index_posts DROP CONSTRAINT IF EXISTS swan_index_posts_profile_org_fk;
-ALTER TABLE swan_index_posts ADD  CONSTRAINT swan_index_posts_profile_org_fk
-  FOREIGN KEY (profile_id, organisation_id) REFERENCES swan_index_profiles (id, organisation_id) ON DELETE CASCADE;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'swan_index_posts_profile_org_fk' AND conrelid = 'swan_index_posts'::regclass) THEN
+    ALTER TABLE swan_index_posts ADD CONSTRAINT swan_index_posts_profile_org_fk
+      FOREIGN KEY (profile_id, organisation_id) REFERENCES swan_index_profiles (id, organisation_id) ON DELETE CASCADE;
+  END IF;
+END $$;
 
 -- ═══════════════════════════════════════════════════════════════════════════════════════════════
 -- Additions to an already-created table.
