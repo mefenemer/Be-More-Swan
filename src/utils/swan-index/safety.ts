@@ -64,8 +64,20 @@ const SEVERE = new Set([
     'illicit', 'illicit/violent',
 ]);
 
-interface ModerationInput { text?: string; imageUrls?: string[] }
-interface ModerationOutcome { ran: boolean; flagged: string[]; severe: string[]; error?: string }
+export interface ModerationInput { text?: string; imageUrls?: string[] }
+export interface ModerationOutcome { ran: boolean; flagged: string[]; severe: string[]; error?: string }
+
+/**
+ * Why text and images are moderated in SEPARATE calls.
+ *
+ * They were one call — cheaper, and the API takes both in a single `input` array. But the endpoint
+ * fetches every image URL itself, and if it cannot reach even one it fails the WHOLE request with
+ * `image_url_unavailable`. Measured against the live API 2026-08-22: one unreachable image turned
+ * the combined call into a 400, which this module reported as "not checked" for the text as well —
+ * so a single expired presigned URL silently disabled the text moderation on that piece. The text
+ * was always checkable; losing it to an unrelated image failure is the exact false-negative this
+ * screen exists to prevent. Two calls, two verdicts, each failing on its own.
+ */
 
 /**
  * One call to the OpenAI moderation endpoint, text and images together.
@@ -89,7 +101,13 @@ export async function moderateForReview(input: ModerationInput): Promise<Moderat
             body: JSON.stringify({ model: 'omni-moderation-latest', input: parts }),
             signal: AbortSignal.timeout(20_000),
         });
-        if (!res.ok) return { ran: false, flagged: [], severe: [], error: `Moderation API returned ${res.status}.` };
+        if (!res.ok) {
+            // The body carries the actual reason (`image_url_unavailable`, a bad model name, an
+            // auth failure). Discarding it left every failure looking identical to the editor.
+            const detail = await res.text().catch(() => '');
+            const code = detail.match(/"code":\s*"([^"]+)"/)?.[1] || detail.match(/"message":\s*"([^"]+)"/)?.[1];
+            return { ran: false, flagged: [], severe: [], error: `Moderation API returned ${res.status}${code ? ` (${code})` : ''}.` };
+        }
         const data = await res.json() as { results?: Array<{ categories?: Record<string, boolean> }> };
         const flagged = new Set<string>();
         for (const result of data.results || []) {
@@ -162,13 +180,16 @@ export interface SafetyInput {
     monthlyPostCount: number;
 }
 
+/** Injectable for tests: the real one calls OpenAI, so the failure paths are otherwise unreachable. */
+export type Moderator = (input: ModerationInput) => Promise<ModerationOutcome>;
+
 /**
- * Run the whole benchmark. One moderation call covers text and images together.
+ * Run the whole benchmark. Text and images are moderated separately — see the note above.
  *
  * Never throws: an editor opening the drawer must always get a report, and a screen that 500s the
  * page it is meant to help is worse than one that reports its own failure.
  */
-export async function runSafetyScreen(input: SafetyInput): Promise<SafetyReport> {
+export async function runSafetyScreen(input: SafetyInput, moderate: Moderator = moderateForReview): Promise<SafetyReport> {
     const checks: SafetyCheck[] = [];
 
     const bodyText = textOf(input.bodyHtml);
@@ -178,41 +199,50 @@ export async function runSafetyScreen(input: SafetyInput): Promise<SafetyReport>
         ...images.map((i) => i.src),
     ].filter((u) => /^https?:\/\//i.test(u));
 
-    // 1 + 2 — text and images, one call, two verdicts. Split because an editor needs to know WHICH
-    // half was flagged: a caption problem is an edit, a photograph problem is a rejection.
-    const moderation = await moderateForReview({
+    // 1 — the text. Always checkable, so it is never held hostage to an image (see the note above).
+    const textMod = await moderate({
         text: [input.title, input.dek || '', bodyText].filter(Boolean).join('\n\n'),
-        imageUrls,
+    });
+    checks.push({
+        id: 'text-safety',
+        label: 'Text passes the Safe Content Benchmark',
+        status: !textMod.ran ? 'unchecked'
+            : textMod.severe.length ? 'fail'
+                : textMod.flagged.length ? 'warn' : 'pass',
+        detail: !textMod.ran
+            ? `Not checked — ${textMod.error || 'the moderation service did not respond.'}`
+            : textMod.severe.length
+                ? `Flagged: ${textMod.severe.join(', ')}. Read before deciding.`
+                : textMod.flagged.length
+                    ? `Non-severe flags: ${textMod.flagged.join(', ')}. Usually the subject matter, not a problem.`
+                    : `No flags across ${bodyText.split(' ').length} words.`,
     });
 
-    if (!moderation.ran) {
-        const detail = `Not checked — ${moderation.error || 'the moderation service did not respond.'}`;
-        checks.push({ id: 'text-safety', label: 'Text passes the Safe Content Benchmark', status: 'unchecked', detail });
-        checks.push({ id: 'image-safety', label: 'Images pass the Safe Content Benchmark', status: 'unchecked', detail });
-    } else {
-        checks.push({
-            id: 'text-safety',
-            label: 'Text passes the Safe Content Benchmark',
-            status: moderation.severe.length ? 'fail' : moderation.flagged.length ? 'warn' : 'pass',
-            detail: moderation.severe.length
-                ? `Flagged: ${moderation.severe.join(', ')}. Read before deciding.`
-                : moderation.flagged.length
-                    ? `Non-severe flags: ${moderation.flagged.join(', ')}. Usually the subject matter, not a problem.`
-                    : `No flags across ${bodyText.split(' ').length} words.`,
-        });
-        checks.push({
-            id: 'image-safety',
-            label: 'Images pass the Safe Content Benchmark',
-            // Images and text share one result, so a severe flag is attributed to both rather than
-            // guessed at. Said plainly in the detail instead of pretending to a precision we lack.
-            status: !imageUrls.length ? 'pass' : moderation.severe.length ? 'fail' : 'pass',
-            detail: !imageUrls.length
-                ? 'No images on this piece.'
-                : moderation.severe.length
-                    ? `${imageUrls.length} image(s) submitted alongside flagged content — check them by eye.`
-                    : `${imageUrls.length} image(s) checked, nothing flagged.`,
-        });
-    }
+    // 2 — the images, one call of their own.
+    const imageMod = imageUrls.length ? await moderate({ imageUrls }) : null;
+    checks.push({
+        id: 'image-safety',
+        label: 'Images pass the Safe Content Benchmark',
+        status: !imageMod ? 'pass'
+            : !imageMod.ran ? 'unchecked'
+                : imageMod.severe.length ? 'fail'
+                    : imageMod.flagged.length ? 'warn' : 'pass',
+        detail: !imageMod
+            ? 'No images on this piece.'
+            : !imageMod.ran
+                // `image_url_unavailable` means the endpoint could not FETCH the picture — a
+                // presigned URL that expired between publish and review, most likely. Named
+                // explicitly because "not checked" alone sends an editor looking for a safety
+                // problem when the answer is to re-run the screen.
+                ? /image_url_unavailable|Could not download/i.test(imageMod.error || '')
+                    ? `Not checked — the moderation service could not download ${imageUrls.length === 1 ? 'the image' : 'one of the images'}. Usually an expired media link; re-run the screen.`
+                    : `Not checked — ${imageMod.error || 'the moderation service did not respond.'}`
+                : imageMod.severe.length
+                    ? `Flagged: ${imageMod.severe.join(', ')} across ${imageUrls.length} image(s).`
+                    : imageMod.flagged.length
+                        ? `Non-severe flags: ${imageMod.flagged.join(', ')}. Check by eye.`
+                        : `${imageUrls.length} image(s) checked, nothing flagged.`,
+    });
 
     // 3 — alt text. Accessibility, and the one content defect that is genuinely invisible in a
     // review drawer: the editor is looking at the picture, so nothing tells them it has no label.

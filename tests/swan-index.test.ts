@@ -19,6 +19,7 @@ import { normaliseSocial, parseSocials, readSocials, socialEntries, SWAN_SOCIAL_
 import { guessSection, toDek, SECTION_TAG_ALIASES } from '../src/utils/blog-destinations/swanindex';
 import {
     runSafetyScreen, readSafetyReport, summariseSafety, textOf, imagesOf, linksOf, SAFETY_VERSION,
+    type Moderator, type ModerationOutcome,
 } from '../src/utils/swan-index/safety';
 import { BLOG_DESTINATION_IDS, getBlogAdapter, isBlogDestinationId } from '../src/utils/blog-destinations';
 import { swanIndexBaseUrl, SWAN_INDEX_DEFAULT_ORIGIN } from '../src/utils/swan-index/base-url';
@@ -716,6 +717,20 @@ const safeInput = {
     monthlyPostCount: 2,
 };
 
+check('an unreachable image does not take the text check down with it', () => {
+    // Measured against the live API 2026-08-22: text and images used to go in ONE call, and the
+    // endpoint fails the WHOLE request with `image_url_unavailable` if it cannot fetch even one
+    // picture — so a single expired presigned URL silently reported the TEXT as unchecked too.
+    // The text is always checkable; losing it to an unrelated image failure is precisely the
+    // false negative this screen exists to prevent.
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..',
+        'src/utils/swan-index/safety.ts'), 'utf8');
+    assert.match(src, /const textMod = await moderate\(\{/);
+    assert.match(src, /const imageMod = imageUrls\.length \? await moderate\(\{ imageUrls \}\) : null;/);
+    assert.ok(landmark(src, 'const textMod = await moderate({') < landmark(src, 'const imageMod = imageUrls.length'),
+        'two calls, in that order');
+});
+
 check('a stored report cannot claim an all-clear its own checks do not support', () => {
     const forged = {
         version: SAFETY_VERSION, ranAt: '2026-08-22T00:00:00.000Z', confirmed: true,
@@ -813,6 +828,44 @@ async function main() {
         } finally {
             if (key !== undefined) process.env.OPENAI_API_KEY = key;
         }
+    });
+
+    await acheck('an image the API cannot fetch degrades ONLY the image check', async () => {
+        // The injected moderator reproduces the real failure exactly: text succeeds, the image call
+        // 400s with image_url_unavailable. Injected because the real one calls OpenAI, which makes
+        // this path unreachable in a test — and it is the path that was silently wrong.
+        const moderate: Moderator = async (i): Promise<ModerationOutcome> => (
+            i.imageUrls?.length
+                ? { ran: false, flagged: [], severe: [], error: 'Moderation API returned 400 (image_url_unavailable).' }
+                : { ran: true, flagged: [], severe: [] }
+        );
+        const report = await runSafetyScreen({
+            ...safeInput,
+            bodyHtml: '<p>Clean prose.</p><img src="https://media.example.com/gone.png" alt="A chart">',
+        }, moderate);
+        const text = report.checks.find((c) => c.id === 'text-safety')!;
+        const image = report.checks.find((c) => c.id === 'image-safety')!;
+        assert.equal(text.status, 'pass', 'the text was checkable and must report its real verdict');
+        assert.equal(image.status, 'unchecked');
+        // The editor is told it is a FETCH problem, not a safety verdict — otherwise they go
+        // looking for something wrong with the picture.
+        assert.match(image.detail, /could not download/i);
+        assert.match(image.detail, /re-run the screen/i);
+        assert.equal(report.confirmed, false, 'one unchecked item still withholds the all-clear');
+    });
+
+    await acheck('a flagged image fails on its own, without touching the text verdict', async () => {
+        const moderate: Moderator = async (i): Promise<ModerationOutcome> => (
+            i.imageUrls?.length
+                ? { ran: true, flagged: ['sexual'], severe: ['sexual'] }
+                : { ran: true, flagged: [], severe: [] }
+        );
+        const report = await runSafetyScreen({
+            ...safeInput,
+            bodyHtml: '<p>Clean prose.</p><img src="https://media.example.com/a.png" alt="A chart">',
+        }, moderate);
+        assert.equal(report.checks.find((c) => c.id === 'text-safety')!.status, 'pass');
+        assert.equal(report.checks.find((c) => c.id === 'image-safety')!.status, 'fail');
     });
 
     await acheck('a suspended contributor fails the screen whatever the writing is like', async () => {
