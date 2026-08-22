@@ -23,6 +23,7 @@ import {
 } from '../../db/schema';
 import { generateQueries, type DiscoveryStrategy } from '../../src/lib/discovery-query-gen';
 import { scoreCandidates, type ScoreCandidate } from '../../src/lib/discovery-scoring';
+import { loadSenderIdentity } from '../../src/utils/sender-identity';
 import { search, isSearchConfigured, normaliseDomain, fetchSiteIdentity, SearchNotConfiguredError } from '../../src/lib/discovery-search';
 import { enrichLeadContact } from '../../src/lib/discovery-enrich';
 import { recordEnrichment } from '../../src/utils/lead-enrichment';
@@ -141,7 +142,7 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
     // NOTE: attempt is bumped only on failure (handleFailure), not per slice — a legit run spans
     // many slices and must not exhaust its retry budget just by making progress.
     try {
-        // Load campaign + owning assistant (name + roleKey for scoring prompt).
+        // Load the campaign. The scoring prompt's identity comes from the ORG, not from here.
         const [campaign] = await db
             .select({
                 id: discoveryCampaigns.id,
@@ -150,17 +151,19 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
                 targetPersona: discoveryCampaigns.targetPersona,
                 icpSnapshot: discoveryCampaigns.icpSnapshot,
                 approvedBrief: discoveryCampaigns.approvedBrief,
-                assistantName: aiAssistants.name,
             })
             .from(discoveryCampaigns)
-            .leftJoin(aiAssistants, eq(discoveryCampaigns.aiAssistantId, aiAssistants.id))
             .where(eq(discoveryCampaigns.id, job.campaign_id))
             .limit(1);
         if (!campaign) {
             await finishJob(db, job.id, 'failed', 'Campaign no longer exists.');
             return;
         }
-        const assistantName = campaign.assistantName ?? 'your business';
+        // WHO the outreach comes from. The scoring pass writes the outreach draft, so this is the
+        // identity that ends up in the sign-off of every email approved out of this run — it must be
+        // the tenant's business, never the assistant's name and never ours. See
+        // src/config/sender-identity.ts for what went out before this was passed.
+        const sender = await loadSenderIdentity(db, job.organisation_id);
         const icp = (campaign.icpSnapshot && typeof campaign.icpSnapshot === 'object' ? campaign.icpSnapshot : {}) as Record<string, unknown>;
         // The other half of the attribution key (§7.2). Read ONCE per job rather than per lead:
         // one job is one campaign is one assistant, and a recompile mid-run should not split a
@@ -335,7 +338,7 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
 
             // Score the newly-discovered candidates (one batched call).
             const toScore: ScoreCandidate[] = inserted.map((r) => ({ companyName: r.companyName, domain: r.domain, snippet: r.snippet }));
-            const scored = await scoreCandidates(toScore, icp, assistantName);
+            const scored = await scoreCandidates(toScore, icp, sender);
             tokensUsed += scored.inputTokens + scored.outputTokens;
             void logAiUsage({
                 workspaceId: job.organisation_id, assistantId: campaign.aiAssistantId,

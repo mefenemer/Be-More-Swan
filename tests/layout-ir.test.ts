@@ -26,8 +26,9 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { landmark } from './landmark';
 import {
-    LAYOUT_IR_VERSION, MAX_NODES, groundLinks, irToBlogMarkdown, irToDesignBlocks,
-    layoutIrPromptBlock, mediaIntents, normaliseLayoutIr, type IrImage, type LayoutIr,
+    LAYOUT_IR_VERSION, MAX_NODES, groundLinks, groundMarkdownLinks, irToBlogMarkdown,
+    irToDesignBlocks, layoutIrPromptBlock, mediaIntents, normaliseLayoutIr,
+    type IrImage, type LayoutIr,
 } from '../src/utils/layout-ir';
 import { MAX_SOURCED_IMAGES, sourceBlogImages } from '../src/utils/blog-media-source';
 import {
@@ -261,7 +262,7 @@ await check('a button link the brief never supplied is stripped, and the button 
 
 await check('the reviewer is told when a button has no address yet', () => {
     const gen = GEN.slice(landmark(GEN, 'export async function generateIssueBody'), landmark(GEN, '// ── Making an existing draft better'));
-    assert.match(gen, /groundLinks\(scrubbed\.ir, \[brief, opts\.sourceLink\?\.url \?\? ''\]\.join/);
+    assert.match(gen, /groundLinks\(scrubbed\.ir, suppliedLinks\)/);
     assert.match(gen, /had no link to point at/);
     // The grounded layout is what compiles — not the one that still has the invented link on it.
     assert.match(gen, /irToDesignBlocks\(grounded\.ir, theme\)/);
@@ -461,7 +462,8 @@ await check('the blog drafter compiles the layout, and keeps its way back to Mar
     assert.match(gen, /max_tokens: 6000/);
     // Plain Markdown is used exactly as before layouts existed …
     assert.match(gen, /\} else \{\s*\n\s*\/\/ Plain Markdown/);
-    assert.match(gen, /bodyMarkdown = raw;/);
+    // ⚠️ The raw reply is used as the draft, but grounded first — see the prose-link checks above.
+    assert.match(gen, /bodyMarkdown = ground\.markdown;/);
     // … but a JSON object with no layout in it must NEVER be persisted as a body.
     assert.match(gen, /\} else if \(parsed\) \{/);
     assert.match(gen, /throw new Error\('The draft came back in a form we could not read/);
@@ -514,6 +516,106 @@ await check('stock search accepts keywords instead of deriving them with a model
     const media = read('netlify/functions/blog-media.ts');
     assert.match(media, /body\.pexelsType === 'video' \? 'video' : 'image'/);
     assert.match(media, /assetType: pexelsType/);
+});
+
+// ── 5d. Links the brief never supplied ──────────────────────────────────────
+
+await check('every shape that becomes a live link is grounded — measured, not assumed', async () => {
+    // ⚠️ THE LIST IS DERIVED FROM THE REAL RENDERER. GFM autolinks far more than markup: a bare
+    // https:// or www. in a paragraph becomes an anchor with no syntax at all, and a reference
+    // definition carries its URL somewhere else entirely. Each case below was checked against
+    // renderMarkdown to confirm it reaches the page as a link BEFORE grounding was written for it.
+    const supplied = 'Please link to https://real.example/post in the article.';
+    const ungrounded: Array<[string, string]> = [
+        ['inline link', '[our pricing](https://invented.example/pricing)'],
+        ['inline image', 'Text. ![a chart](https://invented.example/c.png) More.'],
+        ['autolink', 'See <https://invented.example/x> today.'],
+        ['bare url', 'See https://invented.example/x for more.'],
+        ['bare www', 'See www.invented.example/x for more.'],
+        ['reference link', 'See [the guide][g].\n\n[g]: https://invented.example/g'],
+        ['mailto', '[email us](mailto:nobody@invented.example)'],
+        ['inside a list', '- one\n- see [x](https://invented.example/y)\n- three'],
+    ];
+    for (const [name, md] of ungrounded) {
+        const out = groundMarkdownLinks(md, supplied);
+        assert.ok(out.removed >= 1, `${name}: nothing was removed`);
+        const html = await renderMarkdown(out.markdown);
+        const live = (html.match(/<a\s/g) || []).length + (html.match(/<img\s/g) || []).length;
+        assert.strictEqual(live, 0, `${name}: still publishes a live link — ${html}`);
+        assert.strictEqual(html.includes('invented.example'), false, `${name}: the address survived`);
+    }
+});
+
+await check('a link the human DID supply is left exactly alone', async () => {
+    const supplied = 'Please link to https://real.example/post in the article.';
+    for (const md of ['[the post](https://real.example/post)', 'Read https://real.example/post now.']) {
+        const out = groundMarkdownLinks(md, supplied);
+        assert.strictEqual(out.removed, 0);
+        assert.strictEqual(out.markdown, md);
+        const html = await renderMarkdown(out.markdown);
+        assert.ok((html.match(/<a\s/g) || []).length >= 1, 'a supplied link was destroyed');
+    }
+});
+
+await check('code is documentation, not a link — and must survive untouched', async () => {
+    // ⚠️ The reason this cannot be a naive regex over the whole string. A URL in a code sample is
+    // the thing the author is trying to SHOW; rewriting it corrupts the example, and it was never
+    // a link in the first place.
+    for (const md of ['Call `https://invented.example/api` from your app.', '```\ncurl https://invented.example/api\n```']) {
+        const out = groundMarkdownLinks(md, 'nothing supplied');
+        assert.strictEqual(out.removed, 0, 'grounding reached inside code');
+        assert.strictEqual(out.markdown, md);
+        const html = await renderMarkdown(out.markdown);
+        assert.strictEqual((html.match(/<a\s/g) || []).length, 0, 'code became a link');
+        assert.ok(html.includes('invented.example'), 'the code sample lost its text');
+    }
+});
+
+await check('the words survive the link — a sentence is not deleted to kill a URL', () => {
+    const out = groundMarkdownLinks('Read [our pricing page](https://invented.example/p) before you decide.', '');
+    assert.match(out.markdown, /Read our pricing page before you decide\./);
+});
+
+await check('prose and quotes inside a layout are grounded, not just buttons', () => {
+    // The dangerous half: a button with a dead href is visibly unfinished in the Studio, whereas an
+    // invented link inside a paragraph publishes silently onto the customer's own domain.
+    const layout = ir([
+        { kind: 'prose', markdown: 'See [our guide](https://invented.example/g) for more.' },
+        { kind: 'quote', text: 'Everything is at https://invented.example/all', attribution: 'Someone' },
+        { kind: 'columns', columns: [
+            [{ kind: 'prose', markdown: 'Nested [link](https://invented.example/n).' }],
+            [{ kind: 'prose', markdown: 'Kept: [real](https://real.example/post).' }],
+        ] },
+    ]);
+    const out = groundLinks(layout, 'https://real.example/post');
+    assert.strictEqual(out.unlinked, 3);
+    assert.match((out.ir.nodes[0] as { markdown: string }).markdown, /See our guide for more\./);
+    assert.strictEqual((out.ir.nodes[1] as { text: string }).text.includes('invented.example'), false);
+    const cols = out.ir.nodes[2] as { columns: Array<Array<{ markdown: string }>> };
+    assert.strictEqual(cols.columns[0][0].markdown.includes('invented.example'), false);
+    assert.match(cols.columns[1][0].markdown, /\[real\]\(https:\/\/real\.example\/post\)/);
+});
+
+await check('every path that writes prose grounds it — including the fallbacks', () => {
+    // ⚠️ The fallback is where this matters MOST: it is what runs when the model could not produce
+    // a layout, which is exactly when it is struggling and most likely to invent.
+    const blog = read('src/utils/blog-generate.ts');
+    assert.match(blog, /const ground = groundMarkdownLinks\(raw, brief\)/);
+    assert.match(blog, /ungroundedLinks = ground\.removed/);
+
+    const nl = read('src/utils/newsletter-generate.ts');
+    // The issue: layout and fallback share ONE definition of what a supplied link is.
+    assert.match(nl, /const suppliedLinks = \[brief, opts\.sourceLink\?\.url \?\? ''\]\.join/);
+    assert.match(nl, /groundLinks\(scrubbed\.ir, suppliedLinks\)/);
+    assert.match(nl, /groundMarkdownLinks\(bodyRaw, suppliedLinks\)/);
+    // The welcome sequence, against its own brief.
+    assert.match(nl, /groundMarkdownLinks\(bodyRaw, seqBrief\)/);
+    // ⚠️ A REVISION is allowed to keep the links the author already had — the copy being revised is
+    // itself the allow-list — and allowed to invent none.
+    assert.match(nl, /groundMarkdownLinks\(bodyRaw, issue\.bodyMarkdown \|\| ''\)/);
+    // And the reviewer is told, in words, on all three.
+    assert.match(nl, /export const UNGROUNDED_LINK_WARNING/);
+    assert.strictEqual((nl.match(/UNGROUNDED_LINK_WARNING/g) || []).length, 3);
 });
 
 // ── 6. The welcome sequence ─────────────────────────────────────────────────

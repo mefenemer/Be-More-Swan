@@ -26,6 +26,7 @@ import { enrichLeadContact } from '../lib/discovery-enrich';
 import { isEnrichProviderConfigured, lookupProviderContact } from '../lib/discovery-enrich-provider';
 import { gatherLeadIntel, nameAppearsInSources, hasIntelWorthScoring, LEAD_INTEL_SEARCHES } from '../lib/lead-intel';
 import { rescoreWithIntel, normaliseLeadCard, type LeadScoringCard, type DecisionMaker, type InterpretedSignal } from '../lib/discovery-scoring';
+import type { SenderIdentity } from '../config/sender-identity';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -307,7 +308,9 @@ export async function deepEnrichLead(
         assistantRecordId: number;
         discoveredLeadId: number | null;
         domain: string | null;
-        assistantName: string;
+        // Who the workspace's own business is — see src/config/sender-identity.ts. Was
+        // `assistantName`, which named the ASSISTANT rather than the business it works for.
+        sender: SenderIdentity;
         icp: Record<string, unknown>;
         ledger?: EnrichmentLedgerContext;
         maxSearches?: number;
@@ -354,7 +357,7 @@ export async function deepEnrichLead(
         evidence: intel.evidence,
         peopleSources: intel.peopleSources,
         fingerprint: { platforms: intel.fingerprint.platforms, hasCareersPage: intel.fingerprint.hasCareersPage },
-    }, opts.icp, opts.assistantName, { domain: opts.domain });
+    }, opts.icp, opts.sender, { domain: opts.domain });
 
     // A failed or unusable re-score leaves the lead exactly as it was. Deliberately NOT a fallback
     // to some default: the existing score is a real judgement, and overwriting it with a guess

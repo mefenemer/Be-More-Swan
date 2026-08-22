@@ -30,6 +30,7 @@ import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
 import { anyTermTsQuery } from '../../src/utils/text-search';
 import { computeScheduleSlots, resolvePostingSchedule } from '../../src/config/posting-cadence';
 import { EXCLUDE_PROFILE_RULE, SCORING_BANDS, icpBlock } from '../../src/config/icp-profile';
+import { SENDER_IDENTITY_RULE } from '../../src/config/sender-identity';
 import { normalizePlatform, platformFormat, type SocialPlatform } from '../../src/config/platform-formats';
 import { normalizeMediaSources } from '../../src/utils/media-sources';
 import { replyClaimsPostSaved, honestDraftReply, isHonestDraftReply, type DraftClaimFailure } from '../../src/utils/chat-draft-claims';
@@ -1092,6 +1093,8 @@ ${EXCLUDE_PROFILE_RULE}
 ${SCORING_BANDS}
 
 When the conversation contains enough detail to assess a lead, include the scoring card.
+
+An outreachDraft is a real email that the user can approve and send as-is, so it is written as ${rc.business.name} and signed off as ${rc.business.name}. ${SENDER_IDENTITY_RULE}
 
 HANDOFF PROTOCOL — when you lack the firmographic data to score a named lead confidently against the profile (e.g. company size/headcount, industry, or revenue is unknown), do NOT output the lead_scoring_card yet. Instead propose a handoff to "CRM Data Assistant": explain in your reply what is missing and that the enricher can fill the gaps, and emit the handoff_proposal uiElement below. Put everything the enricher needs in payloadToPass — the lead/company name, every detail already known from the conversation, and the fields you are missing. The user must approve the handoff before it runs.
 

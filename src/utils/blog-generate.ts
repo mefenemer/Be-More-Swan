@@ -22,7 +22,8 @@ import { assembleBlueprint } from './blueprint';
 import { ASSISTANT_DRAFT_REASON } from './blog-ai-assisted';
 import { parseModelJson } from './model-json';
 import {
-    groundLinks, irToBlogMarkdown, layoutIrPromptBlock, mediaIntents, normaliseLayoutIr,
+    groundLinks, groundMarkdownLinks, irToBlogMarkdown, layoutIrPromptBlock, mediaIntents,
+    normaliseLayoutIr,
 } from './layout-ir';
 import { sourceBlogImages, MAX_SOURCED_IMAGES } from './blog-media-source';
 
@@ -158,6 +159,14 @@ export interface GenerateBlogBodyOptions {
 export interface GenerateBlogBodyResult {
     bodyMarkdown: string;
     tone: string;
+    /**
+     * Link destinations removed because the brief never supplied them. Zero is the normal answer.
+     *
+     * ⚠️ Worth surfacing rather than swallowing: the words survive and the sentence still reads, so
+     * an author re-reading their draft has no way to tell that "our pricing page" stopped being a
+     * link — and the fix (give the assistant the real URL) is theirs to make.
+     */
+    ungroundedLinks: number;
     /**
      * How many stock pictures the run actually placed in the body.
      *
@@ -320,12 +329,14 @@ export async function generateBlogBody(
 
     let bodyMarkdown: string;
     let sourcedImages = 0;
+    let ungroundedLinks = 0;
 
     if (layout) {
         // The brief is the only place a real URL can have come from — same anti-fabrication rule
         // the prompt applies to statistics, and it matters more here than in an inbox: an invented
         // link on a blog post is a 404 published on the customer's own domain.
         const grounded = groundLinks(layout, brief);
+        ungroundedLinks = grounded.unlinked + grounded.stripped.length;
 
         // ⚠️ Only source pictures for a post that has none. A redraft must not pile a second set of
         // stock photographs onto a post somebody has already given media — and on the autopilot
@@ -363,8 +374,17 @@ export async function generateBlogBody(
         throw new Error('The draft came back in a form we could not read. Try again.');
     } else {
         // Plain Markdown: the model ignored the schema and wrote the post. Exactly the behaviour
-        // this path had before layouts existed.
-        bodyMarkdown = raw;
+        // this path had before layouts existed — except for the grounding, which this path needs
+        // MOST: an unstructured draft is where invented links have always been able to reach a
+        // customer's own domain, and it is the path a model falls back to when it is struggling.
+        const ground = groundMarkdownLinks(raw, brief);
+        bodyMarkdown = ground.markdown;
+        ungroundedLinks = ground.removed;
+        if (ground.removed) {
+            console.warn('[blog-generate] removed link destinations the brief never supplied', {
+                blogPostId, removed: ground.removed,
+            });
+        }
     }
 
     if (!bodyMarkdown.trim()) throw new Error('Empty draft.');
@@ -381,5 +401,5 @@ export async function generateBlogBody(
         })
         .where(and(eq(blogPosts.id, blogPostId), eq(blogPosts.organisationId, organisationId)));
 
-    return { bodyMarkdown, tone, sourcedImages };
+    return { bodyMarkdown, tone, sourcedImages, ungroundedLinks };
 }

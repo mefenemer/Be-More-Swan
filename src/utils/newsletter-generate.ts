@@ -40,7 +40,7 @@ import {
 } from './newsletter-design';
 import { loadBrandNewsletterTheme, themedButtonColours } from './brand-theme';
 import {
-    groundLinks, irToDesignBlocks, layoutIrPromptBlock, normaliseLayoutIr,
+    groundLinks, groundMarkdownLinks, irToDesignBlocks, layoutIrPromptBlock, normaliseLayoutIr,
     type IrNode, type LayoutIr,
 } from './layout-ir';
 
@@ -55,6 +55,15 @@ export const NEWSLETTER_MODEL = 'claude-haiku-4-5-20251001';
 
 /** Marks a draft as machine-written, for the AI transparency badge and the review queue. */
 export const NEWSLETTER_DRAFT_REASON = 'assistant_draft';
+
+/**
+ * Shown when a link was removed because nobody supplied it.
+ *
+ * ⚠️ Said out loud rather than swallowed: the words survive and the sentence still reads, so an
+ * author re-reading their draft has no way to notice that "our pricing page" stopped being a link.
+ */
+export const UNGROUNDED_LINK_WARNING =
+    'A link the assistant wrote pointed at a page nobody gave it, so the words are there without the link. Add the address before you send.';
 
 export const MAX_SUBJECT_CHARS = 120;
 export const MAX_PREHEADER_CHARS = 160;
@@ -417,6 +426,10 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
     //     applyProseToDesign path exists precisely so it does not have to.
     const layout = issue.design ? null : normaliseLayoutIr(parsed?.layout);
 
+    // Everywhere a real URL could legitimately have come from. The brief is what the human typed;
+    // the source link is what a blog hand-off supplied. Anything else the model writes is invented.
+    const suppliedLinks = [brief, opts.sourceLink?.url ?? ''].join('\n');
+
     let design: NewsletterDesign | null = null;
     let designWarnings: string[] = [];
     if (layout) {
@@ -428,7 +441,7 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
         // pointing at a page that does not exist — and a dead call to action reaches every
         // subscriber before anybody notices. The button survives with no link and the reviewer is
         // told, which is the same bargain as the "do not invent statistics" rule above.
-        const grounded = groundLinks(scrubbed.ir, [brief, opts.sourceLink?.url ?? ''].join('\n'));
+        const grounded = groundLinks(scrubbed.ir, suppliedLinks);
         if (grounded.stripped.length) {
             designWarnings = [...designWarnings, `The assistant suggested ${grounded.stripped.length === 1
                 ? `a button ("${grounded.stripped[0]}")`
@@ -453,7 +466,11 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
         : str(parsed?.bodyMarkdown, 20000) || str(salvageStringField(raw, 'bodyMarkdown'), 20000);
     if (!design && !bodyRaw) throw new Error('The draft came back in a form we could not read. Try again.');
 
-    const body = scrubMergeTags(bodyRaw, customKeys);
+    // ⚠️ The fallback prose gets grounded too. A designed issue's links went through groundLinks
+    // above; without this the SAME invented link is fine to send the moment the model returns
+    // Markdown instead of a layout — which is exactly when it is struggling.
+    const groundedBody = groundMarkdownLinks(bodyRaw, suppliedLinks);
+    const body = scrubMergeTags(groundedBody.markdown, customKeys);
     // ⚠️ When a design exists it is authoritative and body_markdown is DERIVED from it — the same
     // one-directional rule the Studio's save path follows (src/utils/newsletter-design.ts). The
     // source link is already a block by this point, because a line appended here would be erased
@@ -465,7 +482,9 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
     const subject = scrubMergeTags(str(parsed?.subject, MAX_SUBJECT_CHARS) || issue.subject || 'Your newsletter', customKeys);
     const preheader = scrubMergeTags(str(parsed?.preheader, MAX_PREHEADER_CHARS), customKeys);
 
-    const warnings = [...new Set([...subject.warnings, ...preheader.warnings, ...body.warnings, ...designWarnings])];
+    const warnings = [...new Set([...subject.warnings, ...preheader.warnings, ...body.warnings, ...designWarnings,
+        ...(groundedBody.removed ? [UNGROUNDED_LINK_WARNING] : []),
+    ])];
 
     await db.update(newsletterIssues)
         .set({
@@ -698,7 +717,11 @@ export async function refineEmailCopy(db: Db, args: {
     // wipe the author's draft with nothing, which is the single worst outcome this feature has.
     if (!bodyRaw.trim()) throw new Error('The revision came back in a form we could not read. Try again.');
 
-    const body = scrubMergeTags(bodyRaw, customKeys);
+    // ⚠️ The copy being revised is itself the allow-list. A rewrite is entitled to keep every link
+    // the author already had — they put them there — and entitled to invent none, which is the same
+    // rule as "do not add a claim that was not in the original".
+    const groundedBody = groundMarkdownLinks(bodyRaw, issue.bodyMarkdown || '');
+    const body = scrubMergeTags(groundedBody.markdown, customKeys);
     const subject = scrubMergeTags(str(parsed?.subject, MAX_SUBJECT_CHARS) || issue.subject, customKeys);
     const preheader = scrubMergeTags(str(parsed?.preheader, MAX_PREHEADER_CHARS) || issue.preheader || '', customKeys);
 
@@ -858,7 +881,11 @@ export async function draftSequenceEmail(db: Db, opts: SequenceDraftOptions): Pr
         : str(parsed?.bodyMarkdown, 20000) || str(salvageStringField(raw, 'bodyMarkdown'), 20000);
     if (!design && !bodyRaw) throw new Error('The draft came back in a form we could not read. Try again.');
 
-    const body = scrubMergeTags(bodyRaw, customKeys);
+    // As on the issue path: the Markdown fallback is grounded too, or a welcome email that goes out
+    // unattended for months carries a link to a page that never existed.
+    const groundedBody = groundMarkdownLinks(bodyRaw, seqBrief);
+    if (groundedBody.removed) designWarnings.push(UNGROUNDED_LINK_WARNING);
+    const body = scrubMergeTags(groundedBody.markdown, customKeys);
     const subject = scrubMergeTags(str(parsed?.subject, MAX_SUBJECT_CHARS) || 'Welcome', customKeys);
     const preheader = scrubMergeTags(str(parsed?.preheader, MAX_PREHEADER_CHARS), customKeys);
 

@@ -351,6 +351,110 @@ export function irToBlogMarkdown(ir: LayoutIr, opts?: CompileOptions): string {
 }
 
 /**
+ * Neutralise every link destination in a piece of Markdown that the brief never supplied.
+ *
+ * ⚠️ WHY THIS IS NOT JUST `[text](url)`. What reaches a published page as a live link was measured
+ * against the real renderer (marked + GFM + sanitize-html), not assumed — and GFM autolinks far more
+ * than markup:
+ *
+ *     [text](url)          → anchor          ✗ must be grounded
+ *     ![alt](url)          → img             ✗ must be grounded (hotlinks somebody else's server)
+ *     <https://…>          → anchor          ✗
+ *     bare https://…       → anchor          ✗  ← GFM autolinks it with no markup at all
+ *     bare www.…           → anchor          ✗  ← and this
+ *     [text][ref]          → anchor          ✗  (the definition carries the URL)
+ *     [text](mailto:…)     → anchor          ✗  (an invented address is still a wrong link)
+ *     bare example.com/x   → plain text      ✓ safe, left alone
+ *     `code span`          → plain text      ✓ safe, and MUST be left alone
+ *     ```fenced```         → plain text      ✓ safe, and MUST be left alone
+ *
+ * The last two are why this cannot be a naive regex over the whole string: a URL in a code sample is
+ * documentation, not a link, and rewriting it corrupts the example the author is trying to show.
+ *
+ * Grounded links are untouched. Ungrounded ones lose the LINK and keep the WORDS — "see the pricing
+ * page" survives as a sentence, it just stops pointing somewhere that does not exist. An image is
+ * removed outright, because there is no text under it to keep.
+ */
+export function groundMarkdownLinks(markdown: string, suppliedText: string): { markdown: string; removed: number } {
+    const source = String(markdown ?? '');
+    if (!source) return { markdown: '', removed: 0 };
+    const supplied = String(suppliedText ?? '');
+    let removed = 0;
+
+    const ok = (url: string) => {
+        const u = url.trim().replace(/[.,;:!?)\]]+$/, '');
+        return !u || supplied.includes(u);
+    };
+
+    // ── Pass 1: reference definitions, over the whole document ──────────────────────────────────
+    // `[g]: https://…` on its own line. Collected first because the usages that point at them are
+    // scattered, and a definition left behind is a live link with no visible markup.
+    const deadRefs = new Set<string>();
+    let body = source.replace(/^[ ]{0,3}\[([^\]\n]+)\]:[ \t]*(\S+)([ \t]+["'(][^\n]*)?[ \t]*$/gm, (whole, label, url) => {
+        if (ok(url)) return whole;
+        deadRefs.add(String(label).toLowerCase());
+        removed += 1;
+        return '\u0000DEADREF\u0000';   // marked for removal once the line joins are settled
+    });
+
+    // ── Pass 2: everything else, but ONLY outside code ──────────────────────────────────────────
+    // Fenced blocks first, then inline spans inside what is left. Both are returned verbatim.
+    const FENCE = /(^|\n)([ ]{0,3})(```+|~~~+)[^\n]*\n[\s\S]*?(?:\n\2\3[^\n]*|$)/g;
+    const INLINE_CODE = /(`+)(?:[^`]|(?!\1)`)*\1/g;
+
+    const clean = (text: string): string => text
+        // Images: no text to keep, so the whole construct goes, with one leading space if present.
+        .replace(/ ?!\[([^\]]*)\]\(([^)\s]+)(?:[ \t]+["'(][^)]*)?\)/g, (whole, _alt, url) => {
+            if (ok(url)) return whole;
+            removed += 1;
+            return '';
+        })
+        // Inline links: keep the words, drop the destination.
+        .replace(/\[([^\]]+)\]\(([^)\s]+)(?:[ \t]+["'(][^)]*)?\)/g, (whole, text, url) => {
+            if (ok(url)) return whole;
+            removed += 1;
+            return String(text);
+        })
+        // Reference usages whose definition just died: `[text][g]`, `[g][]`, and the shortcut `[g]`.
+        .replace(/\[([^\]]+)\]\[([^\]]*)\]/g, (whole, text, label) => {
+            const ref = String(label || text).toLowerCase();
+            return deadRefs.has(ref) ? String(text) : whole;
+        })
+        .replace(/\[([^\]]+)\](?!\(|\[|:)/g, (whole, text) => (deadRefs.has(String(text).toLowerCase()) ? String(text) : whole))
+        // Autolinks and bare URLs — GFM turns both into anchors with no markup at all. Nothing to
+        // keep, so they go along with one leading space; trailing punctuation is left to the sentence.
+        .replace(/ ?<(https?:\/\/[^>\s]+|mailto:[^>\s]+)>/g, (whole, url) => {
+            if (ok(url)) return whole;
+            removed += 1;
+            return '';
+        })
+        .replace(/ ?\b(?:https?:\/\/|www\.)[^\s<>()\[\]]+/g, (whole) => {
+            if (ok(whole)) return whole;
+            removed += 1;
+            return '';
+        });
+
+    // Walk the document, handing only the non-code stretches to `clean`.
+    const outside = (text: string, re: RegExp, fn: (t: string) => string): string => {
+        let out = '';
+        let last = 0;
+        re.lastIndex = 0;
+        for (let m = re.exec(text); m; m = re.exec(text)) {
+            out += fn(text.slice(last, m.index)) + m[0];
+            last = m.index + m[0].length;
+        }
+        return out + fn(text.slice(last));
+    };
+
+    body = outside(body, FENCE, (chunk) => outside(chunk, INLINE_CODE, clean));
+
+    // Drop the marked-out definition lines, and the blank line each one leaves behind.
+    body = body.replace(/\n?\u0000DEADREF\u0000/g, '').replace(/\n{3,}/g, '\n\n');
+
+    return { markdown: body, removed };
+}
+
+/**
  * Strip button links the brief never supplied.
  *
  * ⚠️ MODELS INVENT URLS, and this one does: asked to draft a newsletter about a physio clinic's new
@@ -370,19 +474,43 @@ export function irToBlogMarkdown(ir: LayoutIr, opts?: CompileOptions): string {
  * the block leaves the author with no idea it was ever suggested. `stripped` names them so the
  * caller can say so in the draft warnings.
  */
-export function groundLinks(ir: LayoutIr, suppliedText: string): { ir: LayoutIr; stripped: string[] } {
+export function groundLinks(
+    ir: LayoutIr,
+    suppliedText: string,
+): { ir: LayoutIr; stripped: string[]; unlinked: number } {
     const supplied = String(suppliedText ?? '');
     const stripped: string[] = [];
+    let unlinked = 0;
+
+    const prose = (md: string): string => {
+        const out = groundMarkdownLinks(md, supplied);
+        unlinked += out.removed;
+        return out.markdown;
+    };
+
     const ground = (n: IrSimpleNode): IrSimpleNode => {
-        if (n.kind !== 'button' || !n.href) return n;
-        if (supplied.includes(n.href)) return n;
-        stripped.push(n.label);
-        return { ...n, href: '' };
+        switch (n.kind) {
+            case 'button':
+                if (!n.href || supplied.includes(n.href)) return n;
+                stripped.push(n.label);
+                return { ...n, href: '' };
+            // ⚠️ The prose carries links too, and they are the DANGEROUS half: a button with a dead
+            // href is visibly unfinished in the Studio, whereas an invented link inside a paragraph
+            // publishes silently — on a blog, onto the customer's own domain.
+            case 'prose':
+                return { ...n, markdown: prose(n.markdown) };
+            // A quote is plain text that becomes Markdown on compile, so GFM autolinks a bare URL in
+            // it exactly as it would in a paragraph.
+            case 'quote':
+                return { ...n, text: prose(n.text) };
+            default:
+                return n;
+        }
     };
     const node = (n: IrNode): IrNode => (n.kind === 'columns'
         ? { ...n, columns: [n.columns[0].map(ground), n.columns[1].map(ground)] as typeof n.columns }
         : ground(n));
-    return { ir: { ...ir, nodes: ir.nodes.map(node) }, stripped };
+    return { ir: { ...ir, nodes: ir.nodes.map(node) }, stripped, unlinked };
 }
 
 /**

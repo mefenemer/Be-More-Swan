@@ -34,6 +34,8 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { aiAssistants, assistantRecords, leadMessages, leadThreads, organisations, sequenceEnrolments } from '../../db/schema';
 import { appendOutreachFooter, buildOutreachFooter, isUsablePostalAddress } from '../../src/config/outreach-footer';
+import { SENDER_IDENTITY_RULE, senderIdentityBlock, type SenderIdentity } from '../../src/config/sender-identity';
+import { loadSenderIdentity } from '../../src/utils/sender-identity';
 import { sendGmailMessage } from '../../src/utils/gmail';
 import { sendOutlookMessage } from '../../src/utils/outlook';
 import { IntegrationError } from '../../src/utils/workspace-integrations';
@@ -172,6 +174,7 @@ async function draftFollowUp(
     db: Db,
     enrolment: ClaimedRow,
     assistant: { name: string; salesTone: string },
+    sender: SenderIdentity,
     step: SequenceStepRow,
     originalSubject: string | null,
 ): Promise<{ subject: string; body: string } | null> {
@@ -185,7 +188,12 @@ async function draftFollowUp(
         : '(no earlier messages recorded)';
 
     const system =
-`You write follow-up emails for "${assistant.name}", a business using Be More Swan, in a ${assistant.salesTone} tone.
+`You write follow-up emails in a ${assistant.salesTone} tone.
+
+WHO THE EMAIL IS FROM:
+${senderIdentityBlock(sender)}
+
+${SENDER_IDENTITY_RULE}
 
 This is follow-up number ${step.stepNumber} in an outreach sequence to a prospect who has NOT replied.
 
@@ -386,9 +394,19 @@ async function processEnrolment(
         .orderBy(leadMessages.occurredAt)
         .limit(1);
 
+    // Read ONCE, above the draft. The identity half is needed by the prompt (who is this email
+    // from?) and the postal-address half by the gate below, and two reads of the same row is how
+    // the body and the footer ended up disagreeing about the sender in the first place.
+    const [orgRow] = await db
+        .select({ name: organisations.name, postalAddress: organisations.outreachPostalAddress })
+        .from(organisations)
+        .where(eq(organisations.id, row.organisation_id))
+        .limit(1);
+    const sender = await loadSenderIdentity(db, row.organisation_id);
+
     let draft: { subject: string; body: string } | null;
     try {
-        draft = await draftFollowUp(db, row, assistant, step, opener?.subject ?? null);
+        draft = await draftFollowUp(db, row, assistant, sender, step, opener?.subject ?? null);
     } catch (err) {
         return await handleSendFailure(db, ref, row, err, 'draft failed');
     }
@@ -405,11 +423,6 @@ async function processEnrolment(
     // Every follow-up carries the footer too, not just the opener. A cadence step is a separate
     // commercial email and each one independently needs its own opt-out route — and in practice a
     // step-3 chase is the message someone is most likely to want to stop.
-    const [orgRow] = await db
-        .select({ name: organisations.name, postalAddress: organisations.outreachPostalAddress })
-        .from(organisations)
-        .where(eq(organisations.id, row.organisation_id))
-        .limit(1);
     // Same hard gate as the opener (send_outreach): no postal address, no send. A follow-up is an
     // independent commercial email and needs the address just as much as step 1 did.
     //

@@ -17,8 +17,26 @@ import {
     isDisqualifyingProspectType,
     type ProspectType,
 } from '../config/icp-profile';
+import {
+    SENDER_IDENTITY_RULE,
+    senderIdentityBlock,
+    type SenderIdentity,
+} from '../config/sender-identity';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+/**
+ * How the three prompts below refer to the business they are working for.
+ *
+ * ⚠️ This used to interpolate the ASSISTANT's name plus the platform's, and nothing else — see
+ * src/config/sender-identity.ts, which is where the whole story of why approved drafts carried the
+ * wrong sign-off lives. Only scoreCandidates writes prose a prospect reads, so only it carries the
+ * full identity block and the rule; the other two just need to know whose profile they judge against.
+ */
+function senderPhrase(sender: SenderIdentity): string {
+    const name = (sender.businessName || '').trim();
+    return name ? `"${name}"` : 'the business that owns this workspace';
+}
 export const SCORING_MODEL = 'claude-haiku-4-5-20251001';
 
 export interface ScoreCandidate {
@@ -163,13 +181,13 @@ export interface ClassifyResult {
 export async function classifyProspects(
     candidates: ScoreCandidate[],
     icp: Record<string, unknown>,
-    assistantName: string,
+    sender: SenderIdentity,
 ): Promise<ClassifyResult> {
     const empty = candidates.map(() => ({ prospectType: null, rationale: null }));
     if (candidates.length === 0) return { results: [], inputTokens: 0, outputTokens: 0 };
 
     const system =
-`You classify companies discovered on the public web for "${assistantName}", a business using Be More Swan. Decide only what each candidate IS. Do not score or rank them.
+`You classify companies discovered on the public web for ${senderPhrase(sender)}. Decide only what each candidate IS. Do not score or rank them.
 
 ${PROSPECT_TYPE_RULE}
 
@@ -244,12 +262,17 @@ Return STRICT JSON only (no markdown): an array with ONE object per candidate, i
 export async function scoreCandidates(
     candidates: ScoreCandidate[],
     icp: Record<string, unknown>,
-    assistantName: string,
+    sender: SenderIdentity,
 ): Promise<ScoreResult> {
     if (candidates.length === 0) return { cards: [], inputTokens: 0, outputTokens: 0 };
 
     const system =
-`You qualify OUTBOUND leads discovered on the public web for "${assistantName}", a business using Be More Swan. Score each candidate below against the ideal customer profile — strong fit + buying intent scores high; poor fit or no intent scores low. Your reasons must name which profile criteria each candidate met or missed. Only the public info provided is known — do not invent facts about a company.
+`You qualify OUTBOUND leads discovered on the public web for ${senderPhrase(sender)}, and write the outreach email for the ones worth contacting. Score each candidate below against the ideal customer profile — strong fit + buying intent scores high; poor fit or no intent scores low. Your reasons must name which profile criteria each candidate met or missed. Only the public info provided is known — do not invent facts about a company.
+
+WHO THE EMAIL IS FROM:
+${senderIdentityBlock(sender)}
+
+${SENDER_IDENTITY_RULE}
 
 ${PROSPECT_TYPE_RULE}
 
@@ -393,7 +416,7 @@ export async function rescoreWithIntel(
     current: LeadScoringCard,
     intel: IntelForScoring,
     icp: Record<string, unknown>,
-    assistantName: string,
+    sender: SenderIdentity,
     opts: { domain?: string | null } = {},
 ): Promise<RescoreResult> {
     const hasEvidence = intel.evidence.length > 0
@@ -403,7 +426,7 @@ export async function rescoreWithIntel(
     if (!hasEvidence) return EMPTY_RESCORE;
 
     const system =
-`You are re-reading ONE lead for "${assistantName}", a business using Be More Swan. This company was scored ${current.score}/100 (${current.rating}) some time ago, from a single search-result snippet. Since then we have gathered real evidence about them. Decide what that evidence changes.
+`You are re-reading ONE lead for ${senderPhrase(sender)}. This company was scored ${current.score}/100 (${current.rating}) some time ago, from a single search-result snippet. Since then we have gathered real evidence about them. Decide what that evidence changes.
 
 ⚠️ EVIDENCE ONLY. Reason exclusively from the EVIDENCE block in the user message. You may know nothing else about this company, and anything you believe you remember about it is INADMISSIBLE — say nothing that the supplied evidence does not support. If the evidence is thin, the correct answer is a small change or none.
 
@@ -433,6 +456,11 @@ Return STRICT JSON only (no markdown):
 }
 
 Every "url" in "signals" must be one of the evidence urls given to you. Write an outreachDraft for hot/warm leads only; use null for cold. Keep "hooks" to at most three, and only include one if the evidence genuinely supports it.
+
+WHO THE EMAIL IS FROM:
+${senderIdentityBlock(sender)}
+
+${SENDER_IDENTITY_RULE}
 
 ${OUTREACH_SUBJECT_RULES}`;
 

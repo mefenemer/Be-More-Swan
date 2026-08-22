@@ -55,6 +55,8 @@ import {
 } from '../../src/config/revenue-events';
 import { EDIT_REASONS, isEditReason } from '../../src/config/template-feedback';
 import { appendOutreachFooter, buildOutreachFooter, isUsablePostalAddress } from '../../src/config/outreach-footer';
+import { SENDER_IDENTITY_RULE, senderIdentityBlock, type SenderIdentity } from '../../src/config/sender-identity';
+import { loadSenderIdentity } from '../../src/utils/sender-identity';
 import { needsPersonalInboxConfirmation } from '../../src/config/lead-email-kind';
 import { EXCLUDE_PROFILE_DNC_RULE, EXCLUDE_PROFILE_RULE, SCORING_BANDS, icpBlock } from '../../src/config/icp-profile';
 import { recordTemplateEdit } from '../../src/utils/template-feedback';
@@ -230,6 +232,17 @@ export default withLambda(async (event) => {
         return _icpFor({ assistantRecordId: assistantRecordId ?? null, aiAssistantId: assistant.id });
     }
 
+    /**
+     * WHO the outreach is from — the org's own business identity, not this assistant's name.
+     * Memoised for the same reason as the two resolvers above: one request is one org, and most
+     * actions here draft nothing. See src/config/sender-identity.ts.
+     */
+    let _sender: SenderIdentity | undefined;
+    async function sender(): Promise<SenderIdentity> {
+        if (_sender === undefined) _sender = await loadSenderIdentity(db, orgId);
+        return _sender;
+    }
+
     /** Log token usage the same way the chat route does, so COGS reporting stays complete. */
     function logUsage(resp: Anthropic.Message, suffix: string) {
         void logAiUsage({
@@ -277,8 +290,9 @@ export default withLambda(async (event) => {
             if (!name && !company) return json(400, { error: 'A lead needs at least a name or a company.' });
             const title = company || name!;
 
+            const leadSender = await sender();
             const system =
-`You qualify inbound leads for "${assistant.name}", a business using Be More Swan. Score the lead below against the ideal customer profile — a lead that matches it well scores high; one that misses it scores low, and your reasons must name which criteria it met or missed.
+`You qualify inbound leads for ${leadSender.businessName ? `"${leadSender.businessName}"` : 'the business that owns this workspace'}, and write the outreach email for the ones worth contacting. Score the lead below against the ideal customer profile — a lead that matches it well scores high; one that misses it scores low, and your reasons must name which criteria it met or missed.
 
 Ideal customer profile (from setup):
 ${icp}
@@ -286,6 +300,11 @@ ${icp}
 ${EXCLUDE_PROFILE_RULE} ${EXCLUDE_PROFILE_DNC_RULE}
 
 ${SCORING_BANDS}
+
+WHO THE EMAIL IS FROM:
+${senderIdentityBlock(leadSender)}
+
+${SENDER_IDENTITY_RULE}
 
 Return STRICT JSON only (no markdown, no prose outside the JSON):
 {
@@ -661,7 +680,7 @@ ${OUTREACH_SUBJECT_RULES}`;
                 assistantRecordId: recordId,
                 discoveredLeadId: lead?.id ?? null,
                 domain,
-                assistantName: assistant.name,
+                sender: await sender(),
                 icp: onboarding,
                 ledger,
             });
@@ -748,7 +767,7 @@ ${OUTREACH_SUBJECT_RULES}`;
                 assistantRecordId: recordId,
                 discoveredLeadId: link?.id ?? null,
                 domain,
-                assistantName: assistant.name,
+                sender: await sender(),
                 icp: onboarding,
                 ledger: {
                     organisationId: orgId,
@@ -1242,8 +1261,14 @@ ${OUTREACH_SUBJECT_RULES}`;
             let bodyText = str(draft?.body as string, 4000);
             if (!bodyText) {
                 const tone = str(onboarding.salesTone, 40) ?? 'professional';
+                const sendSender = await sender();
                 const system =
-`You write a short, personalised cold outreach email for "${assistant.name}" (a business using Be More Swan) to the lead below, in a ${tone} tone. Under 150 words, no placeholders or brackets.
+`You write a short, personalised cold outreach email to the lead below, in a ${tone} tone. Under 150 words, no placeholders or brackets.
+
+WHO THE EMAIL IS FROM:
+${senderIdentityBlock(sendSender)}
+
+${SENDER_IDENTITY_RULE}
 
 ${OUTREACH_SUBJECT_RULES}
 
@@ -1666,8 +1691,9 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
 
         // ── Propose new lead-generation ideas from the ICP ───────────────────────
         if (action === 'generate_ideas') {
+            const ideaSender = await sender();
             const system =
-`You are a lead-generation strategist for "${assistant.name}", a business using Be More Swan. Propose 3 distinct, actionable lead-generation ideas: each names a target demographic, an industry sector, and a company-size band, and gives a one-sentence rationale grounded in the ideal customer profile below. Prefer small-to-mid-sized companies unless the profile says otherwise. Make the ideas genuinely different from one another.
+`You are a lead-generation strategist for ${ideaSender.businessName ? `"${ideaSender.businessName}"` : 'the business that owns this workspace'}. Propose 3 distinct, actionable lead-generation ideas: each names a target demographic, an industry sector, and a company-size band, and gives a one-sentence rationale grounded in the ideal customer profile below. Prefer small-to-mid-sized companies unless the profile says otherwise. Make the ideas genuinely different from one another.
 
 Ideal customer profile (from setup):
 ${icp}

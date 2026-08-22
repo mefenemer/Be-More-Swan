@@ -56,7 +56,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import * as path from 'path';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../db/client';
-import { aiAssistants, assistantRecords, discoveredLeads, discoveryCampaigns } from '../db/schema';
+import { aiAssistants, assistantRecords, discoveredLeads, discoveryCampaigns, organisations } from '../db/schema';
 import {
     applyProspectType,
     classifyProspects,
@@ -230,10 +230,14 @@ async function main() {
             campaignId: discoveredLeads.campaignId,
             icpSnapshot: discoveryCampaigns.icpSnapshot,
             assistantName: aiAssistants.name,
+            // classifyProspects wants the BUSINESS, not the assistant. assistantName above stays
+            // because the operator log below prints it — it is a workspace label, not an identity.
+            orgName: organisations.name,
         })
         .from(discoveredLeads)
         .innerJoin(discoveryCampaigns, eq(discoveryCampaigns.id, discoveredLeads.campaignId))
         .innerJoin(aiAssistants, eq(aiAssistants.id, discoveryCampaigns.aiAssistantId))
+        .innerJoin(organisations, eq(organisations.id, discoveredLeads.organisationId))
         .where(and(...where))
         .orderBy(discoveredLeads.id);
 
@@ -268,6 +272,7 @@ async function main() {
         const icp = (group[0].icpSnapshot && typeof group[0].icpSnapshot === 'object'
             ? group[0].icpSnapshot : {}) as Record<string, unknown>;
         const assistantName = group[0].assistantName ?? 'your business';
+        const sender = { businessName: group[0].orgName ?? '' };
         console.log(`  ── campaign ${campaignId} — ${group.length} lead(s), assistant "${assistantName}"`);
 
         for (let start = 0; start < group.length; start += BATCH) {
@@ -280,7 +285,7 @@ async function main() {
                 snippet: (l.signals as Record<string, unknown> | null)?.snippet as string ?? null,
             }));
 
-            const { results, inputTokens: it, outputTokens: ot } = await classifyProspects(candidates, icp, assistantName);
+            const { results, inputTokens: it, outputTokens: ot } = await classifyProspects(candidates, icp, sender);
             inputTokens += it;
             outputTokens += ot;
 

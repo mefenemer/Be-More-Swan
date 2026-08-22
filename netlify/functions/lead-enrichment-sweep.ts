@@ -27,12 +27,13 @@
 
 import { and, eq, isNotNull, or, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, assistantRecords, adminAuditLog, discoveredLeads, masterAssistants } from '../../db/schema';
+import { aiAssistants, assistantRecords, adminAuditLog, discoveredLeads, masterAssistants, organisations } from '../../db/schema';
 import { deepEnrichLead, INTEL_FIELD } from '../../src/utils/lead-enrichment';
 import { getBlueprintVersion } from '../../src/utils/blueprint-version';
 import { getIcpSnapshot } from '../../src/utils/icp-snapshot';
 import { isSearchConfigured } from '../../src/lib/discovery-search';
 import { isRetentionDeleted } from '../../src/config/lead-retention';
+import type { SenderIdentity } from '../../src/config/sender-identity';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /**
@@ -58,7 +59,9 @@ interface Candidate {
     title: string;
     organisationId: number;
     aiAssistantId: number;
-    assistantName: string;
+    // The workspace's own business, not the assistant's name — see src/config/sender-identity.ts.
+    // rescoreWithIntel rewrites the outreach draft, so this pass signs emails too.
+    sender: SenderIdentity;
     onboardingContext: unknown;
     data: unknown;
     discoveredLeadId: number | null;
@@ -91,7 +94,10 @@ async function collectCandidates(db: Db, staleBefore: Date): Promise<Candidate[]
             title: assistantRecords.title,
             organisationId: assistantRecords.organisationId,
             aiAssistantId: assistantRecords.aiAssistantId,
-            assistantName: aiAssistants.name,
+            orgName: organisations.name,
+            orgDescription: organisations.businessDescription,
+            orgIndustry: organisations.industry,
+            orgWebsite: organisations.websiteUrl,
             onboardingContext: aiAssistants.onboardingContext,
             data: assistantRecords.data,
             discoveredLeadId: discoveredLeads.id,
@@ -99,6 +105,9 @@ async function collectCandidates(db: Db, staleBefore: Date): Promise<Candidate[]
         })
         .from(assistantRecords)
         .innerJoin(aiAssistants, eq(aiAssistants.id, assistantRecords.aiAssistantId))
+        // Joined rather than looked up per lead: the sweep spans orgs, and one join beats
+        // twenty-five round trips for a row we are already selecting the assistant's half of.
+        .innerJoin(organisations, eq(organisations.id, assistantRecords.organisationId))
         .leftJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
         .leftJoin(discoveredLeads, eq(discoveredLeads.assistantRecordId, assistantRecords.id))
         .where(and(
@@ -137,7 +146,17 @@ async function collectCandidates(db: Db, staleBefore: Date): Promise<Candidate[]
     // (src/config/lead-retention.ts) with one definition, and re-expressing it as a second jsonb
     // path in this query is precisely the hand-copied rule that file exists to prevent. The set is
     // already capped at MAX_LEADS, so filtering in JS costs nothing.
-    return rows.filter((r) => !isRetentionDeleted(r.data));
+    return rows
+        .filter((r) => !isRetentionDeleted(r.data))
+        .map(({ orgName, orgDescription, orgIndustry, orgWebsite, ...rest }) => ({
+            ...rest,
+            sender: {
+                businessName: orgName ?? '',
+                businessDescription: orgDescription,
+                industry: orgIndustry,
+                websiteUrl: orgWebsite,
+            },
+        }));
 }
 
 function onboardingOf(raw: unknown): Record<string, unknown> {
@@ -201,7 +220,7 @@ export async function sweepLeadEnrichment(): Promise<Record<string, unknown>> {
                 assistantRecordId: c.id,
                 discoveredLeadId: c.discoveredLeadId,
                 domain: c.domain,
-                assistantName: c.assistantName,
+                sender: c.sender,
                 icp: onboardingOf(c.onboardingContext),
                 ledger: {
                     organisationId: c.organisationId,
