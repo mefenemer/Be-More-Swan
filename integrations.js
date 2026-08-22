@@ -795,6 +795,105 @@ async function _loadBlogDestinations() {
 // It gets its own card: one click, and copy that names the editorial step, because "your post is
 // queued for a human editor" is the single most surprising thing about this destination and it was
 // stated nowhere in the product.
+// ── The Swan Index author profile ────────────────────────────────
+// The byline every syndicated piece carries. It had no editor at all: the profile was created from
+// the organisation record on connect and nothing in the product could change it afterwards, so a
+// workspace called "Acme" published as "Acme, Acme" and had to ask us to fix it in the database.
+//
+// It lives on the connection card rather than in Blog Studio because it is workspace-level identity
+// — the same byline for every post — and Blog Studio is per-post. Same reason the draft/live control
+// is here and not there.
+const _SWAN_SOCIALS = [
+    ['linkedin',  'LinkedIn',  'linkedin.com/in/you'],
+    ['x',         'X',         '@you'],
+    ['instagram', 'Instagram', '@you'],
+    ['facebook',  'Facebook',  'facebook.com/you'],
+    ['threads',   'Threads',   '@you'],
+    ['youtube',   'YouTube',   '@yourchannel'],
+];
+
+function _swanProfileField(label, key, value, opts) {
+    const o = opts || {};
+    return `<label class="block">
+        <span class="text-[11px] font-bold uppercase tracking-wide text-gray-500">${_esc(label)}</span>
+        <input id="swanprof-${_esc(key)}" type="text" value="${_esc(value || '')}" maxlength="${o.max || 80}"
+            placeholder="${_esc(o.placeholder || '')}"
+            class="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none">
+        ${o.help ? `<span class="block mt-1 text-[11px] text-gray-400">${_esc(o.help)}</span>` : ''}
+    </label>`;
+}
+
+function _swanProfileForm(d) {
+    const p = d.profile;
+    if (!p) return '';
+    const socials = p.socials || {};
+    return `<details class="mt-1"><summary class="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 select-none">Edit your author profile</summary>
+      <div class="mt-3 pt-3 border-t border-gray-100 grid gap-3">
+        <p class="text-xs text-gray-500">This is the byline on every piece you syndicate. Your handle
+          <span class="font-bold text-gray-700">@${_esc(p.handle)}</span> is fixed — it is the address your published pieces already live at.</p>
+        ${_swanProfileField('Display name', 'displayName', p.displayName, { placeholder: 'Jane Smith' })}
+        ${_swanProfileField('Role', 'roleTitle', p.roleTitle, { placeholder: 'Founder' })}
+        ${_swanProfileField('Company', 'companyName', p.companyName, { placeholder: 'Acme', help: 'Leave blank if it is the same as your display name.' })}
+        ${_swanProfileField('Your website', 'siteUrl', p.siteUrl, { max: 300, placeholder: 'acme.com' })}
+        <label class="block">
+          <span class="text-[11px] font-bold uppercase tracking-wide text-gray-500">Short bio</span>
+          <textarea id="swanprof-bio" rows="3" maxlength="600" placeholder="One or two lines about you."
+            class="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none">${_esc(p.bio || '')}</textarea>
+        </label>
+        <div>
+          <span class="text-[11px] font-bold uppercase tracking-wide text-gray-500">Social links</span>
+          <p class="text-[11px] text-gray-400 mb-2">Shown as icons on your byline and profile page. A username or a full link — both work.</p>
+          <div class="grid gap-2 sm:grid-cols-2">
+            ${_SWAN_SOCIALS.map(([key, label, ph]) => `<label class="block">
+              <span class="text-[11px] font-semibold text-gray-500">${_esc(label)}</span>
+              <input id="swanprof-social-${key}" type="text" value="${_esc(socials[key] || '')}" maxlength="300" placeholder="${_esc(ph)}"
+                class="mt-0.5 w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none">
+            </label>`).join('')}
+          </div>
+        </div>
+        <div id="swanprof-err" class="hidden text-xs font-semibold text-red-600"></div>
+        <div class="flex items-center gap-2">
+          <button onclick="window._swanSaveProfile('${d.id}')" type="button"
+            class="px-3 py-1.5 text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg cursor-pointer">Save profile</button>
+          <span class="text-[11px] text-gray-400">Changes show on your published pieces straight away.</span>
+        </div>
+      </div>
+    </details>`;
+}
+
+window._swanSaveProfile = async function (id) {
+    const errEl = document.getElementById('swanprof-err');
+    const val = (key) => (document.getElementById(`swanprof-${key}`) || {}).value || '';
+    if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; }
+
+    const socials = {};
+    _SWAN_SOCIALS.forEach(([key]) => { socials[key] = val(`social-${key}`).trim(); });
+    const profile = {
+        displayName: val('displayName').trim(),
+        roleTitle: val('roleTitle').trim(),
+        companyName: val('companyName').trim(),
+        siteUrl: val('siteUrl').trim(),
+        bio: val('bio').trim(),
+        socials,
+    };
+
+    try {
+        const res = await fetch('/.netlify/functions/connect-blog-destination', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'save-profile', provider: id, profile }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            if (errEl) { errEl.textContent = data.error || 'Could not save your profile.'; errEl.classList.remove('hidden'); }
+            return;
+        }
+        window.showToast?.('Author profile saved.', { icon: '🦢' });
+        await _loadConnections();
+    } catch {
+        if (errEl) { errEl.textContent = 'Could not reach the server. Try again.'; errEl.classList.remove('hidden'); }
+    }
+};
+
 function _firstPartyDestCard(d) {
     const connected = !!d.connected;
     const primaryBtn = 'w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl shadow-sm hover:shadow transition cursor-pointer';
@@ -824,6 +923,7 @@ function _firstPartyDestCard(d) {
            </div>
            ${profileUrl ? `<a href="${_esc(profileUrl)}" target="_blank" rel="noopener" class="text-xs font-bold text-emerald-700 hover:text-emerald-800 underline w-fit">View your profile page</a>` : ''}
            ${modeControl}
+           ${_swanProfileForm(d)}
            <details class="mt-1"><summary class="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 select-none">Manage connection</summary>
                <div class="mt-2 pt-3 border-t border-gray-100 flex items-center gap-2 flex-wrap">
                    <button onclick="window._blogDestDisconnect('${d.id}', true)" class="${ghostPill} text-red-600 bg-white hover:bg-red-600 hover:text-white border-red-200 hover:border-red-600" type="button">Disconnect</button>

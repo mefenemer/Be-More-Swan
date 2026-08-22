@@ -121,6 +121,8 @@ export interface ArticleRow {
     section: string | null;
     sectionLabel: string | null;
     liveAt: Date | null;
+    updatedAt: Date | null;
+    tags: unknown;
     robots: string;
     authorCanonicalUrl: string | null;
     /** From blog_posts, read live — see the note below. */
@@ -157,6 +159,8 @@ export async function getArticle(db: Db, handle: string, slug: string): Promise<
             section: swanIndexPosts.section,
             sectionLabel: swanIndexSections.label,
             liveAt: swanIndexPosts.liveAt,
+            updatedAt: swanIndexPosts.updatedAt,
+            tags: swanIndexPosts.tags,
             robots: swanIndexPosts.robots,
             authorCanonicalUrl: swanIndexPosts.authorCanonicalUrl,
             publishedPayload: blogPosts.publishedPayload,

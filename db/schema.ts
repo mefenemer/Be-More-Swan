@@ -4645,6 +4645,9 @@ export const swanIndexProfiles = pgTable("swan_index_profiles", {
   bio: text("bio"),
   avatarAssetId: integer("avatar_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
   siteUrl: text("site_url"),                                 // the author's own domain — the point of the network
+  // Validated profile URLs keyed by platform ({"linkedin":"https://…"}). One column rather than six:
+  // the set is src/config/platform-formats.ts's, and it has grown twice already.
+  socials: jsonb("socials").notNull().default({}),
 
   status: text("status").notNull().default("active"),        // active | suspended | withdrawn
   frontPageTier: boolean("front_page_tier").notNull().default(false),
@@ -4692,6 +4695,11 @@ export const swanIndexPosts = pgTable("swan_index_posts", {
 
   viewCount: integer("view_count").notNull().default(0),
   readCount: integer("read_count").notNull().default(0),     // dwell > 15s or > 50% scrolled
+
+  // The editorial safety screen an editor sees before approving. Stored, not recomputed per view:
+  // it is also the record of what was true when the decision was made. See swan-index/safety.ts.
+  safetyCheck: jsonb("safety_check"),
+  safetyCheckedAt: timestamp("safety_checked_at"),
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

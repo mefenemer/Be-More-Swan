@@ -10,7 +10,9 @@ export type SwanRoute =
     | { kind: 'section'; key: string }
     | { kind: 'author'; handle: string }
     | { kind: 'article'; handle: string; slug: string }
+    | { kind: 'about' }
     | { kind: 'feed' }
+    | { kind: 'feedStyle' }
     | { kind: 'sitemap' }
     | { kind: 'robots' };
 
@@ -43,7 +45,11 @@ export function parseSwanRoute(pathname: string): SwanRoute | null {
     if (path === '' || path === '/') return { kind: 'home' };
     if (path === '/latest') return { kind: 'latest' };
     if (path === '/authors') return { kind: 'authors' };
+    if (path === '/about') return { kind: 'about' };
     if (path === '/feed.xml' || path === '/rss.xml') return { kind: 'feed' };
+    // The feed's own stylesheet. A browser that follows the <?xml-stylesheet?> instruction renders
+    // the RSS as a readable page instead of a wall of tags; a feed reader ignores it entirely.
+    if (path === '/feed.xsl') return { kind: 'feedStyle' };
     if (path === '/sitemap.xml') return { kind: 'sitemap' };
     // Served by the function, not the repo's robots.txt: the domain rewrite below is `force = true`,
     // so the static file never gets a look in — and the publication needs different rules anyway.

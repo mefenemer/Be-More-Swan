@@ -9286,6 +9286,7 @@ async function _swanRenderQueue() {
               ${p.sectionLabel ? `<span class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">${_swanEsc(p.sectionLabel)}</span>` : '<span class="text-[11px] font-bold text-amber-600 uppercase tracking-wide">No section</span>'}
               ${p.editorScore ? `<span class="text-[11px] font-bold text-gray-500">${'★'.repeat(p.editorScore)}</span>` : ''}
               ${orphaned ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">Author's post is ${_swanEsc(p.sourceStatus)}</span>` : ''}
+              ${_swanSafetyPill(p.safetyCheck)}
             </div>
             <p class="font-bold text-gray-900 leading-snug">${_swanEsc(p.title)}</p>
             ${p.dek ? `<p class="text-sm text-gray-500 mt-0.5 line-clamp-2">${_swanEsc(p.dek)}</p>` : ''}
@@ -9353,6 +9354,8 @@ async function openSwanRead(id) {
       ${orphaned ? `<div class="text-sm bg-red-50 border border-red-200 text-red-800 rounded-lg p-3">
         The author's post is <strong>${_swanEsc(p.sourceStatus)}</strong>, not published. It cannot go on the site — the article page reads the author's live post, so the link would 404. Declining is the only move here until they republish.
       </div>` : ''}
+
+      <div id="swan-safety-panel">${_swanSafetyPanel(p.id, d.safety)}</div>
 
       <div class="text-sm text-gray-600 space-y-1 bg-gray-50 border border-gray-200 rounded-lg p-3">
         <p><span class="text-gray-400">Author</span> — <a href="${_swanEsc(_swanBaseUrl)}/@${encodeURIComponent(p.handle)}" target="_blank" rel="noopener" class="font-semibold text-gray-900 underline">@${_swanEsc(p.handle)}</a> · ${_swanEsc(p.displayName)}${p.frontPageTier ? ' <span class="text-[11px] font-bold text-violet-600">FRONT-PAGE TIER</span>' : ''}</p>
@@ -9537,7 +9540,100 @@ async function _swanSetStatus(id, status, done) {
 const swanFeature = (id) => _swanSetStatus(id, 'featured', 'Added to the front page. It is now indexable.');
 const swanUnfeature = (id) => _swanSetStatus(id, 'live', 'Taken off the front page. Back to noindex.');
 
+// ── Safe Content Benchmark panel ──────────────────────────────────────────────
+// The screen an editor reads before approving. Its whole job is to make "approve" a decision on
+// evidence, so it must never overstate what it knows: a check that could not RUN shows as amber
+// "not checked", counts against the total, and stops the green banner appearing. Green here means
+// every single benchmark returned a pass — nothing else.
+// ⚠️ green-*, NOT emerald-*. input.css remaps the emerald scale to the brand's neon pink, so the
+// obvious "bg-emerald-50" all-clear banner renders bright pink — which reads as an alarm, on the
+// one control whose entire job is to say "this is fine". The green scale is remapped too (to a
+// neon green) but stays green, and input.css says it is the scale for checkmarks.
+const _SWAN_SAFETY_STYLE = {
+  pass:      { icon: '✓', pill: 'bg-green-100 text-green-700',     text: 'text-gray-600' },
+  warn:      { icon: '!', pill: 'bg-amber-100 text-amber-800',     text: 'text-amber-800' },
+  fail:      { icon: '✗', pill: 'bg-red-100 text-red-700',         text: 'text-red-700' },
+  unchecked: { icon: '?', pill: 'bg-gray-200 text-gray-600',       text: 'text-gray-500' },
+};
+
+// The queue's one-glance version. Deliberately says "not screened" rather than showing nothing:
+// the screen runs when a piece is OPENED, so a blank badge here would be indistinguishable from a
+// clean one, and triaging on it would be triaging on an assumption.
+function _swanSafetyPill(safety) {
+  const checks = safety && Array.isArray(safety.checks) ? safety.checks : null;
+  if (!checks) return '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Not screened</span>';
+  const passed = checks.filter((c) => c.status === 'pass').length;
+  if (passed === checks.length) return `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700">Benchmark ${passed}/${checks.length}</span>`;
+  const failed = checks.some((c) => c.status === 'fail');
+  return `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${failed ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'}">Benchmark ${passed}/${checks.length}</span>`;
+}
+
+function _swanSafetyPanel(postId, safety) {
+  if (!safety || !Array.isArray(safety.checks)) {
+    return `<div class="text-sm bg-gray-50 border border-gray-200 rounded-lg p-3 text-gray-500">
+      Safety screen has not run for this piece.
+      <button onclick="swanRecheckSafety(${postId})" class="ml-1 underline font-semibold cursor-pointer">Run it now</button>
+    </div>`;
+  }
+  const total = safety.checks.length;
+  const passed = safety.checks.filter((c) => c.status === 'pass').length;
+  const failed = safety.checks.filter((c) => c.status === 'fail').length;
+
+  const head = safety.confirmed
+    ? `<div class="flex items-center gap-2">
+         <span class="w-6 h-6 rounded-full bg-green-600 text-white text-xs font-bold flex items-center justify-center shrink-0">✓</span>
+         <p class="text-sm font-bold text-green-700">Safe Content Benchmark confirmed — ${passed}/${total}</p>
+       </div>`
+    : `<div class="flex items-center gap-2">
+         <span class="w-6 h-6 rounded-full ${failed ? 'bg-red-600' : 'bg-amber-500'} text-white text-xs font-bold flex items-center justify-center shrink-0">${failed ? '✗' : '!'}</span>
+         <p class="text-sm font-bold ${failed ? 'text-red-800' : 'text-amber-900'}">${passed} of ${total} benchmarks confirmed — read the rest before approving</p>
+       </div>`;
+
+  const rows = safety.checks.map((c) => {
+    const st = _SWAN_SAFETY_STYLE[c.status] || _SWAN_SAFETY_STYLE.unchecked;
+    return `<li class="flex items-start gap-2 py-1.5">
+      <span class="w-5 h-5 rounded-full ${st.pill} text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">${st.icon}</span>
+      <span class="min-w-0">
+        <span class="block text-sm font-semibold text-gray-800">${_swanEsc(c.label)}</span>
+        <span class="block text-xs ${st.text}">${_swanEsc(c.detail)}</span>
+      </span>
+    </li>`;
+  }).join('');
+
+  return `<div class="rounded-lg border ${safety.confirmed ? 'border-green-300 bg-green-50' : failed ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50'} p-3">
+    ${head}
+    <ul class="mt-2 divide-y divide-gray-200">${rows}</ul>
+    <div class="mt-2 pt-2 border-t border-gray-200 flex items-center justify-between gap-2 flex-wrap">
+      <span class="text-[11px] text-gray-500">Screened ${_swanEsc(_swanDate(safety.ranAt))}</span>
+      <button onclick="swanRecheckSafety(${postId})" class="text-[11px] font-bold text-gray-600 underline cursor-pointer">Re-run</button>
+    </div>
+  </div>`;
+}
+
+async function swanRecheckSafety(id) {
+  const host = document.getElementById('swan-safety-panel');
+  if (host) host.innerHTML = '<p class="text-sm text-gray-500">Re-running the safety screen…</p>';
+  try {
+    const d = await api(`${SWAN_API}?resource=post&id=${id}&recheck=1`);
+    if (host) host.innerHTML = _swanSafetyPanel(id, d.safety);
+  } catch (e) {
+    if (host) host.innerHTML = `<p class="text-sm text-red-600">${_swanEsc(e.message)}</p>`;
+  }
+}
+
 // ── Contributors ──────────────────────────────────────────────────────────────
+// "Jane Smith, Founder at Acme". A company that just repeats the display name is dropped: profiles
+// created before 2026-08 took BOTH from organisations.name, so this line read "Acme at Acme" for
+// every workspace that had never edited its profile. Mirrors bylineText() in
+// src/utils/swan-index/render.ts, which is what the public page prints — the two must agree.
+function _swanCredit(c) {
+  const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+  const company = c.companyName && !same(c.companyName, c.displayName) ? c.companyName : '';
+  if (c.roleTitle && company) return `${c.displayName}, ${c.roleTitle} at ${company}`;
+  const one = c.roleTitle || company;
+  return one ? `${c.displayName}, ${one}` : c.displayName;
+}
+
 async function loadSwanContributors() {
   await _swanLoadOverview('swan-counts-contrib');
   const host = document.getElementById('swan-contributors-list');
@@ -9562,7 +9658,7 @@ async function loadSwanContributors() {
               ${c.frontPageTier ? '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">Front-page tier</span>' : ''}
               ${capped ? '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">At monthly limit</span>' : ''}
             </div>
-            <p class="text-sm text-gray-700">${_swanEsc(c.displayName)}${c.roleTitle ? `, ${_swanEsc(c.roleTitle)}` : ''}${c.companyName ? ` at ${_swanEsc(c.companyName)}` : ''}</p>
+            <p class="text-sm text-gray-700">${_swanEsc(_swanCredit(c))}</p>
             <p class="text-xs text-gray-400 mt-1">
               ${c.livePieces} live · ${c.pendingPieces} awaiting · ${c.rejectedPieces} declined
               · this month ${c.thisMonth}${c.monthlyPostCap != null ? ` of ${c.monthlyPostCap}` : ' (uncapped)'}

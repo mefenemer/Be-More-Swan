@@ -11,7 +11,9 @@
 //   GET /@handle              an author's profile and back catalogue
 //   GET /@handle/:slug        the article
 //   GET /authors              the contributors index
+//   GET /about                what this publication is, and what it promises a contributor
 //   GET /feed.xml             RSS
+//   GET /feed.xsl             the feed's browser stylesheet — see renderFeedStylesheet()
 //   GET /sitemap.xml          indexable URLs only — see getIndexableUrls()
 //
 // Public and read-only. No tenant context: this is a magazine, and the whole point is that one
@@ -27,8 +29,9 @@ import {
     listSections, getFeatured, getLatest, getByAuthor, getArticle, listAuthors, getIndexableUrls,
 } from '../../src/utils/swan-index/queries';
 import {
-    renderShell, renderHome, renderList, renderArticle, renderAuthor,
-    articlePath, authorPath, bylineText,
+    renderShell, renderHome, renderList, renderArticle, renderAuthor, renderAbout,
+    renderFeedStylesheet, publisherLd, breadcrumbLd,
+    articlePath, authorPath, bylineText, creditParts,
 } from '../../src/utils/swan-index/render';
 import { PUBLICATION_NAME, PUBLICATION_TAGLINE } from '../../src/utils/swan-index/design';
 import { swanIndexBaseUrl } from '../../src/utils/swan-index/base-url';
@@ -50,6 +53,14 @@ const html = (statusCode: number, body: string, cache = false) => ({
 const xml = (body: string) => ({
     statusCode: 200,
     headers: { 'Content-Type': 'application/xml; charset=utf-8', 'Cache-Control': CACHE },
+    body,
+});
+
+// text/xsl, not application/xml: a browser only applies a stylesheet it was served as one, and the
+// feed silently falls back to the raw document tree if this is wrong.
+const xsl = (body: string) => ({
+    statusCode: 200,
+    headers: { 'Content-Type': 'text/xsl; charset=utf-8', 'Cache-Control': CACHE },
     body,
 });
 
@@ -258,7 +269,7 @@ async function serve(event: HandlerEvent, pathname: string, origin: Origin): Pro
           <div class="index-row__meta"><span class="eyebrow">${a.pieces} ${a.pieces === 1 ? 'piece' : 'pieces'}</span></div>
           <div>
             <h3 class="serif index-row__title"><a href="${escHtml(authorPath(a.handle, base))}">${escHtml(a.displayName)}</a></h3>
-            <span class="eyebrow">${escHtml([a.roleTitle, a.companyName].filter(Boolean).join(' · '))}</span>
+            <span class="eyebrow">${escHtml(creditParts(a).join(' · '))}</span>
           </div>
           <a class="index-row__plus" href="${escHtml(authorPath(a.handle, base))}" aria-label="Read ${escHtml(a.displayName)}">Read</a>
         </li>`).join('');
@@ -273,6 +284,32 @@ async function serve(event: HandlerEvent, pathname: string, origin: Origin): Pro
             },
             sections,
             base,
+            jsonLd: {
+                '@context': 'https://schema.org',
+                '@graph': [
+                    publisherLd(baseUrl),
+                    breadcrumbLd([
+                        { name: PUBLICATION_NAME, url: baseUrl },
+                        { name: 'Contributors', url: `${baseUrl}/authors` },
+                    ]),
+                    {
+                        '@type': 'CollectionPage',
+                        name: `Contributors — ${PUBLICATION_NAME}`,
+                        url: `${baseUrl}/authors`,
+                        isPartOf: { '@id': `${baseUrl}#periodical` },
+                        mainEntity: {
+                            '@type': 'ItemList',
+                            numberOfItems: authors.length,
+                            itemListElement: authors.slice(0, 100).map((a, i) => ({
+                                '@type': 'ListItem',
+                                position: i + 1,
+                                url: `${baseUrl}${authorPath(a.handle)}`,
+                                name: a.displayName,
+                            })),
+                        },
+                    },
+                ],
+            },
             bodyHtml: `<section class="section"><div class="wrap">
               <div class="section__head"><div>
                 <h1 class="serif section__title">Contributors</h1>
@@ -298,6 +335,7 @@ async function serve(event: HandlerEvent, pathname: string, origin: Origin): Pro
                 roleTitle: profile.roleTitle,
                 companyName: profile.companyName,
                 siteUrl: profile.siteUrl,
+                socials: profile.socials,
                 bio: profile.bio,
                 avatarUrl: null,
             },
@@ -341,12 +379,15 @@ async function serve(event: HandlerEvent, pathname: string, origin: Origin): Pro
                 roleTitle: profile.roleTitle,
                 companyName: profile.companyName,
                 siteUrl: profile.siteUrl,
+                socials: profile.socials,
             },
             title: row.title,
             dek: row.dek,
             sectionKey: row.section,
             sectionLabel: row.sectionLabel,
             liveAt: row.liveAt ? row.liveAt.toISOString() : null,
+            modifiedAt: row.updatedAt ? row.updatedAt.toISOString() : null,
+            tags: Array.isArray(row.tags) ? (row.tags as unknown[]).map(String) : null,
             bodyHtml,
             imageUrl,
             imageAlt: (payload?.featureImage?.alt as string | undefined) || row.title,
@@ -359,6 +400,21 @@ async function serve(event: HandlerEvent, pathname: string, origin: Origin): Pro
             aiNotice: BLOG_AI_NOTICE,
             more,
             baseUrl,
+        }), true);
+    }
+
+    // ── the feed's stylesheet ──────────────────────────────────────────────────────────────────
+    if (route.kind === 'feedStyle') return xsl(renderFeedStylesheet(base));
+
+    // ── about ──────────────────────────────────────────────────────────────────────────────────
+    if (route.kind === 'about') {
+        return html(200, renderAbout({
+            sections,
+            base,
+            pageUrl: `${baseUrl}/about`,
+            baseUrl,
+            // Our own page about our own publication — nothing syndicated, nothing to compete with.
+            robots: robotsFor(origin, 'index,follow'),
         }), true);
     }
 
@@ -378,6 +434,7 @@ async function serve(event: HandlerEvent, pathname: string, origin: Origin): Pro
         }).join('\n');
 
         return xml(`<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="${base}/feed.xsl"?>
 <rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:atom="http://www.w3.org/2005/Atom">
 <channel>
   <title>${escHtml(PUBLICATION_NAME)}</title>
@@ -415,9 +472,14 @@ ${body}
         // Nothing to publish here — 404 rather than hand a crawler a list it should ignore.
         if (!origin.indexable) return notFound(sections, baseUrl, base);
         const urls = await getIndexableUrls(db);
-        const statics = ['', '/latest', '/authors', ...sections.map((s) => `/section/${s.key}`)];
+        const statics = ['', '/latest', '/authors', '/about', ...sections.map((s) => `/section/${s.key}`)];
+        // Contributor profiles are OUR index of an author — our own editorial work, indexable, and
+        // the pages a search for the author's name should be able to find. They carry index,follow
+        // in renderAuthor, so leaving them out of the sitemap was an inconsistency, not a policy.
+        const authors = await listAuthors(db);
         const entries = [
             ...statics.map((p) => `  <url><loc>${escHtml(baseUrl + p)}</loc></url>`),
+            ...authors.map((a) => `  <url><loc>${escHtml(`${baseUrl}${authorPath(a.handle)}`)}</loc></url>`),
             ...urls.map((u) => `  <url><loc>${escHtml(`${baseUrl}${articlePath(u.handle, u.slug)}`)}</loc>` +
                 (u.liveAt ? `<lastmod>${u.liveAt.toISOString().slice(0, 10)}</lastmod>` : '') + `</url>`),
         ].join('\n');

@@ -32,17 +32,48 @@ import { articlePath } from '../swan-index/render';
 import { swanIndexBaseUrl } from '../swan-index/base-url';
 
 /**
+ * Tags that mean a section without containing its name.
+ *
+ * Key-substring matching alone almost never fired: an AI tags a piece "hiring", "cashflow" or
+ * "pricing", and not one of those contains "people", "money" or "growth" — so nearly everything
+ * arrived unsectioned and an editor placed it by hand. These are matched WHOLE, never as
+ * substrings, because a wrong section is worse than none: it puts a piece in front of the wrong
+ * readers under our masthead.
+ *
+ * The retired keys are aliases of their successors (capital → money, systems/craft → technology),
+ * so a post tagged with the old vocabulary still lands somewhere sensible.
+ */
+export const SECTION_TAG_ALIASES: Record<string, string[]> = {
+    operations: ['process', 'processes', 'workflow', 'workflows', 'delivery', 'logistics', 'admin',
+        'efficiency', 'productivity', 'projectmanagement', 'outsourcing', 'suppliers', 'inventory'],
+    growth: ['marketing', 'sales', 'pricing', 'demand', 'leads', 'leadgeneration', 'customers',
+        'churn', 'retention', 'seo', 'advertising', 'socialmedia', 'branding', 'acquisition'],
+    money: ['capital', 'cash', 'cashflow', 'finance', 'financial', 'funding', 'revenue', 'profit',
+        'margins', 'tax', 'invoicing', 'budgeting', 'costs', 'accounting', 'investment'],
+    people: ['hiring', 'recruitment', 'recruiting', 'staff', 'team', 'employees', 'management',
+        'managing', 'onboarding', 'training', 'hr', 'performance', 'delegation'],
+    technology: ['systems', 'craft', 'automation', 'ai', 'tools', 'tooling', 'software', 'tech',
+        'integrations', 'data', 'security', 'saas', 'apps', 'product', 'design'],
+    culture: ['values', 'leadership', 'communication', 'remote', 'remotework', 'hybrid',
+        'workplace', 'diversity', 'inclusion', 'teamculture', 'purpose'],
+    lifestyle: ['burnout', 'wellbeing', 'worklifebalance', 'health', 'habits', 'routine', 'mindset',
+        'timemanagement', 'stress', 'founderlife', 'sleep', 'holiday'],
+};
+
+/**
  * Pick a section for a piece from its tags, or null to leave it unsectioned for an editor.
  *
  * A guess, and treated as one — `section` is an editorial field and the editor tools can overwrite
- * it. Matching on the section KEY appearing in a tag is intentionally narrow: a wrong section is
- * worse than none, because it puts a piece in front of the wrong readers under our masthead.
+ * it. Sections are tried in the order given, which is the masthead's own order, so the earlier
+ * (broader) section wins a tie rather than whichever the caller happened to list first.
  */
 export function guessSection(tags: string[], sectionKeys: string[]): string | null {
     const norm = (tags || []).map((t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, ''));
     for (const key of sectionKeys) {
         const k = key.replace(/[^a-z0-9]+/g, '');
         if (norm.some((t) => t === k || t.includes(k))) return key;
+        const aliases = SECTION_TAG_ALIASES[key];
+        if (aliases && norm.some((t) => aliases.includes(t))) return key;
     }
     return null;
 }
@@ -141,10 +172,23 @@ export const swanindexAdapter: BlogDestinationAdapter<SwanIndexCreds> = {
 
         const goLive = !opts?.asDraft;
         const now = new Date();
-        // A piece an editor already FEATURED must not be demoted by the author saving a typo fix.
-        // Only 'pending' and 'live' are ours to move; every other state is an editorial decision.
-        const nextStatus = existing?.status === 'featured'
-            ? 'featured'
+        // ── What a re-publish may and may not change ────────────────────────────────────────────
+        // Nothing already published is demoted by the author saving an edit. A piece that is LIVE
+        // stays live and a FEATURED piece stays featured, whatever the destination's draft/live
+        // mode says — that mode decides where a piece ENTERS the publication, not what happens to
+        // one already in it.
+        //
+        // Only 'featured' used to be protected, and the gap was doing real damage: the mode
+        // defaults to 'draft' (the editorial queue), so an author adding an image to a live article
+        // and re-publishing sent it back to 'pending' — off the public site until an editor
+        // re-approved it — and the liveAt reset below wiped its original publication date too,
+        // re-dating the piece and reshuffling every chronological list on the site. Both are
+        // exactly what the comment two lines down says must not happen.
+        //
+        // 'rejected' and 'withdrawn' are editorial decisions and stay put. A first submission is
+        // the only case the mode still governs.
+        const nextStatus = existing?.status === 'featured' || existing?.status === 'live'
+            ? existing.status
             : existing?.status === 'rejected' || existing?.status === 'withdrawn'
                 ? existing.status
                 : (goLive ? 'live' : 'pending');

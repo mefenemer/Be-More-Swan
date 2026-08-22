@@ -60,6 +60,13 @@ CREATE TABLE IF NOT EXISTS swan_index_profiles (
   -- canonical_url of its own — the whole point of the network is to point back here.
   site_url          TEXT,
 
+  -- Validated public profile URLs, keyed by the platform ids in src/config/platform-formats.ts:
+  --   {"linkedin": "https://www.linkedin.com/in/…", "x": "https://x.com/…"}
+  -- One jsonb rather than six columns because that platform list has grown twice already, and
+  -- every value is host-checked before it is stored (src/utils/swan-index/socials.ts) — an
+  -- unchecked URL field on an indexable masthead is a link farm.
+  socials           JSONB NOT NULL DEFAULT '{}'::jsonb,
+
   status            TEXT NOT NULL DEFAULT 'active',         -- active | suspended | withdrawn
   -- Front-page eligibility, i.e. the paid tier. A profile can publish to its own page regardless;
   -- this is what makes it eligible to be selected for the curated front page.
@@ -126,6 +133,10 @@ CREATE TABLE IF NOT EXISTS swan_index_posts (
   live_at           TIMESTAMP,
   featured_at       TIMESTAMP,
 
+  -- Editorial safety screen; see the ALTER further down and swan-index/safety.ts.
+  safety_check      JSONB,
+  safety_checked_at TIMESTAMP,
+
   -- Readership, aggregated by the same beacon widget-ab-beacon.ts already serves.
   view_count        INTEGER NOT NULL DEFAULT 0,
   read_count        INTEGER NOT NULL DEFAULT 0,              -- dwell > 15s or > 50% scrolled
@@ -177,13 +188,18 @@ CREATE TABLE IF NOT EXISTS swan_index_sections (
   CONSTRAINT swan_index_sections_key_check CHECK (key ~ '^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$')
 );
 
+-- The masthead's seven sections. Named for what a reader is dealing with this week, not for a
+-- topic cloud. The first cut used Capital / Craft / Systems, which sounded like a management
+-- consultancy: "Capital" reads as venture finance to an owner-operator whose actual subject is
+-- cashflow, and "Craft" was a section nobody could predict the contents of.
 INSERT INTO swan_index_sections (key, label, standfirst, position) VALUES
-  ('operations', 'Operations', 'How the work actually gets done.',                  1),
-  ('growth',     'Growth',     'Demand, pricing and the pursuit of customers.',     2),
-  ('capital',    'Capital',    'Money in, money out, and the decisions between.',   3),
-  ('craft',      'Craft',      'Product, design and the discipline of making.',     4),
-  ('people',     'People',     'Hiring, culture and the cost of getting it wrong.', 5),
-  ('systems',    'Systems',    'Automation, tooling and the machinery of scale.',   6)
+  ('operations', 'Operations', 'How the work actually gets done.',                    1),
+  ('growth',     'Growth',     'Demand, pricing and the pursuit of customers.',       2),
+  ('money',      'Money',      'Money in, money out, and the decisions between.',     3),
+  ('people',     'People',     'Hiring, managing and the cost of getting it wrong.',  4),
+  ('technology', 'Technology', 'Tooling, automation and the machinery of scale.',     5),
+  ('culture',    'Culture',    'What a business is like to work in, and why.',        6),
+  ('lifestyle',  'Lifestyle',  'The hours, the health and the life outside the business.', 7)
 ON CONFLICT (key) DO NOTHING;
 
 -- ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -207,6 +223,56 @@ ALTER TABLE swan_index_profiles ADD  CONSTRAINT swan_index_profiles_id_org_uniqu
 ALTER TABLE swan_index_posts DROP CONSTRAINT IF EXISTS swan_index_posts_profile_org_fk;
 ALTER TABLE swan_index_posts ADD  CONSTRAINT swan_index_posts_profile_org_fk
   FOREIGN KEY (profile_id, organisation_id) REFERENCES swan_index_profiles (id, organisation_id) ON DELETE CASCADE;
+
+-- ═══════════════════════════════════════════════════════════════════════════════════════════════
+-- Additions to an already-created table.
+-- ═══════════════════════════════════════════════════════════════════════════════════════════════
+-- This file is the one place the profile table is defined, and it is idempotent by contract, so a
+-- new column goes in the CREATE above AND here — the CREATE is a no-op on every database that
+-- already has the table. db-migrate reports this file as DRIFTED after such an edit and re-runs it,
+-- which is the intended path, not a warning to work around.
+ALTER TABLE swan_index_profiles ADD COLUMN IF NOT EXISTS socials JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+-- ── Editorial safety screen, 2026-08-22 ────────────────────────────────────────────────────────
+-- The report an editor sees in the review drawer: one row per benchmark, with a verdict. Stored on
+-- the submission rather than recomputed per view so it is also a record of what was true when the
+-- piece was approved. NULL means "not screened yet", which the UI must say out loud — see the
+-- unchecked-is-not-pass rule in src/utils/swan-index/safety.ts.
+ALTER TABLE swan_index_posts ADD COLUMN IF NOT EXISTS safety_check      JSONB;
+ALTER TABLE swan_index_posts ADD COLUMN IF NOT EXISTS safety_checked_at TIMESTAMP;
+
+-- ── Section rename, 2026-08-22 ─────────────────────────────────────────────────────────────────
+-- capital → money and systems → technology are the same section under a plainer word, so the
+-- pieces move with them. craft ("product, design and the discipline of making") has no successor;
+-- technology is the least wrong home for what was filed there, and an editor can re-file by hand.
+--
+-- The retired keys are DEACTIVATED, not deleted: swan_index_posts.section has no foreign key, so a
+-- delete would leave any row this UPDATE missed pointing at nothing, and the public list query
+-- LEFT JOINs the label — it would render a piece with a blank section rather than fail loudly.
+-- Inactive keeps them out of the nav and out of /section/:key while the label still resolves.
+UPDATE swan_index_posts SET section = 'money',      updated_at = now() WHERE section = 'capital';
+UPDATE swan_index_posts SET section = 'technology', updated_at = now() WHERE section IN ('systems', 'craft');
+UPDATE swan_index_sections SET active = false WHERE key IN ('capital', 'craft', 'systems');
+
+-- Positions are re-stated rather than left to the seed INSERT: on a database that already had the
+-- first six, ON CONFLICT DO NOTHING skipped every row above, so people would still sit at 5.
+UPDATE swan_index_sections SET position = 1 WHERE key = 'operations';
+UPDATE swan_index_sections SET position = 2 WHERE key = 'growth';
+UPDATE swan_index_sections SET position = 3 WHERE key = 'money';
+UPDATE swan_index_sections SET position = 4 WHERE key = 'people';
+UPDATE swan_index_sections SET position = 5 WHERE key = 'technology';
+UPDATE swan_index_sections SET position = 6 WHERE key = 'culture';
+UPDATE swan_index_sections SET position = 7 WHERE key = 'lifestyle';
+UPDATE swan_index_sections SET standfirst = 'Hiring, managing and the cost of getting it wrong.' WHERE key = 'people';
+
+-- Undo the duplicated byline. ensureProfile() seeded company_name from organisations.name, the same
+-- field display_name comes from, so every profile nobody had edited read "Acme, Acme" on the
+-- article page and "Acme at Acme" in the admin list. Renderers now drop a company that repeats the
+-- name; this clears the stored copy so the profile FORM shows what the page actually prints.
+UPDATE swan_index_profiles
+   SET company_name = NULL, updated_at = now()
+ WHERE company_name IS NOT NULL
+   AND lower(btrim(company_name)) = lower(btrim(display_name));
 
 COMMENT ON TABLE swan_index_profiles IS 'The Swan Index — public author identity, one per workspace. Row existence is the opt-in.';
 COMMENT ON TABLE swan_index_posts    IS 'The Swan Index — curation layer over blog_posts. References the body, never copies it.';

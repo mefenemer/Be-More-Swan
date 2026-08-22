@@ -3,7 +3,8 @@
 //
 // GET    ?resource=overview                → status counts + section list, for the header cards
 // GET    ?resource=queue[&status=]         → submissions; defaults to everything but 'withdrawn'
-// GET    ?resource=post&id=N               → one piece in full, INCLUDING the rendered body
+// GET    ?resource=post&id=N[&recheck=1]   → one piece in full, INCLUDING the rendered body and
+//                                            the editorial safety screen (run on first open)
 // GET    ?resource=featured                → the front page, in editorial order
 // GET    ?resource=contributors            → profiles with their live/pending counts
 // PATCH  ?resource=post&id=N               → { status?, section?, editorScore?, editorNote?, dek? }
@@ -38,6 +39,8 @@ import { articlePath } from '../../src/utils/swan-index/render';
 import { swanIndexBaseUrl } from '../../src/utils/swan-index/base-url';
 import { resolveInlineMedia, resolveFeatureImageUrl } from '../../src/utils/blog-media-resolve';
 import { isAiAssisted } from '../../src/utils/blog-ai-assisted';
+import { runSafetyScreen, readSafetyReport, summariseSafety } from '../../src/utils/swan-index/safety';
+import { monthlyPostCount } from '../../src/utils/swan-index/profile';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -79,10 +82,15 @@ const LIST_COLUMNS = {
     authorCanonicalUrl: swanIndexPosts.authorCanonicalUrl,
     submittedAt: swanIndexPosts.submittedAt,
     liveAt: swanIndexPosts.liveAt,
+    updatedAt: swanIndexPosts.updatedAt,
     readCount: swanIndexPosts.readCount,
+    safetyCheck: swanIndexPosts.safetyCheck,
+    safetyCheckedAt: swanIndexPosts.safetyCheckedAt,
+    profileId: swanIndexPosts.profileId,
     handle: swanIndexProfiles.handle,
     displayName: swanIndexProfiles.displayName,
     profileStatus: swanIndexProfiles.status,
+    monthlyPostCap: swanIndexProfiles.monthlyPostCap,
     frontPageTier: swanIndexProfiles.frontPageTier,
     // Read live, so a piece whose source post was unpublished is visible AS SUCH in the queue
     // rather than looking healthy right up until an editor features a page that 404s.
@@ -210,14 +218,47 @@ export default withLambda(async (event) => {
         if (bodyHtml && source) bodyHtml = await resolveInlineMedia(db, source.organisationId, bodyHtml);
         const imageUrl = source ? await resolveFeatureImageUrl(db, source.organisationId, payload?.featureImage?.assetId) : null;
 
+        const aiAssisted = source ? isAiAssisted(source) : false;
+
+        // ── the editorial safety screen ────────────────────────────────────────────────────────
+        // Run on the FIRST open and re-run when the submission has been touched since (a re-publish
+        // bumps updated_at), so an editor never reads a verdict about an older version of the piece.
+        // ?recheck=1 forces it. A stored report from an earlier check LIST is treated as absent —
+        // readSafetyReport() gates on the version — because "5/5 confirmed" against yesterday's five
+        // checks is the false green this whole feature exists to prevent.
+        let safety = readSafetyReport(row.safetyCheck);
+        const stale = !row.safetyCheckedAt || (row.updatedAt && row.safetyCheckedAt < row.updatedAt);
+        if (!safety || stale || qs.recheck === '1') {
+            safety = await runSafetyScreen({
+                title: row.title,
+                dek: row.dek,
+                bodyHtml,
+                featureImageUrl: imageUrl,
+                featureImageAlt: (payload?.featureImage?.alt as string | undefined) ?? null,
+                authorCanonicalUrl: row.authorCanonicalUrl,
+                publicationOrigin: baseUrl,
+                aiAssisted,
+                profileStatus: row.profileStatus,
+                monthlyPostCap: row.monthlyPostCap,
+                monthlyPostCount: await monthlyPostCount(db, row.profileId),
+            });
+            // Best-effort: a failed write costs a re-run on the next open, never the drawer.
+            await db.update(swanIndexPosts)
+                .set({ safetyCheck: safety, safetyCheckedAt: new Date() })
+                .where(eq(swanIndexPosts.id, id!))
+                .catch((err) => console.error('[swan-index] could not store the safety report:', err));
+        }
+
         return json(200, {
             post: row,
             bodyHtml,
             imageUrl,
             // Surfaced because it decides whether the AI notice appears on the published page, and
             // an editor should know they are reading a machine-drafted piece before featuring it.
-            aiAssisted: source ? isAiAssisted(source) : false,
+            aiAssisted,
             confidenceScore: source?.confidenceScore ?? null,
+            safety,
+            safetySummary: summariseSafety(safety),
             publicUrl: `${baseUrl}${articlePath(row.handle, row.slug)}`,
         });
     }
@@ -240,6 +281,7 @@ export default withLambda(async (event) => {
                 robots: swanIndexPosts.robots,
                 title: swanIndexPosts.title,
                 blogPostId: swanIndexPosts.blogPostId,
+                safetyCheck: swanIndexPosts.safetyCheck,
             })
             .from(swanIndexPosts)
             .where(eq(swanIndexPosts.id, id!))
@@ -310,7 +352,10 @@ export default withLambda(async (event) => {
             newState: { status: patch.status ?? current.status, section: patch.section ?? current.section, robots: patch.robots ?? current.robots, editorScore: patch.editorScore ?? current.editorScore },
             reason: normaliseNote(body.editorNote) ?? undefined,
             ipAddress: getAdminIp(event.headers as Record<string, string | undefined>),
-            metadata: { title: current.title },
+            // The safety verdict AS IT STOOD when the decision was made. An approval is a decision
+            // about someone else's content on our domain, and "what did the screen say at the time"
+            // is the first question anyone asks afterwards — including when it said nothing.
+            metadata: { title: current.title, safety: summariseSafety(readSafetyReport(current.safetyCheck)) },
         });
 
         const [updated] = await listQuery(db).where(eq(swanIndexPosts.id, id!)).limit(1);

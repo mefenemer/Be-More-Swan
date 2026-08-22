@@ -9,6 +9,7 @@ import { workspaceIntegrations } from '../../../db/schema';
 import { storeSecret, getSecret, deleteSecret } from '../vault';
 import { getProfileByOrg, ensureProfile } from '../swan-index/profile';
 import { swanIndexBaseUrl } from '../swan-index/base-url';
+import type { SocialsMap } from '../swan-index/socials';
 import { swanIndexProfiles, swanIndexPosts } from '../../../db/schema';
 import { inArray } from 'drizzle-orm';
 import { getFreshAccessToken, deleteIntegration, type IntegrationProvider } from '../workspace-integrations';
@@ -199,6 +200,23 @@ export interface BlogDestinationStatus {
     handle?: string | null;
     /** First-party only: origin of the publication, for that link. */
     siteUrl?: string | null;
+    /**
+     * First-party only: the editable masthead identity, so the card can render its profile form
+     * without a second round trip. Not `siteUrl` above — that one is the PUBLICATION's origin, and
+     * this one is the author's own site.
+     */
+    profile?: SwanProfileFields | null;
+}
+
+/** The author-editable half of a Swan Index profile. */
+export interface SwanProfileFields {
+    handle: string;
+    displayName: string;
+    roleTitle: string | null;
+    companyName: string | null;
+    bio: string | null;
+    siteUrl: string | null;
+    socials: SocialsMap;
 }
 
 /** Connection state for every adapter, for the integrations/settings UI. */
@@ -230,6 +248,15 @@ export async function listBlogDestinations(db: Db, organisationId: number): Prom
                 firstParty: true,
                 handle: connected ? swanProfile!.handle : null,
                 siteUrl: swanIndexBaseUrl(),
+                profile: connected ? {
+                    handle: swanProfile!.handle,
+                    displayName: swanProfile!.displayName,
+                    roleTitle: swanProfile!.roleTitle,
+                    companyName: swanProfile!.companyName,
+                    bio: swanProfile!.bio,
+                    siteUrl: swanProfile!.siteUrl,
+                    socials: swanProfile!.socials,
+                } : null,
             };
         }
         const isOAuth = adapter.authKind === 'oauth' && !!adapter.oauthProvider;

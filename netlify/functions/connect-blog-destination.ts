@@ -6,6 +6,7 @@
 // POST { action:'connect', provider, creds:{...} }  → validate live, then store
 // POST { action:'disconnect', provider }            → remove connection + vault secret
 // POST { action:'setmode', provider, publishMode }  → set draft/live auto-syndication mode
+// POST { action:'save-profile', provider:'swanindex', profile:{...} } → edit the masthead identity
 
 import { HandlerEvent } from '@netlify/functions';
 import { getDb } from '../../db/client';
@@ -13,6 +14,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { logAuditEvent } from '../../src/utils/audit';
 import { getBlogAdapter, isBlogDestinationId } from '../../src/utils/blog-destinations';
 import { saveBlogDestination, deleteBlogDestination, listBlogDestinations, setBlogPublishMode, connectSwanIndex } from '../../src/utils/blog-destinations/store';
+import { updateProfile } from '../../src/utils/swan-index/profile';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({ statusCode, body: JSON.stringify(body) });
@@ -28,7 +30,10 @@ export default withLambda(async (event: HandlerEvent) => {
 
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed.' });
 
-    let body: { action?: string; provider?: string; creds?: Record<string, unknown>; publishMode?: string };
+    let body: {
+        action?: string; provider?: string; creds?: Record<string, unknown>; publishMode?: string;
+        profile?: Record<string, unknown>;
+    };
     try {
         body = JSON.parse(event.body || '{}');
     } catch {
@@ -53,6 +58,19 @@ export default withLambda(async (event: HandlerEvent) => {
         }
         await setBlogPublishMode(db, ctx.organisationId, body.provider, mode);
         return json(200, { ok: true, publishMode: mode });
+    }
+
+    // The author's own masthead identity — display name, credit line, bio, site and social links.
+    // It lives on this endpoint rather than a new one because it is part of managing THIS
+    // connection, and the card that shows it already has the status payload in hand.
+    if (body.action === 'save-profile') {
+        if (adapter.authKind !== 'firstparty') {
+            return json(400, { error: `${adapter.label} profiles are managed on ${adapter.label}, not here.` });
+        }
+        const saved = await updateProfile(db, ctx.organisationId, body.profile || {});
+        if (!saved.ok) return json(400, { error: saved.error });
+        logAuditEvent({ userId: ctx.userId, actionType: 'UPDATE', resourceType: 'swan_index_profile', resourceId: saved.profile.handle });
+        return json(200, { ok: true, profile: saved.profile });
     }
 
     if (body.action === 'connect') {

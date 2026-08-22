@@ -11,17 +11,25 @@ import { landmark } from './landmark';
 import { parseSwanRoute } from '../src/utils/swan-index/route';
 import { slugifyHandle, HANDLE_RE, RESERVED_HANDLES, monthStart } from '../src/utils/swan-index/profile';
 import {
-    renderHome, renderArticle, renderAuthor, renderList,
-    articlePath, authorPath, bylineText, formatDate, hostOf,
+    renderHome, renderArticle, renderAuthor, renderList, renderAbout, renderFeedStylesheet,
+    articlePath, authorPath, bylineText, creditParts, socialRow, formatDate, hostOf,
     type SwanCard, type SwanSection,
 } from '../src/utils/swan-index/render';
-import { guessSection, toDek } from '../src/utils/blog-destinations/swanindex';
+import { normaliseSocial, parseSocials, readSocials, socialEntries, SWAN_SOCIAL_ORDER } from '../src/utils/swan-index/socials';
+import { guessSection, toDek, SECTION_TAG_ALIASES } from '../src/utils/blog-destinations/swanindex';
+import {
+    runSafetyScreen, readSafetyReport, summariseSafety, textOf, imagesOf, linksOf, SAFETY_VERSION,
+} from '../src/utils/swan-index/safety';
 import { BLOG_DESTINATION_IDS, getBlogAdapter, isBlogDestinationId } from '../src/utils/blog-destinations';
 import { swanIndexBaseUrl, SWAN_INDEX_DEFAULT_ORIGIN } from '../src/utils/swan-index/base-url';
 import { resolveOrigin, robotsFor } from '../netlify/functions/swan-index-page';
 
 let passed = 0;
 function check(name: string, fn: () => void) { fn(); console.log(`  ✓ ${name}`); passed++; }
+/** The async twin. Must be AWAITED at the call site: an un-awaited async fn passed to check()
+ *  prints its tick before the assertions run, and a failure surfaces as an unhandled rejection
+ *  after the "N checks passed" line — a green suite over a red test. */
+async function acheck(name: string, fn: () => Promise<void>) { await fn(); console.log(`  ✓ ${name}`); passed++; }
 
 const sections: SwanSection[] = [
     { key: 'operations', label: 'Operations', standfirst: 'How the work gets done.' },
@@ -149,12 +157,57 @@ check('every other adapter still declares a cred path', () => {
     }
 });
 
+const SECTION_KEYS = ['operations', 'growth', 'money', 'people', 'technology', 'culture', 'lifestyle'];
+
 check('section guessing matches on the key, and declines rather than guessing wrong', () => {
-    const keys = ['operations', 'growth', 'capital'];
-    assert.equal(guessSection(['Growth', 'saas'], keys), 'growth');
-    assert.equal(guessSection(['growth-marketing'], keys), 'growth');
-    assert.equal(guessSection(['hiring', 'culture'], keys), null, 'no match → an editor decides');
-    assert.equal(guessSection([], keys), null);
+    assert.equal(guessSection(['Growth', 'saas'], SECTION_KEYS), 'growth');
+    assert.equal(guessSection(['growth-marketing'], SECTION_KEYS), 'growth');
+    assert.equal(guessSection(['quarterly-review', 'thoughts'], SECTION_KEYS), null, 'no match → an editor decides');
+    assert.equal(guessSection([], SECTION_KEYS), null);
+});
+
+check('the tags an AI actually writes now reach a section', () => {
+    // The reason this exists: key-substring matching alone fired almost never, because "hiring"
+    // does not contain "people" and "cashflow" does not contain "money". Nearly everything arrived
+    // unsectioned and an editor placed it by hand.
+    assert.equal(guessSection(['hiring'], SECTION_KEYS), 'people');
+    assert.equal(guessSection(['cashflow'], SECTION_KEYS), 'money');
+    assert.equal(guessSection(['automation'], SECTION_KEYS), 'technology');
+    assert.equal(guessSection(['burnout'], SECTION_KEYS), 'lifestyle');
+    // The retired keys are aliases of their successors, so old tags still land.
+    assert.equal(guessSection(['capital'], SECTION_KEYS), 'money');
+    assert.equal(guessSection(['systems'], SECTION_KEYS), 'technology');
+    // Whole words only — an alias must never match as a substring.
+    assert.equal(guessSection(['aisle'], SECTION_KEYS), null, '"ai" must not match inside another word');
+});
+
+check('no alias is claimed by two sections', () => {
+    // A duplicate would make the result depend on section ORDER, which is a display decision — the
+    // masthead reordering its nav must not silently re-file the next submission.
+    const seen = new Map<string, string>();
+    for (const [section, aliases] of Object.entries(SECTION_TAG_ALIASES)) {
+        for (const alias of aliases) {
+            assert.ok(!seen.has(alias), `"${alias}" is claimed by both ${seen.get(alias)} and ${section}`);
+            seen.set(alias, section);
+        }
+    }
+});
+
+check('a re-publish never demotes a piece that is already published', () => {
+    // The bug: the destination's mode defaults to 'draft' (the editorial queue), so an author
+    // adding an image to a LIVE article and re-publishing sent it back to 'pending' — off the
+    // public site — and cleared liveAt, re-dating the piece. Only 'featured' was protected.
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..',
+        'src/utils/blog-destinations/swanindex.ts'), 'utf8');
+    const decide = src.slice(
+        landmark(src, 'const nextStatus ='),
+        landmark(src, 'const shared = {'),
+    );
+    assert.ok(decide.length > 0, 'the status decision must still be findable');
+    assert.match(decide, /existing\?\.status === 'featured' \|\| existing\?\.status === 'live'/,
+        'live must be carried through untouched, exactly as featured is');
+    // And the liveAt reset must not reach either of them.
+    assert.match(src, /nextStatus === 'live' \|\| nextStatus === 'featured' \? \{\} : \{ liveAt: null \}/);
 });
 
 check('dek truncates on a word boundary and keeps short text intact', () => {
@@ -189,6 +242,26 @@ check('byline degrades cleanly as fields go missing', () => {
     assert.equal(bylineText({ handle: 'a', displayName: 'Jane', roleTitle: 'Founder', companyName: 'Acme' }), 'Jane, Founder at Acme');
     assert.equal(bylineText({ handle: 'a', displayName: 'Jane', roleTitle: 'Founder' }), 'Jane, Founder');
     assert.equal(bylineText({ handle: 'a', displayName: 'Jane' }), 'Jane');
+});
+
+check('a company that just repeats the name is dropped, not printed twice', () => {
+    // The bug this exists for: ensureProfile() seeded BOTH from organisations.name, so an unedited
+    // profile published as "Be More Swan, Be More Swan" — and "Be More Swan at Be More Swan" in the
+    // admin contributor list, which is where someone finally saw it.
+    assert.equal(bylineText({ handle: 'a', displayName: 'Be More Swan', companyName: 'Be More Swan' }), 'Be More Swan');
+    assert.equal(bylineText({ handle: 'a', displayName: 'Be More Swan', companyName: ' be more swan ' }), 'Be More Swan');
+    // A role still reads, and a genuinely different company is untouched.
+    assert.equal(bylineText({ handle: 'a', displayName: 'Acme', roleTitle: 'Founder', companyName: 'Acme' }), 'Acme, Founder');
+    assert.equal(bylineText({ handle: 'a', displayName: 'Jane', companyName: 'Acme' }), 'Jane, Acme');
+    assert.deepEqual(creditParts({ handle: 'a', displayName: 'Acme', roleTitle: 'Founder', companyName: 'Acme' }), ['Founder']);
+});
+
+check('the admin contributor line agrees with the public byline', () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'admin.html'), 'utf8');
+    // Two renderers, one rule. The admin list is where the duplication was reported from, so a
+    // future edit that inlines the concatenation again has to fail here.
+    assert.match(src, /function _swanCredit\(c\)/, 'admin.html must keep the shared credit helper');
+    assert.ok(!/\$\{c\.companyName \? ` at /.test(src), 'the raw " at company" concatenation must stay gone');
 });
 
 check('dates are long-form en-GB; an unparseable one renders as nothing, not "Invalid Date"', () => {
@@ -455,4 +528,308 @@ check('the noindex header is stamped by the FUNCTION, at one exit point', () => 
         'the inert [[headers]] rule must stay removed — it reads as a guard and is not one');
 });
 
-console.log(`\n${passed} checks passed.`);
+// ── contributor social links ────────────────────────────────────────────────
+console.log('\nSocial links');
+
+check('a bare username becomes that platform\u2019s canonical profile URL', () => {
+    assert.deepEqual(normaliseSocial('x', '@janesmith'), { ok: true, url: 'https://x.com/janesmith' });
+    assert.deepEqual(normaliseSocial('linkedin', 'janesmith'), { ok: true, url: 'https://www.linkedin.com/in/janesmith' });
+    assert.deepEqual(normaliseSocial('youtube', 'acme'), { ok: true, url: 'https://www.youtube.com/@acme' });
+});
+
+check('a pasted URL is accepted, cleaned, and forced to https', () => {
+    assert.deepEqual(normaliseSocial('linkedin', 'uk.linkedin.com/in/jane?trk=share'),
+        { ok: true, url: 'https://uk.linkedin.com/in/jane' });
+    assert.deepEqual(normaliseSocial('x', 'http://twitter.com/jane/'), { ok: true, url: 'https://twitter.com/jane' });
+    assert.deepEqual(normaliseSocial('instagram', ''), { ok: true, url: '' });
+});
+
+check('a link that is not the platform it claims is refused', () => {
+    // The masthead is indexable and carries other people's names. An unchecked URL field here is a
+    // link farm, which is the exact thing the publication's noindex default exists to avoid.
+    const wrongHost = normaliseSocial('linkedin', 'https://spam.example.com/jane');
+    assert.equal(wrongHost.ok, false);
+    assert.equal(normaliseSocial('x', 'javascript:alert(1)').ok, false);
+    assert.equal(normaliseSocial('facebook', 'https://linkedin.com/in/jane').ok, false);
+    // Look-alike domains must not pass the suffix check.
+    assert.equal(normaliseSocial('x', 'https://x.com.evil.test/jane').ok, false);
+});
+
+check('every bad field is reported, and stored blobs are re-validated on read', () => {
+    const bad = parseSocials({ linkedin: 'https://evil.test/a', x: 'https://evil.test/b' });
+    assert.equal(bad.ok, false);
+    if (!bad.ok) assert.equal(bad.errors.length, 2, 'one save should surface both problems');
+
+    const good = parseSocials({ linkedin: 'jane', instagram: '', unknown: 'https://evil.test' });
+    assert.deepEqual(good.ok && good.socials, { linkedin: 'https://www.linkedin.com/in/jane' });
+    // A row written before the host check existed must not render.
+    assert.deepEqual(readSocials({ x: 'https://evil.test/x', linkedin: 'https://www.linkedin.com/in/jane' }),
+        { linkedin: 'https://www.linkedin.com/in/jane' });
+    assert.deepEqual(readSocials(null), {});
+});
+
+check('icons render as nofollow me links with an accessible name, and nothing at all when empty', () => {
+    const html = socialRow({ handle: 'a', displayName: 'Jane Smith', socials: { linkedin: 'https://www.linkedin.com/in/jane' } });
+    assert.match(html, /rel="nofollow me noopener"/, 'contributor links must not pass authority');
+    assert.match(html, /Jane Smith on LinkedIn/, 'a screen reader needs more than "link"');
+    assert.match(html, /<svg viewBox="0 0 24 24"[^>]*aria-hidden="true"/);
+    assert.equal(socialRow({ handle: 'a', displayName: 'Jane' }), '', 'no links, no empty row');
+    assert.equal(socialEntries({}).length, 0);
+});
+
+check('display order is the publication\u2019s, and every platform has a spec', () => {
+    assert.equal(SWAN_SOCIAL_ORDER[0], 'linkedin', 'business readers follow authors on LinkedIn first');
+    const all = parseSocials(Object.fromEntries(SWAN_SOCIAL_ORDER.map((p) => [p, 'jane'])));
+    assert.ok(all.ok && Object.keys(all.socials).length === SWAN_SOCIAL_ORDER.length,
+        'a platform added to SWAN_SOCIAL_ORDER without a spec must not silently vanish');
+});
+
+check('the author page publishes the links as schema.org sameAs', () => {
+    const html = renderAuthor({
+        sections, base: '',
+        author: {
+            handle: 'acme', displayName: 'Jane Smith', roleTitle: 'Founder', companyName: 'Acme',
+            siteUrl: 'https://acme.com', bio: 'Writes about churn.',
+            socials: { linkedin: 'https://www.linkedin.com/in/jane', x: 'https://x.com/jane' },
+        },
+        items: [card()],
+        pageUrl: 'https://theswanindex.com/@acme',
+        baseUrl: 'https://theswanindex.com',
+        robots: 'index,follow',
+    });
+    // sameAs is what ties the profile to the author's own accounts — the entity credit accrues to
+    // them, which is the promise the network is sold on.
+    assert.match(html, /"sameAs":\["https:\/\/www\.linkedin\.com\/in\/jane","https:\/\/x\.com\/jane"\]/);
+    assert.match(html, /class="socials socials--author"/);
+});
+
+check('a profile created on connect no longer copies the org name into the company field', () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..',
+        'src/utils/swan-index/profile.ts'), 'utf8');
+    const insert = src.slice(
+        landmark(src, 'await db.insert(swanIndexProfiles).values({'),
+        landmark(src, 'const created = await getProfileByOrg(db, organisationId);'),
+    );
+    assert.ok(insert.length > 0, 'the ensureProfile insert must still be findable');
+    assert.ok(!/companyName:/.test(insert),
+        'seeding companyName from the org name is what produced "Acme, Acme" on every unedited profile');
+});
+
+// ── routes, about and the feed ──────────────────────────────────────────────
+console.log('\nAbout, feed and SEO');
+
+check('the new top-level routes parse, prefix and all', () => {
+    assert.deepEqual(parseSwanRoute('/about'), { kind: 'about' });
+    assert.deepEqual(parseSwanRoute('/about/'), { kind: 'about' });
+    assert.deepEqual(parseSwanRoute('/index-preview/about'), { kind: 'about' });
+    assert.deepEqual(parseSwanRoute('/feed.xsl'), { kind: 'feedStyle' });
+    assert.deepEqual(parseSwanRoute('/index-preview/feed.xsl'), { kind: 'feedStyle' });
+    // Still anchored — the new patterns must not match inside a path.
+    assert.equal(parseSwanRoute('/x/about'), null);
+});
+
+check('the about page states the two promises the code actually keeps', () => {
+    const html = renderAbout({
+        sections, base: '', pageUrl: 'https://theswanindex.com/about',
+        baseUrl: 'https://theswanindex.com', robots: 'index,follow',
+    });
+    assert.match(html, /<h1 class="serif section__title">The Swan Index<\/h1>/);
+    // The canonical credit and the human review are what a contributor decides on. If either stops
+    // being true in the code, this page is a false claim, so it is asserted rather than trusted.
+    assert.match(html, /rel="canonical"/);
+    assert.match(html, /editors.{0,4} queue/i);
+    assert.match(html, /"@type":"AboutPage"/);
+    assert.match(html, /<link rel="canonical" href="https:\/\/theswanindex\.com\/about">/);
+    assert.equal((html.match(/<h1/g) || []).length, 1, 'one h1 per page');
+});
+
+check('the feed stylesheet is a stylesheet, not a page', () => {
+    const xsl = renderFeedStylesheet('');
+    assert.match(xsl, /^<\?xml version="1\.0" encoding="UTF-8"\?>/);
+    assert.match(xsl, /<xsl:stylesheet version="1\.0"/);
+    assert.match(xsl, /xmlns:dc="http:\/\/purl\.org\/dc\/elements\/1\.1\/"/, 'dc:creator is read from the feed');
+    // It must never invite indexing: it is the same content as /latest, at a URL nobody should land on.
+    assert.match(xsl, /name="robots" content="noindex,follow"/);
+    // The staging prefix has to reach the internal links, same as every other surface.
+    assert.match(renderFeedStylesheet('/index-preview'), /href="\/index-preview"/);
+});
+
+check('the feed itself points at the stylesheet, at one place in the function', () => {
+    const fn = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..',
+        'netlify/functions/swan-index-page.ts'), 'utf8');
+    assert.match(fn, /<\?xml-stylesheet type="text\/xsl" href="\$\{base\}\/feed\.xsl"\?>/);
+    // text/xsl, not application/xml: a browser ignores a stylesheet served as anything else, and
+    // the feed silently falls back to the raw document tree — the bug this fixes.
+    assert.match(fn, /'Content-Type': 'text\/xsl; charset=utf-8'/);
+});
+
+check('an article carries a publisher, a breadcrumb and its section', () => {
+    const html = renderArticle({
+        ...articleBase,
+        authorCanonicalUrl: 'https://acme.com/blog/cutting-churn',
+        title: 'How we cut churn by a third',
+        sectionKey: 'growth', sectionLabel: 'Growth',
+        tags: ['churn', 'pricing'],
+        modifiedAt: '2026-08-21T09:00:00.000Z',
+    });
+    assert.match(html, /"@type":"BreadcrumbList"/);
+    assert.match(html, /"@id":"https:\/\/theswanindex\.com#publisher"/, 'one publisher node, referenced by @id');
+    assert.match(html, /"articleSection":"Growth"/);
+    assert.match(html, /<meta property="article:section" content="Growth">/);
+    assert.match(html, /<meta property="article:tag" content="churn">/);
+    assert.match(html, /<meta property="og:locale" content="en_GB">/);
+    assert.match(html, /"dateModified":"2026-08-21T09:00:00\.000Z"/);
+});
+
+check('a modified time equal to the publish time is not emitted', () => {
+    // Claiming an edit that did not happen is a freshness signal we have not earned.
+    const html = renderArticle({
+        ...articleBase, authorCanonicalUrl: null, modifiedAt: articleBase.liveAt,
+    });
+    assert.ok(!/article:modified_time/.test(html));
+    assert.ok(!/"dateModified"/.test(html));
+});
+
+check('the credit line reads co-written, not autonomous', () => {
+    const html = renderArticle({ ...articleBase, authorCanonicalUrl: null });
+    assert.match(html, /Co-written and published with/);
+    assert.ok(!/autonomously/.test(html), 'every piece here is submitted and reviewed by a person');
+    // The Art. 50 disclosure is a SEPARATE line and must survive the copy change.
+    assert.match(html, /Drafted with AI assistance/, 'the Art. 50 notice is a separate line and survives');
+});
+
+// ── the editorial safety screen ─────────────────────────────────────────────
+console.log('\nSafe Content Benchmark');
+
+const safeInput = {
+    title: 'How we cut churn by a third',
+    dek: 'A year of unglamorous work.',
+    bodyHtml: '<p>We stopped guessing. <a href="https://acme.com/pricing">Our pricing page</a> explains it.</p>'
+        + '<img src="https://media.example.com/a.png" alt="The churn dashboard">',
+    featureImageUrl: null,
+    featureImageAlt: null,
+    authorCanonicalUrl: 'https://acme.com/blog/churn',
+    publicationOrigin: 'https://theswanindex.com',
+    aiAssisted: true,
+    profileStatus: 'active',
+    monthlyPostCap: 8,
+    monthlyPostCount: 2,
+};
+
+check('a stored report cannot claim an all-clear its own checks do not support', () => {
+    const forged = {
+        version: SAFETY_VERSION, ranAt: '2026-08-22T00:00:00.000Z', confirmed: true,
+        checks: [
+            { id: 'a', label: 'A', status: 'pass', detail: 'ok' },
+            { id: 'b', label: 'B', status: 'unchecked', detail: 'no key' },
+        ],
+    };
+    assert.equal(readSafetyReport(forged)!.confirmed, false, 'confirmed is recomputed, never trusted');
+    // A report written against an older CHECK LIST is treated as absent — "5/5" against yesterday's
+    // five checks is exactly the false green this feature exists to prevent.
+    assert.equal(readSafetyReport({ ...forged, version: SAFETY_VERSION - 1 }), null);
+    assert.equal(readSafetyReport(null), null);
+    assert.equal(summariseSafety(null), 'Not screened yet');
+});
+
+check('the body parsers read what is actually in the markup', () => {
+    assert.equal(textOf('<p>Hello <em>there</em></p><script>evil()</script>'), 'Hello there');
+    assert.deepEqual(imagesOf('<img src="a.png" alt="A"><img src="b.png">'),
+        [{ src: 'a.png', alt: 'A' }, { src: 'b.png', alt: null }]);
+    assert.deepEqual(linksOf('<a href="https://x.test">x</a><a>none</a>'), ['https://x.test']);
+});
+
+check('the admin drawer runs the screen and never reads a verdict about an older draft', () => {
+    const fn = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..',
+        'netlify/functions/admin-swan-index.ts'), 'utf8');
+    assert.match(fn, /const stale = !row\.safetyCheckedAt \|\| \(row\.updatedAt && row\.safetyCheckedAt < row\.updatedAt\)/,
+        'a re-published piece must be re-screened, not shown its old report');
+    assert.match(fn, /if \(!safety \|\| stale \|\| qs\.recheck === '1'\)/);
+    // The verdict at the moment of the decision is what an audit asks for.
+    assert.match(fn, /metadata: \{ title: current\.title, safety: summariseSafety\(readSafetyReport\(current\.safetyCheck\)\) \}/);
+});
+
+check('the admin UI cannot show green for a screen that did not run', () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'admin.html'), 'utf8');
+    // Green is gated on safety.confirmed, which is every check passing — not on a count, and not on
+    // "no failures", either of which would let an unchecked item through as an all-clear.
+    assert.match(src, /safety\.confirmed\s*\n?\s*\? `<div class="flex items-center gap-2">/);
+    assert.match(src, /Not screened<\/span>/, 'an unscreened piece must say so in the queue');
+});
+
+// The screen's own checks are async (they call, or decline to call, a moderation API). Wrapped in
+// a function because tsx compiles this suite to CJS, where top-level await is a build error — and
+// awaited inside it, because an un-awaited assertion failure lands after the summary line as an
+// unhandled rejection, which reads as a passing suite.
+async function main() {
+    await acheck('a check that could not run reports unchecked, and unchecked is never confirmed', async () => {
+        // THE rule this module exists for. With no API key the moderation calls cannot run, and an
+        // editor told "all clear" by a screen that never ran stops looking — which is worse than being
+        // told nothing. Asserted with the key explicitly removed so the suite does not depend on env.
+        const key = process.env.OPENAI_API_KEY;
+        delete process.env.OPENAI_API_KEY;
+        try {
+            const report = await runSafetyScreen(safeInput);
+            const text = report.checks.find((c) => c.id === 'text-safety')!;
+            const image = report.checks.find((c) => c.id === 'image-safety')!;
+            assert.equal(text.status, 'unchecked');
+            assert.equal(image.status, 'unchecked');
+            assert.equal(report.confirmed, false, 'an unrun check must never read as confirmed');
+            assert.match(summariseSafety(report), /^\d+\/\d+ confirmed/);
+            // The deterministic half still ran and still reports.
+            assert.equal(report.checks.find((c) => c.id === 'author-credit')!.status, 'pass');
+            assert.equal(report.checks.find((c) => c.id === 'image-alt-text')!.status, 'pass');
+            assert.equal(report.checks.find((c) => c.id === 'link-integrity')!.status, 'pass');
+        } finally {
+            if (key !== undefined) process.env.OPENAI_API_KEY = key;
+        }
+    });
+
+    await acheck('the promise the network is built on is a hard fail when it is missing', async () => {
+        const key = process.env.OPENAI_API_KEY;
+        delete process.env.OPENAI_API_KEY;
+        try {
+            const none = await runSafetyScreen({ ...safeInput, authorCanonicalUrl: null });
+            assert.equal(none.checks.find((c) => c.id === 'author-credit')!.status, 'fail');
+            // A canonical pointing back at US is the worse version of the same bug: it looks set.
+            const self = await runSafetyScreen({ ...safeInput, authorCanonicalUrl: 'https://theswanindex.com/@acme/churn' });
+            assert.equal(self.checks.find((c) => c.id === 'author-credit')!.status, 'fail');
+        } finally {
+            if (key !== undefined) process.env.OPENAI_API_KEY = key;
+        }
+    });
+
+    await acheck('script URLs and unlabelled images are caught without any API', async () => {
+        const key = process.env.OPENAI_API_KEY;
+        delete process.env.OPENAI_API_KEY;
+        try {
+            const report = await runSafetyScreen({
+                ...safeInput,
+                bodyHtml: '<p><a href="javascript:alert(1)">click</a></p><img src="https://m.example.com/a.png">',
+            });
+            assert.equal(report.checks.find((c) => c.id === 'link-integrity')!.status, 'fail');
+            assert.equal(report.checks.find((c) => c.id === 'image-alt-text')!.status, 'warn');
+            assert.equal(report.confirmed, false);
+        } finally {
+            if (key !== undefined) process.env.OPENAI_API_KEY = key;
+        }
+    });
+
+    await acheck('a suspended contributor fails the screen whatever the writing is like', async () => {
+        const key = process.env.OPENAI_API_KEY;
+        delete process.env.OPENAI_API_KEY;
+        try {
+            const report = await runSafetyScreen({ ...safeInput, profileStatus: 'suspended' });
+            assert.equal(report.checks.find((c) => c.id === 'contributor-standing')!.status, 'fail');
+        } finally {
+            if (key !== undefined) process.env.OPENAI_API_KEY = key;
+        }
+    });
+}
+
+main().then(() => {
+    console.log(`\n${passed} checks passed.`);
+}).catch((err) => {
+    console.error(err);
+    process.exit(1);
+});

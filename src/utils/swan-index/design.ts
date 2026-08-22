@@ -43,22 +43,37 @@ export const MASTHEAD = { article: 'The', name: 'Swan Index' } as const;
 export const PUBLICATION_NAME = `${MASTHEAD.article} ${MASTHEAD.name}`;
 export const PUBLICATION_TAGLINE = 'Business writing from the people running the businesses.';
 
-/** The "Powered by" line. The magazine builds its own reputation; this is the only sales surface. */
+/**
+ * The "Powered by" line. The magazine builds its own reputation; this is the only sales surface.
+ *
+ * "Co-written", not "written autonomously". Every piece here is submitted by the person whose name
+ * is on the byline and passes a human review before it publishes, so "autonomously" described the
+ * drafting tool rather than the article — and on a masthead selling business writing BY operators
+ * it read as "nobody wrote this". The EU AI Act Art. 50 disclosure is a separate line
+ * (BLOG_AI_NOTICE) and is unchanged; this one is the credit, not the compliance notice.
+ */
 export const POWERED_BY_HTML =
-    'Written and published autonomously with ' +
+    'Co-written and published with ' +
     '<a href="https://bemoreswan.com?utm_source=swanindex&utm_medium=referral&utm_campaign=powered_by">Be More Swan</a>.';
 
 export const STYLESHEET = `
 :root {
   color-scheme: light;                      /* committed, not a default — see the header note */
 
-  --ground:   #FCFCFC;                      /* Balance's near-white; pure #fff reads as a UI */
-  --paper:    #FFFFFF;
-  --ink:      #101010;
-  --muted:    #747474;                      /* OM's exact secondary */
-  --rule:     #E3E3E3;
+  /* ── Depth comes from the gap between these two ─────────────────────────────────────────────
+     The first version set --ground to #FCFCFC, one step off pure white, and then put every page on
+     it — so nothing was ever ON anything, and the whole site read as one flat sheet with hairlines
+     drawn on it. The ground is now a real off-white and the reading column is real paper white,
+     which is the oldest depth cue in print: a page lying on a desk. Nothing else changes — no
+     gradients, no borders pretending to be edges. */
+  --ground:   #F2F2EF;                      /* the desk */
+  --paper:    #FFFFFF;                      /* the page */
+  --ink:      #0A0A0A;                      /* near-black; #101010 read soft against true paper */
+  --muted:    #5C5C5C;                      /* was #747474 — 7.2:1 on paper, and crisper for it */
+  --rule:     #E2E2DE;
   --invert:   #000000;
   --invert-ink: #FCFCFC;
+  --lift:     0 1px 2px rgba(10, 10, 10, .04), 0 28px 56px -40px rgba(10, 10, 10, .22);
 
   /* Fluid scale. clamp(min, preferred, max) on rem — zoom-safe, unlike a vw root size. */
   --step--1: clamp(0.78rem, 0.75rem + 0.15vw, 0.86rem);
@@ -87,9 +102,23 @@ body {
   font-family: var(--sans);
   font-size: var(--step-0);
   line-height: 1.6;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
 }
+
+/* ⚠️ No -webkit-font-smoothing: antialiased here, and that is deliberate. It was, and it is what
+   made the type look washed out: on macOS it replaces subpixel rendering with greyscale, thinning
+   every stem. Dark text on white is exactly the case subpixel AA is best at. Removing it is the
+   single largest crispness change on this page. */
+
+/* The reading surface. Full-bleed rather than a centred card: a magazine page is the width of the
+   paper, and an inset card with rounded corners would be a UI. */
+#main {
+  background: var(--paper);
+  box-shadow: var(--lift);
+}
+
+/* Headlines set with the line breaks a typesetter would choose rather than wherever the box ends. */
+.serif, .dek { text-wrap: pretty; }
+h1.serif, .lead__title, .article__title, .section__title { text-wrap: balance; }
 
 a { color: inherit; text-decoration: none; }
 img { max-width: 100%; height: auto; display: block; }
@@ -113,6 +142,27 @@ img { max-width: 100%; height: auto; display: block; }
 }
 
 .dek { font-size: var(--step-1); line-height: 1.45; color: var(--muted); font-weight: 400; }
+
+/* Screen-reader-only. The social icons carry no visible text, so this is the only thing standing
+   between a screen reader and a byline that reads "link, link, link". */
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* ── Contributor social links ────────────────────────────────────────────────────────────────── */
+/* Line-drawn glyphs at the byline's own weight, never brand colours: six saturated logos under a
+   headline would be the loudest thing on a page whose entire design is restraint. */
+.socials { display: inline-flex; align-items: center; gap: 0.35rem; }
+.socials__link {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2rem; height: 2rem; border-radius: 50%; color: var(--muted);
+  text-decoration: none; transition: color .18s ease, background-color .18s ease;
+}
+.socials__link:hover, .socials__link:focus-visible { color: var(--ink); background: var(--rule); }
+.socials__link svg { width: 1.15rem; height: 1.15rem; }
+.socials--author { margin-left: -0.5rem; }
+@media (prefers-reduced-motion: reduce) { .socials__link { transition: none; } }
 
 /* ── Masthead ────────────────────────────────────────────────────────────────────────────────── */
 .masthead { border-bottom: 1px solid var(--rule); background: var(--ground); }
@@ -290,6 +340,25 @@ img { max-width: 100%; height: auto; display: block; }
 .author__name { font-size: var(--step-3); margin: 0.35rem 0 0.5rem; line-height: 1.05; }
 .author__bio { max-width: 38rem; font-size: var(--step-1); color: var(--muted); margin: 0 0 1.25rem; }
 .author__links { display: flex; flex-wrap: wrap; gap: 1.5rem; }
+
+/* ── About ───────────────────────────────────────────────────────────────────────────────────── */
+/* Set at the article measure, not the grid width: it is prose, and prose 82rem wide is unreadable
+   however handsome the type. Two columns on wide screens would be worse — nobody scrolls back up. */
+.about { max-width: var(--measure); }
+.about__block + .about__block { margin-top: clamp(2rem, 4vw, 3rem); }
+.about__heading { font-size: var(--step-2); margin: 0 0 0.75rem; }
+.about p { font-family: var(--serif); font-size: var(--step-1); line-height: 1.6; margin: 0 0 1rem; }
+.about p:last-child { margin-bottom: 0; }
+.about code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82em;
+  background: var(--ground); padding: 0.12em 0.35em;
+}
+.about__cta {
+  max-width: var(--measure); margin: clamp(2.5rem, 5vw, 4rem) 0 0;
+  padding-top: 1.5rem; border-top: 1px solid var(--rule);
+  font-size: var(--step--1); text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted);
+}
+.about__cta a { color: var(--ink); text-decoration: underline; text-underline-offset: 0.2em; }
 
 /* ── Footer ──────────────────────────────────────────────────────────────────────────────────── */
 .foot { padding-block: clamp(2.5rem, 5vw, 4rem); }

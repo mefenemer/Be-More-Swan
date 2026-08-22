@@ -6,6 +6,7 @@
 // a magazine whose entire product is shareable articles cannot afford to be invisible to them.
 
 import { escHtml } from '../blog-seo';
+import { socialEntries, type SocialsMap } from './socials';
 import {
     STYLESHEET, MOTION_SCRIPT, FONT_CSS_URL, FONT_ORIGINS,
     MASTHEAD, PUBLICATION_NAME, PUBLICATION_TAGLINE, POWERED_BY_HTML,
@@ -21,6 +22,8 @@ export interface SwanAuthorRef {
     roleTitle?: string | null;
     companyName?: string | null;
     siteUrl?: string | null;
+    /** Validated profile URLs by platform — see socials.ts. Absent on card projections. */
+    socials?: SocialsMap | null;
 }
 
 /** One piece, as every list surface needs it. */
@@ -46,7 +49,12 @@ export interface SwanHead {
     imageUrl?: string | null;
     ogType?: 'website' | 'article' | 'profile';
     publishedAt?: string | null;
+    modifiedAt?: string | null;
     authorName?: string | null;
+    /** Article only: the masthead section, emitted as article:section. */
+    sectionLabel?: string | null;
+    /** Article only: the author's own tags, emitted as article:tag. */
+    tags?: string[] | null;
 }
 
 // ── small helpers ──────────────────────────────────────────────────────────────────────────────
@@ -77,11 +85,75 @@ export function authorPath(handle: string, base = ''): string {
     return `${base}/@${encodeURIComponent(handle)}`;
 }
 
+/**
+ * The credit after a name: ["Founder", "Acme"] — either half may be missing.
+ *
+ * A company equal to the display name is dropped. A profile auto-created from the organisation
+ * record used to take BOTH from organisations.name, so every workspace that had never edited its
+ * profile published as "Be More Swan, Be More Swan" — the duplication was in the data, and this is
+ * the render half of the fix (ensureProfile() no longer writes it; existing rows still have it).
+ * Compared case- and space-insensitively: "Acme Ltd" and "acme ltd " are the same company.
+ */
+export function creditParts(a: SwanAuthorRef): string[] {
+    const norm = (s?: string | null) => String(s || '').trim().toLowerCase();
+    const company = norm(a.companyName) && norm(a.companyName) !== norm(a.displayName) ? a.companyName : null;
+    return [a.roleTitle, company].filter(Boolean).map(String);
+}
+
 /** "Jane Smith, Founder at Acme" — omitting whichever halves are missing. */
 export function bylineText(a: SwanAuthorRef): string {
-    const at = [a.roleTitle, a.companyName].filter(Boolean);
+    const at = creditParts(a);
     if (at.length === 2) return `${a.displayName}, ${at[0]} at ${at[1]}`;
     return at.length ? `${a.displayName}, ${at[0]}` : a.displayName;
+}
+
+/**
+ * The author's social links, as icons.
+ *
+ * rel="nofollow me": "me" is the rel-me convention that lets the author's own site verify the link
+ * back, and nofollow is what keeps a masthead full of contributor profiles from being a link farm
+ * — the same reasoning that makes syndicated articles noindex by default. The platform name is
+ * carried in the accessible name rather than beside the glyph: a reader who can see the icon does
+ * not need the word, and a reader who cannot needs more than "link".
+ */
+export function socialRow(a: SwanAuthorRef, className = 'socials'): string {
+    const entries = socialEntries(a.socials);
+    if (!entries.length) return '';
+    const links = entries.map((e) => `<a class="socials__link" href="${escHtml(e.url)}" rel="nofollow me noopener" target="_blank" title="${escHtml(e.label)}">
+        <span class="visually-hidden">${escHtml(a.displayName)} on ${escHtml(e.label)}</span>
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">${e.icon}</svg>
+      </a>`).join('');
+    return `<span class="${escHtml(className)}">${links}</span>`;
+}
+
+// ── structured data ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The publication as an entity, in one place.
+ *
+ * Search engines resolve a site to an entity from the SAME node repeated across its pages, so a
+ * publisher block written out three slightly different ways is three weak signals instead of one.
+ * No `logo` key: an Organization logo must be a real image URL, and inventing one that 404s is a
+ * structured-data error rather than a missing nicety.
+ */
+export function publisherLd(baseUrl: string): Record<string, unknown> {
+    return {
+        '@type': 'Organization',
+        '@id': `${baseUrl}#publisher`,
+        name: PUBLICATION_NAME,
+        url: baseUrl,
+        description: PUBLICATION_TAGLINE,
+    };
+}
+
+/** A breadcrumb trail. Google renders it in place of the raw URL in a result. */
+export function breadcrumbLd(items: Array<{ name: string; url: string }>): Record<string, unknown> {
+    return {
+        '@type': 'BreadcrumbList',
+        itemListElement: items.map((it, i) => ({
+            '@type': 'ListItem', position: i + 1, name: it.name, item: it.url,
+        })),
+    };
 }
 
 // ── head ───────────────────────────────────────────────────────────────────────────────────────
@@ -103,8 +175,16 @@ export function buildHead(d: SwanHead): string {
         `<meta property="og:site_name" content="${escHtml(PUBLICATION_NAME)}">`,
     );
     if (d.imageUrl) tags.push(`<meta property="og:image" content="${escHtml(d.imageUrl)}">`);
+    tags.push(`<meta property="og:locale" content="en_GB">`);
     if (d.publishedAt) tags.push(`<meta property="article:published_time" content="${escHtml(d.publishedAt)}">`);
+    // Only when it differs: an article:modified_time equal to the publish date tells a crawler an
+    // edit happened that did not, and "freshness" claimed and not delivered is worse than silence.
+    if (d.modifiedAt && d.modifiedAt !== d.publishedAt) {
+        tags.push(`<meta property="article:modified_time" content="${escHtml(d.modifiedAt)}">`);
+    }
     if (d.authorName) tags.push(`<meta property="article:author" content="${escHtml(d.authorName)}">`);
+    if (d.sectionLabel) tags.push(`<meta property="article:section" content="${escHtml(d.sectionLabel)}">`);
+    for (const t of (d.tags || []).slice(0, 8)) tags.push(`<meta property="article:tag" content="${escHtml(t)}">`);
     tags.push(
         `<meta name="twitter:card" content="${d.imageUrl ? 'summary_large_image' : 'summary'}">`,
         `<meta name="twitter:title" content="${escHtml(d.title)}">`,
@@ -154,6 +234,7 @@ function footer(sections: SwanSection[], base: string): string {
             <ul>
               <li><a href="${escHtml(base)}/latest">Latest</a></li>
               <li><a href="${escHtml(base)}/authors">Authors</a></li>
+              <li><a href="${escHtml(base)}/about">About</a></li>
               <li><a href="${escHtml(base)}/feed.xml">RSS</a></li>
             </ul>
           </div>
@@ -337,10 +418,28 @@ export function renderHome(d: HomeData): string {
         base: d.base,
         jsonLd: {
             '@context': 'https://schema.org',
-            '@type': 'Periodical',
-            name: PUBLICATION_NAME,
-            url: d.baseUrl,
-            description: PUBLICATION_TAGLINE,
+            '@graph': [
+                publisherLd(d.baseUrl),
+                {
+                    '@type': 'WebSite',
+                    '@id': `${d.baseUrl}#website`,
+                    name: PUBLICATION_NAME,
+                    url: d.baseUrl,
+                    description: PUBLICATION_TAGLINE,
+                    inLanguage: 'en-GB',
+                    publisher: { '@id': `${d.baseUrl}#publisher` },
+                },
+                // Periodical is the honest type for what this is, and it is what makes the section
+                // pages read as parts of one publication rather than as unrelated tag archives.
+                {
+                    '@type': 'Periodical',
+                    '@id': `${d.baseUrl}#periodical`,
+                    name: PUBLICATION_NAME,
+                    url: d.baseUrl,
+                    description: PUBLICATION_TAGLINE,
+                    publisher: { '@id': `${d.baseUrl}#publisher` },
+                },
+            ],
         },
         bodyHtml: body,
     });
@@ -383,6 +482,37 @@ export function renderList(d: ListData): string {
         sections: d.sections,
         base: d.base,
         currentSection: d.currentSection,
+        // A CollectionPage whose itemList is the pieces on it. This is what makes a section read as
+        // an edited part of the publication rather than a tag archive, which is the distinction
+        // search engines apply their scaled-content judgement on.
+        jsonLd: {
+            '@context': 'https://schema.org',
+            '@graph': [
+                publisherLd(d.baseUrl),
+                breadcrumbLd([
+                    { name: PUBLICATION_NAME, url: d.baseUrl },
+                    { name: d.heading, url: d.pageUrl },
+                ]),
+                {
+                    '@type': 'CollectionPage',
+                    name: d.heading,
+                    url: d.pageUrl,
+                    ...(d.standfirst ? { description: d.standfirst } : {}),
+                    isPartOf: { '@id': `${d.baseUrl}#periodical` },
+                    inLanguage: 'en-GB',
+                    mainEntity: {
+                        '@type': 'ItemList',
+                        numberOfItems: d.items.length,
+                        itemListElement: d.items.slice(0, 30).map((c, i) => ({
+                            '@type': 'ListItem',
+                            position: i + 1,
+                            url: `${d.baseUrl}${articlePath(c.author.handle, c.slug)}`,
+                            name: c.title,
+                        })),
+                    },
+                },
+            ],
+        },
         bodyHtml: body,
     });
 }
@@ -397,6 +527,10 @@ export interface ArticleData {
     sectionKey?: string | null;
     sectionLabel?: string | null;
     liveAt: string | null;
+    /** swan_index_posts.updated_at — emitted only when it differs from liveAt. */
+    modifiedAt?: string | null;
+    /** The author's own tags. Emitted as article:tag and schema keywords, never as navigation. */
+    tags?: string[] | null;
     /** Already-sanitised, media-resolved HTML from blog_posts.published_payload. Not escaped. */
     bodyHtml: string;
     imageUrl?: string | null;
@@ -439,6 +573,7 @@ export function renderArticle(d: ArticleData): string {
         <div class="byline">
           <strong><a href="${escHtml(authorPath(d.author.handle, d.base))}">${escHtml(bylineText(d.author))}</a></strong>
           ${d.author.siteUrl ? `<a href="${escHtml(d.author.siteUrl)}" rel="nofollow">${escHtml(hostOf(d.author.siteUrl) || 'Website')}</a>` : ''}
+          ${socialRow(d.author)}
         </div>
       </header>
       ${hero}
@@ -462,28 +597,51 @@ export function renderArticle(d: ArticleData): string {
             imageUrl: d.imageUrl,
             ogType: 'article',
             publishedAt: d.liveAt,
+            modifiedAt: d.modifiedAt,
             authorName: d.author.displayName,
+            sectionLabel: d.sectionLabel,
+            tags: d.tags,
         },
         sections: d.sections,
         base: d.base,
         currentSection: d.sectionKey,
         jsonLd: {
             '@context': 'https://schema.org',
-            '@type': 'BlogPosting',
-            headline: d.title,
-            ...(d.dek ? { description: d.dek } : {}),
-            // mainEntityOfPage is the author's page when they have one — the structured-data
-            // counterpart of rel=canonical, and search engines read both.
-            mainEntityOfPage: { '@type': 'WebPage', '@id': d.authorCanonicalUrl || d.pageUrl },
-            url: d.pageUrl,
-            ...(d.imageUrl ? { image: [d.imageUrl] } : {}),
-            ...(d.liveAt ? { datePublished: d.liveAt } : {}),
-            author: {
-                '@type': 'Person',
-                name: d.author.displayName,
-                ...(d.author.siteUrl ? { url: d.author.siteUrl } : {}),
-            },
-            publisher: { '@type': 'Organization', name: PUBLICATION_NAME, url: d.baseUrl },
+            '@graph': [
+                publisherLd(d.baseUrl),
+                breadcrumbLd([
+                    { name: PUBLICATION_NAME, url: d.baseUrl },
+                    ...(d.sectionKey && d.sectionLabel
+                        ? [{ name: d.sectionLabel, url: `${d.baseUrl}/section/${encodeURIComponent(d.sectionKey)}` }]
+                        : []),
+                    { name: d.title, url: d.pageUrl },
+                ]),
+                {
+                    '@type': 'BlogPosting',
+                    headline: d.title,
+                    ...(d.dek ? { description: d.dek } : {}),
+                    // mainEntityOfPage is the author's page when they have one — the structured-data
+                    // counterpart of rel=canonical, and search engines read both.
+                    mainEntityOfPage: { '@type': 'WebPage', '@id': d.authorCanonicalUrl || d.pageUrl },
+                    url: d.pageUrl,
+                    ...(d.imageUrl ? { image: [d.imageUrl] } : {}),
+                    ...(d.liveAt ? { datePublished: d.liveAt } : {}),
+                    ...(d.modifiedAt && d.modifiedAt !== d.liveAt ? { dateModified: d.modifiedAt } : {}),
+                    ...(d.sectionLabel ? { articleSection: d.sectionLabel } : {}),
+                    ...(d.tags?.length ? { keywords: d.tags.slice(0, 12).join(', ') } : {}),
+                    inLanguage: 'en-GB',
+                    isAccessibleForFree: true,
+                    author: {
+                        '@type': 'Person',
+                        name: d.author.displayName,
+                        ...(d.author.siteUrl ? { url: d.author.siteUrl } : {}),
+                        ...(socialEntries(d.author.socials).length
+                            ? { sameAs: socialEntries(d.author.socials).map((e) => e.url) }
+                            : {}),
+                    },
+                    publisher: { '@id': `${d.baseUrl}#publisher` },
+                },
+            ],
         },
         bodyHtml: body,
     });
@@ -509,12 +667,13 @@ export function renderAuthor(d: AuthorData): string {
     const body = `<section class="wrap author">
       ${avatar}
       <div>
-        <span class="eyebrow">${escHtml([a.roleTitle, a.companyName].filter(Boolean).join(' · ') || 'Contributor')}</span>
+        <span class="eyebrow">${escHtml(creditParts(a).join(' · ') || 'Contributor')}</span>
         <h1 class="serif author__name">${escHtml(a.displayName)}</h1>
         ${a.bio ? `<p class="author__bio">${escHtml(a.bio)}</p>` : ''}
         <div class="author__links">
           ${a.siteUrl ? `<a class="eyebrow" href="${escHtml(a.siteUrl)}" rel="nofollow">${escHtml(hostOf(a.siteUrl) || 'Website')} →</a>` : ''}
           <span class="eyebrow">${d.items.length} ${d.items.length === 1 ? 'piece' : 'pieces'}</span>
+          ${socialRow(a, 'socials socials--author')}
         </div>
       </div>
     </section>
@@ -538,11 +697,20 @@ export function renderAuthor(d: AuthorData): string {
         jsonLd: {
             '@context': 'https://schema.org',
             '@type': 'ProfilePage',
+            url: d.pageUrl,
+            isPartOf: { '@id': `${d.baseUrl}#periodical` },
+            publisher: publisherLd(d.baseUrl),
             mainEntity: {
                 '@type': 'Person',
                 name: a.displayName,
                 ...(a.roleTitle ? { jobTitle: a.roleTitle } : {}),
                 ...(a.siteUrl ? { url: a.siteUrl } : {}),
+                // sameAs is how a search engine ties this profile to the author's own accounts.
+                // It is the reason the social links are worth collecting at all beyond decoration:
+                // the entity credit accrues to the AUTHOR, which is what we promise contributors.
+                ...(socialEntries(a.socials).length
+                    ? { sameAs: socialEntries(a.socials).map((e) => e.url) }
+                    : {}),
             },
         },
         bodyHtml: body,
@@ -553,4 +721,172 @@ export function renderAuthor(d: AuthorData): string {
 export function hostOf(url: string | null | undefined): string | null {
     if (!url) return null;
     try { return new URL(url).host.replace(/^www\./, ''); } catch { return null; }
+}
+
+// ── about ──────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The publication's own account of itself.
+ *
+ * Every claim here is one the code actually honours, and that is the constraint the page is written
+ * under rather than a nicety: an About page is where a publication is easiest to over-sell, and the
+ * two promises below (the canonical credit and the human review) are the two a contributor decides
+ * on. If either ever stops being true in the code, this page has to change with it.
+ */
+export const ABOUT_SECTIONS: Array<{ heading: string; body: string[] }> = [
+    {
+        heading: 'What this is',
+        body: [
+            `${PUBLICATION_NAME} is a business magazine written by the people running the businesses — owners, founders and operators publishing what they have actually learned, rather than what an agency thinks their industry wants to read.`,
+            'Every piece here first appeared on its author’s own site. We republish it, credit it, and send readers back.',
+        ],
+    },
+    {
+        heading: 'The credit goes to the author',
+        body: [
+            'A syndicated copy that outranks the original is worse than useless to the person who wrote it. So every article on this site names where it first appeared, links to it, and points <code>rel="canonical"</code> at the author’s own URL.',
+            'Syndicated pieces are not submitted for indexing by default. Editorial selection is what changes that: a piece the editors choose for the front page is a publication decision, and search engines are told so.',
+        ],
+    },
+    {
+        heading: 'A person decides what runs',
+        body: [
+            'Submissions land in an editors’ queue, not on the site. Someone reads the piece, files it under a section, and decides. Nothing reaches the front page automatically, and an author can withdraw their work at any time — disconnecting the destination takes their back catalogue down with it.',
+            'There is a monthly limit on how much any one contributor can publish. It exists to keep this a magazine rather than a content farm.',
+        ],
+    },
+    {
+        heading: 'How the writing is made',
+        body: [
+            `Contributors draft with Be More Swan, which means most pieces here are written by a person working with an AI assistant. Where that is true the article says so, in plain words, at the foot of the page — that is the ${'European AI Act'}’s requirement and, more to the point, what a reader is owed.`,
+            'What is never automated is the decision to publish.',
+        ],
+    },
+    {
+        heading: 'Writing for us',
+        body: [
+            'Contributing is open to any Be More Swan workspace: connect The Swan Index as a blog destination, publish on your own site as normal, and the piece is submitted here under your byline.',
+        ],
+    },
+];
+
+export interface AboutData {
+    sections: SwanSection[];
+    base: string;
+    pageUrl: string;
+    baseUrl: string;
+    robots: string;
+}
+
+export function renderAbout(d: AboutData): string {
+    const blocks = ABOUT_SECTIONS.map((s) => `<section class="about__block reveal">
+      <h2 class="serif about__heading">${escHtml(s.heading)}</h2>
+      ${s.body.map((p) => `<p>${p}</p>`).join('')}
+    </section>`).join('');
+
+    const body = `<section class="section"><div class="wrap">
+      <div class="section__head"><div>
+        <span class="eyebrow">About</span>
+        <h1 class="serif section__title">${escHtml(PUBLICATION_NAME)}</h1>
+        <p class="dek">${escHtml(PUBLICATION_TAGLINE)}</p>
+      </div></div>
+      <div class="about">${blocks}</div>
+      <p class="about__cta"><a href="${escHtml(d.base)}/latest">Read the latest</a> · <a href="${escHtml(d.base)}/authors">Meet the contributors</a></p>
+    </div></section>`;
+
+    return renderShell({
+        head: {
+            title: `About — ${PUBLICATION_NAME}`,
+            description: `${PUBLICATION_NAME} republishes business writing by the owners and operators who wrote it, credits the original, and puts a human editor between a submission and the front page.`,
+            pageUrl: d.pageUrl,
+            canonicalUrl: d.pageUrl,
+            robots: d.robots,
+            ogType: 'website',
+        },
+        sections: d.sections,
+        base: d.base,
+        jsonLd: {
+            '@context': 'https://schema.org',
+            '@type': 'AboutPage',
+            name: `About ${PUBLICATION_NAME}`,
+            url: d.pageUrl,
+            mainEntity: publisherLd(d.baseUrl),
+        },
+        bodyHtml: body,
+    });
+}
+
+// ── the feed's stylesheet ──────────────────────────────────────────────────────────────────────
+
+/**
+ * XSLT that turns /feed.xml into a readable page in a browser.
+ *
+ * The feed was correct all along — valid RSS 2.0, `application/xml`, the right dc:creator — but a
+ * browser with no stylesheet renders "This XML file does not appear to have any style information"
+ * over a colour-coded document tree, which to anyone who did not come looking for a feed URL looks
+ * like the site is broken. A feed reader ignores <?xml-stylesheet?> entirely, so this changes
+ * nothing about the feed itself.
+ *
+ * ⚠️ Browser XSLT support is being wound down (Chrome has announced removal). When that lands this
+ * degrades to exactly today's behaviour — the raw tree — and the feed keeps working. It is a
+ * presentation nicety with a known end date, not something to build on.
+ */
+export function renderFeedStylesheet(base: string): string {
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<xsl:stylesheet version="1.0"
+  xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
+  xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <xsl:output method="html" encoding="UTF-8" indent="yes"/>
+  <xsl:template match="/">
+    <html lang="en">
+      <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1"/>
+        <meta name="robots" content="noindex,follow"/>
+        <title><xsl:value-of select="/rss/channel/title"/> — RSS feed</title>
+        <link rel="stylesheet" href="${escHtml(FONT_CSS_URL)}"/>
+        <style><![CDATA[${STYLESHEET}
+.feed__note { border: 1px solid var(--rule); background: var(--paper); padding: clamp(1.25rem, 3vw, 2rem); margin-bottom: clamp(2rem, 4vw, 3rem); }
+.feed__url { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--step--1); word-break: break-all; }
+        ]]></style>
+      </head>
+      <body>
+        <header class="masthead"><div class="wrap masthead__inner">
+          <a class="logo" href="${escHtml(base || '/')}">
+            <span class="logo__the">${escHtml(MASTHEAD.article)}</span>
+            <span class="logo__name">${escHtml(MASTHEAD.name)}</span>
+          </a>
+          <p class="eyebrow masthead__meta">RSS feed</p>
+        </div></header>
+        <main class="section"><div class="wrap">
+          <div class="section__head"><div>
+            <span class="eyebrow">Subscribe</span>
+            <h1 class="serif section__title">This page is a feed</h1>
+            <p class="dek">You are looking at the machine-readable version of <xsl:value-of select="/rss/channel/title"/>. Paste its address into any feed reader and new pieces arrive as they publish.</p>
+          </div></div>
+          <div class="feed__note">
+            <span class="eyebrow">Feed address</span>
+            <p class="feed__url"><xsl:value-of select="/rss/channel/atom:link/@href" xmlns:atom="http://www.w3.org/2005/Atom"/></p>
+            <p><a href="${escHtml(base || '/')}">Read it in a browser instead →</a></p>
+          </div>
+          <ul class="index-list">
+            <xsl:for-each select="/rss/channel/item">
+              <li class="index-row">
+                <div class="index-row__meta"><span class="eyebrow"><xsl:value-of select="pubDate"/></span></div>
+                <div>
+                  <h2 class="serif index-row__title">
+                    <a><xsl:attribute name="href"><xsl:value-of select="link"/></xsl:attribute><xsl:value-of select="title"/></a>
+                  </h2>
+                  <p class="dek"><xsl:value-of select="description"/></p>
+                  <span class="eyebrow"><xsl:value-of select="dc:creator"/></span>
+                </div>
+                <a class="index-row__plus"><xsl:attribute name="href"><xsl:value-of select="link"/></xsl:attribute>Read</a>
+              </li>
+            </xsl:for-each>
+          </ul>
+        </div></main>
+      </body>
+    </html>
+  </xsl:template>
+</xsl:stylesheet>`;
 }
