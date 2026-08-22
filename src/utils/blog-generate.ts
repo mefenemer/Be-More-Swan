@@ -13,13 +13,18 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, aiBlueprints, blogPosts, organisations } from '../../db/schema';
+import { aiAssistants, aiBlueprints, blogPostAssets, blogPosts, organisations } from '../../db/schema';
 import { logAiUsage } from './ai-usage';
 import { buildInspoBlock } from './inspo-profile';
 import { currentDatePromptBlock } from './current-date-prompt';
 import { resolvePostingSchedule } from '../config/posting-cadence';
 import { assembleBlueprint } from './blueprint';
 import { ASSISTANT_DRAFT_REASON } from './blog-ai-assisted';
+import { parseModelJson } from './model-json';
+import {
+    groundLinks, irToBlogMarkdown, layoutIrPromptBlock, mediaIntents, normaliseLayoutIr,
+} from './layout-ir';
+import { sourceBlogImages, MAX_SOURCED_IMAGES } from './blog-media-source';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -153,6 +158,15 @@ export interface GenerateBlogBodyOptions {
 export interface GenerateBlogBodyResult {
     bodyMarkdown: string;
     tone: string;
+    /**
+     * How many stock pictures the run actually placed in the body.
+     *
+     * Zero is the ordinary answer: the drafter only asks for a picture where one earns its place,
+     * a post that already has media is left alone, and a deployment with no PEXELS_API_KEY sources
+     * nothing at all. Reported so the Studio can say what happened rather than leaving the author
+     * to notice.
+     */
+    sourcedImages: number;
 }
 
 export class BlogPostNotFoundError extends Error {
@@ -247,7 +261,12 @@ export async function generateBlogBody(
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const response = await anthropic.messages.create({
         model: BLOG_MODEL,
-        max_tokens: 2500,
+        // ⚠️ Raised from 2500 with the layout. A long-form post is the one place structured output
+        // is genuinely risky: the same 1,200 words now arrive wrapped in JSON nodes, and a reply
+        // that runs out of tokens loses the WHOLE object rather than its tail. The headroom is what
+        // keeps the structured path from being a worse deal than the wall of Markdown it replaced —
+        // and the raw-Markdown fallback below is what catches it when it happens anyway.
+        max_tokens: 6000,
         system:
             // Blog is the most year-exposed surface there is — "the 2025 guide to…" is a title
             // format a blog writer reaches for unprompted, and an H1 with a stale year is visible
@@ -255,24 +274,100 @@ export async function generateBlogBody(
             `${currentDatePromptBlock({ publishDate: post.publishDate, timezone })}\n\n` +
             `You are a blog writer${org?.name ? ` for ${org.name}` : ''}. Write in a ${tone} tone. ` +
             (assistantPrompt ? `Voice guidance: ${assistantPrompt}\n` : '') +
-            'Produce a complete, publish-ready blog post in Markdown: a single H1 title, a short ' +
-            'hook intro, 3–6 H2 sections with substantive paragraphs, and a brief conclusion. Weave ' +
-            'the target keywords in naturally — never keyword-stuff. Return ONLY the Markdown, no preamble.' +
+            'Produce a complete, publish-ready blog post: a single level-1 heading as the title, a ' +
+            'short hook intro, 3–6 level-2 sections with substantive paragraphs, and a brief ' +
+            'conclusion. Weave the target keywords in naturally — never keyword-stuff.\n' +
+            // ⚠️ THE LENGTH TARGET IS LOAD-BEARING, and it was measured rather than guessed. Asking
+            // for a layout instead of a wall of Markdown made drafts ~30% SHORTER on the same brief
+            // (mean 773 words against 1,101 over two runs each): the model keeps the same number of
+            // sections and thins every one of them, spending its budget on structure. Without this
+            // line, adding layouts would have quietly downgraded every blog post the product writes.
+            'Write 900–1,200 words in total. Each section needs real substance — two or three full ' +
+            'paragraphs, examples, specifics — not a sentence under a heading.\n' +
+            'Return ONLY a JSON object with one key, "layout", SET OUT as described under LAYOUT ' +
+            'below.\n' +
+            // ⚠️ The escape hatch, and on this surface it is doing more work than on the newsletter:
+            // a blog post is long enough that a model can run out of room mid-object. A reply that
+            // is plain Markdown is used as the draft exactly as it was before layouts existed.
+            'If you cannot produce a layout, return the post as plain Markdown instead, with no ' +
+            'JSON and no preamble.' +
             // Order matters: the workspace's binding rules and authoritative business facts are
             // established FIRST, so the Inspo styling that follows can shape the voice but never
             // override them. Mirrors the social path, where inspo sits after the blueprint.
+            `\n\n${layoutIrPromptBlock({ images: 'encouraged' })}` +
             (guardrailsBlock ? `\n\n${guardrailsBlock}` : '') +
             (inspoBlock ? `\n\n${inspoBlock}` : ''),
         messages: [{ role: 'user', content: brief }],
     });
 
-    const bodyMarkdown = (response.content[0] as { text?: string })?.text?.trim() ?? '';
-    if (!bodyMarkdown) throw new Error('Empty draft.');
+    const raw = (response.content[0] as { text?: string })?.text?.trim() ?? '';
+    if (!raw) throw new Error('Empty draft.');
 
     void logAiUsage({
         userId, workspaceId: organisationId, model: BLOG_MODEL,
         inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
     });
+
+    // ── Layout, pictures, prose ─────────────────────────────────────────────────────────────────
+    //
+    // Three outcomes, in order of how much the reader gets:
+    //   1. a valid layout → pictures are sourced for the ones it asked for, and the body is
+    //      compiled with `:::media` directives placed where the drafter wanted them;
+    //   2. no usable layout but plain Markdown → the draft it has always produced, unchanged;
+    //   3. neither → an error, and specifically NOT a post whose body is JSON scaffolding.
+    const parsed = parseModelJson<{ layout?: unknown }>(raw);
+    const layout = normaliseLayoutIr(parsed?.layout);
+
+    let bodyMarkdown: string;
+    let sourcedImages = 0;
+
+    if (layout) {
+        // The brief is the only place a real URL can have come from — same anti-fabrication rule
+        // the prompt applies to statistics, and it matters more here than in an inbox: an invented
+        // link on a blog post is a 404 published on the customer's own domain.
+        const grounded = groundLinks(layout, brief);
+
+        // ⚠️ Only source pictures for a post that has none. A redraft must not pile a second set of
+        // stock photographs onto a post somebody has already given media — and on the autopilot
+        // path a retried job would otherwise attach three more on every attempt.
+        const wanted = mediaIntents(grounded.ir).slice(0, MAX_SOURCED_IMAGES);
+        let assetIds: (number | null)[] = [];
+        if (wanted.length) {
+            const [existingMedia] = await db
+                .select({ id: blogPostAssets.contentAssetId })
+                .from(blogPostAssets)
+                .where(eq(blogPostAssets.blogPostId, blogPostId))
+                .limit(1);
+            if (!existingMedia) {
+                assetIds = await sourceBlogImages(db, {
+                    blogPostId,
+                    organisationId,
+                    userId,
+                    // The words the drafter itself wrote for the search, so no model call is spent
+                    // re-deriving them. Falls back to the alt text when it left `query` empty.
+                    queries: wanted.map((m) => m.query || m.alt),
+                });
+                sourcedImages = assetIds.filter(Boolean).length;
+            }
+        }
+
+        // ⚠️ An unresolved picture is DROPPED from the body, not faked: the directive names a real
+        // blog_post_assets row and there is no placeholder form. The description is not lost — the
+        // asset is attached to the post either way, so the Studio's media panel shows what the
+        // drafter found.
+        bodyMarkdown = irToBlogMarkdown(grounded.ir, { assetFor: (_image, i) => assetIds[i] ?? null });
+    } else if (parsed) {
+        // It parsed as JSON and there was no layout in it. Whatever is in `raw` is an object, and
+        // persisting it would put `{"layout":[{"kind":…` on a customer's blog — the exact failure
+        // src/utils/model-json.ts exists to prevent. Fail the run instead; the caller retries.
+        throw new Error('The draft came back in a form we could not read. Try again.');
+    } else {
+        // Plain Markdown: the model ignored the schema and wrote the post. Exactly the behaviour
+        // this path had before layouts existed.
+        bodyMarkdown = raw;
+    }
+
+    if (!bodyMarkdown.trim()) throw new Error('Empty draft.');
 
     // Stamp the body AND the provenance marker in one write, so a machine-drafted post can never
     // exist without the flag the AI transparency badge reads (src/utils/blog-ai-assisted.ts).
@@ -286,5 +381,5 @@ export async function generateBlogBody(
         })
         .where(and(eq(blogPosts.id, blogPostId), eq(blogPosts.organisationId, organisationId)));
 
-    return { bodyMarkdown, tone };
+    return { bodyMarkdown, tone, sourcedImages };
 }

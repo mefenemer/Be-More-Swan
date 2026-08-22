@@ -28,6 +28,8 @@ import {
     DEFAULT_THEME, designToHtml, designToPlainText, normaliseDesign, type NewsletterDesign,
 } from './newsletter-design';
 import { newsletterMediaUrl } from './newsletter-media-url';
+// The same colour maths the browser runs — see src/public/brand-contrast.js.
+import { ensureContrast } from '../public/brand-contrast.js';
 
 /**
  * The unsubscribe route for a newsletter recipient. Keyed on newsletter_sends.unsubscribe_token,
@@ -125,6 +127,14 @@ export async function renderIssueSnapshot(input: {
     // A Markdown issue keeps the shell it has always had; a designed one takes the author's theme.
     const shell = design ? design.theme : DEFAULT_THEME_SHELL;
 
+    // ⚠️ THE ACCENT IS A FILL; A LINK IS TEXT. The accent is stored exactly as the brand (or the
+    // author, in the Style panel) set it, which is right for a button — a button carries its own
+    // label colour, picked against that fill. Written as body text on the card it can easily be
+    // unreadable: a soft yellow link on white is about 1.3:1. So the link colour, and ONLY the link
+    // colour, is walked toward legibility here. Darkening the stored accent instead would darken
+    // every button with it and turn a pale brand into a different one.
+    const linkColour = ensureContrast(accent, shell.cardBackground) ?? accent;
+
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -133,7 +143,7 @@ export async function renderIssueSnapshot(input: {
 <meta name="x-apple-disable-message-reformatting">
 <title>${escapeHtml(input.senderName)}</title>
 <style>
-a{color:${accent};}
+a{color:${linkColour};}
 /* ⚠️ The ONLY thing this stylesheet is load-bearing for is stacking a two-column block on a phone.
    Every colour, size and space in the body is inline, because Outlook drops this block entirely —
    a design that needs it renders as a wall of unstyled text for a third of business recipients. */

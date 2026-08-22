@@ -11,14 +11,16 @@
 // deliberately neutral reads as a design choice, whereas a card in someone else's brand pink reads
 // as a bug. Phase 2 (website extraction) is what replaces the neutral default with a real palette.
 
-/** A colour the renderer can actually paint with: #rgb / #rrggbb, normalized to lowercase #rrggbb. */
-export function normalizeHex(raw: unknown): string | null {
-    if (typeof raw !== 'string') return null;
-    const v = raw.trim().toLowerCase();
-    const short = /^#([0-9a-f]{3})$/.exec(v);
-    if (short) return `#${short[1].split('').map((c) => c + c).join('')}`;
-    return /^#[0-9a-f]{6}$/.test(v) ? v : null;
-}
+// ⚠️ THE COLOUR MATHS LIVES IN src/public/brand-contrast.js, not here. It is plain .js so the
+// browser runs the SAME artifact: the newsletter canvas picks a button's label colour as the author
+// adds it, and the server picks the identical colour when it builds one from a template. Re-exported
+// rather than moved out of this module's surface, so every existing caller is untouched.
+export {
+    normalizeHex, relativeLuminance, saturation, contrastRatio, readableInkOn,
+    MIN_DISPLAY_CONTRAST,
+} from '../public/brand-contrast.js';
+
+import { normalizeHex } from '../public/brand-contrast.js';
 
 export interface BrandKit {
     /** Accent — the headline colour on a light card, and the background of a bold one. */
@@ -194,57 +196,7 @@ export function shouldExtractBrandKit(kit: BrandKit, now = new Date()): boolean 
 }
 
 // ── Contrast ──────────────────────────────────────────────────────────────────────────────────
-// The user's brief allows either polarity ("white background and suitable font colour" OR
-// "coloured background with white font"), which means the renderer picks foregrounds at runtime
-// against a colour nobody has eyeballed. These helpers make that pick safe rather than hopeful:
-// a client whose accent is pale yellow must not get white text on it.
-
-/** WCAG 2.1 relative luminance (0 = black, 1 = white). */
-export function relativeLuminance(hex: string): number {
-    const h = normalizeHex(hex) ?? '#000000';
-    const channel = (i: number) => {
-        const c = parseInt(h.slice(1 + i * 2, 3 + i * 2), 16) / 255;
-        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    };
-    return 0.2126 * channel(0) + 0.7152 * channel(1) + 0.0722 * channel(2);
-}
-
-/** HSL saturation, 0…1. Used to tell a brand accent apart from a grey/canvas/ink colour. */
-export function saturation(hex: string): number {
-    const h = normalizeHex(hex) ?? '#000000';
-    const [r, g, b] = [0, 1, 2].map((i) => parseInt(h.slice(1 + i * 2, 3 + i * 2), 16) / 255);
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    if (max === min) return 0;
-    const l = (max + min) / 2;
-    return l > 0.5 ? (max - min) / (2 - max - min) : (max - min) / (max + min);
-}
-
-/** WCAG contrast ratio between two colours, 1:1 … 21:1. */
-export function contrastRatio(a: string, b: string): number {
-    const [l1, l2] = [relativeLuminance(a), relativeLuminance(b)];
-    const [hi, lo] = l1 >= l2 ? [l1, l2] : [l2, l1];
-    return (hi + 0.05) / (lo + 0.05);
-}
-
-/** Large display type only needs 3:1 under WCAG; below that a colour is unusable as a headline. */
-export const MIN_DISPLAY_CONTRAST = 3;
-
-/**
- * The foreground to write on `background`: white when it is legible there, otherwise the dark ink.
- *
- * Deliberately NOT "whichever contrasts most". Be More Swan's own accent is a case in point — dark
- * ink scores 4.4:1 on the neon pink versus white's 3.8:1, so a pure max-contrast rule would set
- * every bold card in near-black and quietly contradict the brand (and the brief, which asks for a
- * coloured field with white type). White is the design intent, so white wins whenever it clears the
- * display floor; a pale accent, where white would genuinely be unreadable, is what falls back.
- *
- * If NEITHER clears the floor — an accent close to mid-grey — the better of the two is returned:
- * a slightly-under-threshold headline beats refusing to draw one.
- */
-export function readableInkOn(background: string, ink = '#1f1e1b'): string {
-    const white = contrastRatio('#ffffff', background);
-    if (white >= MIN_DISPLAY_CONTRAST) return '#ffffff';
-    const dark = contrastRatio(ink, background);
-    return dark >= MIN_DISPLAY_CONTRAST || dark >= white ? ink : '#ffffff';
-}
+// Moved to src/public/brand-contrast.js and re-exported at the top of this file — the newsletter
+// canvas needs the identical answers in the browser. The reasoning that used to live here (why
+// readableInkOn prefers white rather than maximising contrast, and what each WCAG floor is for)
+// moved with the code; read it there before changing a threshold.

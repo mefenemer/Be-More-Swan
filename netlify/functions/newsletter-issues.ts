@@ -35,10 +35,11 @@ import {
     NEWSLETTER_DRAFT_REASON,
 } from '../../src/utils/newsletter-generate';
 import {
-    applyProseToDesign, blocksFromMarkdown, designToMarkdown, DEFAULT_THEME, findingsHtmlHint,
+    applyProseToDesign, blocksFromMarkdown, designToMarkdown, findingsHtmlHint,
     normaliseDesign, type NewsletterDesign,
 } from '../../src/utils/newsletter-design';
 import { designFromTemplate, NEWSLETTER_TEMPLATES } from '../../src/config/newsletter-templates';
+import { loadBrandNewsletterTheme } from '../../src/utils/brand-theme';
 import { NEWSLETTER_PURPOSES, purposeOrDefault } from '../../src/config/newsletter-purposes';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { renderForRecipient, renderIssueSnapshot } from '../../src/utils/newsletter-render';
@@ -287,6 +288,12 @@ export default withLambda(async (event: HandlerEvent) => {
                 defaultTemplate: p.defaultTemplate,
             })),
             templates: NEWSLETTER_TEMPLATES.map((t) => ({ key: t.key, label: t.label, description: t.description })),
+            // ⚠️ The organisation's colours, resolved by the SAME function the server mints designs
+            // with (src/utils/brand-theme.ts). The browser had its own hardcoded copy of the default
+            // theme and used it for a converted sequence step and for every new button — two places
+            // that quietly disagreed with the server. It rides with the rest of the org-level config
+            // for the same reason the merge vars do: the browser must not hold its own answer.
+            brandTheme: await loadBrandNewsletterTheme(db, orgId),
         });
     }
 
@@ -333,7 +340,9 @@ export default withLambda(async (event: HandlerEvent) => {
         // A template is opted INTO. An issue created with no template is a plain Markdown issue —
         // which is what the chat card creates, what the blog hand-off creates, and what the
         // autopilot creates, and none of those should acquire a layout they did not ask for.
-        const seeded = body.template ? designFromTemplate(body.template) : null;
+        const seeded = body.template
+            ? designFromTemplate(body.template, await loadBrandNewsletterTheme(db, orgId))
+            : null;
         // Scrubbed on the way in, like every other write path: a chat draft can carry a tag the
         // send worker cannot resolve just as easily as a generated one.
         const bodyMarkdown = 'bodyMarkdown' in body
@@ -705,11 +714,15 @@ export default withLambda(async (event: HandlerEvent) => {
             return json(200, { issue: updated, design: null });
         }
 
+        // The organisation's own colours, resolved once for whichever branch runs. An org that has
+        // never set a brand gets DEFAULT_THEME back, so this changes nothing for them.
+        const theme = await loadBrandNewsletterTheme(db, orgId);
+
         const design = body.mode === 'convert'
             // ⚠️ Converting keeps the author's words and only adds structure — the alternative
             // (start from a template) would silently discard a draft they may have spent an hour on.
-            ? { version: 1, template: 'custom', theme: { ...DEFAULT_THEME }, blocks: blocksFromMarkdown(issue.bodyMarkdown) }
-            : designFromTemplate(body.template);
+            ? { version: 1, template: 'custom', theme, blocks: blocksFromMarkdown(issue.bodyMarkdown) }
+            : designFromTemplate(body.template, theme);
 
         const normalised = normaliseDesign(design);
         if (!normalised) return json(400, { error: 'That template produced nothing to edit.' });

@@ -12,8 +12,9 @@
 // English is how a template's own words end up in somebody's inbox. Every text block below is
 // written so that leaving it in would be visibly wrong.
 
-import type { NewsletterDesign, DesignBlock } from '../utils/newsletter-design';
+import type { NewsletterDesign, DesignBlock, DesignTheme } from '../utils/newsletter-design';
 import { DEFAULT_THEME } from '../utils/newsletter-design';
+import { applyThemeToNewBlocks } from '../utils/brand-theme';
 
 export interface NewsletterTemplate {
     key: string;
@@ -152,13 +153,26 @@ export function findTemplate(key: unknown): NewsletterTemplate {
     return NEWSLETTER_TEMPLATES.find((t) => t.key === k) ?? NEWSLETTER_TEMPLATES[0];
 }
 
-/** A fresh design from a template key. The theme is always the default — themes are per-issue. */
-export function designFromTemplate(key: unknown): NewsletterDesign {
+/**
+ * A fresh design from a template key, in the organisation's own colours.
+ *
+ * `theme` comes from `brandNewsletterTheme(org.brandKit)` at the call site — this file has no
+ * organisation in scope and must not acquire one, because the templates are also read by the
+ * browser's picker. Omitting it keeps the pre-brand default, which is what the tests and any
+ * caller without an org get.
+ *
+ * ⚠️ The blocks are repainted after `build()`, not built themed: the `button()` helper above bakes
+ * in DEFAULT_THEME.accent, and a template that shipped a green button into a customer's blue
+ * newsletter is the exact fault this whole path exists to fix. Themes remain per-issue after
+ * creation — nothing re-applies a brand to a design somebody has edited.
+ */
+export function designFromTemplate(key: unknown, theme?: DesignTheme): NewsletterDesign {
     const template = findTemplate(key);
+    const resolved = theme ?? { ...DEFAULT_THEME };
     return {
         version: 1,
         template: template.key,
-        theme: { ...DEFAULT_THEME },
-        blocks: template.build(),
+        theme: resolved,
+        blocks: applyThemeToNewBlocks(template.build(), resolved),
     };
 }

@@ -43,6 +43,12 @@
   ];
   var FONT_LABELS = ['System sans', 'Serif', 'Rounded sans', 'Typewriter'];
 
+  // ⚠️ LAST RESORT ONLY. The colours a new design actually gets are the ORGANISATION's, resolved
+  // by src/utils/brand-theme.ts from its brand kit and handed to mount() as `defaultTheme` (the
+  // newsletter list GET returns it as `brandTheme`). This object is what an org that has never set
+  // a brand keeps, and what remains if the payload is missing — it must stay identical to
+  // DEFAULT_THEME in src/utils/newsletter-design.ts. It used to be the only answer, which is why
+  // every customer's newsletter went out in this green.
   var DEFAULT_THEME = {
     accent: '#059669',
     background: '#f6f7f9',
@@ -50,6 +56,13 @@
     text: '#111827',
     fontFamily: FONT_STACKS[0],
     rounded: true,
+  };
+
+  // The shared colour maths — the SAME artifact src/utils/brand-theme.ts imports on the server, so a
+  // button added here and a button built from a template there get the identical label colour.
+  // Script-loaded by workspace.html; the fallback keeps the canvas working if it ever is not.
+  var CONTRAST = (typeof window !== 'undefined' && window.BrandContrast) || {
+    readableInkOn: function () { return '#ffffff'; },
   };
 
   var uid = function () { return 'b_' + Math.random().toString(36).slice(2, 10); };
@@ -131,13 +144,19 @@
     image: function () {
       return { id: uid(), type: 'image', assetId: null, baseAssetId: null, alt: '', href: '', align: 'center', width: 100, caption: '', overlays: [] };
     },
-    button: function () {
-      return { id: uid(), type: 'button', label: 'Read more', href: '', align: 'center', background: DEFAULT_THEME.accent, color: '#ffffff' };
+    // ⚠️ Takes the live theme. Every button in the product used to be born in the default green
+    // with a white label — wrong colour on a branded email, and unreadable on a pale accent.
+    button: function (theme) {
+      var accent = (theme && theme.accent) || DEFAULT_THEME.accent;
+      return {
+        id: uid(), type: 'button', label: 'Read more', href: '', align: 'center',
+        background: accent, color: CONTRAST.readableInkOn(accent),
+      };
     },
     divider: function () { return { id: uid(), type: 'divider' }; },
     spacer: function () { return { id: uid(), type: 'spacer', size: 24 }; },
-    columns: function () {
-      return { id: uid(), type: 'columns', columns: [[FACTORY.image()], [FACTORY.heading(), FACTORY.text()]] };
+    columns: function (theme) {
+      return { id: uid(), type: 'columns', columns: [[FACTORY.image(theme)], [FACTORY.heading(theme), FACTORY.text(theme)]] };
     },
   };
 
@@ -206,7 +225,10 @@
       return {
         version: 1,
         template: (design && design.template) || 'custom',
-        theme: Object.assign({}, DEFAULT_THEME, (design && design.theme) || {}),
+        // ⚠️ The stored theme still wins field by field. A design somebody has restyled by hand
+        // must not be repainted in the brand the next time it is opened — the brand is the base a
+        // NEW design starts from, not a rule applied to old ones.
+        theme: Object.assign({}, DEFAULT_THEME, opts.defaultTheme || {}, (design && design.theme) || {}),
         blocks: (design && Array.isArray(design.blocks)) ? design.blocks.slice(0, MAX_BLOCKS) : [],
       };
     }
@@ -241,7 +263,7 @@
     // ── Mutations ─────────────────────────────────────────────────────────────
     function addBlock(kind) {
       if (state.design.blocks.length >= MAX_BLOCKS) { toast('That is as many blocks as one email can hold.'); return; }
-      var block = FACTORY[kind] ? FACTORY[kind]() : null;
+      var block = FACTORY[kind] ? FACTORY[kind](state.design.theme) : null;
       if (!block) return;
       // Inserted AFTER the selection rather than at the end. Adding to the bottom of a long email
       // and then dragging it fifteen places up is the interaction everybody complains about.
@@ -389,9 +411,32 @@
           return '<option value="' + esc(f) + '"' + (t.fontFamily === f ? ' selected' : '') + '>' + FONT_LABELS[i] + '</option>';
         }).join('') + '</select>')
         + field('Corners', seg('rounded', t.rounded ? 'r' : 's', [['r', 'Rounded'], ['s', 'Square']]))
+        + brandResetHtml()
         + '<p class="nld-hint">Most email clients honour these. A few — Outlook especially — will '
         + 'ignore rounded corners and background colours, so the email must still read as an email '
         + 'in black on white. It always will: nothing here changes the words.</p>';
+    }
+
+    /**
+     * "Back to my brand colours", offered only when it would change something.
+     *
+     * ⚠️ Deliberately a button rather than automatic. A design keeps whatever colours it was saved
+     * with (see normalise) — repainting an issue somebody styled by hand, because their brand kit
+     * changed last week, is not a thing software should do on its own. This is how they ask.
+     */
+    function brandResetHtml() {
+      var brand = opts.defaultTheme;
+      if (!brand) return '';
+      var t = state.design.theme;
+      var same = ['accent', 'text', 'cardBackground', 'background'].every(function (k) {
+        return String(t[k]).toLowerCase() === String(brand[k]).toLowerCase();
+      });
+      if (same) {
+        return '<p class="nld-hint" style="margin-top:10px">These are your brand colours, from your '
+          + 'brand kit in Settings.</p>';
+      }
+      return '<div style="margin-top:10px"><button type="button" class="nld-btn" data-nld-brandreset>'
+        + 'Back to my brand colours</button></div>';
     }
 
     function inspectorHtml() {
@@ -574,6 +619,19 @@
           changed();
         });
       });
+
+      var brandReset = host.querySelector('[data-nld-brandreset]');
+      if (brandReset) {
+        brandReset.addEventListener('click', function () {
+          // ⚠️ Colours only. The font and the corners are layout choices the author made about THIS
+          // email, and the brand kit has no opinion about either (a webfont does not survive the
+          // trip into an inbox — see src/utils/brand-theme.ts).
+          ['accent', 'text', 'cardBackground', 'background'].forEach(function (k) {
+            if (opts.defaultTheme && opts.defaultTheme[k]) state.design.theme[k] = opts.defaultTheme[k];
+          });
+          changed();
+        });
+      }
 
       host.querySelectorAll('[data-nld-fmt]').forEach(function (el) {
         el.addEventListener('click', function () { applyFormat(el.getAttribute('data-nld-fmt')); });

@@ -4,7 +4,22 @@ Authoring goal: in the Blog Studio, an author can bring in an **image, video or 
 their content library, a Canva design, a Pexels stock search, or an AI generation — and **drag it
 into the body** where they want it: inline with the text, or as part of a **column layout**.
 
-This plan is the design + phasing for that. No code has been written yet.
+This plan is the design + phasing for that.
+
+> **Status — 2026-08-22. ⚠️ Phases 1–4 are SHIPPED.** This line used to read "No code has been
+> written yet", and it stayed that way for a month after the code landed — long enough to be quoted
+> back as a reason not to start something that was already possible. Verify against the code before
+> treating any phase below as outstanding.
+>
+> - **Phase 1–2** (directives, sanitiser, resolver, editor insert, audio as an asset type) — done.
+>   `src/public/marked-bms-directives.js`, `markdown-render.ts`, `src/utils/blog-media-resolve.ts`,
+>   `tests/blog-media-directives.test.ts` (24 checks, hostile input included).
+> - **Phase 3–4** (positional insert, drag-and-drop, OS file drop, column layouts) — done.
+>   `markdown-editor.js` (`insertMediaAt`), `blog-studio-modal.js` (`insertColumns`).
+> - **Phase 5** — partly done. §5.1/5.2 (decoupled stock sourcing, stock VIDEO on the blog) and a
+>   drafting-time entry point (`src/utils/blog-media-source.ts`, used by `blog-generate.ts` to place
+>   pictures the layout IR asked for) landed 2026-08-22. Still open: the Studio's AI-video job-poll
+>   UI (§5.3) and a blog entry into the `media-resolver.ts` matrix (§5.4).
 
 Companion to `docs/content-engine-epic-plan.md` (the blog epic proper). Read §8 of that doc first —
 the publish snapshot contract described there is what constrains most of the decisions below.

@@ -26,6 +26,10 @@
     issues: [], segments: [], customFields: [], sendTimezone: '', current: null, dirty: false,
     // Config the server owns — purposes and templates are not duplicated in the browser.
     purposes: [], templates: [],
+    // The organisation's colours, resolved server-side from its brand kit (src/utils/brand-theme.ts)
+    // and returned by the list GET. Null until the first load; the designer falls back to its own
+    // default, which is what an org that has never set a brand gets anyway.
+    brandTheme: null,
     // Who this Studio speaks for. ⚠️ Resolved once; '' records "we looked and there is no
     // Newsletter Assistant", so an org without one does not refetch on every issue.
     assistant: { id: null, name: null },
@@ -142,12 +146,17 @@
 
   async function loadIssues(selectId) {
     try {
-      const { issues, segments, customFields, purposes, templates } = await api(ISSUES_API);
+      const { issues, segments, customFields, purposes, templates, brandTheme } = await api(ISSUES_API);
       state.issues = issues || [];
       state.segments = segments || [];
       state.customFields = customFields || [];
       state.purposes = purposes || [];
       state.templates = templates || [];
+      // ⚠️ The organisation's colours, resolved by the server from its brand kit — the same answer
+      // the server uses when IT mints a design. The browser must not compute its own: it used to
+      // fall back to the designer's hardcoded default green, so a layout started here and a layout
+      // started by the server disagreed about what colour the customer's newsletter is.
+      if (brandTheme) state.brandTheme = brandTheme;
       renderList();
       fillSegments();
       renderVarChips();
@@ -170,12 +179,13 @@
    */
   async function refreshList() {
     try {
-      const { issues, segments, customFields, purposes, templates } = await api(ISSUES_API);
+      const { issues, segments, customFields, purposes, templates, brandTheme } = await api(ISSUES_API);
       state.issues = issues || [];
       state.segments = segments || [];
       state.customFields = customFields || [];
       if (purposes) state.purposes = purposes;
       if (templates) state.templates = templates;
+      if (brandTheme) state.brandTheme = brandTheme;
       renderList();
     } catch { /* the list is context, not the work — a failure here must not disturb the editor */ }
   }
@@ -428,6 +438,7 @@
     state.designer = window.NewsletterDesigner.mount({
       host,
       design,
+      defaultTheme: state.brandTheme || null,
       assistantName: assistantName(),
       onChange: () => {
         scheduleSave();
@@ -1212,9 +1223,18 @@
       $('nl-subject').value = res.subject || '';
       $('nl-preheader').value = res.preheader || '';
       $('nl-body').value = res.bodyMarkdown || '';
-      // The server re-flowed the new copy into the layout, keeping the pictures and buttons where
-      // they were. Take its version rather than the one on screen.
-      if (res.design && state.designer) state.designer.setDesign(res.design);
+      // Two different things arrive as `design`, and they need different handling:
+      //  · the issue already HAD a layout — the server re-flowed the new copy into it, keeping the
+      //    pictures and buttons where they were, so take its version rather than the one on screen;
+      //  · the issue had none and the assistant DESIGNED one (src/utils/layout-ir.ts) — there is no
+      //    canvas mounted yet, so mounting it is what makes the layout visible at all. Without this
+      //    the author gets the derived Markdown in the textarea and never sees the layout they were
+      //    just written.
+      if (res.design) {
+        if (state.current) state.current.design = res.design;
+        if (state.designer) state.designer.setDesign(res.design);
+        else if (state.current) mountDesign(state.current);
+      }
       renderWarnings(res.warnings);
       renderWordCount();
       recomputeFindings();
@@ -2019,7 +2039,11 @@
       const md = $('nl-seq-body').value || '';
       const design = {
         version: 1, template: 'custom',
-        theme: (window.NewsletterDesigner && window.NewsletterDesigner.DEFAULT_THEME) || {},
+        // ⚠️ The org's colours, exactly as the server would build them for an issue converted the
+        // same way. The designer's own DEFAULT_THEME is the last resort behind it, not the answer.
+        theme: state.brandTheme
+          || (window.NewsletterDesigner && window.NewsletterDesigner.DEFAULT_THEME)
+          || {},
         blocks: blocksFromMarkdownClient(md),
       };
       seqState.editing.design = design;
@@ -2170,7 +2194,7 @@
     hide($('nl-seq-design-on')); show($('nl-seq-design-off'), 'inline-flex');
     seqState.editing.design = live;
     seqState.designer = window.NewsletterDesigner.mount({
-      host, design: live, assistantName: assistantName(),
+      host, design: live, defaultTheme: state.brandTheme || null, assistantName: assistantName(),
       onChange: () => { seqSaver?.schedule(); renderSeqWordCount(); recomputeSeqFindings(); },
     });
   }
@@ -2217,6 +2241,10 @@
           stepNumber: Number($('nl-seq-step-number').value || 1),
           delayDays: Number($('nl-seq-delay').value || 0),
           notes: $('nl-seq-body').value,
+          // ⚠️ A step being written has no row yet, so the server cannot read its layout from
+          // anywhere but here. With it, the new copy flows INTO the layout (pictures and buttons
+          // stay put); without it, the assistant is free to design one.
+          design: (seqState.designer && seqState.designer.getDesign()) || seqState.editing.design || null,
         }),
       });
       // The subject is only overwritten when the author has not written one — they usually have,
@@ -2224,9 +2252,18 @@
       if (!($('nl-seq-subject').value || '').trim()) $('nl-seq-subject').value = res.subject || '';
       if (!($('nl-seq-preheader').value || '').trim()) $('nl-seq-preheader').value = res.preheader || '';
       $('nl-seq-body').value = res.bodyMarkdown || '';
-      if (seqState.designer) {
-        const design = seqState.designer.getDesign();
-        seqState.designer.setDesign({ ...design, blocks: blocksFromMarkdownClient(res.bodyMarkdown || '') });
+      // Two things arrive as `design`, exactly as on the issue editor: the layout this step already
+      // had with the new copy re-flowed into it, or a layout the assistant designed for a step that
+      // had none. The second needs a canvas mounting — without it the author gets the derived
+      // Markdown in the textarea and never sees the email they were just written.
+      //
+      // ⚠️ What used to be here rebuilt the blocks from the Markdown in the BROWSER, which deleted
+      // every picture and button in the step. The server re-flows now (applyProseToDesign), so take
+      // its answer rather than making our own.
+      if (res.design) {
+        seqState.editing.design = res.design;
+        if (seqState.designer) seqState.designer.setDesign(res.design);
+        else mountSeqDesign(res.design);
       }
       if (res.warnings && res.warnings.length) window.showToast(res.warnings[0], { duration: 8000 });
       seqSaver?.schedule();
@@ -2258,6 +2295,9 @@
           subject: $('nl-seq-subject').value,
           preheader: $('nl-seq-preheader').value,
           bodyMarkdown: seqProse(),
+          // So the server can flow the revision into the layout instead of the browser rebuilding
+          // it — see the draft path above.
+          design: (seqState.designer && seqState.designer.getDesign()) || seqState.editing.design || null,
         }),
       });
       seqState.editing.revision = res;
@@ -2290,9 +2330,12 @@
       $('nl-seq-subject').value = r.subject || $('nl-seq-subject').value;
       $('nl-seq-preheader').value = r.preheader || $('nl-seq-preheader').value;
       $('nl-seq-body').value = r.bodyMarkdown || '';
-      if (seqState.designer) {
-        const design = seqState.designer.getDesign();
-        seqState.designer.setDesign({ ...design, blocks: blocksFromMarkdownClient(r.bodyMarkdown || '') });
+      // ⚠️ The server flowed the revision into the layout, keeping the pictures and buttons where
+      // the author put them. Rebuilding the blocks from the Markdown here — which is what this used
+      // to do — deleted every one of them.
+      if (r.design) {
+        seqState.editing.design = r.design;
+        if (seqState.designer) seqState.designer.setDesign(r.design);
       }
       seqState.editing.revision = null;
       hide(el);

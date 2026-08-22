@@ -33,8 +33,9 @@ import {
     draftSequenceEmail, refineEmailCopy, refineInstructionFor, scrubMergeTags,
 } from '../../src/utils/newsletter-generate';
 import { loadCustomFieldDefs, loadCustomFieldKeys } from '../../src/utils/audience-custom-fields';
-import { designToMarkdown, normaliseDesign } from '../../src/utils/newsletter-design';
+import { applyProseToDesign, designToMarkdown, normaliseDesign } from '../../src/utils/newsletter-design';
 import { designFromTemplate } from '../../src/config/newsletter-templates';
+import { loadBrandNewsletterTheme } from '../../src/utils/brand-theme';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -208,6 +209,9 @@ export default withLambda(async (event: HandlerEvent) => {
                 .where(eq(newsletterSequenceSteps.sequenceId, sequence.id))
                 .orderBy(asc(newsletterSequenceSteps.stepNumber));
             const stepNumber = Math.max(1, Math.min(MAX_STEPS, Number(body.stepNumber || 1) || 1));
+            // The layout the step editor currently has, sent up by the browser — a step being
+            // written has no row yet, so the server cannot read it from anywhere else.
+            const existingDesign = normaliseDesign(body.design);
             const result = await draftSequenceEmail(db, {
                 organisationId: orgId,
                 userId: ctx.userId,
@@ -217,7 +221,20 @@ export default withLambda(async (event: HandlerEvent) => {
                 notes: body.notes,
                 // The other subjects, so email three does not open by introducing the business again.
                 existingSubjects: steps.filter((st) => st.stepNumber !== stepNumber).map((st) => st.subject),
+                // ⚠️ Only design a step that has no design. Otherwise the author already laid this
+                // email out and the new copy flows INTO it, below.
+                allowLayout: !existingDesign,
             });
+
+            // ⚠️ Re-flow rather than rebuild. This used to replace the step's blocks wholesale with
+            // blocksFromMarkdown in the BROWSER, which threw away every picture and button the
+            // author had put in a welcome email — the issue editor has re-flowed since the Studio
+            // shipped and this path never did. applyProseToDesign is the "your pictures stay where
+            // they are" promise; a welcome email is entitled to it too.
+            if (existingDesign) {
+                const next = applyProseToDesign(existingDesign, result.bodyMarkdown);
+                return json(200, { ...result, design: next, bodyMarkdown: designToMarkdown(next) });
+            }
             // ⚠️ Returned, not saved. Same contract as everywhere else copy is written by a model:
             // the author reads it and presses Save, which is the step that makes it real.
             return json(200, result);
@@ -242,6 +259,15 @@ export default withLambda(async (event: HandlerEvent) => {
                 bodyMarkdown,
                 instruction,
             });
+            // ⚠️ Same re-flow as the draft path above, for the same reason: the browser used to
+            // rebuild the step's blocks from the revised Markdown, deleting every picture and
+            // button in it. A revision changes WORDS. Returned, not saved — the author still has to
+            // press "Use this version".
+            const existingDesign = normaliseDesign(body.design);
+            if (existingDesign) {
+                const next = applyProseToDesign(existingDesign, result.bodyMarkdown);
+                return json(200, { ...result, design: next, bodyMarkdown: designToMarkdown(next) });
+            }
             return json(200, result);
         } catch (err) {
             console.error('[newsletter-sequences] refine failed', { orgId }, err);
@@ -281,7 +307,7 @@ export default withLambda(async (event: HandlerEvent) => {
     if (action === 'template') {
         // The same starting layouts an issue gets. Not saved here — the step form holds it until
         // the author presses Save, so abandoning a template does not leave one behind.
-        const design = designFromTemplate(body.template);
+        const design = designFromTemplate(body.template, await loadBrandNewsletterTheme(db, orgId));
         return json(200, { design, bodyMarkdown: designToMarkdown(design) });
     }
 

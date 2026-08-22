@@ -12,6 +12,8 @@
 //   attach may pass a `pexelsCandidate` instead of `assetId`: we mint a hotlinked content_asset
 //   from it (createPexelsAsset — no scheduledPosts coupling) and attach that. Candidates come from
 //   the existing pexels-search endpoint; attribution rides on contentAssets.attributionName.
+//   `pexelsType: 'image' | 'video'` says WHICH search it came from — the two candidate shapes are
+//   indistinguishable here and a video minted as an image renders as a broken picture.
 
 import { HandlerEvent } from '@netlify/functions';
 import { and, asc, eq } from 'drizzle-orm';
@@ -19,7 +21,7 @@ import { getDb } from '../../db/client';
 import { blogPosts, blogPostAssets, contentAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { resolveAssetDisplayUrl } from '../../src/utils/social-publish';
-import { createPexelsAsset, type PexelsCandidate } from '../../src/utils/pexels';
+import { createPexelsAsset, type PexelsCandidate, type PexelsVideoCandidate } from '../../src/utils/pexels';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 type Db = ReturnType<typeof getDb>;
@@ -112,12 +114,17 @@ export default withLambda(async (event: HandlerEvent) => {
     // action === 'attach'. Either an existing library asset (assetId) or a Pexels candidate to mint.
     let assetId: number;
     if (body.pexelsCandidate) {
-        const c = body.pexelsCandidate as PexelsCandidate;
+        const c = body.pexelsCandidate as PexelsCandidate | PexelsVideoCandidate;
         if (!c.providerAssetId || !c.url) {
             return { statusCode: 400, body: JSON.stringify({ error: 'A valid pexelsCandidate is required.' }) };
         }
-        // Pexels images only — the blog hero/inline media pipeline expects an image asset.
-        assetId = await createPexelsAsset(db, { userId: ctx.userId, orgId, candidate: c, assetType: 'image' });
+        // Stock video as well as stock photos (plan §4 Phase 5.2). The candidate shapes are
+        // different searches from the same provider, so the caller says which it picked — guessing
+        // from the URL would mint a video as an image and render it as a broken picture.
+        // ⚠️ The hero is unaffected: a non-image asset is refused for the feature role below,
+        // whatever the type says here.
+        const pexelsType = body.pexelsType === 'video' ? 'video' : 'image';
+        assetId = await createPexelsAsset(db, { userId: ctx.userId, orgId, candidate: c, assetType: pexelsType });
     } else {
         assetId = Number(body.assetId);
         if (!Number.isFinite(assetId)) return { statusCode: 400, body: JSON.stringify({ error: 'assetId is required.' }) };

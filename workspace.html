@@ -5159,6 +5159,11 @@ function formatCurrency(amount, currency) {
      only on reload. Never replace it with a hand-written browser copy. The designer needs
      image-overlay-editor.js (already loaded below) to put text and stickers on a picture. -->
 <script src="/src/public/newsletter-findings.js"></script>
+<!-- ⚠️ Also a shared artifact: src/utils/brand-kit.ts re-exports brand-contrast.js on the server,
+     so the canvas picks a button's label colour with the identical WCAG maths the server uses when
+     it builds one from a template. Must load BEFORE the designer, which reads window.BrandContrast
+     at definition time. -->
+<script src="/src/public/brand-contrast.js"></script>
 <script src="/src/components/newsletter-designer.js"></script>
 <script src="/newsletter.js"></script>
 <script src="/src/components/platform-post-preview.js"></script>

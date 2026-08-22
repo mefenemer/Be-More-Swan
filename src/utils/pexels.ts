@@ -193,6 +193,20 @@ export async function filterUnique<T extends { providerAssetId: string }>(db: Db
     return candidates.filter(c => !usedSet.has(c.providerAssetId));
 }
 
+export interface SearchOptions {
+    limit?: number;
+    dedup?: boolean;
+    /**
+     * Search terms to use INSTEAD of deriving them from `context` with a model call.
+     *
+     * ⚠️ For a caller that already holds real keywords — the layout IR's image nodes carry a
+     * `query` the drafting model wrote for exactly this purpose (src/utils/layout-ir.ts). Passing
+     * them skips generateImageKeywords, which is an LLM round trip per picture: three pictures in
+     * one draft is three extra calls to re-derive words we were already given.
+     */
+    keywords?: string;
+}
+
 export interface SearchResult { keywords: string; candidates: PexelsCandidate[]; }
 export interface VideoSearchResult { keywords: string; candidates: PexelsVideoCandidate[]; }
 
@@ -202,9 +216,9 @@ export async function searchUniqueImages(
     db: Db,
     orgId: number,
     context: string,
-    { limit = 5, dedup = true }: { limit?: number; dedup?: boolean } = {},
+    { limit = 5, dedup = true, keywords: given }: SearchOptions = {},
 ): Promise<SearchResult> {
-    const keywords = await generateImageKeywords(context);
+    const keywords = given?.trim() || await generateImageKeywords(context);
     if (!keywords) return { keywords, candidates: [] };
 
     const page1 = await cachedSearch<PexelsCandidate>(db, 'photo', keywords, 1);
@@ -225,9 +239,9 @@ export async function searchUniqueVideos(
     db: Db,
     orgId: number,
     context: string,
-    { limit = 5, dedup = true }: { limit?: number; dedup?: boolean } = {},
+    { limit = 5, dedup = true, keywords: given }: SearchOptions = {},
 ): Promise<VideoSearchResult> {
-    const keywords = await generateImageKeywords(context);
+    const keywords = given?.trim() || await generateImageKeywords(context);
     if (!keywords) return { keywords, candidates: [] };
 
     const page1 = await cachedSearch<PexelsVideoCandidate>(db, 'video', keywords, 1);
