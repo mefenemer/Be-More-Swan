@@ -51,6 +51,10 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 type Db = ReturnType<typeof getDb>;
 
 const BACKOFF_SECS = [10, 30, 90];
+// How long a run waits when its assistant is paused. Long enough that a pause lasting weeks costs
+// one cheap query an hour rather than one per drain tick, short enough that resuming an assistant
+// gets its search moving again without the user wondering whether it is broken.
+const PAUSED_RETRY_SECS = 15 * 60;
 // Queries processed per tick — ONE search + one scoring call per slice keeps a tick well
 // under Netlify's ~10s function limit (3/tick was hitting 504 Inactivity Timeouts). The
 // cursor resumes the next query on the next tick, so total coverage is unchanged.
@@ -226,6 +230,43 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
             .limit(1);
         if (!campaign) {
             await finishJob(db, job.id, 'failed', 'Campaign no longer exists.');
+            return;
+        }
+
+        // ── A paused assistant must not spend ────────────────────────────────────
+        //
+        // ⚠️ This worker had NO reference to lifecycleStatus, isActive or archivedAt, so an
+        // assistant `system_paused` for exceeding its plan limit still ran paid searches and model
+        // calls. Observed 2026-08-23: assistant 21 was paused from 2026-08-19 and ran 8 search
+        // calls on 2026-08-23 while its own dashboard read "This assistant is paused because your
+        // plan's assistant limit was exceeded". The pause gated the kick-off card and nothing else.
+        //
+        // The gate itself is not new — lead-enrichment-sweep.ts has carried it all along, with the
+        // reasoning spelled out: "Archived or deactivated assistants are not working, and spending
+        // their owner's money ... is the definition of waste." Discovery spends more per run than
+        // that sweep does. `archivedAt` is checked alongside `isActive` for the same reason it is
+        // there: an archived assistant sits in its reinstate window still flagged active.
+        //
+        // SKIPPED, not failed. A pause is a fixable configuration state, not a verdict about this
+        // campaign — failing would kill a run the user can resume in one click, and a failed job is
+        // not resumable. Same choice process-sequence-sends.ts makes for a missing postal address.
+        const [owner] = await db
+            .select({ isActive: aiAssistants.isActive, archivedAt: aiAssistants.archivedAt })
+            .from(aiAssistants)
+            .where(eq(aiAssistants.id, campaign.aiAssistantId))
+            .limit(1);
+        if (!owner || owner.isActive !== true || owner.archivedAt !== null) {
+            // Backed off rather than left to spin: the job returns to the queue but is not
+            // re-claimed on every drain tick while the assistant stays paused.
+            await db.update(discoveryJobs)
+                .set({
+                    status: 'queued',
+                    nextRetryAt: new Date(Date.now() + PAUSED_RETRY_SECS * 1000),
+                    errorMessage: 'Paused — this assistant is not active, so the search is waiting rather than spending.',
+                    updatedAt: new Date(),
+                })
+                .where(eq(discoveryJobs.id, job.id));
+            console.log(`[process-discovery-jobs] job ${job.job_id} deferred: assistant ${campaign.aiAssistantId} is not active`);
             return;
         }
         // WHO the outreach comes from. The scoring pass writes the outreach draft, so this is the

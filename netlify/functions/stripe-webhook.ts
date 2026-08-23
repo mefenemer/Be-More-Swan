@@ -10,6 +10,7 @@ import { recordCardFingerprint } from '../../src/utils/billing-fingerprint';
 import { sendNewSubscriberAlert } from '../../src/utils/founder-alerts';
 import { grantXCredits } from '../../src/utils/ai-credits';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { releasePausedLimit } from '../../src/utils/release-paused-limit';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' });
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
@@ -918,6 +919,9 @@ export default withLambda(async (event) => {
                     }
                 }
 
+                // Set when this event pauses assistants, so the release below can tell a downgrade
+                // that just took seats away from a plan change that gave them back.
+                let pausedForLimit = false;
                 if (newMasterPlan?.assistantLimit !== null && newMasterPlan?.assistantLimit !== undefined) {
                     // Count currently active assistants
                     const activeAssistants = await db
@@ -932,6 +936,7 @@ export default withLambda(async (event) => {
                         const toPause = activeAssistants.slice(newMasterPlan.assistantLimit);
                         const pauseIds = toPause.map(a => a.id);
                         const pausedNames = toPause.map(a => a.name).join(', ');
+                        pausedForLimit = true;
 
                         await db.update(aiAssistants)
                             .set({ isActive: false, provisioningStatus: 'paused_limit', updatedAt: new Date() })
@@ -945,6 +950,30 @@ export default withLambda(async (event) => {
                             } },
                             metadata: { pausedIds: pauseIds, newLimit: newMasterPlan.assistantLimit },
                         });
+                    }
+                }
+
+                // ── The other direction ──────────────────────────────────────────
+                // customer.subscription.updated fires on UPGRADES too, and until now nothing gave
+                // back the assistants an earlier downgrade had taken: `paused_limit` had one writer
+                // and no releaser.
+                //
+                // ⚠️ Deliberately OUTSIDE the `assistantLimit !== null` guard above. My first
+                // version of this sat inside it as an `else`, which meant an upgrade to an
+                // UNLIMITED plan — the most generous change a customer can make — released nothing
+                // at all, because that block is skipped entirely when the limit is null.
+                //
+                // Skipped only when this same event just paused assistants: that is a downgrade
+                // taking seats away, and handing them straight back would undo it.
+                if (newMasterPlan && !pausedForLimit) {
+                    // Same lookup the dispute path uses — membership, not an owner column.
+                    const [uo] = await db.select({ organisationId: userOrganisations.organisationId })
+                        .from(userOrganisations).where(eq(userOrganisations.userId, userId)).limit(1);
+                    if (uo?.organisationId) {
+                        const released = await releasePausedLimit(db, userId, uo.organisationId);
+                        if (released.resumed.length) {
+                            console.log(`[stripe-webhook] plan change resumed ${released.resumed.length} assistant(s) for user ${userId}`);
+                        }
                     }
                 }
             }

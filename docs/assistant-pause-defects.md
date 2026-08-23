@@ -4,7 +4,9 @@ Found 2026-08-23 while testing the Lead Generator on staging. Neither is related
 both were pre-existing, and both were only visible because a paused assistant happened to be the
 one under test. Written up because each is easy to lose and hard to rediscover.
 
-Neither is fixed. This is a report, not a change.
+**Both fixed 2026-08-23**, in the same session that found them. The report below is kept as written
+— the evidence is what makes the fixes checkable — with the resolution recorded under each.
+Guarded by `tests/assistant-pause-defects.test.ts`.
 
 ---
 
@@ -60,12 +62,19 @@ assistant being brought back. A `paused_limit` assistant is not archived, so it 
 The only self-service route is to archive the paused assistant and then reinstate it, which means
 archiving something you want to keep in order to un-pause it.
 
-### Suggested fix
+### Fixed
 
-Re-evaluate on the events that can resolve the condition — an assistant being archived, and an
-upgrade raising the limit — using the capacity check `manage-assistant.ts` already implements.
-Resume the newest-paused first, mirroring the "pause the oldest" rule in the downgrade handler so
-the two are inverses.
+`src/utils/release-paused-limit.ts` — resumes `paused_limit` assistants up to whatever the plan now
+allows, called from the two events that can resolve the condition: **archiving** an assistant
+(`manage-assistant.ts`) and a **plan change** that makes room (`stripe-webhook.ts`).
+
+Resolves the limit through the same `effectiveLimit` + `bonusAssistants` path the capacity gate
+uses, so one surface cannot hand back a seat the other refuses. Resumes newest-first, the exact
+inverse of the downgrade handler. Never throws — an archive must not fail because a courtesy resume
+did not.
+
+⚠️ Still not notified: the pause raises `assistants_paused_downgrade`, and the release is silent.
+Worth a template, and left out here rather than invented.
 
 ⚠️ Whatever does this must resume **only** `paused_limit`, and must not touch `paused_payment`,
 `paused_quota`, or an assistant the user switched off themselves (`complete` + `isActive: false`).
@@ -117,20 +126,23 @@ sql`${aiAssistants.archivedAt} IS NULL`,
 That reasoning applies verbatim to discovery, which spends more per run. One of the two paths has
 the gate and the other does not.
 
-### Suggested fix
+### Fixed
 
-Apply the same predicate in the discovery worker, when the job resolves its campaign. Precedent,
-wording and rationale already exist in the sweep.
+The same predicate now runs in `process-discovery-jobs.ts`, immediately after the campaign loads and
+**before** query generation, search or scoring — gating the first slice rather than the second.
 
-Two decisions worth making deliberately rather than by default:
+Both decisions went the way the report argued:
 
-- **Skip or fail?** A paused assistant is a fixable configuration state, not a verdict about the
-  campaign — so *skip and leave the job queued* (the pattern `process-sequence-sends.ts` uses for a
-  missing postal address) rather than failing it, which is not resumable.
-- **What about a run already in flight?** A run spans many ticks. Checking per tick means a pause
-  stops it mid-run; checking only at enqueue means it finishes. Stopping mid-run is probably right
-  for a billing gate, but it will produce partial runs, and Tier 1 coverage reporting should then
-  learn a `paused` stop reason so the campaign card can say why.
+- **Skipped, not failed.** The job returns to the queue with a 15-minute `nextRetryAt` and a
+  readable `errorMessage` ("Paused — this assistant is not active, so the search is waiting rather
+  than spending"). Failing would kill a run the user can resume in one click, and a failed job is
+  not resumable.
+- **Checked per tick**, so a pause stops a run already in flight. The backoff is what keeps that
+  cheap: a pause lasting weeks costs one indexed query an hour, not one per drain tick.
+
+⚠️ The consequence the report predicted still stands: a run stopped this way is partial, and Tier 1
+has no `paused` stop reason, so the campaign card says nothing about why it went quiet. The job's
+`errorMessage` carries it; the card does not read that field.
 
 ---
 

@@ -14,6 +14,7 @@ import { effectiveLimit, type FeatureOverrides } from '../../src/utils/plan-feat
 import { requireTenant } from '../../src/utils/tenant';
 import { transitionAssistantStatus } from '../../src/utils/assistant-lifecycle';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { releasePausedLimit } from '../../src/utils/release-paused-limit';
 
 // Issue #191: archiving starts a 14-day reinstate window before purge-archived-assistants.ts
 // (daily cron) permanently deletes the assistant and all of its associated data.
@@ -180,6 +181,17 @@ export default withLambda(async (event) => {
                 await db.update(aiAssistants)
                     .set({ provisioningStatus: 'cancelled', archivedAt: now, scheduledDeletionAt, updatedAt: now })
                     .where(eq(aiAssistants.id, id));
+
+                // ── The seat this just freed ─────────────────────────────────────
+                // Archiving is the obvious way to get back under a plan limit, and until now it
+                // did nothing for an assistant paused BY that limit: `paused_limit` had one writer
+                // (the downgrade webhook) and no releaser, so the user stayed paused with no route
+                // out except a billing change. Best-effort and never throws — the archive itself
+                // must not fail because a courtesy resume did not work out.
+                const released = await releasePausedLimit(db, ctx.userId, orgId);
+                if (released.resumed.length) {
+                    console.log(`[manage-assistant] archive freed a seat; resumed ${released.resumed.map((a) => a.name).join(', ')}`);
+                }
 
                 // AC5.2 purge: hard-delete queued / in-flight task runs so nothing more executes.
                 // (There is no separate AI session-token store; non-terminal task_runs are the
