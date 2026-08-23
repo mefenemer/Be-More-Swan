@@ -112,6 +112,12 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'post_revised' THEN 'state_change'
     WHEN 'post_draft_ready' THEN 'state_change'
     WHEN 'blog_draft_ready' THEN 'state_change'  -- Blog Autopilot's long-form equivalent
+    -- Added WITH the code change that emits them, per the 2026-08-17 note above. ⚠️ Both call sites
+    -- ALSO pass an explicit `category` to createNotification, so these two are correct even on a
+    -- database this file has not been re-run against — this CASE is the belt to that braces, and
+    -- what keeps a fresh apply and the backfill consistent with src/utils/notification-actions.ts.
+    WHEN 'newsletter_issue_ready' THEN 'state_change'  -- an issue is drafted and waiting for approval
+    WHEN 'newsletter_issue_sent' THEN 'state_change'   -- an approved issue finished sending
     WHEN 'assistant_reinstated' THEN 'state_change'  -- Issue #191 follow-up — reinstate took effect
     WHEN 'post_generation_queued' THEN 'state_change'
     WHEN 'provisioning_complete' THEN 'state_change'

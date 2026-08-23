@@ -29,8 +29,10 @@
            initCalendar is told the assistant doesn't publish content. -->
       <select id="cal-platform-filter"
         class="text-sm font-semibold text-gray-700 border border-gray-200 rounded-lg px-3 py-1.5 bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-500">
-        <!-- All six social platforms (src/config/platform-formats.ts) plus Blog. Threads and YouTube
-             were missing, so posts on them could not be filtered for at all. -->
+        <!-- All six social platforms (src/config/platform-formats.ts) plus Blog and Newsletter.
+             Threads and YouTube were missing, so posts on them could not be filtered for at all.
+             ⚠️ The last two are not platforms — this control filters by DESTINATION, which is what
+             the entries in calendar.js's PLATFORM_META actually are. -->
         <option value="all">All platforms</option>
         <option value="facebook">Facebook</option>
         <option value="instagram">Instagram</option>
@@ -39,6 +41,7 @@
         <option value="threads">Threads</option>
         <option value="youtube">YouTube</option>
         <option value="blog">Blog</option>
+        <option value="newsletter">Newsletter</option>
       </select>
       <!-- #4: filter calendar to a single assistant's activity -->
       <select id="cal-assistant-filter"

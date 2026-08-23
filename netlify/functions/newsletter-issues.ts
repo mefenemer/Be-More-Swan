@@ -23,7 +23,7 @@
 // ship two different issues to two halves of one list.
 
 import { HandlerEvent } from '@netlify/functions';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lte, or, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     aiAssistants, audienceContactSegments, audienceContacts, audienceSegments, blogPosts,
@@ -158,6 +158,48 @@ export default withLambda(async (event: HandlerEvent) => {
         if ('error' in ctx) return ctx.error;
         const orgId = ctx.organisationId;
         const idParam = event.queryStringParameters?.id;
+
+        // ── Calendar feed ────────────────────────────────────────────────────────────────────
+        // Mirrors the blog-posts.ts branch of the same shape, and exists for the same reason: the
+        // full list response below carries segments, custom fields, purposes, templates, the brand
+        // theme and up to 500 issues, none of which a calendar cell needs — and the calendar
+        // refetches on every month change.
+        //
+        // ⚠️ Only issues that are GOING TO HAPPEN or HAVE happened. A draft or an issue awaiting
+        // approval has no agreed date to plot and belongs to the Review Queue; putting one on a
+        // calendar would state a send date nobody has committed to. Same rule as blog-posts.ts,
+        // whose comment on the list view records it as a deliberate cut.
+        const fromParam = event.queryStringParameters?.from;
+        const toParam = event.queryStringParameters?.to;
+        if (fromParam && toParam) {
+            const fromD = new Date(fromParam);
+            const toD = new Date(toParam);
+            if (Number.isNaN(fromD.getTime()) || Number.isNaN(toD.getTime())) {
+                return json(400, { error: 'Invalid from/to.' });
+            }
+            const rows = await db
+                .select({
+                    id: newsletterIssues.id,
+                    subject: newsletterIssues.subject,
+                    status: newsletterIssues.status,
+                    assistantId: newsletterIssues.assistantId,
+                    scheduledFor: newsletterIssues.scheduledFor,
+                    sentAt: newsletterIssues.sentAt,
+                    recipientCount: newsletterIssues.recipientCount,
+                })
+                .from(newsletterIssues)
+                .where(and(
+                    eq(newsletterIssues.organisationId, orgId),
+                    inArray(newsletterIssues.status, ['scheduled', 'sending', 'sent']),
+                    or(
+                        and(gte(newsletterIssues.scheduledFor, fromD), lte(newsletterIssues.scheduledFor, toD)),
+                        and(gte(newsletterIssues.sentAt, fromD), lte(newsletterIssues.sentAt, toD)),
+                    ),
+                ))
+                .orderBy(newsletterIssues.scheduledFor)
+                .limit(500);
+            return json(200, { issues: rows });
+        }
 
         if (idParam) {
             const id = Number(idParam);

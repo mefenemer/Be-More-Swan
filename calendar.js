@@ -13,6 +13,7 @@ const PLATFORM_LOGOS = {
     tiktok:    `<svg viewBox="0 0 24 24" fill="currentColor" class="w-full h-full"><path d="M12.53.02C13.84 0 15.14.01 16.44 0c.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/></svg>`,
     youtube:   `<svg viewBox="0 0 24 24" fill="currentColor" class="w-full h-full"><path d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>`,
     blog:      `<svg viewBox="0 0 24 24" fill="currentColor" class="w-full h-full"><path d="M5 3h11a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2zm2 4v2h7V7H7zm0 4v2h7v-2H7zm0 4v2h5v-2H7z"/></svg>`,
+    newsletter:`<svg viewBox="0 0 24 24" fill="currentColor" class="w-full h-full"><path d="M20 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V6a2 2 0 00-2-2zm0 4.24l-8 4.62-8-4.62V6l8 4.62L20 6v2.24z"/></svg>`,
 };
 
 const PLATFORM_META = {
@@ -24,6 +25,9 @@ const PLATFORM_META = {
     tiktok:    { label: 'TikTok',      bg: '#010101', text: 'text-white' },
     youtube:   { label: 'YouTube',     bg: '#FF0000', text: 'text-white' },
     blog:      { label: 'Blog',        bg: '#7c3aed', text: 'text-white' },
+    // ⚠️ Not a social platform, and neither is 'blog' — this map is the calendar's vocabulary for
+    // "where a piece of content goes", which is what the platform filter actually filters on.
+    newsletter:{ label: 'Newsletter',  bg: '#0d9488', text: 'text-white' },
 };
 
 // Returns a circular platform avatar (logo on brand bg) for list/panel use.
@@ -51,6 +55,12 @@ const STATUS_META = {
     // here every lookup falls back to STATUS_META.draft, so a committed post parked on quota would
     // render on the calendar labelled "Draft" — the one word that is certainly wrong.
     paused_credits:  { label: 'Paused · X credits', badge: 'bg-amber-100 text-amber-700 border-amber-300', chipBorder: 'border-amber-400', dot: 'bg-amber-500' },
+    // Newsletter issue states. ⚠️ Without an entry here each falls back to STATUS_META.draft, so a
+    // SENT issue would render on the calendar labelled "Draft" — exactly the failure recorded for
+    // paused_credits above. 'sending' is blue like 'publishing', its social twin: in flight, no
+    // action needed. 'sent' is emerald like 'published': done and correct.
+    sending:         { label: 'Sending',     badge: 'bg-blue-100 text-blue-700 border-blue-300',   chipBorder: 'border-blue-500',    dot: 'bg-blue-500' },
+    sent:            { label: 'Sent',        badge: 'bg-emerald-100 text-emerald-700 border-emerald-300', chipBorder: 'border-emerald-500', dot: 'bg-emerald-500' },
     failed:          { label: 'Failed',      badge: 'bg-red-100 text-red-700 border-red-300',      chipBorder: 'border-red-500',     dot: 'bg-red-500' },
     missed:          { label: 'Missed',      badge: 'bg-orange-100 text-orange-700 border-orange-300', chipBorder: 'border-orange-300', dot: 'bg-amber-500' },
     rejected:        { label: 'Rejected',    badge: 'bg-red-100 text-red-700 border-red-300',      chipBorder: 'border-red-500',     dot: 'bg-red-500' },
@@ -160,6 +170,9 @@ let _anchor = new Date();        // date anchor for current view
 _anchor.setHours(0, 0, 0, 0);
 let _posts = [];                 // all loaded posts (social — scheduled_posts)
 let _blogPosts = [];             // long-form blog posts (blog_posts) surfaced read-only on the calendar
+// Newsletter issues (newsletter_issues), read-only, same treatment as blog posts above. Only
+// scheduled/sending/sent ever arrive — the server refuses to plot a draft, which has no agreed date.
+let _newsletterIssues = [];
 let _openPostId = null;          // post currently open in the editor, so a refresh can clear it
 let _dragPostId = null;          // drag source
 let _dragTargetDate = null;      // drop target
@@ -317,16 +330,20 @@ async function _loadAndRender() {
     try {
         const { from, to } = _getDateRange();
         // Posts, completed assistant activity, and the assistant list (for colours/filter) in parallel.
-        const [postsRes, actRes, asstRes, blogRes] = await Promise.all([
+        const [postsRes, actRes, asstRes, blogRes, nlRes] = await Promise.all([
             fetch(`/.netlify/functions/scheduled-posts?from=${from.toISOString()}&to=${to.toISOString()}`),
             fetch(`/.netlify/functions/get-calendar-activity?from=${from.toISOString()}&to=${to.toISOString()}`),
             _assistants.length ? Promise.resolve(null) : fetch('/.netlify/functions/get-assistants'),
             fetch(`/.netlify/functions/blog-posts?from=${from.toISOString()}&to=${to.toISOString()}`),
+            // The from/to branch of newsletter-issues.ts, NOT its list response — that one carries
+            // segments, custom fields, templates and the brand theme, and this refetches on every
+            // month change.
+            fetch(`/.netlify/functions/newsletter-issues?from=${from.toISOString()}&to=${to.toISOString()}`),
         ]);
 
         // null = "no definitive answer" (a 500, say) — leave the previous value alone rather than
         // blanking the grid on a transient failure. [] is a real, empty answer.
-        let posts = null, activities = null, assistants = null, blogPosts = null, records = [], followUps = [];
+        let posts = null, activities = null, assistants = null, blogPosts = null, newsletterIssues = null, records = [], followUps = [];
 
         if (postsRes.ok) {
             posts = (await postsRes.json()).posts || [];
@@ -342,6 +359,10 @@ async function _loadAndRender() {
         if (actRes && actRes.ok) activities = (await actRes.json()).activities || [];
         if (asstRes && asstRes.ok) assistants = (await asstRes.json()).assistants || [];
         if (blogRes && blogRes.ok) blogPosts = (await blogRes.json()).posts || [];
+        // Left null on any non-OK answer, per the rule above: an environment without the newsletter
+        // schema applied answers with an error, and blanking every OTHER kind of entry on the grid
+        // because of it would be a worse calendar than one issue short.
+        if (nlRes && nlRes.ok) newsletterIssues = (await nlRes.json()).issues || [];
 
         // Assistant Calendar tab only: overlay this assistant's scheduled Data Hub records so
         // "Approve & Schedule" in the Review Queue shows up here as scheduled work.
@@ -384,6 +405,7 @@ async function _loadAndRender() {
             window.AssistantColors?.rememberAll(assistants);
         }
         if (blogPosts) _blogPosts = blogPosts;
+        if (newsletterIssues) _newsletterIssues = newsletterIssues;
         _scheduledRecords = records;
         _followUps = followUps;
     } catch (e) { console.warn('Calendar load error:', e); }
@@ -547,11 +569,12 @@ function _renderMonth() {
         </div>`;
         const dayActs = _activitiesOnDate(date);
         const dayBlogs = _blogPostsOnDate(date);
+        const dayIssues = _newsletterIssuesOnDate(date);
         const dayRecords = _scheduledRecordsOnDate(date);
         const dayFollowUps = _followUpsOnDate(date);
         // Pending outreach sits ABOVE the reminders and the completed runs: it is the only entry
         // in the cell that is going to do something on its own.
-        html += `<div class="space-y-1">${dayGroups.map(g => _postChip(g, 'month')).join('')}${dayBlogs.map(_blogChip).join('')}${dayFollowUps.map(f => _followUpChip(f, 'month')).join('')}${dayRecords.map(r => _recordChip(r, 'month')).join('')}${dayActs.map(a => _activityChip(a, 'month')).join('')}</div>`;
+        html += `<div class="space-y-1">${dayGroups.map(g => _postChip(g, 'month')).join('')}${dayBlogs.map(_blogChip).join('')}${dayIssues.map(_issueChip).join('')}${dayFollowUps.map(f => _followUpChip(f, 'month')).join('')}${dayRecords.map(r => _recordChip(r, 'month')).join('')}${dayActs.map(a => _activityChip(a, 'month')).join('')}</div>`;
         html += `</div>`;
     }
 
@@ -585,7 +608,7 @@ function _renderWeek() {
             ondragover="window._calDragOver(event, '${dateKey}')"
             ondragleave="window._calDragLeave(event)"
             ondrop="window._calDrop(event, '${dateKey}')">
-            ${dayGroups.map(g => _postChip(g, 'week')).join('')}${_blogPostsOnDate(d).map(_blogChip).join('')}${_followUpsOnDate(d).map(f => _followUpChip(f, 'week')).join('')}${_scheduledRecordsOnDate(d).map(r => _recordChip(r, 'week')).join('')}${_activitiesOnDate(d).map(a => _activityChip(a, 'week')).join('')}
+            ${dayGroups.map(g => _postChip(g, 'week')).join('')}${_blogPostsOnDate(d).map(_blogChip).join('')}${_newsletterIssuesOnDate(d).map(_issueChip).join('')}${_followUpsOnDate(d).map(f => _followUpChip(f, 'week')).join('')}${_scheduledRecordsOnDate(d).map(r => _recordChip(r, 'week')).join('')}${_activitiesOnDate(d).map(a => _activityChip(a, 'week')).join('')}
         </div>`;
     }
     html += `</div>`;
@@ -618,8 +641,13 @@ function _renderList() {
     // Apply filter
     const statusSets = {
         all:       null,
-        scheduled: new Set(['approved', 'scheduled', 'publishing']),
-        published: new Set(['published']),
+        // ⚠️ These sets span posts, blog posts AND newsletter issues, which use different words for
+        // the same two moments: an issue is 'sending' where a post is 'publishing', and 'sent'
+        // where a post is 'published'. Omitting either would drop every newsletter issue out of
+        // the tab it belongs in while leaving it in All — a silent disappearance of exactly the
+        // kind the paused_credits note below records.
+        scheduled: new Set(['approved', 'scheduled', 'publishing', 'sending']),
+        published: new Set(['published', 'sent']),
         // 'paused_credits' belongs here, not under Scheduled: the post is committed but parked on
         // spent X quota, which is the definition of needing attention. Omitting it left a parked
         // post reachable only from the All tab — the same silent disappearance that the status
@@ -633,6 +661,7 @@ function _renderList() {
         const date = new Date(year, month, d);
         let postGroups = _postsOnDate(date);
         let blogs = _blogPostsOnDate(date);
+        let issues = _newsletterIssuesOnDate(date);
         // Scheduled Data Hub records are approval_status='scheduled', so they only
         // belong under the "All" and "Scheduled" filters.
         let records = (_listFilter === 'all' || _listFilter === 'scheduled') ? _scheduledRecordsOnDate(date) : [];
@@ -650,9 +679,10 @@ function _renderList() {
                 })
                 .filter(Boolean);
             blogs = blogs.filter(p => allowedStatuses.has(p.status));
+            issues = issues.filter(i => allowedStatuses.has(i.status));
         }
-        if (postGroups.length > 0 || blogs.length > 0 || records.length > 0 || followUps.length > 0) {
-            days.push({ date, postGroups, blogs, records, followUps });
+        if (postGroups.length > 0 || blogs.length > 0 || issues.length > 0 || records.length > 0 || followUps.length > 0) {
+            days.push({ date, postGroups, blogs, issues, records, followUps });
         }
     }
 
@@ -665,7 +695,7 @@ function _renderList() {
     }
 
     html += `<div class="max-w-3xl mx-auto px-4 py-6 space-y-8">`;
-    days.forEach(({ date, postGroups, blogs, records, followUps }) => {
+    days.forEach(({ date, postGroups, blogs, issues, records, followUps }) => {
         const today = new Date(); today.setHours(0,0,0,0);
         const isToday = _dateKey(date) === _dateKey(today);
         html += `<div>
@@ -676,7 +706,7 @@ function _renderList() {
                 </span>
                 <div class="flex-1 h-px bg-gray-200"></div>
             </div>
-            <div class="space-y-2">${postGroups.map(g => _listRow(g)).join('')}${(blogs || []).map(_blogChip).join('')}${(followUps || []).map(_listFollowUpRow).join('')}${(records || []).map(_listRecordRow).join('')}</div>
+            <div class="space-y-2">${postGroups.map(g => _listRow(g)).join('')}${(blogs || []).map(_blogChip).join('')}${(issues || []).map(_issueChip).join('')}${(followUps || []).map(_listFollowUpRow).join('')}${(records || []).map(_listRecordRow).join('')}</div>
         </div>`;
     });
     html += `</div>`;
@@ -1410,6 +1440,63 @@ function _blogPostsOnDate(date) {
         return _dateKey(new Date(when)) === key;
     });
 }
+
+// Newsletter issues falling on a date. Mirrors _blogPostsOnDate: a SENT issue is plotted on the day
+// it actually went out, everything else on the day it is due.
+//
+// ⚠️ `sending` reads its date from scheduledFor, not sentAt — sentAt is not stamped until the last
+// recipient is done, and an issue spreading a local-time send over 24 hours would otherwise vanish
+// from the calendar for the whole day it is being sent.
+function _newsletterIssuesOnDate(date) {
+    const key = _dateKey(date);
+    if (!_matchesPlatformFilter('newsletter')) return [];
+    return _newsletterIssues.filter(i => {
+        const when = i.status === 'sent' ? (i.sentAt || i.scheduledFor) : i.scheduledFor;
+        if (!when) return false;
+        if (!_matchesAssistantFilter(i.assistantId)) return false;
+        return _dateKey(new Date(when)) === key;
+    });
+}
+
+// Read-only newsletter chip. Same treatment as the blog chip below and for the same reason: issues
+// are managed in the Newsletter Studio, so this is not draggable and does not open the social
+// governance panel — clicking opens the Studio on that issue.
+function _issueChip(issue) {
+    const sm = STATUS_META[issue.status] || STATUS_META.draft;
+    const sent = issue.status === 'sent';
+    const when = sent ? (issue.sentAt || issue.scheduledFor) : issue.scheduledFor;
+    const time = new Date(when).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    const chipBg = sent ? 'bg-emerald-50 hover:bg-emerald-100' : 'bg-teal-50 hover:bg-teal-100';
+    const timeColor = sent ? 'text-emerald-700' : 'text-teal-700';
+    // The recipient count is the one fact worth the space on a sent issue — it is the answer to
+    // "did that go out, and to how many people".
+    const marker = sent
+        ? `<span class="text-emerald-600 text-xs font-extrabold shrink-0" title="Sent ${time}${issue.recipientCount ? ` to ${issue.recipientCount}` : ''}">✓</span>`
+        : `<span class="w-1.5 h-1.5 rounded-full ${sm.dot} shrink-0" title="${sm.label}"></span>`;
+    const subject = issue.subject || 'Untitled issue';
+    return `<div
+        onclick="window._calOpenIssue(${issue.id})"
+        data-issue-id="${issue.id}"
+        class="group flex items-center gap-1.5 px-2 py-1 rounded-lg ${chipBg} shadow-sm cursor-pointer transition select-none text-left w-full"
+        style="border-left:3px solid #0d9488"
+        aria-label="Newsletter · ${_escHtml(subject)}">
+        ${_platAvatar('newsletter', 16)}
+        <div class="flex-1 min-w-0">
+            <p class="text-[11px] font-bold ${timeColor} truncate">${time}</p>
+            <p class="text-[11px] text-gray-500 truncate leading-tight">${_escHtml(subject.substring(0, 40))}</p>
+        </div>
+        ${marker}
+    </div>`;
+}
+
+// Open the clicked issue in the Newsletter Studio. _newsletterInitialIssueId is the existing
+// deep-link hook the Review Queue's "Open in Studio" already uses, and newsletter.js consumes it
+// on read so a later visit does not silently reopen an issue the user has moved on from.
+window._calOpenIssue = function (id) {
+    window._newsletterInitialIssueId = id;
+    if (typeof window.loadView === 'function') window.loadView('newsletter');
+    else window.open('/newsletter.html', '_blank');
+};
 
 // Read-only blog chip (month/week/list). Blog posts are managed in Blog Studio, so — unlike social
 // chips — these aren't draggable and don't open the social governance panel; clicking opens the studio.

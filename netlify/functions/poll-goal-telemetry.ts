@@ -21,6 +21,7 @@ import { getDb } from '../../db/client';
 import {
     goals, goalTelemetry, aiAssistants, systemConnections,
     scheduledPosts, plans, masterPlans, assistantRecords, blogPosts,
+    audienceContacts, newsletterIssues,
 } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { getSecret } from '../../src/utils/vault';
@@ -283,6 +284,28 @@ async function fetchIgProfileViews(igUserId: string, token: string): Promise<Fet
 }
 
 /**
+ * Run a count that reads a table this environment might not have yet.
+ *
+ * ⚠️ The newsletter and audience schemas are manual-apply, so an environment that has the code but
+ * not `db/audience.sql` / `db/newsletter.sql` answers 42P01 (and a half-applied one 42703). That
+ * throw would propagate into the `Promise.allSettled` in pollGoalTelemetry, where the goal is
+ * dropped from every counter and nothing is logged — a missing migration would look exactly like
+ * a quiet tick. Reported instead as "no figure yet", which is what it is; any other error is a
+ * real fault and rethrows.
+ */
+async function countOrUnmeasured(run: () => Promise<number>): Promise<FetchResult> {
+    try {
+        return { value: await run(), disconnected: false };
+    } catch (err) {
+        const code = (err as { code?: string; cause?: { code?: string } })?.code
+            ?? (err as { cause?: { code?: string } })?.cause?.code;
+        if (code !== '42P01' && code !== '42703') throw err;
+        console.warn('[poll-goal-telemetry] newsletter schema not applied on this environment; goal left unmeasured');
+        return { value: null, disconnected: false };
+    }
+}
+
+/**
  * Count of this assistant's records of a given type (optionally status-filtered) — the measurement
  * behind the non-social role outcome metrics (Leads Scored, Tickets Resolved, …). Always org- AND
  * assistant-scoped so one assistant's goal never counts another's records.
@@ -444,6 +467,54 @@ async function fetchMetric(
                 .from(blogPosts)
                 .where(and(eq(blogPosts.assistantId, goal.assistantId), eq(blogPosts.status, 'published')));
             return { value: Number(row?.v ?? 0), disconnected: false };
+        }
+
+        // ── Newsletter Assistant outcomes ──
+        //
+        // ⚠️ These two were declared in goal-metrics.ts when the role went live and NEVER given a
+        // case here, so both fell to `default: { value: null }`. That is the quietest failure this
+        // function has: `disconnected` stays false, so pollOneGoal returns 'unmeasured' — no
+        // telemetry row, no progress update, and deliberately no alert, because "nothing came back
+        // and nothing is provably broken" is also what a workspace with no data yet looks like. A
+        // newsletter goal therefore sat at 0% for ever with nothing on screen to explain it. Same
+        // class of bug as the linkedin_followers case; if you add a metric to the catalogue, add
+        // its case here in the same commit.
+        case 'newsletter_subscribers': {
+            // ⚠️ ORG-scoped, not assistant-scoped, and that is not an oversight: the Audience is one
+            // shared org-wide list (audience_contacts has no assistant_id), so two Newsletter
+            // Assistants in a workspace are growing the same list and must report the same number.
+            //
+            // Only 'subscribed' counts. 'pending' has not completed double opt-in and is never
+            // mailable, and every terminal status is someone who has left — counting rows instead
+            // would make a goal rise on an unsubscribe, which measures the opposite of "grow my
+            // list" (the reasoning recorded on the metric itself).
+            return countOrUnmeasured(async () => {
+                const [row] = await db
+                    .select({ v: sql<number>`count(*)::int` })
+                    .from(audienceContacts)
+                    .where(and(
+                        eq(audienceContacts.organisationId, goal.organisationId),
+                        eq(audienceContacts.status, 'subscribed'),
+                    ));
+                return Number(row?.v ?? 0);
+            });
+        }
+        case 'newsletter_issues_sent': {
+            // Assistant-scoped, mirroring posts_published. Only 'sent' — an issue still 'sending'
+            // has reached some of the list and not the rest, and 'approved'/'scheduled' have
+            // reached nobody. A cadence that drafts weekly and sends nothing is exactly the
+            // failure this metric exists to show, so nothing short of delivered may count.
+            return countOrUnmeasured(async () => {
+                const [row] = await db
+                    .select({ v: sql<number>`count(*)::int` })
+                    .from(newsletterIssues)
+                    .where(and(
+                        eq(newsletterIssues.assistantId, goal.assistantId),
+                        eq(newsletterIssues.organisationId, goal.organisationId),
+                        eq(newsletterIssues.status, 'sent'),
+                    ));
+                return Number(row?.v ?? 0);
+            });
         }
 
         // ── Non-social role outcomes — counted from assistant_records (the Data Hub database). ──

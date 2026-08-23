@@ -134,6 +134,13 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     // Blog Autopilot's long-form draft, mirroring post_draft_ready above. Uncategorised types fall
     // back to 'informational', which would have put a "review this draft" alert in the wrong bucket.
     blog_draft_ready: 'state_change',
+    // The Newsletter Assistant's pair, mirroring blog_draft_ready and post_published exactly.
+    // ⚠️ Both are state_change, NOT suggested_action, even though an unapproved issue is arguably
+    // "parked": the drafting cron refuses to write a second issue while one is still waiting
+    // (draft-newsletter-issues.ts rule 1), so nothing degrades and nothing expires if it is read
+    // next week. Keeping "Action required" to things that are genuinely blocked is what makes
+    // that tab worth opening.
+    newsletter_issue_ready: 'state_change', newsletter_issue_sent: 'state_change',
     post_generation_queued: 'state_change', provisioning_complete: 'state_change', profile_sync_complete: 'state_change',
     draft_horizon_expanded: 'state_change', draft_horizon_shrunk: 'state_change',
     org_invite_accepted: 'state_change', org_joined: 'state_change',

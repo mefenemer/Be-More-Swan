@@ -20,6 +20,7 @@ import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, newsletterIssues } from '../../db/schema';
 import { generateIssueBody } from '../../src/utils/newsletter-generate';
+import { createNotification } from '../../src/utils/notify';
 import { postsPerWeekFor } from '../../src/config/posting-cadence';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -119,9 +120,29 @@ export default withLambda(async () => {
 
             // Waiting for a person, explicitly — not left as a bare 'draft' that looks like
             // something the user started and abandoned.
-            await db.update(newsletterIssues)
+            //
+            // The subject comes back from the UPDATE rather than a second read: generateIssueBody
+            // wrote it a moment ago, and re-selecting would be a second round trip to learn
+            // something this statement can return.
+            const [ready] = await db.update(newsletterIssues)
                 .set({ status: 'pending_approval', updatedAt: new Date() })
-                .where(eq(newsletterIssues.id, issue.id));
+                .where(eq(newsletterIssues.id, issue.id))
+                .returning({ subject: newsletterIssues.subject });
+
+            // ⚠️ THE POINT OF THE WHOLE CRON. Nothing here sends, so an issue nobody is told about
+            // is an issue nobody approves — this function drafted in complete silence until
+            // 2026-08-23 while the preferences matrix already offered toggles for it.
+            // Non-fatal by design, exactly as process-blog-jobs treats blog_draft_ready: a
+            // notification failing must not roll back a draft that was written successfully.
+            await createNotification(db, 'newsletter_issue_ready', {
+                userId: a.userId,
+                assistantId: a.id,
+                // Explicit so the stored column is right without db/notifications-categorization.sql
+                // having been re-applied; the DB trigger only stamps when this is NULL.
+                category: 'state_change',
+                context: { assistant: { name: a.name }, issue: { subject: ready?.subject || 'Untitled issue' } },
+                metadata: { assistantId: a.id, newsletterIssueId: issue.id },
+            }).catch(err => console.error('[draft-newsletter-issues] notification failed', err));
 
             out.drafted++;
         } catch (err) {

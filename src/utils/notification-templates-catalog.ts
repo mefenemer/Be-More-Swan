@@ -699,6 +699,32 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        templateKey: 'newsletter_issue_ready',
+        name: 'Newsletter issue ready for review',
+        category: 'Content',
+        type: 'newsletter_issue_ready',
+        title: 'New newsletter draft: “{{issue.subject}}”',
+        message: '{{assistant.name}} has written your next issue. Nothing is sent until you approve it.',
+        variables: [
+            v('issue.subject', 'Issue subject line', 'Five ways to shorten your quote turnaround'),
+            v('assistant.name', 'Assistant name', 'Wren'),
+        ],
+    },
+    {
+        templateKey: 'newsletter_issue_sent',
+        name: 'Newsletter issue sent',
+        category: 'Content',
+        // ⚠️ The recipient count is passed as a resolved noun phrase, not a bare number — the merge
+        // engine has no plural rules (see the header note).
+        type: 'newsletter_issue_sent',
+        title: 'Sent: “{{issue.subject}}”',
+        message: 'Your issue went out to {{issue.recipients}}.',
+        variables: [
+            v('issue.subject', 'Issue subject line', 'Five ways to shorten your quote turnaround'),
+            v('issue.recipients', 'Recipient phrase', '1,204 subscribers'),
+        ],
+    },
+    {
         templateKey: 'blog_content_decay',
         name: 'Blog traffic decay',
         category: 'Content',

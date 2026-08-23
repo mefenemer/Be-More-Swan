@@ -32,6 +32,7 @@ import { buildSegmentCondition, parseRules } from './audience-segment-rules';
 import { decideAndRelease, prepareAbSample } from './newsletter-ab';
 import { dueAtForRecipient, resolveSendTimezone } from './newsletter-schedule';
 import { deliverPending, emitWebhook } from './webhooks';
+import { createNotification } from './notify';
 import { checkAudienceConsentBulk, type AudienceSkipReason } from './audience-consent';
 import { renderForRecipient, newsletterUnsubscribeUrl, type IssueSnapshot } from './newsletter-render';
 import { buildFromAddress } from './sending-domain';
@@ -680,12 +681,29 @@ export async function sendDueIssues(db: Db, opts: { baseUrl: string; now?: Date;
 
                 // Only when THIS tick was the one that finished it — the status guard above means a
                 // losing race returns nothing, and two ticks must not announce the same send twice.
+                // That guard is why the notification belongs HERE and not beside the status update:
+                // it is the one place in this worker that runs exactly once per issue.
                 if (finished) {
                     await emitWebhook(db, {
                         organisationId: claimed.organisationId,
                         event: 'newsletter.sent',
                         data: { issueId: claimed.id, subject: claimed.subject, recipients: delivered },
                     });
+                    // ⚠️ Recipient count as a resolved noun phrase, not a number: the notification
+                    // merge engine has no plural rules, so "1 subscribers" is what a bare count
+                    // produces on the one send where the tenant is most likely to be testing.
+                    await createNotification(db, 'newsletter_issue_sent', {
+                        userId: claimed.userId,
+                        assistantId: claimed.assistantId ?? null,
+                        category: 'state_change',
+                        context: {
+                            issue: {
+                                subject: claimed.subject,
+                                recipients: `${delivered.toLocaleString('en-GB')} ${delivered === 1 ? 'subscriber' : 'subscribers'}`,
+                            },
+                        },
+                        metadata: { newsletterIssueId: claimed.id },
+                    }).catch(err => console.error('[newsletter-send] notification failed', err));
                 }
             } else {
                 // Left in 'sending' on purpose — the next tick resumes at the first queued row.

@@ -4396,7 +4396,16 @@ let _tuningCtx = null;
 
 window._openTuningSession = async function(ctx) {
     ctx = ctx || {};
-    _tuningCtx = { postId: ctx.postId || null, output: ctx.output || '', meta: ctx.meta || '', platform: ctx.platform || null };
+    // ⚠️ postId and blogPostId are DELIBERATELY separate and never merged into one field.
+    // content_rules.origin_post_id is read back by content-rules.ts with a join against
+    // scheduledPosts, so a blog post's id stored there would either resolve to nothing or — far
+    // worse — to an unrelated social post that happens to share the number, and be shown to the
+    // user as "the post this rule came from". A blog tuning therefore files origin_post_id NULL;
+    // the correction and the excerpt still ground the directive. Giving blog rules their own
+    // backlink means a new column, and content-rules.ts reads content_rules with a bare
+    // db.select() that names every column — so that migration would break the panel on any
+    // database it had not reached yet. Not worth a provenance link.
+    _tuningCtx = { postId: ctx.postId || null, blogPostId: ctx.blogPostId || null, output: ctx.output || '', meta: ctx.meta || '', platform: ctx.platform || null };
     const modal = document.getElementById('modal-tuning');
     if (!modal) return;
     const outEl = document.getElementById('tuning-output');
@@ -4428,6 +4437,24 @@ window._openTuningSession = async function(ctx) {
             } else if (outEl) outEl.textContent = '(Could not load the post.)';
         } catch { if (outEl) outEl.textContent = '(Could not load the post.)'; }
     }
+    // Same seeding step for a blog draft, which lives in blog_posts and carries a title + body
+    // rather than a caption. Only the opening of the article is sent: the directive is about HOW
+    // the assistant writes and the opening is where voice lives, and tune-assistant caps `output`
+    // at 2000 characters anyway — a 1,200-word post would be truncated mid-sentence for nothing.
+    if (!_tuningCtx.output && _tuningCtx.blogPostId) {
+        try {
+            const res = await fetch(`/.netlify/functions/blog-posts?id=${_tuningCtx.blogPostId}`);
+            if (res.ok) {
+                const { post } = await res.json();
+                if (post) {
+                    _tuningCtx.output = [post.title, String(post.bodyMarkdown || '').trim().slice(0, 1200)].filter(Boolean).join('\n\n')
+                        || '(No content)';
+                    if (outEl) outEl.textContent = _tuningCtx.output;
+                    if (metaEl) metaEl.textContent = ['Blog post', post.publishDate ? new Date(post.publishDate).toLocaleDateString('en-GB') : ''].filter(Boolean).join(' · ');
+                }
+            } else if (outEl) outEl.textContent = '(Could not load the blog post.)';
+        } catch { if (outEl) outEl.textContent = '(Could not load the blog post.)'; }
+    }
     corr?.focus();
 };
 
@@ -4448,7 +4475,9 @@ window._submitTuning = async function() {
     try {
         const res = await fetch('/.netlify/functions/tune-assistant', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ assistantId: window._currentAssistantId, postId: _tuningCtx.postId, output: _tuningCtx.output, correction: text, platform: _tuningCtx.platform }),
+            // contentKind names the artefact for the prompt only — it is not persisted. postId
+            // stays null for a blog tuning (see _openTuningSession for why).
+            body: JSON.stringify({ assistantId: window._currentAssistantId, postId: _tuningCtx.postId, output: _tuningCtx.output, correction: text, platform: _tuningCtx.platform, contentKind: _tuningCtx.blogPostId ? 'blog post' : 'post' }),
         });
         if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'Failed to save the directive.'); }
         const { directive } = await res.json();
@@ -4489,27 +4518,64 @@ window._tuningRevisePost = async function() {
 // (assistant-detail.html). Bring both back in the commit that ships orchestration between
 // assistants — a card that cannot fill in is worse than an absent one.
 
-// Action-bar / Runbook entry: pick a recent post to tune (each row seeds a session by id).
+// Action-bar / Runbook entry: pick a recent output to tune (each row seeds a session by id).
+//
+// ⚠️ WHICH TABLE holds this assistant's drafts is decided by the review queue's `source`, never by
+// its `kind`. A Blog Writer is `kind:'posts'` — which is why _rulesSteerThisAssistant() correctly
+// ungates the Learned Directives card, since blueprint §4 does reach blog drafting — but its
+// `source` is 'blog_posts', and get-social-drafts only ever selects from scheduledPosts. Keyed on
+// kind alone this picker reported "No recent posts to tune" on a Blog Writer sitting on a full
+// approval queue, which broke the correction→directive loop at its last link while every other
+// leg of it worked.
 window._openTuningPicker = async function() {
     const modal = document.getElementById('modal-tuning-picker');
     const list = document.getElementById('tuning-picker-list');
     if (!modal || !list) return;
-    list.innerHTML = '<div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading recent posts…</div>';
+    const isBlog = ((window._detailReviewQueue || {}).source === 'blog_posts');
+    const noun = isBlog ? 'blog posts' : 'posts';
+    list.innerHTML = `<div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading recent ${noun}…</div>`;
     modal.classList.remove('hidden');
-    let drafts = [];
+    // Normalised to one row shape so the render below is not written twice: `label` is the small
+    // grey line (platform / publish date), `body` the output itself.
+    let rows = [];
     try {
-        const res = await fetch(`/.netlify/functions/get-social-drafts?status=pending_approval&assistantId=${window._currentAssistantId}`);
-        if (res.ok) drafts = (await res.json()).drafts || [];
+        if (isBlog) {
+            // blog-posts has no status filter — it returns the assistant's 200 most recently
+            // updated rows, which is why the awaiting-review bucket is selected here rather than
+            // by a query param. Same bucket as the social side: the drafts you are reviewing are
+            // the outputs you have an opinion about.
+            const res = await fetch(`/.netlify/functions/blog-posts?assistantId=${window._currentAssistantId}`);
+            if (res.ok) {
+                rows = ((await res.json()).posts || [])
+                    .filter(p => p.status === 'pending_approval')
+                    .map(p => ({
+                        id: Number(p.id),
+                        arg: 'blogPostId',
+                        label: p.publishDate ? new Date(p.publishDate).toLocaleDateString('en-GB') : '',
+                        body: p.title || '(Untitled draft)',
+                    }));
+            }
+        } else {
+            const res = await fetch(`/.netlify/functions/get-social-drafts?status=pending_approval&assistantId=${window._currentAssistantId}`);
+            if (res.ok) {
+                rows = ((await res.json()).drafts || []).map(d => ({
+                    id: Number(d.id),
+                    arg: 'postId',
+                    label: d.platform || '',
+                    body: String(d.caption || '(No caption)'),
+                }));
+            }
+        }
     } catch { /* non-critical */ }
-    if (!drafts.length) {
-        list.innerHTML = '<p class="text-sm text-gray-400 text-center py-6">No recent posts to tune. Posts appear here once your assistant drafts them.</p>';
+    if (!rows.length) {
+        list.innerHTML = `<p class="text-sm text-gray-400 text-center py-6">No recent ${noun} to tune. They appear here once your assistant has drafted something and it is waiting for your review.</p>`;
         return;
     }
-    list.innerHTML = drafts.slice(0, 15).map(d => `
-        <button type="button" onclick="document.getElementById('modal-tuning-picker').classList.add('hidden'); window._openTuningSession({ postId:${Number(d.id)} })"
+    list.innerHTML = rows.slice(0, 15).map(r => `
+        <button type="button" onclick="document.getElementById('modal-tuning-picker').classList.add('hidden'); window._openTuningSession({ ${r.arg}:${r.id} })"
             class="w-full text-left px-4 py-3 rounded-xl border border-gray-200 hover:border-indigo-400 hover:bg-indigo-50/40 transition cursor-pointer">
-            <p class="text-xs text-gray-400 mb-0.5">${_escapeHtml(d.platform || '')}</p>
-            <p class="text-sm text-gray-800">${_escapeHtml(String(d.caption || '(No caption)').slice(0, 120))}</p>
+            <p class="text-xs text-gray-400 mb-0.5">${_escapeHtml(r.label)}</p>
+            <p class="text-sm text-gray-800">${_escapeHtml(r.body.slice(0, 120))}</p>
         </button>`).join('');
 };
 

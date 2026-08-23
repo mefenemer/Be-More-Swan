@@ -255,6 +255,11 @@ export const PREF_CATEGORIES: PrefCategory[] = [
             // Long-form equivalents. Without these the user cannot mute blog notifications at all:
             // an uncategorised type is unreachable from the preferences matrix.
             'blog_draft_ready', 'blog_content_decay',
+            // Newsletter equivalents. Same reason as the blog line above: a type in no category is
+            // unreachable from this matrix, so the user could not mute it at all. newsletter_editor
+            // is already in PUBLISHING_ROLE_KEYS below, which is what makes this category visible
+            // on that assistant in the first place.
+            'newsletter_issue_ready', 'newsletter_issue_sent',
         ],
     },
     {

@@ -160,7 +160,14 @@ check('a send inside the ceiling says nothing at all', () => {
 
 check('warm-up only applies to a verified domain', () => {
     // A mailbox send is capped at a small list anyway and has no reputation of its own.
-    const fn = ISSUES.slice(landmark(ISSUES, 'const [verifiedDomain]'), landmark(ISSUES, 'return json(200, {'));
+    // ⚠️ The end landmark is searched FROM the start one. Unanchored it took the FIRST
+    // `return json(200, {` in the file, which stopped being the one that closes this block the day
+    // an earlier branch was added to the same handler (the calendar feed) — and a slice whose end
+    // precedes its start is '', so every assertion below passed vacuously... except that
+    // assert.match on '' fails loudly. It failed the right way here; the same shape silently
+    // reports "N checks passed" when the assertions are negative ones.
+    const start = landmark(ISSUES, 'const [verifiedDomain]');
+    const fn = ISSUES.slice(start, landmark(ISSUES, 'return json(200, {', start));
     assert.match(fn, /status, 'verified'/);
     assert.match(fn, /verifiedDomain\s*\n?\s*\? warmupFinding|verifiedDomain$/m);
 });

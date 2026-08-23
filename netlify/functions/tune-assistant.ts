@@ -9,8 +9,9 @@
 //   Body: {
 //     assistantId: number,   // required
 //     correction:  string,   // required — what the user wants different
-//     output?:     string,   // the output being corrected (post caption) — grounds the LLM
-//     postId?:     number,   // the originating post, if any (links the directive to it)
+//     output?:     string,   // the output being corrected (caption / blog excerpt) — grounds the LLM
+//     postId?:     number,   // the originating SOCIAL post, if any (links the directive to it)
+//     contentKind?: string,  // what the output is ('post' | 'blog post') — names it in the prompt
 //     platform?:   string,   // scope the directive to one platform (null = all)
 //   }
 //   Returns: { rule, directive }
@@ -52,6 +53,9 @@ export default withLambda(async (event) => {
     }
 
     const { assistantId, correction, output, postId, platform } = body;
+    // ⚠️ Closed list, not free text: this value is interpolated into the system prompt, so an
+    // arbitrary string from the client would be prompt injection with a session cookie attached.
+    const contentKind = body.contentKind === 'blog post' ? 'blog post' : 'post';
     if (!assistantId || !correction?.trim()) {
         return { statusCode: 400, body: JSON.stringify({ error: 'assistantId and correction are required.' }) };
     }
@@ -73,9 +77,13 @@ export default withLambda(async (event) => {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) return { statusCode: 500, body: JSON.stringify({ error: 'AI is not configured.' }) };
 
-    const systemPrompt = `You turn a social media manager's correction about one post into a single, reusable directive for their AI assistant.
+    // ⚠️ The noun is parametrised because this endpoint is shared by every role whose work reads
+    // blueprint §4 — social posts and blog posts today. It used to open "You turn a social media
+    // manager's correction about one post…", which asks a model correcting a 1,200-word article to
+    // generalise as though it were a caption.
+    const systemPrompt = `You turn a user's correction about one ${contentKind} their AI assistant wrote into a single, reusable directive for that assistant.
 
-Rewrite the correction as ONE crisp, general instruction that will improve ALL future posts by this assistant — not just this one. Keep it under 300 characters, imperative, and specific enough to act on. Do not reference "this post" or the specific example.
+Rewrite the correction as ONE crisp, general instruction that will improve ALL future ${contentKind}s by this assistant — not just this one. Keep it under 300 characters, imperative, and specific enough to act on. Do not reference "this ${contentKind}" or the specific example.
 
 Respond with ONLY valid JSON: { "directive": "the instruction" }`;
 
