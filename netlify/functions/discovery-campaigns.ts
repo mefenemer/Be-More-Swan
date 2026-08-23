@@ -46,7 +46,7 @@ import { logAiUsage } from '../../src/utils/ai-usage';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { computePlanReach } from '../../src/config/plan-reach';
 import { assessMarket } from '../../src/lib/market-enumerability';
-import { splitTerritories, expandQueryAcrossTerritories } from '../../src/lib/territory-split';
+import { splitTerritories, expandQueryAcrossTerritories, pickExpansionSource } from '../../src/lib/territory-split';
 import {
     DEFAULT_MAX_LEADS_PER_RUN, DEFAULT_MAX_LEADS_PER_MONTH, DEFAULT_MAX_SEARCH_CALLS_PER_RUN,
 } from '../../src/config/discovery-limits';
@@ -586,17 +586,22 @@ export default withLambda(async (event) => {
         if (!split) return json(200, { expanded: false, reason: 'no_territories' });
 
         // ── Which queries get expanded ──────────────────────────────────────
-        // The FIRST of each strategy, and only that one. Expanding all fifteen across eighteen
-        // counties is 270 searches — a plan nobody can read and a bill nobody sanctioned. The first
-        // query of each strategy is the broadest statement of that angle, which makes it the one
-        // worth asking per area; the rest are kept verbatim so nothing the user wrote is lost.
+        // ONE per strategy. Expanding all fifteen across eighteen counties is 270 searches — a plan
+        // nobody can read and a bill nobody sanctioned.
+        //
+        // ⚠️ NOT blindly the first. The generator often slices geographically on its own, so the
+        // first query of a group may already name a place; if that place is one the split did not
+        // enumerate, expanding it yields a query about two different places. pickExpansionSource
+        // chooses the one the substitution can handle exactly — preferring a query that names the
+        // area itself — and everything else is kept verbatim.
         const expandedQueries: GeneratedQueries = { niche_scrape: [], intent_signal: [], footprint: [] };
         for (const key of ['niche_scrape', 'intent_signal', 'footprint'] as const) {
             const list = queries[key];
             if (list.length === 0) continue;
+            const i = pickExpansionSource(list, split.area, split.territories);
             expandedQueries[key] = [
-                ...expandQueryAcrossTerritories(list[0], split.area, split.territories),
-                ...list.slice(1),
+                ...expandQueryAcrossTerritories(list[i], split.area, split.territories),
+                ...list.filter((_, n) => n !== i),
             ];
         }
 

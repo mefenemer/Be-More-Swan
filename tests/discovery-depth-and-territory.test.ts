@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { computePlanReach, RESULTS_PER_QUERY, MAX_PAGES_PER_QUERY, YIELD_TO_PAGINATE } from '../src/config/plan-reach';
-import { expandQueryAcrossTerritories, MAX_TERRITORIES } from '../src/lib/territory-split';
+import { expandQueryAcrossTerritories, expansionAnchor, pickExpansionSource, MAX_TERRITORIES } from '../src/lib/territory-split';
 import { DEFAULT_MAX_LEADS_PER_RUN, DEFAULT_MAX_LEADS_PER_MONTH, DEFAULT_MAX_SEARCH_CALLS_PER_RUN } from '../src/config/discovery-limits';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -143,7 +143,124 @@ check('substitution preserves search operators exactly', () => {
     ]);
 });
 
+// ── The bug a live plan walked into ────────────────────────────────────────────────────────────
+// ⚠️ The generator had ALREADY sliced geographically, so the first query of each group read
+// "primary school Surrey" while the area was "South East England excluding Essex". Neither
+// matched, every expansion fell to append, and the plan would have contained
+// "primary school Surrey Kent" (two counties) and "primary school Surrey Surrey" (noise) — about a
+// third of it nonsense, one paid search each. The original tests passed because they exercised
+// substitution and append in isolation and never asked what append does to a query that already
+// names a DIFFERENT territory.
+
+check('a query that already names a county has it REPLACED, never appended to', () => {
+    const out = expandQueryAcrossTerritories('primary school Surrey', 'South East England excluding Essex',
+        ['Kent', 'Surrey', 'Hampshire']);
+    assert.deepStrictEqual(out, ['primary school Kent', 'primary school Surrey', 'primary school Hampshire']);
+    for (const q of out) {
+        assert.ok(!/Surrey \w/.test(q) || q === 'primary school Surrey', `two counties in one query: ${q}`);
+    }
+});
+
+check('a query naming SEVERAL counties keeps exactly one', () => {
+    // ⚠️ The full territory set, as a real split supplies. My first version passed ['Surrey','Kent']
+    // and asserted Hampshire vanished — it did not, and should not have: a territory the split never
+    // enumerated is one this function has never heard of. The honest fix for THAT case is not to
+    // expand such a query at all (see the anchor tests below).
+    const out = expandQueryAcrossTerritories(
+        'primary school Kent Hampshire -site:tes.com -inurl:careers', 'South East England',
+        ['Surrey', 'Kent', 'Hampshire']);
+    assert.deepStrictEqual(out, [
+        'primary school Surrey -site:tes.com -inurl:careers',
+        'primary school Kent -site:tes.com -inurl:careers',
+        'primary school Hampshire -site:tes.com -inurl:careers',
+    ]);
+});
+
+check('the short form of a compound county is recognised', () => {
+    // The generator writes "Sussex"; the register says "East Sussex". Without the short form the
+    // query looks unanchored and gets a second county bolted on.
+    const out = expandQueryAcrossTerritories('primary school Sussex', 'South East England', ['Kent', 'East Sussex']);
+    assert.deepStrictEqual(out, ['primary school Kent', 'primary school East Sussex']);
+});
+
+check('a compound name does not donate a misleading short form', () => {
+    // "Brighton and Hove" must not contribute "Hove", and "Isle of Wight" must not contribute
+    // "Wight", as though either were the county itself.
+    const out = expandQueryAcrossTerritories('primary school Hove', 'South East England', ['Kent', 'Brighton and Hove']);
+    assert.ok(out.every((q) => q.includes('Hove ') || q.endsWith('Hove')), 'Hove must be treated as unanchored text');
+});
+
+check('lowercase county names are matched too', () => {
+    // The live prod campaign wrote "primary school kent surrey sussex" in lower case.
+    const out = expandQueryAcrossTerritories('primary school kent surrey sussex', 'South East England',
+        ['Hampshire', 'Kent', 'Surrey', 'East Sussex']);
+    assert.strictEqual(out[0], 'primary school Hampshire', 'all three lowercase counties must be stripped');
+    // Assert the SUBSTANCE — exactly one county per query — not the word count. "East Sussex" is
+    // two words, so a length check fails on a correct result.
+    for (const q of out) {
+        const named = ['Hampshire', 'Kent', 'Surrey', 'Sussex'].filter((c) => new RegExp(`\\b${c}\\b`, 'i').test(q));
+        assert.strictEqual(named.length, 1, `expected exactly one county in "${q}", found ${named.join(' + ')}`);
+    }
+});
+
+check('an exclusion clause does not stop the area matching', () => {
+    // "South East England excluding Essex" never appears verbatim in a query that says
+    // "south east England" — which is exactly why everything fell through to append.
+    const out = expandQueryAcrossTerritories(
+        'primary school "head teacher" contact south east England', 'South East England excluding Essex', ['Kent']);
+    assert.deepStrictEqual(out, ['primary school "head teacher" contact Kent']);
+});
+
+check('repeated territories are not paid for twice', () => {
+    // My first version of this asserted that 'primary school Kent Surrey' with territories
+    // ['Kent','Kent'] collapses to one query. It does not, and should not: Surrey is not in that
+    // territory list, so the function has never heard of it and correctly leaves it alone. Only
+    // territories the split actually named are stripped — a limitation worth stating, and harmless
+    // in practice because a real split enumerates every county in the area.
+    const out = expandQueryAcrossTerritories('primary school Surrey', 'South East England', ['Kent', 'Kent', 'Surrey']);
+    assert.deepStrictEqual(out, ['primary school Kent', 'primary school Surrey'], 'the duplicate must collapse');
+});
+
+// ── The residual gap, handled by choosing WHICH query to expand ───────────────────────────────
+// Substitution can only strip territories the split enumerated. A query naming a place outside
+// that list keeps it, and the two-county bug returns by the back door. Rather than pretend a
+// gazetteer is available, the caller picks a query the substitution handles exactly.
+
+check('a query naming an unenumerated place is classified as unsafe to expand', () => {
+    assert.strictEqual(expansionAnchor('primary school Kent Medway', 'South East England', ['Kent', 'Surrey']), 'unknown');
+});
+
+check('anchors are ranked area > territory > none', () => {
+    const T = ['Kent', 'Surrey'];
+    assert.strictEqual(expansionAnchor('primary school south east England', 'South East England', T), 'area');
+    assert.strictEqual(expansionAnchor('primary school Kent', 'South East England', T), 'territory');
+    assert.strictEqual(expansionAnchor('primary school admissions email', 'South East England', T), 'none');
+});
+
+check('operators and quoted phrases are not mistaken for places', () => {
+    // -site:Tes.com and a quoted "Head Teacher" must not read as an unenumerated county.
+    assert.strictEqual(
+        expansionAnchor('primary school Kent "Head Teacher" -site:Tes.com', 'South East England', ['Kent']),
+        'territory',
+    );
+});
+
+check('the cleanest query in a group is the one expanded', () => {
+    // The live plan: the first query named a county, a later one named the area. The area one is
+    // the unambiguous substitution, so it wins despite not being first.
+    const group = ['primary school Kent Medway', 'primary school contact south east England', 'primary school Surrey'];
+    assert.strictEqual(pickExpansionSource(group, 'South East England excluding Essex', ['Kent', 'Surrey']), 1);
+});
+
+check('the API picks the source rather than taking list[0]', () => {
+    const block = API.slice(API.indexOf("action === 'expand_territories'"));
+    assert.match(block.slice(0, 3600), /pickExpansionSource\(list, split\.area, split\.territories\)/);
+    assert.ok(!/expandQueryAcrossTerritories\(list\[0\]/.test(block.slice(0, 3600)), 'list[0] must no longer be forced');
+});
+
 check('a query that does not name the area still becomes territory-specific', () => {
+    // Append survives as the LAST resort — the one case where adding a territory cannot contradict
+    // anything already in the query.
     const out = expandQueryAcrossTerritories('primary school contact -inurl:blog', 'nowhere', ['Kent']);
     assert.strictEqual(out[0], 'primary school contact -inurl:blog Kent', 'the territory must be appended');
 });
@@ -172,15 +289,18 @@ check('the number of territories is bounded', () => {
 check('expanding saves nothing and returns a plan to review', () => {
     const i = API.indexOf("action === 'expand_territories'");
     assert.ok(i > 0, 'the action must exist');
-    const block = API.slice(i, i + 3200);
+    // Bounded at the next action so the window cannot silently fall short of the block as it grows —
+    // an off-by-a-few slice is how a source-scan test starts passing for the wrong reason.
+    const block = API.slice(i, API.indexOf("action === 'approve_brief'", i));
+    assert.ok(block.length > 500, 'the expand_territories block must be found in full');
     assert.ok(!/db\.update\(discoveryCampaigns\)/.test(block), 'expansion must not persist anything');
     assert.match(block, /computePlanReach\(flat\.length/, 'and must re-report reach for the bigger plan');
 });
 
-check('only the first query of each strategy is expanded', () => {
+check('exactly one query per strategy is expanded, and the rest kept verbatim', () => {
     // 15 queries x 18 counties is 270 searches — a plan nobody can read and a bill nobody sanctioned.
     const block = API.slice(API.indexOf("action === 'expand_territories'"));
-    assert.match(block.slice(0, 3200), /expandQueryAcrossTerritories\(list\[0\], split\.area, split\.territories\),\s*\n\s*\.\.\.list\.slice\(1\)/,
+    assert.match(block.slice(0, 3600), /expandQueryAcrossTerritories\(list\[i\], split\.area, split\.territories\),\s*\n\s*\.\.\.list\.filter\(\(_, n\) => n !== i\)/,
         'the rest of the plan must be kept verbatim');
 });
 
