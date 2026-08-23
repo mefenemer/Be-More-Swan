@@ -45,10 +45,13 @@ import {
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { computePlanReach } from '../../src/config/plan-reach';
+import { readTerritoryPlan, nextSlice, type TerritoryPlan } from '../../src/config/territory-plan';
+import { MAX_PAGES_PER_QUERY } from '../../src/config/plan-reach';
 import { assessMarket } from '../../src/lib/market-enumerability';
 import { splitTerritories, expandQueryAcrossTerritories, pickExpansionSource, MAX_TERRITORIES } from '../../src/lib/territory-split';
 import {
     DEFAULT_MAX_LEADS_PER_RUN, DEFAULT_MAX_LEADS_PER_MONTH, DEFAULT_MAX_SEARCH_CALLS_PER_RUN,
+    DEFAULT_MAX_TOKENS_PER_RUN, MAX_TOKENS_PER_RUN_CEILING, MAX_SEARCH_CALLS_PER_RUN_CEILING,
 } from '../../src/config/discovery-limits';
 
 function json(statusCode: number, body: unknown) {
@@ -261,7 +264,10 @@ export default withLambda(async (event) => {
                 // read was new. Both live on the job's `cursor` jsonb (no migration — see the
                 // Coverage note in process-discovery-jobs.ts). NULL for runs predating this, which
                 // the client renders as "not recorded" rather than as "finished cleanly".
-                latestRunStopReason: sql<string | null>`(
+                // Territory progress, for the card to say "12 of 58 areas worked".
+                territoriesTotal: sql<number | null>`jsonb_array_length(${discoveryCampaigns.approvedBrief} #> '{territoryPlan,territories}')`,
+                territoriesCovered: sql<number | null>`jsonb_array_length(${discoveryCampaigns.approvedBrief} #> '{territoryPlan,covered}')`,
+            latestRunStopReason: sql<string | null>`(
                     SELECT j.cursor ->> 'stopReason' FROM discovery_jobs j
                     WHERE j.campaign_id = ${discoveryCampaigns.id}
                     ORDER BY j.created_at DESC, j.id DESC LIMIT 1
@@ -289,6 +295,8 @@ export default withLambda(async (event) => {
                 // Guardrail snapshot so the Edit form can prefill without a second round-trip.
                 // Only the fields the form actually shows — maxCostGbpPerRun is operator-only.
                 maxLeadsPerRun: discoveryGuardrails.maxLeadsPerRun,
+                maxSearchCallsPerRun: discoveryGuardrails.maxSearchCallsPerRun,
+                maxTokensPerRun: discoveryGuardrails.maxTokensPerRun,
                 negativeKeywords: discoveryGuardrails.negativeKeywords,
                 // Returned so a domain blocked from the reject flow is VISIBLE and removable. A
                 // one-click permanent exclusion the user can never see again is a trap, not a
@@ -325,6 +333,8 @@ export default withLambda(async (event) => {
             approvedBrief: discoveryCampaigns.approvedBrief,
             targetPersona: discoveryCampaigns.targetPersona,
             maxLeadsPerRun: discoveryGuardrails.maxLeadsPerRun,
+            maxSearchCallsPerRun: discoveryGuardrails.maxSearchCallsPerRun,
+            maxTokensPerRun: discoveryGuardrails.maxTokensPerRun,
             negativeKeywords: discoveryGuardrails.negativeKeywords,
             excludedDomains: discoveryGuardrails.excludedDomains,
             requireHumanApproval: discoveryGuardrails.requireHumanApproval,
@@ -367,6 +377,8 @@ export default withLambda(async (event) => {
                 WHERE j.campaign_id = ${discoveryCampaigns.id}
                 ORDER BY j.created_at DESC, j.id DESC LIMIT 1
             )`,
+            territoriesTotal: sql<number | null>`jsonb_array_length(${discoveryCampaigns.approvedBrief} #> '{territoryPlan,territories}')`,
+            territoriesCovered: sql<number | null>`jsonb_array_length(${discoveryCampaigns.approvedBrief} #> '{territoryPlan,covered}')`,
             // Coverage of that run — see the matching block on the list query above, and the
             // Coverage note in process-discovery-jobs.ts for why these live on the cursor jsonb.
             latestRunStopReason: sql<string | null>`(
@@ -438,6 +450,8 @@ export default withLambda(async (event) => {
                 // coverage for this run" and "this run covered nothing" are different facts, and
                 // the card says different things about them — runs predating this feature must not
                 // masquerade as runs that covered zero queries.
+                territoriesTotal: campaign.territoriesTotal ?? null,
+                territoriesCovered: campaign.territoriesCovered ?? null,
                 latestRunStopReason: campaign.latestRunStopReason ?? null,
                 latestRunQueriesRun: campaign.latestRunQueriesRun ?? null,
                 latestRunQueriesPlanned: campaign.latestRunQueriesPlanned ?? null,
@@ -538,7 +552,10 @@ export default withLambda(async (event) => {
         // Tier 3: is this plan aimed at an area big enough to be worth working piece by piece?
         // Offered, never applied — the expansion is a separate action the user triggers and reads.
         // Both calls fail soft and resolve null; neither can fail the brief screen.
-        const territorySplit = await splitTerritories(campaign.idea);
+        const territorySplit = await splitTerritories(
+            campaign.idea,
+            body.granularity === 'fine' ? 'fine' : 'coarse',
+        );
 
         // The exclusions are returned alongside the queries because they are half of what the user
         // is approving: "it will skip directories, job boards and social networks" is reassurance
@@ -603,7 +620,7 @@ export default withLambda(async (event) => {
                 basis: typeof offered?.basis === 'string' ? offered.basis.trim().slice(0, 120) : '',
                 territories: offeredTerritories,
             }
-            : await splitTerritories(campaign.idea);
+            : await splitTerritories(campaign.idea, body.granularity === 'fine' ? 'fine' : 'coarse');
         if (!split) return json(200, { expanded: false, reason: 'no_territories' });
 
         // ── Which queries get expanded ──────────────────────────────────────
@@ -615,12 +632,56 @@ export default withLambda(async (event) => {
         // enumerate, expanding it yields a query about two different places. pickExpansionSource
         // chooses the one the substitution can handle exactly — preferring a query that names the
         // area itself — and everything else is kept verbatim.
-        const expandedQueries: GeneratedQueries = { niche_scrape: [], intent_signal: [], footprint: [] };
+        // ── Phase 1: the METHOD ─────────────────────────────────────────────
+        // One pre-expansion query per strategy, chosen for how cleanly it substitutes. Kept on the
+        // campaign so later runs can continue into territories this plan never reaches — see
+        // src/config/territory-plan.ts. Picked before the slice, because the slice is sized from
+        // how many templates there turn out to be.
+        const templates: Record<'niche_scrape' | 'intent_signal' | 'footprint', string | null> = {
+            niche_scrape: null, intent_signal: null, footprint: null,
+        };
+        const sources: Partial<Record<'niche_scrape' | 'intent_signal' | 'footprint', number>> = {};
         for (const key of ['niche_scrape', 'intent_signal', 'footprint'] as const) {
             const list = queries[key];
             if (list.length === 0) continue;
             const i = pickExpansionSource(list, split.area, split.territories);
-            const expanded = expandQueryAcrossTerritories(list[i], split.area, split.territories);
+            sources[key] = i;
+            templates[key] = list[i];
+        }
+
+        const territoryPlan: TerritoryPlan = {
+            area: split.area, basis: split.basis,
+            granularity: 'granularity' in split ? split.granularity : 'coarse',
+            territories: split.territories, covered: [], templates,
+        };
+
+        // ── Phase 2: how much of it THIS run takes on ───────────────────────
+        //
+        // ⚠️ The first slice, not every territory. 58 districts x 3 strategies is 174 queries —
+        // more than one run can execute and more than anyone can read on a review screen. Worse,
+        // approving all of them seeded a first run that banked no territory progress, so the next
+        // run began the sweep at territory one and re-covered ground the first had already done.
+        //
+        // Slicing here makes the screen honest both ways: what you review is what runs now, and
+        // the plan states what follows. A coarse split of 9-13 counties fits inside one slice, so
+        // it behaves exactly as it did before.
+        const [gl] = await db.select({
+            maxLeadsPerRun: discoveryGuardrails.maxLeadsPerRun,
+            maxSearchCallsPerRun: discoveryGuardrails.maxSearchCallsPerRun,
+            maxLeadsPerMonth: discoveryGuardrails.maxLeadsPerMonth,
+        }).from(discoveryGuardrails).where(eq(discoveryGuardrails.campaignId, campaignId)).limit(1);
+
+        const slice = nextSlice(territoryPlan, {
+            maxSearchCalls: gl?.maxSearchCallsPerRun ?? DEFAULT_MAX_SEARCH_CALLS_PER_RUN,
+            maxPagesPerQuery: MAX_PAGES_PER_QUERY,
+        });
+
+        const expandedQueries: GeneratedQueries = { niche_scrape: [], intent_signal: [], footprint: [] };
+        for (const key of ['niche_scrape', 'intent_signal', 'footprint'] as const) {
+            const list = queries[key];
+            const i = sources[key];
+            if (list.length === 0 || i === undefined) continue;
+            const expanded = expandQueryAcrossTerritories(list[i], split.area, slice);
 
             // ⚠️ Deduped against the EXPANSION, not just within it. The generator often writes
             // "primary school Kent" alongside the broader query that gets expanded, and expanding
@@ -633,12 +694,6 @@ export default withLambda(async (event) => {
 
         const flat = flattenQueries(expandedQueries);
         if (flat.length === 0) return json(200, { expanded: false, reason: 'no_territories' });
-
-        const [gl] = await db.select({
-            maxLeadsPerRun: discoveryGuardrails.maxLeadsPerRun,
-            maxSearchCallsPerRun: discoveryGuardrails.maxSearchCallsPerRun,
-            maxLeadsPerMonth: discoveryGuardrails.maxLeadsPerMonth,
-        }).from(discoveryGuardrails).where(eq(discoveryGuardrails.campaignId, campaignId)).limit(1);
 
         // Recomputed for the EXPANDED plan. A split that quadruples the query count usually moves
         // the binding limit to the search cap, and the user needs to see that before approving —
@@ -659,7 +714,11 @@ export default withLambda(async (event) => {
             leadsThisMonth: Number(expandMonthTotal ?? 0),
         });
 
-        return json(200, { expanded: true, queries: expandedQueries, planReach, territorySplit: split });
+        // territoryPlan travels back to the client, which returns it on approve_brief. Persisting
+        // here would save a plan the user may never approve.
+        // `slice` travels back too: approving seeds the first job with exactly these territories,
+        // so the run banks progress for the ground it actually works.
+        return json(200, { expanded: true, queries: expandedQueries, planReach, territorySplit: split, territoryPlan, slice });
     }
 
     // ── approve a brief and start the run it describes ──────────────────────────
@@ -701,6 +760,12 @@ export default withLambda(async (event) => {
             .set({
                 approvedBrief: {
                     queries,
+                    // ⚠️ The campaign's memory of which territories it has worked. Without it every
+                    // run re-plans from scratch and the same few areas get searched repeatedly
+                    // while the rest are never looked at once.
+                    ...(readTerritoryPlan({ territoryPlan: body.territoryPlan })
+                        ? { territoryPlan: readTerritoryPlan({ territoryPlan: body.territoryPlan }) }
+                        : {}),
                     persona: body.persona ?? null,
                     exclusions: (body.exclusions && typeof body.exclusions === 'object') ? body.exclusions : null,
                     approvedAt: new Date().toISOString(),
@@ -732,7 +797,18 @@ export default withLambda(async (event) => {
         const jobId = randomUUID();
         await db.insert(discoveryJobs).values({
             jobId, organisationId: orgId, campaignId, triggerType: 'on_demand',
-            cursor: { flat, queryIndex: 0 }, stage: 'searching',
+            // ⚠️ `territorySlice` makes the FIRST run the first leg of the sweep rather than a
+            // one-off. Without it that run banked no progress, so the next one restarted at
+            // territory one and re-covered ground already worked.
+            cursor: {
+                flat, queryIndex: 0,
+                ...(Array.isArray(body.slice) && body.slice.length
+                    ? { territorySlice: (body.slice as unknown[])
+                        .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+                        .map((t) => t.trim().slice(0, 80)) }
+                    : {}),
+            },
+            stage: 'searching',
         });
 
         await triggerDiscoveryDrain(event.headers as Record<string, string | undefined>, jobId, 'discovery-campaigns:approve_brief');
@@ -945,6 +1021,14 @@ export default withLambda(async (event) => {
             // maxCostGbpPerRun is not editable — see the create branch above.
             // Clamped on the way in, exactly as on create: the edit modal is the other door to the
             // same column, and a limit that can only be raised through Edit is not a limit.
+            // The two limits that actually end a run, now settable. Both were invisible: a user
+            // could raise their lead cap to 200 and still be stopped at ~63 searches by a token
+            // budget they had never been shown.
+            const searchCalls = clampGuardrail(g.maxSearchCallsPerRun, MAX_SEARCH_CALLS_PER_RUN_CEILING);
+            if (searchCalls !== undefined) patch.maxSearchCallsPerRun = searchCalls;
+            const tokens = clampGuardrail(g.maxTokensPerRun, MAX_TOKENS_PER_RUN_CEILING);
+            if (tokens !== undefined) patch.maxTokensPerRun = tokens;
+
             const perRun = clampGuardrail(g.maxLeadsPerRun, MAX_LEADS_PER_RUN_CEILING);
             if (perRun !== undefined) patch.maxLeadsPerRun = perRun;
             const perMonth = clampGuardrail(g.maxLeadsPerMonth, MAX_LEADS_PER_MONTH_CEILING);

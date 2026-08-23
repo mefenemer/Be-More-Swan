@@ -177,6 +177,24 @@
       + 'which suggests these searches have found what they can.';
   }
 
+  /**
+   * ── Progress through an area sweep ────────────────────────────────────────
+   *
+   * A district split is too large for one run, so a campaign works it a few areas at a time. That
+   * makes "stopped early" the NORMAL outcome rather than a warning — and without this line the
+   * coverage note beside it reads as a failure every single run, which would train the user to
+   * ignore the one message that tells them when something is actually wrong.
+   *
+   * Returns null for a campaign that is not sweeping, which is most of them.
+   */
+  function sweepLine(c) {
+    const total = Number(c.territoriesTotal ?? 0);
+    if (!total) return null;
+    const done = Number(c.territoriesCovered ?? 0);
+    if (done >= total) return `All ${total} areas worked. Run it again to re-check them for new companies.`;
+    return `${done} of ${total} areas worked so far — each run continues where the last one stopped.`;
+  }
+
   function body() { return state.overlay?.querySelector('[data-dc-body]'); }
   function setBody(html) { const b = body(); if (b) b.innerHTML = html; }
 
@@ -208,6 +226,23 @@
           <div>
             <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Max leads / run</label>
             <input data-dc-maxleads type="number" min="1" value="50" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
+          </div>
+        </div>
+
+        <!-- ⚠️ The two limits that actually END a run, and neither was shown anywhere. A measured
+             run spent 3,185 tokens per search, so the old 200k budget stopped it after ~63 searches
+             — before the search cap and long before the cost cap. A user could raise their lead cap
+             to its maximum and still be halted by a number they had never seen. -->
+        <div class="grid grid-cols-2 gap-3 mt-3">
+          <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Max searches / run</label>
+            <input data-dc-maxsearches type="number" min="1" value="500" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
+            <p class="text-[11px] text-gray-400 mt-1">Each search reads one page of results.</p>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Token budget / run</label>
+            <input data-dc-maxtokens type="number" min="1000" step="100000" value="1500000" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
+            <p class="text-[11px] text-gray-400 mt-1">Scoring costs roughly 3,200 per search.</p>
           </div>
         </div>
 
@@ -268,6 +303,8 @@
       <div class="border border-gray-200 rounded-xl p-4 ${paused ? 'opacity-70' : ''}" data-campaign="${c.id}" data-dc-idea-val="${esc(c.idea)}"
            data-dc-name-val="${esc(c.name || '')}"
            data-dc-maxleads-val="${esc(c.maxLeadsPerRun ?? 50)}"
+           data-dc-maxsearches-val="${esc(c.maxSearchCallsPerRun ?? 500)}"
+           data-dc-maxtokens-val="${esc(c.maxTokensPerRun ?? 1500000)}"
            data-dc-negatives-val="${esc(Array.isArray(c.negativeKeywords) ? c.negativeKeywords.join(', ') : '')}"
            data-dc-domains-val="${esc(Array.isArray(c.excludedDomains) ? c.excludedDomains.join(', ') : '')}"
            data-dc-approval-val="${c.requireHumanApproval === false ? '0' : '1'}">
@@ -277,6 +314,7 @@
         </div>
         ${c.name ? `<p class="text-xs text-gray-500 mt-0.5">${esc(c.idea)}</p>` : ''}
         <p class="text-xs text-gray-500 mt-1">${leadCountLine(c)}</p>
+        ${sweepLine(c) ? `<p class="text-xs text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-2 py-1.5 mt-1.5">${esc(sweepLine(c))}</p>` : ''}
         ${coverageLine(c) ? `<p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-1.5">${esc(coverageLine(c))}</p>` : ''}
         <p class="text-xs text-gray-400 mt-0.5">${paused ? 'Paused — it will not run until you resume it.' : esc(scheduleLine(c))}</p>
         <div class="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-100">
@@ -345,6 +383,8 @@
       cadence: root.querySelector('[data-dc-cadence]')?.value || 'one_off',
       guardrails: {
         maxLeadsPerRun: Number(root.querySelector('[data-dc-maxleads]')?.value) || undefined,
+        maxSearchCallsPerRun: Number(root.querySelector('[data-dc-maxsearches]')?.value) || undefined,
+        maxTokensPerRun: Number(root.querySelector('[data-dc-maxtokens]')?.value) || undefined,
         negativeKeywords: negatives.length ? negatives : undefined,
         requireHumanApproval: !!root.querySelector('[data-dc-approval]')?.checked,
       },
@@ -415,10 +455,17 @@
     const t = brief.territorySplit;
     if (!t || !Array.isArray(t.territories) || t.territories.length < 2) return '';
     if (state.territoriesApplied) {
+      const slice = Array.isArray(state.brief?.slice) ? state.brief.slice.length : t.territories.length;
+      const partial = slice < t.territories.length;
       return `
         <div class="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
           <p class="text-xs font-bold text-emerald-900">Split across ${esc(String(t.territories.length))} areas</p>
-          <p class="text-xs text-emerald-800 mt-1">The broadest search from each angle now runs once per area. Check the reach below — a bigger plan often means a limit cuts it short.</p>
+          <p class="text-xs text-emerald-800 mt-1">${partial
+            // ⚠️ Say this plainly. A district sweep is deliberately more than one run, and a user
+            // who thinks they are approving all 58 areas will read the next "stopped early" notice
+            // as a failure rather than as the sweep working exactly as designed.
+            ? `This run works the first ${esc(String(slice))} — the searches below. Later runs continue with the rest, picking up where this one stops.`
+            : 'The broadest search from each angle now runs once per area. Check the reach below — a bigger plan often means a limit cuts it short.'}</p>
         </div>`;
     }
     return `
@@ -428,10 +475,21 @@
           One search for a whole region returns whatever ranks, not whatever matches. Splitting it into
           ${esc(String(t.territories.length))} ${esc(t.basis || 'areas')} asks a question each set of results can actually answer.
         </p>
-        <button type="button" data-dc-split class="mt-2 px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-60">
-          Split into ${esc(String(t.territories.length))} areas
-        </button>
-        <span class="hidden ml-2 text-xs font-semibold text-red-600" data-dc-split-error></span>
+        <div class="flex flex-wrap items-center gap-2 mt-2">
+          <button type="button" data-dc-split class="px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-60">
+            Split into ${esc(String(t.territories.length))} areas
+          </button>
+          <!-- ⚠️ The finer level is the one that changes the ORDER of the answer, not a multiple of
+               it. One search against Kent addresses ~600 primary schools; no depth setting makes ten
+               results a meaningful sample of six hundred. Districts are where a page of results is a
+               real fraction of the question. Offered rather than defaulted: it is a much larger plan,
+               and it is worked across several runs. -->
+          <button type="button" data-dc-split-fine class="px-3 py-1.5 bg-white border border-blue-300 text-blue-800 hover:bg-blue-100 text-xs font-bold rounded-lg transition disabled:opacity-60">
+            Go finer — split by district
+          </button>
+          <span class="hidden text-xs font-semibold text-red-600 w-full" data-dc-split-error></span>
+        </div>
+        <p class="text-[11px] text-blue-700 mt-1.5">A district split is worked a few areas per run, continuing where the last run stopped.</p>
       </div>`;
   }
 
@@ -592,7 +650,7 @@
    * The response replaces the plan in place and re-renders. Nothing is saved: approving is still a
    * separate, deliberate act, and "Draft a different plan" still discards the whole thing.
    */
-  async function expandTerritories(btn) {
+  async function expandTerritories(btn, granularity) {
     const b = body();
     const err = b?.querySelector('[data-dc-split-error]');
     if (err) err.classList.add('hidden');
@@ -602,16 +660,22 @@
     try {
       const data = await call('expand_territories', {
         campaignId: state.briefCampaignId,
+        granularity,
         queries: collectQueries(b),
         // ⚠️ Send the split the BUTTON was drawn from. The server re-derived it before, and the
         // call is non-deterministic — "Split into 9 areas" delivered 12. What you approve must be
         // what runs.
-        territorySplit: state.brief?.territorySplit ?? null,
+        territorySplit: granularity === 'fine' ? null : (state.brief?.territorySplit ?? null),
       });
       if (!data.expanded) throw new Error('There is no clear way to split this area up.');
       // Carry the untouched halves forward: the server returns the new plan and its reach, but the
       // exclusions and market advice belong to the brief and have not changed.
-      state.brief = { ...state.brief, queries: data.queries, planReach: data.planReach, territorySplit: data.territorySplit };
+      state.brief = {
+        ...state.brief,
+        queries: data.queries, planReach: data.planReach, territorySplit: data.territorySplit,
+        territoryPlan: data.territoryPlan ?? null,
+        slice: data.slice ?? null,
+      };
       state.territoriesApplied = true;
       setBody(briefView(state.brief));
       wireBrief();
@@ -627,7 +691,8 @@
     if (!b) return;
     b.querySelector('[data-dc-approve]')?.addEventListener('click', (e) => approveBrief(e.currentTarget));
     b.querySelector('[data-dc-regen]')?.addEventListener('click', () => openBrief(state.briefCampaignId));
-    b.querySelector('[data-dc-split]')?.addEventListener('click', (e) => expandTerritories(e.currentTarget));
+    b.querySelector('[data-dc-split]')?.addEventListener('click', (e) => expandTerritories(e.currentTarget, 'coarse'));
+    b.querySelector('[data-dc-split-fine]')?.addEventListener('click', (e) => expandTerritories(e.currentTarget, 'fine'));
     b.querySelector('[data-dc-brief-cancel]')?.addEventListener('click', () => refresh());
     b.querySelectorAll('[data-dc-remove]').forEach((el) => {
       el.addEventListener('click', () => el.closest('[data-dc-query]')?.remove());
@@ -666,6 +731,13 @@
         queries,
         persona: state.brief?.persona ?? null,
         exclusions: state.brief?.exclusions ?? null,
+        // ⚠️ Only present once the plan has been split. Without it the campaign has no memory of
+        // which areas it has worked, and every later run re-plans from scratch — which is how a
+        // handful of territories got searched repeatedly while the rest were never looked at.
+        territoryPlan: state.brief?.territoryPlan ?? null,
+        // Which territories this first run works. Seeds cursor.territorySlice so the run banks
+        // progress for exactly the ground it covers.
+        slice: state.brief?.slice ?? null,
       });
       window.showToast?.(data.alreadyRunning
         ? 'A run is already in progress.'
@@ -779,6 +851,20 @@
             <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Max leads / run</label>
             <input data-edit-maxleads type="number" min="1" value="${esc(g('maxLeadsPerRun', '50'))}" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
           </div>
+          <!-- ⚠️ The limits that actually end a run. Measured at 3,185 tokens per search, the old
+               200k budget stopped a run after ~63 searches — before the search cap, long before the
+               cost cap, and invisible in every surface the user could see. -->
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Max searches / run</label>
+              <input data-edit-maxsearches type="number" min="1" value="${esc(g('maxSearchCallsPerRun', '500'))}" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Token budget / run</label>
+              <input data-edit-maxtokens type="number" min="1000" step="100000" value="${esc(g('maxTokensPerRun', '1500000'))}" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
+            </div>
+          </div>
+          <p class="text-[11px] text-gray-500 -mt-2">Scoring costs roughly 3,200 tokens per search, so a budget of 1.5M covers about 470 searches.</p>
           <div>
             <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Exclude words (comma-sep)</label>
             <input data-edit-negatives type="text" value="${esc(g('negativeKeywords', ''))}" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm" placeholder="marketing agency, franchise">
@@ -824,6 +910,8 @@
           name: overlay.querySelector('[data-edit-name]').value.trim(),
           guardrails: {
             maxLeadsPerRun: Number(overlay.querySelector('[data-edit-maxleads]').value) || undefined,
+            maxSearchCallsPerRun: Number(overlay.querySelector('[data-edit-maxsearches]')?.value) || undefined,
+            maxTokensPerRun: Number(overlay.querySelector('[data-edit-maxtokens]')?.value) || undefined,
             negativeKeywords: negatives,
             excludedDomains: domains,
             requireHumanApproval: !!overlay.querySelector('[data-edit-approval]').checked,
@@ -981,6 +1069,7 @@
           <p class="text-xs text-gray-500 mt-1">Up to ${esc(c.maxLeadsPerRun)} companies per run.</p>`)}
         ${section('What it has found', `
           <p class="text-xs text-gray-700">${esc(leadCountLine(c))}</p>
+          ${sweepLine(c) ? `<p class="text-xs text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-2 py-1.5 mt-1.5">${esc(sweepLine(c))}</p>` : ''}
           ${coverageLine(c) ? `<p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-1.5">${esc(coverageLine(c))}</p>` : ''}
           <p class="text-xs text-gray-500 mt-1">${esc(c.runCount === 0
             ? 'It has not finished a run yet.'
@@ -1216,6 +1305,8 @@
         name: attr('data-dc-name-val'),
         idea: attr('data-dc-idea-val'),
         maxLeadsPerRun: attr('data-dc-maxleads-val') || '50',
+        maxSearchCallsPerRun: attr('data-dc-maxsearches-val') || '500',
+        maxTokensPerRun: attr('data-dc-maxtokens-val') || '1500000',
         negativeKeywords: attr('data-dc-negatives-val'),
         excludedDomains: attr('data-dc-domains-val'),
         requireHumanApproval: attr('data-dc-approval-val') !== '0',

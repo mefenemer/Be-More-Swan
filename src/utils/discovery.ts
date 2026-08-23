@@ -10,6 +10,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { discoveryCampaigns, discoveryGuardrails, discoverySchedules, discoveryJobs, aiAssistants } from '../../db/schema';
 import { icpFromOnboarding } from './icp-snapshot';
 import { MAX_ACTIVE_CAMPAIGNS_PER_ORG } from '../config/discovery-limits';
+import { DEFAULT_MAX_SEARCH_CALLS_PER_RUN, DEFAULT_MAX_TOKENS_PER_RUN } from '../config/discovery-limits';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -130,8 +131,12 @@ export async function createDiscoveryRun(input: CreateRunInput): Promise<CreateR
         organisationId, campaignId: campaign.id,
         ...(g.maxLeadsPerRun !== undefined ? { maxLeadsPerRun: g.maxLeadsPerRun } : {}),
         ...(g.maxLeadsPerMonth !== undefined ? { maxLeadsPerMonth: g.maxLeadsPerMonth } : {}),
-        ...(g.maxSearchCallsPerRun !== undefined ? { maxSearchCallsPerRun: g.maxSearchCallsPerRun } : {}),
-        ...(g.maxTokensPerRun !== undefined ? { maxTokensPerRun: g.maxTokensPerRun } : {}),
+        // ⚠️ Written explicitly rather than left to the column default. The table defaults
+        // (100 searches / 200k tokens) predate the measurement that showed the token budget binds
+        // at ~63 searches — see src/config/discovery-limits.ts. Falling through to them would give
+        // every new campaign the ceiling we just established is too low to finish a split sweep.
+        maxSearchCallsPerRun: g.maxSearchCallsPerRun ?? DEFAULT_MAX_SEARCH_CALLS_PER_RUN,
+        maxTokensPerRun: g.maxTokensPerRun ?? DEFAULT_MAX_TOKENS_PER_RUN,
         ...(g.maxCostGbpPerRun !== undefined ? { maxCostGbpPerRun: String(g.maxCostGbpPerRun) } : {}),
         ...(g.negativeKeywords !== undefined ? { negativeKeywords: g.negativeKeywords } : {}),
         ...(g.excludedDomains !== undefined ? { excludedDomains: g.excludedDomains } : {}),

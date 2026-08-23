@@ -66,7 +66,11 @@ const GENERATE = API.slice(landmark(API, "if (action === 'generate_brief')"), la
 // ── 1. Cost-neutrality: the seeded cursor ────────────────────────────────────
 
 check('approving seeds the job cursor, which is what skips the worker’s query_gen', () => {
-    assert.ok(/cursor: \{ flat, queryIndex: 0 \}/.test(APPROVE),
+    // Asserted on the two things that MATTER — the approved queries and a zero index — rather than
+    // on the object literal's exact shape. It legitimately gained a conditional `territorySlice`
+    // when a district sweep became something a campaign works across several runs, and an
+    // exact-match assertion fails on every honest change while catching no real regression.
+    assert.match(APPROVE, /cursor: \{[\s\S]{0,400}?\bflat,[\s\S]{0,400}?queryIndex: 0/,
         'approve_brief no longer seeds the cursor — the worker would regenerate queries and run something the user never saw');
     assert.ok(/stage: 'searching'/.test(APPROVE),
         "the seeded job must start at stage 'searching', matching what query_gen would have set");

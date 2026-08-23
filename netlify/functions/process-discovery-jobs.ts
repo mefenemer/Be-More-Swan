@@ -40,8 +40,11 @@ import { createNotification } from '../../src/utils/notify';
 import { savedSearchLabel } from '../../src/config/signal-sources';
 // ⚠️ Shared with the brief-approval planner so the two cannot disagree about what a run can read.
 import { RESULTS_PER_QUERY, MAX_PAGES_PER_QUERY, YIELD_TO_PAGINATE } from '../../src/config/plan-reach';
+import { readTerritoryPlan, nextSlice, territoriesWorked, type TerritoryPlan } from '../../src/config/territory-plan';
+import { expandQueryAcrossTerritories } from '../../src/lib/territory-split';
 import {
     DEFAULT_MAX_LEADS_PER_RUN, DEFAULT_MAX_LEADS_PER_MONTH, DEFAULT_MAX_SEARCH_CALLS_PER_RUN,
+    DEFAULT_MAX_TOKENS_PER_RUN,
 } from '../../src/config/discovery-limits';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -128,6 +131,14 @@ interface Cursor {
     coverage?: Coverage;
     /** Set once searching is over. Absent while a run is still in progress. */
     stopReason?: StopReason;
+    /**
+     * Territories this run took on, when it is continuing an area sweep.
+     *
+     * ⚠️ Marked covered only when SEARCHING FINISHES, never at claim time. A run cut short by a
+     * lead cap has not worked the territories it never reached, and recording them would skip
+     * them forever — the campaign would report progress it had not made.
+     */
+    territorySlice?: string[];
 }
 
 interface Guardrails {
@@ -145,7 +156,7 @@ const DEFAULT_GUARDRAILS: Guardrails = {
     // reads NULL, and Number(null) is 0 — which would silently disable paid enrichment rather
     // than cap it — so loadGuardrails coalesces to this instead.
     maxEnrichmentCallsPerRun: 25,
-    maxTokensPerRun: 200000, maxCostGbpPerRun: 2.0,
+    maxTokensPerRun: DEFAULT_MAX_TOKENS_PER_RUN, maxCostGbpPerRun: 2.0,
     negativeKeywords: [], excludedDomains: [], requireHumanApproval: true,
 };
 
@@ -250,6 +261,42 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
 
         // ── STAGE query_gen: generate queries once, cache, resume next tick ──────
         if (!cursor || !Array.isArray(cursor.flat)) {
+            // ── Continue an area sweep, if this campaign is running one ──────────────
+            //
+            // ⚠️ Deterministic, and it makes NO model call. The territories and the query templates
+            // were approved by a human; expanding one across the other is substitution, and asking
+            // a model to re-derive it would reintroduce the non-determinism the stored plan exists
+            // to remove — the same idea has returned 9, 10, 12, 13 and 18 areas on different calls.
+            //
+            // This is what makes a market larger than one run reachable at all: without it every
+            // run re-planned from scratch, so the same few territories were worked repeatedly and
+            // the rest never once.
+            const tPlan = readTerritoryPlan(campaign.approvedBrief);
+            const slice = tPlan ? nextSlice(tPlan, {
+                maxSearchCalls: guardrails.maxSearchCallsPerRun,
+                maxPagesPerQuery: MAX_PAGES_PER_QUERY,
+            }) : [];
+
+            if (tPlan && slice.length > 0) {
+                const flat: PlannedQuery[] = [];
+                for (const strategy of ['niche_scrape', 'intent_signal', 'footprint'] as const) {
+                    const template = tPlan.templates[strategy];
+                    if (!template) continue;
+                    for (const query of expandQueryAcrossTerritories(template, tPlan.area, slice)) {
+                        flat.push({ query, strategy });
+                    }
+                }
+                if (flat.length > 0) {
+                    await db.update(discoveryJobs)
+                        .set({
+                            cursor: { flat, queryIndex: 0, territorySlice: slice } satisfies Cursor,
+                            stage: 'searching', status: 'queued', updatedAt: new Date(),
+                        })
+                        .where(eq(discoveryJobs.id, job.id));
+                    return;
+                }
+            }
+
             const gen = await generateQueries({
                 idea: campaign.idea,
                 targetPersona: (campaign.targetPersona ?? null) as Record<string, unknown> | null,
@@ -490,6 +537,21 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
         const finalStopReason: StopReason | null = stopReason ?? (planExhausted ? 'plan_complete' : null);
 
         if (done) {
+            // ── Bank the territories this run actually worked ────────────────────────
+            //
+            // ⚠️ NOT gated on plan_complete, though that was the first instinct. A district sweep
+            // plans ~99 queries per run and a 200-lead cap stops it around the 44th, so
+            // plan_complete would never fire — nothing would ever be banked and the sweep would
+            // re-work its first territories forever while the rest were never reached.
+            //
+            // territoriesWorked() answers the narrower, honest question instead: which territories
+            // had every one of their base queries executed. Ground the cursor never reached is
+            // still not retired.
+            if (Array.isArray(cursor.territorySlice) && cursor.territorySlice.length) {
+                const worked = territoriesWorked(flat, nextIndex, cursor.territorySlice);
+                if (worked.length) await markTerritoriesCovered(db, job.campaign_id, worked);
+            }
+
             // Searching finished — hand off to the resumable promoting stage. The cursor is written
             // HERE rather than inside enterPromoting: that helper is shared with the monthly-cap
             // path above, which stops for a different reason and must not be relabelled.
@@ -899,6 +961,36 @@ function isExcluded(domain: string, haystack: string, g: Guardrails): boolean {
     if (g.excludedDomains.includes(domain)) return true;
     const text = haystack.toLowerCase();
     return g.negativeKeywords.some((kw) => kw && text.includes(kw.toLowerCase()));
+}
+
+/**
+ * Add territories to the campaign's covered list, without disturbing the rest of the brief.
+ *
+ * Read-modify-write on a jsonb column. Safe here because a campaign runs one job at a time (the
+ * claim in drainDiscoveryJobs enforces it), so there is no second writer to race.
+ */
+async function markTerritoriesCovered(db: Db, campaignId: number, worked: string[]): Promise<void> {
+    try {
+        const [row] = await db.select({ brief: discoveryCampaigns.approvedBrief })
+            .from(discoveryCampaigns).where(eq(discoveryCampaigns.id, campaignId)).limit(1);
+        const plan = readTerritoryPlan(row?.brief);
+        if (!plan) return;
+
+        const seen = new Set(plan.covered.map((t) => t.toLowerCase()));
+        const covered = [...plan.covered, ...worked.filter((t) => !seen.has(t.toLowerCase()))];
+        const brief = (row?.brief && typeof row.brief === 'object') ? row.brief as Record<string, unknown> : {};
+
+        await db.update(discoveryCampaigns)
+            .set({
+                approvedBrief: { ...brief, territoryPlan: { ...plan, covered } satisfies TerritoryPlan },
+                updatedAt: new Date(),
+            })
+            .where(eq(discoveryCampaigns.id, campaignId));
+    } catch (err) {
+        // Never fails the run. Losing a progress stamp costs one repeated territory next time;
+        // throwing here would lose the leads the run just banked.
+        console.error('[process-discovery-jobs] could not record territory progress:', err);
+    }
 }
 
 async function finishJob(db: Db, jobId: number, status: 'completed' | 'failed', message: string | null): Promise<void> {

@@ -36,13 +36,34 @@
  */
 export const DEFAULT_MAX_LEADS_PER_RUN = 50;
 export const DEFAULT_MAX_LEADS_PER_MONTH = 500;
-export const DEFAULT_MAX_SEARCH_CALLS_PER_RUN = 100;
+export const DEFAULT_MAX_SEARCH_CALLS_PER_RUN = 500;
 
 /** Hard ceiling on `discovery_guardrails.max_leads_per_run`, whatever the caller asks for. */
 export const MAX_LEADS_PER_RUN_CEILING = 200;
 
 /** Hard ceiling on `discovery_guardrails.max_leads_per_month`. */
 export const MAX_LEADS_PER_MONTH_CEILING = 2000;
+
+// ── The limits that actually stop a run ──────────────────────────────────────
+//
+// ⚠️ Measured, not guessed. A real staging run banked 200 leads from 44 searches and burned
+// 140,139 tokens doing it — about 3,185 tokens per search, nearly all of it scoring. Against the
+// old 200,000 ceiling that is ~63 searches, so the TOKEN cap bound before the search cap (100) and
+// long before the cost cap (£2 ≈ 2,000 searches). Neither the token nor the search limit was
+// exposed anywhere in the UI, so the two things that actually ended a run were invisible AND
+// unchangeable, while the one the user could set (leads) was the only one they ever saw.
+//
+// Raised to give a territory-split sweep room to finish: ~450 base queries across a region's
+// districts is roughly 1.5M tokens, which the old ceiling refused an order of magnitude short of.
+
+/** Default token budget for a run. ~470 searches at the measured rate. */
+export const DEFAULT_MAX_TOKENS_PER_RUN = 1_500_000;
+
+/** Hard ceiling on `discovery_guardrails.max_tokens_per_run`. ~1,500 searches. */
+export const MAX_TOKENS_PER_RUN_CEILING = 5_000_000;
+
+/** Hard ceiling on `discovery_guardrails.max_search_calls_per_run`. */
+export const MAX_SEARCH_CALLS_PER_RUN_CEILING = 1500;
 
 /**
  * How many searches one organisation may have running at once (`status = 'active'`).

@@ -161,6 +161,11 @@ const FIELD_CLAIMS: Record<string, RegExp> = {
     name: /optional short name for the search/,
     cadence: /how often to run \(once now \/ daily \/ weekly\)/,
     maxleads: /max leads per run/,
+    // The two limits that actually end a run. Added to the form once measurement showed the token
+    // budget bound at ~63 searches — before the search cap and long before the cost cap — while
+    // being invisible everywhere the user could look.
+    maxsearches: /max searches per run/,
+    maxtokens: /a token budget per run/,
     negatives: /terms to exclude/,
     approval: /"review found leads before any outreach" checkbox/,
 };

@@ -253,9 +253,11 @@ check('the cleanest query in a group is the one expanded', () => {
 });
 
 check('the API picks the source rather than taking list[0]', () => {
-    const block = API.slice(API.indexOf("action === 'expand_territories'"));
-    assert.match(block.slice(0, 3600), /pickExpansionSource\(list, split\.area, split\.territories\)/);
-    assert.ok(!/expandQueryAcrossTerritories\(list\[0\]/.test(block.slice(0, 3600)), 'list[0] must no longer be forced');
+    // Bounded at the next action, not a character count — the block has grown twice now and a
+    // fixed window silently stops reaching the code it is supposed to check.
+    const block = API.slice(API.indexOf("action === 'expand_territories'"), API.indexOf("action === 'approve_brief'"));
+    assert.match(block, /pickExpansionSource\(list, split\.area, split\.territories\)/);
+    assert.ok(!/expandQueryAcrossTerritories\(list\[0\]/.test(block), 'list[0] must no longer be forced');
 });
 
 check('a query that does not name the area still becomes territory-specific', () => {
@@ -280,7 +282,10 @@ check('the split respects an exclusion in the idea', () => {
 });
 
 check('the number of territories is bounded', () => {
-    assert.ok(MAX_TERRITORIES > 0 && MAX_TERRITORIES <= 60, 'a split must not become a bill');
+    // Raised to 80 to carry a region at DISTRICT level: South East England is 9 counties but ~67
+    // districts, and the county level was never granular enough for a page of results to be a
+    // meaningful fraction of the answer.
+    assert.ok(MAX_TERRITORIES >= 60 && MAX_TERRITORIES <= 120, 'a split must not become a bill');
     assert.match(SPLIT, /\.slice\(0, MAX_TERRITORIES\)/, 'the cap must be enforced in code, not just asked for');
 });
 
@@ -304,7 +309,9 @@ check('exactly one query per strategy is expanded, and the rest kept unless dupl
     // the live deploy: expanding across Kent reproduces "primary school Kent", and keeping the
     // original too meant paying twice. The assertion described the defect and passed.
     const block = API.slice(API.indexOf("action === 'expand_territories'"), API.indexOf("action === 'approve_brief'"));
-    assert.match(block, /const expanded = expandQueryAcrossTerritories\(list\[i\], split\.area, split\.territories\);/,
+    // Across the first SLICE now, not every territory — a district sweep is worked over several
+    // runs, so the plan approved here is the leg this run executes.
+    assert.match(block, /const expanded = expandQueryAcrossTerritories\(list\[i\], split\.area, slice\);/,
         'one query per strategy is expanded');
     assert.match(block, /expandedQueries\[key\] = \[\.\.\.expanded, \.\.\.leftovers\];/,
         'the deduped leftovers follow the expansion');
@@ -336,12 +343,16 @@ check('the expansion uses the split the BRIEF offered, not a fresh one', () => {
     const block = API.slice(API.indexOf("action === 'expand_territories'"), API.indexOf("action === 'approve_brief'"));
     assert.match(block, /body\.territorySplit/, 'the client-supplied split must be read');
     assert.match(block, /offeredTerritories\.length >= 2/, 'and preferred over a fresh call');
-    assert.match(block, /: await splitTerritories\(campaign\.idea\)/, 'with a fallback for older callers');
+    assert.match(block, /: await splitTerritories\(campaign\.idea,/, 'with a fallback for older callers');
 });
 
 check('the client sends the split its button was drawn from', () => {
-    const call = UI.slice(UI.indexOf("call('expand_territories'"), UI.indexOf("call('expand_territories'") + 500);
-    assert.match(call, /territorySplit: state\.brief\?\.territorySplit/, 'the brief\'s own split must be sent back');
+    const call = UI.slice(UI.indexOf("call('expand_territories'"), UI.indexOf("call('expand_territories'") + 900);
+    // ⚠️ Now conditional, and correctly so: the offered-equals-delivered rule holds only at the
+    // SAME granularity. A district split cannot reuse a split the button drew from counties, so
+    // that path deliberately re-derives. The coarse path still sends the brief's own split.
+    assert.match(call, /territorySplit: granularity === 'fine' \? null : \(state\.brief\?\.territorySplit \?\? null\)/,
+        'the coarse path must send the brief\'s own split back');
 });
 
 // ── No paying twice for the same query ────────────────────────────────────────────────────────

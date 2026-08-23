@@ -28,8 +28,24 @@ import { parseModelJson } from '../utils/model-json';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-haiku-4-5-20251001';
 
-/** Above this, a split stops being a plan and becomes a bill. */
-export const MAX_TERRITORIES = 40;
+/**
+ * Above this, a split stops being a plan and becomes a bill.
+ *
+ * ⚠️ Raised from 40 to cover a region at DISTRICT level. Counties were never granular enough: one
+ * search against Kent addresses ~600 primary schools, and no depth setting makes ten results a
+ * meaningful sample of six hundred. The South East has ~9 counties but ~67 districts and unitary
+ * authorities, and that is the level at which a page of results is a real fraction of the answer.
+ */
+export const MAX_TERRITORIES = 80;
+
+/**
+ * How finely to divide the area.
+ *
+ * 'coarse' is counties — a handful of queries, fast, good for a first look at a market.
+ * 'fine' is districts, boroughs and unitary authorities — an order more queries, and the only
+ * setting at which a large region is genuinely worked rather than sampled.
+ */
+export type SplitGranularity = 'coarse' | 'fine';
 
 export interface TerritorySplit {
     /** What the area was understood to be, e.g. "South East England". */
@@ -38,36 +54,60 @@ export interface TerritorySplit {
     territories: string[];
     /** How they were divided, e.g. "counties and unitary authorities". */
     basis: string;
+    /** Which level produced this list. */
+    granularity: SplitGranularity;
 }
 
-const SYSTEM =
-`You break a geographic area into the sub-areas a business would use to work it systematically.
+function systemPrompt(granularity: SplitGranularity): string {
+    // ⚠️ Two failed shapes are why this is now NESTED. A flat "use the finest division" prompt
+    // returned counties — the same nine as the coarse split. Insisting harder returned eighty
+    // LONDON boroughs, which are not in South East England at all: freed from the county anchor,
+    // the model filled the quota with the nearest dense set of district names it knew.
+    //
+    // Asking for districts GROUPED UNDER their parent fixes both. The model enumerates the parents
+    // first — the one thing it already gets right — and each district is then produced in the
+    // context of a county it has just named, so there is nowhere for a neighbouring region to
+    // enter. It also makes the answer checkable: a parent outside the area is visible, where a
+    // flat list of eighty district names is not.
+    const level = granularity === 'fine'
+        ? `Work in TWO steps.\n`
+          + `  1. List the top-level divisions of the area (for the UK, its counties and unitary authorities).\n`
+          + `  2. Under EACH of those, list that division's local authority districts or boroughs — for Kent that is Ashford, Canterbury, Dartford, Dover, Folkestone and Hythe, Gravesham, Maidstone, Sevenoaks, Swale, Thanet, Tonbridge and Malling, Tunbridge Wells.\n`
+          + `A unitary authority that has no districts beneath it is its own single entry.\n`
+          + `⚠️ Every district MUST belong to a parent you listed in step 1. Never include a district from a neighbouring region — London boroughs are NOT in South East England.`
+        : `Use the standard top-level administrative divisions for that country — UK counties or unitary authorities, US states, and so on.`;
 
-Given a description of who someone wants to find, identify the geographic area named in it and list the standard administrative sub-areas that COMPLETELY cover it, with no overlaps and no gaps.
+    return `You break a geographic area into the sub-areas a business would use to work it systematically.
+
+Given a description of who someone wants to find, identify the geographic area named in it and list the sub-areas that COMPLETELY cover it, with no overlaps and no gaps.
 
 Rules:
-- Use the standard administrative divisions for that country — UK counties or unitary authorities, US states or counties, and so on. Never invent groupings of your own.
+- ${level} Never invent groupings of your own.
 - COMPLETE COVERAGE matters more than granularity. Every part of the area must fall in exactly one sub-area.
-- Respect any exclusion in the description: if it says "excluding Essex", Essex must not appear.
+- ⚠️ Include ONLY sub-areas genuinely inside the named region. Bedfordshire is not in South East England; do not pad the list with neighbours.
+- Respect any exclusion in the description: if it says "excluding Essex", neither Essex nor any district inside it may appear.
 - If the description names no geographic area, or names one already small enough to search directly (a single town or borough), return an empty list. That is a normal answer, not a failure.
-- Never return more than ${MAX_TERRITORIES} sub-areas. If the area would need more, use the coarser level of division instead.
+- Never return more than ${MAX_TERRITORIES} sub-areas. If the area would need more, use the next coarser level of division instead.
 
 Return STRICT JSON only:
-{ "area": "<the area as you understood it>", "basis": "<what these divisions are>", "territories": ["<sub-area>", ...] }`;
+${granularity === 'fine'
+    ? `{ "area": "<the area>", "basis": "<what these divisions are>", "groups": [ { "parent": "<top-level division>", "territories": ["<district>", ...] }, ... ] }`
+    : `{ "area": "<the area as you understood it>", "basis": "<what these divisions are>", "territories": ["<sub-area>", ...] }`}`;
+}
 
 /**
  * Never throws. Returns null when there is no useful split — no area named, an area already small
  * enough, or any failure at all. The caller shows nothing in that case.
  */
-export async function splitTerritories(idea: string): Promise<TerritorySplit | null> {
+export async function splitTerritories(idea: string, granularity: SplitGranularity = 'coarse'): Promise<TerritorySplit | null> {
     const text = String(idea ?? '').trim();
     if (!text || !process.env.ANTHROPIC_API_KEY) return null;
 
     try {
         const resp = await anthropic.messages.create({
             model: MODEL,
-            max_tokens: 700,
-            system: SYSTEM,
+            max_tokens: 1600,
+            system: systemPrompt(granularity),
             messages: [{ role: 'user', content: `Who they want to find:\n${text.slice(0, 1000)}` }],
         });
         const parsed = parseModelJson<Record<string, unknown>>(
@@ -75,8 +115,19 @@ export async function splitTerritories(idea: string): Promise<TerritorySplit | n
         );
         if (!parsed) return null;
 
-        const territories = Array.isArray(parsed.territories)
-            ? parsed.territories
+        // The fine split answers as groups; flatten it. Parents are kept out of the list on
+        // purpose — a plan that searched both "primary school Kent" and each of Kent's twelve
+        // districts would pay for the county twice over.
+        const fromGroups = Array.isArray(parsed.groups)
+            ? (parsed.groups as unknown[]).flatMap((grp) => {
+                const g = (grp && typeof grp === 'object') ? grp as Record<string, unknown> : {};
+                return Array.isArray(g.territories) ? g.territories : [];
+            })
+            : [];
+        const raw = fromGroups.length ? fromGroups : parsed.territories;
+
+        const territories = Array.isArray(raw)
+            ? raw
                 .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
                 .map((t) => t.trim().slice(0, 80))
                 .slice(0, MAX_TERRITORIES)
@@ -88,6 +139,7 @@ export async function splitTerritories(idea: string): Promise<TerritorySplit | n
         return {
             area: typeof parsed.area === 'string' ? parsed.area.trim().slice(0, 120) : '',
             basis: typeof parsed.basis === 'string' ? parsed.basis.trim().slice(0, 120) : '',
+            granularity,
             territories,
         };
     } catch (err) {
