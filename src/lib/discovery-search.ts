@@ -23,6 +23,17 @@ const SERPER_API_KEY = process.env.SERPER_API_KEY;
 const COST_GBP_PER_CALL = Number(process.env.DISCOVERY_SEARCH_COST_GBP ?? '0.001');
 const FETCH_TIMEOUT_MS = Number(process.env.DISCOVERY_FETCH_TIMEOUT_MS ?? '8000');
 
+/**
+ * Hard ceiling on results requested per call.
+ *
+ * ⚠️ This was 20 while the worker only ever asked for 10, so the real constraint on coverage was
+ * two constants of ours — NOT, as it appeared, the search interface. Serper accepts `num` well
+ * above this; the ceiling is left env-tunable rather than raised on faith because it has never been
+ * exercised against a live key here. Raise DISCOVERY_MAX_RESULTS_PER_CALL once you have watched a
+ * real response come back at the higher number.
+ */
+const MAX_RESULTS_PER_CALL = Number(process.env.DISCOVERY_MAX_RESULTS_PER_CALL ?? '20');
+
 const SERPER_ENDPOINT = 'https://google.serper.dev/search';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -84,16 +95,20 @@ export function normaliseDomain(input: string | null | undefined): string | null
  * Run one search query against the configured provider.
  * @param query the literal query string (an entry from an LLM-generated query array)
  * @param opts.limit max results to return (default 10)
+ * @param opts.page 1-based result page. Page 2+ is how a run reads PAST the first screen of
+ *                  results — the single biggest lever on coverage, and previously unused: nothing
+ *                  in discovery paginated, so a market of 4,500 was only ever seen ten at a time.
  * @throws SearchNotConfiguredError when no provider is wired
  */
 export async function search(
     query: string,
-    opts: { limit?: number; recency?: 'year' | 'month' } = {},
+    opts: { limit?: number; recency?: 'year' | 'month'; page?: number } = {},
 ): Promise<SearchResponse> {
     if (!isSearchConfigured()) throw new SearchNotConfiguredError();
-    const limit = Math.max(1, Math.min(opts.limit ?? 10, 20));
+    const limit = Math.max(1, Math.min(opts.limit ?? 10, MAX_RESULTS_PER_CALL));
+    const page = Math.max(1, Math.floor(opts.page ?? 1));
 
-    if (PROVIDER === 'serper') return searchSerper(query, limit, opts.recency);
+    if (PROVIDER === 'serper') return searchSerper(query, limit, opts.recency, page);
     throw new SearchNotConfiguredError(`Unknown DISCOVERY_SEARCH_PROVIDER "${PROVIDER}".`);
 }
 
@@ -175,7 +190,7 @@ export async function fetchPageText(url: string): Promise<string> {
 
 // ── Serper.dev provider ──────────────────────────────────────────────────────
 
-async function searchSerper(query: string, limit: number, recency?: 'year' | 'month'): Promise<SearchResponse> {
+async function searchSerper(query: string, limit: number, recency?: 'year' | 'month', page = 1): Promise<SearchResponse> {
     // `tbs` is Google's own date restriction, passed through by Serper. Used by the buying-signal
     // sweep, where a funding round from 2019 is not a buying signal — it is history, and feeding it
     // to the re-scorer as though it were news is how a lead gets promoted for nothing.
@@ -183,7 +198,10 @@ async function searchSerper(query: string, limit: number, recency?: 'year' | 'mo
     const res = await fetch(SERPER_ENDPOINT, {
         method: 'POST',
         headers: { 'X-API-KEY': SERPER_API_KEY as string, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ q: query, num: limit, ...(tbs ? { tbs } : {}) }),
+        // ⚠️ `page` is sent ONLY when past the first — an explicit page:1 is equivalent to omitting
+        // it, and not sending it keeps every existing call byte-identical to what has been running
+        // in production, so pagination cannot regress the un-paginated path.
+        body: JSON.stringify({ q: query, num: limit, ...(page > 1 ? { page } : {}), ...(tbs ? { tbs } : {}) }),
     });
     if (!res.ok) {
         const detail = await res.text().catch(() => '');

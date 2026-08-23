@@ -1,0 +1,204 @@
+// tests/discovery-depth-and-territory.test.ts
+// Tier 3: actually reach more of the market, rather than describing how little was reached.
+//
+// Two independent levers, and they are not the same kind of thing:
+//
+//   DEPTH (pagination)  — a MULTIPLE. Reads past the first ten results of a query it already runs.
+//   TERRITORY (split)   — an ORDER. "primary school kent surrey sussex" is one search against
+//                         ~1,500 schools; one search per county asks a question a result set can
+//                         actually answer. No amount of depth fixes a query aimed at a population
+//                         three orders of magnitude larger than any page of results.
+//
+// ⚠️ Depth is EARNED, never planned: buying four pages for every query would be 75 searches whether
+// or not any paid. And territory expansion is OFFERED, never automatic — it moves the binding limit
+// and the bill, so it belongs on the screen the user is already reading.
+
+import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { computePlanReach, RESULTS_PER_QUERY, MAX_PAGES_PER_QUERY, YIELD_TO_PAGINATE } from '../src/config/plan-reach';
+import { expandQueryAcrossTerritories, MAX_TERRITORIES } from '../src/lib/territory-split';
+import { DEFAULT_MAX_LEADS_PER_RUN, DEFAULT_MAX_LEADS_PER_MONTH, DEFAULT_MAX_SEARCH_CALLS_PER_RUN } from '../src/config/discovery-limits';
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const read = (p: string) => readFileSync(join(root, p), 'utf8');
+
+let passed = 0;
+function check(name: string, fn: () => void) {
+    try { fn(); passed++; console.log(`  ✓ ${name}`); }
+    catch (err) { console.error(`  ✗ ${name}\n    ${(err as Error).message}`); process.exitCode = 1; }
+}
+
+console.log('\nDiscovery depth and territory\n');
+
+const WORKER = read('netlify/functions/process-discovery-jobs.ts');
+const SEARCH = read('src/lib/discovery-search.ts');
+const SPLIT = read('src/lib/territory-split.ts');
+const UI = read('src/components/assistant-discovery-campaigns.js');
+const API = read('netlify/functions/discovery-campaigns.ts');
+
+// ── Depth: the search layer can now go past page one ───────────────────────────────────────────
+
+check('the provider call accepts a page', () => {
+    // Nothing in discovery paginated at all, so a market of thousands was only ever seen ten at a
+    // time — and I had wrongly called that a limit of the search interface.
+    assert.match(SEARCH, /page\?: number/, 'search() must take a page');
+    assert.match(SEARCH, /\.\.\.\(page > 1 \? \{ page \} : \{\}\)/, 'page must reach the provider payload');
+});
+
+check('page 1 sends a byte-identical payload to before', () => {
+    // ⚠️ An explicit page:1 is equivalent but not identical. Omitting it means pagination cannot
+    // regress the path that has been running in production.
+    assert.ok(!/page: 1/.test(SEARCH), 'page:1 must never be sent explicitly');
+});
+
+check('the per-call results ceiling is tunable without a deploy', () => {
+    // It sat at 20 while the worker asked for 10 — the real constraint was ours, not the vendor's.
+    // Left env-tunable rather than raised on faith: it has never been exercised against a live key.
+    assert.match(SEARCH, /DISCOVERY_MAX_RESULTS_PER_CALL/, 'the ceiling must be env-tunable');
+    assert.ok(!/Math\.min\(opts\.limit \?\? 10, 20\)/.test(SEARCH), 'the hardcoded 20 is back');
+});
+
+// ── Depth is earned, not planned ───────────────────────────────────────────────────────────────
+
+check('the next page is bought only when this one paid', () => {
+    const i = WORKER.indexOf('const yieldRate =');
+    assert.ok(i > 0, 'the worker must measure per-page yield');
+    assert.match(WORKER.slice(i, i + 300), /page < MAX_PAGES_PER_QUERY && yieldRate >= YIELD_TO_PAGINATE/,
+        'depth must be gated on BOTH a page ceiling and a yield floor');
+});
+
+check('earned pages go to the END of the plan, preserving strategy interleaving', () => {
+    // ⚠️ The plan interleaves three strategies so a budget cut still samples all of them. Splicing
+    // depth in after the current entry would let one productive query eat the run before the other
+    // two angles were tried even once.
+    assert.match(WORKER, /extraPages\.push\(/, 'depth must be collected');
+    assert.match(WORKER, /\[\.\.\.cursor\.flat, \.\.\.extraPages\]/, 'and appended, not spliced');
+});
+
+check('a grown plan is persisted on both exits', () => {
+    // The completion path and the resume path both write the cursor. Depth earned on the last slice
+    // of a run is worthless if only the resume path saves it.
+    const writes = WORKER.split('flat,').length - 1;
+    assert.ok(writes >= 2, `both cursor writes must carry the grown plan (found ${writes})`);
+});
+
+check('a cursor written before pagination still runs', () => {
+    // Entries have no `page`. A required field would strand every in-flight run at deploy time.
+    assert.match(WORKER, /page\?: number;/, 'the planned-query page must be optional');
+    assert.match(WORKER, /Math\.max\(1, plannedPage \?\? 1\)/, 'a missing page must mean page 1');
+});
+
+// ── Reach reports a RANGE, because depth is conditional ────────────────────────────────────────
+
+const DEFAULTS = {
+    maxLeadsPerRun: DEFAULT_MAX_LEADS_PER_RUN,
+    maxSearchCallsPerRun: DEFAULT_MAX_SEARCH_CALLS_PER_RUN,
+    maxLeadsPerMonth: DEFAULT_MAX_LEADS_PER_MONTH,
+};
+
+check('the schools plan now reports both a floor and a ceiling', () => {
+    const r = computePlanReach(15, DEFAULTS);
+    assert.strictEqual(r.searchesThatWillRun, 15, 'the floor is the plan as written');
+    assert.strictEqual(r.searchesIfAllProductive, Math.min(15 * MAX_PAGES_PER_QUERY, DEFAULT_MAX_SEARCH_CALLS_PER_RUN));
+    assert.ok(r.maxResultsReadIfAllProductive > r.maxResultsRead, 'depth must widen the ceiling');
+});
+
+check('depth cannot outrun the user\'s own search cap', () => {
+    const r = computePlanReach(15, { ...DEFAULTS, maxSearchCallsPerRun: 20 });
+    assert.strictEqual(r.searchesIfAllProductive, 20, 'a page spends a search like any other');
+});
+
+check('caps are reported against the DEEP figure, not the shallow one', () => {
+    // ⚠️ A lead cap that only bites once depth is earned still bites. Measuring against the shallow
+    // number would tell the user a cap will not affect them when it is what ends their run.
+    const r = computePlanReach(2, DEFAULTS);
+    assert.ok(r.maxResultsReadIfAllProductive >= r.maxLeadsBanked);
+    assert.strictEqual(computePlanReach(15, DEFAULTS).bindingLimit, 'lead_cap');
+});
+
+check('the screen states the range rather than the floor alone', () => {
+    // Quoting only the floor understates reach fourfold.
+    assert.match(UI, /searchesIfAllProductive/, 'the reach block must render the ceiling');
+    assert.match(UI, /go deeper on their own/, 'and explain that depth is conditional');
+});
+
+// ── Territory: the lever that changes the order of the answer ──────────────────────────────────
+
+check('the model names territories but never writes the queries', () => {
+    // ⚠️ Query strings carry -site:/-inurl: operators the pipeline depends on, and they are half of
+    // what the user approved. A regenerated set would quietly drop or mangle them.
+    assert.match(SPLIT, /export function expandQueryAcrossTerritories/, 'substitution must be in code');
+    const fn = SPLIT.slice(SPLIT.indexOf('export function expandQueryAcrossTerritories'));
+    assert.ok(!/anthropic|messages\.create/.test(fn), 'the expansion itself must not call a model');
+});
+
+check('substitution preserves search operators exactly', () => {
+    const out = expandQueryAcrossTerritories(
+        'primary school south east england -site:linkedin.com -inurl:jobs', 'south east england', ['Kent', 'Surrey']);
+    assert.deepStrictEqual(out, [
+        'primary school Kent -site:linkedin.com -inurl:jobs',
+        'primary school Surrey -site:linkedin.com -inurl:jobs',
+    ]);
+});
+
+check('a query that does not name the area still becomes territory-specific', () => {
+    const out = expandQueryAcrossTerritories('primary school contact -inurl:blog', 'nowhere', ['Kent']);
+    assert.strictEqual(out[0], 'primary school contact -inurl:blog Kent', 'the territory must be appended');
+});
+
+check('an empty territory list leaves the query untouched', () => {
+    assert.deepStrictEqual(expandQueryAcrossTerritories('primary school kent', 'kent', []), ['primary school kent']);
+    assert.deepStrictEqual(expandQueryAcrossTerritories('', 'kent', ['Kent']), []);
+});
+
+check('one territory is not a split', () => {
+    // It is the same query wearing a hat, and offering it spends a model call to say nothing.
+    assert.match(SPLIT, /if \(territories\.length < 2\) return null;/);
+});
+
+check('the split respects an exclusion in the idea', () => {
+    assert.match(SPLIT, /excluding Essex/, 'the prompt must be explicit that exclusions bind');
+});
+
+check('the number of territories is bounded', () => {
+    assert.ok(MAX_TERRITORIES > 0 && MAX_TERRITORIES <= 60, 'a split must not become a bill');
+    assert.match(SPLIT, /\.slice\(0, MAX_TERRITORIES\)/, 'the cap must be enforced in code, not just asked for');
+});
+
+// ── Expansion is offered, never applied ────────────────────────────────────────────────────────
+
+check('expanding saves nothing and returns a plan to review', () => {
+    const i = API.indexOf("action === 'expand_territories'");
+    assert.ok(i > 0, 'the action must exist');
+    const block = API.slice(i, i + 3200);
+    assert.ok(!/db\.update\(discoveryCampaigns\)/.test(block), 'expansion must not persist anything');
+    assert.match(block, /computePlanReach\(flat\.length/, 'and must re-report reach for the bigger plan');
+});
+
+check('only the first query of each strategy is expanded', () => {
+    // 15 queries x 18 counties is 270 searches — a plan nobody can read and a bill nobody sanctioned.
+    const block = API.slice(API.indexOf("action === 'expand_territories'"));
+    assert.match(block.slice(0, 3200), /expandQueryAcrossTerritories\(list\[0\], split\.area, split\.territories\),\s*\n\s*\.\.\.list\.slice\(1\)/,
+        'the rest of the plan must be kept verbatim');
+});
+
+check('the expansion uses the EDITED plan, not a regenerated one', () => {
+    const block = API.slice(API.indexOf("action === 'expand_territories'"), API.indexOf("action === 'expand_territories'") + 1600);
+    assert.match(block, /body\.queries/, 'it must read the queries from the request');
+    assert.ok(!/generateQueries\(/.test(block), 'regenerating would discard the user\'s edits');
+});
+
+check('the offer is a button, not a side effect', () => {
+    assert.match(UI, /data-dc-split/, 'the split must be user-triggered');
+    assert.match(UI, /state\.territoriesApplied = false;/, 'and its banner must reset with a fresh brief');
+});
+
+check('both advisory calls fail soft', () => {
+    // They run while the user waits on the brief screen; neither is a gate.
+    assert.match(SPLIT, /catch \(err\)/);
+    assert.match(SPLIT, /!process\.env\.ANTHROPIC_API_KEY/, 'a missing key must short-circuit');
+});
+
+console.log(`\n${passed} checks passed\n`);

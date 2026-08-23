@@ -116,6 +116,67 @@
     return `${noun(latest)} on the last run · ${noun(total)} in total.`;
   }
 
+  /**
+   * ── Did this run see the market, or a corner of it? ───────────────────────
+   *
+   * ⚠️ This is the honesty fix. Before it, a run that read 9 of its 15 searches before hitting a
+   * lead cap reported EXACTLY the same as one that worked its whole plan: a lead count and nothing
+   * else. So 175 leads out of ~4,500 South East schools presented itself as a finished search, and
+   * nothing on screen invited the reader to doubt it. Silent under-delivery dressed as a result is
+   * worse than a small number honestly labelled.
+   *
+   * Two independent facts, and they must not be conflated:
+   *   • Did we finish OUR PLAN?     — stopReason
+   *   • Is there more OUT THERE?    — the newness rate (new domains / everything we looked at)
+   *
+   * A run can finish its plan and still have barely scratched the market, which is exactly the
+   * schools case. Saying only "completed" there would be true and still misleading.
+   *
+   * Returns null when there is nothing honest to say — no run yet, or a run that predates this
+   * being recorded. An absent line is better than a confident guess about a run we did not measure.
+   */
+  function coverageLine(c) {
+    const reason = c.latestRunStopReason;
+    if (!reason) return null;
+
+    const run = Number(c.latestRunQueriesRun ?? 0);
+    const planned = Number(c.latestRunQueriesPlanned ?? 0);
+    const seen = Number(c.latestRunResolved ?? 0);
+    const fresh = Number(c.latestRunNewDomains ?? 0);
+
+    // "Every company it looked at was one it had never seen" — the signal that the market is far
+    // from exhausted. Gated on a meaningful sample: 2 of 2 proves nothing.
+    const mostlyNew = seen >= 10 && fresh / seen >= 0.8;
+
+    const CAPPED = {
+      lead_cap:   'it hit the lead limit for this search',
+      search_cap: 'it hit the search limit for this run',
+      cost_cap:   'it reached this run\'s cost budget',
+      token_cap:  'it reached this run\'s processing budget',
+      month_cap:  'this campaign has used its monthly lead allowance',
+    };
+
+    if (CAPPED[reason]) {
+      const progress = planned && run < planned ? ` after ${run} of ${planned} searches` : '';
+      const more = reason === 'month_cap'
+        // A monthly allowance is not a per-run knob: re-running today changes nothing, so do not
+        // send the reader off to raise a per-run limit that was never what stopped them.
+        ? ' Running it again now will not find more — the allowance resets next month.'
+        : ' There were more results still to read, so this is a sample rather than the whole market.';
+      return `Stopped early${progress} — ${CAPPED[reason]}.${more}`;
+    }
+
+    // plan_complete: we worked every query we were given. That is a fact about our plan, and on its
+    // own it does NOT mean the market is exhausted.
+    if (mostlyNew) {
+      return `Worked through all ${planned || run} searches, and nearly every company found was a new one. `
+        + 'That usually means there are many more out there than these searches can reach — try narrowing '
+        + 'to one area at a time, or importing a list if an official register exists for this market.';
+    }
+    return `Worked through all ${planned || run} searches. Most results were companies already on this list, `
+      + 'which suggests these searches have found what they can.';
+  }
+
   function body() { return state.overlay?.querySelector('[data-dc-body]'); }
   function setBody(html) { const b = body(); if (b) b.innerHTML = html; }
 
@@ -216,6 +277,7 @@
         </div>
         ${c.name ? `<p class="text-xs text-gray-500 mt-0.5">${esc(c.idea)}</p>` : ''}
         <p class="text-xs text-gray-500 mt-1">${leadCountLine(c)}</p>
+        ${coverageLine(c) ? `<p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-1.5">${esc(coverageLine(c))}</p>` : ''}
         <p class="text-xs text-gray-400 mt-0.5">${paused ? 'Paused — it will not run until you resume it.' : esc(scheduleLine(c))}</p>
         <div class="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-100">
           ${primaryBtn}
@@ -325,6 +387,111 @@
     footprint: 'What they’re missing',
   };
 
+  /**
+   * ── What this plan can reach, said BEFORE the user spends ─────────────────
+   *
+   * Tier 2 of the coverage work. Tier 1 (coverageLine) tells them after a run that it sampled
+   * rather than covered; by then the money is gone and the list looks finished. This is the same
+   * fact at the only moment it is still actionable — they are already reading the queries, and
+   * "narrow this to one county" is a five-second edit here and a re-run later.
+   *
+   * ⚠️ Two blocks with deliberately different confidence, and they must not blur together:
+   *   • Reach is ARITHMETIC — exact, ours, stated plainly.
+   *   • Market advice is ADVISORY — a model's read, may be absent, phrased as something to check.
+   * Presenting a guess in the same voice as the arithmetic is how a confident wrong number ships.
+   */
+  /**
+   * ── Offer to work the area piece by piece ─────────────────────────────────
+   *
+   * The only lever in this whole piece of work that changes the ORDER of the answer rather than a
+   * multiple of it. "primary school kent surrey sussex" is one search against ~1,500 schools; one
+   * search per county is a question each result set can actually answer.
+   *
+   * ⚠️ An OFFER, never automatic. Expanding turns a 15-query plan into a 60-query one and moves the
+   * binding limit — usually onto the search cap. That has to be something the user sees and accepts
+   * on the screen they are already reading, not something that happens to their bill.
+   */
+  function territoryBlock(brief) {
+    const t = brief.territorySplit;
+    if (!t || !Array.isArray(t.territories) || t.territories.length < 2) return '';
+    if (state.territoriesApplied) {
+      return `
+        <div class="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+          <p class="text-xs font-bold text-emerald-900">Split across ${esc(String(t.territories.length))} areas</p>
+          <p class="text-xs text-emerald-800 mt-1">The broadest search from each angle now runs once per area. Check the reach below — a bigger plan often means a limit cuts it short.</p>
+        </div>`;
+    }
+    return `
+      <div class="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+        <p class="text-xs font-bold text-blue-900">This covers ${esc(t.area || 'a large area')}</p>
+        <p class="text-xs text-blue-800 mt-1">
+          One search for a whole region returns whatever ranks, not whatever matches. Splitting it into
+          ${esc(String(t.territories.length))} ${esc(t.basis || 'areas')} asks a question each set of results can actually answer.
+        </p>
+        <button type="button" data-dc-split class="mt-2 px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-60">
+          Split into ${esc(String(t.territories.length))} areas
+        </button>
+        <span class="hidden ml-2 text-xs font-semibold text-red-600" data-dc-split-error></span>
+      </div>`;
+  }
+
+  function planReachBlock(brief) {
+    const r = brief.planReach;
+    if (!r || !r.queries) return '';
+
+    const BINDING = {
+      lead_cap:   'your lead limit for a single run',
+      search_cap: 'the search limit for a single run',
+      month_cap:  'what is left of this campaign\'s monthly lead allowance',
+    };
+    // Depth is EARNED, never planned, so reach is a range. Quoting only the floor understates it
+    // fourfold; quoting only the ceiling promises depth a saturated market never buys.
+    const deep = Number(r.searchesIfAllProductive || 0) > Number(r.searchesThatWillRun || 0);
+    const limitLine = BINDING[r.bindingLimit]
+      ? `It will stop at ${esc(String(r.maxLeadsBanked))} lead${r.maxLeadsBanked === 1 ? '' : 's'} — that is ${esc(BINDING[r.bindingLimit])}.`
+      : 'No limit will cut this run short.';
+
+    return `
+      <div class="mt-4 pt-3 border-t border-gray-100">
+        <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">What this plan can reach</p>
+        <p class="text-xs text-gray-600 mt-1">
+          ${esc(String(r.searchesThatWillRun))} search${r.searchesThatWillRun === 1 ? '' : 'es'} to start,
+          reading <span class="font-semibold">${esc(String(r.maxResultsRead))} web results</span>.
+          ${deep ? `Searches that keep turning up new companies go deeper on their own, up to ${esc(String(r.searchesIfAllProductive))} searches and ${esc(String(r.maxResultsReadIfAllProductive))} results. ` : ''}${esc(limitLine)}
+        </p>
+        <p class="text-xs text-gray-500 mt-1">A search that starts repeating itself stops early rather than paying to re-read the same companies${deep ? '' : ''} — so a market much larger than this is sampled, not covered.</p>
+      </div>`;
+  }
+
+  /**
+   * The advisory half — is this a market you can LIST, or only one you can SAMPLE?
+   *
+   * ⚠️ Renders NOTHING unless the assessment came back and said "enumerable". A "not enumerable"
+   * verdict needs no words: sampling is the right tool and the plan above is the right plan. Only
+   * the enumerable case changes what the user should do, and only that case earns screen space.
+   */
+  function marketAdviceBlock(brief) {
+    const m = brief.marketAdvice;
+    if (!m || !m.enumerable) return '';
+
+    const sector = m.sector ? esc(m.sector) : 'this market';
+    // The register name is offered, never asserted — assessMarket() returns null when unsure
+    // rather than inventing one, and the copy has to survive that null without reading oddly.
+    const register = m.registerName
+      ? ` Check whether <span class="font-semibold">${esc(m.registerName)}</span> covers it.`
+      : ' It is worth checking whether an official register covers it.';
+
+    return `
+      <div class="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+        <p class="text-xs font-bold text-blue-900">There may be a complete list of ${sector}</p>
+        <p class="text-xs text-blue-800 mt-1">
+          Web searches sample a market; they cannot enumerate one. ${register}
+          If it does, importing that list into your Enrichment tab gives you every one of them — and this
+          assistant can then score and write to them, which is the part searching cannot replace.
+        </p>
+      </div>`;
+  }
+
   function briefView(brief) {
     const q = brief.queries || {};
     const groups = ['niche_scrape', 'intent_signal', 'footprint'].map((key) => {
@@ -354,6 +521,10 @@
           <p class="text-xs text-gray-600 mt-1">${skipped.length ? esc(skipped.join(' · ')) : 'Nothing configured.'}</p>
           ${negatives.length ? `<p class="text-xs text-gray-600 mt-1">Plus anything matching: <span class="font-semibold">${esc(negatives.join(', '))}</span></p>` : ''}
         </div>
+
+        ${territoryBlock(brief)}
+        ${planReachBlock(brief)}
+        ${marketAdviceBlock(brief)}
 
         <div class="flex flex-wrap items-center gap-2 mt-4">
           <button type="button" data-dc-approve class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Approve &amp; start searching</button>
@@ -405,8 +576,46 @@
       return;
     }
     state.brief = data;
+    // Reset with the plan it describes: reopening a brief must not inherit a previous expansion's
+    // "already split" banner over a freshly generated, unexpanded plan.
+    state.territoriesApplied = false;
     setBody(briefView(data));
     wireBrief();
+  }
+
+  /**
+   * Expand the on-screen plan across territories.
+   *
+   * ⚠️ Sends the queries as currently EDITED, not the generated ones — same rule as approveBrief.
+   * Expanding a regenerated plan would silently discard whatever the user just typed.
+   *
+   * The response replaces the plan in place and re-renders. Nothing is saved: approving is still a
+   * separate, deliberate act, and "Draft a different plan" still discards the whole thing.
+   */
+  async function expandTerritories(btn) {
+    const b = body();
+    const err = b?.querySelector('[data-dc-split-error]');
+    if (err) err.classList.add('hidden');
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Splitting…';
+    try {
+      const data = await call('expand_territories', {
+        campaignId: state.briefCampaignId,
+        queries: collectQueries(b),
+      });
+      if (!data.expanded) throw new Error('There is no clear way to split this area up.');
+      // Carry the untouched halves forward: the server returns the new plan and its reach, but the
+      // exclusions and market advice belong to the brief and have not changed.
+      state.brief = { ...state.brief, queries: data.queries, planReach: data.planReach, territorySplit: data.territorySplit };
+      state.territoriesApplied = true;
+      setBody(briefView(state.brief));
+      wireBrief();
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = label;
+      if (err) { err.textContent = e.message || 'Could not split that area.'; err.classList.remove('hidden'); }
+    }
   }
 
   function wireBrief() {
@@ -414,6 +623,7 @@
     if (!b) return;
     b.querySelector('[data-dc-approve]')?.addEventListener('click', (e) => approveBrief(e.currentTarget));
     b.querySelector('[data-dc-regen]')?.addEventListener('click', () => openBrief(state.briefCampaignId));
+    b.querySelector('[data-dc-split]')?.addEventListener('click', (e) => expandTerritories(e.currentTarget));
     b.querySelector('[data-dc-brief-cancel]')?.addEventListener('click', () => refresh());
     b.querySelectorAll('[data-dc-remove]').forEach((el) => {
       el.addEventListener('click', () => el.closest('[data-dc-query]')?.remove());
@@ -767,6 +977,7 @@
           <p class="text-xs text-gray-500 mt-1">Up to ${esc(c.maxLeadsPerRun)} companies per run.</p>`)}
         ${section('What it has found', `
           <p class="text-xs text-gray-700">${esc(leadCountLine(c))}</p>
+          ${coverageLine(c) ? `<p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-1.5">${esc(coverageLine(c))}</p>` : ''}
           <p class="text-xs text-gray-500 mt-1">${esc(c.runCount === 0
             ? 'It has not finished a run yet.'
             : `${c.runCount} run${c.runCount === 1 ? '' : 's'} finished. Created ${created}.`)}</p>`)}

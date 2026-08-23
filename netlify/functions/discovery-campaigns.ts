@@ -44,6 +44,12 @@ import {
 } from '../../src/utils/discovery-schedule';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { computePlanReach } from '../../src/config/plan-reach';
+import { assessMarket } from '../../src/lib/market-enumerability';
+import { splitTerritories, expandQueryAcrossTerritories } from '../../src/lib/territory-split';
+import {
+    DEFAULT_MAX_LEADS_PER_RUN, DEFAULT_MAX_LEADS_PER_MONTH, DEFAULT_MAX_SEARCH_CALLS_PER_RUN,
+} from '../../src/config/discovery-limits';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -250,6 +256,36 @@ export default withLambda(async (event) => {
                     WHERE j.campaign_id = ${discoveryCampaigns.id}
                     ORDER BY j.created_at DESC, j.id DESC LIMIT 1
                 )`,
+                // ── Coverage of the latest run ────────────────────────────────────────────
+                // Whether that run worked its whole plan or stopped early, and how much of what it
+                // read was new. Both live on the job's `cursor` jsonb (no migration — see the
+                // Coverage note in process-discovery-jobs.ts). NULL for runs predating this, which
+                // the client renders as "not recorded" rather than as "finished cleanly".
+                latestRunStopReason: sql<string | null>`(
+                    SELECT j.cursor ->> 'stopReason' FROM discovery_jobs j
+                    WHERE j.campaign_id = ${discoveryCampaigns.id}
+                    ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+                )`,
+                latestRunQueriesRun: sql<number | null>`(
+                    SELECT (j.cursor -> 'coverage' ->> 'queriesRun')::int FROM discovery_jobs j
+                    WHERE j.campaign_id = ${discoveryCampaigns.id}
+                    ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+                )`,
+                latestRunQueriesPlanned: sql<number | null>`(
+                    SELECT jsonb_array_length(j.cursor -> 'flat') FROM discovery_jobs j
+                    WHERE j.campaign_id = ${discoveryCampaigns.id}
+                    ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+                )`,
+                latestRunResolved: sql<number | null>`(
+                    SELECT (j.cursor -> 'coverage' ->> 'resolved')::int FROM discovery_jobs j
+                    WHERE j.campaign_id = ${discoveryCampaigns.id}
+                    ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+                )`,
+                latestRunNewDomains: sql<number | null>`(
+                    SELECT (j.cursor -> 'coverage' ->> 'inserted')::int FROM discovery_jobs j
+                    WHERE j.campaign_id = ${discoveryCampaigns.id}
+                    ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+                )`,
                 // Guardrail snapshot so the Edit form can prefill without a second round-trip.
                 // Only the fields the form actually shows — maxCostGbpPerRun is operator-only.
                 maxLeadsPerRun: discoveryGuardrails.maxLeadsPerRun,
@@ -331,6 +367,33 @@ export default withLambda(async (event) => {
                 WHERE j.campaign_id = ${discoveryCampaigns.id}
                 ORDER BY j.created_at DESC, j.id DESC LIMIT 1
             )`,
+            // Coverage of that run — see the matching block on the list query above, and the
+            // Coverage note in process-discovery-jobs.ts for why these live on the cursor jsonb.
+            latestRunStopReason: sql<string | null>`(
+                SELECT j.cursor ->> 'stopReason' FROM discovery_jobs j
+                WHERE j.campaign_id = ${discoveryCampaigns.id}
+                ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+            )`,
+            latestRunQueriesRun: sql<number | null>`(
+                SELECT (j.cursor -> 'coverage' ->> 'queriesRun')::int FROM discovery_jobs j
+                WHERE j.campaign_id = ${discoveryCampaigns.id}
+                ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+            )`,
+            latestRunQueriesPlanned: sql<number | null>`(
+                SELECT jsonb_array_length(j.cursor -> 'flat') FROM discovery_jobs j
+                WHERE j.campaign_id = ${discoveryCampaigns.id}
+                ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+            )`,
+            latestRunResolved: sql<number | null>`(
+                SELECT (j.cursor -> 'coverage' ->> 'resolved')::int FROM discovery_jobs j
+                WHERE j.campaign_id = ${discoveryCampaigns.id}
+                ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+            )`,
+            latestRunNewDomains: sql<number | null>`(
+                SELECT (j.cursor -> 'coverage' ->> 'inserted')::int FROM discovery_jobs j
+                WHERE j.campaign_id = ${discoveryCampaigns.id}
+                ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+            )`,
         })
             .from(discoveryCampaigns)
             .leftJoin(discoveryGuardrails, eq(discoveryGuardrails.campaignId, discoveryCampaigns.id))
@@ -371,6 +434,15 @@ export default withLambda(async (event) => {
                 runCount: Number(campaign.runCount ?? 0),
                 leadsFound: Number(campaign.leadsFound ?? 0),
                 latestRunLeadsFound: Number(campaign.latestRunLeadsFound ?? 0),
+                // ⚠️ null, not 0, and deliberately not coerced with Number(). "We did not record
+                // coverage for this run" and "this run covered nothing" are different facts, and
+                // the card says different things about them — runs predating this feature must not
+                // masquerade as runs that covered zero queries.
+                latestRunStopReason: campaign.latestRunStopReason ?? null,
+                latestRunQueriesRun: campaign.latestRunQueriesRun ?? null,
+                latestRunQueriesPlanned: campaign.latestRunQueriesPlanned ?? null,
+                latestRunResolved: campaign.latestRunResolved ?? null,
+                latestRunNewDomains: campaign.latestRunNewDomains ?? null,
                 approvedQueries: briefQueries ? {
                     niche_scrape: cleanQueryList(briefQueries.niche_scrape),
                     intent_signal: cleanQueryList(briefQueries.intent_signal),
@@ -435,10 +507,46 @@ export default withLambda(async (event) => {
             return json(200, { failed: true, message: 'Could not draft a search plan for this idea. Try describing the business you are looking for more concretely.' });
         }
 
+        // ── What this plan can actually reach ────────────────────────────────────
+        // Tier 2 of the coverage work. Tier 1 told the user AFTER a run that it had sampled rather
+        // than covered; this says it while they can still act — narrow the target, raise a limit,
+        // or take a different route entirely. The arithmetic is exact (src/config/plan-reach.ts);
+        // the market advice is explicitly advisory and may be absent.
+        const [gl] = await db.select({
+            maxLeadsPerRun: discoveryGuardrails.maxLeadsPerRun,
+            maxSearchCallsPerRun: discoveryGuardrails.maxSearchCallsPerRun,
+            maxLeadsPerMonth: discoveryGuardrails.maxLeadsPerMonth,
+        }).from(discoveryGuardrails).where(eq(discoveryGuardrails.campaignId, campaignId)).limit(1);
+
+        const [{ monthTotal } = { monthTotal: 0 }] = await db.execute<{ monthTotal: number }>(
+            `SELECT COALESCE(SUM(leads_found), 0)::int AS "monthTotal"
+             FROM discovery_jobs
+             WHERE campaign_id = ${campaignId} AND created_at >= date_trunc('month', now())`
+        );
+
+        const planReach = computePlanReach(gen.flat.length, {
+            maxLeadsPerRun: gl?.maxLeadsPerRun ?? DEFAULT_MAX_LEADS_PER_RUN,
+            maxSearchCallsPerRun: gl?.maxSearchCallsPerRun ?? DEFAULT_MAX_SEARCH_CALLS_PER_RUN,
+            maxLeadsPerMonth: gl?.maxLeadsPerMonth ?? DEFAULT_MAX_LEADS_PER_MONTH,
+            leadsThisMonth: Number(monthTotal ?? 0),
+        });
+
+        // ⚠️ Awaited, but it cannot fail the request: assessMarket() swallows everything and
+        // resolves null. The user is waiting on this screen, so it is one small call, not a chain.
+        const marketAdvice = await assessMarket(campaign.idea, (campaign.icpSnapshot ?? null) as Record<string, unknown> | null);
+
+        // Tier 3: is this plan aimed at an area big enough to be worth working piece by piece?
+        // Offered, never applied — the expansion is a separate action the user triggers and reads.
+        // Both calls fail soft and resolve null; neither can fail the brief screen.
+        const territorySplit = await splitTerritories(campaign.idea);
+
         // The exclusions are returned alongside the queries because they are half of what the user
         // is approving: "it will skip directories, job boards and social networks" is reassurance
         // the old UI never gave, and it is the difference between a plan and a list of strings.
         return json(200, {
+            planReach,
+            marketAdvice,
+            territorySplit,
             queries: gen.queries,
             persona: campaign.targetPersona ?? null,
             icpSnapshot: campaign.icpSnapshot ?? null,
@@ -449,6 +557,68 @@ export default withLambda(async (event) => {
             },
             searchConfigured: true,
         });
+    }
+
+    // ── expand a plan across territories ────────────────────────────────────────
+    //
+    // ⚠️ Returns a plan; saves NOTHING. The expanded queries go back to the same review screen the
+    // user was already reading, so a 15-query plan becoming a 60-query one is something they see
+    // and can edit before it costs anything. An expansion applied silently would be the same class
+    // of surprise this whole piece of work exists to remove.
+    if (action === 'expand_territories') {
+        const campaignId = Number(body.campaignId);
+        const [campaign] = await db.select({ id: discoveryCampaigns.id, idea: discoveryCampaigns.idea })
+            .from(discoveryCampaigns)
+            .where(and(eq(discoveryCampaigns.id, campaignId), eq(discoveryCampaigns.organisationId, orgId)))
+            .limit(1);
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+
+        // From the REQUEST, like approve_brief: the user may have edited the plan on screen, and
+        // expanding a regenerated one would silently discard those edits.
+        const raw = (body.queries && typeof body.queries === 'object') ? body.queries as Record<string, unknown> : {};
+        const queries: GeneratedQueries = {
+            niche_scrape: cleanQueryList(raw.niche_scrape),
+            intent_signal: cleanQueryList(raw.intent_signal),
+            footprint: cleanQueryList(raw.footprint),
+        };
+
+        const split = await splitTerritories(campaign.idea);
+        if (!split) return json(200, { expanded: false, reason: 'no_territories' });
+
+        // ── Which queries get expanded ──────────────────────────────────────
+        // The FIRST of each strategy, and only that one. Expanding all fifteen across eighteen
+        // counties is 270 searches — a plan nobody can read and a bill nobody sanctioned. The first
+        // query of each strategy is the broadest statement of that angle, which makes it the one
+        // worth asking per area; the rest are kept verbatim so nothing the user wrote is lost.
+        const expandedQueries: GeneratedQueries = { niche_scrape: [], intent_signal: [], footprint: [] };
+        for (const key of ['niche_scrape', 'intent_signal', 'footprint'] as const) {
+            const list = queries[key];
+            if (list.length === 0) continue;
+            expandedQueries[key] = [
+                ...expandQueryAcrossTerritories(list[0], split.area, split.territories),
+                ...list.slice(1),
+            ];
+        }
+
+        const flat = flattenQueries(expandedQueries);
+        if (flat.length === 0) return json(200, { expanded: false, reason: 'no_territories' });
+
+        const [gl] = await db.select({
+            maxLeadsPerRun: discoveryGuardrails.maxLeadsPerRun,
+            maxSearchCallsPerRun: discoveryGuardrails.maxSearchCallsPerRun,
+            maxLeadsPerMonth: discoveryGuardrails.maxLeadsPerMonth,
+        }).from(discoveryGuardrails).where(eq(discoveryGuardrails.campaignId, campaignId)).limit(1);
+
+        // Recomputed for the EXPANDED plan. A split that quadruples the query count usually moves
+        // the binding limit to the search cap, and the user needs to see that before approving —
+        // otherwise the expansion reads as free coverage when most of it will never run.
+        const planReach = computePlanReach(flat.length, {
+            maxLeadsPerRun: gl?.maxLeadsPerRun ?? DEFAULT_MAX_LEADS_PER_RUN,
+            maxSearchCallsPerRun: gl?.maxSearchCallsPerRun ?? DEFAULT_MAX_SEARCH_CALLS_PER_RUN,
+            maxLeadsPerMonth: gl?.maxLeadsPerMonth ?? DEFAULT_MAX_LEADS_PER_MONTH,
+        });
+
+        return json(200, { expanded: true, queries: expandedQueries, planReach, territorySplit: split });
     }
 
     // ── approve a brief and start the run it describes ──────────────────────────

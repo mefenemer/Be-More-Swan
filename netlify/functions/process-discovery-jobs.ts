@@ -38,6 +38,11 @@ import { getBlueprintVersion } from '../../src/utils/blueprint-version';
 import { getIcpSnapshot } from '../../src/utils/icp-snapshot';
 import { createNotification } from '../../src/utils/notify';
 import { savedSearchLabel } from '../../src/config/signal-sources';
+// ⚠️ Shared with the brief-approval planner so the two cannot disagree about what a run can read.
+import { RESULTS_PER_QUERY, MAX_PAGES_PER_QUERY, YIELD_TO_PAGINATE } from '../../src/config/plan-reach';
+import {
+    DEFAULT_MAX_LEADS_PER_RUN, DEFAULT_MAX_LEADS_PER_MONTH, DEFAULT_MAX_SEARCH_CALLS_PER_RUN,
+} from '../../src/config/discovery-limits';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 type Db = ReturnType<typeof getDb>;
@@ -47,7 +52,6 @@ const BACKOFF_SECS = [10, 30, 90];
 // under Netlify's ~10s function limit (3/tick was hitting 504 Inactivity Timeouts). The
 // cursor resumes the next query on the next tick, so total coverage is unchanged.
 const QUERIES_PER_SLICE = 1;
-const RESULTS_PER_QUERY = 10;
 // Leads promoted into assistant_records per tick — bounded so promotion can't exceed the
 // function timeout even when a run discovered dozens of leads.
 const PROMOTE_BATCH = 20;
@@ -69,9 +73,61 @@ type JobRow = {
     attempt: number; max_attempts: number;
 };
 
+/**
+ * Why searching ended. The distinction between "we worked the whole plan" and "we stopped early
+ * because a cap tripped" was already computed and then thrown away — `stopped` was collapsed into
+ * `done` and never persisted, so a run that read 9 of 15 searches reported identically to one that
+ * read all 15. That is what let a 175-lead sample of ~4,500 schools present itself as a finished
+ * search. See COVERAGE below.
+ */
+type StopReason = 'plan_complete' | 'lead_cap' | 'search_cap' | 'cost_cap' | 'token_cap' | 'month_cap';
+
+/**
+ * ── COVERAGE ────────────────────────────────────────────────────────────────
+ * Evidence about whether this run saw the market or a corner of it. Three cheap numbers, all
+ * already flowing through the loop below and all previously discarded:
+ *
+ *   queriesRun / (queriesRun + queries left)  — did the plan finish?
+ *   inserted / resolved                       — the NEWNESS rate. A run whose every result is a
+ *                                               domain we had never seen is nowhere near
+ *                                               exhausting its market; one returning mostly
+ *                                               duplicates is close to saturating it.
+ *
+ * ⚠️ Lives on the `cursor` jsonb, NOT in new columns. The cursor is already the worker's own bag
+ * of run state ({ queries, queryIndex, leadsFound, … }), and adding columns would mean a DDL that
+ * has to land on staging AND prod BEFORE the code that names them — every db.select() lists every
+ * column, so the deploy would break reads of this table in the window between push and migration.
+ * A jsonb key costs nothing and cannot half-apply.
+ */
+interface Coverage {
+    /** Queries actually searched, across every slice of this run. */
+    queriesRun: number;
+    /** Candidates that survived resolution and the exclusion filters. */
+    resolved: number;
+    /** Of those, the ones that were NEW domains for this campaign (the rest deduped away). */
+    inserted: number;
+}
+
+/**
+ * One unit of work: a query, and WHICH PAGE of it.
+ *
+ * ⚠️ `page` is optional so cursors written before pagination existed keep working — an entry
+ * without one is page 1. A required field here would strand every in-flight run at the moment of
+ * deploy, which is a needless outage for a purely additive feature.
+ */
+interface PlannedQuery {
+    query: string;
+    strategy: DiscoveryStrategy;
+    page?: number;
+}
+
 interface Cursor {
-    flat: Array<{ query: string; strategy: DiscoveryStrategy }>;
+    flat: PlannedQuery[];
     queryIndex: number;
+    /** Accumulated across slices; absent on runs that predate this. */
+    coverage?: Coverage;
+    /** Set once searching is over. Absent while a run is still in progress. */
+    stopReason?: StopReason;
 }
 
 interface Guardrails {
@@ -82,7 +138,9 @@ interface Guardrails {
 }
 
 const DEFAULT_GUARDRAILS: Guardrails = {
-    maxLeadsPerRun: 50, maxLeadsPerMonth: 500, maxSearchCallsPerRun: 100,
+    maxLeadsPerRun: DEFAULT_MAX_LEADS_PER_RUN,
+    maxLeadsPerMonth: DEFAULT_MAX_LEADS_PER_MONTH,
+    maxSearchCallsPerRun: DEFAULT_MAX_SEARCH_CALLS_PER_RUN,
     // Matches db/discovery-enrichment-cap.sql's default. A campaign row predating that migration
     // reads NULL, and Number(null) is 0 — which would silently disable paid enrichment rather
     // than cap it — so loadGuardrails coalesces to this instead.
@@ -242,6 +300,12 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
              WHERE campaign_id = ${job.campaign_id} AND created_at >= date_trunc('month', now())`
         );
         if (monthTotal >= guardrails.maxLeadsPerMonth) {
+            // Distinct from every per-run cap: the user's own monthly budget is spent, so re-running
+            // today changes nothing. Saying "stopped early" without saying THIS would send them to
+            // raise a per-run limit that is not what stopped them.
+            await db.update(discoveryJobs)
+                .set({ cursor: { ...cursor, stopReason: 'month_cap' } satisfies Cursor })
+                .where(eq(discoveryJobs.id, job.id));
             await enterPromoting(db, job.id, { leadsFound, searchCallsMade, tokensUsed, costGbp });
             return;
         }
@@ -252,22 +316,33 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
         // end-of-run promoting stage), so the tab fills live during a run. The promoting stage
         // below stays as a safety net for any lead whose inline promotion failed.
         const approvalStatus = guardrails.requireHumanApproval ? 'pending_approval' : 'approved';
-        let stopped = false;
+        // Which cap tripped, not merely that one did. "Stopped early" is not actionable on its
+        // own — the user's next move differs entirely depending on whether they hit a lead cap
+        // they can raise or a cost cap they cannot.
+        let stopReason: StopReason | null = null;
 
-        for (const { query, strategy } of slice) {
+        // Carried forward across slices: one run spans many ticks, and coverage is a fact about
+        // the RUN, not the tick.
+        const coverage: Coverage = cursor.coverage ?? { queriesRun: 0, resolved: 0, inserted: 0 };
+
+        // Depth earned during this slice, appended to the plan below. Collected rather than written
+        // immediately so one database write still covers the whole slice.
+        const extraPages: PlannedQuery[] = [];
+
+        for (const { query, strategy, page: plannedPage } of slice) {
             // Enforce per-run caps BEFORE spending anything.
-            if (
-                searchCallsMade >= guardrails.maxSearchCallsPerRun ||
-                costGbp >= guardrails.maxCostGbpPerRun ||
-                tokensUsed >= guardrails.maxTokensPerRun ||
-                leadsFound >= guardrails.maxLeadsPerRun
-            ) { stopped = true; break; }
+            if (searchCallsMade >= guardrails.maxSearchCallsPerRun) { stopReason = 'search_cap'; break; }
+            if (costGbp >= guardrails.maxCostGbpPerRun) { stopReason = 'cost_cap'; break; }
+            if (tokensUsed >= guardrails.maxTokensPerRun) { stopReason = 'token_cap'; break; }
+            if (leadsFound >= guardrails.maxLeadsPerRun) { stopReason = 'lead_cap'; break; }
 
             if (!isSearchConfigured()) throw new SearchNotConfiguredError();
 
-            const { results, costGbp: callCost } = await search(query, { limit: RESULTS_PER_QUERY });
+            const page = Math.max(1, plannedPage ?? 1);
+            const { results, costGbp: callCost } = await search(query, { limit: RESULTS_PER_QUERY, page });
             searchCallsMade += 1;
             costGbp += callCost;
+            coverage.queriesRun += 1;
 
             // Resolve each hit to the company it is about, then dedupe, then apply guardrails.
             //
@@ -306,6 +381,7 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
             // fetches compound past the function tick (LEAD_BUDGET_MS in discovery-enrich.ts).
             // On timeout or failure the lead is kept with its domain as the name — never dropped.
             const candidates = await resolveIdentities(resolved, job.job_id);
+            coverage.resolved += candidates.length;
 
             if (candidates.length === 0) continue;
 
@@ -333,6 +409,23 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
                 // infer a partial index from a bare ON CONFLICT target, so the predicate is required.
                 .onConflictDoNothing({ target: [discoveredLeads.campaignId, discoveredLeads.domain], where: sql`${discoveredLeads.domain} IS NOT NULL` })
                 .returning({ id: discoveredLeads.id, companyName: discoveredLeads.companyName, domain: discoveredLeads.domain, snippet: sql<string>`(${discoveredLeads.signals} ->> 'snippet')` });
+
+            coverage.inserted += inserted.length;
+
+            // ── Buy another page, but only if this one paid ──────────────────────────
+            //
+            // The yield of THIS page decides whether the next exists. A query still turning up
+            // mostly-new companies has more to give and is the cheapest coverage available; one
+            // returning names already on the list is charging full price to re-read them.
+            //
+            // ⚠️ Appended to the END of cursor.flat, never spliced in after the current entry. The
+            // plan is interleaved across the three strategies precisely so a budget cut still
+            // samples all of them (see flattenQueries) — inserting depth mid-plan would let one
+            // productive niche_scrape query eat the run before footprint was ever tried.
+            const yieldRate = candidates.length ? inserted.length / candidates.length : 0;
+            if (page < MAX_PAGES_PER_QUERY && yieldRate >= YIELD_TO_PAGINATE) {
+                extraPages.push({ query, strategy, page: page + 1 });
+            }
 
             if (inserted.length === 0) continue;
 
@@ -384,16 +477,35 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
         }
 
         const nextIndex = cursor.queryIndex + slice.length;
-        const done = stopped || nextIndex >= cursor.flat.length;
+        // The plan can GROW mid-run: a productive query earns its next page. So "have we reached
+        // the end" is asked of the grown list, not the one we started the slice with.
+        const flat = extraPages.length ? [...cursor.flat, ...extraPages] : cursor.flat;
+        const planExhausted = nextIndex >= flat.length;
+        const done = stopReason !== null || planExhausted;
+
+        // ⚠️ Reaching the end of the plan is 'plan_complete' — a run that worked every query it was
+        // given. That is NOT the same as "there was nothing more to find", which is what the
+        // newness rate in `coverage` speaks to. Keep the two separate: one is about our plan, the
+        // other is about the market.
+        const finalStopReason: StopReason | null = stopReason ?? (planExhausted ? 'plan_complete' : null);
 
         if (done) {
-            // Searching finished — hand off to the resumable promoting stage.
+            // Searching finished — hand off to the resumable promoting stage. The cursor is written
+            // HERE rather than inside enterPromoting: that helper is shared with the monthly-cap
+            // path above, which stops for a different reason and must not be relabelled.
+            await db.update(discoveryJobs)
+                .set({ cursor: { ...cursor, flat, coverage, stopReason: finalStopReason ?? 'plan_complete' } satisfies Cursor })
+                .where(eq(discoveryJobs.id, job.id));
             await enterPromoting(db, job.id, { leadsFound, searchCallsMade, tokensUsed, costGbp });
         } else {
             // Persist progress and resume next tick.
+            //
+            // ⚠️ Spread `cursor`, never rebuild it from its two known keys. This object used to be
+            // written as `{ flat, queryIndex }`, which silently dropped anything else on it — so a
+            // coverage tally accumulated over five slices would be erased by the sixth.
             await db.update(discoveryJobs)
                 .set({
-                    cursor: { flat: cursor.flat, queryIndex: nextIndex } satisfies Cursor,
+                    cursor: { ...cursor, flat, queryIndex: nextIndex, coverage } satisfies Cursor,
                     status: 'queued', stage: 'searching', errorMessage: null,
                     leadsFound, searchCallsMade, tokensUsed, costGbp: String(costGbp), updatedAt: new Date(),
                 })

@@ -24,6 +24,20 @@
 // they live in code and not in a settings screen. If they ever become plan-differentiated, resolve
 // them per plan HERE and keep the call sites reading one function.
 
+/**
+ * What a campaign gets when its guardrail row says nothing.
+ *
+ * ⚠️ These had one reader (the worker's DEFAULT_GUARDRAILS) until the brief-approval screen began
+ * telling users what a plan can reach. Two readers means two chances to drift, and a planner that
+ * promised 50 leads while the worker allowed 30 would be a worse lie than the silence it replaced —
+ * so they are defined once, here, beside the ceilings that clamp them.
+ *
+ * Distinct from the CEILINGS below: a default is what you get, a ceiling is what you may not exceed.
+ */
+export const DEFAULT_MAX_LEADS_PER_RUN = 50;
+export const DEFAULT_MAX_LEADS_PER_MONTH = 500;
+export const DEFAULT_MAX_SEARCH_CALLS_PER_RUN = 100;
+
 /** Hard ceiling on `discovery_guardrails.max_leads_per_run`, whatever the caller asks for. */
 export const MAX_LEADS_PER_RUN_CEILING = 200;
 
