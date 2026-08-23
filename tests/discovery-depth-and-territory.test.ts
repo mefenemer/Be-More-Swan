@@ -256,7 +256,7 @@ check('the API picks the source rather than taking list[0]', () => {
     // Bounded at the next action, not a character count — the block has grown twice now and a
     // fixed window silently stops reaching the code it is supposed to check.
     const block = API.slice(API.indexOf("action === 'expand_territories'"), API.indexOf("action === 'approve_brief'"));
-    assert.match(block, /pickExpansionSource\(list, split\.area, split\.territories\)/);
+    assert.match(block, /pickExpansionSource\(list, split\.area, split\.territories/);
     assert.ok(!/expandQueryAcrossTerritories\(list\[0\]/.test(block), 'list[0] must no longer be forced');
 });
 
@@ -311,7 +311,7 @@ check('exactly one query per strategy is expanded, and the rest kept unless dupl
     const block = API.slice(API.indexOf("action === 'expand_territories'"), API.indexOf("action === 'approve_brief'"));
     // Across the first SLICE now, not every territory — a district sweep is worked over several
     // runs, so the plan approved here is the leg this run executes.
-    assert.match(block, /const expanded = expandQueryAcrossTerritories\(list\[i\], split\.area, slice\);/,
+    assert.match(block, /const expanded = expandQueryAcrossTerritories\(list\[i\], split\.area, slice/,
         'one query per strategy is expanded');
     assert.match(block, /expandedQueries\[key\] = \[\.\.\.expanded, \.\.\.leftovers\];/,
         'the deduped leftovers follow the expansion');

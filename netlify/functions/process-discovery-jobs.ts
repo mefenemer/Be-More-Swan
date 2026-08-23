@@ -282,7 +282,9 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
                 for (const strategy of ['niche_scrape', 'intent_signal', 'footprint'] as const) {
                     const template = tPlan.templates[strategy];
                     if (!template) continue;
-                    for (const query of expandQueryAcrossTerritories(template, tPlan.area, slice)) {
+                    // Parents included: later runs expand the same county-level templates and need
+                    // the same vocabulary the first run had.
+                    for (const query of expandQueryAcrossTerritories(template, tPlan.area, slice, tPlan.parents)) {
                         flat.push({ query, strategy });
                     }
                 }

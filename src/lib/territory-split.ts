@@ -56,6 +56,19 @@ export interface TerritorySplit {
     basis: string;
     /** Which level produced this list. */
     granularity: SplitGranularity;
+    /**
+     * The level ABOVE the territories — the counties a district split was derived from.
+     *
+     * ⚠️ Load-bearing, not metadata. The query generator writes at county level ("primary school
+     * Berkshire") while a fine split's territories are districts (Ashford, Canterbury…). With only
+     * the districts as vocabulary the expansion does not recognise "Berkshire", falls through to
+     * its append branch, and produces "primary school Berkshire Ashford" — a county and a district
+     * from a different county in one query. Carrying the parents is what lets the substitution
+     * strip the level the query actually used.
+     *
+     * Empty for a coarse split, where the territories ARE the top level.
+     */
+    parents: string[];
 }
 
 function systemPrompt(granularity: SplitGranularity): string {
@@ -118,6 +131,15 @@ export async function splitTerritories(idea: string, granularity: SplitGranulari
         // The fine split answers as groups; flatten it. Parents are kept out of the list on
         // purpose — a plan that searched both "primary school Kent" and each of Kent's twelve
         // districts would pay for the county twice over.
+        const parents = Array.isArray(parsed.groups)
+            ? (parsed.groups as unknown[])
+                .map((grp) => {
+                    const g = (grp && typeof grp === 'object') ? grp as Record<string, unknown> : {};
+                    return typeof g.parent === 'string' ? g.parent.trim().slice(0, 80) : '';
+                })
+                .filter(Boolean)
+            : [];
+
         const fromGroups = Array.isArray(parsed.groups)
             ? (parsed.groups as unknown[]).flatMap((grp) => {
                 const g = (grp && typeof grp === 'object') ? grp as Record<string, unknown> : {};
@@ -140,6 +162,7 @@ export async function splitTerritories(idea: string, granularity: SplitGranulari
             area: typeof parsed.area === 'string' ? parsed.area.trim().slice(0, 120) : '',
             basis: typeof parsed.basis === 'string' ? parsed.basis.trim().slice(0, 120) : '',
             granularity,
+            parents,
             territories,
         };
     } catch (err) {
@@ -230,14 +253,21 @@ function spliceSpan(q: string, at: number, length: number, replacement: string):
  *   'unknown'   — names a place the split did not enumerate. AVOID: expanding this is what
  *                 produces a query about two different places.
  */
-export function expansionAnchor(query: string, area: string, territories: string[]): 'area' | 'territory' | 'none' | 'unknown' {
+export function expansionAnchor(
+    query: string,
+    area: string,
+    territories: string[],
+    alsoStrip: string[] = [],
+): 'area' | 'territory' | 'none' | 'unknown' {
     const q = String(query ?? '').trim();
     const list = territories.map((t) => String(t ?? '').trim()).filter(Boolean);
     if (!q || list.length === 0) return 'none';
 
     for (const phrase of areaPhrases(area)) if (locate(q, phrase)) return 'area';
 
-    const spans = namedTerritorySpans(q, list);
+    // ⚠️ Includes the level ABOVE the territories. A district split has to recognise the county a
+    // query names, or every query looks unanchored and gets a district bolted onto a county.
+    const spans = namedTerritorySpans(q, [...list, ...alsoStrip.map((t) => String(t ?? '').trim()).filter(Boolean)]);
     if (spans.length === 0) return 'none';
 
     // Anything left that looks like a place once the KNOWN territories are removed. Detected by
@@ -258,12 +288,13 @@ export function expansionAnchor(query: string, area: string, territories: string
  * Pick the query in a group that expands most cleanly, preferring an exact anchor over the first
  * one written. Returns its index; -1 when the group is empty.
  */
-export function pickExpansionSource(queries: string[], area: string, territories: string[]): number {
+export function pickExpansionSource(queries: string[], area: string, territories: string[], alsoStrip: string[] = []): number {
     if (queries.length === 0) return -1;
     const rank = { area: 0, territory: 1, none: 2, unknown: 3 } as const;
     let best = 0;
     for (let i = 1; i < queries.length; i++) {
-        if (rank[expansionAnchor(queries[i], area, territories)] < rank[expansionAnchor(queries[best], area, territories)]) best = i;
+        if (rank[expansionAnchor(queries[i], area, territories, alsoStrip)]
+            < rank[expansionAnchor(queries[best], area, territories, alsoStrip)]) best = i;
     }
     return best;
 }
@@ -294,12 +325,20 @@ export function pickExpansionSource(queries: string[], area: string, territories
  * 3. APPEND. Only when the query is geographically unanchored, which is the one case where adding
  *    a territory cannot contradict anything already in it.
  */
-export function expandQueryAcrossTerritories(query: string, area: string, territories: string[]): string[] {
+export function expandQueryAcrossTerritories(
+    query: string,
+    area: string,
+    territories: string[],
+    alsoStrip: string[] = [],
+): string[] {
     const q = String(query ?? '').trim();
     const list = territories.map((t) => String(t ?? '').trim()).filter(Boolean);
     if (!q || list.length === 0) return q ? [q] : [];
 
-    const spans = namedTerritorySpans(q, list);
+    // ⚠️ `alsoStrip` carries the level above — the counties a district split came from. Without it
+    // "primary school Berkshire" is unrecognised against a list of districts, the append branch
+    // runs, and the result names two areas in different counties.
+    const spans = namedTerritorySpans(q, [...list, ...alsoStrip.map((t) => String(t ?? '').trim()).filter(Boolean)]);
 
     const rewrite = (t: string): string => {
         if (spans.length) {

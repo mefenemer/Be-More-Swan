@@ -618,6 +618,11 @@ export default withLambda(async (event) => {
             ? {
                 area: typeof offered?.area === 'string' ? offered.area.trim().slice(0, 120) : '',
                 basis: typeof offered?.basis === 'string' ? offered.basis.trim().slice(0, 120) : '',
+                granularity: offered?.granularity === 'fine' ? 'fine' as const : 'coarse' as const,
+                parents: Array.isArray(offered?.parents)
+                    ? offered!.parents.filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+                        .map((t) => t.trim().slice(0, 80))
+                    : [],
                 territories: offeredTerritories,
             }
             : await splitTerritories(campaign.idea, body.granularity === 'fine' ? 'fine' : 'coarse');
@@ -644,7 +649,7 @@ export default withLambda(async (event) => {
         for (const key of ['niche_scrape', 'intent_signal', 'footprint'] as const) {
             const list = queries[key];
             if (list.length === 0) continue;
-            const i = pickExpansionSource(list, split.area, split.territories);
+            const i = pickExpansionSource(list, split.area, split.territories, split.parents ?? []);
             sources[key] = i;
             templates[key] = list[i];
         }
@@ -652,6 +657,7 @@ export default withLambda(async (event) => {
         const territoryPlan: TerritoryPlan = {
             area: split.area, basis: split.basis,
             granularity: 'granularity' in split ? split.granularity : 'coarse',
+            parents: split.parents ?? [],
             territories: split.territories, covered: [], templates,
         };
 
@@ -681,7 +687,7 @@ export default withLambda(async (event) => {
             const list = queries[key];
             const i = sources[key];
             if (list.length === 0 || i === undefined) continue;
-            const expanded = expandQueryAcrossTerritories(list[i], split.area, slice);
+            const expanded = expandQueryAcrossTerritories(list[i], split.area, slice, split.parents ?? []);
 
             // ⚠️ Deduped against the EXPANSION, not just within it. The generator often writes
             // "primary school Kent" alongside the broader query that gets expanded, and expanding

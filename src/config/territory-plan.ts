@@ -23,6 +23,14 @@ export interface TerritoryPlan {
     area: string;
     basis: string;
     granularity: SplitGranularity;
+    /**
+     * The level ABOVE the territories — see TerritorySplit.parents.
+     *
+     * ⚠️ Stored, not recomputed. Later runs expand the same county-level templates across new
+     * districts, so they need the same vocabulary the first run had. Without it a continuation run
+     * reproduces exactly the bug the first run avoided.
+     */
+    parents: string[];
     /** Every territory the split produced, in the order it produced them. */
     territories: string[];
     /** Those already worked by a completed run. */
@@ -107,12 +115,14 @@ export function readTerritoryPlan(brief: unknown): TerritoryPlan | null {
         : [];
     const territories = strs(o.territories);
     if (territories.length < 2) return null;
+    const parents = strs(o.parents);
     const t = (o.templates && typeof o.templates === 'object') ? o.templates as Record<string, unknown> : {};
     const q = (v: unknown) => typeof v === 'string' && v.trim() ? v.trim().slice(0, 300) : null;
     return {
         area: typeof o.area === 'string' ? o.area.slice(0, 120) : '',
         basis: typeof o.basis === 'string' ? o.basis.slice(0, 120) : '',
         granularity: o.granularity === 'fine' ? 'fine' : 'coarse',
+        parents,
         territories,
         covered: strs(o.covered),
         templates: { niche_scrape: q(t.niche_scrape), intent_signal: q(t.intent_signal), footprint: q(t.footprint) },

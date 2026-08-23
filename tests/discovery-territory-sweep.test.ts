@@ -20,6 +20,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readTerritoryPlan, remainingTerritories, nextSlice, territoriesWorked, type TerritoryPlan } from '../src/config/territory-plan';
+import { expandQueryAcrossTerritories, expansionAnchor } from '../src/lib/territory-split';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -36,6 +37,7 @@ const PLAN: TerritoryPlan = {
     area: 'South East England excluding Essex',
     basis: 'districts',
     granularity: 'fine',
+    parents: ['Kent'],
     territories: ['Ashford', 'Canterbury', 'Dartford', 'Dover', 'Maidstone', 'Sevenoaks', 'Swale', 'Thanet'],
     covered: ['Ashford', 'Canterbury'],
     templates: { niche_scrape: 'primary school Ashford', intent_signal: null, footprint: 'primary school Ashford -inurl:jobs' },
@@ -115,7 +117,7 @@ check('continuing a sweep makes NO model call', () => {
     const i = WORKER.indexOf('const tPlan = readTerritoryPlan(campaign.approvedBrief);');
     assert.ok(i > 0, 'the worker must read the stored plan');
     const block = WORKER.slice(i, WORKER.indexOf('const gen = await generateQueries({', i));
-    assert.match(block, /expandQueryAcrossTerritories\(template, tPlan\.area, slice\)/, 'substitution, not generation');
+    assert.match(block, /expandQueryAcrossTerritories\(template, tPlan\.area, slice/, 'substitution, not generation');
     assert.ok(!/generateQueries|anthropic/.test(block), 'the continuation path must not call a model');
 });
 
@@ -258,8 +260,8 @@ check('the expansion covers the first slice, not every territory', () => {
     // next run restarted at territory one and re-covered ground already worked.
     const block = API.slice(API.indexOf("action === 'expand_territories'"), API.indexOf("action === 'approve_brief'"));
     assert.match(block, /const slice = nextSlice\(territoryPlan, \{/, 'the slice must be computed');
-    assert.match(block, /expandQueryAcrossTerritories\(list\[i\], split\.area, slice\)/, 'and expanded across');
-    assert.ok(!/expandQueryAcrossTerritories\(list\[i\], split\.area, split\.territories\)/.test(block),
+    assert.match(block, /expandQueryAcrossTerritories\(list\[i\], split\.area, slice/, 'and expanded across');
+    assert.ok(!/expandQueryAcrossTerritories\(list\[i\], split\.area, split\.territories/.test(block),
         'expanding across every territory is back');
 });
 
@@ -280,6 +282,60 @@ check('the screen says a sweep spans several runs', () => {
     // A user who believes they approved all 58 areas will read the next "stopped early" notice as
     // a failure instead of the sweep working as designed.
     assert.match(UI, /Later runs continue with the rest/);
+});
+
+// ── The level ABOVE the territories ────────────────────────────────────────────────────────────
+// ⚠️ Caught by predicting a live district split, not by any test written before it. The generator
+// writes at county level ("primary school Berkshire") while a fine split's territories are
+// districts, so with only districts as vocabulary the expansion did not recognise the county, fell
+// through to its append branch, and produced "primary school Berkshire Ashford" — two areas, in
+// different counties, in one paid search. About a third of a 111-query plan.
+//
+// The root cause both times has been the same: every earlier test drew the query and the territory
+// list from the SAME split. Real plans cross granularities.
+
+check('a county-level query expanded across DISTRICTS loses the county', () => {
+    const out = expandQueryAcrossTerritories(
+        'primary school Berkshire', 'South East England',
+        ['Ashford', 'Canterbury'], ['Berkshire', 'Kent']);
+    assert.deepStrictEqual(out, ['primary school Ashford', 'primary school Canterbury']);
+});
+
+check('the same holds with a suffix and with operators', () => {
+    assert.deepStrictEqual(
+        expandQueryAcrossTerritories('primary school Kent admissions enquiry', 'SE', ['Ashford'], ['Kent']),
+        ['primary school Ashford admissions enquiry'],
+    );
+    assert.deepStrictEqual(
+        expandQueryAcrossTerritories('primary school Berkshire -site:tes.com -inurl:jobs', 'SE', ['Ashford'], ['Berkshire']),
+        ['primary school Ashford -site:tes.com -inurl:jobs'],
+    );
+});
+
+check('without the parents it would append — the bug, pinned', () => {
+    // Same call, parents omitted. Proves the fix is the vocabulary and not something incidental.
+    assert.deepStrictEqual(
+        expandQueryAcrossTerritories('primary school Berkshire', 'South East England', ['Ashford']),
+        ['primary school Berkshire Ashford'],
+    );
+});
+
+check('a county query becomes anchored once the parents are known', () => {
+    // ⚠️ I described the pre-fix classification as `unknown`. It was `none` — with no district
+    // matched there are no spans at all, so the "is there a stray place name in the residue" test
+    // never runs. Either way pickExpansionSource could not help, because EVERY query in the plan
+    // rated the same and it had nothing better to choose.
+    assert.strictEqual(expansionAnchor('primary school Berkshire', 'SE', ['Ashford'], ['Berkshire']), 'territory');
+    assert.strictEqual(expansionAnchor('primary school Berkshire', 'SE', ['Ashford']), 'none');
+});
+
+check('parents survive into the stored plan and the worker', () => {
+    // A continuation run expands the same county-level templates across NEW districts, so it needs
+    // the vocabulary the first run had.
+    const back = readTerritoryPlan({ territoryPlan: PLAN });
+    assert.deepStrictEqual(back?.parents, ['Kent']);
+    assert.match(WORKER, /expandQueryAcrossTerritories\(template, tPlan\.area, slice, tPlan\.parents\)/);
+    assert.match(API, /expandQueryAcrossTerritories\(list\[i\], split\.area, slice, split\.parents \?\? \[\]\)/);
 });
 
 console.log(`\n${passed} checks passed\n`);
