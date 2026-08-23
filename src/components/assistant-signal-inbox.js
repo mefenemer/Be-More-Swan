@@ -530,6 +530,7 @@
         <div class="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-100">
           ${resultsBtn}
           <span class="ml-auto flex flex-wrap items-center gap-2">
+            <button type="button" data-si-plan="${s.id}" class="${BTN.secondary}">Review plan</button>
             <button type="button" data-si-view="${s.id}" class="${BTN.secondary}">View</button>
             <button type="button" data-si-edit="${s.id}" class="${BTN.secondary}">Edit</button>
             <button type="button" data-si-schedule="${s.id}" class="${BTN.secondary}">Schedule</button>
@@ -749,6 +750,10 @@
     // Two of these can be on screen at once (toolbar + empty state), so bind them as a set.
     h.querySelectorAll('[data-si-new-search]').forEach((b) => b.addEventListener('click', openNewSearch));
     h.querySelector('[data-si-lead-ideas]')?.addEventListener('click', openLeadIdeas);
+    // "Review plan" opens the same brief screen the Find New Leads panel shows — what this search
+    // will actually run, what it can reach, and the offer to split it by area. This tab could
+    // start a search but never read its plan first.
+    h.querySelectorAll('[data-si-plan]').forEach((b) => b.addEventListener('click', () => manageSearch('openPlan', b, 'data-si-plan')));
     h.querySelectorAll('[data-si-view]').forEach((b) => b.addEventListener('click', () => manageSearch('openView', b, 'data-si-view')));
     h.querySelectorAll('[data-si-edit]').forEach((b) => b.addEventListener('click', () => manageSearch('openEdit', b, 'data-si-edit')));
     h.querySelectorAll('[data-si-schedule]').forEach((b) => b.addEventListener('click', () => manageSearch('openSchedule', b, 'data-si-schedule')));
@@ -800,6 +805,8 @@
     });
     // Archiving the search whose results are open would leave a modal listing a search that no
     // longer exists; editing one changes what its results mean. Close first, reload after.
+    // openView is the only pure read. openPlan can end in "Approve & start searching", which
+    // changes what the open results modal means, so it closes like the mutating methods.
     if (method !== 'openView') closeResults();
     dc[method](id, () => load());
   }

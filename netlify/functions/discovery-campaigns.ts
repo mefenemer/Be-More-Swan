@@ -46,7 +46,7 @@ import { logAiUsage } from '../../src/utils/ai-usage';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { computePlanReach } from '../../src/config/plan-reach';
 import { assessMarket } from '../../src/lib/market-enumerability';
-import { splitTerritories, expandQueryAcrossTerritories, pickExpansionSource } from '../../src/lib/territory-split';
+import { splitTerritories, expandQueryAcrossTerritories, pickExpansionSource, MAX_TERRITORIES } from '../../src/lib/territory-split';
 import {
     DEFAULT_MAX_LEADS_PER_RUN, DEFAULT_MAX_LEADS_PER_MONTH, DEFAULT_MAX_SEARCH_CALLS_PER_RUN,
 } from '../../src/config/discovery-limits';
@@ -582,7 +582,28 @@ export default withLambda(async (event) => {
             footprint: cleanQueryList(raw.footprint),
         };
 
-        const split = await splitTerritories(campaign.idea);
+        // ⚠️ Prefer the split the BRIEF already computed and showed the user. splitTerritories is a
+        // model call and is non-deterministic — the same idea has returned 18, 10, 9 and 12 areas —
+        // so re-deriving it here meant the button offered "Split into 9 areas" and the expansion
+        // delivered 12. What the user approves has to be what runs.
+        const offered = (body.territorySplit && typeof body.territorySplit === 'object')
+            ? body.territorySplit as Record<string, unknown> : null;
+        const offeredTerritories = Array.isArray(offered?.territories)
+            ? offered!.territories
+                .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+                .map((t) => t.trim().slice(0, 80))
+                .slice(0, MAX_TERRITORIES)
+            : [];
+
+        // Falls back to a fresh split only when the client sent none — an older cached page, or a
+        // caller that predates this. Two territories is the same floor splitTerritories enforces.
+        const split = offeredTerritories.length >= 2
+            ? {
+                area: typeof offered?.area === 'string' ? offered.area.trim().slice(0, 120) : '',
+                basis: typeof offered?.basis === 'string' ? offered.basis.trim().slice(0, 120) : '',
+                territories: offeredTerritories,
+            }
+            : await splitTerritories(campaign.idea);
         if (!split) return json(200, { expanded: false, reason: 'no_territories' });
 
         // ── Which queries get expanded ──────────────────────────────────────
@@ -599,10 +620,15 @@ export default withLambda(async (event) => {
             const list = queries[key];
             if (list.length === 0) continue;
             const i = pickExpansionSource(list, split.area, split.territories);
-            expandedQueries[key] = [
-                ...expandQueryAcrossTerritories(list[i], split.area, split.territories),
-                ...list.filter((_, n) => n !== i),
-            ];
+            const expanded = expandQueryAcrossTerritories(list[i], split.area, split.territories);
+
+            // ⚠️ Deduped against the EXPANSION, not just within it. The generator often writes
+            // "primary school Kent" alongside the broader query that gets expanded, and expanding
+            // across Kent reproduces it exactly — so keeping every leftover verbatim left three
+            // identical queries in one group, each a paid search for a result already fetched.
+            const seen = new Set(expanded.map((q) => q.toLowerCase()));
+            const leftovers = list.filter((q, n) => n !== i && !seen.has(q.trim().toLowerCase()));
+            expandedQueries[key] = [...expanded, ...leftovers];
         }
 
         const flat = flattenQueries(expandedQueries);
@@ -617,10 +643,20 @@ export default withLambda(async (event) => {
         // Recomputed for the EXPANDED plan. A split that quadruples the query count usually moves
         // the binding limit to the search cap, and the user needs to see that before approving —
         // otherwise the expansion reads as free coverage when most of it will never run.
+        // Same month-to-date figure generate_brief uses. Omitting it here reported a full monthly
+        // allowance on the expanded plan while the un-expanded one knew better — two screens
+        // disagreeing about the same limit, one of them wrong.
+        const [{ monthTotal: expandMonthTotal } = { monthTotal: 0 }] = await db.execute<{ monthTotal: number }>(
+            `SELECT COALESCE(SUM(leads_found), 0)::int AS "monthTotal"
+             FROM discovery_jobs
+             WHERE campaign_id = ${campaignId} AND created_at >= date_trunc('month', now())`
+        );
+
         const planReach = computePlanReach(flat.length, {
             maxLeadsPerRun: gl?.maxLeadsPerRun ?? DEFAULT_MAX_LEADS_PER_RUN,
             maxSearchCallsPerRun: gl?.maxSearchCallsPerRun ?? DEFAULT_MAX_SEARCH_CALLS_PER_RUN,
             maxLeadsPerMonth: gl?.maxLeadsPerMonth ?? DEFAULT_MAX_LEADS_PER_MONTH,
+            leadsThisMonth: Number(expandMonthTotal ?? 0),
         });
 
         return json(200, { expanded: true, queries: expandedQueries, planReach, territorySplit: split });

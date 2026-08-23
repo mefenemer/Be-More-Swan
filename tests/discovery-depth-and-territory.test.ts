@@ -297,11 +297,17 @@ check('expanding saves nothing and returns a plan to review', () => {
     assert.match(block, /computePlanReach\(flat\.length/, 'and must re-report reach for the bigger plan');
 });
 
-check('exactly one query per strategy is expanded, and the rest kept verbatim', () => {
+check('exactly one query per strategy is expanded, and the rest kept unless duplicated', () => {
     // 15 queries x 18 counties is 270 searches — a plan nobody can read and a bill nobody sanctioned.
-    const block = API.slice(API.indexOf("action === 'expand_territories'"));
-    assert.match(block.slice(0, 3600), /expandQueryAcrossTerritories\(list\[i\], split\.area, split\.territories\),\s*\n\s*\.\.\.list\.filter\(\(_, n\) => n !== i\)/,
-        'the rest of the plan must be kept verbatim');
+    //
+    // ⚠️ This used to assert the leftovers were kept VERBATIM, which is precisely the bug found on
+    // the live deploy: expanding across Kent reproduces "primary school Kent", and keeping the
+    // original too meant paying twice. The assertion described the defect and passed.
+    const block = API.slice(API.indexOf("action === 'expand_territories'"), API.indexOf("action === 'approve_brief'"));
+    assert.match(block, /const expanded = expandQueryAcrossTerritories\(list\[i\], split\.area, split\.territories\);/,
+        'one query per strategy is expanded');
+    assert.match(block, /expandedQueries\[key\] = \[\.\.\.expanded, \.\.\.leftovers\];/,
+        'the deduped leftovers follow the expansion');
 });
 
 check('the expansion uses the EDITED plan, not a regenerated one', () => {
@@ -319,6 +325,65 @@ check('both advisory calls fail soft', () => {
     // They run while the user waits on the brief screen; neither is a gate.
     assert.match(SPLIT, /catch \(err\)/);
     assert.match(SPLIT, /!process\.env\.ANTHROPIC_API_KEY/, 'a missing key must short-circuit');
+});
+
+// ── What you are offered is what runs ─────────────────────────────────────────────────────────
+// Found by pressing the button on a real deploy: it said "Split into 9 areas" and delivered 12.
+// generate_brief called splitTerritories to draw the button, expand_territories called it AGAIN,
+// and the call is non-deterministic — the same idea has returned 18, 10, 9 and 12.
+
+check('the expansion uses the split the BRIEF offered, not a fresh one', () => {
+    const block = API.slice(API.indexOf("action === 'expand_territories'"), API.indexOf("action === 'approve_brief'"));
+    assert.match(block, /body\.territorySplit/, 'the client-supplied split must be read');
+    assert.match(block, /offeredTerritories\.length >= 2/, 'and preferred over a fresh call');
+    assert.match(block, /: await splitTerritories\(campaign\.idea\)/, 'with a fallback for older callers');
+});
+
+check('the client sends the split its button was drawn from', () => {
+    const call = UI.slice(UI.indexOf("call('expand_territories'"), UI.indexOf("call('expand_territories'") + 500);
+    assert.match(call, /territorySplit: state\.brief\?\.territorySplit/, 'the brief\'s own split must be sent back');
+});
+
+// ── No paying twice for the same query ────────────────────────────────────────────────────────
+// Also found on the live deploy: group one held twelve expanded queries and then kept
+// "primary school Kent", "primary school Hampshire" and "primary school Berkshire" verbatim —
+// each already produced by the expansion. Three paid searches for results already fetched.
+
+check('leftovers duplicating the expansion are dropped', () => {
+    const block = API.slice(API.indexOf("action === 'expand_territories'"), API.indexOf("action === 'approve_brief'"));
+    assert.match(block, /new Set\(expanded\.map\(\(q\) => q\.toLowerCase\(\)\)\)/, 'the expansion must be indexed');
+    assert.match(block, /!seen\.has\(q\.trim\(\)\.toLowerCase\(\)\)/, 'and leftovers filtered against it');
+    // ⚠️ The old assertion — "the rest of the plan must be kept verbatim" — described exactly the
+    // behaviour that caused this, and passed while being wrong.
+    assert.ok(!/\.\.\.list\.filter\(\(_, n\) => n !== i\)/.test(block), 'unfiltered leftovers are back');
+});
+
+check('both reach calculations know how much of the month is spent', () => {
+    // generate_brief passed leadsThisMonth and expand_territories did not, so the expanded plan
+    // reported a full monthly allowance while the un-expanded one knew better.
+    const uses = API.match(/leadsThisMonth: Number\(/g) ?? [];
+    assert.strictEqual(uses.length, 2, `both brief paths must pass it (found ${uses.length})`);
+});
+
+// ── Review plan reaches the Searches tab ──────────────────────────────────────────────────────
+
+check('the Searches tab can review a plan before spending on it', () => {
+    const inbox = read('src/components/assistant-signal-inbox.js');
+    assert.match(inbox, /data-si-plan/, 'the tab must offer the button');
+    assert.match(inbox, /manageSearch\('openPlan', b, 'data-si-plan'\)/, 'wired through the shared delegate');
+});
+
+check('openPlan is exported and raises the overlay before drawing the brief', () => {
+    // ⚠️ openBrief writes into [data-dc-body], which only exists once the modal is mounted —
+    // calling it from another tab without raising the overlay first is a silent no-op.
+    assert.match(UI, /window\.AssistantDiscoveryCampaigns = \{[^}]*openPlan/, 'openPlan must be public');
+    assert.match(UI, /openOverlay\(\(\) => openBrief\(campaignId\)\)/, 'the overlay must be raised first');
+});
+
+check('reviewing a plan closes the results modal, like the other mutating actions', () => {
+    // It can end in "Approve & start searching", which changes what an open results list means.
+    const inbox = read('src/components/assistant-signal-inbox.js');
+    assert.match(inbox, /if \(method !== 'openView'\) closeResults\(\);/);
 });
 
 console.log(`\n${passed} checks passed\n`);

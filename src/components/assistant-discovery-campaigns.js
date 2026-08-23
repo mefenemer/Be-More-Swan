@@ -603,6 +603,10 @@
       const data = await call('expand_territories', {
         campaignId: state.briefCampaignId,
         queries: collectQueries(b),
+        // ⚠️ Send the split the BUTTON was drawn from. The server re-derived it before, and the
+        // call is non-deterministic — "Split into 9 areas" delivered 12. What you approve must be
+        // what runs.
+        territorySplit: state.brief?.territorySplit ?? null,
       });
       if (!data.expanded) throw new Error('There is no clear way to split this area up.');
       // Carry the untouched halves forward: the server returns the new plan and its reach, but the
@@ -1220,6 +1224,17 @@
   }
 
   function open() {
+    openOverlay(refresh);
+  }
+
+  /**
+   * Open the Find New Leads modal on a specific view.
+   *
+   * ⚠️ Extracted from open() so the Searches tab can jump straight to a search plan. openBrief()
+   * writes into [data-dc-body], which only exists once this overlay is mounted — calling it from
+   * another tab without raising the overlay first is a silent no-op.
+   */
+  function openOverlay(then) {
     if (!state.assistantId) return;
     const overlay = document.createElement('div');
     overlay.className = 'fixed inset-0 bg-gray-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm';
@@ -1254,7 +1269,23 @@
     overlay.querySelector('[data-dc-close]').addEventListener('click', close);
     document.body.appendChild(overlay);
     state.overlay = overlay;
-    refresh();
+    then();
+  }
+
+  /**
+   * "Review plan" from the Searches tab — the same brief screen the Find New Leads panel shows.
+   *
+   * That tab could start a search, view it, edit it and schedule it, but not READ THE PLAN before
+   * spending on it, which is the one screen that says what a run can reach and offers to split it
+   * by area. Running something again from the tab you manage searches in, without being able to
+   * see what it will do, is the gap this closes.
+   */
+  function openPlan(campaignId) {
+    // ⚠️ No callback, unlike its siblings. Closing this overlay already calls
+    // AssistantSignalInbox.refresh() unconditionally (see close() above), so the tab re-reads
+    // itself whether the user approved a plan, edited it or walked away. Taking an onDone here
+    // would be a second path to the same refresh, and a field nothing reads.
+    openOverlay(() => openBrief(campaignId));
   }
 
   // Callers own their own trigger — this only loads state. The old #btn-discovery-campaigns
@@ -1270,5 +1301,5 @@
   // open() is the Find New Leads modal. The four below are per-search management, called from the
   // Searches tab (assistant-signal-inbox.js) — each takes an optional callback so that tab can
   // re-read itself, since it renders the same searches from a different endpoint.
-  window.AssistantDiscoveryCampaigns = { init, open, openView, openEdit, openSchedule, archive };
+  window.AssistantDiscoveryCampaigns = { init, open, openPlan, openView, openEdit, openSchedule, archive };
 })();
