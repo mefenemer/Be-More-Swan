@@ -311,6 +311,7 @@ Return STRICT JSON only (no markdown, no prose outside the JSON):
   "reasons": ["<short reason tied to a profile criterion>", ...],
   "suggestedNextStep": "<one concrete next action>",
   "outreachDraft": { "to": "<email or null>", "subject": "<subject>", "body": "<personalised outreach email in the sales tone>" } | null,
+  "excludedBy": "<the exclusion-list entry this matches, quoted from the profile>" | null,
   "doNotContact": <true|false>,
   "doNotContactReason": "<short reason, or null>"
 }

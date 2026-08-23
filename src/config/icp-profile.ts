@@ -81,7 +81,13 @@ export function icpBlock(icp: Record<string, unknown>): string {
  * resurfacing the moment a run finds nothing better.
  */
 export const EXCLUDE_PROFILE_RULE =
-    'When the profile lists companies that are NOT customers, treat a match against that list as decisive: score it 0-10, rate it "cold", and say plainly in reasons which exclusion it matched. This outranks every other signal — a competitor with strong buying intent is still a competitor. Being in a target industry is NOT evidence against this: peers and competitors are usually in the same industry as the customers they serve, which is why the exclusion list exists.';
+    'When the profile lists who is NOT a customer, decide whether this candidate matches ANY entry on that list and return the answer as "excludedBy" — the matching entry, quoted from the list, or null. '
+    + 'This is a GATE, not a criterion: it is answered before scoring and it outranks every other signal. '
+    + '⚠️ An exclusion can be about anything the list says — a competitor, a peer, a sector, a company size, or a PLACE. '
+    + '"Companies outside of the UK" excludes a school in Ohio as surely as "other training providers" excludes a rival trainer. '
+    + 'A candidate that is outside the stated territory IS a match: being outside the area of business means excluded, never "outside the exclusion". '
+    + 'Being in a target industry is NOT evidence against a match — peers are usually in the same industry as the customers they serve, and a school in the wrong country is still a school. '
+    + 'Do not reason your way past an entry you can see applies: if the candidate matches, name it in "excludedBy" and say so plainly in reasons.';
 
 /**
  * The `doNotContact` half of the rule, for the surfaces whose card shape actually carries the flag.
@@ -93,7 +99,7 @@ export const EXCLUDE_PROFILE_RULE =
  * the field itself.
  */
 export const EXCLUDE_PROFILE_DNC_RULE =
-    'A match against the exclusion list also means "doNotContact": true — emailing a competitor is not a weak send, it is a wrong one. Set outreachDraft to null when it is true.';
+    'A match against the exclusion list also means "doNotContact": true — emailing a competitor, or a company in a country the business does not serve, is not a weak send but a wrong one. Set outreachDraft to null when it is true.';
 
 // ── The prospect-type gate ───────────────────────────────────────────────────
 //
@@ -144,6 +150,25 @@ export type ProspectType = (typeof PROSPECT_TYPES)[number];
  * managed to look at. 10 is unambiguously cold, and unambiguously a verdict.
  */
 export const DISQUALIFIED_MAX_SCORE = 10;
+
+/**
+ * Highest score a candidate matching the exclusion list may hold.
+ *
+ * ⚠️ Enforced in CODE (normaliseLeadCard), not asked for in prose — for exactly the reason the
+ * prospect-type gate above is. The rule used to say "score it 0-10, rate it cold", and the same
+ * pass that scored also decided whether the rule applied, so it could decline to apply it and
+ * nothing downstream could tell. Against an ICP whose exclusions read "companies outside of the
+ * UK", four US schools were rated hot and warm on 2026-08-23 — each having correctly identified
+ * the geography first, in its own reasons:
+ *
+ *   "Located in US (West Virginia), outside UK exclusion zone"   → scored 45, warm
+ *   "UK exclusion does not apply: located in New York, USA"      → scored hot
+ *   "Location is Iowa, which is in scope"                        → scored 62, warm
+ *
+ * The model was not confused about the facts. It was asked to both judge and enforce, and did only
+ * the first. So it now emits the match as DATA and the clamp happens here.
+ */
+export const EXCLUDED_MAX_SCORE = 10;
 
 /** True for every prospect type that cannot be a customer, whatever the profile fit. */
 export function isDisqualifyingProspectType(value: unknown): value is ProspectType {

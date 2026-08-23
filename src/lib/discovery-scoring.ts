@@ -9,6 +9,7 @@ import { OUTREACH_SUBJECT_RULES } from '../constants/outreach-subject';
 import { parseModelJson, parseModelJsonArray } from '../utils/model-json';
 import {
     DISQUALIFIED_MAX_SCORE,
+    EXCLUDED_MAX_SCORE,
     EXCLUDE_PROFILE_DNC_RULE,
     EXCLUDE_PROFILE_RULE,
     PROSPECT_TYPES,
@@ -56,6 +57,12 @@ export interface LeadScoringCard {
     reasons: string[];
     suggestedNextStep: string;
     outreachDraft: { to: string | null; subject: string; body: string } | null;
+    /**
+     * The exclusion-list entry this candidate matches, quoted from the profile — or null.
+     *
+     * ⚠️ Data, not a verdict the model enforces. See EXCLUDED_MAX_SCORE.
+     */
+    excludedBy: string | null;
     /** Hard block on emailing this lead at all — enforced by evaluateDoNotContact(). */
     doNotContact: boolean;
     doNotContactReason: string | null;
@@ -96,8 +103,9 @@ export function normaliseLeadCard(raw: unknown, fallbackName: string): LeadScori
     const prospectType: ProspectType | null =
         disqualifiedAs ?? (ui.prospectType === 'target_business' ? 'target_business' : null);
 
-    const score = disqualifiedAs ? Math.min(claimed, DISQUALIFIED_MAX_SCORE) : claimed;
-    const rating: LeadScoringCard['rating'] =
+    // `let`, because the exclusion gate below can lower both after the fact.
+    let score = disqualifiedAs ? Math.min(claimed, DISQUALIFIED_MAX_SCORE) : claimed;
+    let rating: LeadScoringCard['rating'] =
         disqualifiedAs ? 'cold'
         : ui.rating === 'hot' || ui.rating === 'warm' || ui.rating === 'cold' ? ui.rating
         : score >= 70 ? 'hot' : score >= 40 ? 'warm' : 'cold';
@@ -111,6 +119,20 @@ export function normaliseLeadCard(raw: unknown, fallbackName: string): LeadScori
     if (disqualifiedAs && claimed > score) {
         reasons.unshift(`Scored ${claimed} on profile fit, but classified "${disqualifiedAs}" — not a business we can sell to, so capped at ${DISQUALIFIED_MAX_SCORE}.`);
         reasons.length = Math.min(reasons.length, 6);
+    }
+
+    // ── The exclusion gate ───────────────────────────────────────────────────
+    // Applied in code for the same reason the prospect-type gate is: asking the scorer to both
+    // decide the rule applies AND act on it let it do only the first. Four US schools were rated
+    // hot and warm against an ICP excluding "companies outside of the UK", each having named the
+    // state in its own reasons. The model still makes the judgement — it is the only thing here
+    // that can read a snippet — but it no longer gets to make it and then ignore it.
+    const excludedBy = str(ui.excludedBy, 200);
+    if (excludedBy && score > EXCLUDED_MAX_SCORE) {
+        reasons.unshift(`Scored ${score} on profile fit, but matches the exclusion "${excludedBy}", so capped at ${EXCLUDED_MAX_SCORE}.`);
+        reasons.length = Math.min(reasons.length, 6);
+        score = EXCLUDED_MAX_SCORE;
+        rating = 'cold';
     }
 
     let outreachDraft: LeadScoringCard['outreachDraft'] = null;
@@ -133,10 +155,13 @@ export function normaliseLeadCard(raw: unknown, fallbackName: string): LeadScori
         // doNotContact: that flag means sending would be WRONG (a competitor, our own staff, an
         // opt-out), and a fulfilment provider is merely a bad prospect. Conflating "not worth
         // emailing" with "must never be emailed" would quietly poison the do-not-contact gate.
-        outreachDraft: (doNotContact || disqualifiedAs) ? null : outreachDraft,
+        // An excluded candidate loses its draft too: a polished email to a market the business
+        // cannot serve is worse than no email, because it reads as ready to send.
+        outreachDraft: (doNotContact || disqualifiedAs || excludedBy) ? null : outreachDraft,
         doNotContact,
         doNotContactReason: doNotContact ? str(ui.doNotContactReason, 300) : null,
         prospectType,
+        excludedBy,
     };
 }
 
@@ -290,6 +315,7 @@ Return STRICT JSON only (no markdown): an array with ONE object per candidate, i
     "reasons": ["<reason tied to a profile criterion>", ...],
     "suggestedNextStep": "<one concrete next action>",
     "outreachDraft": { "to": null, "subject": "<subject>", "body": "<personalised outreach in the sales tone>" } | null,
+    "excludedBy": "<the exclusion-list entry this matches, quoted from the profile>" | null,
     "doNotContact": <true|false>,
     "doNotContactReason": "<short reason, or null>"
   }
@@ -439,6 +465,8 @@ ${SCORING_BANDS}
 Ideal customer profile (from setup):
 ${icpBlock(icp)}
 
+${EXCLUDE_PROFILE_RULE}
+
 Return STRICT JSON only (no markdown):
 {
   "score": <0-100>,
@@ -449,6 +477,7 @@ Return STRICT JSON only (no markdown):
   "people": [{ "name": "<exactly as printed on the page>", "title": "<their role as printed, or null>", "sourceUrl": "<which team page>" }],
   "hooks": ["<a concrete opening line the outreach could use, tied to something in the evidence>", ...],
   "suggestedNextStep": "<one concrete next action>",
+  "excludedBy": "<the exclusion-list entry this matches, quoted from the profile>" | null,
   "outreachDraft": { "to": null, "subject": "<subject>", "body": "<personalised outreach in the sales tone, referencing the strongest hook>" } | null
 }
 
