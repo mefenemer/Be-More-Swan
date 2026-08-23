@@ -62,8 +62,21 @@ function str(v: unknown, max: number): string | null {
     return typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null;
 }
 
-/** Cap per strategy on an APPROVED plan. Matches the generator's ceiling — each query is paid search. */
-const MAX_QUERIES_PER_STRATEGY = 10;
+/**
+ * Sanity bound per strategy on an APPROVED plan.
+ *
+ * ⚠️ This was 10, written when a generated plan was five queries per strategy and the comment read
+ * "matches the generator's ceiling". Territory expansion walked straight past it: a district split
+ * offered 37 queries per group, the review screen showed 111, the reach block promised 111 searches
+ * across 33 areas — and approve_brief silently kept the first 10 of each, so the run executed 30
+ * and worked about ten districts. Nothing anywhere said so.
+ *
+ * Sized from what an expansion can legitimately produce: MAX_TERRITORIES (80) plus room for the
+ * leftovers kept beside them. It is a guard against a malformed request, NOT a spend control —
+ * maxSearchCallsPerRun bounds the money, and it does it honestly, in a number the user can see and
+ * the reach block computes from.
+ */
+const MAX_QUERIES_PER_STRATEGY = MAX_TERRITORIES + 20;
 
 /** Sanitise one strategy's worth of user-edited queries. A query is a search string, nothing more. */
 function cleanQueryList(v: unknown): string[] {

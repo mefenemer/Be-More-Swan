@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readTerritoryPlan, remainingTerritories, nextSlice, territoriesWorked, type TerritoryPlan } from '../src/config/territory-plan';
-import { expandQueryAcrossTerritories, expansionAnchor } from '../src/lib/territory-split';
+import { expandQueryAcrossTerritories, expansionAnchor, MAX_TERRITORIES } from '../src/lib/territory-split';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -336,6 +336,38 @@ check('parents survive into the stored plan and the worker', () => {
     assert.deepStrictEqual(back?.parents, ['Kent']);
     assert.match(WORKER, /expandQueryAcrossTerritories\(template, tPlan\.area, slice, tPlan\.parents\)/);
     assert.match(API, /expandQueryAcrossTerritories\(list\[i\], split\.area, slice, split\.parents \?\? \[\]\)/);
+});
+
+// ── The plan you approve is the plan that runs ─────────────────────────────────────────────────
+// ⚠️ Found on a live run, not by any test. approve_brief sanitises each group through
+// cleanQueryList, which sliced to MAX_QUERIES_PER_STRATEGY = 10 — a constant written when a
+// generated plan was five per strategy. A district split offered 37 per group; the screen showed
+// 111 queries and promised "the first 33 areas"; approval kept 30 and the run worked ten districts.
+// Nothing anywhere reported the loss.
+
+check('the approval cap is derived from what an expansion can produce', () => {
+    assert.match(API, /const MAX_QUERIES_PER_STRATEGY = MAX_TERRITORIES \+ \d+;/,
+        'the cap must be tied to MAX_TERRITORIES, not a free-standing number that expansion outgrows');
+    assert.ok(!/const MAX_QUERIES_PER_STRATEGY = 10;/.test(API), 'the old literal cap is back');
+});
+
+check('a full slice plus its leftovers fits inside the cap', () => {
+    // The invariant that was violated: a slice can be as large as MAX_TERRITORIES, and each group
+    // keeps a handful of un-expanded originals beside it. If the cap is below that sum, approval
+    // truncates a plan the user has already read and agreed to.
+    const m = /const MAX_QUERIES_PER_STRATEGY = MAX_TERRITORIES \+ (\d+);/.exec(API);
+    assert.ok(m, 'the cap must be expressed against MAX_TERRITORIES');
+    const headroom = Number(m[1]);
+    assert.ok(headroom >= 5, `only ${headroom} spare — a group keeping 5 originals would be truncated`);
+    assert.ok(MAX_TERRITORIES + headroom >= MAX_TERRITORIES + 5);
+});
+
+check('the cap is a sanity bound, not a spend control', () => {
+    // Spend is bounded by maxSearchCallsPerRun, which the user can see and the reach block computes
+    // from. A second, hidden limit that silently drops approved queries is not a safeguard.
+    const i = API.indexOf('const MAX_QUERIES_PER_STRATEGY');
+    assert.match(API.slice(Math.max(0, i - 900), i), /NOT a spend control/,
+        'the reasoning must be recorded, or the number gets "tidied" back down');
 });
 
 console.log(`\n${passed} checks passed\n`);
