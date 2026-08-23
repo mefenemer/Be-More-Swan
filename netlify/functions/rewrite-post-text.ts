@@ -28,6 +28,7 @@ import { buildInspoBlock } from '../../src/utils/inspo-profile';
 import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
 import { platformFormat } from '../../src/config/platform-formats';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { stripCodeFences } from '../../src/utils/model-json';
 
 const MODEL = 'claude-haiku-4-5-20251001';
 const MAX_CAPTION_CHARS = 5000;
@@ -151,7 +152,7 @@ export default withLambda(async (event: HandlerEvent) => {
         });
 
         let text = (response.content[0] as { text?: string })?.text?.trim() ?? '';
-        text = text.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
+        text = stripCodeFences(text);
         if (!text) throw new Error('Empty rewrite.');
 
         void logAiUsage({

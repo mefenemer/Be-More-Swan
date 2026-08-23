@@ -19,6 +19,7 @@ import { blogPosts, organisations } from '../../db/schema';
 import { logAiUsage } from './ai-usage';
 import { buildInspoBlock } from './inspo-profile';
 import { currentDatePromptBlock } from './current-date-prompt';
+import { parseModelJson } from './model-json';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -44,22 +45,6 @@ export interface IdeateBlogTopicOptions {
     userId: number;
 }
 
-/**
- * Strip the model's most common wrapper habits off a JSON reply: ```json fences, and any prose
- * either side of the object. Returns null when nothing object-shaped survives.
- */
-function parseJsonObject(raw: string): Record<string, unknown> | null {
-    const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-    const start = cleaned.indexOf('{');
-    const end = cleaned.lastIndexOf('}');
-    if (start === -1 || end === -1 || end <= start) return null;
-    try {
-        const parsed = JSON.parse(cleaned.slice(start, end + 1));
-        return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
-    } catch {
-        return null;
-    }
-}
 
 const str = (v: unknown, max: number): string =>
     typeof v === 'string' ? v.trim().slice(0, max) : '';
@@ -139,7 +124,7 @@ export async function ideateBlogTopic(
             inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
         });
 
-        const parsed = parseJsonObject((response.content[0] as { text?: string })?.text ?? '');
+        const parsed = parseModelJson<Record<string, unknown>>((response.content[0] as { text?: string })?.text ?? '');
         if (!parsed) return null;
 
         const title = str(parsed.title, 200);

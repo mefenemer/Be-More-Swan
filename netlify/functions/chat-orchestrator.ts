@@ -37,6 +37,7 @@ import { replyClaimsPostSaved, honestDraftReply, isHonestDraftReply, type DraftC
 import { blogPostDraftFromUiElement, BLOG_POST_DRAFT_TYPE } from '../../src/utils/blog-chat-draft';
 import { newsletterDraftFromUiElement, NEWSLETTER_ISSUE_DRAFT_TYPE } from '../../src/utils/newsletter-chat-draft';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { parseModelJson, stripCodeFences } from '../../src/utils/model-json';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
@@ -259,22 +260,14 @@ function looksLikeStructuredAttempt(text: string): boolean {
 }
 
 function parseStructuredReply(raw: string): { content: string; uiElement: unknown | null } {
-    const stripped = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
+    const stripped = stripCodeFences(raw);
 
-    // Direct parse first, then a best-effort parse of the outermost {...} span — this
-    // recovers a reply wrapped in stray prose, though not one broken *inside* the JSON.
-    const candidates = [stripped];
-    const first = stripped.indexOf('{');
-    const last = stripped.lastIndexOf('}');
-    if (first !== -1 && last > first) candidates.push(stripped.slice(first, last + 1));
-
-    for (const candidate of candidates) {
-        try {
-            const parsed = JSON.parse(candidate);
-            if (parsed && typeof parsed.reply === 'string') {
-                return { content: parsed.reply.trim(), uiElement: parsed.uiElement ?? null };
-            }
-        } catch { /* try the next candidate */ }
+    // This route hand-rolled its own strip plus an outermost-{...} recovery. The shared extractor
+    // does the same thing with a string-aware brace balancer, so a `}` inside a reply no longer
+    // truncates the object — see src/utils/model-json.ts.
+    const parsed = parseModelJson<{ reply?: unknown; uiElement?: unknown }>(raw);
+    if (parsed && typeof parsed.reply === 'string') {
+        return { content: parsed.reply.trim(), uiElement: parsed.uiElement ?? null };
     }
 
     // Unparseable. Never show raw JSON scaffolding to the user: if this was clearly a

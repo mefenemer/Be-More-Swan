@@ -10,21 +10,13 @@
 
 import { getDb } from '../../db/client';
 import { securityAudits } from '../../db/schema';
+// Severe categories that trigger a hard block — shared with the Swan Index editorial screen, which
+// had drifted from this list when both kept their own copy. See src/config/moderation-severity.ts.
+import { SEVERE_CATEGORIES } from '../config/moderation-severity';
 
 /** Standardised UI error (AC2.2). */
 export const SAFE_CONTENT_BLOCK_MESSAGE =
     'This request violates the Be More Swan Safe Content Benchmark and cannot be processed.';
-
-// Severe categories that trigger a hard block. Softer flags (e.g. mild "harassment")
-// are left to the in-prompt Refusal & Pivot Protocol rather than a hard block.
-const SEVERE_CATEGORIES = [
-    'violence', 'violence/graphic',
-    'self-harm', 'self-harm/intent', 'self-harm/instructions',
-    'sexual/minors',
-    'hate/threatening',
-    'harassment/threatening',
-    'illicit', 'illicit/violent',
-];
 
 export interface ModerationResult {
     /** True when a severe category was flagged and the request must be blocked. */

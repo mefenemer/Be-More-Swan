@@ -34,6 +34,7 @@ import { resolveConnectedDraftPlatforms } from '../../src/utils/auto-publish-run
 import { platformFormat } from '../../src/config/platform-formats';
 import { decideAutoPublish, describeDecision } from '../../src/utils/auto-publish-runtime';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { parseModelJson, toCaptionText } from '../../src/utils/model-json';
 
 const IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
 
@@ -48,17 +49,21 @@ async function draftCopy(orgName: string, assistantName: string, platform: Auton
         messages: [{ role: 'user', content: 'Draft a post for an upcoming empty slot in the content calendar.' }],
         maxTokens: 600,
     });
-    try {
-        const parsed = JSON.parse(res.text.trim().replace(/^```json\s*|\s*```$/g, ''));
+    const parsed = parseModelJson<Record<string, unknown>>(res.text);
+    if (parsed) {
         return {
             caption: String(parsed.caption || '').slice(0, 2000),
             hashtags: String(parsed.hashtags || '').slice(0, 500),
             imagePrompt: String(parsed.imagePrompt || parsed.caption || '').slice(0, 1000),
         };
-    } catch {
-        // Model didn't return clean JSON — fall back to using the raw text as the caption.
-        return { caption: res.text.slice(0, 2000), hashtags: '', imagePrompt: res.text.slice(0, 300) };
     }
+    // ⚠️ The old fallback here assigned the RAW reply straight to the caption — fences, braces, \n
+    // escapes and all, persisted as the post caption and shown on the dashboard and review queue.
+    // That is the exact failure src/utils/model-json.ts was written to end, and this seam had
+    // never been converted. toCaptionText salvages the caption field from a broken reply and
+    // returns '' rather than ever handing JSON scaffolding to a user.
+    const salvaged = toCaptionText(res.text);
+    return { caption: salvaged.slice(0, 2000), hashtags: '', imagePrompt: salvaged.slice(0, 300) };
 }
 
 // First uncovered day (tomorrow..horizon) for the platform, or null if fully covered.

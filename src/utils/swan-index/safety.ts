@@ -23,6 +23,8 @@
 // read long after they arrive. Stored rather than recomputed so the report is also a record of what
 // was true when the decision was made.
 
+import { PUBLICATION_SEVERE_CATEGORIES } from '../../config/moderation-severity';
+
 export type SafetyStatus = 'pass' | 'warn' | 'fail' | 'unchecked';
 
 export interface SafetyCheck {
@@ -42,29 +44,36 @@ export interface SafetyReport {
     version: number;
 }
 
-/** Bump when checks are added, removed or materially changed. */
-export const SAFETY_VERSION = 1;
+/**
+ * Bump when checks are added, removed or materially changed — readSafetyReport() treats an older
+ * version as absent, so bumping forces every stored report to be re-screened.
+ *
+ * 2 (2026-08-22): `violence` became severe here, matching the product gate. A report stored under
+ * version 1 could say "confirmed" about a piece that now fails, and a stale all-clear is the one
+ * thing this module must never serve.
+ */
+export const SAFETY_VERSION = 2;
 
 // ── the moderation call ────────────────────────────────────────────────────────────────────────
 
 /**
- * Categories that make a piece unpublishable here rather than merely worth a second look.
+ * Categories that make a piece unpublishable here.
  *
- * Narrower than a general-purpose blocklist on purpose: this is a business magazine, and a piece
- * about laying people off, a fraud that nearly killed a company, or a founder's breakdown is
- * exactly the writing it exists to publish. Flagging those as failures would train editors to
- * override the screen, which costs more than the screen buys.
+ * Everything the product-wide prompt gate blocks, plus `sexual` and `hate` — a masthead is a
+ * stricter surface than a chat prompt. The list lives in src/config/moderation-severity.ts because
+ * it used to live in TWO places and had drifted: `violence` was severe to the product gate and
+ * merely amber here, so the same sentence blocked a customer's prompt and showed an editor a
+ * "worth a look".
+ *
+ * The earlier version of this comment argued that plain `violence` should NOT be severe, on the
+ * grounds that a piece about a fraud that nearly killed a company is exactly the writing this
+ * publication exists to run. That reasoning was about the WORD, not the category — the model
+ * flags depicted violence, not "we were bleeding cash" — and the cost of being wrong here is only
+ * that an editor reads a red line before approving. The screen advises; it has never blocked.
  */
-const SEVERE = new Set([
-    'sexual', 'sexual/minors',
-    'hate', 'hate/threatening',
-    'harassment/threatening',
-    'violence/graphic',
-    'self-harm', 'self-harm/intent', 'self-harm/instructions',
-    'illicit', 'illicit/violent',
-]);
+const SEVERE = new Set(PUBLICATION_SEVERE_CATEGORIES);
 
-export interface ModerationInput { text?: string; imageUrls?: string[] }
+interface ModerationInput { text?: string; imageUrls?: string[] }
 export interface ModerationOutcome { ran: boolean; flagged: string[]; severe: string[]; error?: string }
 
 /**

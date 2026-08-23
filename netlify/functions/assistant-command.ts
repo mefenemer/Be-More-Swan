@@ -19,6 +19,7 @@ import { computeOnboardingProgress } from '../../src/utils/onboarding-progress';
 import { provisioningBlockInfo } from '../../src/utils/assistant-lifecycle';
 import { normalizePlatform } from '../../src/config/platform-formats';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { parseModelJson } from '../../src/utils/model-json';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -173,22 +174,26 @@ Rules:
         });
 
         const raw = (response.content[0] as { text: string }).text.trim();
-        // Defensive parse: strip any accidental code fences.
-        const jsonText = raw.replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
-        let parsed: any;
-        try { parsed = JSON.parse(jsonText); } catch {
+        // Shared extractor (src/utils/model-json.ts), not a local fence-strip: the private copies
+        // anchored their strip to the start of the reply and lost any answer with a line above it.
+        const parsed = parseModelJson<{
+            type?: string; reply?: string; view?: string;
+            suggestView?: string; suggestReportIssue?: boolean;
+            assistantId?: unknown; platform?: unknown; brief?: unknown;
+        }>(raw);
+        if (!parsed) {
             return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'answer', reply: raw.slice(0, 240) || "Sorry, I didn't quite catch that — try rephrasing." }) };
         }
 
         // Validate / sanitise the action so the client can trust it.
-        const type = ['navigate', 'delegate', 'answer'].includes(parsed.type) ? parsed.type : 'answer';
+        const type = ['navigate', 'delegate', 'answer'].includes(parsed.type ?? '') ? parsed.type! : 'answer';
         const out: any = { type, reply: typeof parsed.reply === 'string' && parsed.reply.trim() ? parsed.reply.trim() : 'Done.' };
 
         if (type === 'navigate') {
-            out.view = (VIEWS as readonly string[]).includes(parsed.view) ? parsed.view : 'dashboard';
+            out.view = (VIEWS as readonly string[]).includes(parsed.view ?? '') ? parsed.view! : 'dashboard';
         } else if (type === 'answer') {
             // "how do I / where do I" questions: surface a "Take me there →" button.
-            if ((VIEWS as readonly string[]).includes(parsed.suggestView)) out.suggestView = parsed.suggestView;
+            if ((VIEWS as readonly string[]).includes(parsed.suggestView ?? '')) out.suggestView = parsed.suggestView;
             // "why isn't X working" questions the LLM couldn't fully resolve: surface a
             // "Report an issue →" button instead of leaving the user with a dead-end promise.
             if (parsed.suggestReportIssue === true) out.suggestReportIssue = true;

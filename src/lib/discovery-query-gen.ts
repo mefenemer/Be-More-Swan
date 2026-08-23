@@ -11,6 +11,9 @@ import Anthropic from '@anthropic-ai/sdk';
 import {
     excludedDomainsByCategory, EXCLUDED_SUBDOMAINS, EXCLUDED_TITLE_SHAPES,
 } from './discovery-domain-filter';
+// ⚠️ NOT a local copy. The local one anchored its fence-strip to the start of the reply, so a
+// model that narrated STEP ONE above the fence failed the whole run. See src/utils/llm-json.ts.
+import { parseModelJson } from '../utils/model-json';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 export const QUERY_GEN_MODEL = 'claude-haiku-4-5-20251001';
@@ -42,11 +45,6 @@ function cleanList(v: unknown, max: number): string[] {
         .slice(0, max);
 }
 
-/** Strip accidental ```json fences and parse; null (not throw) on bad JSON. */
-function parseJson<T = unknown>(raw: string): T | null {
-    const text = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
-    try { return JSON.parse(text) as T; } catch { return null; }
-}
 
 export interface QueryGenInput {
     idea: string;
@@ -228,7 +226,7 @@ ${JSON.stringify(input.icpSnapshot ?? {})}`;
         inputTokens = resp.usage.input_tokens;
         outputTokens = resp.usage.output_tokens;
         const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
-        const parsed = parseJson<Record<string, unknown>>(raw);
+        const parsed = parseModelJson<Record<string, unknown>>(raw);
         if (parsed) {
             queries = {
                 niche_scrape: cleanList(parsed.niche_scrape, perStrategy),

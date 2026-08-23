@@ -17,6 +17,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { stripCodeFences } from '../../src/utils/model-json';
 
 const MODEL = 'claude-haiku-4-5-20251001';
 const MAX_SELECTION_CHARS = 6000;
@@ -99,7 +100,7 @@ export default withLambda(async (event: HandlerEvent) => {
 
         let rewrittenText = (response.content[0] as { text?: string })?.text?.trim() ?? '';
         // Strip an accidental wrapping code fence if the model added one.
-        rewrittenText = rewrittenText.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
+        rewrittenText = stripCodeFences(rewrittenText);
         if (!rewrittenText) throw new Error('Empty rewrite result.');
 
         void logAiUsage({

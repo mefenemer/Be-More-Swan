@@ -56,6 +56,7 @@ import {
     MAX_SEND_ATTEMPTS, MAX_SENDS_PER_ORG_PER_DAY, MAX_STEPS_PER_ENROLMENT,
     WORKER_BATCH_SIZE, WORKER_BUDGET_MS, sequenceTemplateVersion,
 } from '../../src/config/outreach-sequences';
+import { parseModelJson } from '../../src/utils/model-json';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -239,9 +240,10 @@ Otherwise return STRICT JSON only (no markdown, no prose outside the JSON):
     });
 
     const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
-    const text = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
-    let parsed: { subject?: unknown; body?: unknown; decline?: unknown } | null = null;
-    try { parsed = JSON.parse(text); } catch { return null; }
+    // Shared extractor. A follow-up whose model narrated above the fence used to return null here,
+    // which routes into handleSendFailure — a cadence step silently skipped over a wrapper.
+    const parsed = parseModelJson<{ subject?: unknown; body?: unknown; decline?: unknown }>(raw);
+    if (!parsed) return null;
 
     // An explicit refusal. Without this channel the model has nowhere to put "this should not be
     // sent" except the subject and body — which then get emailed verbatim. Returning null routes it

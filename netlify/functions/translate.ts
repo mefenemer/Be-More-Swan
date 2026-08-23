@@ -15,6 +15,7 @@ import { getDb } from '../../db/client';
 import { uiTranslations } from '../../db/schema';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { parseModelJsonArray } from '../../src/utils/model-json';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -87,7 +88,7 @@ Rules:
                 messages: [{ role: 'user', content: JSON.stringify(misses) }],
                 maxTokens: 4096,
             });
-            const parsed = JSON.parse(stripFence(res.text));
+            const parsed = parseModelJsonArray<string>(res.text);
             if (Array.isArray(parsed) && parsed.length === misses.length) {
                 const toInsert: { lang: string; sourceHash: string; sourceText: string; translatedText: string }[] = [];
                 misses.forEach((src, i) => {
@@ -108,11 +109,6 @@ Rules:
     const translations = capped.map(s => cache.get(s) ?? s);
     return json({ translations });
 });
-
-// Models occasionally wrap JSON in ```json fences — strip them before parse.
-function stripFence(s: string): string {
-    return s.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-}
 
 function json(body: unknown) {
     return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };

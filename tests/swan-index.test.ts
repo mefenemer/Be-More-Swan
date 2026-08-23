@@ -16,6 +16,9 @@ import {
     type SwanCard, type SwanSection,
 } from '../src/utils/swan-index/render';
 import { normaliseSocial, parseSocials, readSocials, socialEntries, SWAN_SOCIAL_ORDER } from '../src/utils/swan-index/socials';
+import {
+    SEVERE_CATEGORIES, PUBLICATION_SEVERE_CATEGORIES, PUBLICATION_EXTRA_SEVERE,
+} from '../src/config/moderation-severity';
 import { guessSection, toDek, SECTION_TAG_ALIASES } from '../src/utils/blog-destinations/swanindex';
 import {
     runSafetyScreen, readSafetyReport, summariseSafety, textOf, imagesOf, linksOf, SAFETY_VERSION,
@@ -717,6 +720,37 @@ const safeInput = {
     monthlyPostCount: 2,
 };
 
+check('the editorial bar is never lower than the product gate', () => {
+    // The drift this replaced: `violence` was severe to the product gate and merely amber on the
+    // masthead, so one sentence blocked a customer's prompt and showed an editor "worth a look".
+    // A publication is the STRICTER surface — refusing to draft something costs one person an
+    // afternoon; running it puts it beside other people's bylines on a domain we own.
+    for (const category of SEVERE_CATEGORIES) {
+        assert.ok(PUBLICATION_SEVERE_CATEGORIES.includes(category),
+            `"${category}" blocks a prompt but would not fail an editorial review`);
+    }
+    assert.ok(PUBLICATION_SEVERE_CATEGORIES.includes('violence'), 'the category this alignment was for');
+    // The extras are additions, never substitutions.
+    for (const extra of PUBLICATION_EXTRA_SEVERE) {
+        assert.ok(!SEVERE_CATEGORIES.includes(extra), `"${extra}" is listed twice`);
+    }
+    assert.equal(PUBLICATION_SEVERE_CATEGORIES.length, SEVERE_CATEGORIES.length + PUBLICATION_EXTRA_SEVERE.length);
+    // One list, not two. A second hand-written copy is what produced the drift.
+    const mod = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src/utils/moderation.ts'), 'utf8');
+    assert.match(mod, /import \{ SEVERE_CATEGORIES \} from '\.\.\/config\/moderation-severity'/);
+    assert.ok(!/const SEVERE_CATEGORIES = \[/.test(mod), 'the product gate must not keep its own copy');
+});
+
+check('a stored report from before the alignment is re-screened, not trusted', () => {
+    // A version-1 report could say "confirmed" about a piece that now fails on `violence`.
+    assert.equal(SAFETY_VERSION, 2);
+    const stale = {
+        version: 1, ranAt: '2026-08-22T00:00:00.000Z', confirmed: true,
+        checks: [{ id: 'text-safety', label: 'Text', status: 'pass', detail: 'ok' }],
+    };
+    assert.equal(readSafetyReport(stale), null, 'an older check version must read as not screened');
+});
+
 check('an unreachable image does not take the text check down with it', () => {
     // Measured against the live API 2026-08-22: text and images used to go in ONE call, and the
     // endpoint fails the WHOLE request with `image_url_unavailable` if it cannot fetch even one
@@ -866,6 +900,15 @@ async function main() {
         }, moderate);
         assert.equal(report.checks.find((c) => c.id === 'text-safety')!.status, 'pass');
         assert.equal(report.checks.find((c) => c.id === 'image-safety')!.status, 'fail');
+    });
+
+    await acheck('a violent flag now FAILS the editorial screen, as it blocks a prompt', async () => {
+        const moderate: Moderator = async (): Promise<ModerationOutcome> => (
+            { ran: true, flagged: ['violence'], severe: ['violence'] }
+        );
+        const report = await runSafetyScreen(safeInput, moderate);
+        assert.equal(report.checks.find((c) => c.id === 'text-safety')!.status, 'fail');
+        assert.equal(report.confirmed, false);
     });
 
     await acheck('a suspended contributor fails the screen whatever the writing is like', async () => {

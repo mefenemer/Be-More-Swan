@@ -56,6 +56,7 @@ import {
 import { EDIT_REASONS, isEditReason } from '../../src/config/template-feedback';
 import { appendOutreachFooter, buildOutreachFooter, isUsablePostalAddress } from '../../src/config/outreach-footer';
 import { SENDER_IDENTITY_RULE, senderIdentityBlock, type SenderIdentity } from '../../src/config/sender-identity';
+import { parseModelJson, parseModelJsonArray } from '../../src/utils/model-json';
 import { loadSenderIdentity } from '../../src/utils/sender-identity';
 import { needsPersonalInboxConfirmation } from '../../src/config/lead-email-kind';
 import { EXCLUDE_PROFILE_DNC_RULE, EXCLUDE_PROFILE_RULE, SCORING_BANDS, icpBlock } from '../../src/config/icp-profile';
@@ -135,10 +136,6 @@ function str(v: unknown, max = 300): string | null {
 }
 
 /** Strip accidental ```json fences and parse; return null instead of throwing on bad JSON. */
-function parseJson<T = unknown>(raw: string): T | null {
-    const text = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
-    try { return JSON.parse(text) as T; } catch { return null; }
-}
 
 
 /**
@@ -202,7 +199,7 @@ export default withLambda(async (event) => {
     if (assistant.onboardingContext && typeof assistant.onboardingContext === 'object' && !Array.isArray(assistant.onboardingContext)) {
         onboarding = assistant.onboardingContext as Record<string, unknown>;
     } else if (typeof assistant.onboardingContext === 'string') {
-        const parsed = parseJson<Record<string, unknown>>(assistant.onboardingContext);
+        const parsed = parseModelJson<Record<string, unknown>>(assistant.onboardingContext);
         if (parsed && typeof parsed === 'object') onboarding = parsed;
     }
     const icp = icpBlock(onboarding);
@@ -336,7 +333,7 @@ ${OUTREACH_SUBJECT_RULES}`;
             const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
             // Widened on purpose: the card is stored as the record's `data` blob and this path
             // stamps extra fields onto it below.
-            const card: LeadScoringCard & Record<string, unknown> = { ...normaliseLeadCard(parseJson(raw), title) };
+            const card: LeadScoringCard & Record<string, unknown> = { ...normaliseLeadCard(parseModelJson(raw), title) };
 
             // Persist the address the user actually typed. Without this the only recipient
             // source for a manual lead is whatever the model chose to echo into
@@ -1283,7 +1280,7 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
                     messages: [{ role: 'user', content: `Lead: ${JSON.stringify({ title: rec.title, ...data })}` }],
                 });
                 logUsage(resp, 'send_outreach_gen');
-                const gen = parseJson<{ subject?: string; body?: string; decline?: string }>(resp.content[0]?.type === 'text' ? resp.content[0].text : '') || {};
+                const gen = parseModelJson<{ subject?: string; body?: string; decline?: string }>(resp.content[0]?.type === 'text' ? resp.content[0].text : '') || {};
 
                 // An explicit refusal — e.g. the scoring pass wrote "do not contact" or "internal test
                 // account" into this record and the only honest email would contradict it. Without this
@@ -1711,7 +1708,7 @@ Return STRICT JSON only (no markdown), an array of exactly 3 objects:
             });
             logUsage(resp, 'generate_ideas');
             const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
-            const parsed = parseJson<unknown[]>(raw);
+            const parsed = parseModelJsonArray(raw);
             const list = Array.isArray(parsed) ? parsed : [];
             const saved: { id: number; title: string; status: string; data: unknown }[] = [];
             for (const item of list.slice(0, 3)) {

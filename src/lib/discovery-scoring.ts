@@ -6,6 +6,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { OUTREACH_SUBJECT_RULES } from '../constants/outreach-subject';
+import { parseModelJson, parseModelJsonArray } from '../utils/model-json';
 import {
     DISQUALIFIED_MAX_SCORE,
     EXCLUDE_PROFILE_DNC_RULE,
@@ -79,10 +80,6 @@ function str(v: unknown, max = 300): string | null {
     return typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null;
 }
 
-function parseJson<T = unknown>(raw: string): T | null {
-    const text = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
-    try { return JSON.parse(text) as T; } catch { return null; }
-}
 
 /** Coerce whatever the LLM returned into a safe lead_scoring_card. */
 export function normaliseLeadCard(raw: unknown, fallbackName: string): LeadScoringCard {
@@ -231,7 +228,7 @@ Return STRICT JSON only (no markdown): an array with ONE object per candidate, i
         inputTokens = resp.usage.input_tokens;
         outputTokens = resp.usage.output_tokens;
         const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
-        const p = parseJson<unknown[]>(raw);
+        const p = parseModelJsonArray(raw);
         if (Array.isArray(p)) parsed = p;
     } catch (err) {
         console.error('[discovery-scoring] classification failed:', err);
@@ -328,7 +325,7 @@ ${OUTREACH_SUBJECT_RULES}`;
         inputTokens = resp.usage.input_tokens;
         outputTokens = resp.usage.output_tokens;
         const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
-        const p = parseJson<unknown[]>(raw);
+        const p = parseModelJsonArray(raw);
         if (Array.isArray(p)) parsed = p;
     } catch (err) {
         console.error('[discovery-scoring] scoring failed:', err);
@@ -491,7 +488,7 @@ ${OUTREACH_SUBJECT_RULES}`;
         inputTokens = resp.usage.input_tokens;
         outputTokens = resp.usage.output_tokens;
         const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
-        parsed = parseJson<Record<string, unknown>>(raw);
+        parsed = parseModelJson<Record<string, unknown>>(raw);
     } catch (err) {
         console.error('[discovery-scoring] rescore failed:', err);
         return { ...EMPTY_RESCORE, inputTokens, outputTokens };

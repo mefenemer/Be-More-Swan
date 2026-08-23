@@ -20,6 +20,7 @@ import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { consumeTaskCredit } from '../../src/utils/task-credit';
 import { displayCaption } from '../../src/utils/model-json';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { stripCodeFences } from '../../src/utils/model-json';
 
 const MODEL = 'claude-haiku-4-5-20251001';
 /** What fits on a still at a readable size. The overlay renderer shrinks past this, it does not wrap well. */
@@ -103,7 +104,7 @@ export default withLambda(async (event: HandlerEvent) => {
         let text = (response.content[0] as { text?: string })?.text?.trim() ?? '';
         // The model is asked for one line and no decoration; strip what it adds anyway rather than
         // showing the user a quoted, fenced, or multi-line "hook" they then have to tidy by hand.
-        text = text.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
+        text = stripCodeFences(text);
         text = text.split('\n')[0].trim().replace(/^["'“”']+|["'“”']+$/g, '').trim();
         if (text.length > MAX_OVERLAY_CHARS) text = text.slice(0, MAX_OVERLAY_CHARS).trimEnd();
         if (!text) throw new Error('Empty suggestion.');
