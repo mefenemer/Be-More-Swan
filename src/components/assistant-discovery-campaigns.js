@@ -456,16 +456,21 @@
     if (!t || !Array.isArray(t.territories) || t.territories.length < 2) return '';
     if (state.territoriesApplied) {
       const slice = Array.isArray(state.brief?.slice) ? state.brief.slice.length : t.territories.length;
+      const done = Array.isArray(state.brief?.territoryPlan?.covered) ? state.brief.territoryPlan.covered.length : 0;
       const partial = slice < t.territories.length;
+      // ⚠️ Name the already-worked areas explicitly. Re-splitting used to reset a sweep silently;
+      // it now carries progress forward, and a banner that still read "the first 33" would leave
+      // the user unable to tell which of those two things had just happened.
+      const already = done ? `${esc(String(done))} area${done === 1 ? '' : 's'} already worked. ` : '';
       return `
         <div class="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
           <p class="text-xs font-bold text-emerald-900">Split across ${esc(String(t.territories.length))} areas</p>
           <p class="text-xs text-emerald-800 mt-1">${partial
-            // ⚠️ Say this plainly. A district sweep is deliberately more than one run, and a user
-            // who thinks they are approving all 58 areas will read the next "stopped early" notice
-            // as a failure rather than as the sweep working exactly as designed.
-            ? `This run works the first ${esc(String(slice))} — the searches below. Later runs continue with the rest, picking up where this one stops.`
-            : 'The broadest search from each angle now runs once per area. Check the reach below — a bigger plan often means a limit cuts it short.'}</p>
+            // A district sweep is deliberately more than one run, and a user who thinks they are
+            // approving all of them will read the next "stopped early" notice as a failure rather
+            // than as the sweep working exactly as designed.
+            ? `${already}This run works the next ${esc(String(slice))} — the searches below. Later runs continue with the rest, picking up where this one stops.`
+            : `${already}The broadest search from each angle now runs once per area. Check the reach below — a bigger plan often means a limit cuts it short.`}</p>
         </div>`;
     }
     return `

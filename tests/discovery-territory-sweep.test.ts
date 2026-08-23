@@ -370,4 +370,35 @@ check('the cap is a sanity bound, not a spend control', () => {
         'the reasoning must be recorded, or the number gets "tidied" back down');
 });
 
+// ── Re-opening a plan must not undo the sweep ──────────────────────────────────────────────────
+// ⚠️ Found on staging with ten districts already banked: pressing "Go finer" again rebuilt the plan
+// with covered: [], so approving it would have restarted at Ashford and re-searched ground already
+// paid for. Nothing on the screen distinguished that from a genuine continuation.
+
+check('a re-split carries forward what the campaign has already worked', () => {
+    const block = API.slice(API.indexOf("action === 'expand_territories'"), API.indexOf("action === 'approve_brief'"));
+    assert.match(block, /const prior = readTerritoryPlan\(campaign\.approvedBrief\);/, 'prior progress must be read');
+    assert.match(block, /covered: carriedOver/, 'and carried into the new plan');
+    assert.ok(!/territories: split\.territories, covered: \[\], templates/.test(block), 'the reset is back');
+});
+
+check('progress is carried by NAME, not by position', () => {
+    // The split is non-deterministic — the same idea has returned 56 and 66 areas — so index
+    // matching would credit entirely the wrong districts.
+    const block = API.slice(API.indexOf("action === 'expand_territories'"), API.indexOf("action === 'approve_brief'"));
+    assert.match(block, /stillListed\.has\(t\.toLowerCase\(\)\)/, 'names must be matched case-insensitively');
+});
+
+check('a territory dropped by the new split is dropped from progress', () => {
+    // It is no longer part of the plan, so carrying it would inflate the count against a total it
+    // is not in — "34 of 33 areas worked".
+    const block = API.slice(API.indexOf("action === 'expand_territories'"), API.indexOf("action === 'approve_brief'"));
+    assert.match(block, /\(prior\?\.covered \?\? \[\]\)\.filter\(/, 'carried progress must be filtered against the new list');
+});
+
+check('the banner distinguishes a continuation from a fresh start', () => {
+    assert.match(UI, /already worked\. /, 'it must say how much was done before');
+    assert.match(UI, /This run works the next/, 'and that this run continues rather than restarts');
+});
+
 console.log(`\n${passed} checks passed\n`);

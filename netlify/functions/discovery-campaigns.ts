@@ -597,7 +597,12 @@ export default withLambda(async (event) => {
     // of surprise this whole piece of work exists to remove.
     if (action === 'expand_territories') {
         const campaignId = Number(body.campaignId);
-        const [campaign] = await db.select({ id: discoveryCampaigns.id, idea: discoveryCampaigns.idea })
+        const [campaign] = await db.select({
+            id: discoveryCampaigns.id,
+            idea: discoveryCampaigns.idea,
+            // Read so a re-split can carry forward what the campaign has already worked.
+            approvedBrief: discoveryCampaigns.approvedBrief,
+        })
             .from(discoveryCampaigns)
             .where(and(eq(discoveryCampaigns.id, campaignId), eq(discoveryCampaigns.organisationId, orgId)))
             .limit(1);
@@ -667,11 +672,24 @@ export default withLambda(async (event) => {
             templates[key] = list[i];
         }
 
+        // ── Progress survives a re-split ────────────────────────────────────
+        //
+        // ⚠️ `covered: []` here meant that merely re-opening the plan and approving it threw away
+        // the sweep. A campaign that had worked ten districts would silently restart at the first,
+        // re-searching ground it had already paid for, and nothing on the screen said so.
+        //
+        // Carried forward BY NAME, not by position: the split is non-deterministic and has returned
+        // 56 and 66 areas for the same idea, so index-matching would credit the wrong districts. A
+        // name that is no longer in the new list is dropped, since it is no longer part of the plan.
+        const prior = readTerritoryPlan(campaign.approvedBrief);
+        const stillListed = new Set(split.territories.map((t) => t.toLowerCase()));
+        const carriedOver = (prior?.covered ?? []).filter((t) => stillListed.has(t.toLowerCase()));
+
         const territoryPlan: TerritoryPlan = {
             area: split.area, basis: split.basis,
             granularity: 'granularity' in split ? split.granularity : 'coarse',
             parents: split.parents ?? [],
-            territories: split.territories, covered: [], templates,
+            territories: split.territories, covered: carriedOver, templates,
         };
 
         // ── Phase 2: how much of it THIS run takes on ───────────────────────
