@@ -1309,16 +1309,23 @@ ledger row to `delivered`.
 
 1. ~~**Dispatch: A, B or C in §6?**~~ **ANSWERED 2026-08-20: option 2** — verified per-tenant domain
    by default, tenant mailbox as a hard-capped small-list fallback. See §6.
-2. **Is the Audience a top-level nav item now**, or does it stay inside the Newsletter Assistant
-   until the Campaign Assistant lands? (Recommend top-level immediately — retro-fitting shared data
-   into a shared surface is the expensive version.)
-3. **Volume expectations per tenant** — 500 subscribers or 50,000? It changes batching, the send
-   cron budget, and whether option B is ever acceptable.
-4. **Free-plan abuse posture**: an anonymous-write public endpoint on a low-cost plan is a spam
-   vector. Minimum: verified sending domain required before the first send, and a per-plan
-   recipients/month ceiling.
-5. **Lead → audience promotion**: single-record button only, or a bulk action with a consent
-   declaration? (Recommend single-record for launch.)
+2. ~~**Is the Audience a top-level nav item now?**~~ **ANSWERED — top-level**, as recommended.
+   `components/sidebar.html` carries `#nav-audience`.
+3. **STILL OPEN — volume expectations per tenant** — 500 subscribers or 50,000? It changes
+   batching, the send cron budget, and whether the mailbox fallback is ever acceptable.
+4. **HALF ANSWERED — free-plan abuse posture**: an anonymous-write public endpoint on a low-cost
+   plan is a spam vector. The verified-sending-domain half is **enforced** — `resolveSendRoute`
+   refuses without one and the mailbox fallback is hard-capped at `MAILBOX_MAX_RECIPIENTS`
+   (`src/utils/newsletter-send.ts`). ⚠️ **The per-plan recipients/month ceiling does NOT exist**:
+   nothing in the plan/entitlement layer caps newsletter volume. Still open.
+5. ~~**Lead → audience promotion**: single-record or bulk?~~ **ANSWERED 2026-08-21 — NEITHER, and
+   do not re-propose it.** The owner's decision is that the two populations stay separate: a lead is
+   a speculative cold contact who has given no permission to receive a newsletter. `lead_promotion`
+   was removed from `SOURCE_VALUES`, `SOURCE_LABEL`, `SOURCE_OPTS` and `ContactSource` accordingly —
+   it had been a source with no writer, offered in the rule builder as a filter that could only ever
+   return zero people. ⚠️ It survives in the `audience_contacts_source_check` CHECK in **both**
+   homes (`db/audience.sql` and the `db/schema.ts` mirror) on purpose: dropping a CHECK value needs
+   DROP + ADD on two live databases and buys nothing when no row can carry it. A test pins that.
 
 ---
 
@@ -1406,30 +1413,54 @@ business tool and not worth chasing.
 
 Not a market report; a checklist of what a paying customer coming from Mailchimp, Kit, Beehiiv or
 Substack will expect to find, scored against this plan. The point is to be explicit about what we
-are deliberately *not* shipping in v1, so the marketing copy doesn't promise it.
+are deliberately *not* shipping, so the marketing copy doesn't promise it.
 
-| Capability | Category | This plan |
+> **Reconciled against the code 2026-08-23**, every row re-checked by opening the module rather
+> than by reading this table. It needed it: written on 2026-08-20, it still scored A/B subjects,
+> drip sequences and the hosted landing page as ❌ *v1* two days after all three shipped, and it
+> still said the cross-assistant consent binding ran one way after the direction had been closed.
+> ⚠️ **A stale ❌ is not the safe direction.** This table's job is to stop the product overclaiming,
+> and a checklist that under-reports is quoted as a reason not to build something that already
+> exists — which is exactly what happened to `docs/blog-media-composition-plan.md`. Re-check a row
+> before citing it, in either direction.
+
+| Capability | Category | Status |
 |---|---|---|
-| List import, segmentation, tagging | Table stakes | ✅ Phase 1 |
-| Embeddable signup form / hosted landing page | Table stakes | ✅ form in Phase 2; hosted page **not** in scope |
-| Double opt-in + one-click unsubscribe + consent audit | Table stakes / legal | ✅ Phases 2 & 4 |
-| Authenticated sending domain (SPF/DKIM/DMARC) | Table stakes | ✅ if option A |
-| Bounce & complaint handling with automatic suppression | Table stakes | ✅ Phase 4 |
-| Open / click / unsubscribe analytics | Table stakes | ✅ Phase 5 (counters on the issue) |
-| Drag-and-drop visual email builder | Expected | ❌ Markdown + a themed template. A real gap vs Mailchimp; state it plainly rather than implying otherwise |
-| Automations / drip sequences on triggers | Expected | ❌ v1. `outreach_sequences` already exists for the Lead Generator and is the obvious base when it comes |
-| A/B testing subject lines | Expected | ❌ v1, but `blog_ab_stats` + the widget A/B machinery is the pattern to copy |
+| List import, segmentation, tagging | Table stakes | ✅ Phase 1, and past parity since: tags (§11l), **dynamic** segments that are rules rather than frozen lists (§11k), and tenant-defined custom fields the rules can filter on (§11m) |
+| Embeddable signup form / hosted landing page | Table stakes | ✅ **both** — the embed in Phase 2, the hosted page at `/s/<key>` in §11p. ⚠️ What Kit has and we do not is a page *builder*: ours is one layout with a headline and an intro |
+| Double opt-in + one-click unsubscribe + consent audit | Table stakes / legal | ✅ Phases 2 & 4. The one-click POST is RFC 8058 and is never a menu |
+| Authenticated sending domain (SPF/DKIM/DMARC) | Table stakes | ✅ **option A shipped** and is the default (§6 answered 2026-08-20); the tenant's own mailbox survives only as a hard-capped small-list fallback |
+| Bounce & complaint handling with automatic suppression | Table stakes | ✅ Phase 4. ⚠️ Depends on `RESEND_WEBHOOK_SECRET` being set *and* the provider webhook actually pointed at us — until then every event is rejected 401 and the list degrades with nothing on screen |
+| Open / click / unsubscribe analytics | Table stakes | ✅ Phase 5, plus per-recipient first-touch opens/clicks (§11e) and **per-link** click reporting by people, not raw hits (§11n). ⚠️ Two honest limits: opens are indicative only (Apple MPP pre-fetches the pixel), and `email.opened`/`email.clicked` must be subscribed on the provider webhook — a manual step no code performs |
+| **Drag-and-drop** visual email builder | Expected | ⚠️ **Partly. Read this row before repeating either half of it.** A visual block editor DID ship (§Design Studio, 2026-08-21): a canvas, an inspector, a media picker, baked text/sticker overlays and 7 starting templates, with `design` authoritative and `body_markdown` derived from it. But it is **not drag-and-drop** — blocks are reordered with up/down buttons (`move(id, delta)` in `src/components/newsletter-designer.js`); there is no `draggable`, no drop target. "Drag-and-drop builder" remains a false claim; "visual editor" is a true one |
+| Automations / drip sequences on triggers | Expected | ⚠️ **One trigger, not the model.** The welcome sequence shipped (§11g) and fires on double-opt-in confirmation — but `newsletter_sequences.trigger_event` is CHECK-constrained to exactly `('subscribed')`. Kit's model (tag added, link clicked, purchase, …) is not built, and adding a second trigger is a widened CHECK plus an enrolment call site, not a new engine |
+| A/B testing subject lines | Expected | ✅ **Shipped** (§11o, `src/utils/newsletter-ab.ts`). Decides inside `sendDueIssues` rather than on a cron of its own, and reports a margin too small to mean anything as "too close to call" instead of as a winner |
 | Paid subscriptions / monetisation | Differentiator for creator tools | ❌ out of scope; BMS sells to businesses, not newsletter creators |
 | Referral / recommendation network | Differentiator for creator tools | ❌ out of scope |
 | **Content drafted for you on a cadence, from your own business context** | **BMS's actual edge** | ✅ Phase 3/5 — this is the Blog Writer pipeline, and it is the thing the incumbents do not do |
-| **One audience shared across every assistant, with consent that binds all of them** | **BMS's actual edge** | ✅ Phase 0 — `audience-consent.ts` is the whole claim in one module |
+| **One audience, with consent that binds the assistants that send** | **BMS's actual edge** | ✅ and now genuinely **two-way** (2026-08-21). A Lead Generator opt-out already blocked a newsletter; `src/utils/audience-objection.ts`, reached through `checkSuppression`, closes the return leg so a plain unsubscribe or a 30/90-day pause also stops cold outreach. ⚠️ Worded "the assistants that send" on purpose — see the note below |
+
+⚠️ **"Shared across *every* assistant" is the overclaim to avoid.** Two assistants consult the
+Audience, in opposite directions: the Newsletter Assistant asks *may I send to this person*
+(`checkAudienceConsent`, a positive gate — no contact row means refuse), and the Lead Generator
+asks the narrower *has this person told us to stop* (`audienceObjection` — no contact row means no
+objection, or every cold email in the product would be blocked). The other live roles do not send
+email at all, so there is nothing for the consent to bind. The capability is real and the
+distinction is the whole reason it works; "every assistant" is the part that is not true.
+
+⚠️ **The two populations stay separate, by the owner's decision (2026-08-21) — do not re-propose
+lead → audience promotion.** A speculative cold contact has given no permission to be sent a
+newsletter. Separation of LISTS was the decision; a REFUSAL crossing is the row above, and they are
+different questions.
 
 The honest positioning: BMS is not a better email builder, and shouldn't claim to be. It is the
 only one of these where the list, the drafting and the other channels are the same product — an
-unsubscribe here stops the cold outreach there, and next week's issue writes itself from the same
-brand context the blog and social posts use. That is a real, demonstrable difference; the builder,
-the automations and the A/B tests are the parity gaps to close afterwards.
+unsubscribe here really does stop the cold outreach there, and next week's issue writes itself from
+the same brand context the blog and social posts use. That is a real, demonstrable difference. The
+remaining parity gaps are narrower than they were: a true drag-and-drop builder, and drip sequences
+on triggers beyond the first.
 
-⚠️ **Do not put any of the ❌ rows into public copy.** There is an existing pattern in this product
-of marketing claims the code does not honour; check `docs/` and the site copy against this table
-before the role is flipped live.
+⚠️ **Do not put any ❌ or ⚠️ row into public copy** — and note that the ⚠️ rows are the dangerous
+ones, because half of each is true and the marketing sentence writes itself from that half. There
+is an existing pattern in this product of claims the code does not honour; check `docs/` and the
+site copy against this table before quoting any capability.
