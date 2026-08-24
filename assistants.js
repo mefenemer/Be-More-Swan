@@ -2740,8 +2740,13 @@ async function _rqOfferOutreachConnect() {
     await _rqSetOutreachProvider(choice);
     // A real link rather than window.open: this runs several awaits after the click that started
     // it, and a popup opened without a live user gesture is blocked silently.
+    // ?assistantId rides along so the new tab lands back on THIS assistant's Connections tab when
+    // the grant completes (oauth-integrations.ts reads it out of the signed state) rather than on
+    // the workspace-wide integrations page.
+    const connectHref = `/api/oauth/${p.key}/connect`
+        + (window._currentAssistantId ? `?assistantId=${encodeURIComponent(window._currentAssistantId)}` : '');
     await window.alertModal(
-        `<a href="/api/oauth/${p.key}/connect" target="_blank" rel="noopener" style="display:inline-block;font-weight:700;color:#047857;">Connect ${window.escapeHtml(p.brand)} →</a>`
+        `<a href="${connectHref}" target="_blank" rel="noopener" style="display:inline-block;font-weight:700;color:#047857;">Connect ${window.escapeHtml(p.brand)} →</a>`
         + '<br><br>Opens in a new tab. When you come back, press <strong>Send email now</strong> on this lead in the Approved tab — '
         + 'and every lead you approve after that is emailed automatically.',
         { title: `Connect ${p.brand}`, confirmLabel: 'Done' },
@@ -4768,6 +4773,13 @@ async function _renderOutreachEmailConnect(data) {
         ? { key: 'outlook', brand: 'Microsoft', account: 'Outlook / Microsoft 365', cta: 'Connect Outlook' }
         : { key: 'gmail',   brand: 'Google',    account: 'Gmail / Google Workspace', cta: 'Connect Gmail' };
 
+    // ?assistantId is what brings the user back HERE afterwards: oauth-integrations.ts carries it
+    // through the signed state and returns to /workspace.html?oauth_success=…&assistantId=…, which
+    // reopens this assistant on its Connections tab. Without it the callback falls back to the
+    // standalone integrations page and the user loses their place.
+    const connectUrl = `/api/oauth/${esc(M.key)}/connect`
+        + (window._currentAssistantId ? `?assistantId=${encodeURIComponent(window._currentAssistantId)}` : '');
+
     card.innerHTML = `<div class="bg-white border border-gray-200 rounded-2xl p-5 text-sm text-gray-400">Checking your ${esc(M.brand)} connection…</div>`;
     let connected = false, accountName = null;
     try {
@@ -4796,10 +4808,12 @@ async function _renderOutreachEmailConnect(data) {
                <div>
                  <p class="font-bold text-gray-900 text-sm">Connect your ${esc(M.brand)} account to send outreach</p>
                  <p class="text-sm text-gray-600 mt-0.5">You chose to send outreach emails from your own inbox. Connect ${esc(M.account)} and approved leads are emailed automatically, with a chase reminder set for you.</p>
-                 ${provider === 'microsoft' ? `<p class="text-xs text-gray-500 mt-1.5">If you use a work or school Microsoft account, your IT administrator may need to approve the connection first.</p>` : ''}
+                 <p class="text-xs text-gray-500 mt-1.5">Sign in with the ${esc(M.brand)} account the outreach should come from${provider === 'microsoft'
+                    ? ' — if it is a work or school account, your IT administrator may need to approve the connection first.'
+                    : '. Google’s screen names Be More Swan as the app asking for access; it is not a Be More Swan login.'}</p>
                </div>
              </div>
-             <a href="/api/oauth/${esc(M.key)}/connect" class="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition whitespace-nowrap">${esc(M.cta)}</a>
+             <a href="${connectUrl}" class="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition whitespace-nowrap">${esc(M.cta)}</a>
            </div>`;
 }
 

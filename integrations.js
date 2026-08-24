@@ -230,7 +230,7 @@ function _closeDrawerForModal() {
 // gate, so unlike _intStartOAuth there is nothing to interstitial.
 window._intConnectSource = function (sourceId) {
     const source = SOURCES.find(s => s.id === sourceId);
-    if (source) window.location.href = source.oauthUrl;
+    if (source) window.location.href = _withAssistantId(source.oauthUrl);
 };
 
 // Canva is the only source with a picker, so this is deliberately Canva-specific rather than
@@ -395,6 +395,11 @@ const MAILBOX_CATALOG = {
         iconText: 'text-red-700',
         account: 'Gmail or Google Workspace',
         tagline: 'Approved leads are emailed from your own inbox, with a chase reminder set for you.',
+        // Google's consent screen reads "Be More Swan wants access to your Google Account", which
+        // users setting a client up have read as being asked to sign into US. Say what the screen
+        // is before they meet it, and which account to pick — the grant decides the send-from
+        // mailbox, and it has to be a Google-hosted one.
+        note: 'Sign in with the Google account the outreach should come from. Google’s screen names Be More Swan as the app asking for access — it is not a Be More Swan login.',
     },
     outlook: {
         label: 'Outlook',
@@ -405,7 +410,7 @@ const MAILBOX_CATALOG = {
         tagline: 'Approved leads are emailed from your own mailbox, and a copy is kept in Sent Items.',
         // Microsoft publisher verification is still pending, so a work/school tenant may refuse
         // consent until an administrator approves it. Personal and own-tenant accounts connect fine.
-        note: 'On a work or school account, your IT administrator may need to approve the connection first.',
+        note: 'Sign in with the Microsoft account the outreach should come from. On a work or school account, your IT administrator may need to approve the connection first.',
     },
 };
 
@@ -459,10 +464,19 @@ function _relevantSources() {
 // route through social-oauth-init/meta-oauth and already carry a query string, but the
 // /api/oauth/:provider/connect routes (Threads, and any future workspace-integration platform)
 // do not — a hardcoded '&' produced '…/connect&assistantId=3', which the rewrite never matches.
+// Every connect link on this grid goes through here, not just the social platforms: the id is
+// what oauth-integrations.ts reads back out of the signed state to return the user to the
+// assistant's Connections tab (/workspace.html?oauth_success=…&assistantId=…). A connect URL
+// built without it falls through to the standalone integrations page, which is nowhere near
+// where the user started.
+function _withAssistantId(url) {
+    if (!_selectedAssistantId) return url;
+    const sep = url.includes('?') ? '&' : '?';
+    return `${url}${sep}assistantId=${encodeURIComponent(_selectedAssistantId)}`;
+}
+
 function _oauthUrl(platform) {
-    if (!_selectedAssistantId) return platform.oauthUrl;
-    const sep = platform.oauthUrl.includes('?') ? '&' : '?';
-    return `${platform.oauthUrl}${sep}assistantId=${encodeURIComponent(_selectedAssistantId)}`;
+    return _withAssistantId(platform.oauthUrl);
 }
 
 // Instagram Business accounts authenticate via Meta's Facebook Login (there is no
@@ -700,7 +714,7 @@ function _mailboxCard(m) {
     const meta = MAILBOX_CATALOG[m.provider];
     if (!meta) return '';
     const connected = !!m.connected;
-    const connectUrl = `/api/oauth/${encodeURIComponent(m.provider)}/connect`;
+    const connectUrl = _withAssistantId(`/api/oauth/${encodeURIComponent(m.provider)}/connect`);
     const primaryBtn = 'w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition cursor-pointer';
 
     const capPill = connected

@@ -285,12 +285,27 @@ export default withLambda(async (event) => {
         } else if (provider === 'gmail') {
             // access_type=offline + prompt=consent forces Google to issue a refresh token
             // (it only does so on the first consent otherwise).
-            authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.gmail)}&access_type=offline&prompt=consent&state=${state}`;
+            //
+            // `select_account` alongside it is not cosmetic. This grant decides WHICH MAILBOX the
+            // assistant's outreach is sent from, and with `consent` alone Google skips the account
+            // chooser whenever exactly one Google session is live in the browser — so an agency
+            // signed into its own Google account while setting a client up was shown "Be More Swan
+            // wants access to <the agency's account>" with no visible way to pick the client's
+            // mailbox, and read that as the product asking them to connect to us. Google documents
+            // `prompt` as a space-delimited list, so both apply.
+            const gmailPrompt = encodeURIComponent('consent select_account');
+            authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.gmail)}&access_type=offline&prompt=${gmailPrompt}&state=${state}`;
         } else if (provider === 'outlook') {
             // /common serves work, school AND personal Microsoft accounts — matches the app's
             // "any Entra tenant + personal accounts" registration. offline_access lives in the
             // scope string (unlike Google, Microsoft has no access_type param).
-            authUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.outlook)}&response_mode=query&prompt=consent&state=${state}`;
+            //
+            // prompt=select_account, not consent, for the same reason as Gmail above: the user must
+            // be able to see and choose the mailbox. Unlike Google this is a single value — Entra
+            // rejects a space-delimited list with AADSTS70011 — and nothing is lost by dropping
+            // `consent`: the refresh token comes from offline_access in the scope string, and Entra
+            // raises the consent screen by itself whenever the requested scopes are not yet granted.
+            authUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.outlook)}&response_mode=query&prompt=select_account&state=${state}`;
         } else if (provider === 'threads') {
             // `redirectUri` (= ${baseUrl}/api/oauth/threads/callback) must be whitelisted under the
             // Threads use case → Settings → Redirect Callback URLs, or Meta blocks with error 1349168
