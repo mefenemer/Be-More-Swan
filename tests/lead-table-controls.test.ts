@@ -308,10 +308,12 @@ check('the button presses the real control instead of repeating it', () => {
 
 check('the footer is re-stated when a decision changes the answer', () => {
     // ⚠️ Sliced to the DELETE push, not the Reject one — Reject left this tab on 2026-08-15 and
-    // Approve is now the last approval-gate button in the bar.
-    const approve = HUB.slice(landmark(HUB, "buttons.push({ label: 'Approve'"), landmark(HUB, "buttons.push({ label: 'Delete'"));
-    assert.ok(/syncNextStepFooter\(/.test(approve),
-        '"Approving clears this lead for outreach" is false the instant it has been approved');
+    // the move is now the last approval-gate button in the bar.
+    // ⚠️ Anchored on `primary: true, key:` — the label is a template (it names a tab the role may
+    // rename) and the bare key also appears in nextStepGuidance(), earlier in the file.
+    const move = HUB.slice(landmark(HUB, "primary: true, key: 'move-to-outreach'"), landmark(HUB, "buttons.push({ label: 'Delete'"));
+    assert.ok(/syncNextStepFooter\(/.test(move),
+        '"Moving it puts this lead in the Outreach tab" is false the instant it has been moved');
 });
 
 check('only the surface holding the action bar may render a button', () => {

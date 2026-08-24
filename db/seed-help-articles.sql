@@ -174,7 +174,7 @@ setup answers, and files the results.
 | Tab | What you do there |
 |-----|------------------|
 | **Searches** | Start searches, review plans, see what each run found |
-| **Enrichment** | Every lead in every state. Find contact details, correct details, research a company to improve its rating |
+| **Enrichment** | Every lead in every state. Find contact details, correct details, research a company to improve its rating, then **Move to Outreach** the ones worth pursuing |
 | **Outreach** | Read each drafted email and approve or archive it. Approving is what sends |
 | **Conversations** | What happened after the email: replies, chasers, your own answers, and the deal outcome |
 

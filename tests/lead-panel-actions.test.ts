@@ -45,9 +45,15 @@ check('the bar hides exactly the action the footer promotes', () => {
     assert.match(loop, /const promotedKey = promoted && promoted\.action \? promoted\.action\.key : null/,
         'the promoted key comes from the same guidance the footer was built from, or the two can '
         + 'disagree about which button is the duplicate');
-    assert.match(loop.slice(0, 1600), /b\.key === promotedKey[\s\S]{0,200}style\.display = 'none'/,
+    assert.match(loop, /b\.key === promotedKey[\s\S]{0,400}style\.display = 'none'/,
         'and the bar must hide its copy. `hidden` alone loses to the flex display on these buttons, '
         + 'so the inline style is what actually hides it');
+    // ⚠️ AFTER `btn.className =`, which is a whole-attribute WRITE. Running the hide first left the
+    // class silently stripped — the button was still invisible, because the inline style is the
+    // half that actually wins, so the belt-and-braces pair had quietly become one strand with
+    // nothing on screen to show for it.
+    assert.ok(landmark(loop, 'btn.className = b.danger') < landmark(loop, 'b.key === promotedKey'),
+        'the hide runs before btn.className is assigned, which wipes the `hidden` class it just added');
 });
 
 check('a button is only hidden when the footer was actually drawn', () => {
@@ -83,19 +89,40 @@ check('an unresearched lead is told to research it', () => {
     assert.match(branch, /key: 'enrich'/,
         'Research is the one control here that can change a lead\'s rating, so on a lead nobody '
         + 'has looked at it is the next step — the approve decision below depends on it');
-    // Ordering: research must be asked BEFORE the plain approve fallback, or it is never reached.
+    // Ordering: research must be asked BEFORE the move fallback, or it is never reached.
     assert.ok(
-        landmark(guidance, "if (!d.intel) {") < landmark(guidance, "action: { key: 'approve'"),
-        'and it must come before the approve fallback, which returns unconditionally',
+        landmark(guidance, "if (!d.intel) {") < landmark(guidance, "action: { key: 'move-to-outreach'"),
+        'and it must come before the move fallback, which returns unconditionally',
     );
 });
 
-check('a researched lead is told to approve it, naming the tab as the role labels it', () => {
+check('a researched lead is told to move it on, naming the tab as the role labels it', () => {
+    // ⚠️ Was "told to approve it". The fallback approved the lead until 2026-08-24, which put it
+    // in the Outreach tab's Approved column having never been through the review of its email.
     const guidance = HUB.slice(landmark(HUB, 'function nextStepGuidance(record)'));
-    const tail = guidance.slice(landmark(guidance, "action: { key: 'approve'")).slice(0, 400);
+    const tail = guidance.slice(landmark(guidance, "action: { key: 'move-to-outreach'")).slice(0, 500);
     assert.match(tail, /\$\{reviewTabLabel\(\)\} tab/,
         'this role renames Review to "Outreach", and copy naming a tab the user cannot see is the '
         + 'same dead end as naming a tool that does not exist');
+    // And the COLUMN inside it, for the same reason — "the Outreach tab" alone does not say which
+    // of its five columns the lead just landed in.
+    assert.match(tail, /\$\{reviewColumnLabel\(\)\} column/,
+        'the sentence names the tab but not the column the lead actually moves into');
+});
+
+check('a lead already in the review column is not offered the move again', () => {
+    // ⚠️ Both halves of the predicate. The column asks for `pending_approval` AND the stage rule,
+    // so a REJECTED lead carrying a stale 'review' stage is not in it — and treating it as though
+    // it were hid the only button that can un-reject it, on the screen a rejection is reversed from.
+    const fn = HUB.slice(landmark(HUB, 'function isInOutreachReview(record)')).slice(0, 400);
+    assert.match(fn, /record\.approvalStatus !== 'pending_approval'/,
+        'the approval status dropped out of the predicate — a rejected lead now reads as queued');
+    assert.match(fn, /S\.isInReview\(record\.data \|\| \{\}\)/,
+        'the panel no longer reads the shared stage predicate, so it can disagree with the column');
+    // Guidance and the bar must apply it identically — the footer PRESSES the bar's button.
+    const guidance = HUB.slice(landmark(HUB, 'function nextStepGuidance(record)'));
+    assert.ok(/if \(isInOutreachReview\(record\)\) \{/.test(guidance),
+        'the footer offers a move on a lead the bar has stopped drawing a button for');
 });
 
 console.log('\n──── approving something already sent ────');

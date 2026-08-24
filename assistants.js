@@ -1378,6 +1378,21 @@ function _rqColumnLabel(status) {
     return overrides[status] || _RQ_COLUMN_LABELS[status] || status;
 }
 
+/**
+ * The Data Hub tab as THIS role names it — "Enrichment" on the Lead Generator, "Ledger" on the
+ * Bookkeeper, "Data Hub" with no override at all. Read off the rendered button rather than the
+ * registry because that is the word actually on screen, which is the only one a sentence pointing
+ * at the tab may use.
+ *
+ * ⚠️ Strip the count. setTabCount writes "Enrichment (48)" into this same span, and a tab name is
+ * not a tab name plus a badge — same trap the column relabel loop carries.
+ */
+function _rqHubTabLabel() {
+    const el = document.getElementById('datahub-tab-label');
+    const raw = el ? el.textContent.trim() : '';
+    return raw.replace(/\s*\(\d+\)\s*$/, '') || 'Data Hub';
+}
+
 // Records currently on screen, by id — see the merge note in _detailRqRenderRecords.
 const _rqRecordsById = new Map();
 
@@ -2069,14 +2084,33 @@ function _rqRecordActions(r, statusKey) {
                 if (out === 'drafted') {
                     note = `<p class="w-full text-[11px] text-gray-500">Approved — nothing has been emailed. Copy the draft and send it from your own inbox, or connect one and send it from here.</p>`;
                 }
+                // ⚠️ TWO ways back, and they used to be one button that did neither reliably.
+                // "Send back to review" wrote `pending_approval` and stopped there — which is the
+                // status the Review column asks for, but the column ALSO filters on a readable
+                // email, so a lead with no draft left the Approved column and appeared in no
+                // Outreach column at all. It read as the button having sent the lead back to
+                // Enrichment. It now stamps the stage as well, so it lands where its label says.
+                //
+                // And "back to Enrichment" is a real, different intention — this one needs more
+                // work before anyone reads its email — which had no button, because for a lead
+                // carrying a draft it is not expressible as a status at all. That is what the
+                // 'triage' stage is for. Two destinations, two buttons, each naming its own.
+                //
+                // ⚠️ "MOVE to", not "Send back FOR enrichment" — that is a different, existing
+                // control on the Deleted section (lead-generation.ts `send_back_for_enrichment`),
+                // and it SPENDS: it runs a real scrape and paid lookup on the spot. This one only
+                // moves the lead between two surfaces. Two buttons a word apart, one of which
+                // costs money, is not a distinction anyone should have to make from memory — so
+                // this one mirrors "Move to Outreach" on the panel it sends the lead back to.
                 buttons = (hasDraft ? btn('Send email now', 'sendNow', primary) : '')
                     + btn('Mark outreach sent', 'outreachSent', hasDraft ? secondary : primary)
                     + (hasDraft ? btn('Copy draft', 'copyEmail', secondary) : '')
-                    + btn('Send back to review', 'review', secondary)
+                    + btn(`Send back to ${_rqEsc(_rqColumnLabel('review'))}`, 'review', secondary)
+                    + btn(`Move to ${_rqEsc(_rqHubTabLabel())}`, 'backToEnrichment', secondary)
                     + notesBtn;
             }
         } else {
-            buttons = btn('Schedule', 'showSchedule', primary) + btn('Send back to review', 'review', secondary);
+            buttons = btn('Schedule', 'showSchedule', primary) + btn(`Send back to ${_rqEsc(_rqColumnLabel('review'))}`, 'review', secondary);
         }
     } else if (statusKey === 'scheduled') {
         if (isLead) {
@@ -2089,7 +2123,7 @@ function _rqRecordActions(r, statusKey) {
         }
         buttons = btn(isLead ? 'Clear chase reminder' : 'Unschedule', 'unschedule', secondary) + notesBtn;
     } else if (statusKey === 'archived') {
-        buttons = btn('Restore to review', 'review', secondary) + notesBtn;
+        buttons = btn(`Restore to ${_rqEsc(_rqColumnLabel('review'))}`, 'review', secondary) + notesBtn;
     }
     return `<div class="flex flex-wrap items-center gap-2 mt-3">
         ${note}
@@ -3169,15 +3203,29 @@ window._detailRqRecordAct = async function (btn, action) {
         const rec = _rqRecordsById.get(patch.id);
         _rqPendingReject = { recordId: patch.id, recordType: rec?.recordType, title: rec?.title };
     }
-    else if (action === 'review') {
+    else if (action === 'review' || action === 'backToEnrichment') {
         patch.approvalStatus = 'pending_approval';
         // Back in the queue means the email is unresolved again, so the "yours to send" stamp has
         // to go — otherwise the card would sit in Review chipped "Email Drafted" above an Approve
         // button, claiming a hand-off that is being taken back. `outreachSentAt` is deliberately
         // NOT cleared: an email that went out went out, and that is the sales cycle's start date.
         const backRec = _rqRecordsById.get(patch.id);
-        if (backRec && (backRec.data || {}).outreachDraftedAt) {
-            const { outreachDraftedAt: _cleared, ...restData } = backRec.data;
+        const backData = (backRec && backRec.data) || {};
+        const { outreachDraftedAt: _cleared, ...restData } = backData;
+        // ⚠️ The status alone does not decide which surface a lead lands on, which is why one of
+        // these two buttons used to be a lie. Enrichment and the Outreach tab's review column
+        // SHARE `pending_approval`; the column additionally filters on a readable email, so
+        // "Send back to review" dropped every draft-less lead out of the Outreach tab entirely and
+        // "send it back for more research" could not be expressed at all. `outreachStage` is the
+        // human's answer and it overrides that filter in both directions — see
+        // src/config/lead-recipient.ts, whose predicate the server's filter mirrors.
+        //
+        // ⚠️ LEADS ONLY. Both buttons are drawn for posts and meetings too (the non-lead Approved
+        // column, and "Restore to review" on Archived), and those queues have no such column
+        // filter and no stage — stamping one would put a key on a record nothing reads.
+        if (backRec && backRec.recordType === 'lead') {
+            patch.data = { ...restData, outreachStage: action === 'review' ? 'review' : 'triage' };
+        } else if (backData.outreachDraftedAt) {
             patch.data = restData;
         }
     }
@@ -3210,6 +3258,13 @@ window._detailRqRecordAct = async function (btn, action) {
                 : action === 'schedule' ? 'Scheduled — it’s on the Calendar now.'
                 : action === 'saveEmail' ? 'Draft updated — this is the version your approval acts on.'
                 : action === 'saveAttendees' ? 'Addresses saved — the follow-up can reach them now.'
+                // Both routes back name the destination they were pressed for. They write the
+                // same approval status and differ only in the stage, so a shared "Updated." left
+                // the user with no way to tell which of the two had happened. Phrased to be true
+                // of a restore from Archived as well as a step back from Approved — the same
+                // action serves both columns.
+                : action === 'review' ? `It's in the ${_rqColumnLabel('review')} column now.${_rqIsLeadQueue() ? ' Nothing has been sent — approve it there to send it.' : ''}`
+                : action === 'backToEnrichment' ? `Moved to ${_rqHubTabLabel()}. It has left the Outreach columns — move it back when it's ready to be emailed. Nothing was looked up: "Send back for enrichment" is the button that researches a lead.`
                 : action === 'reject' ? 'Rejected.' : 'Updated.';
             window.showToast?.(toast);
         }

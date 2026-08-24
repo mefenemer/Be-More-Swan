@@ -348,6 +348,29 @@
     isDeliverable: isLeadDeliverable,
   };
 
+  // ── Lead outreach stage ───────────────────────────────────────────────────
+  // From src/config/lead-recipient.ts, stringified. This is the human override on top of the
+  // predicate directly above: which of the two lead surfaces — Enrichment, or the Outreach tab's
+  // Review column — a person has said this lead belongs on. The buttons that write it and the SQL
+  // that reads it are on opposite sides of the wire, so a hand copy that drifted would leave a
+  // lead in a column its own button says it is not in.
+  //
+  // isInOutreachReview closes over isLeadDeliverable, declared just above — keep the order.
+  var leadOutreachStage = function leadOutreachStage(data){if(!data||typeof data!=="object"||Array.isArray(data))return null;const raw=data.outreachStage;if(typeof raw!=="string")return null;const v=raw.trim();return v==="review"||v==="triage"?v:null};
+  var isInOutreachReview = function isInOutreachReview(data){const stage=leadOutreachStage(data);if(stage==="review")return true;if(stage==="triage")return false;return isLeadDeliverable(data)};
+
+  window.LeadOutreachStage = {
+    /** 'review' | 'triage' | null — what a PERSON said, never inferred. */
+    of: leadOutreachStage,
+
+    /**
+     * Does this lead belong in the Outreach tab's Review column? A stage wins outright in both
+     * directions; with none, deliverability decides. Keep identical to the server's stage-aware
+     * ?deliverable=1 filter.
+     */
+    isInReview: isInOutreachReview,
+  };
+
   // ── Lead retention (the 30-day clock) ─────────────────────────────────────
   // From src/config/lead-retention.ts, stringified — the REAL countdown, for the sharpest version
   // of the reason the two blocks above are mirrored: this number sits beside a lead and tells the

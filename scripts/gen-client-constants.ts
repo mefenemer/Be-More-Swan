@@ -42,6 +42,7 @@ import {
 } from '../src/config/posting-cadence';
 import {
     LEAD_RECIPIENT_PATHS, resolveLeadRecipient, hasOutreachDraft, isLeadDeliverable,
+    leadOutreachStage, isInOutreachReview,
 } from '../src/config/lead-recipient';
 import {
     ROLE_EMAIL_PREFIXES, roleOrPersonal, classifyEmailKind,
@@ -438,6 +439,29 @@ ${formatRows}
      * keep it identical to the server's ?deliverable=1 filter or the badge and the list disagree.
      */
     isDeliverable: isLeadDeliverable,
+  };
+
+  // ── Lead outreach stage ───────────────────────────────────────────────────
+  // From src/config/lead-recipient.ts, stringified. This is the human override on top of the
+  // predicate directly above: which of the two lead surfaces — Enrichment, or the Outreach tab's
+  // Review column — a person has said this lead belongs on. The buttons that write it and the SQL
+  // that reads it are on opposite sides of the wire, so a hand copy that drifted would leave a
+  // lead in a column its own button says it is not in.
+  //
+  // isInOutreachReview closes over isLeadDeliverable, declared just above — keep the order.
+  var leadOutreachStage = ${leadOutreachStage.toString()};
+  var isInOutreachReview = ${isInOutreachReview.toString()};
+
+  window.LeadOutreachStage = {
+    /** 'review' | 'triage' | null — what a PERSON said, never inferred. */
+    of: leadOutreachStage,
+
+    /**
+     * Does this lead belong in the Outreach tab's Review column? A stage wins outright in both
+     * directions; with none, deliverability decides. Keep identical to the server's stage-aware
+     * ?deliverable=1 filter.
+     */
+    isInReview: isInOutreachReview,
   };
 
   // ── Lead retention (the 30-day clock) ─────────────────────────────────────

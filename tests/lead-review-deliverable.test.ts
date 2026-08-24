@@ -37,7 +37,7 @@ import { fileURLToPath } from 'node:url';
 import { landmark } from './landmark';
 import {
     LEAD_RECIPIENT_PATHS, LEAD_RECIPIENT_SQL_PATHS, LEAD_DRAFT_BODY_SQL_PATH,
-    resolveLeadRecipient, hasOutreachDraft, isLeadDeliverable,
+    resolveLeadRecipient, hasOutreachDraft, isLeadDeliverable, isInOutreachReview,
 } from '../src/config/lead-recipient';
 
 let passed = 0;
@@ -119,7 +119,10 @@ check('the GET filter builds its COALESCE from the shared paths', () => {
 
 check('the filter is opt-in and additive', () => {
     assert.ok(/deliverable === '1'/.test(RECORDS), 'the param is no longer read');
-    assert.ok(/\.\.\.\(deliverableOnly \? \[deliverableWhere\] : \[\]\)/.test(RECORDS),
+    // ⚠️ Still spread — the shape is what matters, not which predicate it carries. Leads now get
+    // the stage-aware form (see 'the server column honours the stage in BOTH directions'); every
+    // other record type gets the bare deliverability filter it always had.
+    assert.ok(/\.\.\.\(deliverableOnly \? \[[^\]]*deliverableWhere\] : \[\]\)/.test(RECORDS),
         'the predicate must spread in only when asked — always-on would change every hub tab');
 });
 
@@ -170,6 +173,45 @@ check('the generated resolver behaves identically to the server one', () => {
     }
 });
 
+check('the generated stage predicate behaves identically to the server one', () => {
+    // Same shape as the check above, and the same reason: this is what catches a stale mirror. The
+    // stage decides which SURFACE a lead is on, so a fork here shows the user a button that says
+    // it moved a lead into a column the column itself disagrees about.
+    // ⚠️ TWO slices, each stopping at its `window.` assignment. One slice spanning both blocks
+    // swallows `window.LeadRecipient = {...}` in between, and there is no window in node.
+    const decls = GENERATED.slice(landmark(GENERATED, 'var LEAD_RECIPIENT_PATHS'), landmark(GENERATED, 'window.LeadRecipient'))
+        + GENERATED.slice(landmark(GENERATED, 'var leadOutreachStage'), landmark(GENERATED, 'window.LeadOutreachStage'));
+    // eslint-disable-next-line no-new-func
+    const browser = new Function(`${decls}\nreturn { isInOutreachReview };`)() as {
+        isInOutreachReview: (d: unknown) => boolean;
+    };
+    const draft = { outreachDraft: { to: 'a@x.com', body: 'hi' } };
+    const fixtures: unknown[] = [
+        // ⚠️ The two that matter are the OVERRIDES, and each has to contradict deliverability or it
+        // proves nothing: a promoted lead with nothing to send, and a held-back lead with a perfect
+        // draft. Agreeing on the easy cases is what a fork looks like from the outside.
+        { ...draft, outreachStage: 'triage' },
+        { outreachStage: 'review' },
+        { contactEmail: 'b@x.com', outreachStage: 'review' },
+        { ...draft, outreachStage: 'review' },
+        { ...draft, outreachStage: '  triage  ' },
+        { ...draft, outreachStage: 'nonsense' },   // retired value → the automatic behaviour, never an empty column
+        { ...draft, outreachStage: 42 },
+        { ...draft, outreachStage: null },
+        draft, {}, null, 'junk',
+    ];
+    for (const f of fixtures) {
+        assert.equal(browser.isInOutreachReview(f), isInOutreachReview(f),
+            `browser and server disagree on the review column for ${JSON.stringify(f)} — regenerate constants`);
+    }
+    // And the overrides actually override, in both directions — otherwise the loop above passes on
+    // two implementations that are identically wrong.
+    assert.equal(isInOutreachReview({ ...draft, outreachStage: 'triage' }), false,
+        'a lead held back for more work is still shown in the review column');
+    assert.equal(isInOutreachReview({ outreachStage: 'review' }), true,
+        'a lead a human promoted by name is dropped by the deliverability filter anyway');
+});
+
 check('the Review Queue recipient line reads the shared resolver, not its own chain', () => {
     const fn = ASSISTANTS.slice(landmark(ASSISTANTS, 'function _rqRecipient'), landmark(ASSISTANTS, 'function _detailRqRecordCard'));
     assert.ok(/LR\.resolve\(d\)/.test(fn), '_rqRecipient no longer uses window.LeadRecipient');
@@ -203,34 +245,82 @@ check('an empty lead Review column explains where the leads went', () => {
 
 // ── 5. Triage in the Leads tab does not send ─────────────────────────────────
 
-check('the Leads tab offers Approve alongside Reject', () => {
-    // Matched loosely on the label: this button carries a `primary: true` flag now (it is the one
-    // decision the panel exists for, and five identical ghost buttons gave the reader no way in),
-    // and a landmark pinned to the exact argument order failed on a styling change that could not
-    // affect what the button does.
-    assert.ok(/label: 'Approve'/.test(HUB), 'the Approve triage action is gone');
-    // The gate was `record.approvalStatus !== 'approved'`, which missed SENT leads: a successful
-    // send rests at 'scheduled', so every contacted lead was still offered Approve. The rule now
-    // lives in isPastApprovalGate() so the footer and the bar cannot apply different versions of
-    // it — see tests/lead-panel-actions.test.ts, which pins what the gate itself accepts.
-    assert.ok(/if \(!isPastApprovalGate\(record\)\) \{/.test(HUB),
-        'Approve should hide once a lead is already through the approval gate');
+check('the Leads tab moves a lead ON, and hides the button once it has', () => {
+    // Anchored on the action KEY, not the label: the label is `Move to ${reviewTabLabel()}` so it
+    // tracks a role's rename of the tab, and a landmark pinned to the rendered words would fail on
+    // a rename that cannot affect what the button does.
+    assert.ok(/key: 'move-to-outreach'/.test(HUB), 'the triage action is gone');
+    // TWO gates, and both must be here.
+    //   • isPastApprovalGate — the rule was `approvalStatus !== 'approved'`, which missed SENT
+    //     leads: a successful send rests at 'scheduled', so every contacted lead was still offered
+    //     the button. It lives in one helper so the footer and the bar cannot apply different
+    //     versions of it (tests/lead-panel-actions.test.ts pins what the gate accepts).
+    //   • isInOutreachReview — added 2026-08-24 with the move itself. Without it the panel offers
+    //     to move a lead into the column it is already sitting in.
+    assert.ok(/if \(!isPastApprovalGate\(record\) && !isInOutreachReview\(record\)\) \{/.test(HUB),
+        'the move should hide once a lead is through the gate OR already in the review column');
 });
 
-check('approving from the Leads tab PATCHes only, and never calls the sender', () => {
-    // ⚠️ Anchored on the PUSH, not on the bare label — nextStepGuidance() also carries
-    // "label: 'Approve'" (it offers Approve as the next-step button), and a slice starting there
-    // swallows the whole action bar, including the "Look again" call to lead-generation. The
-    // assertion then fails while the handler it names is perfectly correct.
-    // ⚠️ Sliced to the DELETE push. It used to end at "label: 'Reject'"; Reject left this tab on
-    // 2026-08-15 (Delete performs the rejection now), so Delete is the next push in the bar.
-    const start = landmark(HUB, "buttons.push({ label: 'Approve'");
+check('moving from the Leads tab lands in REVIEW, PATCHes only, and never sends', () => {
+    // ⚠️ THIS IS THE BYPASS CHECK. The button wrote `approvalStatus: 'approved'`, which put the
+    // lead in the Outreach tab's Approved column having never passed through the column whose
+    // whole job is a human reading the email before it goes to a stranger. Its own status line
+    // said the drafted email was "waiting for you in the Review tab", and it was not.
+    //
+    // ⚠️ Anchored on the PUSH, not on a bare label — nextStepGuidance() carries the same words for
+    // the next-step button, and a slice starting there swallows the whole action bar including the
+    // "Look again" call to lead-generation, failing while the handler it names is correct.
+    // ⚠️ Sliced to the DELETE push: Reject left this tab on 2026-08-15 (Delete performs the
+    // rejection now), so Delete is the next push in the bar.
+    // ⚠️ `key: 'move-to-outreach'` ALONE is not unique — nextStepGuidance() offers the same key
+    // for the footer button it promotes, it appears first in the file, and a slice starting there
+    // swallows the whole action bar. `primary: true` is only on the push.
+    const start = landmark(HUB, "primary: true, key: 'move-to-outreach'");
     const block = HUB.slice(start, landmark(HUB, "buttons.push({ label: 'Delete'", start));
-    assert.ok(/approvalStatus: 'approved'/.test(block), 'the PATCH no longer sets approved');
+    assert.ok(/approvalStatus: 'pending_approval'/.test(block),
+        'the PATCH sets a state other than pending_approval — anything else skips the review column');
+    assert.ok(!/approvalStatus: 'approved'/.test(block),
+        'the move approves the lead again, which is the bypass this check exists for');
+    // The status alone does not move it: Enrichment and the review column SHARE
+    // `pending_approval`, and the column additionally filters on a readable email. The stage is
+    // what carries a draft-less lead across, so without it the button moves nothing at all.
+    assert.ok(/outreachStage: 'review'/.test(block),
+        'the move does not stamp the outreach stage, so a lead with no draft goes nowhere');
     assert.ok(!/lead-generation/.test(block) && !/send_outreach/.test(block),
-        'the Leads tab must NOT send — approving here is the targeting decision, not the email');
+        'the Leads tab must NOT send — this is the targeting decision, not the email');
     assert.ok(/Nothing has been sent/.test(block),
         'say what did not happen: users who learned Review sends will assume this did too');
+});
+
+check('the server column honours the stage in BOTH directions', () => {
+    // The browser predicate and the SQL are two copies of one three-way decision, and they are
+    // read by things that must agree: the column's contents, its badge count, and the buttons that
+    // claim to have moved a lead into or out of it.
+    const cfg = read('src/config/lead-recipient.ts');
+    assert.ok(/export function isInOutreachReview/.test(cfg), 'the shared predicate is gone');
+    assert.ok(/if \(stage === 'review'\) return true;/.test(cfg)
+        && /if \(stage === 'triage'\) return false;/.test(cfg)
+        && /return isLeadDeliverable\(data\);/.test(cfg),
+        'the predicate no longer resolves stage → stage → deliverability, in that order');
+
+    const records = read('netlify/functions/assistant-records.ts');
+    assert.ok(/WHEN \$\{stageSql\} = 'review' THEN TRUE/.test(records)
+        && /WHEN \$\{stageSql\} = 'triage' THEN FALSE/.test(records)
+        && /ELSE \(\$\{deliverableWhere\}\)/.test(records),
+        'the SQL filter forked from the browser predicate — the badge and the list will disagree');
+    // ⚠️ Leads only. Both other record types pass ?deliverable=1 through the same param and carry
+    // no stage; reading one there would be a jsonb probe for a key nothing writes.
+    assert.ok(/recordType === 'lead' \? inOutreachReviewWhere : deliverableWhere/.test(records),
+        'the stage-aware filter is applied to record types that have no stage');
+
+    // The mirror the browser actually loads. isInOutreachReview closes over isLeadDeliverable, and
+    // the two must be emitted as BARE names into one scope — an import between config modules is
+    // rewritten by esbuild into a bundler local that does not exist in the browser, so the copy
+    // throws on the first lead it is asked about.
+    const gen = read('src/generated/platform-constants.js');
+    assert.ok(/var isInOutreachReview = function/.test(gen), 'the stage predicate is missing from the client mirror');
+    assert.ok(!/import_lead_recipient\./.test(gen),
+        'the mirror references a bundler-local import that does not exist in the browser');
 });
 
 check('the send still lives in the Review Queue, gated on the lead record type', () => {

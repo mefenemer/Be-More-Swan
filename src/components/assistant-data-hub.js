@@ -1076,6 +1076,40 @@
     return !!(record.data || {}).outreachSentAt;
   }
 
+  /** The Review COLUMN as this role names it, inside the Outreach tab. Same reason as the tab
+   *  label above: a sentence must never send someone to a column they cannot see. */
+  function reviewColumnLabel() {
+    return typeof window._rqColumnLabel === 'function' ? window._rqColumnLabel('review') : 'Review';
+  }
+
+  /**
+   * Is this lead already sitting in the Outreach tab's Review column?
+   *
+   * ⚠️ NOT the same question as `approvalStatus === 'pending_approval'`, and that is the whole
+   * point. Enrichment and Outreach ▸ Review share that one status — the column additionally asks
+   * for a lead a human has promoted, or one whose drafted email makes it reviewable on its own
+   * (src/config/lead-recipient.ts `isInOutreachReview`, mirrored into the server's filter). So a
+   * lead can be `pending_approval` and be nowhere near that column.
+   *
+   * Read by nextStepGuidance() AND detailActions(), for the same reason isPastApprovalGate is: the
+   * footer PRESSES the bar's button, so a lead the two disagree about gets a promoted control with
+   * nothing behind it.
+   *
+   * ⚠️ The approval status is HALF the predicate and must stay in it. The column asks for
+   * `pending_approval` too, so a REJECTED lead carrying a stale 'review' stage is not in that
+   * column — and treating it as though it were hid the only button that could un-reject it, on
+   * the one screen a rejection is reversed from.
+   *
+   * ⚠️ Falls back to `false` when the generated constants have not loaded. That way the move
+   * button is still offered and still works; the alternative default hides the one action this
+   * panel exists to take, on the grounds that a script tag was slow.
+   */
+  function isInOutreachReview(record) {
+    if (record.approvalStatus !== 'pending_approval') return false;
+    const S = window.LeadOutreachStage;
+    return !!(S && typeof S.isInReview === 'function' && S.isInReview(record.data || {}));
+  }
+
   /**
    * Does this lead have a conversation thread to record its outcome against?
    *
@@ -1119,8 +1153,10 @@
     }
 
     if (record.approvalStatus === 'rejected') {
+      // ⚠️ Names the button as the bar now draws it. This said "Approve it below" while the bar
+      // said "Move to Outreach" — the panel telling the user to press a control that is not there.
       return { owner: 'closed', action: null,
-        note: 'This lead is rejected, so nothing will be sent. Approve it below if you want to pursue it after all.' };
+        note: `This lead is rejected, so nothing will be sent. Move it to ${reviewTabLabel()} below if you want to pursue it after all.` };
     }
 
     if (d.outreachSentAt) {
@@ -1169,8 +1205,20 @@
         note: 'Nothing has been researched on this company yet. Researching reads their site and recent news and re-scores the lead, so your approve decision rests on more than the first pass.' };
     }
 
-    return { owner: 'you', action: { key: 'approve', label: 'Approve' },
-      note: `Approving clears this lead for outreach. The email itself goes out when you approve it in the ${reviewTabLabel()} tab.` };
+    // Already promoted — say so and offer the way there, rather than a second move button that
+    // would write the state it is already in. Below the research step deliberately: a promoted
+    // lead nobody has researched is still better off researched first.
+    if (isInOutreachReview(record)) {
+      const canOpenReview = typeof window._activateMainTab === 'function';
+      return { owner: 'you', action: canOpenReview ? { key: 'open-review', label: `Open ${reviewTabLabel()}` } : null,
+        note: `This lead is waiting in the ${reviewTabLabel()} tab, in the ${reviewColumnLabel()} column. Nothing is sent until you approve it there.` };
+    }
+
+    // ⚠️ This moves the lead ONE step — into the review column, not past it. It used to approve,
+    // which put the lead in the Approved column having never been through the human read of its
+    // email. See the Move handler below.
+    return { owner: 'you', action: { key: 'move-to-outreach', label: `Move to ${reviewTabLabel()}` },
+      note: `Moving it puts this lead in the ${reviewTabLabel()} tab's ${reviewColumnLabel()} column, where you read its email before anything is sent. Nothing goes out from here.` };
   }
 
   /**
@@ -1460,59 +1508,86 @@
       // copying, drafting into Gmail and sending all live in the REVIEW tab, on one card with the
       // message in front of you. This tab is for the lead record: read it, progress its next step,
       // enrich it, decide on it, delete it.
-      // Approve — the TRIAGE decision: "this company is worth pursuing." It lives here because
-      // this tab is where every lead is, in every state, with the Approval and Contact columns
-      // beside it — the two facts the decision needs.
+      // Move to Outreach — the TRIAGE decision: "this company is worth pursuing." It lives here
+      // because this tab is where every lead is, in every state, with the Approval and Contact
+      // columns beside it — the two facts the decision needs.
       //
-      // ⚠️ This does NOT send anything, and must not. Approving in the Review Queue sends the
-      // drafted email (the button there says "Approve & send email"); approving HERE only records
-      // the targeting decision, because most leads on this tab have no address to send to —
-      // enrichment attempts hot/warm leads only and hits roughly one in three. Keeping the two
-      // acts apart is the whole point of the split: judging a company is fast and high-volume,
-      // judging an email is slow and low-volume, and one button cannot be both.
+      // ⚠️ THIS BUTTON SAID "Approve" AND WROTE `approved`, WHICH BYPASSED THE REVIEW GATE.
+      // The two acts it conflated are the split the product is built on: judging a COMPANY is fast
+      // and high-volume and happens here, judging its EMAIL is slow and low-volume and happens in
+      // the Outreach tab. Writing `approved` skipped the second one — the lead appeared in the
+      // Outreach tab's Approved column having never been through the column whose entire job is a
+      // human reading the message before it goes to a stranger. The button's own status line said
+      // "the drafted email is waiting for you in the Review tab", and it was not: an approved lead
+      // is not in that column.
+      //
+      // It now writes `pending_approval` + `outreachStage: 'review'` — one step, into the review
+      // column, exactly as the label says. The stage is what makes the move visible: Enrichment
+      // and that column share `pending_approval`, and without it a lead carrying no draft would
+      // move nowhere at all (src/config/lead-recipient.ts).
+      //
+      // ⚠️ Still sends nothing, and must not. The send is the Outreach tab's Approve.
       //
       // Offered for anything not already through the gate — which includes SENT leads, whose
-      // record rests at 'scheduled' rather than 'approved'. Testing 'approved' alone put an
-      // "Approve" button on every lead whose email had already gone out, offering to clear it for
-      // an outreach the recipient had already received. Not hidden for rejected leads: reversing a
+      // record rests at 'scheduled' rather than 'approved'. Testing 'approved' alone put the
+      // button on every lead whose email had already gone out, offering to clear it for an
+      // outreach the recipient had already received. Not hidden for rejected leads: reversing a
       // rejection is a legitimate correction, and the Approval cell states the result either way.
-      // See isPastApprovalGate — nextStepGuidance reads the SAME rule, or the footer promotes a
-      // button this bar no longer draws.
-      if (!isPastApprovalGate(record)) {
+      // ⚠️ Also hidden once the lead IS in the review column, or the panel would offer to move it
+      // somewhere it already is. See isPastApprovalGate and isInOutreachReview — nextStepGuidance
+      // reads the SAME two rules, or the footer promotes a button this bar no longer draws.
+      if (!isPastApprovalGate(record) && !isInOutreachReview(record)) {
         // `primary`: the one decision this panel exists to take. Everything else here is a tool
         // (edit it, copy the draft, log an outcome) — those are reached deliberately, this is the
         // thing the reader arrived to do.
-        buttons.push({ label: 'Approve', primary: true, key: 'approve', async run(btn, status) {
+        buttons.push({ label: `Move to ${reviewTabLabel()}`, primary: true, key: 'move-to-outreach', async run(btn, status) {
+          // Both halves in ONE patch. The status and the stage are the same act — "a person put
+          // this lead in the review column" — and splitting them across two requests would leave a
+          // failure between them showing a lead as pending in no column at all.
+          const nextData = { ...(record.data || {}), outreachStage: 'review' };
           const res = await fetch(API, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: record.id, approvalStatus: 'approved' }),
+            body: JSON.stringify({ id: record.id, approvalStatus: 'pending_approval', data: nextData }),
           });
           const data = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(data.error || 'Could not approve that lead.');
-          record.approvalStatus = 'approved';
-          // Becomes a STATE, not a button that still looks pressable. It stayed enabled reading
-          // "Approved", so the obvious next thing to do with it was press it again — which re-sent
-          // the same approval. The chip below and the row's Approval cell carry the state; this
-          // just stops offering an action that has already been taken.
-          btn.textContent = 'Approved ✓';
+          if (!res.ok) throw new Error(data.error || 'Could not move that lead.');
+          record.approvalStatus = 'pending_approval';
+          record.data = nextData;
+          // Becomes a STATE, not a button that still looks pressable. It stayed enabled after the
+          // act, so the obvious next thing to do with it was press it again. The chip below and
+          // the row's Approval cell carry the state; this just stops offering an action already
+          // taken.
+          btn.textContent = 'Moved ✓';
           btn.disabled = true;
           // Same two surfaces the reject path updates: the row's Approval cell and the banner on
           // the open record. refreshRow rewrites cells in place rather than re-rendering the
           // table, which would collapse the panel the user is still reading.
           refreshRow(record);
           const chip = btn.closest('[data-hub-detail]')?.querySelector('[data-hub-approval]');
-          if (chip) chip.innerHTML = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${APPROVAL_CHIP.approved.cls}">${esc(APPROVAL_CHIP.approved.label)}</span>`;
+          const nextChip = APPROVAL_CHIP.pending_approval;
+          if (chip && nextChip) chip.innerHTML = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${nextChip.cls}">${esc(nextChip.label)}</span>`;
           // Third surface stating the same fact: the next-step footer, whose sentence was about
-          // what approving WOULD do.
+          // what moving WOULD do.
           syncNextStepFooter(btn.closest('[data-hub-detail]'), record);
-          // Say what did and did not happen. A user who has used the Review Queue has learned that
-          // approving sends — leaving that unsaid here would let them believe mail went out.
+          // Say where it went and what is waiting there. A lead with no address or no drafted body
+          // is still moved — a human asked for it by name, and the stage is what carries it past
+          // the deliverability filter — but the card it lands on will have no email to read, and
+          // finding that out on arrival is the sentence this replaces.
+          // ⚠️ The two halves of deliverability fail for DIFFERENT reasons and the sentence has to
+          // name the one that actually failed. `isDeliverable` collapses them, so a lead with a
+          // perfectly good address and no draft was told to go and find an address.
+          //   no recipient — enrichment found nothing and nobody has typed one in
+          //   no draft     — the scorer declined to write one (cold, or do-not-contact)
           const LR = window.LeadRecipient;
-          const reachable = LR && typeof LR.isDeliverable === 'function' && LR.isDeliverable(record.data);
-          status.textContent = reachable
-            ? 'Approved. Nothing has been sent — the drafted email is waiting for you in the Review tab.'
-            : 'Approved. Nothing has been sent: there’s no contact address for this lead yet.';
+          const where = `Moved to the ${reviewTabLabel()} tab’s ${reviewColumnLabel()} column.`;
+          const hasAddress = !!(LR && typeof LR.resolve === 'function' && LR.resolve(record.data));
+          const hasDraft = !!(LR && typeof LR.hasDraft === 'function' && LR.hasDraft(record.data));
+          status.textContent = hasAddress && hasDraft
+            ? `${where} Nothing has been sent — read the drafted email there and approve it to send.`
+            : !hasAddress
+              ? `${where} Nothing has been sent, and nothing can be until this lead has a contact address.`
+              : `${where} Nothing has been sent. There’s no drafted email to read on this one — approving it there records the decision without emailing anybody.`;
         }});
       }
 
@@ -1571,10 +1646,6 @@
       // The handle nextStepGuidance()'s action button presses. Set here rather than per-push so a
       // button that gains a key never has to remember to render it.
       if (b.key) btn.setAttribute('data-hub-action', b.key);
-      if (b.key && b.key === promotedKey) {
-        btn.classList.add('hidden');
-        btn.style.display = 'none';
-      }
       // Three weights, matching the rest of the app: the emerald fill for the one decision this
       // panel exists to take, the white ghost for everything else, and the red ghost for Delete.
       // Every button here was the same ghost, so a row reading "Edit · Record outcome · Copy
@@ -1584,6 +1655,14 @@
         : b.primary
           ? 'px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed'
           : btnCls;
+      // ⚠️ AFTER the className assignment, which is a whole-attribute WRITE and silently dropped
+      // the class when this ran first. The button was still invisible — the inline style is what
+      // actually wins over `inline-flex` — so nothing looked broken, and the belt-and-braces pair
+      // this comment promises had quietly become one strand.
+      if (b.key && b.key === promotedKey) {
+        btn.classList.add('hidden');
+        btn.style.display = 'none';
+      }
       btn.addEventListener('click', async () => {
         btn.disabled = true;
         try { await b.run(btn, status); }

@@ -1,5 +1,6 @@
 // src/config/lead-recipient.ts
-// Where a lead's outreach actually gets sent, and whether it can be sent at all.
+// Where a lead's outreach actually gets sent, whether it can be sent at all, and which of the two
+// lead surfaces the lead is sitting on.
 //
 // ── What this fixes ──────────────────────────────────────────────────────────
 // The precedence `outreachDraft.to → contactEmail → lead.email` was written out by hand in two
@@ -21,6 +22,12 @@
 // ⚠️ The functions below are emitted to the browser via `.toString()`, so they must stay
 // self-contained: no imports, no closures over anything except the constants declared in this file
 // (the generator re-declares those alongside them, matching the posting-cadence precedent).
+//
+// ⚠️ That constraint is also why the OUTREACH STAGE lives in this file rather than one of its own.
+// `isInOutreachReview` needs both the stage and `isLeadDeliverable`, and an import between two
+// config modules does not survive the mirror: esbuild rewrites the call to a bundler-local
+// (`import_lead_recipient.isLeadDeliverable`) that does not exist in the browser, so the emitted
+// copy throws on the first lead it is asked about. Same module, bare names, no rewrite.
 
 /**
  * Recipient precedence for a lead, highest priority first, as jsonb paths into the record's `data`.
@@ -94,4 +101,84 @@ export function hasOutreachDraft(data: unknown): boolean {
  */
 export function isLeadDeliverable(data: unknown): boolean {
     return resolveLeadRecipient(data) !== null && hasOutreachDraft(data);
+}
+
+// ── The outreach stage ───────────────────────────────────────────────────────
+//
+// Enrichment and the Outreach tab's Review column are two screens with two jobs — triage the
+// COMPANY, then read the EMAIL — but they are one `approval_status`. Both are `pending_approval`,
+// and until this existed the only thing separating them was `isLeadDeliverable` above. That left
+// three things broken, all of them the same bug wearing different clothes:
+//
+//   • Enrichment's Approve had nowhere to send a lead except PAST the review gate. It wrote
+//     `approved`, so the lead landed in the Outreach tab's Approved column having never been
+//     through the column whose entire job is the human read of the email. It bypassed the gate.
+//   • "Send back to review" in the Approved column wrote `pending_approval` — correct on paper —
+//     and for a lead with no draft it then vanished from the Outreach tab altogether, because the
+//     deliverability filter dropped it. The user pressed a button naming a column, and the lead
+//     reappeared on Enrichment instead.
+//   • There was no way to say "this one needs more work" and mean it: sending a lead back for
+//     review and demoting it to triage were the same write.
+//
+// `data.outreachStage` is set by a PERSON, and only by a person. Three values, and the third is
+// the important one:
+//
+//   'review'  — a human moved this lead into Outreach ▸ Review. Shown there whatever the
+//               deliverability filter thinks, because a human asked for it by name.
+//   'triage'  — a human sent it back to Enrichment. Kept OUT of Outreach ▸ Review even when it
+//               does carry a draft, or "send it back for more research" would be a no-op on
+//               exactly the leads worth researching.
+//   absent    — nobody has ruled either way. `isLeadDeliverable` decides, exactly as before.
+//
+// ⚠️ The absent case is what makes this safe against a live table. Every lead already in the
+// database carries no stage, so every column keeps the contents it had this morning and the
+// automatic path — a search finds a lead, the scorer drafts an email, it appears in Review — is
+// untouched. Nothing backfills it: a stage means "a human decided", and inventing one for a row
+// nobody has looked at would be a lie the filter then acts on.
+//
+// ⚠️ NOT a replacement for the deliverability filter, and it must not become one. That filter is
+// what stops a search that found sixty leads from stocking Review with sixty cards promising an
+// email nobody wrote. This overrides it one lead at a time, by hand, which is the only volume at
+// which overriding it is reasonable.
+
+/** The two things a person can say about where a lead belongs. */
+export type LeadOutreachStage = 'review' | 'triage';
+
+/** Where the stage lives on the record's `data`. Never typed out anywhere else. */
+export const LEAD_OUTREACH_STAGE_PATH: ReadonlyArray<string> = ['outreachStage'];
+
+/** The Postgres `#>>` path literal, e.g. `{outreachStage}`. Built from the array above. */
+export const LEAD_OUTREACH_STAGE_SQL_PATH = `{${LEAD_OUTREACH_STAGE_PATH.join(',')}}`;
+
+/**
+ * The stage a person set on this lead, or null when nobody has set one.
+ *
+ * Null is the honest answer and the common one — "no human has ruled on this" is a third thing,
+ * not a quieter version of either ruling. An unrecognised string reads as null for the same reason
+ * the server drops unknown approval states rather than 400ing them: a stale client writing a value
+ * we have retired must degrade to the automatic behaviour, never to an empty column.
+ */
+export function leadOutreachStage(data: unknown): 'review' | 'triage' | null {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+    const raw = (data as Record<string, unknown>).outreachStage;
+    if (typeof raw !== 'string') return null;
+    const v = raw.trim();
+    return v === 'review' || v === 'triage' ? v : null;
+}
+
+/**
+ * Does this lead belong in the Outreach tab's Review column?
+ *
+ * The one predicate the column, its badge and every button that moves a lead must agree on. A
+ * human's stage wins outright in both directions; with no stage, deliverability decides.
+ *
+ * ⚠️ Mirrored into SQL by the `deliverable` filter in netlify/functions/assistant-records.ts, which
+ * builds the same three-way decision as a CASE. Change one and change the other, or a lead sits in
+ * a column whose own button says it is somewhere else.
+ */
+export function isInOutreachReview(data: unknown): boolean {
+    const stage = leadOutreachStage(data);
+    if (stage === 'review') return true;
+    if (stage === 'triage') return false;
+    return isLeadDeliverable(data);
 }

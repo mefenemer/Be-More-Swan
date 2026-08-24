@@ -404,4 +404,71 @@ check('card copy names the column as the role labels it', () => {
         + 'users at a column that is not on their screen');
 });
 
+
+console.log('\n──── the two routes back out of Approved ────');
+
+// The complaint: "Send back to review sends it back to Enrichment." It did, for the leads it was
+// most often pressed on. The button wrote `pending_approval` and stopped — which IS the status the
+// review column asks for, except the column also filters on a readable email, so a lead carrying
+// no draft left Approved and appeared in no Outreach column at all. The only place left holding it
+// was the Enrichment tab. And the thing the user actually wanted a button for — send this one back
+// for more research — could not be said at all: for a lead WITH a draft it is not expressible as a
+// status, because that lead is deliverable and the column would take it straight back.
+
+check('the Approved column offers both destinations, each naming its own', () => {
+    const bar = SHELL.slice(landmark(SHELL, "function _rqRecordActions("), landmark(SHELL, "\n    return `<div class=\"flex flex-wrap items-center gap-2 mt-3\">"));
+    assert.ok(/btn\(`Send back to \$\{_rqEsc\(_rqColumnLabel\('review'\)\)\}`, 'review'/.test(bar),
+        'the route back to the review column is gone, or has stopped naming the column as this role labels it');
+    assert.ok(/btn\(`Move to \$\{_rqEsc\(_rqHubTabLabel\(\)\)\}`, 'backToEnrichment'/.test(bar),
+        'there is no separate route back to the hub tab — the two intentions are one button again');
+    // ⚠️ "Move to", never "Send back FOR enrichment". That is a different, existing control on the
+    // Deleted section which SPENDS — it runs a real scrape and paid lookup. Two buttons a word
+    // apart, one of which costs money, is not a distinction to make from memory.
+    assert.ok(!/`Send back for \$\{_rqEsc\(_rqHubTabLabel/.test(bar) && !/'Send back for enrichment', 'backToEnrichment'/.test(bar),
+        'the demote button has taken the name of the paid enrichment pass');
+    // Both labels are resolved, never typed. "Enrichment" and "Review" are this role's words for
+    // tabs other roles rename, and copy that hardcodes them points at a tab the user cannot see.
+    assert.ok(!/'Move to Enrichment'|'Send back to review'|'Restore to review'/.test(SHELL),
+        'a route-back button hardcodes a tab or column name instead of resolving the role label');
+});
+
+check('the hub tab label is read off the button, minus its count', () => {
+    const fn = SHELL.slice(landmark(SHELL, 'function _rqHubTabLabel()'), landmark(SHELL, '\n}\n', landmark(SHELL, 'function _rqHubTabLabel()')));
+    assert.ok(/datahub-tab-label/.test(fn), 'the label no longer comes from the rendered tab button');
+    // setTabCount writes "Enrichment (48)" into the same span. A tab name is not a tab name plus a
+    // badge — the same trap the column relabel loop carries.
+    assert.ok(/\\s\*\\\(\\d\+\\\)\\s\*\$/.test(fn) || /\(\\d\+\\\)/.test(fn),
+        'the count is not stripped, so the sentence names a tab called "Enrichment (48)"');
+});
+
+check('the two routes differ by STAGE, and only for leads', () => {
+    const branch = SHELL.slice(landmark(SHELL, "else if (action === 'review' || action === 'backToEnrichment')"));
+    const body = branch.slice(0, landmark(branch, "\n    else if (action === 'unschedule')"));
+    assert.ok(/patch\.approvalStatus = 'pending_approval';/.test(body),
+        'both routes must leave the lead awaiting approval — anything else keeps it past the gate');
+    assert.ok(/outreachStage: action === 'review' \? 'review' : 'triage'/.test(body),
+        'the two routes no longer differ — without the stage, "send back to review" drops a '
+        + 'draft-less lead out of the Outreach tab entirely and "back to enrichment" is a no-op');
+    // ⚠️ Posts and meetings press the same two actions (the non-lead Approved column, and "Restore
+    // to review" on Archived). Their queues have no such column filter and nothing reads a stage.
+    assert.ok(/backRec\.recordType === 'lead'/.test(body),
+        'the stage is stamped on record types that have no stage');
+    // The stamp that has to go either way: back in the queue means the email is unresolved again,
+    // so "yours to send" would sit above an Approve button, claiming a hand-off being taken back.
+    assert.ok(/outreachDraftedAt: _cleared/.test(body), 'the drafted-hand-off stamp is no longer cleared');
+    assert.ok(!/outreachSentAt: _/.test(body),
+        'an email that went out went out — clearing the send stamp would restart the sales cycle clock');
+});
+
+check('each route back says which one happened', () => {
+    // They write the same approval status and differ only in the stage, so a shared "Updated."
+    // left the user unable to tell the two apart — which is how "send back to review" came to read
+    // as having sent the lead to Enrichment in the first place.
+    const toasts = SHELL.slice(landmark(SHELL, "const toast = action === 'outreachSent'"), landmark(SHELL, "'Rejected.' : 'Updated.'"));
+    assert.ok(/action === 'review' \?/.test(toasts), 'the route back to review shares a toast with everything else again');
+    assert.ok(/action === 'backToEnrichment' \?/.test(toasts), 'the route back to the hub tab has no toast of its own');
+    assert.ok(/_rqColumnLabel\('review'\)/.test(toasts) && /_rqHubTabLabel\(\)/.test(toasts),
+        'a route-back toast names a destination literally instead of as this role labels it');
+});
+
 console.log(`\n${passed} checks passed.`);

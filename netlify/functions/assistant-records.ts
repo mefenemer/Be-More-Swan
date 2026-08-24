@@ -48,7 +48,7 @@ import { recordLeadRejection } from '../../src/utils/lead-reject-feedback';
 import {
     DOMAIN_EXCLUSION_REASONS, LEAD_REJECT_REASONS, isLeadRejectReason,
 } from '../../src/config/lead-reject-reasons';
-import { LEAD_RECIPIENT_SQL_PATHS, LEAD_DRAFT_BODY_SQL_PATH } from '../../src/config/lead-recipient';
+import { LEAD_RECIPIENT_SQL_PATHS, LEAD_DRAFT_BODY_SQL_PATH, LEAD_OUTREACH_STAGE_SQL_PATH } from '../../src/config/lead-recipient';
 import {
     RETENTION_DELETED_SQL_PATH, RETENTION_FIELD, RETENTION_REASON_USER_DELETE,
 } from '../../src/config/lead-retention';
@@ -383,6 +383,30 @@ export default withLambda(async (event) => {
             const deliverableWhere = sql`COALESCE(${recipientSql}) IS NOT NULL
                 AND ${sql.raw(`NULLIF(BTRIM(data #>> '${LEAD_DRAFT_BODY_SQL_PATH}'), '')`)} IS NOT NULL`;
 
+            // ── The human override on top of it: data.outreachStage ─────────────────────────
+            // The filter above is automatic and it is right about the automatic case, but it was
+            // the ONLY thing separating the Enrichment tab from the Outreach tab's Review column —
+            // both are `pending_approval` — so a person had no way to move a lead between the two.
+            // Enrichment's promote button had to write `approved` to make the lead go anywhere,
+            // which walked it straight past the review gate, and "Send back to review" on a lead
+            // with no draft dropped it out of the Outreach tab entirely.
+            //
+            // `outreachStage` is what a PERSON said, and it wins in both directions: 'review'
+            // shows the lead here whatever the draft looks like, 'triage' holds it back even when
+            // the draft is perfect. Absent — which is every row written before today — falls
+            // through to the predicate above, so no existing column changes.
+            //
+            // ⚠️ Keep this three-way decision identical to `isInOutreachReview` in
+            // src/config/lead-recipient.ts, which is the browser's copy of it. The Review badge is
+            // counted from the list this returns, so a fork shows a count beside a list that
+            // contradicts it — and, worse, a button that says it moved a lead somewhere it isn't.
+            const stageSql = sql.raw(`NULLIF(BTRIM(data #>> '${LEAD_OUTREACH_STAGE_SQL_PATH}'), '')`);
+            const inOutreachReviewWhere = sql`CASE
+                WHEN ${stageSql} = 'review' THEN TRUE
+                WHEN ${stageSql} = 'triage' THEN FALSE
+                ELSE (${deliverableWhere})
+            END`;
+
             // ── Retention filter (?retention=live|deleted|all) ───────────────────────────────
             // Which side of the 30-day sweep to read (src/config/lead-retention.ts). A lead the
             // sweep has moved carries `data.retention.deletedAt` and belongs in exactly one place:
@@ -431,7 +455,10 @@ export default withLambda(async (event) => {
                     // ⚠️ `inArray`, never a raw sql`` with an interpolated array — drizzle renders a
                     // JS array inside a template as a ROW constructor, and `= ANY((a,b))` is a 42809.
                     ...(approvalFilter.length ? [inArray(assistantRecords.approvalStatus, approvalFilter)] : []),
-                    ...(deliverableOnly ? [deliverableWhere] : []),
+                    // ⚠️ Leads only for the stage-aware form. `deliverable` is a generic param — the
+                    // predicate has one definition and callers pass it where it means something — but
+                    // `outreachStage` is a lead concept, and no meeting or invoice carries one.
+                    ...(deliverableOnly ? [recordType === 'lead' ? inOutreachReviewWhere : deliverableWhere] : []),
                     // Only ever applied to leads. The retention sweep is a lead concept and no
                     // other record type carries the stamp, so on a Ledger or Tickets hub the
                     // predicate would be a `data #>> '{retention,deletedAt}' IS NULL` that is true

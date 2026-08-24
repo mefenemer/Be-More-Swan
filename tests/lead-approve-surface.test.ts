@@ -32,7 +32,7 @@ const SHELL = read('assistants.js');
 
 console.log('\n──── the two approve paths really are different ────');
 
-check('the Review Queue approve sends; the Leads tab approve does not', () => {
+check('the Review Queue approve sends; the Leads tab move does not', () => {
     // Pin the premise. If these ever converge, the surface-aware copy below becomes unnecessary
     // rather than wrong — but the two must be reasoned about together.
     // ⚠️ Re-anchored: the send flow moved out of the approve handler into _rqSendLeadOutreach, so
@@ -45,13 +45,17 @@ check('the Review Queue approve sends; the Leads tab approve does not', () => {
         'and it must still send that lead’s outreach');
     assert.match(SHELL, /action: 'send_outreach', assistantId: window\._currentAssistantId, recordId,/,
         'which is the one place that POSTs send_outreach');
-    // ⚠️ Anchored on the PUSH, not on the bare label. "label: 'Approve'" also occurs in
-    // nextStepGuidance(), which offers Approve as the next-step button — a slice starting there
-    // runs through half the file and stops asserting anything about this handler.
-    const hubApprove = HUB.slice(landmark(HUB, "buttons.push({ label: 'Approve'"));
+    // ⚠️ Anchored on the PUSH, not on the bare key. `key: 'move-to-outreach'` also occurs in
+    // nextStepGuidance(), which offers it as the next-step button and appears FIRST in the file —
+    // a slice starting there runs through half the file and stops asserting anything about this
+    // handler. `primary: true` is only on the push.
+    // ⚠️ The button was "Approve" until 2026-08-24, when it stopped writing `approved` and started
+    // moving the lead into the review column instead. The label is a template now (it names a tab
+    // the role may rename), so the key is the stable handle.
+    const hubApprove = HUB.slice(landmark(HUB, "primary: true, key: 'move-to-outreach'"));
     const body = hubApprove.slice(0, landmark(hubApprove, '}});'));
     assert.ok(!/send_outreach/.test(body),
-        'the Leads tab approve must not send — the split is deliberate: judging a company is fast '
+        'the Leads tab move must not send — the split is deliberate: judging a company is fast '
         + 'and high-volume, judging an email is slow and low-volume');
     assert.match(body, /Nothing has been sent/,
         'and it must say so, because a user who has used the Review Queue has learned that '
@@ -115,10 +119,13 @@ check('the Leads tab offers nothing that acts on the outreach email', () => {
     // ⚠️ 'Reject' left this list on 2026-08-15 and its absence is now an ASSERTION of its own
     // below. Delete performs the rejection (it marks the lead rejected, banks the reason and files
     // it under Deleted), so the two buttons had become two names for one act.
-    for (const kept of ['Add an address', 'Look again', 'Record outcome', 'Approve', 'Delete']) {
+    for (const kept of ['Add an address', 'Look again', 'Record outcome', 'Delete']) {
         assert.ok(hub.includes(`'${kept}'`) || hub.includes(`: '${kept}'`) || new RegExp(`'${kept}`).test(hub),
             `the Leads tab lost "${kept}", which is a lead-record action and belongs here`);
     }
+    // ⚠️ The triage decision is keyed, not labelled — its label names a tab the role may rename.
+    assert.ok(/key: 'move-to-outreach'/.test(hub),
+        'the Leads tab lost its triage decision, which is the action the panel exists for');
 });
 
 check('the card hides its Gmail button on a record surface', () => {
@@ -151,13 +158,16 @@ check('the copy and the send read the same stored draft', () => {
 
 console.log('\n──── a decision already taken is not an offer ────');
 
-check('Approve stops being pressable once pressed', () => {
-    // Was 'Approve and Reject'. Reject is gone from this tab (2026-08-15) — see the check below.
-    for (const label of ['Approve']) {
-        const branch = HUB.slice(landmark(HUB, `label: '${label}'`));
+check('the move stops being pressable once pressed', () => {
+    // Was 'Approve and Reject'. Reject is gone from this tab (2026-08-15), and Approve became
+    // "Move to Outreach" (2026-08-24) when it stopped writing `approved` — see the checks below.
+    // Anchored on the action KEY, which is the stable handle the next-step footer presses; the
+    // label is a template now and would not survive a rename of the tab it names.
+    for (const key of ['move-to-outreach']) {
+        const branch = HUB.slice(landmark(HUB, `key: '${key}'`));
         const body = branch.slice(0, landmark(branch, '}});'));
         assert.match(body, /btn\.disabled = true;/,
-            `the ${label} button stayed enabled after succeeding, so the obvious next thing to do `
+            `the ${key} button stayed enabled after succeeding, so the obvious next thing to do `
             + 'with it was press it again — which re-sent the same decision');
     }
 });
@@ -177,10 +187,14 @@ check('Reject is gone, and Delete carries what it did', () => {
 
 check('the panel has exactly one emphasised action', () => {
     // Five identical ghost buttons ("Edit · Record outcome · Copy outreach draft · Approve ·
-    // Reject") gave a reader no way in. Approve is the decision the panel exists for; everything
-    // else is a tool.
-    const primaries = [...HUB.matchAll(/buttons\.push\(\{ label: '([^']+)', primary: true/g)].map((m) => m[1]);
-    assert.deepStrictEqual(primaries, ['Approve'],
+    // Reject") gave a reader no way in. Moving the lead on is the decision the panel exists for;
+    // everything else is a tool.
+    //
+    // ⚠️ The label is a TEMPLATE now — `Move to ${reviewTabLabel()}` — because a role may rename
+    // the tab it names, and copy that points at a tab the user cannot see is the dead end the
+    // column labels were fixed for. So the pattern accepts either quote style.
+    const primaries = [...HUB.matchAll(/buttons\.push\(\{ label: [`']([^`']+)[`'], primary: true/g)].map((m) => m[1]);
+    assert.deepStrictEqual(primaries, ['Move to ${reviewTabLabel()}'],
         `exactly one primary action is expected, found: ${primaries.join(', ') || 'none'}`);
     assert.match(HUB, /b\.primary\s*\n?\s*\? 'px-3 py-1\.5 bg-emerald-700/,
         'primary must render in the house emerald fill, not a fourth bespoke style');

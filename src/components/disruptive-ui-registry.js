@@ -95,12 +95,12 @@
    *
    * ⚠️ It depends on the surface, and getting it wrong points a compliance warning at the wrong
    * button. Approving in the REVIEW QUEUE calls send_outreach and the mail goes (assistants.js);
-   * approving in the LEADS TAB only records the decision, and that handler's own status line says
-   * "Nothing has been sent — the drafted email is waiting for you in the Review tab". This card was
-   * written for the first case and rendered unchanged in the second, so a user reading a lead in
-   * the Leads tab was told, directly above an Approve button, that approving would email a named
-   * individual automatically. Default true: chat and the Review Queue are where this card came
-   * from, and a surface that does send must never be the one that forgets to say so.
+   * the LEADS TAB does not approve at all — its button is "Move to Outreach", which puts the lead
+   * in the review column and sends nothing. This card was written for the first case and rendered
+   * unchanged in the second, so a user reading a lead in the Leads tab was told, directly above
+   * that button, that pressing it would email a named individual automatically. Default true:
+   * chat and the Review Queue are where this card came from, and a surface that does send must
+   * never be the one that forgets to say so.
    */
   /**
    * `opts.outreachActions` — may this card offer to DO something with the email?
@@ -251,7 +251,7 @@
               <p class="text-xs font-bold text-amber-900">Personal inbox — check before approving</p>
               <p class="text-xs text-amber-800 mt-0.5">This looks like a named individual rather than a general contact address. ${sendsOnApproval
                 ? 'Approving sends the outreach email automatically.'
-                : 'Approving here records your decision only — the email goes out when you approve it in the Review tab.'}</p>
+                : 'Moving it to Outreach records your decision only — the email goes out when you approve it there.'}</p>
             </div>` : ''}
         </div>` : ''}
 

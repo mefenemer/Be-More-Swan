@@ -2,6 +2,14 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-lead-stage",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/8c1eed72-0879-42fc-b887-917f5ff2c016/scratchpad/stageharness/server.mjs"
+      ],
+      "port": 4611
+    },
+    {
       "name": "component-harness-outreach-connect",
       "runtimeExecutable": "python3",
       "runtimeArgs": [
