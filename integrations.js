@@ -1251,7 +1251,13 @@ window._renderConnectionsStatusCard = function () {
     const sources = _assistantScoped ? _relevantSources() : [];
     // Blog destinations (cms) are org-wide like sources — a connected one is "on" with no switch.
     const blogDests = _assistantScoped ? _blogDestinations : [];
-    const nothingRelevant = !platforms.length && !sources.length && !blogDests.length;
+    // ⚠️ Outreach mailboxes count. Gmail/Outlook are real connector cards in the grid — the server
+    // sends `mailboxProviders` only for MAILBOX_ROLES (see connection-map.ts) — but this emptiness
+    // test predated them and never counted them. On the Lead Generator, whose ONLY connectors are
+    // those two, that hid this whole card, and with it the only "Manage connections" button on the
+    // page: the tab was reachable from nowhere but the Connections tab itself.
+    const mailboxes = _assistantScoped ? _mailboxProviders : [];
+    const nothingRelevant = !platforms.length && !sources.length && !blogDests.length && !mailboxes.length;
     // A social media assistant always keeps its Connections card — even before anything is
     // connected the user needs a permanent place to add a channel, so it shows an empty state
     // rather than vanishing. Other roles (whose "connectors" are Synced-action recipes living

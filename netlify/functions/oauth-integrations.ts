@@ -137,6 +137,23 @@ function parseZendeskSubdomain(raw: string | undefined): string | null {
     return /^[a-z0-9][a-z0-9-]{0,62}$/.test(value) ? value : null;
 }
 
+/**
+ * Where a connect flow returns to inside the assistant it was started from, keyed by the opaque
+ * `returnTo` token the client sends on /connect.
+ *
+ * ⚠️ A TABLE, not a pass-through. `state` is base64 of client-supplied JSON with no signature, so
+ * anything read back out of it can have been rewritten by whoever holds the URL. Resolving the
+ * token here means the only tab names that can ever reach a redirect are the ones written below.
+ *
+ * Default (no token): the assistant's Connections tab, which is where every connect link on the
+ * Connections grid comes from. 'outreach' belongs to the connect-your-inbox prompt raised by
+ * approving a lead — that user is mid-send, not managing connectors, so they go back to the
+ * Outreach tab's Approved column where the lead they just approved is waiting.
+ */
+const RETURN_DESTINATIONS: Record<string, { tab: string; rqStatus?: string }> = {
+    outreach: { tab: 'review-queue', rqStatus: 'approved' },
+};
+
 function buildState(payload: object): string {
     return Buffer.from(JSON.stringify(payload)).toString('base64url');
 }
@@ -264,8 +281,19 @@ export default withLambda(async (event) => {
         const assistantId = rawAssistantId && /^\d+$/.test(rawAssistantId) && Number(rawAssistantId) > 0
             ? rawAssistantId : null;
 
+        // ?returnTo names WHERE INSIDE that assistant to land — see RETURN_DESTINATIONS. It is an
+        // opaque token deliberately: `state` is client-visible and unsigned, so an unknown value is
+        // dropped here and the resolved value is looked up from our own table on the way back,
+        // rather than echoing a caller-supplied tab name into a redirect.
+        const rawReturnTo = event.queryStringParameters?.returnTo;
+        const returnTo = rawReturnTo && RETURN_DESTINATIONS[rawReturnTo] ? rawReturnTo : null;
+
         const redirectUri = `${baseUrl}/api/oauth/${provider}/callback`;
-        const state = buildState({ provider, userId: String(userId), csrf, ...(assistantId ? { assistantId } : {}) });
+        const state = buildState({
+            provider, userId: String(userId), csrf,
+            ...(assistantId ? { assistantId } : {}),
+            ...(returnTo ? { returnTo } : {}),
+        });
 
         let authUrl: string;
         if (provider === 'hubspot') {
@@ -354,6 +382,24 @@ export default withLambda(async (event) => {
             // problems the user needs to see (and we need in the logs) to fix them.
             console.error(`[oauth ${provider}] authorize callback returned error=${error}${error_description ? ` (${error_description})` : ''}`);
             const oauthError = error === 'access_denied' ? 'access_denied' : 'provider_error';
+            // ⚠️ A DECLINE HAS TO COME BACK TO WHERE IT STARTED. This branch runs before `state` is
+            // verified, so it used to send every failure to integrations.html — tolerable while
+            // every connect link opened a throwaway tab the user could close, but the outreach
+            // prompt now navigates THIS tab into the grant, so pressing "Cancel" on Google's screen
+            // would have dumped a user who was approving a lead onto the workspace-wide connectors
+            // page with their assistant nowhere in sight. The routing hints are re-validated (an
+            // integer id, a table lookup) exactly as the success path does; nothing here trusts
+            // `state` for anything but where to send the browser.
+            const failState = rawState ? parseState(rawState) : null;
+            const failAssistantId = failState?.assistantId && /^\d+$/.test(failState.assistantId)
+                ? failState.assistantId : null;
+            if (failAssistantId) {
+                const dest = failState?.returnTo ? RETURN_DESTINATIONS[failState.returnTo] : null;
+                const where = dest
+                    ? `&tab=${dest.tab}${dest.rqStatus ? `&rqStatus=${dest.rqStatus}` : ''}`
+                    : '';
+                return redirect(`/workspace.html?oauth_error=${oauthError}&platform=${provider}&assistantId=${failAssistantId}${where}`);
+            }
             return redirect(`/integrations.html?oauth_error=${oauthError}&provider=${provider}&reason=${encodeURIComponent(error_description || error)}`);
         }
         if (!code || !rawState) return redirect(`/integrations.html?oauth_error=missing_params&provider=${provider}`);
@@ -1012,7 +1058,14 @@ export default withLambda(async (event) => {
         // send those back there; every other provider lands on integrations.html.
         const returnAssistantId = state.assistantId && /^\d+$/.test(state.assistantId) ? state.assistantId : null;
         if (returnAssistantId) {
-            return redirect(`/workspace.html?oauth_success=${provider}&assistantId=${returnAssistantId}`);
+            // …and, when the flow named one, on the exact tab/column it was started from rather than
+            // the Connections default. Resolved through RETURN_DESTINATIONS so nothing from `state`
+            // is echoed verbatim.
+            const dest = state.returnTo ? RETURN_DESTINATIONS[state.returnTo] : null;
+            const where = dest
+                ? `&tab=${dest.tab}${dest.rqStatus ? `&rqStatus=${dest.rqStatus}` : ''}`
+                : '';
+            return redirect(`/workspace.html?oauth_success=${provider}&assistantId=${returnAssistantId}${where}`);
         }
         const blogProvider = provider === 'wordpresscom' || provider === 'searchconsole';
         return redirect(blogProvider ? `/blog-studio.html?connected=${provider}` : `/integrations.html?connected=${provider}`);

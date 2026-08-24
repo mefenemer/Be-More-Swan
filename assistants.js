@@ -899,7 +899,13 @@ window._activateMainTab = function(name) {
     // Load the assistant-scoped review queue when the tab is first opened. detailRqOpenStatus
     // branches on window._detailReviewQueue.kind (posts vs records) internally.
     if (name === 'review-queue') {
-        const renderDone = detailRqOpenStatus('review');
+        // A deep-link can name the COLUMN as well as the tab. The outreach mailbox connect flow
+        // uses it to come back on Approved, where the lead being sent now sits — landing on Review
+        // would show a list that lead has just left. Validated against the column table and
+        // consumed once, so a later tab switch goes back to the default.
+        const wantedCol = window._assistantDetailInitialRqStatus;
+        window._assistantDetailInitialRqStatus = null;
+        const renderDone = detailRqOpenStatus(_DETAIL_RQ_COLUMNS[wantedCol] ? wantedCol : 'review');
         // Populate every lifecycle column's count, not just the one being rendered.
         window._detailRqRefreshColumnCounts?.();
         // Issue #180 follow-up: a chat "review & approve" link can name the exact post it
@@ -2681,8 +2687,9 @@ async function _rqOfferCopyDraft(recordId) {
  * Returns:
  *   { retry: true }      — an account was already connected and the user switched auto-send on;
  *                          the caller should send now.
- *   { connecting: true } — the user has gone off to authorise an account. Nothing is stamped: the
- *                          email is not "drafted for you to send", it is waiting on a connection.
+ *   { connecting: true } — this tab is navigating to the provider's consent screen. Nothing is
+ *                          stamped: the email is not "drafted for you to send", it is waiting on a
+ *                          connection, and the callback returns to the Approved column.
  *   { declined: true }   — they would rather send it themselves.
  */
 async function _rqOfferOutreachConnect() {
@@ -2738,19 +2745,19 @@ async function _rqOfferOutreachConnect() {
     // still reads "I'll send outreach myself" would never auto-send anything, and nothing on this
     // screen would explain why.
     await _rqSetOutreachProvider(choice);
-    // A real link rather than window.open: this runs several awaits after the click that started
-    // it, and a popup opened without a live user gesture is blocked silently.
-    // ?assistantId rides along so the new tab lands back on THIS assistant's Connections tab when
-    // the grant completes (oauth-integrations.ts reads it out of the signed state) rather than on
-    // the workspace-wide integrations page.
-    const connectHref = `/api/oauth/${p.key}/connect`
-        + (window._currentAssistantId ? `?assistantId=${encodeURIComponent(window._currentAssistantId)}` : '');
-    await window.alertModal(
-        `<a href="${connectHref}" target="_blank" rel="noopener" style="display:inline-block;font-weight:700;color:#047857;">Connect ${window.escapeHtml(p.brand)} →</a>`
-        + '<br><br>Opens in a new tab. When you come back, press <strong>Send email now</strong> on this lead in the Approved tab — '
-        + 'and every lead you approve after that is emailed automatically.',
-        { title: `Connect ${p.brand}`, confirmLabel: 'Done' },
-    );
+    // Picking the provider IS the instruction to connect it, so go straight into the grant.
+    //
+    // This used to open a second modal containing a "Connect Google →" link that had to be clicked,
+    // in a new tab, whose callback landed on the Connections tab — three surfaces between choosing
+    // Gmail and having Gmail. Same-tab navigation replaces all of it: `window.open` was avoided here
+    // because a popup fired several awaits after the original click is blocked silently, but that
+    // has never applied to navigating the current tab, which needs no user gesture at all.
+    //
+    // returnTo:'outreach' is what brings them back to the Approved column rather than to
+    // Connections — see _outreachConnectUrl and oauth-integrations.ts.
+    window.location.assign(_outreachConnectUrl(p.key, 'outreach'));
+    // The navigation is async; report "connecting" so the caller does not stamp the lead
+    // "drafted for you to send" in the moments before the page goes.
     return { connecting: true };
 }
 
@@ -4777,9 +4784,19 @@ function _inferMailboxProvider(email) {
 // through the signed state and returns to /workspace.html?oauth_success=…&assistantId=…, which
 // reopens this assistant on its Connections tab. Without it the callback falls back to the
 // workspace-wide integrations page and the user loses their place.
-function _outreachConnectUrl(providerKey) {
-    return `/api/oauth/${providerKey}/connect`
-        + (window._currentAssistantId ? `?assistantId=${encodeURIComponent(window._currentAssistantId)}` : '');
+// `returnTo` names WHERE inside the assistant the grant should land. Omitted (the Overview card's
+// own links) it keeps the historic behaviour — back on the Connections tab. 'outreach' is used by
+// the connect-your-inbox flow that starts from approving a lead: the user did not come here to
+// manage connections, they came here to send one email, so the callback puts them back on the
+// Outreach tab's Approved column where that lead is now waiting. The value is an opaque token, not
+// a tab name — `state` is client-visible, so oauth-integrations.ts resolves it against its own
+// allow-list rather than echoing whatever it is handed.
+function _outreachConnectUrl(providerKey, returnTo) {
+    const params = new URLSearchParams();
+    if (window._currentAssistantId) params.set('assistantId', String(window._currentAssistantId));
+    if (returnTo) params.set('returnTo', returnTo);
+    const qs = params.toString();
+    return `/api/oauth/${providerKey}/connect${qs ? `?${qs}` : ''}`;
 }
 
 // The address this workspace actually runs on. Business Information's billing email first (it is

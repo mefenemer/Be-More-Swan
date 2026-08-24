@@ -2,6 +2,32 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-outreach-connect",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4522",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/d0db6547-3b7d-4fc1-b70b-45bea92930e0/scratchpad/outreachharness"
+      ],
+      "port": 4522,
+      "autoPort": false
+    },
+    {
+      "name": "component-harness-connections-card",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4521",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/d0db6547-3b7d-4fc1-b70b-45bea92930e0/scratchpad/connharness"
+      ],
+      "port": 4521,
+      "autoPort": false
+    },
+    {
       "name": "notifications-grouping-harness",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

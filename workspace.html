@@ -3572,19 +3572,32 @@ function formatCurrency(amount, currency) {
       url.searchParams.delete('meta_error');
       url.searchParams.delete('platform');
       url.searchParams.delete('assistantId');
+      // ?tab / ?rqStatus name where the flow began — see RETURN_DESTINATIONS in
+      // oauth-integrations.ts. Both are resolved server-side from a fixed table, never echoed.
+      const returnTab = qs.get('tab');
+      const returnRqStatus = qs.get('rqStatus');
+      url.searchParams.delete('tab');
+      url.searchParams.delete('rqStatus');
       history.replaceState(null, '', url.toString());
 
-      // A failed connect must leave the user where they started — the assistant's Connections tab —
-      // not bounce them to the Dashboard. Mirrors the success flow. Safe to call before the toast:
-      // routing swaps the view but the toast is a fixed-position overlay that survives it.
+      // A failed connect must leave the user where they started — the assistant's Connections tab,
+      // or the tab the flow was launched from when it named one — not bounce them to the Dashboard.
+      // Mirrors the success flow. Safe to call before the toast: routing swaps the view but the
+      // toast is a fixed-position overlay that survives it.
       const routeBackToConnections = () => {
         if (assistantId && typeof window.routeToAssistantDetail === 'function') {
-          window._assistantDetailInitialTab = 'platforms';
+          window._assistantDetailInitialTab = returnTab || 'platforms';
+          if (returnRqStatus) window._assistantDetailInitialRqStatus = returnRqStatus;
           window.routeToAssistantDetail(assistantId);
         }
       };
 
-      const LABELS = { instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X (Twitter)' };
+      const LABELS = {
+        instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X (Twitter)',
+        // Cancelling the outreach mailbox grant lands here too, and "The platform isn't available"
+        // is a poor way to describe declining Google's consent screen.
+        gmail: 'Gmail', outlook: 'Outlook',
+      };
       const label = LABELS[platform] || 'The platform';
 
       const MESSAGES = {
@@ -3652,9 +3665,19 @@ function formatCurrency(amount, currency) {
       const platform = qs.get('oauth_success');
       if (!platform) return;
       const assistantId = qs.get('assistantId');
+      // Where inside the assistant to land. Absent = the Connections tab, which is where the
+      // Connections grid's own connect links come from. The connect-your-inbox prompt raised by
+      // approving a lead sends tab=review-queue&rqStatus=approved instead, so the user returns to
+      // the lead they were mid-way through sending rather than to a connector list they never
+      // asked for. Both values are resolved from a fixed table server-side (RETURN_DESTINATIONS in
+      // oauth-integrations.ts) — `state` is unsigned, so nothing here is echoed from it verbatim.
+      const returnTab = qs.get('tab');
+      const returnRqStatus = qs.get('rqStatus');
       const url = new URL(window.location.href);
       url.searchParams.delete('oauth_success');
       url.searchParams.delete('assistantId');
+      url.searchParams.delete('tab');
+      url.searchParams.delete('rqStatus');
       history.replaceState(null, '', url.toString());
       // Socials plus the workspace-integration providers that can now return here (their
       // connect flow carries assistantId — see oauth-integrations.ts). Proper-cased brand
@@ -3677,16 +3700,25 @@ function formatCurrency(amount, currency) {
         if (icon) icon.setAttribute('d', 'M5 13l4 4L19 7');
         const closeBtn = toast.querySelector('button');
         if (closeBtn) closeBtn.style.color = '#a7f3d0'; // emerald-200
-        msgEl.textContent = assistantId
+        // ⚠️ Connecting the mailbox does NOT send the email that started this. The lead was
+        // approved before the connect prompt appeared, so it is sitting in Approved with nothing
+        // emailed — and the modal that used to say "press Send email now when you come back" is
+        // gone, replaced by this navigation. Naming the button here is the only place that
+        // instruction survives.
+        msgEl.textContent = returnRqStatus === 'approved'
+          ? `${label} connected. Press “Send email now” on the lead below to send its outreach — every lead you approve from here on is emailed automatically.`
+          : assistantId
           ? `${label} connected successfully.`
           : `${label} connected successfully. Open an assistant's Connections tab to manage it.`;
         toast.classList.remove('hidden', 'opacity-0');
         toast.classList.add('opacity-100');
         setTimeout(() => { toast.classList.remove('opacity-100'); toast.classList.add('opacity-0'); setTimeout(() => toast.classList.add('hidden'), 500); }, 6000);
       }
-      // Return the user to the assistant they were configuring, on its Connections tab.
+      // Return the user to the assistant they were configuring, on the tab the flow came from
+      // (Connections unless it named another) and, for the review queue, the right column.
       if (assistantId && typeof window.routeToAssistantDetail === 'function') {
-        window._assistantDetailInitialTab = 'platforms';
+        window._assistantDetailInitialTab = returnTab || 'platforms';
+        if (returnRqStatus) window._assistantDetailInitialRqStatus = returnRqStatus;
         window.routeToAssistantDetail(assistantId);
       }
     })();
