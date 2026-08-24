@@ -2,7 +2,7 @@
 -- All inserts use ON CONFLICT (title) DO UPDATE so re-running is safe (UPSERT).
 -- Wrapped in a transaction — all succeed or all roll back.
 --
--- ⚠️ TWO QUOTING RULES, AND THEY ARE OPPOSITE. The article BODIES are dollar-quoted ($$ … $$), where
+-- ⚠️ TWO QUOTING RULES, AND THEY ARE OPPOSITE. The article BODIES are dollar-quoted, where
 -- everything is literal: write `lead's`, never `lead''s`, or the doubled pair is published verbatim.
 -- (It was — twelve of them, reading "lead''s email" in the live Help Centre, fixed 2026-08-17.) The
 -- TITLES and the WHERE-clause literals are ordinary single-quoted strings, where an apostrophe MUST
@@ -11,6 +11,21 @@
 -- ⚠️ ON CONFLICT (title) CANNOT RENAME AN ARTICLE. Changing a title inserts a new row and leaves the
 -- old one published beside it. Retiring copy therefore takes two steps: the new article here, and an
 -- explicit UPDATE … is_published = FALSE at the foot of this file.
+
+-- ⚠️ THIS FILE FAILED TO APPLY THROUGH THE NEON SQL EDITOR ON 2026-08-24, CAUSE UNKNOWN.
+-- It rolled back cleanly — prod was byte-for-byte unchanged afterwards, so nothing was half
+-- written — but it reported no error anyone captured, and re-pasting it is not a plan. The three
+-- changed articles were applied as individual UPDATE … RETURNING statements instead, and that
+-- path worked first time. Before running this whole file again:
+--   • work out what failed (43,229 bytes here vs 42,495 in the version that applied on 2026-08-18);
+--   • suspect the CLIENT, not the server. A web console splits a pasted script into statements
+--     before sending it, and this file contains ten semicolons inside dollar-quoted article bodies
+--     — invisible to Postgres, but exactly where a naive splitter cuts. A dollar-quote marker
+--     inside a `--` comment is the same class of trap, which is why one was removed above;
+--   • prefer per-article UPDATEs for a small change. Ten of the thirteen articles here are usually
+--     byte-identical to what is already live, so a full re-seed rewrites far more than it needs to.
+-- ⚠️ And always end a hand-run statement with RETURNING. A bare UPDATE shows "No result" in the
+-- Neon editor whether it changed one row or none, so success and failure look identical.
 
 BEGIN;
 
