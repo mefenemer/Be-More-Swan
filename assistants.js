@@ -4745,10 +4745,74 @@ function _renderOnboardingConnections() {
     }
 }
 
-// Lead Generator email-connect CTA. When the user chose to send outreach from their own inbox
-// (onboardingContext.outreachEmailProvider) but the account isn't connected, surface a prominent
-// Connect card above the onboarding summary. Google uses the existing OAuth (a plain link, same
-// as integrations.html); Microsoft is a fast-follow (informational only for now).
+// The two mailbox providers the outreach send path supports. The onboarding answer is
+// 'google' | 'microsoft'; the OAuth provider keys are 'gmail' | 'outlook'. Mapped here (and in
+// lead-generation.ts send_outreach) rather than renaming the stored answer, which would strand
+// every assistant already onboarded.
+const _OUTREACH_MAILBOXES = {
+    google:    { key: 'gmail',   brand: 'Google',    account: 'Gmail / Google Workspace', cta: 'Connect Gmail' },
+    microsoft: { key: 'outlook', brand: 'Microsoft', account: 'Outlook / Microsoft 365',  cta: 'Connect Outlook' },
+};
+const _OUTREACH_OTHER = { google: 'microsoft', microsoft: 'google' };
+
+/**
+ * Which provider hosts an address, judged from its domain — 'google' | 'microsoft' | null.
+ *
+ * null is the common and correct answer: a custom domain is as likely to be Workspace as it is
+ * 365 or neither, so only the consumer domains are decided here. Used to CONTRADICT the stored
+ * setup answer, never to silently overwrite it — that answer is what send_outreach gates on, so
+ * changing it is the user's call and has to go through set_outreach_provider.
+ */
+function _inferMailboxProvider(email) {
+    const domain = String(email || '').trim().toLowerCase().split('@')[1] || '';
+    if (!domain) return null;
+    if (domain === 'gmail.com' || domain === 'googlemail.com') return 'google';
+    // hotmail/live/outlook/msn run dozens of country domains (hotmail.co.uk, live.de, outlook.fr),
+    // so match the family rather than trying to enumerate them.
+    if (/^(hotmail|live|outlook|msn)\.[a-z.]+$/.test(domain)) return 'microsoft';
+    return null;
+}
+
+// ?assistantId is what brings the user back HERE afterwards: oauth-integrations.ts carries it
+// through the signed state and returns to /workspace.html?oauth_success=…&assistantId=…, which
+// reopens this assistant on its Connections tab. Without it the callback falls back to the
+// workspace-wide integrations page and the user loses their place.
+function _outreachConnectUrl(providerKey) {
+    return `/api/oauth/${providerKey}/connect`
+        + (window._currentAssistantId ? `?assistantId=${encodeURIComponent(window._currentAssistantId)}` : '');
+}
+
+// The address this workspace actually runs on. Business Information's billing email first (it is
+// the address the user maintains and the one they expect this card to know), the signed-in user's
+// own address as the fallback. Best-effort: a failure here just means no second opinion.
+async function _workspaceEmailAddress() {
+    try {
+        const res = await fetch('/.netlify/functions/billing-information');
+        if (res.ok) {
+            const info = ((await res.json()) || {}).billingInfo;
+            const email = info && typeof info.email === 'string' ? info.email.trim() : '';
+            if (email) return email;
+        }
+    } catch { /* fall through to the session's own address */ }
+    return String(window._currentUserEmail || '').trim();
+}
+
+/**
+ * Lead Generator email-connect CTA. When the user chose to send outreach from their own inbox
+ * (onboardingContext.outreachEmailProvider) but the account isn't connected, surface a prominent
+ * Connect card above the onboarding summary.
+ *
+ * The provider named here is the SETUP ANSWER, not a detected fact, and the two can disagree: a
+ * user whose only address is a gmail.com one was told "Connect your Microsoft account to send
+ * outreach" with no clue where that came from or how to change it, because the answer is only
+ * editable in a different sub-section (Operational Setup) that the card never mentions. So the
+ * card now checks the answer against the workspace's actual address and against what is already
+ * connected, and when they disagree it says so and offers the switch inline.
+ *
+ * Switching is TWO writes, never one: the OAuth grant AND the onboarding answer. send_outreach
+ * gates on the answer, so a Gmail account connected while the answer still reads 'microsoft'
+ * produces an assistant that looks connected and still never sends.
+ */
 async function _renderOutreachEmailConnect(data) {
     const anchor = document.getElementById('onboarding-summary');
     if (!anchor || !anchor.parentNode) return;
@@ -4766,55 +4830,151 @@ async function _renderOutreachEmailConnect(data) {
     card.className = 'mb-4';
     if (!existing) anchor.parentNode.insertBefore(card, anchor);
 
-    // The onboarding answer is 'google' | 'microsoft'; the OAuth provider keys are
-    // 'gmail' | 'outlook'. Mapped here (and in lead-generation.ts send_outreach) rather
-    // than renaming the stored answer, which would strand already-onboarded assistants.
-    const M = provider === 'microsoft'
-        ? { key: 'outlook', brand: 'Microsoft', account: 'Outlook / Microsoft 365', cta: 'Connect Outlook' }
-        : { key: 'gmail',   brand: 'Google',    account: 'Gmail / Google Workspace', cta: 'Connect Gmail' };
-
-    // ?assistantId is what brings the user back HERE afterwards: oauth-integrations.ts carries it
-    // through the signed state and returns to /workspace.html?oauth_success=…&assistantId=…, which
-    // reopens this assistant on its Connections tab. Without it the callback falls back to the
-    // standalone integrations page and the user loses their place.
-    const connectUrl = `/api/oauth/${esc(M.key)}/connect`
-        + (window._currentAssistantId ? `?assistantId=${encodeURIComponent(window._currentAssistantId)}` : '');
+    const M = _OUTREACH_MAILBOXES[provider];
+    const altKey = _OUTREACH_OTHER[provider];
+    const ALT = _OUTREACH_MAILBOXES[altKey];
 
     card.innerHTML = `<div class="bg-white border border-gray-200 rounded-2xl p-5 text-sm text-gray-400">Checking your ${esc(M.brand)} connection…</div>`;
-    let connected = false, accountName = null;
+
+    // One status call covers BOTH providers — the endpoint returns every provider — so the card
+    // can tell "nothing connected" from "the other one is connected and the answer is stale".
+    let connected = false, accountName = null, altConnected = false, altAccountName = null;
     try {
         const res = await fetch('/api/oauth/status');
         if (res.ok) {
-            const g = ((await res.json()) || {}).providers?.[M.key];
+            const providers = ((await res.json()) || {}).providers || {};
+            const g = providers[M.key];
             connected = !!(g && g.connected);
             accountName = g && g.accountName;
+            const a = providers[ALT.key];
+            altConnected = !!(a && a.connected);
+            altAccountName = a && a.accountName;
         }
     } catch { /* treat as not connected → show the Connect CTA */ }
 
     // Guard against a stale re-render having replaced the node while we awaited.
     if (document.getElementById(ID) !== card) return;
 
-    card.innerHTML = connected
-        ? `<div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex items-start gap-3">
+    const switchBtn = (wanted, mode, label, cls) =>
+        `<button type="button" data-outreach-switch="${esc(wanted)}" data-outreach-mode="${esc(mode)}" class="${cls}">${esc(label)}</button>`;
+    const primaryCls = 'shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition whitespace-nowrap cursor-pointer';
+    const linkCls = 'text-xs font-bold text-emerald-700 hover:text-emerald-800 underline cursor-pointer';
+
+    if (connected) {
+        card.innerHTML = `<div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex items-start gap-3">
              <span class="text-xl shrink-0">✅</span>
              <div>
                <p class="font-bold text-gray-900 text-sm">${esc(M.brand)} connected — outreach sends automatically</p>
                <p class="text-sm text-gray-600 mt-0.5">Approving a lead emails your outreach from ${accountName ? `<span class="font-semibold text-gray-800">${esc(accountName)}</span>` : `your connected ${esc(M.brand)} account`} and sets a chase reminder on the Calendar.</p>
              </div>
-           </div>`
-        : `<div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+           </div>`;
+        _wireOutreachSwitches(card, data);
+        return;
+    }
+
+    // Only worth asking who the workspace is once we know the answer's provider is NOT connected —
+    // a working connection settles the question on its own.
+    const knownEmail = await _workspaceEmailAddress();
+    const inferred = _inferMailboxProvider(knownEmail);
+    if (document.getElementById(ID) !== card) return;
+
+    // The stale-answer case: the OTHER mailbox is already connected. Nothing needs authorising —
+    // the only thing standing between this assistant and a working send is the setup answer, so
+    // offer to change just that rather than sending them through an OAuth round trip.
+    if (altConnected) {
+        card.innerHTML = `<div class="bg-amber-50 border border-amber-200 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+             <div class="flex items-start gap-3">
+               <span class="text-xl shrink-0">📧</span>
+               <div>
+                 <p class="font-bold text-gray-900 text-sm">This assistant is set to send from ${esc(M.brand)}, but ${esc(ALT.brand)} is what's connected</p>
+                 <p class="text-sm text-gray-600 mt-0.5">Your setup answer says outreach goes out through ${esc(M.account)}, and that account isn't connected — so approved leads are being handed back as drafts. ${altAccountName ? `<span class="font-semibold text-gray-800">${esc(altAccountName)}</span> is connected` : `Your ${esc(ALT.brand)} account is connected`} and can send instead.</p>
+                 <p class="text-xs text-gray-500 mt-1.5">Switching changes this assistant's setup answer. You can also change it under Operational Setup → “${esc('Send outreach emails from your own inbox?')}”.</p>
+               </div>
+             </div>
+             <div class="shrink-0 flex flex-col items-stretch gap-2">
+               ${switchBtn(altKey, 'answer-only', `Send from ${ALT.brand} instead`, primaryCls)}
+               <a href="${_outreachConnectUrl(M.key)}" class="text-xs font-bold text-gray-600 hover:text-gray-800 underline text-center">${esc(M.cta)} anyway</a>
+             </div>
+           </div>`;
+        _wireOutreachSwitches(card, data);
+        return;
+    }
+
+    // The contradicted-answer case: nothing is connected, and the workspace's own address is
+    // plainly hosted by the other provider. Lead with the one the evidence points at.
+    if (inferred && inferred !== provider) {
+        card.innerHTML = `<div class="bg-amber-50 border border-amber-200 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+             <div class="flex items-start gap-3">
+               <span class="text-xl shrink-0">📧</span>
+               <div>
+                 <p class="font-bold text-gray-900 text-sm">Connect the inbox your outreach should come from</p>
+                 <p class="text-sm text-gray-600 mt-0.5">At setup this assistant was told to send through ${esc(M.account)}, but <span class="font-semibold text-gray-800">${esc(knownEmail)}</span> is ${esc(ALT.brand === 'Google' ? 'a Google address' : 'a Microsoft address')}. Connect ${esc(ALT.account)} and approved leads are emailed automatically, with a chase reminder set for you.</p>
+                 <p class="text-xs text-gray-500 mt-1.5">Connecting ${esc(ALT.brand)} also switches this assistant's setup answer, so the two can't disagree. Sign in with the account the outreach should come from.</p>
+               </div>
+             </div>
+             <div class="shrink-0 flex flex-col items-stretch gap-2">
+               ${switchBtn(altKey, 'connect', ALT.cta, primaryCls)}
+               <a href="${_outreachConnectUrl(M.key)}" class="text-xs font-bold text-gray-600 hover:text-gray-800 underline text-center">No — ${esc(M.cta)}</a>
+             </div>
+           </div>`;
+        _wireOutreachSwitches(card, data);
+        return;
+    }
+
+    // Nothing contradicts the setup answer — but still say where the answer came from and offer
+    // the other provider, because being unable to find the switch is what made this card wrong.
+    card.innerHTML = `<div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
              <div class="flex items-start gap-3">
                <span class="text-xl shrink-0">📧</span>
                <div>
                  <p class="font-bold text-gray-900 text-sm">Connect your ${esc(M.brand)} account to send outreach</p>
-                 <p class="text-sm text-gray-600 mt-0.5">You chose to send outreach emails from your own inbox. Connect ${esc(M.account)} and approved leads are emailed automatically, with a chase reminder set for you.</p>
+                 <p class="text-sm text-gray-600 mt-0.5">At setup you chose to send outreach from ${esc(M.account)}. Connect it and approved leads are emailed automatically, with a chase reminder set for you.</p>
                  <p class="text-xs text-gray-500 mt-1.5">Sign in with the ${esc(M.brand)} account the outreach should come from${provider === 'microsoft'
                     ? ' — if it is a work or school account, your IT administrator may need to approve the connection first.'
                     : '. Google’s screen names Be More Swan as the app asking for access; it is not a Be More Swan login.'}</p>
                </div>
              </div>
-             <a href="${connectUrl}" class="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition whitespace-nowrap">${esc(M.cta)}</a>
+             <div class="shrink-0 flex flex-col items-stretch gap-2">
+               <a href="${_outreachConnectUrl(M.key)}" class="${primaryCls}">${esc(M.cta)}</a>
+               ${switchBtn(altKey, 'connect', `Use ${ALT.brand} instead`, linkCls + ' text-center')}
+             </div>
            </div>`;
+    _wireOutreachSwitches(card, data);
+}
+
+/**
+ * Wire every [data-outreach-switch] control in the card.
+ *
+ * mode 'answer-only' changes the setup answer and repaints; mode 'connect' changes it and then
+ * sends the user to that provider's OAuth. The answer is written FIRST in both cases — if the
+ * grant succeeds and the answer write had failed, the assistant would come back looking connected
+ * and still refuse to send, which is the exact confusion this card exists to end.
+ */
+function _wireOutreachSwitches(card, data) {
+    card.querySelectorAll('[data-outreach-switch]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            const wanted = btn.getAttribute('data-outreach-switch');
+            const mode = btn.getAttribute('data-outreach-mode');
+            const target = _OUTREACH_MAILBOXES[wanted];
+            if (!target) return;
+            btn.disabled = true;
+            btn.style.opacity = '0.6';
+            const saved = await _rqSetOutreachProvider(wanted);
+            if (!saved) {
+                btn.disabled = false;
+                btn.style.opacity = '';
+                window.showToast?.('Could not save that choice. Try again.', { icon: '⚠️' });
+                return;
+            }
+            // Keep the in-memory assistant in step so a repaint (here or from any other renderer
+            // reading data.context) does not show the answer we just replaced.
+            if (data && data.context && typeof data.context === 'object') data.context.outreachEmailProvider = wanted;
+            if (window.cachedContext && typeof window.cachedContext === 'object') window.cachedContext.outreachEmailProvider = wanted;
+            if (mode === 'connect') { window.location.href = _outreachConnectUrl(target.key); return; }
+            window.showToast?.(`Outreach will now send from ${target.brand}.`, { icon: '✅' });
+            _renderOutreachEmailConnect(data);
+        });
+    });
 }
 
 // Role-specific "Quick Start Suggestions" for the Mandate tab — clickable bottleneck
