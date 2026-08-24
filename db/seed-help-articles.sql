@@ -518,6 +518,10 @@ $$
 The **Outreach** tab holds each lead with the email your assistant drafted for it. Read the email,
 edit it if you want, then approve.
 
+Leads arrive here two ways: automatically, once a search has scored a company and written its
+draft; or because you pressed **Move to Outreach** on a lead in the **Enrichment** tab. Neither
+route sends anything.
+
 > **Approve & send email** does exactly that — the email goes immediately, from your own connected
 > mailbox. There is no queue to release and no undo.
 
@@ -530,8 +534,8 @@ Turn the whole thing off with **Chase leads who do not reply?** in the assistant
 
 | Column | What is in it |
 |--------|--------------|
-| **Review** | Waiting on your decision, with a deliverable email |
-| **Approved** | You cleared it. Also where **Send email now** and **Mark outreach sent** live |
+| **Review** | Waiting on your decision. Stocked automatically with the leads that have an email ready to read, plus any you moved here by hand |
+| **Approved** | You cleared it. Also where **Send email now**, **Mark outreach sent**, **Send back to Review** and **Move to Enrichment** live |
 | **Awaiting reply** | The email has **already gone** — this is the chase reminder, not a pending send |
 | **Archived** | You turned it down. The reason feeds your targeting |
 
@@ -577,7 +581,9 @@ $$
 # The Enrichment Tab: Working a Lead Up
 
 The **Enrichment** tab holds every lead this assistant has scored, in every state, plus anything you
-imported from a spreadsheet. It is where a lead is improved rather than judged.
+imported from a spreadsheet. It is where a lead is worked up and triaged: you improve what is known
+about a company here, then decide whether it is worth approaching. Judging the *email* happens one
+tab along, in **Outreach**.
 
 ## What you can do to one lead
 
@@ -588,6 +594,7 @@ imported from a spreadsheet. It is where a lead is improved rather than judged.
 | **Send back for enrichment** | Rescues a lead from the Deleted section: restores it, hunts for an address, and researches it in one press | Real money per press |
 | **Edit** | Correct the company details, or add a contact address by hand | Free |
 | **Add a note** | Contemporaneous notes, newest first, kept with the lead everywhere it appears | Free |
+| **Move to Outreach** | Says this company is worth approaching, and moves the lead to the **Outreach** tab's **Review** column. It sends nothing — the email is read and approved there | Free |
 | **Delete** | Removes the lead and records *why* — which is what teaches your targeting | Free |
 
 There is no "research everything" button, deliberately: one click across a full lead list would be
