@@ -22,6 +22,7 @@ import {
 import {
     SEQUENCE_HALT_REASONS, SEQUENCE_HALT_REASON_LABELS, haltReasonLabel,
 } from '../src/config/outreach-sequences';
+import { openLeadThread } from '../src/utils/lead-threads';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -397,6 +398,100 @@ check('the Signal Inbox is the DECLARED landing tab, not an accident of tab orde
         "lead_qualifier must declare defaultMainTab: 'signals' rather than relying on the first-visible-tab fallback");
 });
 
+// ── 8. One token, one address ────────────────────────────────────────────────
+//
+// The reply_token printed in an outreach email is what lead-unsubscribe.ts resolves an opt-out
+// against, and it suppresses the thread's contact_email. So the token must map to exactly ONE
+// address for that thread's lifetime. openLeadThread used to write contact_email only on INSERT
+// and ignore the recipient on the reuse path, so a lead whose address changed after its first send
+// kept mailing the new address with the old address's token: the person who clicked unsubscribe was
+// never suppressed, and a third party was. These run openLeadThread against a fake db — the branch
+// is the whole behaviour, and it is not visible in the source text.
+//
+// ⚠️ These are the only ASYNC checks in the file, and the runner compiles it to CJS — no top-level
+// await. They live in a function that the bottom of the file awaits before printing the count, so
+// their results are inside the total rather than racing it.
+
+interface FakeRow { id: number; replyToken: string; state: string; contactEmail: string | null }
+
+function fakeDb(existing: FakeRow | null) {
+    const updated: Record<string, unknown>[] = [];
+    const inserted: Record<string, unknown>[] = [];
+    const selectChain: Record<string, unknown> = {
+        from: () => selectChain,
+        where: () => selectChain,
+        orderBy: () => selectChain,
+        limit: async () => (existing ? [existing] : []),
+    };
+    const db = {
+        select: () => selectChain,
+        update: () => ({ set: (v: Record<string, unknown>) => ({ where: async () => { updated.push(v); } }) }),
+        insert: () => ({
+            values: (v: Record<string, unknown>) => ({
+                returning: async () => { inserted.push(v); return [{ id: 99, replyToken: v.replyToken }]; },
+            }),
+        }),
+    };
+    return { db, updated, inserted };
+}
+
+const OPEN: FakeRow = { id: 7, replyToken: 'tok-existing', state: 'open', contactEmail: 'Mark@Example.com' };
+const base = { organisationId: 58, aiAssistantId: 21, assistantRecordId: 135 };
+
+async function checkAsync(name: string, fn: () => Promise<void>): Promise<void> {
+    try { await fn(); passed++; console.log(`  ✓ ${name}`); }
+    catch (err) { console.error(`  ✗ ${name}\n    ${(err as Error).message}`); process.exitCode = 1; }
+}
+
+async function runOneTokenOneAddressChecks(): Promise<void> {
+    console.log('\n──── a reply token can only ever suppress the address it was sent to ────');
+
+    await checkAsync('the same address reuses the thread, whatever its case or spacing', async () => {
+        const { db, updated, inserted } = fakeDb(OPEN);
+        const ref = await openLeadThread(db as never, { ...base, contactEmail: '  mark@example.com ' });
+        assert.deepStrictEqual(ref, { id: 7, replyToken: 'tok-existing' }, 'must be the same conversation');
+        assert.strictEqual(inserted.length, 0, 'a matching address must not fork the thread');
+        assert.strictEqual(updated.length, 0, 'nothing to correct');
+    });
+
+    await checkAsync('a CHANGED address forks a new thread with a new token', async () => {
+        const { db, updated, inserted } = fakeDb(OPEN);
+        const ref = await openLeadThread(db as never, { ...base, contactEmail: 'someone.else@example.com' });
+        assert.ok(ref && ref.id !== OPEN.id, 'must not hand back the thread bound to the old address');
+        assert.ok(ref && ref.replyToken !== OPEN.replyToken,
+            'a new address needs a NEW token — reusing it lets an unsubscribe suppress the wrong person');
+        assert.strictEqual(inserted.length, 1, 'exactly one new thread');
+        assert.strictEqual(inserted[0].contactEmail, 'someone.else@example.com', 'recorded against the new address');
+        assert.strictEqual(inserted[0].assistantRecordId, 135, 'still the same lead record');
+        assert.strictEqual(updated.length, 0,
+            'the old row must be left alone — an unsubscribe from an already-delivered email still '
+            + 'belongs to the address that received it');
+    });
+
+    await checkAsync('a thread with no recorded address adopts the one we are writing to', async () => {
+        const { db, updated, inserted } = fakeDb({ ...OPEN, contactEmail: null });
+        const ref = await openLeadThread(db as never, { ...base, contactEmail: ' new@example.com ' });
+        assert.deepStrictEqual(ref, { id: 7, replyToken: 'tok-existing' }, 'nothing was bound, so no fork');
+        assert.strictEqual(inserted.length, 0, 'adopting, not forking');
+        assert.strictEqual(updated.length, 1, 'the address must be written, or unsubscribe can only 404');
+        assert.strictEqual(updated[0].contactEmail, 'new@example.com', 'stored trimmed');
+    });
+
+    await checkAsync('a caller that does not know the address keeps the conversation', async () => {
+        const { db, updated, inserted } = fakeDb(OPEN);
+        const ref = await openLeadThread(db as never, { ...base });
+        assert.deepStrictEqual(ref, { id: 7, replyToken: 'tok-existing' }, 'absence of an address is not a change of address');
+        assert.strictEqual(inserted.length + updated.length, 0, 'nothing to do');
+    });
+
+    await checkAsync('a closed thread still starts a fresh one', async () => {
+        const { db, inserted } = fakeDb({ ...OPEN, state: 'closed', contactEmail: 'mark@example.com' });
+        const ref = await openLeadThread(db as never, { ...base, contactEmail: 'mark@example.com' });
+        assert.ok(ref && ref.id !== OPEN.id, 'closed means closed');
+        assert.strictEqual(inserted.length, 1, 'one new thread');
+    });
+}
+
 // ── 9. Closing the lifecycle from the conversation ───────────────────────────
 //
 // A deal ending was recordable only from the Leads tab, which meant reading what the prospect
@@ -490,4 +585,6 @@ check('the API returns the outcome but not the rest of the lead record', () => {
         + 'appears once the thread is open cannot answer "which of these are closed out?"');
 });
 
-console.log(`\n${passed} checks passed.`);
+void runOneTokenOneAddressChecks().then(() => {
+    console.log(`\n${passed} checks passed.`);
+});

@@ -36,18 +36,45 @@ export interface OpenThreadInput {
 
 export interface ThreadRef { id: number; replyToken: string }
 
+/** An address as a mailbox would compare it: trimmed and case-insensitive. '' means "unknown". */
+function normaliseAddress(value: string | null | undefined): string {
+    return String(value ?? '').trim().toLowerCase();
+}
+
 /**
  * Get the open thread for a lead record, or create one.
  *
  * Reuses an existing OPEN or REPLIED thread rather than minting a new alias per send: a follow-up
  * belongs to the same conversation the prospect is already reading, and a second Reply-To would
  * split one exchange across two threads. Only a closed thread starts a fresh one.
+ *
+ * ⚠️ A thread is reused ONLY when its recorded address is the one this send is going to. The
+ * reply_token printed in an email is what lead-unsubscribe.ts resolves an opt-out against, and it
+ * suppresses `lead_threads.contact_email` — so a token must map to exactly one address for the
+ * lifetime of that thread. Before this rule the row kept whichever address it was CREATED with and
+ * the current recipient was silently ignored, so a lead whose email changed after its first send
+ * (enrichment finding a better address, a reviewer editing the lead) sent every later email to the
+ * new address carrying the old address's token. Unsubscribing then suppressed a third party who
+ * never asked, and left the person who did ask still receiving mail — an opt-out that opts nobody
+ * out, which is the one thing CAN-SPAM and CASL both require to work. Observed on staging
+ * 2026-08-24.
+ *
+ * Updating the row in place would have inverted the same bug rather than fixing it: an unsubscribe
+ * clicked from an OLDER email, already delivered to the previous address, would then suppress the
+ * new one. A changed address therefore starts a new thread with a new token, and the old thread is
+ * left open — the prospect may still reply to it, and that reply belongs to the address that
+ * received it.
  */
 export async function openLeadThread(db: Db, input: OpenThreadInput): Promise<ThreadRef | null> {
     try {
         if (input.assistantRecordId) {
             const [existing] = await db
-                .select({ id: leadThreads.id, replyToken: leadThreads.replyToken, state: leadThreads.state })
+                .select({
+                    id: leadThreads.id,
+                    replyToken: leadThreads.replyToken,
+                    state: leadThreads.state,
+                    contactEmail: leadThreads.contactEmail,
+                })
                 .from(leadThreads)
                 .where(and(
                     eq(leadThreads.organisationId, input.organisationId),
@@ -56,7 +83,30 @@ export async function openLeadThread(db: Db, input: OpenThreadInput): Promise<Th
                 .orderBy(desc(leadThreads.createdAt))
                 .limit(1);
             if (existing && existing.state !== 'closed') {
-                return { id: existing.id, replyToken: existing.replyToken };
+                const known = normaliseAddress(existing.contactEmail);
+                const wanted = normaliseAddress(input.contactEmail);
+
+                // The caller does not know the address (a DM channel, or a send path that never
+                // resolved one), or it is the address already on the thread. Same conversation.
+                if (!wanted || known === wanted) {
+                    return { id: existing.id, replyToken: existing.replyToken };
+                }
+
+                // The thread has never recorded an address and we now know it. Adopt it rather
+                // than forking: nothing has been sent under a DIFFERENT one, so the token is not
+                // yet bound to anybody — and until it is, lead-unsubscribe.ts can only 404 on it
+                // (it refuses a thread with no contact_email), which is an opt-out link that
+                // cannot opt anyone out.
+                if (!known) {
+                    await db.update(leadThreads)
+                        .set({ contactEmail: String(input.contactEmail).trim(), updatedAt: new Date() })
+                        .where(eq(leadThreads.id, existing.id));
+                    return { id: existing.id, replyToken: existing.replyToken };
+                }
+
+                // Both known and different — fall through and mint a new thread for the new
+                // address. The `desc(createdAt)` ordering above means the next send finds THIS
+                // one, so the fork happens once per address change rather than on every send.
             }
         }
 
