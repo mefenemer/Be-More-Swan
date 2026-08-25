@@ -9,6 +9,25 @@
 // scored cold in June, sitting in the Enrichment tab, and now hiring, funded, or opening a second
 // site. Nothing would ever revisit them.
 //
+// ── ⚠️ WHAT THIS IS NOT, since 2026-08-25 (§6) ───────────────────────────────
+// It is NOT a rescue for an unfinished run, and it must never be enabled as one. That was a real
+// role it quietly played while a run could report "complete" having scored only some of its leads
+// and looked up addresses for a fifth of them. Those are fixed at the source now:
+//
+//   §4.2  every lead is scored in-run — blank batches are halved and re-scored, and whatever is
+//         still blank is marked unscored rather than filed as cold.
+//   §5    every COMPANY gets its site read in-run, whatever it scored. Rating is no longer part
+//         of the rule.
+//   §3    the completion notification gates on all of it, and says what the run covered.
+//
+// So the only job left here is the one in the paragraph above: STALENESS. A lead whose verdict was
+// formed months ago from one search snippet, on a company that has since changed. If this file ever
+// starts looking like the thing that makes runs complete, the run is broken and this is hiding it.
+//
+// ⚠️ It cannot do that job anyway: MAX_LEADS is 25 per run ACROSS ALL TENANTS. It is a trickle, not
+// a backfill, and it is operator-wide — enabling it for one customer enables it for every one.
+// docs/lead-generator-completeness-plan.md §6.
+//
 // ── Why this is a separate function from the retention sweep ─────────────────
 // They pull in opposite directions and must not share a run. Retention MOVES leads that nobody has
 // acted on; this one RE-READS leads to find out whether they should have been acted on. Running
@@ -76,6 +95,9 @@ interface Candidate {
  *
  *   • Never enriched at all, oldest first — the cohort most likely to be mis-scored, because their
  *     rating came from one search-result snippet and nothing since.
+ *     ⚠️ Since §5 this cohort should be nearly EMPTY on any lead found after 2026-08-25: the run
+ *     itself reads every company's site. A large one here is evidence a run is failing to finish,
+ *     not evidence this sweep is needed — check the run before turning this on.
  *   • Then the stalest intel.
  *
  * And the exclusions, each of which would otherwise be money spent on a foregone conclusion:

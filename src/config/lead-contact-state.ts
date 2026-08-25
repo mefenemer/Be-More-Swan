@@ -19,6 +19,8 @@
 //
 // Derived entirely from fields the pipeline already writes. No new storage, no migration.
 
+import { PROSPECT_TYPES } from './icp-profile';
+
 /**
  * The five states, as a user would say them.
  *
@@ -65,29 +67,59 @@ const COL = {
  * file exists to prevent. Changing it in one place and not the others makes the Searches tab say
  * nobody looked at a lead the pipeline just looked at.
  *
- * ── Why prospect type, and not rating alone ──────────────────────────────────
- * Measured on a prod tenant, 2026-08-25: 95 hot/warm leads were attempted and 65 yielded an
- * address — 68%, well above the ~1/3 the scraper alone manages, because the paid tier picks up
- * the misses. In the same workspace 89 leads carried `prospectType: 'target_business'` — the
- * scorer's own judgement that they are companies this business could sell to — while rating cold,
- * and every one of them was skipped. The rating is a fit judgement made off a one-line search
- * snippet; the prospect type is a judgement about WHAT THE THING IS, and the second is both more
- * reliable from a snippet and the one that decides whether an address is worth having.
+ * ── §5, 2026-08-25: the rule is now about WHAT it is, never about its rating ────────────────
+ * The customer's principle, and it is the right one:
  *
- * A cold rating is not a reason to refuse to learn how to contact a real company: the user can
- * re-rate it, and cannot conjure an address. `supplier_to_target`, `aggregator`, `media`,
- * `content_page` and `platform` stay excluded — no address makes a listicle into a customer.
- * ⚠️ Deliberately NOT extended to leads with no prospect type at all. Absent means the scorer
- * never classified it, and paying to enrich an unknown is how this becomes a blank cheque; those
- * leads are the deep-enrichment sweep's job (lead-enrichment-sweep.ts), which re-reads and
- * re-scores rather than guessing.
+ *   "Emails should be found for all leads irrespective of cold or not, as the user can then
+ *    determine themselves whether to contact a cold lead. This is not for us to decide."
+ *
+ * Agreed for COLD. Not agreed for NOT-A-COMPANY: an aggregator, a news article or a Wikipedia page
+ * has nobody to email, and a lookup against one cannot return anything. So rating drops out of the
+ * rule entirely and prospect type is the whole of it.
+ *
+ * ⚠️ Conflating those two is the original defect. `rating = cold` was used as a proxy for "not
+ * worth contacting" and silently included 89 companies the scorer had itself classified
+ * `target_business`. Measured 2026-08-25: 95 of 500 leads were ever offered a lookup, and 68% of
+ * those yielded an address — the gate was the bottleneck, never the lookup.
+ *
+ * ── TWO gates, because one is free and the other is not ─────────────────────
+ * Reading a company's own website costs a few seconds. Buying an address costs money. So:
+ *
+ *   ENRICH_ELIGIBLE_SQL       who gets READ    — anything that might be a company, including
+ *                                               leads with no prospect type at all
+ *   PAID_ENRICH_ELIGIBLE_SQL  who gets BOUGHT  — only a confirmed `target_business`
+ *
+ * An unclassified lead is either legacy (scored before the gate shipped 2026-08-12) or unscored
+ * (§4.2). Scraping one is free and might hand the user an address; PAYING for one is a blank
+ * cheque against a lead nobody has judged.
+ */
+const DISQUALIFYING_TYPES = PROSPECT_TYPES.filter((t) => t !== 'target_business');
+
+/**
+ * Who gets their website read. Everything except the types no address can help.
+ *
+ * Built from PROSPECT_TYPES rather than a hand-typed list, so a new disqualifying type reaches
+ * this rule on the next deploy with no second edit to forget.
  */
 export const ENRICH_ELIGIBLE_SQL =
-    `(${COL.rating} IN ('hot','warm') OR ${COL.prospectType} = 'target_business')`;
+    `(${COL.prospectType} IS NULL OR ${COL.prospectType} NOT IN (${DISQUALIFYING_TYPES.map((t) => `'${t}'`).join(', ')}))`;
 
-/** The same decision in JS — the mirror the fixture matrix pins against. */
-export function isEnrichEligible(lead: { rating?: string | null; prospectType?: string | null }): boolean {
-    return lead.rating === 'hot' || lead.rating === 'warm' || lead.prospectType === 'target_business';
+/**
+ * Who is worth PAYING a provider for. Confirmed companies only.
+ *
+ * ⚠️ Deliberately narrower than the scrape. The free tier can afford to be generous with an
+ * unknown; a paid lookup cannot, and `paidLookupAt` is stamped on a MISS too — it counts money
+ * spent, not addresses found.
+ */
+export const PAID_ENRICH_ELIGIBLE_SQL = `${COL.prospectType} = 'target_business'`;
+
+export function isEnrichEligible(lead: { prospectType?: string | null }): boolean {
+    return !lead.prospectType || !(DISQUALIFYING_TYPES as readonly string[]).includes(lead.prospectType);
+}
+
+/** The JS mirror of PAID_ENRICH_ELIGIBLE_SQL. */
+export function isPaidEnrichEligible(lead: { prospectType?: string | null }): boolean {
+    return lead.prospectType === 'target_business';
 }
 
 /**
@@ -145,25 +177,12 @@ export function contactBucketOf(lead: {
     return lead.enrichmentInFlight ? 'pending' : 'missed';
 }
 
-/**
- * ⚠️ An UNSCORED lead lands in `notAttempted` too, and that is correct — nothing should be spent
- * looking up a company nobody has judged. But it is a different REASON, and the per-lead chip has
- * to say which: "not a company you could sell to" is a false statement about a lead the scorer
- * never reached. Hence a separate chip (`unscored`) over the same bucket, exactly as `role` and
- * `personal` are two chips over `reachable`.
- *
- * The aggregate sentence covers both causes in one clause rather than growing a sixth bucket —
- * the counts partition the total and a bucket that is nearly always zero would add a clause to
- * every search's summary to serve a residual case.
- */
-
 /** The bucket each of the Contact column's chips belongs to — the map the test asserts. */
 export const CONTACT_STATE_TO_BUCKET: Record<string, ContactBucket> = {
     role: 'reachable',
     personal: 'reachable',
     none: 'nonePublished',
     unchecked: 'notAttempted',
-    unscored: 'notAttempted',
     checking: 'pending',
     missed: 'missed',
 };

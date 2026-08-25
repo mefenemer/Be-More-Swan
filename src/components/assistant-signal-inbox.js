@@ -373,11 +373,14 @@
     // have separate chips in the table (a per-lead answer must be exact) but share one clause
     // here, because a sixth bucket that is nearly always zero would add a clause to every
     // search's summary to serve a residual case.
-    // ⚠️ No em-dash: the lead-in already uses one, and the clauses are comma-joined, so a second
-    // dash inside a clause reads as a nested aside.
+    // ⚠️ §5 narrowed this bucket to ONE cause. It used to also hold unscored leads (which now get
+    // read like any other possible company) and cold companies (which now get read too, because
+    // rating is no longer part of the rule). What is left is only what no address can help: a
+    // directory, an article, a supplier. So the clause can name that cause outright again.
+    // No em-dash — the lead-in already uses one and the clauses are comma-joined.
     if (notCompanies) parts.push(notCompanies === 1
-        ? '1 was not a company you could sell to, or was not scored, so was never checked'
-        : `${notCompanies} were not companies you could sell to, or were not scored, so were never checked`);
+        ? '1 was not a company you could sell to, so was never checked'
+        : `${notCompanies} were not companies you could sell to, so were never checked`);
     // ⚠️ Distinct from `pending`, which is a promise. These are hot/warm leads the run ended
     // without reaching, so nothing will look them up unless someone asks it to (item 11).
     if (missed) parts.push(`${missed} ${missed === 1 ? 'was' : 'were'} not looked up`);

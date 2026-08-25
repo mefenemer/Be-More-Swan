@@ -3411,7 +3411,7 @@ export const discoveryGuardrails = pgTable("discovery_guardrails", {
   // needing more than this many purchases has a targeting problem worth noticing rather than
   // spending through. Inert unless DISCOVERY_ENRICH_PROVIDER names a provider.
   // SQL: db/discovery-enrichment-cap.sql (MANUAL APPLY — keep this line in sync or a push drops it).
-  maxEnrichmentCallsPerRun: integer("max_enrichment_calls_per_run").notNull().default(25),
+  maxEnrichmentCallsPerRun: integer("max_enrichment_calls_per_run").notNull().default(200),  // raised from 25 for §5 — see db/discovery-enrichment-cap-raise.sql
   maxTokensPerRun: integer("max_tokens_per_run").notNull().default(200000),
   maxCostGbpPerRun: decimal("max_cost_gbp_per_run", { precision: 10, scale: 2 }).notNull().default("2.00"),
   negativeKeywords: jsonb("negative_keywords"),                  // hard-exclude terms (competitors, sensitive)

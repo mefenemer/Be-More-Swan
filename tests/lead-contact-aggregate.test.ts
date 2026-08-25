@@ -28,9 +28,11 @@ import {
     CONTACT_BUCKET_SQL,
     CONTACT_STATE_TO_BUCKET,
     ENRICH_ELIGIBLE_SQL,
+    PAID_ENRICH_ELIGIBLE_SQL,
     LIVE_JOB_SQL,
     contactBucketOf,
     isEnrichEligible,
+    isPaidEnrichEligible,
     type ContactBucket,
 } from '../src/config/lead-contact-state';
 
@@ -103,24 +105,40 @@ check('contactBucketOf agrees with the Contact column on every shape', () => {
     }
 });
 
-check('a cold target_business is looked up — the 2026-08-25 gate change', () => {
-    // The defect: a prod tenant held 89 leads the scorer had itself classified as companies this
-    // business could sell to, every one rated cold off a one-line search snippet, and not one was
-    // ever offered to the scraper or the paid provider. Meanwhile the leads that WERE eligible
-    // yielded an address 68% of the time. The gate, not the lookup, was the bottleneck.
-    const cold = { contactEmail: null, enrichAttemptedAt: null, rating: 'cold' } as const;
-    assert.equal(contactBucketOf({ ...cold, prospectType: 'target_business', enrichmentInFlight: true }), 'pending');
-    assert.equal(contactBucketOf({ ...cold, prospectType: 'target_business', enrichmentInFlight: false }), 'missed');
-    // …and the things no address can turn into a customer are still refused.
-    for (const junk of ['aggregator', 'media', 'content_page', 'platform', 'supplier_to_target']) {
-        assert.equal(contactBucketOf({ ...cold, prospectType: junk, enrichmentInFlight: true }), 'notAttempted',
-            `a cold ${junk} must never be worth paying to enrich`);
+check('rating is NOT part of the rule — §5, 2026-08-25', () => {
+    // The customer's principle: "Emails should be found for all leads irrespective of cold or not,
+    // as the user can then determine themselves whether to contact a cold lead. This is not for us
+    // to decide." Agreed for COLD. Not agreed for NOT-A-COMPANY, which is the whole of the rule now.
+    //
+    // The defect it closes: 95 of one tenant's 500 leads were ever offered a lookup, and 68% of
+    // those yielded an address. The gate was the bottleneck, never the lookup.
+    const noAddress = { contactEmail: null, enrichAttemptedAt: null } as const;
+    for (const rating of ['hot', 'warm', 'cold', null, 'something_new']) {
+        assert.equal(contactBucketOf({ ...noAddress, rating, prospectType: 'target_business', enrichmentInFlight: true }), 'pending',
+            `a ${rating} company must be looked up — rating is the user's call, not the pipeline's`);
+        // Unclassified: legacy (scored before the gate shipped) or unscored (§4.2). Free to read.
+        assert.equal(contactBucketOf({ ...noAddress, rating, prospectType: null, enrichmentInFlight: true }), 'pending',
+            `an unclassified ${rating} lead must still be READ — it might be a company`);
     }
-    // An UNCLASSIFIED cold lead stays out. Absent means the scorer never judged it, and enriching
-    // an unknown is the blank cheque; those are the deep-enrichment sweep's job.
-    assert.equal(contactBucketOf({ ...cold, prospectType: null, enrichmentInFlight: true }), 'notAttempted');
-    // The rating half of the OR is untouched.
-    assert.ok(isEnrichEligible({ rating: 'hot' }) && isEnrichEligible({ rating: 'warm' }));
+    // …and the things no address can turn into a customer are still refused, at every rating.
+    for (const junk of ['aggregator', 'media', 'content_page', 'platform', 'supplier_to_target']) {
+        for (const rating of ['hot', 'cold', null]) {
+            assert.equal(contactBucketOf({ ...noAddress, rating, prospectType: junk, enrichmentInFlight: true }), 'notAttempted',
+                `a ${rating} ${junk} has nobody to email`);
+        }
+    }
+});
+
+check('PAYING is gated narrower than READING', () => {
+    // ⚠️ Two gates, deliberately different. Reading a site costs seconds; buying an address costs
+    // money, and paidLookupAt is stamped on a MISS too — it counts money spent, not addresses
+    // found. So an unclassified lead is read for free and never bought for.
+    assert.ok(isEnrichEligible({ prospectType: null }), 'an unclassified lead must be READ');
+    assert.ok(!isPaidEnrichEligible({ prospectType: null }), 'an unclassified lead must never be BOUGHT for');
+    assert.ok(isEnrichEligible({ prospectType: 'target_business' }) && isPaidEnrichEligible({ prospectType: 'target_business' }));
+    for (const junk of ['aggregator', 'media', 'content_page', 'platform', 'supplier_to_target']) {
+        assert.ok(!isEnrichEligible({ prospectType: junk }) && !isPaidEnrichEligible({ prospectType: junk }));
+    }
 });
 
 check('"Checking…" requires a live job — it is a claim, not a default', () => {
@@ -131,14 +149,15 @@ check('"Checking…" requires a live job — it is a claim, not a default', () =
     assert.equal(contactState({ ...hotNoStamp, enrichmentInFlight: true }), 'checking');
     assert.equal(contactState({ ...hotNoStamp, enrichmentInFlight: false }), 'missed');
     assert.equal(contactState(hotNoStamp), 'missed', 'an absent flag must not promise a lookup');
-    // A cold lead with no prospect type is unaffected: never eligible, live run or not.
-    for (const live of [true, false]) {
-        assert.equal(contactState({ status: 'cold', enrichmentInFlight: live, data: {} }), 'unchecked');
-    }
-    // But a cold TARGET_BUSINESS follows the same live-job split as a hot lead — it is queued.
+    // ⚠️ §5: a COLD lead is no longer unaffected — it is read like any other possible company, so
+    // it follows the same live-job split. Only a confirmed non-company sits outside it.
     const coldCompany = { status: 'cold', data: { prospectType: 'target_business' } };
     assert.equal(contactState({ ...coldCompany, enrichmentInFlight: true }), 'checking');
     assert.equal(contactState({ ...coldCompany, enrichmentInFlight: false }), 'missed');
+    for (const live of [true, false]) {
+        assert.equal(contactState({ status: 'cold', enrichmentInFlight: live, data: { prospectType: 'aggregator' } }), 'unchecked',
+            'a directory has nobody to email, whatever is running');
+    }
 });
 
 check('the missed chip explains itself, and every no-address chip does', () => {
@@ -193,11 +212,11 @@ check('an unexpected rating stays inside the total', () => {
     // dropping the row from the arithmetic. It is now a POSITIVE test, so an unrated, unclassified
     // lead reads `notAttempted`, which is not a fallthrough at all: it is what the worker will
     // genuinely do with it. The row is still counted, which is the invariant this check defends.
-    assert.equal(contactBucketOf({ rating: null, enrichmentInFlight: true }), 'notAttempted');
-    assert.equal(contactBucketOf({ rating: 'something_new', enrichmentInFlight: true }), 'notAttempted');
-    // An unrated lead the scorer DID classify is eligible, and still splits on the live job.
-    assert.equal(contactBucketOf({ rating: null, prospectType: 'target_business', enrichmentInFlight: true }), 'pending');
+    // ⚠️ §5: an unrecognised rating no longer decides anything — the rule reads prospect type only.
+    assert.equal(contactBucketOf({ rating: null, enrichmentInFlight: true }), 'pending');
+    assert.equal(contactBucketOf({ rating: 'something_new', enrichmentInFlight: true }), 'pending');
     assert.equal(contactBucketOf({ rating: null, prospectType: 'target_business' }), 'missed', 'no live job means no promise');
+    assert.equal(contactBucketOf({ rating: 'something_new', prospectType: 'media', enrichmentInFlight: true }), 'notAttempted');
 });
 
 // ── The SQL mirror ────────────────────────────────────────────────────────────
@@ -220,9 +239,15 @@ check('every predicate reads the same three fields as the JS mirror', () => {
     for (const b of ['pending', 'missed'] as const) {
         assert.ok(CONTACT_BUCKET_SQL[b].includes(ENRICH_ELIGIBLE_SQL), `${b} must require an eligible lead`);
     }
-    assert.ok(/scoring_card ->> 'prospectType' = 'target_business'/.test(ENRICH_ELIGIBLE_SQL),
-        'the prospect-type half of the gate is gone — cold companies stop being looked up again');
-    assert.ok(/dl\.rating IN \('hot','warm'\)/.test(ENRICH_ELIGIBLE_SQL), 'the rating half of the gate is gone');
+    // ⚠️ §5: the rule reads PROSPECT TYPE ONLY. A rating anywhere in it is the old defect coming
+    // back — cold companies stop being looked up, which is where this whole thread started.
+    assert.ok(/prospectType/.test(ENRICH_ELIGIBLE_SQL), 'the eligibility rule no longer reads prospect type');
+    assert.ok(!/rating/.test(ENRICH_ELIGIBLE_SQL),
+        'rating is back in the eligibility rule — that is the defect that stranded 89 cold companies');
+    assert.ok(/= 'target_business'/.test(PAID_ENRICH_ELIGIBLE_SQL), 'the paid gate no longer requires a confirmed company');
+    for (const junk of ['aggregator', 'media', 'content_page', 'platform', 'supplier_to_target']) {
+        assert.ok(ENRICH_ELIGIBLE_SQL.includes(`'${junk}'`), `${junk} is no longer excluded from the scrape`);
+    }
     // The item-11 split: identical leads, separated only by whether a job is live.
     assert.ok(CONTACT_BUCKET_SQL.pending.includes(LIVE_JOB_SQL), 'pending must require a live job');
     assert.ok(CONTACT_BUCKET_SQL.missed.includes(`NOT ${LIVE_JOB_SQL}`), 'missed must require NO live job');
@@ -261,13 +286,13 @@ check('states the prod run this was built for', () => {
     // turns "Review only has 3 things in it" into "and here is why".
     assert.equal(
         agg({ contactTotal: 65, contactReachable: 4, contactNonePublished: 9, contactNotAttempted: 52 }),
-        'Contact details for 4 of 65 — 9 publish none, 52 were not companies you could sell to, or were not scored, so were never checked.',
+        'Contact details for 4 of 65 — 9 publish none, 52 were not companies you could sell to, so were never checked.',
     );
     // Campaign 1, same database: 20 found, not one of them worth a scrape. The line diagnoses
     // targeting without the user having to open a single lead.
     assert.equal(
         agg({ contactTotal: 20, contactNotAttempted: 20 }),
-        'Contact details for 0 of 20 — 20 were not companies you could sell to, or were not scored, so were never checked.',
+        'Contact details for 0 of 20 — 20 were not companies you could sell to, so were never checked.',
     );
 });
 
@@ -283,7 +308,7 @@ check('omits clauses that are zero', () => {
 
 check('reads correctly in the singular', () => {
     assert.equal(agg({ contactTotal: 3, contactReachable: 1, contactNonePublished: 1, contactNotAttempted: 1 }),
-        'Contact details for 1 of 3 — 1 publishes none, 1 was not a company you could sell to, or was not scored, so was never checked.');
+        'Contact details for 1 of 3 — 1 publishes none, 1 was not a company you could sell to, so was never checked.');
 });
 
 check('names work still in progress rather than calling it a result', () => {

@@ -101,8 +101,20 @@ check('a hot/warm lead with no attempt stamp is queued only while a job is LIVE'
     assert.strictEqual(contactState({ ...lead('hot'), enrichmentInFlight: false }), 'missed');
 });
 
-check('a cold lead with no address reads "nobody looked, and nobody will"', () => {
-    assert.strictEqual(contactState(lead('cold')), 'unchecked');
+check('a lead no address can help reads "nobody looked, and nobody will"', () => {
+    // ⚠️ §5, 2026-08-25: this used to be keyed on a COLD rating. Rating is no longer part of the
+    // rule — the user decides who is worth contacting. What is left is only what no address can
+    // turn into a customer: a directory, an article, a supplier.
+    assert.strictEqual(contactState(lead('cold', { prospectType: 'aggregator' })), 'unchecked');
+    assert.strictEqual(contactState(lead('hot', { prospectType: 'content_page' })), 'unchecked');
+});
+
+check('a cold company IS looked up — the §5 change', () => {
+    // The defect this closes: 89 leads the scorer had itself classified `target_business` were
+    // stranded on a cold rating and never offered a lookup.
+    assert.strictEqual(contactState(lead('cold', { prospectType: 'target_business' })), 'missed');
+    // And an unclassified lead is read too — it might be a company. Free, unlike a paid lookup.
+    assert.strictEqual(contactState(lead('cold')), 'missed');
 });
 
 check('a cold lead that somehow HAS an address still reports the address', () => {
@@ -160,21 +172,32 @@ check('a backfill exists for records enriched before the mirror changed', () => 
     assert.ok(/IS NULL/.test(sql), 'the backfill must skip rows that already carry the key (idempotent)');
 });
 
-check('contactState mirrors the eligibility rule, both halves of it', () => {
-    // ⚠️ CHANGED 2026-08-25 with the gate. The old rule was "cold means nobody looked", and this
-    // check enforced testing the SKIPPED rating only, so there would be one list rather than two.
-    // Eligibility is now a positive test with two halves (rating OR prospect type), so the column
-    // has to state both — and the thing worth defending is that it states the SAME two the
-    // pipeline does. tests/lead-contact-aggregate.test.ts runs this function against
+check('contactState mirrors the eligibility rule — prospect type, not rating', () => {
+    // ⚠️ CHANGED TWICE in three days, so the history matters. It was "cold means nobody looked";
+    // then (§4.2 gate) "hot/warm OR target_business"; now (§5) prospect type ALONE. Each step
+    // widened who gets read, and the thing worth defending is that the column states the SAME rule
+    // the pipeline runs. tests/lead-contact-aggregate.test.ts runs this function against
     // isEnrichEligible() over the full cross-product; this check keeps the source honest.
     const src = HUB.slice(landmark(HUB, 'function contactState'), landmark(HUB, 'function cellValue'));
     const code = src.replace(/\/\/.*$/gm, '');
-    assert.ok(/record\.status === 'hot'/.test(code) && /record\.status === 'warm'/.test(code),
-        'the rating half of the eligibility rule is missing from the column');
-    assert.ok(/prospectType === 'target_business'/.test(code),
-        'the prospect-type half is missing — cold companies would read "Not checked" while being looked up');
-    assert.ok(!/status === 'cold'/.test(code),
-        'the column is back to inferring from a cold rating alone, which the gate no longer does');
+    assert.ok(!/status === 'hot'|status === 'warm'|status === 'cold'/.test(code),
+        'a RATING is back in the Contact column — that is the defect that stranded 89 cold companies');
+    assert.ok(/prospectType/.test(code), 'the prospect-type rule is missing from the column');
+    for (const junk of ['aggregator', 'media', 'content_page', 'platform', 'supplier_to_target']) {
+        assert.ok(code.includes(`'${junk}'`), `${junk} is no longer refused by the column`);
+    }
+    // ⚠️ The `unscored` branch belongs in the RATING column, not this one — §5 reads those leads
+    // like any other possible company, so a "no lookup" chip here would be a lie.
+    assert.ok(!/scoringFailed/.test(code),
+        'scoringFailed is back in the Contact column — an unscored lead IS looked up under §5');
+});
+
+check('an unscored lead says so in the RATING column', () => {
+    // Its status is NULL (the worker writes NULL rather than 'cold' for a card nothing judged), and
+    // cellValue would render an em-dash — indistinguishable from a rating that had not loaded.
+    assert.ok(/scoringFailed === true/.test(HUB), 'the Rating column no longer detects an unscored lead');
+    assert.ok(/'Not scored'/.test(HUB), 'the "Not scored" label is gone');
+    assert.ok(/NOT a cold lead/.test(HUB), 'the tooltip no longer denies the cold verdict outright');
 });
 
 console.log('\n──── the column is wired and states are total ────');
@@ -195,11 +218,11 @@ check('every state contactState can return has a chip', () => {
     // 'missed' joined the set for Phase 2 item 11: hot/warm, never looked up, and no live job to
     // look it up — previously rendered as "Checking…" forever.
     //
-    // 'unscored' joined 2026-08-25 (§4.2). It shares the `notAttempted` BUCKET with 'unchecked' —
-    // neither gets a lookup — but they are opposite statements: 'unchecked' says a judgement was
-    // made and this is not a company worth an address, 'unscored' says NOTHING judged it. Letting
-    // the first stand in for the second is precisely how 132 unscored leads passed as rejections.
-    assert.deepEqual(declared, ['checking', 'missed', 'none', 'personal', 'role', 'unchecked', 'unscored'],
+    // ⚠️ 'unscored' was added here for §4.2 and REMOVED by §5 one commit later. Under §4.2 an
+    // unscored lead got no lookup, so the Contact column had to explain why; under §5 it does get
+    // read like any other possible company, so a "no lookup" chip would be a lie in the other
+    // direction. The unscored fact moved to the RATING column, which is where it always belonged.
+    assert.deepEqual(declared, ['checking', 'missed', 'none', 'personal', 'role', 'unchecked'],
         'CONTACT_CHIP and contactState() have drifted — an unmapped state throws on render');
 });
 

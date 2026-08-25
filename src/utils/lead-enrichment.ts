@@ -191,6 +191,14 @@ export async function enrichOneLead(
     }
 
     // ── Tier 2: buy one, only on a miss ──
+    //
+    // ⚠️ NO PROSPECT-TYPE GATE HERE, and that is deliberate — it differs from the worker on purpose.
+    // enrichBatch buys only for a confirmed `target_business` because it is spending unattended
+    // across a whole run (PAID_ENRICH_ELIGIBLE_SQL). This path is one lead, chosen by a human who
+    // pressed a button on it. They have decided this company is worth an address; refusing because
+    // the scorer never classified it would be the pipeline overruling the user on the one lead they
+    // actually asked about. The refusal that DOES apply is in lead-generation.ts `look_again`, which
+    // turns down the types no address can help.
     let paidAttempted = false;
     if (!found.contact && opts.allowPaid !== false && isEnrichProviderConfigured()) {
         paidAttempted = true;

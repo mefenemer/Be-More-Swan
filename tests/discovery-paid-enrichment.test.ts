@@ -157,8 +157,14 @@ check('the free scrape runs BEFORE any purchase', () => {
     const iPaid = body.indexOf('lookupProviderContact(');
     assert.ok(iScrape !== -1 && iPaid !== -1, 'one of the two enrichment tiers is gone');
     assert.ok(iScrape < iPaid, 'the paid lookup runs first — that buys data the free scrape already had');
-    assert.ok(/const misses = scraped\.filter\(\(s\) => !s\.found\.contact/.test(body),
+    assert.ok(/const misses = scraped\.filter\(\(s\) =>\s*\n?\s*!s\.found\.contact/.test(body),
         'the paid tier no longer targets only the scrape misses');
+    // ⚠️ §5 (2026-08-25): the paid tier is gated NARROWER than the scrape. The scrape reads
+    // anything that might be a company, including leads with no prospect type at all — that costs
+    // seconds and might hand the user an address for free. Buying one costs money, and
+    // `paidLookupAt` is stamped on a MISS too, so an unclassified lead would be a blank cheque.
+    assert.ok(/isPaidEnrichEligible\(/.test(body),
+        'the paid tier no longer gates on prospect type — it would buy addresses for unclassified leads');
 });
 
 check('the purchase is skipped entirely when no provider is configured', () => {

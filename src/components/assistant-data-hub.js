@@ -112,11 +112,6 @@
       why: 'A search is running now and this lead is queued for a contact lookup.' },
     unchecked: { short: 'Not checked', cls: 'bg-gray-100 text-gray-500 border-gray-200',
       why: 'This is not a company you could sell to — a directory, article or supplier — so no address was looked up. The fix is targeting, not the lookup.' },
-    // ⚠️ Same bucket as `unchecked`, different REASON, and the difference is the whole point: the
-    // chip above asserts a judgement was made. For a lead the scorer never reached, that assertion
-    // is false — and it was the shape that let 132 unscored leads pass as rejected ones.
-    unscored: { short: 'Not scored', cls: 'bg-gray-100 text-gray-500 border-gray-200',
-      why: 'This company was never scored, so nothing has judged it and no address was looked up. It is NOT a cold lead. Run the search again to score it.' },
     // Phase 2 item 11: eligible for a lookup, never attempted, and nothing is running to attempt it.
     missed: { short: 'Not attempted', cls: 'bg-amber-50 text-amber-700 border-amber-200',
       why: 'The last search finished without looking this one up. Nothing is queued for it — run the search again or add an address by hand.' },
@@ -178,13 +173,16 @@
     const d = record.data || {};
     if (contactEmailOf(record)) return d.emailKind === 'personal' ? 'personal' : 'role';
     if (d.enrichAttemptedAt) return 'none';
-    // ⚠️ BEFORE the eligibility test. An unscored lead is not eligible either, but saying "not a
-    // company you could sell to" about a lead nothing ever judged is a false statement, and it is
-    // exactly how a blank card passes for a rejection.
-    if (d.scoringFailed === true) return 'unscored';
     // Mirrors isEnrichEligible(). `data` on a promoted lead IS the scoring card, so prospectType
     // sits at its top level (promoteOne, process-discovery-jobs.ts).
-    const eligible = record.status === 'hot' || record.status === 'warm' || d.prospectType === 'target_business';
+    //
+    // ⚠️ §5: RATING IS NOT PART OF THIS. Every company gets its site read whatever it scored — the
+    // user decides who is worth contacting, not us. Only the types no address can help are refused.
+    // An UNSCORED lead is read too (it might be a company), which is why there is no `scoringFailed`
+    // branch here any more: that fact belongs in the Rating column, not this one, because a lookup
+    // genuinely is attempted.
+    const eligible = !d.prospectType
+      || ['supplier_to_target', 'aggregator', 'media', 'content_page', 'platform'].indexOf(d.prospectType) === -1;
     if (!eligible) return 'unchecked';
     return record.enrichmentInFlight ? 'checking' : 'missed';
   }
@@ -2275,7 +2273,17 @@
         const ratingCls = (window.LeadRating && typeof window.LeadRating.chipFor === 'function')
           ? window.LeadRating.chipFor(record.status).cls
           : 'bg-gray-100 text-gray-500 border-gray-200';
-        cell = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${ratingCls} whitespace-nowrap${ratingHelp ? ' cursor-help' : ''}"${ratingHelp ? ` title="${esc(ratingHelp)}"` : ''}>${esc(cellValue(record, c.key))}</span>`;
+        // ⚠️ An UNSCORED lead renders "Not scored", not a blank chip. Its status is NULL (the worker
+        // writes NULL rather than 'cold' for a card nothing judged — §4.2), and cellValue would
+        // render an em-dash: a lead that was never scored would look identical to one whose rating
+        // simply had not loaded. The tooltip says outright that it is not a cold lead, because the
+        // neutral grey chip sits in a column where grey could be read as "lowest".
+        const unscored = (record.data || {}).scoringFailed === true;
+        const ratingText = unscored ? 'Not scored' : cellValue(record, c.key);
+        const ratingTip = unscored
+          ? 'Nothing has scored this company yet — the scoring step did not return a verdict for it. It is NOT a cold lead. Run the search again to score it.'
+          : ratingHelp;
+        cell = `<span class="text-xs font-bold px-2 py-0.5 rounded-full border ${ratingCls} whitespace-nowrap${ratingTip ? ' cursor-help' : ''}"${ratingTip ? ` title="${esc(ratingTip)}"` : ''}>${esc(ratingText)}</span>`;
       } else if (c.key === 'approvalStatus') {
         // Coloured, unlike the neutral Rating chip beside it: this column exists to be SCANNED for
         // the amber ones. A record with no approval status renders the bare em-dash — a grey chip

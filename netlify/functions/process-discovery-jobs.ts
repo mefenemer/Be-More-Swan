@@ -26,7 +26,7 @@ import { scoreCandidates, type ScoreCandidate } from '../../src/lib/discovery-sc
 import { loadSenderIdentity } from '../../src/utils/sender-identity';
 import { search, isSearchConfigured, normaliseDomain, fetchSiteIdentity, SearchNotConfiguredError } from '../../src/lib/discovery-search';
 import { enrichLeadContact } from '../../src/lib/discovery-enrich';
-import { ENRICH_ELIGIBLE_SQL } from '../../src/config/lead-contact-state';
+import { ENRICH_ELIGIBLE_SQL, isPaidEnrichEligible } from '../../src/config/lead-contact-state';
 import { recordEnrichment } from '../../src/utils/lead-enrichment';
 import {
     isEnrichProviderConfigured, lookupProviderContact, ENRICH_COST_GBP_PER_LOOKUP,
@@ -164,7 +164,12 @@ const DEFAULT_GUARDRAILS: Guardrails = {
     // Matches db/discovery-enrichment-cap.sql's default. A campaign row predating that migration
     // reads NULL, and Number(null) is 0 — which would silently disable paid enrichment rather
     // than cap it — so loadGuardrails coalesces to this instead.
-    maxEnrichmentCallsPerRun: 25,
+    //
+    // ⚠️ RAISED 25 → 200 for §5 (db/discovery-enrichment-cap-raise.sql). At 25 the cap was the new
+    // gate: prod job 23 found 120 leads and made 9 paid lookups, because so little was eligible.
+    // With rating out of the rule, a 500-lead run where most are companies needs a few hundred, and
+    // 25 would have silently rationed it back to where it started. 200 × £0.008 ≈ £1.60 a run.
+    maxEnrichmentCallsPerRun: 200,
     maxTokensPerRun: DEFAULT_MAX_TOKENS_PER_RUN, maxCostGbpPerRun: 2.0,
     negativeKeywords: [], excludedDomains: [], requireHumanApproval: true,
 };
@@ -701,8 +706,9 @@ async function enrichBatch(db: Db, job: JobRow, guardrails: Guardrails, counters
     // to refuse to learn how to contact a real company.
     // ai_assistant_id is joined in (rather than fetched separately) purely so the ledger event can
     // be attributed to the assistant — this stage has the job, not the campaign row.
-    const batch = await db.execute<{ id: number; domain: string | null; assistant_record_id: number | null; ai_assistant_id: number }>(
-        `SELECT dl.id, dl.domain, dl.assistant_record_id, dc.ai_assistant_id
+    const batch = await db.execute<{ id: number; domain: string | null; assistant_record_id: number | null; ai_assistant_id: number; prospect_type: string | null }>(
+        `SELECT dl.id, dl.domain, dl.assistant_record_id, dc.ai_assistant_id,
+                dl.scoring_card ->> 'prospectType' AS prospect_type
            FROM discovered_leads dl
            JOIN discovery_campaigns dc ON dc.id = dl.campaign_id
          WHERE dl.campaign_id = ${job.campaign_id}
@@ -752,7 +758,14 @@ async function enrichBatch(db: Db, job: JobRow, guardrails: Guardrails, counters
     //
     // Costs nothing and does nothing unless DISCOVERY_ENRICH_PROVIDER names a configured
     // provider — the default. See src/lib/discovery-enrich-provider.ts.
-    const misses = scraped.filter((s) => !s.found.contact && s.lead.domain);
+    // ⚠️ TWO GATES, and this is the narrow one. The scrape above reads anything that might be a
+    // company, including leads with no prospect type — that costs seconds, and it might hand the
+    // user an address. Buying one costs money, and `paidLookupAt` is stamped on a MISS too, so it
+    // counts money SPENT rather than addresses found. An unclassified lead is either legacy or
+    // unscored (§4.2); paying for one is a blank cheque against a lead nobody has judged.
+    // See PAID_ENRICH_ELIGIBLE_SQL in src/config/lead-contact-state.ts.
+    const misses = scraped.filter((s) =>
+        !s.found.contact && s.lead.domain && isPaidEnrichEligible({ prospectType: s.lead.prospect_type }));
     if (misses.length > 0 && isEnrichProviderConfigured()) {
         // What this RUN has already spent. Counted from the `paidLookupAt` stamp rather than a
         // job column, mirroring `enrichAttemptedAt`, and stamped on a MISS too so the cap counts

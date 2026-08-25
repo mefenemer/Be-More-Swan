@@ -1,6 +1,6 @@
 # Lead Generator — completeness plan
 
-**Status:** 2026-08-25. §2, §3 and §4 are BUILT. §5 and §6 are not.
+**Status:** 2026-08-25. **§2–§6 are all BUILT.** ⚠️ §5 needs `db/discovery-enrichment-cap-raise.sql` applied to staging AND prod — the code alone leaves every existing campaign capped at 25.
 **Supersedes nothing.** Extends `docs/lead-generator-discovery-plan.md` (the discovery engine) and
 `docs/lead-triage-review-split-plan.md` (the tabs). Cite sections from code as
 `docs/lead-generator-completeness-plan.md §N`.
@@ -334,67 +334,80 @@ lead the scorer never reached, and it is exactly the shape that let 132 blanks p
 - ⚠️ No second em-dash in that clause: the lead-in already uses one and the clauses are
   comma-joined, so a dash inside a clause reads as a nested aside.
 
-## §5 Contact details for every company
+## §5 Contact details for every company — BUILT 2026-08-25
 
-### §5.1 The principle, and the one distinction that matters
+### §5.1 Rating is out of the rule entirely
 
 > Emails should be found for all leads irrespective of cold or not, as the user can then determine
 > themselves whether to contact a cold lead. This is not for us to decide.
 
 Agreed for **cold**. Not agreed for **not-a-company**: an aggregator, a news article or a Wikipedia
-page has nobody to email, and a paid lookup against one is spend with no possible return.
+page has nobody to email. So rating drops out and prospect type is the whole of the rule.
 
-⚠️ Conflating those two is the original defect. `rating = cold` was used as a proxy for "not worth
-contacting", and it silently included 89 companies the scorer had itself classified as
-`target_business`.
+⚠️ Conflating those two was the original defect. `rating = cold` stood in for "not worth
+contacting" and silently included 89 companies the scorer had itself classified `target_business`.
 
-### §5.2 The target rule
+### §5.2 TWO gates, because one is free and the other is not
 
-| Lead | Free scrape | Paid lookup |
+| | Who | Why |
 |---|---|---|
-| Any rating, `prospectType = target_business` | yes | yes |
-| Any rating, `prospectType` absent | yes | yes — after §4 it means unscored, not dubious |
-| `supplier_to_target`, `aggregator`, `media`, `content_page`, `platform` | no | no |
+| `ENRICH_ELIGIBLE_SQL` | Everything except the five disqualifying prospect types — **including leads with no type at all** | Reading a site costs seconds and might hand the user an address |
+| `PAID_ENRICH_ELIGIBLE_SQL` | Confirmed `target_business` only | Buying costs money, and `paidLookupAt` is stamped on a MISS too — it counts money SPENT |
 
-This widens `ENRICH_ELIGIBLE_SQL` (`src/config/lead-contact-state.ts`) — currently
-`rating IN ('hot','warm') OR prospectType = 'target_business'`, itself a widening made 2026-08-25 —
-to *every company, regardless of rating*. It remains the single definition, mirrored by the
-Searches aggregate, the Contact column and the "Look again" gate.
+An unclassified lead is either legacy (scored before the type gate shipped 2026-08-12) or unscored
+(§4.2). Scraping one is free; **paying** for one is a blank cheque against a lead nobody has judged.
 
-### §5.3 What this costs, and why §2 is a prerequisite
+⚠️ `ENRICH_ELIGIBLE_SQL` is generated from `PROSPECT_TYPES`, so a new disqualifying type reaches the
+rule on the next deploy with no second edit to forget.
 
-- **Money.** ~£0.008 per paid lookup. A 500-lead run where most are companies is roughly **£4**
-  worst case, against ~£0.20 today. `maxEnrichmentCallsPerRun` (default **25**) must rise or it
-  becomes the new gate — on prod job 23 it never bound, because so little was eligible.
-- **Time.** `LEAD_BUDGET_MS = 6000` per lead, five per slice. 500 leads is 100 enrichment slices —
-  roughly **17 minutes** of consecutive work. That exceeds the looper's 12-minute `BUDGET_MS`, so
-  it needs one hand-off. ✅ **§2.2 is built**, so this is no longer a blocker; a 500-lead run costs
-  two links of a four-link chain.
+⚠️ **The on-demand path deliberately differs.** `enrichOneLead` (Look again / Send back for
+enrichment) has no prospect-type gate on the paid tier: it is one lead, chosen by a human who
+pressed a button on it. Refusing because the scorer never classified it would be the pipeline
+overruling the user on the one lead they actually asked about. The refusal that does apply is
+`look_again`'s, which turns down the types no address can help.
 
-**Acceptance.** Every company a run finds has either an address or a recorded attempt that found
-none. "Not attempted" ceases to exist for companies.
+### §5.3 The cap had to move or it became the new gate
 
----
+`maxEnrichmentCallsPerRun` **25 → 200**. At 25, §5 would have done almost nothing — prod job 23
+found 120 leads and made **nine** paid lookups, because so little was eligible. 200 × £0.008 ≈
+**£1.60** a run, against ~£0.20 today. A ceiling, not a target: the waterfall only pays for what the
+free scrape missed, which has been about one in three.
 
-## §6 The nightly sweep goes back to being about staleness
+⚠️ **`db/discovery-enrichment-cap-raise.sql` MUST be applied — the schema default alone is not
+enough.** A column default reaches only rows inserted after it, and every existing campaign holds a
+literal 25. Without the UPDATE the change reaches new campaigns and silently rations every campaign
+a customer already has — exactly the population it was built for. The UPDATE is guarded on the old
+value, so it is re-runnable and does not overwrite a hand-tuned campaign.
 
-`netlify/functions/lead-enrichment-sweep.ts` currently serves two jobs: re-reading leads whose
-intel has aged (legitimate), and rescuing leads the original run should have handled (a symptom of
-§3–§5). Once a run completes properly, only the first remains.
+### §5.4 The surfaces, again
 
-**State today:** `LEAD_ENRICH_SWEEP_ENABLED` is unset on **production and staging**, so despite
-being scheduled at 05:30 daily since 2026-08-15 it has **never run anywhere**. Its first execution
-will be its first ever, across every tenant at once.
+§5 changed a state §4.2 had introduced one commit earlier, and both moves were right at the time:
 
-**Actions:**
-1. Do not enable it as a fix for §3–§5. It is 25 leads per run across all tenants — a trickle, not
-   a backfill, and it cannot make a run complete.
-2. When it is enabled, exercise it on staging first through `run-lead-sweeps.ts` with
-   `LEAD_ENRICH_SWEEP_MAX_LEADS` small, and read the cost of one run before prod sees it.
-3. ⚠️ It is **operator-wide, not per-tenant**. Enabling it for one customer enables it for all.
-4. Re-scope its documentation to staleness once §5 lands, so nobody reintroduces the rescue role.
+- **The `unscored` CONTACT chip is gone.** Under §4.2 an unscored lead got no lookup, so the column
+  had to explain why. Under §5 it *is* read like any other possible company, so a "no lookup" chip
+  would be a lie in the other direction.
+- **The unscored fact moved to the RATING column**, which is where it always belonged. Its status is
+  NULL, and `cellValue` would render an em-dash — indistinguishable from a rating that had not
+  loaded. It now reads **"Not scored"** with a tooltip that denies the cold verdict outright.
+- **The aggregate clause narrowed back.** `notAttempted` now has exactly one cause again, so it says
+  "N were not companies you could sell to, so were never checked" — no hedge needed.
 
----
+## §6 The nightly sweep is about staleness — DONE 2026-08-25
+
+Re-scoped in `lead-enrichment-sweep.ts` itself, where someone about to enable it will read it.
+
+**What it is not, in the file:** a rescue for an unfinished run, and it must never be enabled as
+one. That was a real role it quietly played while a run could report "complete" having scored only
+some of its leads and looked up a fifth of them. §3, §4.2 and §5 fix that at the source.
+
+**The tell, written into the candidate-ordering comment:** the "never enriched at all" cohort should
+be nearly **empty** for any lead found after 2026-08-25, because the run reads every company's site
+itself. A large one is evidence a run is failing to finish — check the run before turning this on.
+
+⚠️ Unchanged and still true: `LEAD_ENRICH_SWEEP_ENABLED` is unset on production and staging, so it
+has **never run anywhere**; `MAX_LEADS` is 25 per run **across all tenants**; and it is
+operator-wide — enabling it for one customer enables it for every one. Exercise it on staging via
+`run-lead-sweeps.ts` with a small `LEAD_ENRICH_SWEEP_MAX_LEADS` and read the cost of one run first.
 
 ## §7 The support-load test
 
@@ -427,11 +440,11 @@ several customers hold daily schedules? Prod was re-provisioned 2026-07-11 after
 set the ten-minute cadence, and this has not been load-tested at multi-tenant scale.
 **Owner: operator.**
 
-### §8.2 Per-run enrichment budget
-What spend per run, per customer, is acceptable? §5 needs a number for
-`maxEnrichmentCallsPerRun`, and it should be a plan-tier property rather than a constant.
-⚠️ Discovery spend caps are operator-only by existing policy, never a user-facing setting.
-**Owner: commercial.**
+### §8.2 Per-run enrichment budget — DECIDED
+Raised to **200** (≈ £1.60 a run at £0.008 a lookup). ⚠️ Still a flat constant, not a plan-tier
+property — a customer on the entry tier and one on the top tier get the same ceiling. Making it
+tier-aware is the follow-up, and it stays operator-only by existing policy, never a user-facing
+setting. **Owner: commercial.**
 
 ### §8.3 Discoverability of chat-authored searches
 Not a code change to the engine. The assistant already writes and saves searches from chat; the
@@ -449,8 +462,8 @@ Not a code change to the engine. The assistant already writes and saves searches
 | §3 completion gate | §2.1 | ✅ **BUILT.** Stop reason + coverage now reach the user |
 | §4.2 scoring guarantee | §4.1 | ✅ **BUILT.** Blank batches are halved and re-scored; survivors are marked, never cold |
 | §2.2 budget hand-off | — | ✅ **BUILT.** A run of any length now completes in one chain |
-| §5 contact for all companies | §8.2 | Needs the throughput, and needs §4.2 so "unclassified" means unscored rather than unknown |
-| §6 sweep re-scoped | §3, §5 | Only safe to demote once runs are complete |
+| §5 contact for all companies | — | ✅ **BUILT.** Rating out of the rule; two gates, free and paid |
+| §6 sweep re-scoped | §3, §5 | ✅ **DONE.** Re-scoped in the file itself |
 
 ⚠️ §5 before §2 makes runs *slower*, not better — 100 enrichment slices at ten minutes each. The
 ordering is not a preference.
