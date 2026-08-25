@@ -22,6 +22,18 @@
 -- Idempotent and re-runnable: the UPDATE is guarded on the OLD value, so a second run is a no-op
 -- and an operator who has since tuned a campaign by hand does not have their number overwritten.
 
+-- ⚠️ ORDER-INDEPENDENT ON PURPOSE. The runner applies db/*.sql ALPHABETICALLY, and
+-- "discovery-enrichment-cap-raise.sql" sorts BEFORE "discovery-enrichment-cap.sql" — hyphen (0x2D)
+-- precedes dot (0x2E). So on any database where the original cap migration has not run, this file
+-- would execute FIRST and die on a column that does not exist yet, taking the rest of the batch
+-- with it. As of 2026-08-25 the staging ledger lists discovery-enrichment-cap.sql as pending, and
+-- that ledger has been wrong in both directions before — so this must not depend on it either way.
+--
+-- ADD COLUMN IF NOT EXISTS is a no-op when the column is already there, and creates it correctly
+-- when it is not. The SET DEFAULT below then applies whichever branch was taken.
+ALTER TABLE discovery_guardrails
+    ADD COLUMN IF NOT EXISTS max_enrichment_calls_per_run integer NOT NULL DEFAULT 200;
+
 ALTER TABLE discovery_guardrails
     ALTER COLUMN max_enrichment_calls_per_run SET DEFAULT 200;
 
