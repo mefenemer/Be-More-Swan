@@ -1,6 +1,6 @@
 # Lead Generator — completeness plan
 
-**Status:** 2026-08-25. §2 (both halves) and §4.1 are BUILT (uncommitted). §3, §4.2, §5, §6 are not.
+**Status:** 2026-08-25. §2 (both halves), §3 and §4.1 are BUILT. §4.2, §5, §6 are not.
 **Supersedes nothing.** Extends `docs/lead-generator-discovery-plan.md` (the discovery engine) and
 `docs/lead-triage-review-split-plan.md` (the tabs). Cite sections from code as
 `docs/lead-generator-completeness-plan.md §N`.
@@ -174,33 +174,96 @@ than trickling. That is a burst to watch, not a new class of load.
 **Acceptance.** A scheduled run and a hand-started run of the same search take the same time. No
 run falls back to the cron partway through.
 
-## §3 "Complete" means complete
+## §3 "Complete" means complete — BUILT 2026-08-25
 
-**The change.** A run does not notify until every stage has finished for every lead it found, and
-the notification states what the run actually covered.
+### §3.1 Item 1 was already satisfied
 
-**What exists already.** The worker computes `StopReason`
-(`plan_complete | lead_cap | search_cap | cost_cap | token_cap | month_cap`) and a `Coverage`
-record (`queriesRun`, `resolved`, `inserted`) on the cursor. Both were built because *"a 175-lead
-sample of ~4,500 schools presented itself as a finished search"* — the same complaint this plan
-answers. The evidence is computed and then not used by the notification.
+The plan said `publishSignals` should "gate on all stages terminal". It already did: line 791 is the
+**only** `status: 'completed'` write in the worker, it is gated on `remaining === 0`, and it is the
+same statement that fires the notification. `finishJob` is only ever called with `'failed'`. No
+notification could precede a terminal stage. Recorded rather than deleted — the plan overstated the
+defect, and the next reader should not go looking for it.
 
-**What to build.**
-1. `publishSignals` gates on all stages terminal, not just enrichment of the eligible subset.
-2. The notification carries the stop reason and the coverage numbers in the user's words: what was
-   searched, what was found, what was contactable, and — if a cap stopped it — which cap, and what
-   starting it again would do.
-3. A capped run is reported as **capped, not complete**. Those are different outcomes and the user
-   must be able to tell them apart without asking anyone.
+### §3.2 The evidence now reaches the user
 
-⚠️ `search_signals_published` returns early when `leadsFound === 0`, so a run that found nothing
-notifies nobody. That is a silent outcome the user asked a question about; a zero-result run needs
-to say so, with the coverage that explains it.
+`stopReason` and `Coverage` were computed slice by slice, persisted on `discovery_jobs.cursor`, and
+read by nothing. They now render into the notification through
+`src/config/discovery-run-summary.ts` — a pure module, so the copy is testable directly and has one
+definition.
 
-**Acceptance.** No notification can be followed by further automatic work on that run. A user
-reading the notification can answer "did it see my whole market?" without opening a tab.
+Three merge variables **added** to `search_signals_published`:
 
----
+| Variable | Carries |
+|---|---|
+| `search.ending` | "finished running" vs **"stopped early"** |
+| `search.coverage` | searches run of those planned, results read, and what the newness rate means |
+| `search.outcome` | what happened and the next action, branched on the stop reason |
+
+⚠️ **Added, never renamed** — renaming a merge variable blanks every tenant override that used the
+old key. `search.name` and `search.companies` keep their keys.
+
+**A capped run no longer reads as a finished one.** The old message said "Approve the ones worth
+pursuing" whether the run had worked its whole plan or stopped at a cap with the market half-read.
+Each cap now quotes its **own** number — a `search_cap` run says "your limit of 15 searches", never
+the lead cap, because quoting the wrong one sends the user to change the wrong setting.
+
+**`remaining` is derived, not stored.** The cursor already holds the plan (`flat`) and the position
+(`queryIndex`); a second persisted copy is a number that can disagree with the plan it describes.
+
+### §3.3 A zero-result run notifies, instead of saying nothing
+
+⚠️ `publishSignals` returned early on `leadsFound === 0`. A user who started a search and waited was
+told **nothing** — silence reads as "still running" or "broken", and it is the cheapest support
+message this product can generate. A search that found nothing is a result.
+
+The copy distinguishes the two zero cases, which have opposite meanings: a run that worked its whole
+plan and matched nothing is evidence the description is too narrow; a run that stopped at a cap
+having found nothing is **not a verdict on the market** and must not blame the description.
+
+### §3.4 The copy collisions the tests caught
+
+- The newness reading said "companies", beside a lead count that could read "found no companies" —
+  nothing matched, yet we had "already found" most of them. Both true of different things
+  (domains resolved vs leads qualified), which is precisely the sentence a user brings to support.
+  It says **"sites"** now.
+- The zero-result outcome repeated "worked through every search it planned", which
+  `coverageSentence()` had just said in the same paragraph.
+- The Searches tab named itself in the template copy, and the call to action moved into
+  `search.outcome`. The invariant moved with it: **every branch** of `outcomeSentence()` names the
+  tab, enforced across the whole cross-product in `tests/discovery-run-summary.test.ts`.
+
+### §3.5 The finished-run sentence — FIXED 2026-08-25
+
+The old copy — preserved verbatim through the first pass of §3, so this was never a regression —
+had three errors in nine words, in the one notification a user definitely reads:
+
+> Approve the ones worth pursuing on the Searches tab and they become leads.
+
+Against `leadGeneratorSurfaces()` in `chat-orchestrator.ts`, which the assistant is held to:
+
+1. **"they become leads"** — every company is already a lead the moment it is scored, whatever it
+   scored. The prompt says outright: never tell a user their results are waiting to *become* leads.
+   The notification was contradicting the assistant that sent it.
+2. **"Approve"** — the button is **"Move to Outreach"**. Approving is a separate act on the Outreach
+   tab, and it SENDS; telling a user a lead is approved would have them believe an email is on its
+   way.
+3. **"on the Searches tab"** — leads live on the **Enrichment** tab; the Searches results view is
+   read-only.
+
+Now:
+
+> They are already in your Enrichment tab — open it and move the ones worth pursuing to Outreach.
+
+**The invariant widened rather than loosened.** "Every branch names the Searches tab" became "every
+branch names a REAL tab, and the RIGHT one for that outcome" — a finished run goes to Enrichment
+where the leads are; a capped or empty one goes to Searches where Start and Edit are. ⚠️ Naming the
+wrong tab is worse than naming none: the user goes where the thing is not, and the notification has
+spent its one chance.
+
+`NAMED_TABS` is checked against the `label:` values in `assistant-dashboard-registry.js`, so
+renaming a tab fails CI — the same coupling `tests/lead-prompt-surfaces.test.ts` already defends for
+the assistant's own prompt. All three errors are pinned individually, because each reads as natural
+English and would otherwise come straight back.
 
 ## §4 Every lead is scored, and the score is real
 
@@ -355,7 +418,7 @@ Not a code change to the engine. The assistant already writes and saves searches
 |---|---|---|
 | §2.1 dispatcher poke | — | ✅ **BUILT.** Scheduled runs now start like hand-started ones |
 | §4.1 scoring ceiling | — | ✅ **BUILT.** Independent of everything else |
-| §3 completion gate | §2.1 | "Complete" is meaningless while a scheduled run idles for hours |
+| §3 completion gate | §2.1 | ✅ **BUILT.** Stop reason + coverage now reach the user |
 | §4.2 scoring guarantee | §4.1 | Turns an unlikely failure into an impossible one |
 | §2.2 budget hand-off | — | ✅ **BUILT.** A run of any length now completes in one chain |
 | §5 contact for all companies | §4.2, §8.2 | Needs the throughput, and needs §4.2 so "unclassified" means unscored rather than unknown |

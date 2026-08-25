@@ -37,6 +37,10 @@ import { enqueueScenarioTrigger } from '../../src/utils/scenario-engine';
 import { recordEvent } from '../../src/utils/revenue-ledger';
 import { getBlueprintVersion } from '../../src/utils/blueprint-version';
 import { getIcpSnapshot } from '../../src/utils/icp-snapshot';
+import {
+    companiesPhrase, coverageSentence, outcomeSentence, isComplete,
+    type RunStopReason,
+} from '../../src/config/discovery-run-summary';
 import { createNotification } from '../../src/utils/notify';
 import { savedSearchLabel } from '../../src/config/signal-sources';
 // ⚠️ Shared with the brief-approval planner so the two cannot disagree about what a run can read.
@@ -814,11 +818,14 @@ async function publishSignals(db: Db, job: JobRow): Promise<void> {
         const claimed = await db.update(discoveryJobs)
             .set({ signalsPublishedAt: new Date() })
             .where(and(eq(discoveryJobs.id, job.id), isNull(discoveryJobs.signalsPublishedAt)))
-            .returning({ id: discoveryJobs.id, leadsFound: discoveryJobs.leadsFound });
+            .returning({ id: discoveryJobs.id, leadsFound: discoveryJobs.leadsFound, cursor: discoveryJobs.cursor });
         if (claimed.length === 0) return; // already published by an earlier tick
 
         const found = claimed[0].leadsFound ?? 0;
-        if (found === 0) return; // nothing to tell them about
+        // ⚠️ A ZERO-LEAD RUN USED TO NOTIFY NOBODY — `if (found === 0) return`. The user started a
+        // search and waited; silence reads as "still running" or "broken", and it is the single
+        // cheapest support message this product can generate. A search that found nothing is a
+        // RESULT, and the coverage sentence below is what makes it an actionable one.
 
         const [campaign] = await db
             .select({
@@ -835,6 +842,26 @@ async function publishSignals(db: Db, job: JobRow): Promise<void> {
         const [assistant] = await db.select({ name: aiAssistants.name })
             .from(aiAssistants).where(eq(aiAssistants.id, campaign.aiAssistantId)).limit(1);
 
+        // ── The evidence this run already collected, finally said out loud ──────────────────────
+        //
+        // Both were computed slice by slice, persisted on `cursor`, and read by NOTHING. The
+        // stopReason exists because "a 175-lead sample of ~4,500 schools presented itself as a
+        // finished search"; the coverage answers "did it see my market?". Neither reached the one
+        // place a user actually looks.
+        //
+        // ⚠️ `remaining` is derived here rather than stored: the cursor already knows the plan
+        // (`flat`) and how far it got (`queryIndex`), and a second persisted copy is a number that
+        // can disagree with the plan it describes.
+        const cursor = (claimed[0].cursor ?? {}) as Partial<Cursor>;
+        const planned = Array.isArray(cursor.flat) ? cursor.flat.length : 0;
+        const coverage = cursor.coverage
+            ? { ...cursor.coverage, remaining: Math.max(0, planned - (cursor.queryIndex ?? 0)) }
+            : null;
+        const stopReason = (cursor.stopReason ?? null) as RunStopReason | null;
+        // Quoted back to the user in the cap sentences — "your limit of 50 leads" is actionable
+        // where "a limit" is not.
+        const caps = await loadGuardrails(db, job.campaign_id);
+
         await createNotification(db, 'search_signals_published', {
             userId: campaign.createdBy,
             context: {
@@ -843,7 +870,11 @@ async function publishSignals(db: Db, job: JobRow): Promise<void> {
                     name: savedSearchLabel(campaign.name, campaign.idea),
                     // Pluralisation lives at the call site by convention — the merge engine has no
                     // plural rules (see notification-templates-catalog.ts).
-                    companies: found === 1 ? '1 company' : `${found} companies`,
+                    companies: companiesPhrase(found),
+                    // "finished" vs "stopped early" — the word the whole message turns on.
+                    ending: isComplete(stopReason) ? 'finished running' : 'stopped early',
+                    coverage: coverageSentence(coverage),
+                    outcome: outcomeSentence(stopReason, found, caps),
                 },
             },
             metadata: { assistantId: campaign.aiAssistantId, campaignId: job.campaign_id, jobId: job.id },

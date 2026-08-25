@@ -301,7 +301,14 @@ check('the notification template exists with the variables the call site supplie
     const copy = body.split('\n').filter((l) => /^\s*(title|message):/.test(l)).join('\n');
     assert.ok(copy.includes('title:') && copy.includes('message:'), 'found both copy lines');
     assert.ok(!/signal/i.test(copy), 'user-facing copy must not use the word "signal"');
-    assert.ok(copy.includes('Searches'), 'copy must name the tab by its user-facing label');
+    // ⚠️ CHANGED 2026-08-25 (§3). The call to action moved OUT of this copy and into
+    // {{search.outcome}}, because it differs by how the run ended — "approve the ones worth
+    // pursuing" is wrong advice for a run that found nothing or stopped at a cap. The invariant is
+    // unchanged and still enforced: EVERY branch of outcomeSentence() names the Searches tab, and
+    // tests/discovery-run-summary.test.ts checks each one. What this line now defends is that the
+    // template still DELEGATES to it — copy that dropped the variable would name no tab at all.
+    assert.ok(copy.includes('Searches') || copy.includes('{{search.outcome}}'),
+        'copy must name the Searches tab, or carry {{search.outcome}} which always does');
 });
 
 // ── 7. Wire contract ─────────────────────────────────────────────────────────

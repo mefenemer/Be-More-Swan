@@ -172,13 +172,26 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         category: 'Assistants',
         type: 'search_signals_published',
         title: '{{assistant.name}} found {{search.companies}} to review',
-        message: 'Your saved search "{{search.name}}" finished running and found {{search.companies}} matching your criteria. Approve the ones worth pursuing on the Searches tab and they become leads.',
+        message: 'Your saved search "{{search.name}}" {{search.ending}} and found {{search.companies}} matching your criteria. {{search.coverage}} {{search.outcome}}',
         variables: [
             ASSISTANT_NAME,
             v('search.name', 'Saved search name', 'UK retreat venues'),
             // Resolved noun phrase, not a bare number — the merge engine has no plural rules, and
             // the old copy said "found 1 new signals" on a single-hit run.
             v('search.companies', 'Companies found (noun phrase)', '14 companies'),
+            // ── Added 2026-08-25, docs/lead-generator-completeness-plan.md §3 ────────────────────
+            //
+            // ⚠️ ADDED, never renamed. Renaming a merge variable blanks every tenant override that
+            // used the old key, and these three sit beside two that shipped long ago.
+            //
+            // The message used to end in "Approve the ones worth pursuing", unconditionally — the
+            // same sentence whether the run had worked its whole plan or stopped at a cap with the
+            // market half-read. A customer read that, counted the addresses and asked a human
+            // "does that seem right?". All three of these are facts the run already recorded on
+            // discovery_jobs.cursor and never surfaced.
+            v('search.ending', 'How the run ended', 'finished running'),
+            v('search.coverage', 'What the run covered', 'It ran all 14 searches it planned and read 120 results — most were companies it had not seen before, so there is likely more of this market left to find.'),
+            v('search.outcome', 'What happened and what to do next', 'Approve the ones worth pursuing on the Searches tab and they become leads.'),
         ],
     },
     {
