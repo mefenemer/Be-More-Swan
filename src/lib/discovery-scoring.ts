@@ -41,6 +41,16 @@ function senderPhrase(sender: SenderIdentity): string {
 }
 export const SCORING_MODEL = 'claude-haiku-4-5-20251001';
 
+/**
+ * How many times a blank batch may be halved and re-scored.
+ *
+ * ⚠️ Bounded because each level costs another model call per half, inside a worker slice that is
+ * already the slowest thing in a run. Three levels takes a ten-candidate page down to batches of
+ * one or two, which is where a token ceiling can no longer be the cause — past that, retrying is
+ * paying to be told the same thing.
+ */
+const MAX_RESCORE_DEPTH = 3;
+
 export interface ScoreCandidate {
     companyName: string;
     domain?: string | null;
@@ -75,6 +85,19 @@ export interface LeadScoringCard {
      * the model's, not ours. Lives in the `scoring_card` jsonb, so no migration.
      */
     prospectType?: ProspectType | null;
+    /**
+     * TRUE when the model never judged this candidate — the reply did not parse, or was cut off
+     * before reaching it — and the card below is a placeholder, not a verdict.
+     *
+     * ⚠️ THE WHOLE POINT. A blank card is score 0, no reasons, no prospectType, and a rating that
+     * falls through to 'cold'. That is indistinguishable from a lead the scorer looked at and
+     * rejected, so 132 of one tenant's 500 leads (26%) sat in the Leads tab as verdicts nobody had
+     * made. An unscored lead is not a cold lead, and every surface that reads a rating has to be
+     * able to tell.
+     *
+     * Lives in the `scoring_card` jsonb, so no migration.
+     */
+    scoringFailed?: boolean;
 }
 
 export interface ScoreResult {
@@ -87,6 +110,41 @@ function str(v: unknown, max = 300): string | null {
     return typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null;
 }
 
+
+/**
+ * Did the model actually judge this candidate, or is this the fallback shape?
+ *
+ * Keyed on the ABSENCE of everything a real verdict carries, rather than on score 0 alone: a
+ * genuine 0 is possible in principle, and a lead the scorer rejected always says why. Requiring
+ * all three (no reasons, no prospect type, no score) is what keeps a real cold verdict out.
+ */
+export function isBlankCard(card: LeadScoringCard): boolean {
+    return card.score === 0
+        && card.reasons.length === 0
+        && !card.prospectType
+        && !card.excludedBy
+        && !card.doNotContact;
+}
+
+/**
+ * The card an unscored candidate carries into the Leads tab.
+ *
+ * ⚠️ It is PROMOTED, not dropped. "Never promote an unscored lead as cold" does not mean hide it —
+ * a lead quietly withheld is the same silence in a different place, and the user cannot act on
+ * what they cannot see. It goes in saying plainly that nothing has judged it.
+ *
+ * ⚠️ `rating` stays 'cold' on the CARD because the type's union has no room for absence, but the
+ * worker writes NULL to `discovered_leads.rating` for these — see the promote path. Unrated is an
+ * existing, supported state; cold is a verdict.
+ */
+export function unscoredCard(companyName: string): LeadScoringCard {
+    return {
+        ...normaliseLeadCard(undefined, companyName),
+        scoringFailed: true,
+        reasons: ['This company could not be scored automatically — the scoring step did not return a verdict for it. It has NOT been judged a poor fit. Run the search again to score it.'],
+        suggestedNextStep: 'Run the search again so this company can be scored.',
+    };
+}
 
 /** Coerce whatever the LLM returned into a safe lead_scoring_card. */
 export function normaliseLeadCard(raw: unknown, fallbackName: string): LeadScoringCard {
@@ -315,6 +373,8 @@ export async function scoreCandidates(
     candidates: ScoreCandidate[],
     icp: Record<string, unknown>,
     sender: SenderIdentity,
+    /** Recursion depth for the blank-card retry below. Callers never pass this. */
+    depth = 0,
 ): Promise<ScoreResult> {
     if (candidates.length === 0) return { cards: [], inputTokens: 0, outputTokens: 0 };
 
@@ -399,6 +459,38 @@ ${OUTREACH_SUBJECT_RULES}`;
     }
 
     const cards = candidates.map((c, i) => normaliseLeadCard(parsed[i], c.companyName));
+
+    // ── RETRY THE ONES THAT CAME BACK BLANK ─────────────────────────────────────────────────────
+    //
+    // ⚠️ A raised ceiling makes truncation unlikely, not impossible. A longer prompt, a bigger
+    // page, or a model that writes more per lead all bring it back, and the failure is SILENT —
+    // `parseModelJsonArray` returns null rather than a partial list (correctly), so one cut-off
+    // reply blanks every candidate in the batch at once. That cost one tenant 26% of its leads.
+    //
+    // Halving is the whole mechanism: the batch that failed is retried as two smaller batches, so
+    // the retry cannot fail the same way — the identical prompt over fewer candidates needs
+    // strictly fewer output tokens. Recursion bottoms out at a single candidate, which is the
+    // smallest request this prompt can make; if THAT still comes back blank the cause is not the
+    // ceiling and no further splitting will help.
+    const blanks = cards.map((c, i) => ({ c, i })).filter(({ c }) => isBlankCard(c));
+    if (blanks.length > 0 && candidates.length > 1 && depth < MAX_RESCORE_DEPTH) {
+        console.warn(`[discovery-scoring] ${blanks.length}/${candidates.length} came back blank — re-scoring in smaller batches (depth ${depth + 1}/${MAX_RESCORE_DEPTH})`);
+        const half = Math.ceil(blanks.length / 2);
+        for (const group of [blanks.slice(0, half), blanks.slice(half)]) {
+            if (group.length === 0) continue;
+            const retry = await scoreCandidates(group.map(({ i }) => candidates[i]), icp, sender, depth + 1);
+            inputTokens += retry.inputTokens;
+            outputTokens += retry.outputTokens;
+            group.forEach(({ i }, k) => { cards[i] = retry.cards[k]; });
+        }
+    }
+
+    // Whatever is STILL blank was never judged. Say so on the card rather than letting a
+    // placeholder pass for a cold verdict.
+    for (let i = 0; i < cards.length; i++) {
+        if (isBlankCard(cards[i])) cards[i] = unscoredCard(candidates[i].companyName);
+    }
+
     return { cards, inputTokens, outputTokens };
 }
 

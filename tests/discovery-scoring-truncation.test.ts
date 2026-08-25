@@ -28,7 +28,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { normaliseLeadCard } from '../src/lib/discovery-scoring';
+import { isBlankCard, normaliseLeadCard, unscoredCard } from '../src/lib/discovery-scoring';
 import { parseModelJsonArray } from '../src/utils/model-json';
 
 let passed = 0;
@@ -53,6 +53,38 @@ check('an absent entry produces EXACTLY the shape the prod data showed', () => {
     assert.equal(card.leadName, 'Acme Primary School', 'the fallback name is all that survives');
 });
 
+check('the blank shape is detectable, and a real cold verdict is not mistaken for it', () => {
+    // ⚠️ Keyed on the ABSENCE of everything a verdict carries, not on score 0 alone. A lead the
+    // scorer rejected always says why, so requiring no reasons AND no prospect type is what keeps
+    // a genuine cold verdict out of the retry path.
+    assert.ok(isBlankCard(normaliseLeadCard(undefined, 'Acme')), 'the fallback card must be detectable');
+    assert.ok(isBlankCard(normaliseLeadCard({}, 'Acme')), 'an empty object is the same failure');
+
+    // A real verdict: scored 0 but with reasons and a classification. Must NOT be retried or
+    // relabelled — retrying it pays twice for the same answer, and relabelling it erases a verdict.
+    const realVerdict = normaliseLeadCard(
+        { leadName: 'Acme', score: 0, rating: 'cold', reasons: ['Outside the target industries'], prospectType: 'aggregator' },
+        'Acme',
+    );
+    assert.ok(!isBlankCard(realVerdict), 'a scored, reasoned, classified cold lead is a VERDICT, not a blank');
+    // Reasons alone are enough to mark it judged.
+    assert.ok(!isBlankCard(normaliseLeadCard({ score: 0, reasons: ['No trading signals found'] }, 'Acme')));
+});
+
+check('an unscored lead says so, and does not pass for a rejection', () => {
+    const card = unscoredCard('Acme Primary School');
+    assert.equal(card.scoringFailed, true, 'the marker is what every surface reads');
+    assert.equal(card.leadName, 'Acme Primary School');
+    assert.ok(card.reasons.length > 0, 'a blank reasons array is what made these invisible');
+    // ⚠️ The reason must deny the rejection outright. "No reasons given" beside a cold rating reads
+    // as a terse verdict; this has to say that no verdict exists.
+    assert.match(card.reasons[0], /could not be scored/i);
+    assert.match(card.reasons[0], /NOT been judged/i, 'it must deny being a poor-fit verdict, not just omit one');
+    assert.match(card.suggestedNextStep, /again/i, 'an unscored lead needs a next action, or it is just a dead end');
+    // Still detectably blank-shaped underneath — the marker is additive, not a disguise.
+    assert.equal(card.score, 0);
+});
+
 check('a blank card is NOT enrichment-eligible, so the loss compounds', () => {
     // Not a separate bug — the reason an unscored lead is worse than a wasted API call. It is
     // filed as cold with no prospect type, which is precisely the pair ENRICH_ELIGIBLE_SQL
@@ -72,6 +104,42 @@ check('parseModelJsonArray returns null for an array cut off mid-string', () => 
     assert.equal(parseModelJsonArray(truncated), null, 'a partial list must never be returned');
     // The complete case still parses, or the whole pipeline is broken.
     assert.deepEqual(parseModelJsonArray('[{"leadName":"A"}]'), [{ leadName: 'A' }]);
+});
+
+console.log('\n──── the retry: a blank batch is halved, not accepted ────');
+
+check('scoreCandidates halves and re-scores rather than filing blanks', () => {
+    const fn = SCORING.slice(SCORING.indexOf('export async function scoreCandidates'));
+    // Halving is the mechanism: the SAME prompt over fewer candidates needs strictly fewer output
+    // tokens, so the retry cannot fail the way the original did. A plain re-issue of the identical
+    // batch would just truncate again at the same point, which is a retry that cannot work.
+    assert.ok(/blanks\.slice\(0, half\)/.test(fn) && /Math\.ceil\(blanks\.length \/ 2\)/.test(fn),
+        'the retry no longer SPLITS the batch — re-issuing the same batch reproduces the same truncation');
+    assert.ok(/depth \+ 1/.test(fn), 'the recursion no longer deepens, so the ceiling can never be reached');
+    assert.ok(/candidates\.length > 1/.test(fn),
+        'a single candidate must not recurse — it is the smallest request this prompt can make');
+    assert.ok(/MAX_RESCORE_DEPTH/.test(SCORING), 'the recursion is unbounded — each level costs a model call per half');
+    // Token accounting has to survive the recursion or a retried run under-reports its spend
+    // against the cost guardrails.
+    assert.ok(/inputTokens \+= retry\.inputTokens/.test(fn) && /outputTokens \+= retry\.outputTokens/.test(fn),
+        'retry tokens are not accumulated — the run would under-report spend against its cost cap');
+    // And the results must land back on the ORIGINAL indices; the caller aligns cards to
+    // candidates by position, so a misplaced retry stamps one company's verdict onto another.
+    assert.ok(/cards\[i\] = retry\.cards\[k\]/.test(fn), 'retried cards are no longer written back by original index');
+});
+
+check('whatever is still blank is marked, never left to pass as cold', () => {
+    const fn = SCORING.slice(SCORING.indexOf('export async function scoreCandidates'));
+    assert.ok(/isBlankCard\(cards\[i\]\)\) cards\[i\] = unscoredCard/.test(fn),
+        'a card that survives the retry still blank is filed as a cold verdict nobody made');
+});
+
+check('the worker writes NULL rating for an unscored lead, not cold', () => {
+    const WORKER = readFileSync(join(root, 'netlify/functions/process-discovery-jobs.ts'), 'utf8');
+    assert.ok(/card\.scoringFailed === true/.test(WORKER), 'the worker no longer detects an unscored card');
+    assert.ok(/rating: unscored \? null : card\.rating/.test(WORKER),
+        "an unscored lead is being written as 'cold' — that is a verdict nobody made, and it is the whole defect");
+    assert.ok(/score: unscored \? null : card\.score/.test(WORKER), 'a score of 0 nobody assigned is still a claim');
 });
 
 console.log('\n──── the ceiling clears a full batch ────');

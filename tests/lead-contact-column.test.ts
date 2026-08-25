@@ -194,7 +194,12 @@ check('every state contactState can return has a chip', () => {
     const declared = [...map.matchAll(/^\s{4}(\w+):/gm)].map((m) => m[1]).sort();
     // 'missed' joined the set for Phase 2 item 11: hot/warm, never looked up, and no live job to
     // look it up — previously rendered as "Checking…" forever.
-    assert.deepEqual(declared, ['checking', 'missed', 'none', 'personal', 'role', 'unchecked'],
+    //
+    // 'unscored' joined 2026-08-25 (§4.2). It shares the `notAttempted` BUCKET with 'unchecked' —
+    // neither gets a lookup — but they are opposite statements: 'unchecked' says a judgement was
+    // made and this is not a company worth an address, 'unscored' says NOTHING judged it. Letting
+    // the first stand in for the second is precisely how 132 unscored leads passed as rejections.
+    assert.deepEqual(declared, ['checking', 'missed', 'none', 'personal', 'role', 'unchecked', 'unscored'],
         'CONTACT_CHIP and contactState() have drifted — an unmapped state throws on render');
 });
 

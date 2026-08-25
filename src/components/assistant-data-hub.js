@@ -112,6 +112,11 @@
       why: 'A search is running now and this lead is queued for a contact lookup.' },
     unchecked: { short: 'Not checked', cls: 'bg-gray-100 text-gray-500 border-gray-200',
       why: 'This is not a company you could sell to — a directory, article or supplier — so no address was looked up. The fix is targeting, not the lookup.' },
+    // ⚠️ Same bucket as `unchecked`, different REASON, and the difference is the whole point: the
+    // chip above asserts a judgement was made. For a lead the scorer never reached, that assertion
+    // is false — and it was the shape that let 132 unscored leads pass as rejected ones.
+    unscored: { short: 'Not scored', cls: 'bg-gray-100 text-gray-500 border-gray-200',
+      why: 'This company was never scored, so nothing has judged it and no address was looked up. It is NOT a cold lead. Run the search again to score it.' },
     // Phase 2 item 11: eligible for a lookup, never attempted, and nothing is running to attempt it.
     missed: { short: 'Not attempted', cls: 'bg-amber-50 text-amber-700 border-amber-200',
       why: 'The last search finished without looking this one up. Nothing is queued for it — run the search again or add an address by hand.' },
@@ -173,6 +178,10 @@
     const d = record.data || {};
     if (contactEmailOf(record)) return d.emailKind === 'personal' ? 'personal' : 'role';
     if (d.enrichAttemptedAt) return 'none';
+    // ⚠️ BEFORE the eligibility test. An unscored lead is not eligible either, but saying "not a
+    // company you could sell to" about a lead nothing ever judged is a false statement, and it is
+    // exactly how a blank card passes for a rejection.
+    if (d.scoringFailed === true) return 'unscored';
     // Mirrors isEnrichEligible(). `data` on a promoted lead IS the scoring card, so prospectType
     // sits at its top level (promoteOne, process-discovery-jobs.ts).
     const eligible = record.status === 'hot' || record.status === 'warm' || d.prospectType === 'target_business';

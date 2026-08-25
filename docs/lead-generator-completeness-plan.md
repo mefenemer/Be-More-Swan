@@ -1,6 +1,6 @@
 # Lead Generator — completeness plan
 
-**Status:** 2026-08-25. §2 (both halves), §3 and §4.1 are BUILT. §4.2, §5, §6 are not.
+**Status:** 2026-08-25. §2, §3 and §4 are BUILT. §5 and §6 are not.
 **Supersedes nothing.** Extends `docs/lead-generator-discovery-plan.md` (the discovery engine) and
 `docs/lead-triage-review-split-plan.md` (the tabs). Cite sections from code as
 `docs/lead-generator-completeness-plan.md §N`.
@@ -283,28 +283,56 @@ rated anything but cold, which is the blank card's signature rather than a verdi
 Fixed: ceiling raised to 8192, `stop_reason` inspected, `warnIfTruncated` on all three model calls
 in `src/lib/discovery-scoring.ts`. Pinned by `tests/discovery-scoring-truncation.test.ts`.
 
-### §4.2 What still needs building
+### §4.2 The guarantee — BUILT 2026-08-25
 
-A raised ceiling makes truncation unlikely, not impossible — a longer prompt or a larger batch
-reintroduces it. The guarantee is structural:
+**1. Blank batches are halved and re-scored.** `scoreCandidates` detects blank cards and retries
+them as two smaller batches, recursing to `MAX_RESCORE_DEPTH = 3`.
 
-1. **Verify before promoting.** A lead whose card is blank (score 0, no reasons, no prospect type)
-   is not a cold lead; it is an unscored one. Detect that shape and re-score it within the run.
-2. **Re-score in smaller batches on retry**, so a retry cannot fail the same way.
-3. **Never promote an unscored lead as cold.** If it cannot be scored after retry, it must be
-   visibly unscored, not silently rejected.
+⚠️ **Halving IS the mechanism.** Re-issuing the identical batch would truncate at the same point —
+a retry that cannot work. The same prompt over fewer candidates needs strictly fewer output tokens,
+so each level is a genuinely different request. Recursion bottoms out at one candidate, the
+smallest request this prompt can make; a single candidate that still comes back blank has a cause
+the ceiling cannot explain and no further splitting will help.
 
-⚠️ The reason this matters beyond wasted spend: an unscored lead is indistinguishable from a
-rejected one, so it vanishes from every count, and `ENRICH_ELIGIBLE_SQL` will not look it up. One
-silent failure becomes three.
+Two things the retry must not break, both pinned:
+- **Token accounting survives the recursion**, or a retried run under-reports its spend against the
+  cost guardrails.
+- **Retried cards land on their ORIGINAL indices.** The caller aligns cards to candidates by
+  position, so a misplaced retry stamps one company's verdict onto another.
 
-**Structural option worth costing:** split the outreach draft out of the scoring call. The draft is
-the bulk of the output tokens and is only wanted for hot/warm leads — which are not known until
-scoring is done. Scoring every lead and drafting for a subset is both cheaper and untruncatable.
+**2. `isBlankCard()` keys on the ABSENCE of a verdict, not on score 0.** A rejected lead always says
+why, so the test requires no reasons AND no prospect type AND no exclusion AND no do-not-contact.
+That is what keeps a genuine cold verdict out of the retry path — retrying one pays twice for the
+same answer, and relabelling one erases a judgement that was made.
 
-**Acceptance.** A completed run contains zero blank cards. The count is assertable in SQL.
+**3. Whatever is still blank is marked, never filed as cold.**
+- The card carries `scoringFailed: true` (jsonb — no migration).
+- The worker writes **NULL** to `discovered_leads.rating` and `score`. Unrated is an existing,
+  supported state; `cold` is a verdict, and writing one nobody made is the entire defect.
+- `reasons` says outright that the lead has **not** been judged a poor fit, and
+  `suggestedNextStep` gives an action. A blank reasons array beside a cold rating reads as a terse
+  verdict.
 
----
+⚠️ **It is PROMOTED, not withheld.** "Never promote an unscored lead as cold" does not mean hide it
+— a lead quietly held back is the same silence in a different place, and the user cannot act on what
+they cannot see.
+
+### §4.3 The surfaces had to learn the difference
+
+An unscored lead is not enrichment-eligible, correctly — nothing should be spent looking up a
+company nobody has judged. But it lands in the same `notAttempted` bucket as a directory, and the
+chip there said *"This is not a company you could sell to"*. That is a **false statement** about a
+lead the scorer never reached, and it is exactly the shape that let 132 blanks pass for rejections.
+
+- New **`unscored`** chip ("Not scored") over the same bucket — precedent: `role` and `personal` are
+  two chips over `reachable`. Its copy denies the rejection outright.
+- `contactState()` tests `scoringFailed` **before** eligibility, or the false chip wins.
+- The Searches aggregate covers both causes in one clause: *"N were not companies you could sell to,
+  or were not scored, so were never checked."* ⚠️ One clause rather than a sixth bucket — the counts
+  partition the total, and a bucket that is nearly always zero would add a clause to every search's
+  summary to serve a residual case.
+- ⚠️ No second em-dash in that clause: the lead-in already uses one and the clauses are
+  comma-joined, so a dash inside a clause reads as a nested aside.
 
 ## §5 Contact details for every company
 
@@ -419,9 +447,9 @@ Not a code change to the engine. The assistant already writes and saves searches
 | §2.1 dispatcher poke | — | ✅ **BUILT.** Scheduled runs now start like hand-started ones |
 | §4.1 scoring ceiling | — | ✅ **BUILT.** Independent of everything else |
 | §3 completion gate | §2.1 | ✅ **BUILT.** Stop reason + coverage now reach the user |
-| §4.2 scoring guarantee | §4.1 | Turns an unlikely failure into an impossible one |
+| §4.2 scoring guarantee | §4.1 | ✅ **BUILT.** Blank batches are halved and re-scored; survivors are marked, never cold |
 | §2.2 budget hand-off | — | ✅ **BUILT.** A run of any length now completes in one chain |
-| §5 contact for all companies | §4.2, §8.2 | Needs the throughput, and needs §4.2 so "unclassified" means unscored rather than unknown |
+| §5 contact for all companies | §8.2 | Needs the throughput, and needs §4.2 so "unclassified" means unscored rather than unknown |
 | §6 sweep re-scoped | §3, §5 | Only safe to demote once runs are complete |
 
 ⚠️ §5 before §2 makes runs *slower*, not better — 100 enrichment slices at ten minutes each. The

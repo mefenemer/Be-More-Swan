@@ -145,12 +145,25 @@ export function contactBucketOf(lead: {
     return lead.enrichmentInFlight ? 'pending' : 'missed';
 }
 
+/**
+ * ⚠️ An UNSCORED lead lands in `notAttempted` too, and that is correct — nothing should be spent
+ * looking up a company nobody has judged. But it is a different REASON, and the per-lead chip has
+ * to say which: "not a company you could sell to" is a false statement about a lead the scorer
+ * never reached. Hence a separate chip (`unscored`) over the same bucket, exactly as `role` and
+ * `personal` are two chips over `reachable`.
+ *
+ * The aggregate sentence covers both causes in one clause rather than growing a sixth bucket —
+ * the counts partition the total and a bucket that is nearly always zero would add a clause to
+ * every search's summary to serve a residual case.
+ */
+
 /** The bucket each of the Contact column's chips belongs to — the map the test asserts. */
 export const CONTACT_STATE_TO_BUCKET: Record<string, ContactBucket> = {
     role: 'reachable',
     personal: 'reachable',
     none: 'nonePublished',
     unchecked: 'notAttempted',
+    unscored: 'notAttempted',
     checking: 'pending',
     missed: 'missed',
 };

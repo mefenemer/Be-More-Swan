@@ -337,7 +337,7 @@
   }
 
   /**
-   * "Contact details for 4 of 65 — 20 publish none, 41 were not companies so were never checked."
+   * "Contact details for 4 of 65 — 20 publish none, 41 were not companies you could sell to..."
    *
    * Enrichment hits about one SMB site in three, so a search that found 65 companies stocks the
    * Review tab with a handful. Without this line an empty Review reads as a broken assistant; with
@@ -369,7 +369,15 @@
     // "publishes none" sends you to find an address by hand, "were not companies" sends you to
     // targeting, "not looked up" sends you to run the search again.
     if (none) parts.push(`${none} publish${none === 1 ? 'es' : ''} none`);
-    if (notCompanies) parts.push(`${notCompanies} ${notCompanies === 1 ? 'was' : 'were'} not ${notCompanies === 1 ? 'a company' : 'companies'} so ${notCompanies === 1 ? 'was' : 'were'} never checked`);
+    // ⚠️ Covers BOTH causes of `notAttempted`: not a sellable company, and never scored. The two
+    // have separate chips in the table (a per-lead answer must be exact) but share one clause
+    // here, because a sixth bucket that is nearly always zero would add a clause to every
+    // search's summary to serve a residual case.
+    // ⚠️ No em-dash: the lead-in already uses one, and the clauses are comma-joined, so a second
+    // dash inside a clause reads as a nested aside.
+    if (notCompanies) parts.push(notCompanies === 1
+        ? '1 was not a company you could sell to, or was not scored, so was never checked'
+        : `${notCompanies} were not companies you could sell to, or were not scored, so were never checked`);
     // ⚠️ Distinct from `pending`, which is a promise. These are hot/warm leads the run ended
     // without reaching, so nothing will look them up unless someone asks it to (item 11).
     if (missed) parts.push(`${missed} ${missed === 1 ? 'was' : 'were'} not looked up`);

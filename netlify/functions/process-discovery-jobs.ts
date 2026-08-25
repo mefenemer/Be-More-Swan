@@ -536,8 +536,17 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
 
             for (let i = 0; i < inserted.length; i++) {
                 const card = scored.cards[i];
+                // ⚠️ NULL, not 'cold', for a lead the scorer never judged. `discovered_leads.rating`
+                // is nullable and unrated is an existing, supported state (see the rating chips) —
+                // whereas 'cold' is a VERDICT, and writing one nobody made is the whole defect this
+                // section closes. The card carries `scoringFailed` so every surface can tell.
+                const unscored = card.scoringFailed === true;
                 await db.update(discoveredLeads)
-                    .set({ score: card.score, rating: card.rating, scoringCard: card, status: 'qualified', updatedAt: new Date() })
+                    .set({
+                        score: unscored ? null : card.score,
+                        rating: unscored ? null : card.rating,
+                        scoringCard: card, status: 'qualified', updatedAt: new Date(),
+                    })
                     .where(eq(discoveredLeads.id, inserted[i].id));
                 // Mirror into the Leads tab immediately (item 4). promoteOne flips the row to
                 // 'promoted' + links the assistant_record, so the promoting stage skips it later.

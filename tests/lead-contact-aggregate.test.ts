@@ -261,13 +261,13 @@ check('states the prod run this was built for', () => {
     // turns "Review only has 3 things in it" into "and here is why".
     assert.equal(
         agg({ contactTotal: 65, contactReachable: 4, contactNonePublished: 9, contactNotAttempted: 52 }),
-        'Contact details for 4 of 65 — 9 publish none, 52 were not companies so were never checked.',
+        'Contact details for 4 of 65 — 9 publish none, 52 were not companies you could sell to, or were not scored, so were never checked.',
     );
     // Campaign 1, same database: 20 found, not one of them worth a scrape. The line diagnoses
     // targeting without the user having to open a single lead.
     assert.equal(
         agg({ contactTotal: 20, contactNotAttempted: 20 }),
-        'Contact details for 0 of 20 — 20 were not companies so were never checked.',
+        'Contact details for 0 of 20 — 20 were not companies you could sell to, or were not scored, so were never checked.',
     );
 });
 
@@ -283,7 +283,7 @@ check('omits clauses that are zero', () => {
 
 check('reads correctly in the singular', () => {
     assert.equal(agg({ contactTotal: 3, contactReachable: 1, contactNonePublished: 1, contactNotAttempted: 1 }),
-        'Contact details for 1 of 3 — 1 publishes none, 1 was not a company so was never checked.');
+        'Contact details for 1 of 3 — 1 publishes none, 1 was not a company you could sell to, or was not scored, so was never checked.');
 });
 
 check('names work still in progress rather than calling it a result', () => {
