@@ -10,6 +10,7 @@ import { and, eq, lte, or, isNull, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { discoveryCampaigns, discoverySchedules, discoveryJobs } from '../../db/schema';
 import { computeNextRun, normaliseDaysOfWeek } from '../../src/utils/discovery-schedule';
+import { triggerDiscoveryDrain } from '../../src/utils/trigger-drain';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 type Db = ReturnType<typeof getDb>;
@@ -42,6 +43,8 @@ export async function dispatchDueRuns(): Promise<number> {
         ));
 
     let enqueued = 0;
+    /** First job enqueued this cycle — the poke below is per-QUEUE, so one id is all it needs. */
+    let firstJobId: string | undefined;
     for (const s of due) {
         const daysOfWeek = normaliseDaysOfWeek(s.daysOfWeek);
 
@@ -68,19 +71,51 @@ export async function dispatchDueRuns(): Promise<number> {
             .limit(1);
 
         if (!inflight) {
+            const jobId = randomUUID();
             await db.insert(discoveryJobs).values({
-                jobId: randomUUID(),
+                jobId,
                 organisationId: s.organisationId,
                 campaignId: s.campaignId,
                 triggerType: 'scheduled',
             });
             enqueued += 1;
+            // Only the FIRST is kept: one poke drains the whole QUEUE, not one job (see below).
+            firstJobId ??= jobId;
         }
 
         const nextRunAt = computeNextRun(s.cadence, s.runAtHourUtc, daysOfWeek, now);
         await db.update(discoverySchedules)
             .set({ lastRunAt: now, nextRunAt, isEnabled: s.cadence === 'one_off' ? false : true, updatedAt: now })
             .where(eq(discoverySchedules.id, s.scheduleId));
+    }
+
+    // ── Start the work now, exactly as a human-started search does ──────────────────────────────
+    //
+    // ⚠️ THE DEFECT THIS CLOSES. Every surface that starts a search by hand pokes the drain
+    // (discovery-campaigns.ts create / approve_brief / run_now, lead-generation.ts). This
+    // dispatcher did not: it INSERTed a queued row and returned, leaving the run to the
+    // ten-minute cron. Because a run is sliced — one search query per invocation, five leads per
+    // enrichment batch — that is ten minutes PER SLICE, so a fifteen-query run took hours where
+    // the identical search started by hand took minutes.
+    //
+    // So the two paths produced the same search at wildly different speeds, and the slow one was
+    // the unattended one nobody was watching to notice.
+    //
+    // ONE poke, not one per job: run-discovery-jobs-background loops drainDiscoveryJobs until the
+    // queue is empty, and drainDiscoveryJobs claims up to five jobs per pass across ALL campaigns.
+    // A poke per enqueued row would start N identical loops competing for the same rows — harmless
+    // (the claim is a single atomic UPDATE ... RETURNING, so they take different rows or none) but
+    // pure waste. The jobId is passed for the log line only.
+    //
+    // Best-effort by construction: every failure path inside `poke` leaves the rows exactly where
+    // they are, to be picked up by the cron — i.e. the behaviour this replaces. It can only make
+    // things faster, never break them.
+    //
+    // ⚠️ No request headers: this is a scheduled invocation, so `resolveBaseUrl` falls through to
+    // BASE_URL (set on production AND staging, each pointing at its own deploy). If that ever
+    // becomes unset the poke logs a warning and the cron carries the run, as before.
+    if (firstJobId) {
+        await triggerDiscoveryDrain(undefined, firstJobId, 'dispatch-discovery-runs');
     }
 
     return enqueued;

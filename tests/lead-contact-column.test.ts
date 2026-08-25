@@ -113,13 +113,19 @@ check('a cold lead that somehow HAS an address still reports the address', () =>
 
 console.log('\n──── the derivation still matches the pipeline ────');
 
-check('enrichment is still hot/warm only, which is what "Not checked" asserts', () => {
+check('enrichment selects on the shared eligibility rule, which is what "Not checked" asserts', () => {
+    // ⚠️ CHANGED 2026-08-25. This used to pin the literal `rating IN ('hot','warm')` inside
+    // enrichBatch, which was one of the FOUR hand-typed copies of that rule. The gate now also
+    // admits any lead the scorer classified `target_business`, and the rule has exactly one
+    // definition — so what this defends is the single definition, not the string.
     const start = WORKER.indexOf('async function enrichBatch');
     assert.ok(start !== -1, 'enrichBatch() is gone — re-derive what "Not checked" can claim');
     const fn = WORKER.slice(start, landmark(WORKER, '\n}', start));
-    assert.ok(/rating IN \('hot','warm'\)/.test(fn),
-        'enrichBatch no longer filters to hot/warm. contactState() infers "Not checked" from a cold '
-        + 'rating alone, so the column now lies about which leads were attempted — update both together.');
+    assert.ok(/ENRICH_ELIGIBLE_SQL/.test(fn),
+        'enrichBatch no longer selects on ENRICH_ELIGIBLE_SQL. contactState() infers "Not checked" from '
+        + 'that same rule, so the column now lies about which leads were attempted — update both together.');
+    assert.ok(!/rating IN \('hot','warm'\)/.test(fn),
+        'a hand-typed hot/warm filter is back inside enrichBatch — it must come from the shared rule');
 });
 
 check('the attempt stamp is mirrored onto the record on a MISS, not just a hit', () => {
@@ -154,12 +160,21 @@ check('a backfill exists for records enriched before the mirror changed', () => 
     assert.ok(/IS NULL/.test(sql), 'the backfill must skip rows that already carry the key (idempotent)');
 });
 
-check('contactState keys off the same two ratings, not a hardcoded third', () => {
+check('contactState mirrors the eligibility rule, both halves of it', () => {
+    // ⚠️ CHANGED 2026-08-25 with the gate. The old rule was "cold means nobody looked", and this
+    // check enforced testing the SKIPPED rating only, so there would be one list rather than two.
+    // Eligibility is now a positive test with two halves (rating OR prospect type), so the column
+    // has to state both — and the thing worth defending is that it states the SAME two the
+    // pipeline does. tests/lead-contact-aggregate.test.ts runs this function against
+    // isEnrichEligible() over the full cross-product; this check keeps the source honest.
     const src = HUB.slice(landmark(HUB, 'function contactState'), landmark(HUB, 'function cellValue'));
-    assert.ok(/record\.status === 'cold'/.test(src),
-        'the "nobody looked" leg must test the rating the pipeline skips');
-    assert.ok(!/'hot'|'warm'/.test(src.replace(/\/\/.*$/gm, '')),
-        'test for the skipped rating only — enumerating the attempted ones means two lists to keep in sync');
+    const code = src.replace(/\/\/.*$/gm, '');
+    assert.ok(/record\.status === 'hot'/.test(code) && /record\.status === 'warm'/.test(code),
+        'the rating half of the eligibility rule is missing from the column');
+    assert.ok(/prospectType === 'target_business'/.test(code),
+        'the prospect-type half is missing — cold companies would read "Not checked" while being looked up');
+    assert.ok(!/status === 'cold'/.test(code),
+        'the column is back to inferring from a cold rating alone, which the gate no longer does');
 });
 
 console.log('\n──── the column is wired and states are total ────');

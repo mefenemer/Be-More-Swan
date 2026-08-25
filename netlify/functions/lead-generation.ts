@@ -54,6 +54,7 @@ import {
     isOutcome, isLossReason, type LossReason,
 } from '../../src/config/revenue-events';
 import { EDIT_REASONS, isEditReason } from '../../src/config/template-feedback';
+import { isEnrichEligible } from '../../src/config/lead-contact-state';
 import { appendOutreachFooter, buildOutreachFooter, isUsablePostalAddress } from '../../src/config/outreach-footer';
 import { SENDER_IDENTITY_RULE, senderIdentityBlock, type SenderIdentity } from '../../src/config/sender-identity';
 import { parseModelJson, parseModelJsonArray } from '../../src/utils/model-json';
@@ -489,7 +490,12 @@ ${OUTREACH_SUBJECT_RULES}`;
             // `enrichBatch` selects from discovered_leads, so clearing only the mirrored copy would
             // change the chip and re-queue precisely nothing.
             const [lead] = await db
-                .select({ id: discoveredLeads.id, domain: discoveredLeads.domain, rating: discoveredLeads.rating, status: discoveredLeads.status })
+                .select({
+                    id: discoveredLeads.id, domain: discoveredLeads.domain, rating: discoveredLeads.rating,
+                    status: discoveredLeads.status,
+                    // Half of the eligibility rule — see isEnrichEligible.
+                    prospectType: sql<string | null>`${discoveredLeads.scoringCard} ->> 'prospectType'`,
+                })
                 .from(discoveredLeads)
                 .where(and(
                     eq(discoveredLeads.assistantRecordId, recordId),
@@ -505,10 +511,11 @@ ${OUTREACH_SUBJECT_RULES}`;
             if (!lead.domain) {
                 return json(400, { error: 'No website is recorded for this company, so there is nothing to read. Add an address by hand instead.' });
             }
-            // Mirrors enrichBatch's own predicate. Clearing the stamp on a cold lead would leave it
-            // eligible-looking and never visited, which is the "Checking… forever" lie in a new coat.
-            if (lead.rating !== 'hot' && lead.rating !== 'warm') {
-                return json(400, { error: 'Only hot and warm leads are looked up, and this one scored cold. Re-scoring or better targeting is the fix, not another lookup.' });
+            // Mirrors enrichBatch's own predicate, through the ONE definition of it. Clearing the
+            // stamp on a lead the worker will not visit would leave it eligible-looking and never
+            // visited, which is the "Checking… forever" lie in a new coat.
+            if (!isEnrichEligible(lead)) {
+                return json(400, { error: 'This lead is not a company the search identified as one you could sell to — it looks like a directory, article or supplier — so a lookup would skip it. Better targeting is the fix, not another lookup.' });
             }
             if (lead.status !== 'promoted') {
                 return json(400, { error: 'This lead is not in the active set for its search, so a lookup would skip it.' });

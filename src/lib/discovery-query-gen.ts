@@ -155,6 +155,43 @@ homeware" returned 14 of which 9 were. Same run, same campaign, same operators.
   WRONG "e-commerce brand"             RIGHT "independent skincare brand", "ceramics studio"
 Say what they SELL, in the words they would print on their own shop.
 
+⚠️ NEVER SEARCH FOR CONTACT DETAILS. "head teacher email", "contact details", "staff directory",
+"email address" and their variants find the sites that HARVEST contact details — staff-list
+aggregators, directories and data brokers — because those are the only pages on which the phrase
+is the subject. The company's own contact page never says "email address" as its topic; it just
+prints one. Finding the company is this step's job, and a later step reads the address off their
+site. Measured on a live run: three "<trade> <place> head teacher email" queries returned 21
+results between them and NOT ONE was a sellable company.
+  WRONG "primary school Kent head teacher email"    RIGHT "primary school Kent"
+
+⚠️ NEVER PUT WHAT THE BUSINESS SELLS INTO THE QUERY. This is the STEP ONE inversion again, and it
+survives naming the trade correctly — the trade is right and the query is still ruined by the
+service bolted onto it. Adding it finds competitors selling the same thing and articles about it.
+Measured on the same account: "children's residential care home staff training" returned 10
+results and 0 sellable companies; "children's residential care home", alone, returned 9 results
+and 7 sellable companies. Same trade, same run.
+  WRONG "independent school UK staff training"      RIGHT "independent school UK"
+  WRONG "care provider UK staff development"        RIGHT "children's residential care home"
+
+⚠️ NEVER SEARCH A REGULATOR, INSPECTORATE OR VACANCY TERM. "Ofsted", "CQC", "inspection report",
+"rated good", "vacancies", "jobs" attach to the regulator's own site and to job boards, both of
+which are blocklisted. The company does not rank for its own inspection; the inspector does.
+Measured: "children's care home Ofsted" → 4 results, 0 companies. "residential children's home
+vacancies" → 5 results, 0 companies.
+
+⚠️ NEVER EXCLUDE A TOP-LEVEL DOMAIN, and never exclude the geography you are searching in. A
+country's businesses live on that country's TLD, so -site:.uk on a UK search removes the entire
+target market — the one filter guaranteed to hurt more than it helps. Measured: five queries on a
+live UK run carried -site:.uk while searching for UK schools. Exclude specific hosts
+(-site:linkedin.com), never a suffix.
+  WRONG -site:.uk   -site:.com   -site:.co.uk       RIGHT -site:linkedin.com   -site:reddit.com
+
+⚠️ THE PLAINEST QUERY USUALLY WINS. On the run above, "academy school Kent" returned 11 results
+of which 9 were sellable companies and "primary school Suffolk" returned 7 of which 4 were, while
+"grammar school Kent England" and "independent secondary school Kent" returned 54 results between
+them and 6 sellable companies. Extra words, quoted phrases and stacked operators narrow towards
+the pages that discuss a market rather than the companies in it. Trade plus place, and stop.
+
 Produce exactly three query arrays, each a distinct ANGLE on finding those company websites:
 - "niche_scrape": the trade term itself, as a business in that trade writes it on its own
   services or about page. This array should read like a list of trades, not a list of topics.
@@ -181,8 +218,9 @@ Rules:
 - Use real Google search operators where they help (inurl:, -inurl:, -site:, quoted phrases).
 - ⚠️ site: and -site: take a FULL DOMAIN and nothing else: -site:medium.com, -site:linkedin.com.
   A bare word after -site: is silently ignored by the search engine, so it costs you a filter you
-  thought you had. To exclude a word in a URL PATH use -inurl: instead:
-    WRONG  -site:blog   -site:agency   -site:medium   -site:recruitment
+  thought you had, and a bare SUFFIX is worse — it works, and deletes the market. To exclude a
+  word in a URL PATH use -inurl: instead:
+    WRONG  -site:blog   -site:agency   -site:medium   -site:recruitment   -site:.uk
     RIGHT  -inurl:blog  -inurl:agency  -site:medium.com   -inurl:recruitment
 - NEVER target these excluded terms/competitors: ${negatives.length ? JSON.stringify(negatives) : '(none provided)'}.
 - Ground every query in the idea, persona and ICP below.

@@ -27,8 +27,10 @@ import {
     CONTACT_BUCKETS,
     CONTACT_BUCKET_SQL,
     CONTACT_STATE_TO_BUCKET,
+    ENRICH_ELIGIBLE_SQL,
     LIVE_JOB_SQL,
     contactBucketOf,
+    isEnrichEligible,
     type ContactBucket,
 } from '../src/config/lead-contact-state';
 
@@ -75,23 +77,50 @@ check('contactBucketOf agrees with the Contact column on every shape', () => {
     const emails = [null, '', '   ', 'hello@acme.co.uk'];
     const stamps = [null, '2026-08-12T10:00:00.000Z'];
     const ratings = ['hot', 'warm', 'cold'];
+    // ⚠️ prospectType is now half of the eligibility rule, so it belongs in the cross-product.
+    // Without it the matrix could not tell a cold directory from a cold company, which is the
+    // whole of the 2026-08-25 change.
+    const prospectTypes = [null, 'target_business', 'aggregator', 'content_page'];
     const inFlight = [true, false];
 
     for (const contactEmail of emails) {
         for (const enrichAttemptedAt of stamps) {
             for (const rating of ratings) {
-                for (const enrichmentInFlight of inFlight) {
-                    const column = contactState({ status: rating, enrichmentInFlight, data: { contactEmail, enrichAttemptedAt } });
-                    const bucket = contactBucketOf({ contactEmail, enrichAttemptedAt, rating, enrichmentInFlight });
-                    assert.equal(
-                        bucket, CONTACT_STATE_TO_BUCKET[column],
-                        `drift for email=${JSON.stringify(contactEmail)} stamp=${!!enrichAttemptedAt} rating=${rating} live=${enrichmentInFlight}: ` +
-                        `column says "${column}" (→ ${CONTACT_STATE_TO_BUCKET[column]}), aggregate says "${bucket}"`,
-                    );
+                for (const prospectType of prospectTypes) {
+                    for (const enrichmentInFlight of inFlight) {
+                        // The column reads the mirrored record, where `data` IS the scoring card.
+                        const column = contactState({ status: rating, enrichmentInFlight, data: { contactEmail, enrichAttemptedAt, prospectType } });
+                        const bucket = contactBucketOf({ contactEmail, enrichAttemptedAt, rating, prospectType, enrichmentInFlight });
+                        assert.equal(
+                            bucket, CONTACT_STATE_TO_BUCKET[column],
+                            `drift for email=${JSON.stringify(contactEmail)} stamp=${!!enrichAttemptedAt} rating=${rating} type=${prospectType} live=${enrichmentInFlight}: ` +
+                            `column says "${column}" (→ ${CONTACT_STATE_TO_BUCKET[column]}), aggregate says "${bucket}"`,
+                        );
+                    }
                 }
             }
         }
     }
+});
+
+check('a cold target_business is looked up — the 2026-08-25 gate change', () => {
+    // The defect: a prod tenant held 89 leads the scorer had itself classified as companies this
+    // business could sell to, every one rated cold off a one-line search snippet, and not one was
+    // ever offered to the scraper or the paid provider. Meanwhile the leads that WERE eligible
+    // yielded an address 68% of the time. The gate, not the lookup, was the bottleneck.
+    const cold = { contactEmail: null, enrichAttemptedAt: null, rating: 'cold' } as const;
+    assert.equal(contactBucketOf({ ...cold, prospectType: 'target_business', enrichmentInFlight: true }), 'pending');
+    assert.equal(contactBucketOf({ ...cold, prospectType: 'target_business', enrichmentInFlight: false }), 'missed');
+    // …and the things no address can turn into a customer are still refused.
+    for (const junk of ['aggregator', 'media', 'content_page', 'platform', 'supplier_to_target']) {
+        assert.equal(contactBucketOf({ ...cold, prospectType: junk, enrichmentInFlight: true }), 'notAttempted',
+            `a cold ${junk} must never be worth paying to enrich`);
+    }
+    // An UNCLASSIFIED cold lead stays out. Absent means the scorer never judged it, and enriching
+    // an unknown is the blank cheque; those are the deep-enrichment sweep's job.
+    assert.equal(contactBucketOf({ ...cold, prospectType: null, enrichmentInFlight: true }), 'notAttempted');
+    // The rating half of the OR is untouched.
+    assert.ok(isEnrichEligible({ rating: 'hot' }) && isEnrichEligible({ rating: 'warm' }));
 });
 
 check('"Checking…" requires a live job — it is a claim, not a default', () => {
@@ -102,10 +131,14 @@ check('"Checking…" requires a live job — it is a claim, not a default', () =
     assert.equal(contactState({ ...hotNoStamp, enrichmentInFlight: true }), 'checking');
     assert.equal(contactState({ ...hotNoStamp, enrichmentInFlight: false }), 'missed');
     assert.equal(contactState(hotNoStamp), 'missed', 'an absent flag must not promise a lookup');
-    // A cold lead is unaffected: it was never eligible, live run or not.
+    // A cold lead with no prospect type is unaffected: never eligible, live run or not.
     for (const live of [true, false]) {
         assert.equal(contactState({ status: 'cold', enrichmentInFlight: live, data: {} }), 'unchecked');
     }
+    // But a cold TARGET_BUSINESS follows the same live-job split as a hot lead — it is queued.
+    const coldCompany = { status: 'cold', data: { prospectType: 'target_business' } };
+    assert.equal(contactState({ ...coldCompany, enrichmentInFlight: true }), 'checking');
+    assert.equal(contactState({ ...coldCompany, enrichmentInFlight: false }), 'missed');
 });
 
 check('the missed chip explains itself, and every no-address chip does', () => {
@@ -143,9 +176,11 @@ check('the buckets partition the population — exactly one per lead', () => {
     for (const contactEmail of [null, 'a@b.com']) {
         for (const enrichAttemptedAt of [null, 'x']) {
             for (const rating of ['hot', 'warm', 'cold', null, 'weird']) {
-                for (const enrichmentInFlight of [true, false]) {
-                    const hits = CONTACT_BUCKETS.filter((b) => contactBucketOf({ contactEmail, enrichAttemptedAt, rating, enrichmentInFlight }) === b);
-                    assert.equal(hits.length, 1, `rating=${rating} email=${contactEmail} stamp=${enrichAttemptedAt} live=${enrichmentInFlight} landed in ${hits.length} buckets`);
+                for (const prospectType of [null, 'target_business', 'media', 'nonsense']) {
+                    for (const enrichmentInFlight of [true, false]) {
+                        const hits = CONTACT_BUCKETS.filter((b) => contactBucketOf({ contactEmail, enrichAttemptedAt, rating, prospectType, enrichmentInFlight }) === b);
+                        assert.equal(hits.length, 1, `rating=${rating} type=${prospectType} email=${contactEmail} stamp=${enrichAttemptedAt} live=${enrichmentInFlight} landed in ${hits.length} buckets`);
+                    }
                 }
             }
         }
@@ -153,9 +188,16 @@ check('the buckets partition the population — exactly one per lead', () => {
 });
 
 check('an unexpected rating stays inside the total', () => {
-    assert.equal(contactBucketOf({ rating: null, enrichmentInFlight: true }), 'pending');
-    assert.equal(contactBucketOf({ rating: 'something_new', enrichmentInFlight: true }), 'pending');
-    assert.equal(contactBucketOf({ rating: null }), 'missed', 'no live job means no promise');
+    // ⚠️ CHANGED 2026-08-25 with the gate. Eligibility used to be "not cold", so an unrated lead
+    // fell through to the hot/warm pair and read "Checking…" — an over-promise chosen over
+    // dropping the row from the arithmetic. It is now a POSITIVE test, so an unrated, unclassified
+    // lead reads `notAttempted`, which is not a fallthrough at all: it is what the worker will
+    // genuinely do with it. The row is still counted, which is the invariant this check defends.
+    assert.equal(contactBucketOf({ rating: null, enrichmentInFlight: true }), 'notAttempted');
+    assert.equal(contactBucketOf({ rating: 'something_new', enrichmentInFlight: true }), 'notAttempted');
+    // An unrated lead the scorer DID classify is eligible, and still splits on the live job.
+    assert.equal(contactBucketOf({ rating: null, prospectType: 'target_business', enrichmentInFlight: true }), 'pending');
+    assert.equal(contactBucketOf({ rating: null, prospectType: 'target_business' }), 'missed', 'no live job means no promise');
 });
 
 // ── The SQL mirror ────────────────────────────────────────────────────────────
@@ -173,7 +215,14 @@ check('every predicate reads the same three fields as the JS mirror', () => {
         assert.ok(/dl\.contact_email/.test(CONTACT_BUCKET_SQL[b]), `${b} does not test the address`);
     }
     assert.ok(/enrichAttemptedAt/.test(CONTACT_BUCKET_SQL.nonePublished), 'nonePublished must key off the attempt stamp');
-    assert.ok(/dl\.rating = 'cold'/.test(CONTACT_BUCKET_SQL.notAttempted), 'notAttempted must key off a cold rating');
+    assert.ok(CONTACT_BUCKET_SQL.notAttempted.includes(`NOT ${ENRICH_ELIGIBLE_SQL}`),
+        'notAttempted must be the negation of the SAME eligibility rule the worker selects on');
+    for (const b of ['pending', 'missed'] as const) {
+        assert.ok(CONTACT_BUCKET_SQL[b].includes(ENRICH_ELIGIBLE_SQL), `${b} must require an eligible lead`);
+    }
+    assert.ok(/scoring_card ->> 'prospectType' = 'target_business'/.test(ENRICH_ELIGIBLE_SQL),
+        'the prospect-type half of the gate is gone — cold companies stop being looked up again');
+    assert.ok(/dl\.rating IN \('hot','warm'\)/.test(ENRICH_ELIGIBLE_SQL), 'the rating half of the gate is gone');
     // The item-11 split: identical leads, separated only by whether a job is live.
     assert.ok(CONTACT_BUCKET_SQL.pending.includes(LIVE_JOB_SQL), 'pending must require a live job');
     assert.ok(CONTACT_BUCKET_SQL.missed.includes(`NOT ${LIVE_JOB_SQL}`), 'missed must require NO live job');
@@ -183,10 +232,20 @@ check('every predicate reads the same three fields as the JS mirror', () => {
 });
 
 check('the aggregate still matches what the worker actually scrapes', () => {
-    // `notAttempted` asserts a cold lead is never attempted. That is only true while enrichBatch
-    // filters to hot/warm — widen it and this line starts claiming nobody looked at leads that
-    // were looked at. Same coupling tests/lead-contact-column.test.ts defends for the chips.
-    assert.ok(/rating IN \('hot','warm'\)/.test(WORKER), 'enrichBatch no longer scrapes hot/warm only');
+    // `notAttempted` asserts nobody will ever look this lead up. That is only true while the
+    // worker selects on the SAME predicate — widen one and this line starts claiming nobody
+    // looked at leads that were looked at. Same coupling tests/lead-contact-column.test.ts
+    // defends for the chips.
+    //
+    // ⚠️ Asserting the worker IMPORTS the shared constant, not that it contains the SQL text. The
+    // rule was hand-typed in four places and drifted; pinning the string here would let a fifth
+    // copy satisfy this check while the shared definition moved underneath it.
+    assert.ok(/ENRICH_ELIGIBLE_SQL/.test(WORKER),
+        'enrichBatch no longer selects on the shared eligibility rule');
+    assert.ok(/from '\.\.\/\.\.\/src\/config\/lead-contact-state'/.test(WORKER),
+        'the worker no longer imports lead-contact-state — the rule has been re-typed somewhere');
+    assert.ok(!/rating IN \('hot','warm'\)/.test(WORKER),
+        'a hand-typed hot/warm filter is back in the worker — that is the drift this file exists to stop');
     assert.ok(/enrichAttemptedAt/.test(WORKER), 'the worker no longer stamps the attempt');
 });
 
@@ -202,13 +261,13 @@ check('states the prod run this was built for', () => {
     // turns "Review only has 3 things in it" into "and here is why".
     assert.equal(
         agg({ contactTotal: 65, contactReachable: 4, contactNonePublished: 9, contactNotAttempted: 52 }),
-        'Contact details for 4 of 65 — 9 publish none, 52 scored cold so were never checked.',
+        'Contact details for 4 of 65 — 9 publish none, 52 were not companies so were never checked.',
     );
     // Campaign 1, same database: 20 found, not one of them worth a scrape. The line diagnoses
     // targeting without the user having to open a single lead.
     assert.equal(
         agg({ contactTotal: 20, contactNotAttempted: 20 }),
-        'Contact details for 0 of 20 — 20 scored cold so were never checked.',
+        'Contact details for 0 of 20 — 20 were not companies so were never checked.',
     );
 });
 
@@ -224,7 +283,7 @@ check('omits clauses that are zero', () => {
 
 check('reads correctly in the singular', () => {
     assert.equal(agg({ contactTotal: 3, contactReachable: 1, contactNonePublished: 1, contactNotAttempted: 1 }),
-        'Contact details for 1 of 3 — 1 publishes none, 1 scored cold so was never checked.');
+        'Contact details for 1 of 3 — 1 publishes none, 1 was not a company so was never checked.');
 });
 
 check('names work still in progress rather than calling it a result', () => {

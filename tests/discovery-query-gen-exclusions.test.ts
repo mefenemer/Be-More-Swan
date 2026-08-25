@@ -101,6 +101,45 @@ check('the prompt makes naming the prospect’s TRADE step one', () => {
         'the all-arrays anchoring rule is gone — intent and footprint queries drift back to the product category');
 });
 
+check('the four faults measured on 2026-08-25 are prohibited by name', () => {
+    // Per-query yield on a live account, jobs 4-23. Every one of these reads like a sensible query
+    // and every one returned near-zero sellable companies, so none of them is inferable from the
+    // rules that were already here — they have to be named.
+    //
+    //   "primary school Kent head teacher email" ×3  → 21 results,  0 companies
+    //   "children's residential care home staff training" → 10 results, 0 companies
+    //     …against "children's residential care home" alone → 9 results, 7 companies
+    //   "children's care home Ofsted"                →  4 results,  0 companies
+    //   five queries carrying -site:.uk, searching for UK schools
+    assert.ok(/NEVER SEARCH FOR CONTACT DETAILS/.test(PROMPT),
+        'the contact-details rule is gone — "head teacher email" finds the harvesters, not the schools');
+    assert.ok(/head teacher email/.test(PROMPT), 'the measured wrong example is no longer shown');
+
+    assert.ok(/NEVER PUT WHAT THE BUSINESS SELLS INTO THE QUERY/.test(PROMPT),
+        'the own-service rule is gone — this survives naming the trade correctly, so STEP ONE does not cover it');
+    assert.ok(/staff training/.test(PROMPT), 'the measured own-service example is no longer shown');
+
+    assert.ok(/NEVER SEARCH A REGULATOR, INSPECTORATE OR VACANCY TERM/.test(PROMPT),
+        'the regulator rule is gone — a company does not rank for its own inspection, the inspector does');
+    assert.ok(/Ofsted/.test(PROMPT), 'the measured regulator example is no longer shown');
+
+    assert.ok(/NEVER EXCLUDE A TOP-LEVEL DOMAIN/.test(PROMPT),
+        'nothing stops -site:.uk any more — that operator deletes the whole target market on a UK search');
+    assert.ok(/-site:\.uk/.test(PROMPT), 'the TLD-exclusion example is no longer shown');
+
+    assert.ok(/THE PLAINEST QUERY USUALLY WINS/.test(PROMPT),
+        'the brevity rule is gone — stacked operators drift back towards pages about the market');
+});
+
+check('the TLD-exclusion ban is wired into the site:-operator rule too', () => {
+    // The operator rule and the prohibition are one page apart and contradicted each other in an
+    // earlier draft: "use -site: where it helps" sitting above "never use -site:.uk". A model
+    // reading only the Rules block must still be told.
+    const rules = PROMPT.slice(PROMPT.indexOf('\nRules:'));
+    assert.ok(/-site:\.uk/.test(rules), 'the Rules block no longer names a TLD exclusion as WRONG');
+    assert.ok(!/RIGHT[^\n]*-site:\.\w/.test(rules), 'a bare TLD is being shown as a RIGHT example');
+});
+
 check('the prompt spells out that site: takes a full domain', () => {
     // The model was emitting `-site:blog`, `-site:agency`, `-site:medium` — bare words that the
     // search engine silently ignores, so every one was a filter the query only appeared to have.

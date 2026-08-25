@@ -24,8 +24,10 @@
  *
  * Collapsing `nonePublished` and `notAttempted` into one "no" would destroy the only useful
  * distinction here: the first means the site was read and publishes nothing (go and find an
- * address by hand), the second means the lead scored cold and was never eligible for a scrape
- * (the fix is TARGETING, not the scraper). Same reasoning as the Contact column's chips.
+ * address by hand), the second means the lead was never eligible for a scrape at all — it is not
+ * a company this business could sell to, so the fix is TARGETING, not the scraper. Same reasoning
+ * as the Contact column's chips. ⚠️ `notAttempted` is now decided by ENRICH_ELIGIBLE_SQL rather
+ * than by a cold rating: a cold lead the scorer identified as a `target_business` IS attempted.
  *
  * ⚠️ `pending` and `missed` are the SAME lead — hot or warm, no address, no attempt stamp — split
  * by whether anything is actually running. That split is the whole of Phase 2 item 11: without it
@@ -50,7 +52,43 @@ const COL = {
     email: 'dl.contact_email',
     stamp: `dl.signals ->> 'enrichAttemptedAt'`,
     rating: 'dl.rating',
+    prospectType: `dl.scoring_card ->> 'prospectType'`,
 } as const;
+
+/**
+ * WHICH LEADS ENRICHMENT WILL ACTUALLY ATTEMPT. The one definition of that rule.
+ *
+ * ⚠️ This is the predicate `enrichBatch()` runs, and it is also what makes `notAttempted` a
+ * statement of fact rather than a guess. It lived as a hand-typed `rating IN ('hot','warm')` in
+ * four places — the worker's batch query, the worker's remaining-count query, the bucket
+ * predicates below and the Contact column's browser mirror — which is precisely the shape this
+ * file exists to prevent. Changing it in one place and not the others makes the Searches tab say
+ * nobody looked at a lead the pipeline just looked at.
+ *
+ * ── Why prospect type, and not rating alone ──────────────────────────────────
+ * Measured on a prod tenant, 2026-08-25: 95 hot/warm leads were attempted and 65 yielded an
+ * address — 68%, well above the ~1/3 the scraper alone manages, because the paid tier picks up
+ * the misses. In the same workspace 89 leads carried `prospectType: 'target_business'` — the
+ * scorer's own judgement that they are companies this business could sell to — while rating cold,
+ * and every one of them was skipped. The rating is a fit judgement made off a one-line search
+ * snippet; the prospect type is a judgement about WHAT THE THING IS, and the second is both more
+ * reliable from a snippet and the one that decides whether an address is worth having.
+ *
+ * A cold rating is not a reason to refuse to learn how to contact a real company: the user can
+ * re-rate it, and cannot conjure an address. `supplier_to_target`, `aggregator`, `media`,
+ * `content_page` and `platform` stay excluded — no address makes a listicle into a customer.
+ * ⚠️ Deliberately NOT extended to leads with no prospect type at all. Absent means the scorer
+ * never classified it, and paying to enrich an unknown is how this becomes a blank cheque; those
+ * leads are the deep-enrichment sweep's job (lead-enrichment-sweep.ts), which re-reads and
+ * re-scores rather than guessing.
+ */
+export const ENRICH_ELIGIBLE_SQL =
+    `(${COL.rating} IN ('hot','warm') OR ${COL.prospectType} = 'target_business')`;
+
+/** The same decision in JS — the mirror the fixture matrix pins against. */
+export function isEnrichEligible(lead: { rating?: string | null; prospectType?: string | null }): boolean {
+    return lead.rating === 'hot' || lead.rating === 'warm' || lead.prospectType === 'target_business';
+}
 
 /**
  * Is anything actually going to look at this lead? True only while a job on ITS OWN campaign is
@@ -73,9 +111,9 @@ export const LIVE_JOB_SQL =
 export const CONTACT_BUCKET_SQL: Record<ContactBucket, string> = {
     reachable: `${COL.email} IS NOT NULL`,
     nonePublished: `${COL.email} IS NULL AND ${COL.stamp} IS NOT NULL`,
-    notAttempted: `${COL.email} IS NULL AND ${COL.stamp} IS NULL AND ${COL.rating} = 'cold'`,
-    pending: `${COL.email} IS NULL AND ${COL.stamp} IS NULL AND ${COL.rating} IN ('hot','warm') AND ${LIVE_JOB_SQL}`,
-    missed: `${COL.email} IS NULL AND ${COL.stamp} IS NULL AND ${COL.rating} IN ('hot','warm') AND NOT ${LIVE_JOB_SQL}`,
+    notAttempted: `${COL.email} IS NULL AND ${COL.stamp} IS NULL AND NOT ${ENRICH_ELIGIBLE_SQL}`,
+    pending: `${COL.email} IS NULL AND ${COL.stamp} IS NULL AND ${ENRICH_ELIGIBLE_SQL} AND ${LIVE_JOB_SQL}`,
+    missed: `${COL.email} IS NULL AND ${COL.stamp} IS NULL AND ${ENRICH_ELIGIBLE_SQL} AND NOT ${LIVE_JOB_SQL}`,
 };
 
 /** Leads the aggregate counts: everything sitting in the Leads tab, so rejects are excluded. */
@@ -85,21 +123,25 @@ export const CONTACT_AGGREGATE_SCOPE_SQL = `dl.status <> 'discarded'`;
  * The same decision in JS. The mirror the test pins `contactState()` against.
  *
  * ⚠️ Exhaustive and mutually exclusive by construction — every lead lands in exactly one bucket,
- * which is what lets the counts be presented as a total. A lead with a rating outside
- * hot/warm/cold and no stamp would fall through both `notAttempted` and the hot/warm pair, so the
- * fallthrough is the hot/warm pair rather than a silent sixth state: over-promising is visible to
- * the user and correctable, where a dropped row would silently break the arithmetic.
+ * which is what lets the counts be presented as a total. Eligibility is now a single positive
+ * test, so the partition holds for any rating at all: an unrecognised rating with no prospect type
+ * is not eligible and reads `notAttempted`, which is exactly what the pipeline will do with it.
+ * That is a change from the old fallthrough, which sent unrated leads to the hot/warm pair to
+ * avoid dropping a row — a positive eligibility test cannot drop one, so the understatement is
+ * both safe and true.
  */
 export function contactBucketOf(lead: {
     contactEmail?: string | null;
     enrichAttemptedAt?: string | null;
     rating?: string | null;
+    /** The scorer's verdict on WHAT this is. Mirrors COL.prospectType. */
+    prospectType?: string | null;
     /** Is a job live on this lead's own campaign? Mirrors LIVE_JOB_SQL. */
     enrichmentInFlight?: boolean;
 }): ContactBucket {
     if (typeof lead.contactEmail === 'string' && lead.contactEmail.trim()) return 'reachable';
     if (lead.enrichAttemptedAt) return 'nonePublished';
-    if (lead.rating === 'cold') return 'notAttempted';
+    if (!isEnrichEligible(lead)) return 'notAttempted';
     return lead.enrichmentInFlight ? 'pending' : 'missed';
 }
 

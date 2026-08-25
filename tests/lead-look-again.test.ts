@@ -90,12 +90,19 @@ check('a lead with no domain is refused', () => {
     assert.ok(/if \(!lead\.domain\)/.test(ACTION), 'there is no site to read — the scrape would skip it');
 });
 
-check('the rating gate mirrors what the worker actually scrapes', () => {
-    // enrichBatch visits `rating IN ('hot','warm')` only. Clearing a cold lead's stamp would leave
-    // it looking eligible and never visited.
-    assert.ok(/rating !== 'hot' && lead\.rating !== 'warm'/.test(ACTION),
-        'a cold lead would be re-queued into a batch that filters it out on rating');
-    assert.ok(/rating IN \('hot','warm'\)/.test(WORKER), "the worker's rating filter moved — re-check this gate");
+check('the eligibility gate mirrors what the worker actually scrapes', () => {
+    // enrichBatch visits ENRICH_ELIGIBLE_SQL only. Clearing the stamp on a lead outside that set
+    // would leave it looking queued and never visited.
+    //
+    // ⚠️ CHANGED 2026-08-25: this used to pin the literal rating comparison in both files, which
+    // is what let the rule exist in four hand-typed copies. Both sides now go through the one
+    // definition in src/config/lead-contact-state.ts, and that is what is pinned.
+    assert.ok(/isEnrichEligible\(lead\)/.test(ACTION),
+        'look_again no longer asks the shared rule whether the worker would visit this lead');
+    assert.ok(/prospectType/.test(ACTION),
+        'the SELECT no longer reads prospectType, so isEnrichEligible() sees half the rule and refuses cold companies');
+    assert.ok(!/rating !== 'hot'/.test(ACTION), 'a hand-typed rating gate is back — it now refuses cold companies the worker would visit');
+    assert.ok(/ENRICH_ELIGIBLE_SQL/.test(WORKER), "the worker's eligibility filter moved — re-check this gate");
 });
 
 check('a lead outside the active set is refused', () => {

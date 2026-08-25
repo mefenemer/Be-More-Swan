@@ -191,6 +191,32 @@ export interface ClassifyResult {
 }
 
 /**
+ * Shout when a batched reply was cut off by the token ceiling rather than finished.
+ *
+ * ⚠️ THE FAILURE THIS MAKES VISIBLE. `parseModelJsonArray` returns null rather than a partial
+ * list, by design — a half-parsed array would desync the cards from the candidates. So a reply
+ * truncated at max_tokens yields `parsed = []`, every candidate gets `normaliseLeadCard(undefined)`
+ * — score 0, no reasons, no prospectType, and a rating that falls through to 'cold' — and NOTHING
+ * anywhere says so. The `catch` below only sees transport errors; a truncation is a successful
+ * response. Measured on a prod tenant 2026-08-25: 132 of 500 leads (26%) were filed as untyped
+ * cold blanks this way, having been searched for and paid to score. Every one scored exactly 0,
+ * 131 of 132 carried no reasons, and not one untyped lead in the workspace was rated anything but
+ * cold — which is the signature of the blank card, not of a verdict.
+ *
+ * Same lesson process-content-jobs.ts already learned: when a reply will not parse, the answer is
+ * usually the token ceiling, so say the stop reason out loud.
+ */
+function warnIfTruncated(where: string, stopReason: string | null, expected: number, got: number): void {
+    if (stopReason === 'max_tokens') {
+        console.error(`[discovery-scoring] ${where}: reply hit the token ceiling with ${expected} candidate(s) — the array never closed, so ALL ${expected} fall back to blank cards. Raise max_tokens or send a smaller batch.`);
+    } else if (got === 0 && expected > 0) {
+        console.error(`[discovery-scoring] ${where}: nothing parsed from the reply for ${expected} candidate(s) (stop_reason: ${stopReason ?? 'unknown'}) — all fall back to blank cards.`);
+    } else if (got < expected) {
+        console.error(`[discovery-scoring] ${where}: parsed ${got} of ${expected} candidate(s) (stop_reason: ${stopReason ?? 'unknown'}) — the remainder fall back to blank cards.`);
+    }
+}
+
+/**
  * Classify candidates WITHOUT scoring them — the gate on its own.
  *
  * Exists for retro-fitting the gate to leads that were scored before it existed. A full re-score
@@ -237,7 +263,10 @@ Return STRICT JSON only (no markdown): an array with ONE object per candidate, i
     try {
         const resp = await anthropic.messages.create({
             model: SCORING_MODEL,
-            max_tokens: 1536,
+            // Classification-only replies are short — one enum and a sentence per candidate — but
+            // this is still a BATCH, and a truncation here silently returns null for every row in
+            // it. Cheap headroom against the same failure scoreCandidates suffered.
+            max_tokens: 4096,
             // Low variance on purpose, unlike scoreCandidates: this is a closed-vocabulary
             // classification, not a judgement with a range of defensible answers.
             //
@@ -255,6 +284,7 @@ Return STRICT JSON only (no markdown): an array with ONE object per candidate, i
         const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
         const p = parseModelJsonArray(raw);
         if (Array.isArray(p)) parsed = p;
+        warnIfTruncated('classifyProspects', resp.stop_reason ?? null, candidates.length, parsed.length);
     } catch (err) {
         console.error('[discovery-scoring] classification failed:', err);
         return { results: empty, inputTokens, outputTokens };
@@ -344,7 +374,17 @@ ${OUTREACH_SUBJECT_RULES}`;
     try {
         const resp = await anthropic.messages.create({
             model: SCORING_MODEL,
-            max_tokens: 2048,
+            // ⚠️ THIS CEILING IS SIZED FOR THE OUTREACH DRAFTS, NOT THE VERDICTS. Every object in
+            // the array carries a complete personalised email — body, subject, reasons, next step
+            // — so a candidate costs 250-400 output tokens, and the old 2048 completed five or six
+            // of them before the array was cut off mid-string. A SERP page inserts up to ten.
+            // Nothing detected it (see warnIfTruncated), so those pages filed every candidate as a
+            // blank cold card: 132 of one prod tenant's 500 leads, 2026-08-25.
+            //
+            // Output is billed on tokens PRODUCED, not on the ceiling, so the headroom is free.
+            // The structural fix is to stop asking for an email for leads that have not been
+            // scored yet — until then, the ceiling must clear a full batch with room to spare.
+            max_tokens: 8192,
             system,
             messages: [{ role: 'user', content: `Score these ${candidates.length} candidates:\n${JSON.stringify(compact)}` }],
         });
@@ -353,6 +393,7 @@ ${OUTREACH_SUBJECT_RULES}`;
         const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
         const p = parseModelJsonArray(raw);
         if (Array.isArray(p)) parsed = p;
+        warnIfTruncated('scoreCandidates', resp.stop_reason ?? null, candidates.length, parsed.length);
     } catch (err) {
         console.error('[discovery-scoring] scoring failed:', err);
     }
@@ -518,6 +559,11 @@ ${OUTREACH_SUBJECT_RULES}`;
         outputTokens = resp.usage.output_tokens;
         const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
         parsed = parseModelJson<Record<string, unknown>>(raw);
+        // One lead, one card — 2048 clears it comfortably, so this is a tripwire rather than a
+        // known fault. It is here because the identical silence cost scoreCandidates 26% of a
+        // tenant's leads: a re-score that quietly parsed nothing would leave the lead exactly as
+        // it was and report success.
+        warnIfTruncated('rescoreWithIntel', resp.stop_reason ?? null, 1, parsed ? 1 : 0);
     } catch (err) {
         console.error('[discovery-scoring] rescore failed:', err);
         return { ...EMPTY_RESCORE, inputTokens, outputTokens };

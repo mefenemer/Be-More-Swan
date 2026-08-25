@@ -337,12 +337,12 @@
   }
 
   /**
-   * "Contact details for 4 of 65 — 20 publish none, 41 scored cold so were never checked."
+   * "Contact details for 4 of 65 — 20 publish none, 41 were not companies so were never checked."
    *
    * Enrichment hits about one SMB site in three, so a search that found 65 companies stocks the
    * Review tab with a handful. Without this line an empty Review reads as a broken assistant; with
    * it, the emptiness is a result — and it points at the right remedy, which is usually TARGETING
-   * (too many cold leads) rather than the scraper.
+   * (too many results that are not companies at all) rather than the scraper.
    *
    * ⚠️ The four counts partition the total, so they must be stated as parts of it and never added
    * up independently. They come from src/config/lead-contact-state.ts, the same definitions the
@@ -357,17 +357,19 @@
     if (!total) return '';
     const found = Number(s.contactReachable || 0);
     const none = Number(s.contactNonePublished || 0);
-    const cold = Number(s.contactNotAttempted || 0);
+    // Named for the bucket, not for "cold": eligibility is prospect type OR rating, so this
+    // counts leads that are not sellable companies at all (see ENRICH_ELIGIBLE_SQL).
+    const notCompanies = Number(s.contactNotAttempted || 0);
     const pending = Number(s.contactPending || 0);
 
     const missed = Number(s.contactMissed || 0);
 
     const parts = [];
     // Each clause explains a different remedy, which is the whole point of not collapsing them:
-    // "publishes none" sends you to find an address by hand, "scored cold" sends you to targeting,
-    // "not looked up" sends you to run the search again.
+    // "publishes none" sends you to find an address by hand, "were not companies" sends you to
+    // targeting, "not looked up" sends you to run the search again.
     if (none) parts.push(`${none} publish${none === 1 ? 'es' : ''} none`);
-    if (cold) parts.push(`${cold} scored cold so ${cold === 1 ? 'was' : 'were'} never checked`);
+    if (notCompanies) parts.push(`${notCompanies} ${notCompanies === 1 ? 'was' : 'were'} not ${notCompanies === 1 ? 'a company' : 'companies'} so ${notCompanies === 1 ? 'was' : 'were'} never checked`);
     // ⚠️ Distinct from `pending`, which is a promise. These are hot/warm leads the run ended
     // without reaching, so nothing will look them up unless someone asks it to (item 11).
     if (missed) parts.push(`${missed} ${missed === 1 ? 'was' : 'were'} not looked up`);
@@ -464,7 +466,7 @@
       //
       // Returned as its own field, not appended to `line`. Concatenated, it landed between the
       // count and the cadence — "65 companies found. Contact details for 4 of 65 — 9 publish
-      // none, 52 scored cold so were never checked. It runs once each time you start it…" — three
+      // none, 52 were not companies so were never checked. It runs once each time you start it…" — three
       // sentences of different kinds in one grey paragraph, which buries the one the user came for.
       return { chip: 'bg-emerald-50 text-emerald-800 border-emerald-200', label: `Ran ${ago(s.lastFinishedAt)}`, action: 'run',
         line: `${total} ${cadence}`, reach: contactAggregateLine(s) };

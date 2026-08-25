@@ -32,6 +32,12 @@ async function poke(
     headers: Record<string, string | undefined> | undefined,
     jobId: string,
     caller: string,
+    /**
+     * Extra body fields for the target function. Used by the discovery looper's budget hand-off to
+     * carry its chain depth forward — the count has to survive the invocation boundary, and the
+     * body is the only channel that does without inventing a table for it.
+     */
+    extra?: Record<string, unknown>,
 ): Promise<void> {
     const secret = process.env.CRON_TRIGGER_SECRET;
     const baseUrl = resolveBaseUrl(headers as never);
@@ -46,7 +52,7 @@ async function poke(
         await fetch(`${baseUrl}/.netlify/functions/${fn}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${secret}` },
-            body: JSON.stringify({ reason: 'on_demand', jobId }),
+            body: JSON.stringify({ reason: 'on_demand', jobId, ...extra }),
             signal: controller.signal,
         });
     } catch (err) {
@@ -81,6 +87,7 @@ export function triggerDiscoveryDrain(
     headers: Record<string, string | undefined> | undefined,
     jobId: string,
     caller: string,
+    extra?: Record<string, unknown>,
 ): Promise<void> {
-    return poke('run-discovery-jobs-background', headers, jobId, caller);
+    return poke('run-discovery-jobs-background', headers, jobId, caller, extra);
 }

@@ -98,7 +98,7 @@
   //
   // ⚠️ Deliberately NOT a yes/no. "We looked and the site publishes nothing" and "nobody has
   // looked" are different facts with different remedies — the first sends you off to find an
-  // address by hand, the second says the lead scored cold and the problem is TARGETING, not
+  // address by hand, the second says the lead was never a sellable company and the problem is TARGETING, not
   // scraping. Collapsing them to "No" would hide the more useful of the two.
   // `why` is the tooltip when there is no address to show instead. A chip reading "Not attempted"
   // with no explanation invites the reading "the product is broken"; the reason is what turns it
@@ -111,8 +111,8 @@
     checking: { short: 'Checking…', cls: 'bg-blue-50 text-blue-800 border-blue-200',
       why: 'A search is running now and this lead is queued for a contact lookup.' },
     unchecked: { short: 'Not checked', cls: 'bg-gray-100 text-gray-500 border-gray-200',
-      why: 'This lead scored cold, and only hot and warm leads are looked up. The fix is targeting, not the lookup.' },
-    // Phase 2 item 11: hot/warm, never attempted, and nothing is running to attempt it.
+      why: 'This is not a company you could sell to — a directory, article or supplier — so no address was looked up. The fix is targeting, not the lookup.' },
+    // Phase 2 item 11: eligible for a lookup, never attempted, and nothing is running to attempt it.
     missed: { short: 'Not attempted', cls: 'bg-amber-50 text-amber-700 border-amber-200',
       why: 'The last search finished without looking this one up. Nothing is queued for it — run the search again or add an address by hand.' },
   };
@@ -144,10 +144,15 @@
    * was read and publishes nothing — "go and find one by hand" — while a blank address with no
    * stamp means nobody has looked.
    *
-   * Which of the two no-stamp readings applies comes from the RATING, because that is exactly the
-   * rule the pipeline runs: `enrichBatch` scrapes `rating IN ('hot','warm')` only. A cold lead is
-   * therefore never going to be attempted (the fix is TARGETING, not scraping); a hot/warm one is
-   * queued for it.
+   * Which of the two no-stamp readings applies comes from ELIGIBILITY, because that is exactly the
+   * rule the pipeline runs: `enrichBatch` selects on ENRICH_ELIGIBLE_SQL
+   * (src/config/lead-contact-state.ts) — hot or warm, OR any lead the scorer classified as a
+   * `target_business`. A lead that is neither is never going to be attempted (the fix is
+   * TARGETING, not scraping); an eligible one is queued for it.
+   *
+   * ⚠️ A cold rating alone no longer means "never checked". A cold `target_business` IS attempted,
+   * and reading the rating by itself here would put a "Not attempted" chip on a lead the pipeline
+   * had just looked up — the exact drift tests/lead-contact-aggregate.test.ts exists to catch.
    *
    * ⚠️ `enrichAttemptedAt` reaches older records only via db/backfill-enrich-attempted.sql. Until
    * that has run, an already-enriched lead that came back empty reads "Checking…" instead of
@@ -168,7 +173,10 @@
     const d = record.data || {};
     if (contactEmailOf(record)) return d.emailKind === 'personal' ? 'personal' : 'role';
     if (d.enrichAttemptedAt) return 'none';
-    if (record.status === 'cold') return 'unchecked';
+    // Mirrors isEnrichEligible(). `data` on a promoted lead IS the scoring card, so prospectType
+    // sits at its top level (promoteOne, process-discovery-jobs.ts).
+    const eligible = record.status === 'hot' || record.status === 'warm' || d.prospectType === 'target_business';
+    if (!eligible) return 'unchecked';
     return record.enrichmentInFlight ? 'checking' : 'missed';
   }
 

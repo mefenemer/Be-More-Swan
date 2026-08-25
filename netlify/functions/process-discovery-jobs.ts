@@ -26,6 +26,7 @@ import { scoreCandidates, type ScoreCandidate } from '../../src/lib/discovery-sc
 import { loadSenderIdentity } from '../../src/utils/sender-identity';
 import { search, isSearchConfigured, normaliseDomain, fetchSiteIdentity, SearchNotConfiguredError } from '../../src/lib/discovery-search';
 import { enrichLeadContact } from '../../src/lib/discovery-enrich';
+import { ENRICH_ELIGIBLE_SQL } from '../../src/config/lead-contact-state';
 import { recordEnrichment } from '../../src/utils/lead-enrichment';
 import {
     isEnrichProviderConfigured, lookupProviderContact, ENRICH_COST_GBP_PER_LOOKUP,
@@ -680,7 +681,11 @@ async function promoteBatch(db: Db, job: JobRow, assistantId: number, guardrails
 // yield nothing are stamped attempted so they're never re-scraped by a later tick.
 
 async function enrichBatch(db: Db, job: JobRow, guardrails: Guardrails, counters: Counters): Promise<void> {
-    // Only hot/warm leads are worth a fetch — cold leads never receive outreach.
+    // WHICH leads are worth a fetch is defined once, in src/config/lead-contact-state.ts, because
+    // the Searches tab's "never checked" count and the Leads tab's Contact chip both assert what
+    // this query does. Hot/warm, plus any lead the scorer called a `target_business` whatever its
+    // rating — a cold rating is a fit judgement made off a search snippet, and it is not a reason
+    // to refuse to learn how to contact a real company.
     // ai_assistant_id is joined in (rather than fetched separately) purely so the ledger event can
     // be attributed to the assistant — this stage has the job, not the campaign row.
     const batch = await db.execute<{ id: number; domain: string | null; assistant_record_id: number | null; ai_assistant_id: number }>(
@@ -691,7 +696,7 @@ async function enrichBatch(db: Db, job: JobRow, guardrails: Guardrails, counters
            AND dl.status = 'promoted'
            AND dl.domain IS NOT NULL
            AND dl.contact_email IS NULL
-           AND dl.rating IN ('hot','warm')
+           AND ${ENRICH_ELIGIBLE_SQL}
            AND dl.signals ->> 'enrichAttemptedAt' IS NULL
          LIMIT ${ENRICH_BATCH}`
     );
@@ -772,10 +777,13 @@ async function enrichBatch(db: Db, job: JobRow, guardrails: Guardrails, counters
     )));
 
     const [{ remaining } = { remaining: 0 }] = await db.execute<{ remaining: number }>(
-        `SELECT count(*)::int AS remaining FROM discovered_leads
-         WHERE campaign_id = ${job.campaign_id} AND status = 'promoted' AND domain IS NOT NULL
-           AND contact_email IS NULL AND rating IN ('hot','warm')
-           AND signals ->> 'enrichAttemptedAt' IS NULL`
+        // Aliased `dl` because ENRICH_ELIGIBLE_SQL is written against that alias — it is the same
+        // predicate the batch query above selects on, and the two disagreeing would loop the job
+        // forever or end it early.
+        `SELECT count(*)::int AS remaining FROM discovered_leads dl
+         WHERE dl.campaign_id = ${job.campaign_id} AND dl.status = 'promoted' AND dl.domain IS NOT NULL
+           AND dl.contact_email IS NULL AND ${ENRICH_ELIGIBLE_SQL}
+           AND dl.signals ->> 'enrichAttemptedAt' IS NULL`
     );
     const done = remaining === 0;
     await db.update(discoveryJobs)

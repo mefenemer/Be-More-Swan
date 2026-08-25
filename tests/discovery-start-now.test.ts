@@ -77,7 +77,9 @@ check('the background drain loops until the queue is empty or its budget expires
     assert.match(s, /deadline|BUDGET_MS/,
         'the loop needs a wall-clock budget: a background function is killed at 15 minutes, and a '
         + 'slice killed mid-write is the "stuck in processing" case the worker must then time out.');
-    assert.match(s, /if \(!processed\) break/,
+    // The `break` is the invariant; the assignment beside it feeds the §2.2 hand-off decision and
+    // is free to change. Pinning the exact statement made an inert edit look like a regression.
+    assert.match(s, /if \(!processed\) \{? ?drained = true; break/,
         'the loop must stop when a pass claims nothing, or an empty queue spins until the budget ends.');
 });
 
