@@ -208,6 +208,27 @@
         <textarea data-dc-idea rows="3" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm"
           placeholder="e.g. Boutique hotels in Southern Europe that don't have a modern online booking app"></textarea>
 
+        <!-- ── The blank-textarea escape hatch ──────────────────────────────────────────────────
+             ⚠️ THIS EXISTS BECAUSE A PAYING CUSTOMER USED A DIFFERENT AI PRODUCT TO FILL IN THIS
+             BOX. They opened a general-purpose assistant, described what they were after, pasted
+             its answer here, and told us about it as a success story. Every part of that worked
+             except the part where they never learned their own assistant does it — and does it
+             better, because it knows their ideal customer profile and how our query generator
+             behaves, and because approving its proposal SAVES the search with nothing to retype.
+
+             So this is not a "go to chat" link — chat is already one click away in the header, and
+             that was not the missing piece. What was missing is that nobody knew chat would write
+             THIS. The sentence has to say what you get back.
+
+             ⚠️ Do not promise that it starts the search. Approving a proposal saves it as a draft
+             marked "Not started"; a run costs real money and reaches real strangers, so the human
+             starts it. chat-orchestrator.ts is held to the same rule and so is this line. -->
+        <p class="text-xs text-gray-500 mt-2">
+          Not sure how to word it?
+          <button type="button" data-dc-ask class="text-emerald-800 font-semibold underline underline-offset-2 hover:text-emerald-700">Ask your assistant in chat</button>
+          — describe your customers in your own words and it writes the search for you, ready to start here.
+        </p>
+
         <!-- Optional short label. The hypothesis above is a paragraph; the Signal Inbox needs
              something chip-sized to filter by. Left blank, readers fall back to a truncated idea. -->
         <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1 mt-3">Name this search <span class="font-normal normal-case text-gray-400">(optional)</span></label>
@@ -1295,6 +1316,13 @@
     const b = body();
     if (!b) return;
     b.querySelector('[data-dc-create]')?.addEventListener('click', (e) => create(e.currentTarget));
+    // Same destination the header's Chat CTA uses (assistants.js, `kind: 'chat'`) — one way to
+    // reach chat, not two. Deliberately does NOT pass ?new=1: arriving with only an assistantId
+    // resumes that assistant's newest active thread, and a user who has been discussing their
+    // customers already should land back in that conversation rather than a blank one.
+    b.querySelector('[data-dc-ask]')?.addEventListener('click', () => {
+        if (state.assistantId) window.location.href = `assistant-chat.html?assistantId=${state.assistantId}`;
+    });
     b.querySelectorAll('[data-dc-run]').forEach((el) => el.addEventListener('click', () => runNow(el)));
     // A draft has never been read by anyone — send it to the brief rather than starting it blind.
     b.querySelectorAll('[data-dc-brief]').forEach((el) => el.addEventListener('click', () => openBrief(Number(el.getAttribute('data-dc-brief')))));

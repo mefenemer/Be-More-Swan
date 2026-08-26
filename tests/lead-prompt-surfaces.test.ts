@@ -170,8 +170,15 @@ const FIELD_CLAIMS: Record<string, RegExp> = {
     approval: /"review found leads before any outreach" checkbox/,
 };
 
-// Attributes inside form() that are not inputs: the submit button and the inline error span.
-const NON_FIELD = new Set(['create', 'error']);
+// Attributes inside form() that are not inputs: the submit button, the inline error span, and the
+// "Ask your assistant in chat" link.
+//
+// ⚠️ `ask` is deliberately NOT in FIELD_CLAIMS. It is a route BACK to chat, and describing it in
+// leadGeneratorSurfaces() would have the assistant telling a user who is already talking to it
+// where to find a link to talk to it. The fields below are things the user fills in; this is not
+// one. (It exists because a customer used a different AI product to fill in the idea box — see the
+// comment on the element itself.)
+const NON_FIELD = new Set(['create', 'error', 'ask']);
 
 check('the prompt describes every field of the discovery campaign form, and no others', () => {
     const component = read('src/components/assistant-discovery-campaigns.js');
