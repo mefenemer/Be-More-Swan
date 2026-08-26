@@ -65,10 +65,17 @@ const SCOPES: Record<IntegrationProvider, string> = {
     salesforce: 'api refresh_token',
     zendesk: 'read write',
     notion: '', // Notion has no scope param — access is granted per-page on the consent screen
-    // Phase 3 actions: QBO invoice notes, Intercom internal notes, Gmail draft creation.
+    // Phase 3 actions: QBO invoice notes, Intercom internal notes, Gmail outreach sends.
     quickbooks: 'com.intuit.quickbooks.accounting',
     intercom: '', // Intercom has no scope param — permissions come from the app's configuration
-    gmail: 'https://www.googleapis.com/auth/gmail.compose',
+    // ⚠️ gmail.send ONLY, and this string must stay identical to the scope declared on the
+    // OAuth consent screen in the Google Cloud console — verification fails on a code/console
+    // mismatch alone, which is exactly what the 2026-08-26 rejection was. It is also the
+    // narrowest scope covering the one thing we do with Gmail: send the outreach email the user
+    // approved. gmail.compose (drafts + send) was requested here until then, and it is
+    // RESTRICTED — it drags the whole app into a CASA security assessment. Never widen this
+    // without pricing that in.
+    gmail: 'https://www.googleapis.com/auth/gmail.send',
     // Outlook/Microsoft 365 outbound email for the Lead Generator. Delegated (sends AS the
     // signed-in user), never application permissions — those would allow sending as any
     // mailbox in a customer tenant. Single source of truth so authorize/exchange/refresh agree.
@@ -656,23 +663,20 @@ export default withLambda(async (event) => {
                 const tokenData: { access_token?: string; refresh_token?: string; expires_in?: number; scope?: string } = await tokenRes.json().catch(() => ({}));
                 if (!tokenData.access_token) return redirect(`/integrations.html?oauth_error=token_exchange&provider=gmail`);
 
-                // The Gmail profile gives the mailbox address for the card label.
-                let emailAddress: string | null = null;
-                try {
-                    const profileRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
-                        headers: { Authorization: `Bearer ${tokenData.access_token}` },
-                    });
-                    const profile: { emailAddress?: string } = profileRes.ok ? await profileRes.json() : {};
-                    emailAddress = profile.emailAddress ?? null;
-                } catch { /* label only — connection still succeeds */ }
-
+                // ⚠️ No account label for Gmail, deliberately. It used to come from
+                // users.getProfile, which gmail.send does NOT authorise — under the send-only
+                // scope that call 403s, so it is gone rather than left to fail on every connect.
+                // Sending does not need it either: the Gmail API resolves `users/me` from the
+                // token. Recovering the label means adding `userinfo.email` (non-sensitive) to
+                // BOTH the scope string above and the console's scope list — both, or the next
+                // verification round fails on the mismatch again.
                 await saveIntegration(db, {
                     organisationId, userId, provider: 'gmail',
                     accessToken: tokenData.access_token,
                     refreshToken: tokenData.refresh_token ?? null,
                     expiresInSec: tokenData.expires_in ?? null,
-                    tenantId: emailAddress,
-                    externalAccountName: emailAddress,
+                    tenantId: null,
+                    externalAccountName: null,
                     scopes: grantedScopes(tokenData.scope),
                 });
             } else if (provider === 'outlook') {

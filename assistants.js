@@ -2018,13 +2018,18 @@ function _rqRecordActions(r, statusKey) {
     const leadApprove = hasDraft ? 'Approve &amp; send email' : 'Approve lead';
     // Editing is offered while the draft can still change the outcome — i.e. before approval.
     const editDraft = hasDraft ? btn('Edit draft', 'editEmail', secondary) : '';
-    // The two "I'll handle the sending myself" routes, for a user who would rather send from their
-    // own inbox than let Approve do it. They live HERE, on the only card that shows the email
-    // itself, having moved off the Leads tab — that tab is for the lead record, and copying a
-    // message you cannot see is a blind action. Leads only: a ticket has no outreach email, and a
-    // meeting's mail is built at send time rather than stored as a draft to copy.
+    // The "I'll handle the sending myself" route, for a user who would rather send from their own
+    // inbox than let Approve do it. It lives HERE, on the only card that shows the email itself,
+    // having moved off the Leads tab — that tab is for the lead record, and copying a message you
+    // cannot see is a blind action. Leads only: a ticket has no outreach email, and a meeting's
+    // mail is built at send time rather than stored as a draft to copy.
+    // ⚠️ "Draft in Gmail" stood beside Copy draft until 2026-08-26 and is deliberately gone. It
+    // built the draft through the Gmail API, which needs gmail.compose — a RESTRICTED scope that
+    // requires a CASA security assessment. The app now requests gmail.send only, so there is no
+    // API route to a draft and Copy draft is the whole of the self-send path. Re-adding a button
+    // here means re-opening restricted-scope verification.
     const selfSend = (isLead && hasDraft)
-        ? btn('Copy draft', 'copyEmail', secondary) + btn('Draft in Gmail', 'draftGmail', secondary)
+        ? btn('Copy draft', 'copyEmail', secondary)
         : '';
     // Notes — every lead, in every column, with no gate at all. The thing a user wants to write
     // down ("they called back", "wrong contact, ask for Dave") arrives at whatever stage the lead
@@ -3025,51 +3030,21 @@ window._detailRqRecordAct = async function (btn, action) {
         return;
     }
 
-    // ── The two "I'll send it myself" paths ──────────────────────────────────
-    // Both moved here from the Leads tab, which is for the lead RECORD: copying an email from a
-    // screen that never shows the email is a blind action, and having two homes for "push this
-    // draft into Gmail" is how a user ends up with two drafts and no idea which they edited.
-    // Both read the STORED draft — the same one Approve & send would send — so a copy taken after
-    // an edit is the edited text.
-    if (action === 'copyEmail' || action === 'draftGmail') {
+    // ── The "I'll send it myself" path ───────────────────────────────────────
+    // Moved here from the Leads tab, which is for the lead RECORD: copying an email from a screen
+    // that never shows the email is a blind action. It reads the STORED draft — the same one
+    // Approve & send would send — so a copy taken after an edit is the edited text.
+    if (action === 'copyEmail') {
         const rec = _rqRecordsById.get(Number(card.getAttribute('data-rq-record')));
         const found = rec && _rqDraft(rec);
         if (!found) { showErr('Couldn’t load this draft — refresh and try again.'); return; }
         const { draft } = found;
         const original = btn.textContent;
-        if (action === 'copyEmail') {
-            try {
-                await navigator.clipboard.writeText(`Subject: ${draft.subject || ''}\n\n${draft.body}`);
-                btn.textContent = 'Copied ✓';
-                setTimeout(() => { btn.textContent = original; }, 2500);
-            } catch { showErr('Your browser blocked the copy — select the text above instead.'); }
-            return;
-        }
-        btn.disabled = true;
-        btn.textContent = 'Drafting…';
         try {
-            const res = await fetch('/api/actions/sync', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    actionType: 'gmail_create_draft',
-                    payload: {
-                        to: typeof draft.to === 'string' ? draft.to : (window.LeadRecipient?.resolve?.(rec.data) || null),
-                        subject: draft.subject ?? '',
-                        body: draft.body,
-                    },
-                }),
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok || data.error) throw new Error(data.error || 'Could not create the Gmail draft.');
-            btn.textContent = 'Drafted in Gmail ✓';
-        } catch (err) {
-            btn.disabled = false;
-            btn.textContent = original;
-            // Naming Gmail matters: the usual cause is that no Google account is connected, and a
-            // bare "something went wrong" sends the user hunting through the wrong settings.
-            showErr(err.message || 'Could not create the Gmail draft — check your Google connection.');
-        }
+            await navigator.clipboard.writeText(`Subject: ${draft.subject || ''}\n\n${draft.body}`);
+            btn.textContent = 'Copied ✓';
+            setTimeout(() => { btn.textContent = original; }, 2500);
+        } catch { showErr('Your browser blocked the copy — select the text above instead.'); }
         return;
     }
 

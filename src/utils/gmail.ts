@@ -3,8 +3,11 @@
 // assembly in sync-action.ts's handleGmailCreateDraft, but hits messages/send instead of
 // drafts — used by the Lead Generator's auto-send-on-approval flow (lead-generation.ts).
 //
-// The existing 'gmail' OAuth grant uses the gmail.compose scope, which Google documents as
-// covering "send messages and drafts" — so sending needs no extra scope or re-consent.
+// The 'gmail' OAuth grant requests gmail.send — the narrowest scope that authorises this call,
+// and a SENSITIVE one rather than restricted. It was gmail.compose until 2026-08-26; compose also
+// creates drafts, but it is RESTRICTED and pulls the app into a CASA security assessment, so the
+// draft feature was dropped instead. messages/send is the ONLY Gmail API call left in the app —
+// adding one that needs more (drafts, read, profile) re-opens restricted-scope verification.
 // getFreshAccessToken throws IntegrationError when Gmail isn't connected; callers catch that
 // to surface a "connect your account" state rather than a hard error.
 

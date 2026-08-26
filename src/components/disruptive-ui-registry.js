@@ -65,9 +65,11 @@
   // { type: 'lead_scoring_card', leadName, score: 0-100, rating: 'hot'|'warm'|'cold',
   //   reasons: [...], suggestedNextStep,
   //   outreachDraft?: { to: string|null, subject, body } | null }
-  // When the LLM includes an outreachDraft, "Draft Outreach in Gmail" pushes it into
-  // the user's Gmail Drafts via /api/actions/sync (gmail_create_draft) so they can
-  // review and send it themselves.
+  // ⚠️ outreachDraft still rides on the wire but this card renders NOTHING for it. "Draft
+  // Outreach in Gmail" pushed it into the user's Gmail Drafts via /api/actions/sync until
+  // 2026-08-26; that call needed gmail.compose, a RESTRICTED scope carrying a CASA security
+  // assessment, and the app now requests gmail.send only. Acting on the draft — read it, edit
+  // it, copy it, send it — belongs to the Review tab, which shows the email before it acts.
   /**
    * The rating chip + score bar, from the GENERATED mirror (window.LeadRating.chips, built from
    * src/config/lead-rating-chips.ts) — orange hot, yellow warm, blue cold.
@@ -101,18 +103,6 @@
    * that button, that pressing it would email a named individual automatically. Default true:
    * chat and the Review Queue are where this card came from, and a surface that does send must
    * never be the one that forgets to say so.
-   */
-  /**
-   * `opts.outreachActions` — may this card offer to DO something with the email?
-   *
-   * False on a surface whose job is the lead record rather than the message. The Leads tab is one:
-   * it exists to read a lead, progress its next step, enrich it or delete it, and every act on the
-   * outreach email — draft, copy, edit, send — belongs to the Review tab, where the full email is
-   * on screen to be read before any of them. Two places to push the same draft into Gmail is how a
-   * user ends up with two drafts and no idea which one they edited.
-   *
-   * The address still renders: that is a fact about the lead (who was found), not an action on
-   * the message.
    */
   /**
    * `opts.nextStep` — who performs the suggested next step, and the one button that starts it.
@@ -166,19 +156,12 @@
 
   function renderLeadScoringCard(ui, esc, opts) {
     const sendsOnApproval = !opts || opts.sendsOnApproval !== false;
-    const outreachActions = !opts || opts.outreachActions !== false;
     const score = Math.max(0, Math.min(100, Number(ui.score) || 0));
     // ⚠️ Was `RATING_STYLES[ui.rating] || RATING_STYLES.cold` — an unrated lead was drawn as COLD,
     // which is a verdict the scorer never reached. ratingStyle() returns the neutral chip with an
     // empty label instead, and the chip below is omitted entirely when there is nothing to say.
     const rating = ratingStyle(ui.rating);
     const reasons = Array.isArray(ui.reasons) ? ui.reasons.filter((r) => typeof r === 'string') : [];
-
-    // Outreach draft: only render the Gmail action when the LLM produced an email body AND this
-    // surface deals in the email at all.
-    const draft = (outreachActions && ui.outreachDraft && typeof ui.outreachDraft === 'object'
-      && typeof ui.outreachDraft.body === 'string' && ui.outreachDraft.body.trim())
-      ? ui.outreachDraft : null;
 
     // Enriched contact (process-discovery-jobs.ts `enriching` stage). Approving a
     // discovered lead AUTO-SENDS to this address, so the reviewer must be able to see
@@ -255,45 +238,7 @@
             </div>` : ''}
         </div>` : ''}
 
-      ${draft ? `
-      <div class="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-gray-100">
-        <p class="text-xs text-gray-400" data-gmail-status>Saves the outreach email to your Gmail Drafts for review before sending.</p>
-        <button type="button" data-draft-gmail
-          class="px-4 py-2 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">
-          Draft Outreach in Gmail
-        </button>
-      </div>` : ''}
     `;
-
-    // Live behaviour: push the LLM-drafted outreach email into Gmail Drafts.
-    if (draft) {
-      const gmailStatusLine = el.querySelector('[data-gmail-status]');
-      el.addEventListener('click', async (e) => {
-        const button = e.target.closest('[data-draft-gmail]');
-        if (!button || button.disabled) return;
-
-        button.disabled = true;
-        button.textContent = 'Drafting…';
-        gmailStatusLine.className = 'text-xs text-gray-400';
-        try {
-          const data = await postSyncAction('gmail_create_draft', {
-            to: typeof draft.to === 'string' ? draft.to : null,
-            subject: draft.subject ?? '',
-            body: draft.body,
-          });
-          button.textContent = 'Drafted ✓';
-          button.className = 'px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-bold rounded-lg cursor-default shrink-0 whitespace-nowrap';
-          gmailStatusLine.textContent = data.message || 'Draft created in Gmail.';
-          gmailStatusLine.className = 'text-xs font-semibold text-emerald-700';
-        } catch (err) {
-          button.disabled = false;
-          button.textContent = 'Retry draft';
-          button.className = 'px-4 py-2 bg-red-50 border border-red-200 text-red-700 hover:border-red-300 text-sm font-bold rounded-lg transition shrink-0 whitespace-nowrap';
-          gmailStatusLine.textContent = err.message || 'Could not create the Gmail draft.';
-          gmailStatusLine.className = 'text-xs font-semibold text-red-600';
-        }
-      });
-    }
 
     return el;
   }

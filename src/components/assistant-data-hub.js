@@ -1518,11 +1518,13 @@
         });
       }
       // ⚠️ No outreach-email actions on this tab, deliberately. "Copy outreach draft" used to sit
-      // here, beside "Draft Outreach in Gmail" inside the card above it — two ways to take the
-      // drafted email somewhere, on a screen that never showed the email's text. Reading, editing,
-      // copying, drafting into Gmail and sending all live in the REVIEW tab, on one card with the
-      // message in front of you. This tab is for the lead record: read it, progress its next step,
-      // enrich it, decide on it, delete it.
+      // here, beside a "Draft Outreach in Gmail" button inside the card above it — two ways to
+      // take the drafted email somewhere, on a screen that never showed the email's text.
+      // Reading, editing, copying and sending all live in the REVIEW tab, on one card with the
+      // message in front of you. This tab is for the lead record: read it, progress its next
+      // step, enrich it, decide on it, delete it.
+      // (The Gmail-draft button itself is gone everywhere since 2026-08-26 — it needed the
+      // restricted gmail.compose scope; the app now requests gmail.send only.)
       // Move to Outreach — the TRIAGE decision: "this company is worth pursuing." It lives here
       // because this tab is where every lead is, in every state, with the Approval and Contact
       // columns beside it — the two facts the decision needs.
@@ -1978,14 +1980,11 @@
       //     (its own status line says so). The card's default is the chat/Review wording, which
       //     told users approving would email a named individual automatically, above a button that
       //     would not.
-      //   outreachActions: false — drops "Draft Outreach in Gmail". Pushing the draft into Gmail
-      //     from a screen that never shows the draft's text is a send-shaped action taken blind.
       //   nextStep: who performs the model's suggested next step, and the button that starts it.
       //     Supplied only HERE — chat and the Review Queue render the same stored card and neither
       //     holds the action bar the button presses, so neither may show one.
       body = window.DisruptiveUIRegistry.render(record.data, {
         sendsOnApproval: false,
-        outreachActions: false,
         nextStep: nextStepGuidance(record),
       });
     }

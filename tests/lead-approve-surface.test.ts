@@ -128,19 +128,26 @@ check('the Leads tab offers nothing that acts on the outreach email', () => {
         'the Leads tab lost its triage decision, which is the action the panel exists for');
 });
 
-check('the card hides its Gmail button on a record surface', () => {
-    assert.match(CARD, /const outreachActions = !opts \|\| opts\.outreachActions !== false;/,
-        'the card must take a flag for whether this surface acts on the email');
-    assert.match(CARD, /const draft = \(outreachActions &&/,
-        'the Gmail action must be gated on it — the draft variable is what renders that button');
-    assert.match(HUB, /outreachActions: false/, 'the Leads tab must switch it off');
+check('no surface pushes a draft into Gmail through the API', () => {
+    // 2026-08-26: the Gmail grant narrowed from gmail.compose to gmail.send for Google's OAuth
+    // verification. compose is a RESTRICTED scope (CASA assessment); send is merely sensitive.
+    // drafts.create is not authorised by send, so every route to it had to go — the card's
+    // "Draft Outreach in Gmail" button, the Review tab's "Draft in Gmail", and the
+    // gmail_create_draft action itself. This check is what stops one quietly coming back and
+    // silently re-opening restricted-scope verification.
+    assert.ok(!/gmail_create_draft/.test(CARD), 'the lead scoring card must not create Gmail drafts');
+    assert.ok(!/gmail_create_draft/.test(SHELL), 'the Review tab must not create Gmail drafts');
+    assert.ok(!/data-draft-gmail/.test(CARD), 'the card must not render a draft-in-Gmail button');
+    assert.ok(!/outreachActions/.test(CARD) && !/outreachActions/.test(HUB),
+        'the flag existed only to gate that button — it must not linger as dead plumbing');
 });
 
-check('the Review tab gained the two routes the Leads tab gave up', () => {
+check('the Review tab gained the route the Leads tab gave up', () => {
     // Moving a capability without a destination is a regression dressed as tidying.
+    // ⚠️ Was TWO routes. "Draft in Gmail" left on 2026-08-26 with the gmail.compose scope, so
+    // Copy draft is now the whole self-send path — see the restricted-scope check above.
     assert.match(SHELL, /btn\('Copy draft', 'copyEmail', secondary\)/, 'Review must offer Copy draft');
-    assert.match(SHELL, /btn\('Draft in Gmail', 'draftGmail', secondary\)/, 'Review must offer Draft in Gmail');
-    assert.match(SHELL, /action === 'copyEmail' \|\| action === 'draftGmail'/, 'and handle both');
+    assert.match(SHELL, /action === 'copyEmail'/, 'and handle it');
     // Leads only: a ticket has no outreach email, and a meeting's mail is built at send time.
     assert.match(SHELL, /const selfSend = \(isLead && hasDraft\)/,
         'these two must be gated on a LEAD that actually has a draft');
@@ -149,11 +156,12 @@ check('the Review tab gained the two routes the Leads tab gave up', () => {
 check('the copy and the send read the same stored draft', () => {
     // A copy taken after an edit must be the edited text — otherwise the user pastes one email into
     // their inbox while Approve would have sent another.
-    const branch = SHELL.slice(landmark(SHELL, "action === 'copyEmail' || action === 'draftGmail'"));
+    const branch = SHELL.slice(landmark(SHELL, "if (action === 'copyEmail') {"));
     const body = branch.slice(0, 1600);
+    assert.ok(body.length > 100, 'landmark went stale — an empty slice passes every assertion below');
     assert.match(body, /_rqDraft\(rec\)/,
-        'both must read the stored draft through _rqDraft, the same accessor saveEmail writes and '
-        + 'send_outreach sends');
+        'the copy must read the stored draft through _rqDraft, the same accessor saveEmail writes '
+        + 'and send_outreach sends');
 });
 
 console.log('\n──── a decision already taken is not an offer ────');

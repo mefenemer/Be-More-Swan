@@ -24,9 +24,6 @@
 //   intercom_add_internal_note — ticket_triage_view (tier1_support_agent,
 //                                helpdeskPlatform=intercom) → post the triage summary as
 //                                an admin note on the Intercom conversation.
-//   gmail_create_draft         — lead_scoring_card / ticket_triage_view
-//                                → create a Gmail draft (to/subject/body) in the user's
-//                                outbox so they can review it before sending.
 //   threads_create_post        — social_publish_card (social_media_manager)
 //                                → two-step Threads publish: create the media/text
 //                                container, then publish it.
@@ -603,55 +600,6 @@ async function handleIntercomAddNote(db: Db, userId: number, organisationId: num
     return json(200, { success: true, message: `Internal note added to Intercom conversation #${conversationId}.` });
 }
 
-// ── Gmail: create a draft in the user's outbox for review before sending ──────
-
-interface GmailDraftPayload {
-    to?: unknown;
-    subject?: unknown;
-    body?: unknown;
-}
-
-/** RFC 2047 B-encode a header value so non-ASCII subjects survive the MIME round trip. */
-function encodeMimeHeader(value: string): string {
-    // eslint-disable-next-line no-control-regex
-    return /^[\x20-\x7e]*$/.test(value) ? value : `=?UTF-8?B?${Buffer.from(value, 'utf8').toString('base64')}?=`;
-}
-
-async function handleGmailCreateDraft(db: Db, userId: number, organisationId: number, payload: GmailDraftPayload) {
-    // Strip CR/LF so payload values can never smuggle extra MIME headers.
-    const to = typeof payload.to === 'string' ? payload.to.replace(/[\r\n]+/g, ' ').trim() : '';
-    const subject = typeof payload.subject === 'string' ? payload.subject.replace(/[\r\n]+/g, ' ').trim() : '';
-    const body = typeof payload.body === 'string' ? payload.body.trim() : '';
-    if (!subject && !body) return json(400, { error: 'Nothing to draft — the payload has no subject or body.' });
-
-    const { accessToken } = await getFreshAccessToken(db, organisationId, 'gmail');
-
-    // Drafts API takes a full RFC 2822 message, base64url-encoded. A missing "to" is fine —
-    // Gmail happily stores recipient-less drafts for the user to complete.
-    const mime = [
-        ...(to ? [`To: ${to}`] : []),
-        `Subject: ${encodeMimeHeader(subject || '(no subject)')}`,
-        'MIME-Version: 1.0',
-        'Content-Type: text/plain; charset="UTF-8"',
-        'Content-Transfer-Encoding: base64',
-        '',
-        Buffer.from(body, 'utf8').toString('base64'),
-    ].join('\r\n');
-
-    const draftRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: { raw: Buffer.from(mime, 'utf8').toString('base64url') } }),
-    });
-    await logApiCall(db, { userId, endpoint: 'gmail.googleapis.com/gmail/v1/users/me/drafts', httpStatus: draftRes.status });
-    if (!draftRes.ok) {
-        const err: { error?: { message?: string } } = await draftRes.json().catch(() => ({}));
-        return json(502, { error: `Gmail rejected the draft${err.error?.message ? `: ${err.error.message}` : '.'}` });
-    }
-
-    return json(200, { success: true, message: `Draft${to ? ` to ${to}` : ''} created in Gmail — review it in your Drafts folder before sending.` });
-}
-
 // ── Threads: two-step publish (create the container, then publish it) ─────────
 // The HTTP calls live in src/utils/social-publish.ts (publishThreads) so this chat-driven
 // path and the scheduled publisher run identical code.
@@ -1080,7 +1028,6 @@ export const ACTION_HANDLERS: Record<string, ActionHandler> = {
     notion_create_page: handleNotionCreatePage,
     qbo_log_note: handleQboLogNote,
     intercom_add_internal_note: handleIntercomAddNote,
-    gmail_create_draft: handleGmailCreateDraft,
     email_meeting_followup: handleEmailMeetingFollowup,
     // Two registry keys, one shared impl — keeps per-provider recipe wiring + audit logs clean.
     jira_create_tasks: (db, userId, orgId, payload) => handleCreateTasks(db, userId, orgId, payload, 'jira'),

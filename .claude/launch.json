@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "review-login-harness",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4650",
+        "--directory",
+        "/Users/mefenemer/WebstormProjects/Be More Swan"
+      ],
+      "port": 4650,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-lead-stage",
       "runtimeExecutable": "node",
       "runtimeArgs": [

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reviewer Sign-in — Be More Swan</title>
+  <!-- Keep search engines off it. This page is not secret (the endpoint behind it is what
+       enforces access) but it has no business appearing in results. -->
+  <meta name="robots" content="noindex, nofollow">
+  <!-- Toast + the confirm/alert/prompt dialogs. In <head> and not deferred: handlers reach
+       for these, so they must exist before anything can run. -->
+  <script src="/dialogs.js"></script>
+  <link href="./style.css" rel="stylesheet">
+  <link rel="icon" href="/favicon/favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
+  <link rel="manifest" href="/favicon/manifest.json">
+</head>
+<!--
+  Password sign-in for the single account named in REVIEW_LOGIN_EMAIL, used by external app
+  reviewers (Google OAuth verification). Everything that decides access lives in
+  netlify/functions/review-login.ts — this page only collects two fields and posts them.
+
+  ⚠️ Deliberately separate from login.html. Real users keep the magic-link flow with no password
+  field anywhere in it, and this page can be switched off by unsetting one Netlify env var
+  (the endpoint then 404s) without touching the login every customer uses.
+-->
+<body class="bg-gray-50 flex items-center justify-center min-h-screen">
+
+<div class="max-w-md w-full bg-white rounded-xl shadow-lg p-8">
+  <div class="text-center mb-8">
+    <h1 class="text-3xl font-bold text-gray-900">Reviewer Sign-in</h1>
+    <p class="text-gray-500 mt-2">For app reviewers testing the Gmail integration. Use the credentials supplied with your review request.</p>
+  </div>
+
+  <div id="errorBox" class="hidden bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-6" role="alert" aria-live="polite"></div>
+
+  <form id="reviewForm" class="space-y-6">
+    <div>
+      <label for="email" class="block text-sm font-medium text-gray-700">Email Address</label>
+      <input type="email" id="email" required autocomplete="username"
+             class="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-emerald-500 focus:border-emerald-500"
+             placeholder="bmsreview.test@gmail.com">
+    </div>
+
+    <div>
+      <label for="password" class="block text-sm font-medium text-gray-700">Password</label>
+      <input type="password" id="password" required autocomplete="current-password"
+             class="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-emerald-500 focus:border-emerald-500"
+             placeholder="Password from your review request">
+    </div>
+
+    <button type="submit" id="submitBtn"
+            class="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 transition-colors cursor-pointer">
+      Sign in
+    </button>
+  </form>
+
+  <div class="mt-6 text-center">
+    <p class="text-sm text-gray-600">
+      Not a reviewer?
+      <a href="/login.html" class="font-medium text-emerald-600 hover:text-emerald-500">Sign in with a magic link</a>
+    </p>
+  </div>
+</div>
+
+<script>
+  const form = document.getElementById('reviewForm');
+  const submitBtn = document.getElementById('submitBtn');
+  const errorBox = document.getElementById('errorBox');
+
+  function showError(message) {
+    errorBox.textContent = message;
+    errorBox.classList.remove('hidden');
+    // ⚠️ `hidden` loses to a competing display rule, so the inline style is set too — the same
+    // belt-and-braces every other toggle in this codebase uses.
+    errorBox.style.display = '';
+  }
+
+  function hideError() {
+    errorBox.classList.add('hidden');
+    errorBox.style.display = 'none';
+  }
+
+  function resetButton() {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Sign in';
+    submitBtn.classList.remove('opacity-75', 'cursor-not-allowed');
+  }
+
+  hideError();
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    hideError();
+
+    const email = document.getElementById('email').value.trim().toLowerCase();
+    const password = document.getElementById('password').value;
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Signing in...';
+    submitBtn.classList.add('opacity-75', 'cursor-not-allowed');
+
+    try {
+      const response = await fetch('/.netlify/functions/review-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (response.ok && data.redirect) {
+        // The session cookie arrived on this response; a full navigation is what makes the
+        // workspace read it.
+        window.location.href = data.redirect;
+        return;
+      }
+
+      // 404 means the endpoint is switched off (env vars unset or the review window has closed).
+      // Say that plainly rather than "wrong password" — it is the difference between a reviewer
+      // retyping forever and one telling us to turn it back on.
+      showError(response.status === 404
+        ? 'Reviewer sign-in is not currently enabled. Please contact the developer who sent you these credentials.'
+        : (data.error || 'Sign-in failed. Please try again.'));
+      resetButton();
+
+    } catch (error) {
+      console.error('Review login error:', error);
+      showError('A network error occurred. Please try again.');
+      resetButton();
+    }
+  });
+</script>
+</body>
+</html>
