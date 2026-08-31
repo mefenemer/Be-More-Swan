@@ -6,7 +6,7 @@
 // (Dev.to, Hashnode) take body_markdown directly; HTML platforms (WordPress, Ghost — later) take the
 // sanitised published_payload HTML. No new rendering.
 
-export type BlogDestinationId = 'devto' | 'hashnode' | 'wordpress' | 'ghost' | 'wordpresscom' | 'swanindex';
+export type BlogDestinationId = 'devto' | 'hashnode' | 'wordpress' | 'ghost' | 'wordpresscom' | 'swanindex' | 'linkedin';
 
 /** The published blog data an adapter needs, projected from a blog_posts row + its snapshot. */
 export interface BlogDestinationPost {
@@ -93,7 +93,18 @@ export interface SwanIndexCreds {
     organisationId: number;
 }
 
-export type BlogDestinationCreds = DevtoCreds | HashnodeCreds | WordpressCreds | GhostCreds | WordpresscomCreds | SwanIndexCreds;
+/**
+ * LinkedIn is SOCIAL-backed: the token is the workspace's existing LinkedIn OAuth connection in
+ * system_connections (the same one the Social Media Manager posts through), resolved by store.ts.
+ * `authorUrn` is that connection's externalUserId — the member the share is posted as.
+ */
+export interface LinkedinCreds {
+    accessToken: string;
+    /** `urn:li:person:<sub>`, or the bare sub; empty when the connection row never stored one. */
+    authorUrn: string;
+}
+
+export type BlogDestinationCreds = DevtoCreds | HashnodeCreds | WordpressCreds | GhostCreds | WordpresscomCreds | SwanIndexCreds | LinkedinCreds;
 
 export interface BlogDestinationAdapter<C extends BlogDestinationCreds = BlogDestinationCreds> {
     id: BlogDestinationId;
@@ -102,11 +113,16 @@ export interface BlogDestinationAdapter<C extends BlogDestinationCreds = BlogDes
      * How the workspace connects this destination. 'paste' (default) collects `credFields` and
      * stores them in the vault; 'oauth' connects via the shared /api/oauth flow, and creds are
      * resolved from the OAuth integration instead; 'firstparty' has nothing to authenticate — the
-     * destination is this same deployment, and connecting means creating a publication profile.
+     * destination is this same deployment, and connecting means creating a publication profile;
+     * 'social' reuses the workspace's existing social OAuth connection in system_connections, which
+     * is SHARED with the social assistants — so it carries a separate per-workspace opt-in, and
+     * disconnecting it here never revokes that connection. See store.ts.
      */
-    authKind?: 'paste' | 'oauth' | 'firstparty';
+    authKind?: 'paste' | 'oauth' | 'firstparty' | 'social';
     /** For authKind 'oauth': the IntegrationProvider the creds live under. */
     oauthProvider?: string;
+    /** For authKind 'social': the system_connections serviceName holding the token. */
+    socialPlatform?: string;
     /** Fields the connect form collects (paste only); the secret ones are encrypted into the vault. */
     credFields: CredField[];
     /**

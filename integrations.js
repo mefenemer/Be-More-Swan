@@ -387,6 +387,11 @@ function _cmsIsLive() {
 // workspace_integrations, so the server sends their state separately as `mailboxProviders` and
 // they get their own card renderer rather than riding the _userConnections path.
 let _mailboxProviders = [];
+// Google Search Console (the `search_console` category). Like the mailboxes, the grant lives in
+// workspace_integrations, so the server sends its state separately as `searchConsole` — null when
+// the assistant's policy does not include the category. It is a READ connector: nothing is ever
+// published to it, which is why its card speaks of what it pulls IN, not what it sends out.
+let _searchConsole = null;
 const MAILBOX_CATALOG = {
     gmail: {
         label: 'Gmail',
@@ -635,6 +640,7 @@ async function _loadConnections() {
         // Outreach mailboxes — only sent for roles that actually send through one, so an empty
         // array means "not a mailbox role", not "nothing connected".
         _mailboxProviders = Array.isArray(data.mailboxProviders) ? data.mailboxProviders : [];
+        _searchConsole = data.searchConsole && typeof data.searchConsole === 'object' ? data.searchConsole : null;
         // Monthly X posting usage { used, allowance, remaining } for the X-card gauge (Phase 1).
         _xCredits = (data.xCredits && typeof data.xCredits.allowance === 'number') ? data.xCredits : null;
     } catch (e) {
@@ -664,7 +670,7 @@ async function _loadConnections() {
     const covered = window._syncedActionCategories || new Set();
     const comingSoon = _supportedTools.filter(t => t && t.available === false && !covered.has(t.key));
 
-    if (!platforms.length && !sources.length && !comingSoon.length && !_blogDestinations.length && !_mailboxProviders.length) {
+    if (!platforms.length && !sources.length && !comingSoon.length && !_blogDestinations.length && !_mailboxProviders.length && !_searchConsole) {
         // Nothing to connect and nothing "coming soon" here — but the assistant may still
         // have enable-able recipes rendered by the Synced actions list above, so only show
         // the empty state when there are no recipes either.
@@ -681,6 +687,7 @@ async function _loadConnections() {
     });
     _blogDestinations.forEach(dest => grid.insertAdjacentHTML('beforeend', _blogDestCard(dest)));
     _mailboxProviders.forEach(m => grid.insertAdjacentHTML('beforeend', _mailboxCard(m)));
+    if (_searchConsole) grid.insertAdjacentHTML('beforeend', _searchConsoleCard(_searchConsole));
     comingSoon.forEach(tool => grid.insertAdjacentHTML('beforeend', _comingSoonCard(tool)));
 
     _queueConnectPermissionPrompts(platforms);
@@ -777,6 +784,85 @@ window._intDisconnectMailbox = async function (provider, label) {
         await _loadConnections();
     } catch (e) {
         window.showToast?.(e.message || `Could not disconnect ${label}.`, { icon: '⚠️' });
+    }
+};
+
+// ── Google Search Console (search_console category) ──────────────
+// The one connector on this grid that is READ-ONLY. Everything else here is somewhere the assistant
+// SENDS work; Search Console is where it reads how the work performed, so the card says "→ in" and
+// never speaks of publishing.
+//
+// It had no card at all until 2026-08-31, and the absence was worse than it sounds: the category
+// was not marked live either, so the grid drew a disabled "Search Console — Coming soon" card while
+// Blog Studio's Search performance panel offered a working Connect button for the same integration,
+// the 06:00 UTC cron ingested from it, two KPI cards were computed from it and a goal metric needed
+// it. One assistant, two contradictory answers.
+function _searchConsoleCard(sc) {
+    const connected = !!sc.connected;
+    const connectUrl = _withAssistantId('/api/oauth/searchconsole/connect');
+    const primaryBtn = 'w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition cursor-pointer';
+    const ghostPill = 'inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
+
+    const capPill = connected
+        ? '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">✓ Connected</span>'
+        : '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-500 border-gray-200">Not connected</span>';
+
+    // A row that exists but is not 'active' is a different state from never connecting — say so,
+    // rather than showing a plain "Connect" over a grant Google has already revoked.
+    const brokenPill = (!connected && sc.status)
+        ? '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-red-50 text-red-700 border-red-200">Needs reconnecting</span>'
+        : '';
+
+    const account = (connected && sc.accountName)
+        ? `<div class="flex items-center gap-1.5 w-fit max-w-full text-xs font-semibold text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-2.5 py-1.5 mt-2"><span class="truncate">Reading ${_esc(sc.accountName)}</span></div>`
+        : '';
+
+    const manage = connected
+        ? `<details class="mt-1">
+               <summary class="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 select-none">Manage connection</summary>
+               <div class="mt-2 pt-3 border-t border-gray-100 flex items-center gap-2 flex-wrap">
+                   <a href="${connectUrl}" class="${ghostPill} text-gray-600 bg-gray-50 hover:bg-gray-100 border-gray-200">Reconnect</a>
+                   <span class="ml-auto"><button type="button" onclick="window._intDisconnectSearchConsole()" class="${ghostPill} text-red-600 bg-white hover:bg-red-600 hover:text-white border-red-200 hover:border-red-600">Disconnect</button></span>
+               </div>
+           </details>`
+        : '';
+
+    return `
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
+        <div class="flex items-start justify-between gap-2">
+          <div class="flex items-center gap-2 flex-wrap">${capPill}${brokenPill}<span class="text-xs font-semibold text-gray-400">→ in</span></div>
+          <span class="text-xs font-semibold text-gray-400">Google Search Console</span>
+        </div>
+        <div class="grow">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center text-lg shrink-0">🔍</div>
+            <p class="font-bold text-gray-900">See how your posts perform in search</p>
+          </div>
+          <p class="text-sm text-gray-500 mt-2">Read-only. Your assistant pulls search impressions and clicks for published posts, and flags one for a refresh when its traffic starts sliding.</p>
+          ${connected ? '' : '<p class="text-xs text-gray-400 mt-1.5">Sign in with the Google account that owns the Search Console property for your site. Nothing is ever published to Google — this connection only reads.</p>'}
+          ${account}
+        </div>
+        ${connected ? '' : `<a href="${connectUrl}" class="${primaryBtn}">Connect Search Console</a>`}
+        ${manage}
+      </div>`;
+}
+
+window._intDisconnectSearchConsole = async function () {
+    if (!(await window.confirmModal(
+        'Your assistant stops seeing search impressions and clicks, and will not flag posts that are losing traffic. '
+        + 'Nothing is published or deleted either way — this connection only ever reads.',
+        { title: 'Disconnect Search Console?', confirmLabel: 'Yes, disconnect', cancelLabel: 'Keep it connected' },
+    ))) return;
+    try {
+        const res = await fetch('/api/oauth/searchconsole/disconnect', { method: 'POST' });
+        if (!res.ok) {
+            const d = await res.json().catch(() => ({}));
+            throw new Error(d.error || 'Could not disconnect Search Console.');
+        }
+        window.showToast?.('Search Console disconnected.', { icon: '🔌' });
+        await _loadConnections();
+    } catch (e) {
+        window.showToast?.(e.message || 'Could not disconnect Search Console.', { icon: '⚠️' });
     }
 };
 
@@ -965,8 +1051,69 @@ function _firstPartyDestCard(d) {
       </div>`;
 }
 
+// ── Social blog destination (LinkedIn) ───────────────────────────
+// A blog destination backed by the workspace's EXISTING social connection rather than a credential
+// of its own, so it has three states, not two — and collapsing the middle one is the whole reason
+// this card exists separately. A workspace that connected LinkedIn for its Social Media Manager is
+// connected but has NOT asked for its blog posts to go there; "Connected" on this card would be a
+// lie about what happens on the next publish. See setSocialBlogDestinationEnabled in store.ts.
+function _socialDestCard(d) {
+    const enabled = !!d.connected;
+    const linked = !!d.socialConnected;
+    const primaryBtn = 'w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl shadow-sm hover:shadow transition cursor-pointer';
+    const ghostPill = 'inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
+
+    const capPill = enabled
+        ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">✓ Enabled</span>`
+        : linked
+            ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">Not enabled</span>`
+            : `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-500 border-gray-200">Not connected</span>`;
+
+    const account = d.accountLabel
+        ? `<div class="flex items-center gap-1.5 w-fit max-w-full text-xs font-semibold text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-2.5 py-1.5 mt-2"><span class="truncate">Posting as ${_esc(d.accountLabel)}</span></div>`
+        : '';
+
+    let body;
+    if (enabled) {
+        body = `${account}
+           <p class="mt-2 text-xs font-semibold text-gray-400">On publish, posted to your feed with a link back to the full post</p>
+           <details class="mt-1"><summary class="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 select-none">Manage connection</summary>
+               <div class="mt-2 pt-3 border-t border-gray-100 flex items-center gap-2 flex-wrap">
+                   <button onclick="window._blogDestDisconnect('${d.id}', false, true)" class="${ghostPill} text-red-600 bg-white hover:bg-red-600 hover:text-white border-red-200 hover:border-red-600" type="button">Turn off</button>
+               </div>
+           </details>`;
+    } else if (linked) {
+        body = `<div class="mt-auto pt-4 border-t border-gray-100">
+               <button onclick="window._blogDestConnectSocial('${d.id}')" class="${primaryBtn}" type="button">Publish blog posts to ${_esc(d.label)}</button>
+               <div id="blogdest-err-${d.id}" class="hidden mt-2 text-xs font-semibold text-red-600"></div>
+           </div>`;
+    } else {
+        body = `<div class="mt-auto pt-4 border-t border-gray-100">
+               <button onclick="window.location.href='${_esc(_withAssistantId(d.connectUrl || '#'))}'" class="${primaryBtn}" type="button">Connect ${_esc(d.label)}</button>
+               <div id="blogdest-err-${d.id}" class="hidden mt-2 text-xs font-semibold text-red-600"></div>
+           </div>`;
+    }
+
+    return `
+      <div class="bg-white border border-gray-200 rounded-2xl p-5 flex flex-col gap-2">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-3 min-w-0">
+            <span class="w-10 h-10 rounded-xl bg-blue-700 text-white flex items-center justify-center text-lg shrink-0">💼</span>
+            <p class="text-sm font-bold text-gray-900 truncate">${_esc(d.label)}</p>
+          </div>
+          ${capPill}
+        </div>
+        <p class="text-xs text-gray-500">Each published post is shared to your ${_esc(d.label)} feed as a short lead-in linking back to
+          the full article — so the reading, and the search ranking, stay on your own page.${
+            linked && !enabled ? ' Your ' + _esc(d.label) + ' is already connected; this only decides whether blog posts go there.' : ''
+          }</p>
+        ${body}
+      </div>`;
+}
+
 function _blogDestCard(d) {
     if (d.firstParty) return _firstPartyDestCard(d);
+    if (d.social) return _socialDestCard(d);
     const connected = !!d.connected;
     const primaryBtn = 'w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl shadow-sm hover:shadow transition cursor-pointer';
     const ghostPill = 'inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
@@ -1088,10 +1235,54 @@ window._blogDestConnectFirstParty = async function (id) {
     }
 };
 
+// Opt a SOCIAL destination in: no creds to collect, so the server validates the connection the
+// workspace already holds and stores the opt-in. A 409 means there is no live connection yet —
+// that is not an error to show, it is the OAuth redirect the user needs.
+window._blogDestConnectSocial = async function (id) {
+    const errEl = document.getElementById(`blogdest-err-${id}`);
+    if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; }
+    try {
+        const res = await fetch('/.netlify/functions/connect-blog-destination', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'connect', provider: id, creds: {} }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            if (res.status === 409 && data.connectUrl) { window.location.href = _withAssistantId(data.connectUrl); return; }
+            if (errEl) { errEl.textContent = data.error || 'Could not turn that on — please try again.'; errEl.classList.remove('hidden'); }
+            return;
+        }
+        const d = _blogDestinations.find(x => x.id === id);
+        window.showToast?.(`Published posts will now be shared to ${d ? d.label : 'LinkedIn'}.`, { icon: '💼' });
+        await _loadConnections();
+    } catch {
+        if (errEl) { errEl.textContent = 'Could not reach the server. Try again.'; errEl.classList.remove('hidden'); }
+    }
+};
+
 // Disconnect a blog destination (org-wide), then refresh the grid.
-window._blogDestDisconnect = async function (id, firstParty) {
+window._blogDestDisconnect = async function (id, firstParty, social) {
     const d = _blogDestinations.find(x => x.id === id);
     const label = d ? d.label : 'this blog';
+    // Social destinations share the workspace's connection with the social assistants, so this
+    // control turns SYNDICATION off and revokes nothing. Saying "disconnect" without saying that
+    // would read as "this will unplug our LinkedIn", which is the thing it must never do.
+    const isSocial = social != null ? !!social : !!(d && d.social);
+    if (isSocial) {
+        if (!(await window.confirmModal(
+            `New blog posts stop being shared to ${label}. Your ${label} connection stays exactly as it is — `
+            + `your other assistants keep using it — and posts already shared there stay up.`,
+            { title: `Stop sharing posts to ${label}?`, confirmLabel: 'Yes, stop sharing', cancelLabel: 'Keep sharing' },
+        ))) return;
+        try {
+            await fetch('/.netlify/functions/connect-blog-destination', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'disconnect', provider: id }),
+            });
+        } catch { /* best-effort; refresh reflects true state */ }
+        await _loadConnections();
+        return;
+    }
     // The card passes `firstParty` explicitly. Falling back to the list lookup alone was wrong in
     // the direction that matters: a miss (the grid redrawn from a list that has since reloaded)
     // would show the mild "future posts stop going there" sentence for the ONE destination where
@@ -1257,7 +1448,11 @@ window._renderConnectionsStatusCard = function () {
     // those two, that hid this whole card, and with it the only "Manage connections" button on the
     // page: the tab was reachable from nowhere but the Connections tab itself.
     const mailboxes = _assistantScoped ? _mailboxProviders : [];
-    const nothingRelevant = !platforms.length && !sources.length && !blogDests.length && !mailboxes.length;
+    // Search Console counts for the same reason the mailboxes do: it is a real card in the grid, so
+    // a role whose only connector were this one would otherwise lose the whole status card and the
+    // one "Manage connections" button with it.
+    const searchConsole = _assistantScoped ? _searchConsole : null;
+    const nothingRelevant = !platforms.length && !sources.length && !blogDests.length && !mailboxes.length && !searchConsole;
     // A social media assistant always keeps its Connections card — even before anything is
     // connected the user needs a permanent place to add a channel, so it shows an empty state
     // rather than vanishing. Other roles (whose "connectors" are Synced-action recipes living

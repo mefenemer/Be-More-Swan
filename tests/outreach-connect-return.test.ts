@@ -160,8 +160,14 @@ check('an unknown returnTo is dropped at /connect', () => {
         landmark(OAUTH, 'const rawReturnTo'),
         landmark(OAUTH, 'const redirectUri = `${baseUrl}/api/oauth/${provider}/callback`;'),
     );
-    assert.match(start, /RETURN_DESTINATIONS\[rawReturnTo\] \? rawReturnTo : null/,
-        'validate on the way in as well as the way out');
+    // Two tables since 2026-08-31 — RETURN_DESTINATIONS for a tab inside an assistant,
+    // STANDALONE_RETURNS for a page outside one. What must not change is the SHAPE: an unknown
+    // token resolves to null and never reaches `state`. A bare `rawReturnTo` here would be a
+    // pass-through, which is the thing this check exists to prevent.
+    assert.match(start, /RETURN_DESTINATIONS\[rawReturnTo\]/, 'assistant tabs are still table-checked');
+    assert.match(start, /STANDALONE_RETURNS\[rawReturnTo\]/, 'standalone pages are table-checked too');
+    assert.match(start, /\?\s*rawReturnTo\s*:\s*null/, 'validate on the way in as well as the way out');
+    assert.ok(!/returnTo\s*=\s*rawReturnTo\s*;/.test(start), 'never a straight pass-through');
 });
 
 check('the success redirect looks the tab up rather than interpolating state', () => {

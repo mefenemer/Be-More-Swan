@@ -4095,6 +4095,111 @@ export const campaignDecisions = pgTable("campaign_decisions", {
   check("campaign_decisions_reject_reason_check", sql`${t.status} <> 'rejected' OR ${t.rejectReason} IS NOT NULL`),
 ]);
 
+// ── Campaign attribution (db/campaign-attribution.sql) ──────────────────────────────────────────
+// The click half of the ROI funnel: campaign → tracked link → click → the thing the person became.
+// Migration is MANUAL APPLY (no drizzle-kit push); the check() calls below MUST stay in sync with
+// the SQL, or a later push silently reverts the DDL.
+//
+// ⚠️ Not to be confused with src/utils/attribution.ts, which is the "Powered by Be More Swan"
+// export footer and has nothing to do with any of this. The module here is
+// src/utils/campaign-attribution.ts.
+
+// One row per destination a campaign points people at. The token is the entire public surface:
+// /go/<token> → 302 to destinationUrl.
+export const campaignLinks = pgTable("campaign_links", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  campaignId: integer("campaign_id").notNull().references(() => campaigns.id, { onDelete: "cascade" }),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  // Unguessable — knowing another org's token lets you inflate their click count. mintLinkToken().
+  token: text().notNull(),
+  // ⚠️ Validated at the WRITE boundary, never here. A link whose destination was never checked is
+  // an open redirector, which is the classic phishing gift.
+  destinationUrl: text("destination_url").notNull(),
+  label: text(),
+  // Closed vocabulary, so the funnel splits paid from organic without string-matching a UTM.
+  // 'paid' is legal TODAY even though paid CAMPAIGNS are not — a tenant running ads by hand on
+  // their own account can already tag the link.
+  medium: text().notNull().default("organic"),
+  // Which network, when medium='paid'. Free text on purpose: we do not control the list, and
+  // pinning it would make a tenant's Reddit ad unrecordable.
+  network: text(),
+  // Soft delete. Hard-deleting would leave dangling click rows and silently under-count.
+  archivedAt: timestamp("archived_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("campaign_links_token_uidx").on(t.token),
+  index("campaign_links_campaign_idx").on(t.campaignId, t.archivedAt),
+  check("campaign_links_medium_check", sql`${t.medium} IN ('organic','paid','email','social','other')`),
+  // A paid link must name its network, or "which channel worked" degrades to "some of it was paid".
+  check("campaign_links_paid_network_check", sql`${t.medium} <> 'paid' OR ${t.network} IS NOT NULL`),
+]);
+
+// APPEND-ONLY. Same discipline as campaignSpendEvents and revenueEvents — a correction appends,
+// it never edits. This table is the denominator of every cost-per-outcome figure in the product.
+export const campaignClickEvents = pgTable("campaign_click_events", {
+  id: bigint({ mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  campaignId: integer("campaign_id").notNull().references(() => campaigns.id, { onDelete: "cascade" }),
+  linkId: integer("link_id").notNull().references(() => campaignLinks.id, { onDelete: "cascade" }),
+  // Our first-party cookie. ⚠️ In a third-party context (the tenant's own site) Safari/ITP caps or
+  // drops it, so treating this as THE answer would quietly report Safari users as unattributed.
+  visitorId: text("visitor_id").notNull(),
+  // The cookie-free path: appended to the destination as ?bmsc=… so a capture form can echo it.
+  clickRef: text("click_ref").notNull(),
+  // The AD NETWORK's own click id, when it appended one. The only key that can ever be reconciled
+  // against the network's own reporting. NULL is the common case and is not a failure.
+  networkClickId: text("network_click_id"),
+  networkClickKind: text("network_click_kind"),
+  // Stored whole, not parsed into columns: they are the caller's data, frequently malformed, and
+  // a column per parameter is a migration per campaign tool.
+  utm: jsonb().notNull().default({}),
+  // ⚠️ NEVER a raw IP — personal data, and this ledger is retained indefinitely.
+  // src/utils/ip-pseudonymise.ts exists for exactly this.
+  ipPrefix: text("ip_prefix"),
+  refererHost: text("referer_host"),
+  // Deliberately not the full UA: a UA is a strong fingerprint and the only question the funnel
+  // ever asks of it is "was this a bot?".
+  isProbableBot: boolean("is_probable_bot").notNull().default(false),
+  occurredAt: timestamp("occurred_at").defaultNow().notNull(),
+}, (t) => [
+  index("campaign_click_link_idx").on(t.linkId, t.occurredAt),
+  index("campaign_click_campaign_idx").on(t.campaignId, t.occurredAt),
+  index("campaign_click_visitor_idx").on(t.visitorId, t.occurredAt),
+  uniqueIndex("campaign_click_ref_uidx").on(t.clickRef),
+]);
+
+// The join that makes the funnel a funnel.
+//
+// ⚠️ POLYMORPHIC, SO subjectType IS MANDATORY. A click can become an audience contact, a
+// discovered lead, or a generic assistant_record — three tables. vectorEmbeddings taught this the
+// expensive way: a polymorphic key without its type column silently matches the WRONG table's row
+// with the same id. No foreign key for the same reason; subjectType plus one application writer is
+// the integrity story.
+export const campaignAttributions = pgTable("campaign_attributions", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  campaignId: integer("campaign_id").notNull().references(() => campaigns.id, { onDelete: "cascade" }),
+  linkId: integer("link_id").references(() => campaignLinks.id, { onDelete: "set null" }),
+  clickEventId: bigint("click_event_id", { mode: "number" }).references(() => campaignClickEvents.id, { onDelete: "set null" }),
+  subjectType: text("subject_type").notNull(),
+  subjectId: integer("subject_id").notNull(),
+  // 'click_ref' (echoed ?bmsc=) or 'cookie'. Stored because the two have very different
+  // reliability, and a funnel that cannot say which it used cannot be argued with.
+  boundVia: text("bound_via").notNull(),
+  boundAt: timestamp("bound_at").defaultNow().notNull(),
+}, (t) => [
+  // ⚠️ ONE ATTRIBUTION PER SUBJECT — the model, not an optimisation. Someone who clicks three ads
+  // and then signs up is ONE outcome. Without this, every multi-touch journey double-counts and
+  // the funnel reports more subscribers than the tenant has. LAST CLICK AT CAPTURE; every touch is
+  // still in campaignClickEvents if multi-touch reporting is wanted later.
+  uniqueIndex("campaign_attributions_subject_uidx").on(t.subjectType, t.subjectId),
+  index("campaign_attributions_campaign_idx").on(t.campaignId, t.subjectType, t.boundAt),
+  check("campaign_attributions_subject_check", sql`${t.subjectType} IN ('audience_contact','discovered_lead','assistant_record')`),
+  check("campaign_attributions_bound_via_check", sql`${t.boundVia} IN ('click_ref','cookie')`),
+]);
+
 // ── Shared Audience layer (db/audience.sql) ─────────────────────────────────────────────────────
 // The ORGANISATION's own contacts, readable by every assistant it hires. ⚠️ NOT `leads` (that is
 // Be More Swan's own sales CRM, admin-visible, no mandatory org) and NOT `assistant_records` (per

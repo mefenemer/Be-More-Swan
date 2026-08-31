@@ -141,11 +141,76 @@ check('the provider defaults to none, unlike search which defaults to serper', (
         'the provider no longer defaults to off — a key appearing in the env would start billing');
 });
 
-check('every failure path returns null rather than throwing', () => {
+check('every failure path is REPORTED as an error rather than thrown', () => {
     // A paid lookup is an enhancement to a pipeline that already works without it.
-    assert.ok(/catch \(err\) \{[\s\S]{0,400}return null;/.test(PROVIDER), 'the HTTP path can throw');
+    assert.ok(/catch \(err\) \{[\s\S]{0,400}return \{ status: 'error', reason \};/.test(PROVIDER),
+        'the HTTP path can throw');
     assert.ok(/if \(!res\.ok\)/.test(PROVIDER), 'a non-200 is not handled');
     assert.ok(/\.catch\(\(\) => null\)/.test(PROVIDER), 'a malformed body is not handled');
+});
+
+// ── 2b. Error is not miss — the invariant the 2026-08-27 outage broke ─────────
+//
+// ⚠️ THIS IS THE ONE THAT COST A CUSTOMER THEIR PIPELINE. The Hunter account ran out of credits
+// mid-afternoon; 172 lookups came back with nothing; the worker recorded every one as "this
+// company publishes no address", stamped them un-retryable and charged £1.46 of spend that never
+// happened. The tenant then hand-deleted 104 schools on the strength of it. A provider that
+// cannot answer must never be able to say something about the LEAD.
+
+check('a provider that did not answer returns error, never miss', () => {
+    // Every non-2xx: out of credits (429) and bad key (401) are the two that actually happen.
+    assert.ok(/if \(!res\.ok\) \{[\s\S]{0,600}return \{ status: 'error', reason: `http_\$\{res\.status\}` \};/.test(PROVIDER),
+        'an HTTP failure is being reported as a miss — an out-of-credits account would read as "no address published"');
+    // A 200 whose body does not carry the array we map is a contract change, not an empty result.
+    assert.ok(/if \(!Array\.isArray\(raw\)\) \{[\s\S]{0,400}return \{ status: 'error', reason: 'bad_body' \};/.test(PROVIDER),
+        'an unparseable response settles the lead — a silent mapping break would look like a market with no emails');
+    // Only a parsed, empty answer is a miss.
+    assert.ok(/if \(!best\) return \{ status: 'miss' \};/.test(PROVIDER),
+        'the genuine no-address case is no longer reported as a miss');
+});
+
+check('an error costs neither a cap slot nor a penny', () => {
+    const i = landmark(WORKER, 'async function enrichBatch');
+    const body = WORKER.slice(i, landmark(WORKER, 'async function publishSignals'));
+    // The early return has to come BEFORE both the stamp and the charge, or the outage is
+    // invisible again.
+    const iErr = body.indexOf("if (outcome.status === 'error')");
+    const iStamp = body.indexOf('s.paidAttempted = true;');
+    const iCharge = body.indexOf('counters.costGbp += ENRICH_COST_GBP_PER_LOOKUP');
+    assert.ok(iErr !== -1, 'the error outcome is not handled separately from a miss');
+    assert.ok(iErr < iStamp && iErr < iCharge,
+        'a failed lookup is still stamped as an attempt or charged to the run budget');
+    assert.ok(/s\.paidFailedReason = outcome\.reason;/.test(body),
+        'the failure reason is discarded — http_401 and http_429 would be indistinguishable');
+});
+
+check('a failed lookup is stamped distinctly, and never as a purchase', () => {
+    assert.ok(/if \(paidFailedReason\) \{[\s\S]{0,300}stamp\.paidLookupFailedAt/.test(ENRICH),
+        'a failed lookup writes no distinguishing stamp');
+    // ⚠️ The two stamps must stay separate keys. paidLookupAt is what the per-run cap counts, and
+    // the cap bounds SPEND — a rejected request costs nothing and must not consume a slot.
+    assert.ok(!/paidLookupFailedAt[\s\S]{0,80}stamp\.paidLookupAt =/.test(ENRICH),
+        'a failed lookup also writes paidLookupAt — the cap would count requests that cost nothing');
+});
+
+check('a stranded lead is re-queued once per run, from query_gen', () => {
+    // ⚠️ CADENCE IS THE WHOLE SAFETY ARGUMENT. `enrichAttemptedAt` is still written on a provider
+    // failure, because the enriching stage ends when no unstamped rows remain — leaving them
+    // unstamped would mean a run with a dead provider never completes. So the retry is a sweep at
+    // the START of the next run. Putting it anywhere in the enriching stage would un-settle the
+    // rows that stage is settling, and the job would loop until the cron gave up.
+    // ⚠️ ANCHOR ON CODE, NOT ON COMMENT BANNERS. WORKER is comment-stripped, so a `STAGE query_gen`
+    // marker resolves to -1 and every ordering assertion below silently compares against it.
+    const iGen = landmark(WORKER, 'if (!cursor || !Array.isArray(cursor.flat))');
+    const iSweep = WORKER.indexOf("dl.signals ->> 'paidLookupFailedAt' IS NOT NULL");
+    const iPromoting = landmark(WORKER, "if (state?.stage === 'promoting')");
+    assert.ok(iSweep !== -1, 'the re-queue sweep is gone — a provider outage strands leads forever');
+    assert.ok(iGen < iSweep && iSweep < iPromoting,
+        'the sweep is not inside query_gen, the one branch that runs exactly once per job');
+    // Both tables, record first: the second statement deletes the key the first selects on.
+    const sweep = WORKER.slice(iGen, iPromoting);
+    assert.ok(sweep.indexOf('UPDATE assistant_records') < sweep.indexOf('UPDATE discovered_leads'),
+        'the discovery row is cleared first, so the record-side mirror can no longer be found');
 });
 
 // ── 3. Waterfall ordering and the cap ────────────────────────────────────────
@@ -203,8 +268,10 @@ check('the paid phase has its own slice budget', () => {
     assert.ok(/PAID_ENRICH_BUDGET_MS/.test(WORKER), 'the paid phase is unbounded');
     assert.ok(/timeoutMs: deadline - Date\.now\(\)/.test(WORKER),
         'the remaining slice budget is not passed to the lookup');
-    assert.ok(/if \(timeoutMs <= 0\) return null;/.test(PROVIDER),
-        'an exhausted budget still issues a request');
+    // ⚠️ Abandoning a lookup because OUR slice ran out of time is an error, not a miss — we ran
+    // out of clock, not out of their addresses.
+    assert.ok(/if \(timeoutMs <= 0\) return \{ status: 'error', reason: 'no_budget' \};/.test(PROVIDER),
+        'an exhausted budget still issues a request, or settles the lead as having no address');
 });
 
 // ── 4. What gets bought, and how it is labelled ──────────────────────────────
@@ -245,11 +312,18 @@ check('an unmigrated environment falls back to the default, not to zero', () => 
 // The only check that needs to await. tsx compiles this file to CJS, which has no top-level
 // await, so it runs here rather than inline above.
 async function main(): Promise<void> {
-    await checkAsync('an unconfigured lookup resolves to null instead of throwing', async () => {
+    await checkAsync('an unconfigured lookup reports an error instead of throwing', async () => {
         // The waterfall must degrade to today's scrape-only behaviour, never fail a run.
-        assert.equal(await lookupProviderContact('example.com'), null);
-        assert.equal(await lookupProviderContact(null), null);
-        assert.equal(await lookupProviderContact('not a domain'), null);
+        // ⚠️ And it must report `error`, NOT `miss`: switching the provider off must not mark the
+        // entire backlog as companies that publish no address.
+        // Unconfigured is checked FIRST, so every input short-circuits to the same reason here.
+        // That ordering is deliberate: "we never asked anyone" is the truest description of what
+        // happened, whatever the domain looked like.
+        for (const input of ['example.com', null, 'not a domain']) {
+            assert.deepEqual(await lookupProviderContact(input),
+                { status: 'error', reason: 'not_configured' },
+                `lookupProviderContact(${JSON.stringify(input)}) must degrade to a not_configured error`);
+        }
     });
     console.log(`\n${passed} checks passed.`);
 }

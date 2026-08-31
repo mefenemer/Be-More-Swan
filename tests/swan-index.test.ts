@@ -156,6 +156,13 @@ check('every other adapter still declares a cred path', () => {
     for (const id of BLOG_DESTINATION_IDS) {
         const a = getBlogAdapter(id);
         if (a.authKind === 'firstparty') continue;
+        // 'social' (LinkedIn) collects nothing here either — the workspace's existing social OAuth
+        // connection IS the credential — but it must say WHICH connection, or store.ts cannot find
+        // one and the destination would sit permanently "not connected".
+        if (a.authKind === 'social') {
+            assert.ok(a.socialPlatform, `${id} must name the social platform holding its token`);
+            continue;
+        }
         const hasPath = a.credFields.length > 0 || a.authKind === 'oauth';
         assert.ok(hasPath, `${id} must collect creds or use OAuth`);
     }

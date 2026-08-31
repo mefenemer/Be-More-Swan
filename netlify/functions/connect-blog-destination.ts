@@ -2,8 +2,10 @@
 // Authed management of paste-token blog connectors (US 3.2, Tier 1 — Dev.to, Hashnode).
 // Not OAuth, so it does not go through oauth-integrations.ts.
 //
-// GET                                   → connection status for every adapter
+// GET                                   → connection status for every AVAILABLE adapter
+//                                          (withheld ones are hidden — see WITHHELD_BLOG_DESTINATIONS)
 // POST { action:'connect', provider, creds:{...} }  → validate live, then store
+//                                          (social destinations: opt in to the existing connection)
 // POST { action:'disconnect', provider }            → remove connection + vault secret
 // POST { action:'setmode', provider, publishMode }  → set draft/live auto-syndication mode
 // POST { action:'save-profile', provider:'swanindex', profile:{...} } → edit the masthead identity
@@ -12,8 +14,8 @@ import { HandlerEvent } from '@netlify/functions';
 import { getDb } from '../../db/client';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAuditEvent } from '../../src/utils/audit';
-import { getBlogAdapter, isBlogDestinationId } from '../../src/utils/blog-destinations';
-import { saveBlogDestination, deleteBlogDestination, listBlogDestinations, setBlogPublishMode, connectSwanIndex } from '../../src/utils/blog-destinations/store';
+import { getBlogAdapter, isBlogDestinationId, isBlogDestinationAvailable } from '../../src/utils/blog-destinations';
+import { saveBlogDestination, deleteBlogDestination, listBlogDestinations, setBlogPublishMode, connectSwanIndex, connectSocialBlogDestination } from '../../src/utils/blog-destinations/store';
 import { updateProfile } from '../../src/utils/swan-index/profile';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -42,6 +44,16 @@ export default withLambda(async (event: HandlerEvent) => {
 
     if (!isBlogDestinationId(body.provider)) return json(400, { error: 'Unknown blog destination.' });
     const adapter = getBlogAdapter(body.provider);
+
+    // A withheld destination is not listed, so nothing in the UI can reach these actions — but the
+    // gate belongs on the SERVER too, or a stale tab (or a crafted POST) can still attach a
+    // credential to an adapter we have decided not to publish through yet.
+    //
+    // 'disconnect' is deliberately still allowed: withholding must never trap a workspace that
+    // connected one before the gate went up, and detaching is the safe direction.
+    if (!isBlogDestinationAvailable(body.provider) && body.action !== 'disconnect') {
+        return json(409, { error: `${adapter.label} is not available yet.` });
+    }
 
     if (body.action === 'disconnect') {
         await deleteBlogDestination(db, ctx.organisationId, body.provider);
@@ -84,6 +96,22 @@ export default withLambda(async (event: HandlerEvent) => {
         }
         if (adapter.authKind === 'oauth' && adapter.oauthProvider) {
             return json(400, { error: `${adapter.label} connects via OAuth.`, connectUrl: `/api/oauth/${adapter.oauthProvider}/connect` });
+        }
+        // Social (LinkedIn): nothing to collect — the workspace's existing social connection is the
+        // credential, and "connect" means opting THIS destination in to it. A workspace with no live
+        // connection gets the OAuth URL back rather than a dead end; see connectSocialBlogDestination.
+        if (adapter.authKind === 'social' && adapter.socialPlatform) {
+            const res = await connectSocialBlogDestination(db, ctx.organisationId, body.provider);
+            if (!res.ok) {
+                return json(res.needsConnection ? 409 : 400, {
+                    error: res.error,
+                    ...(res.needsConnection
+                        ? { connectUrl: `/.netlify/functions/social-oauth-init?platform=${encodeURIComponent(adapter.socialPlatform)}` }
+                        : {}),
+                });
+            }
+            logAuditEvent({ userId: ctx.userId, actionType: 'CREATE', resourceType: 'blog_destination', resourceId: body.provider });
+            return json(200, { ok: true, accountLabel: res.accountLabel });
         }
         const parsed = adapter.parseCreds(body.creds || {});
         if (!parsed.ok) return json(400, { error: parsed.error });

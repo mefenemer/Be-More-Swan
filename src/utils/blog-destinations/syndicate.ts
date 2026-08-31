@@ -104,6 +104,8 @@ export interface SyndicationSummaryEntry {
 export function summariseSyndication(destinations: unknown): SyndicationSummaryEntry[] {
     const blob = (destinations as Record<string, unknown>) || {};
     const out: SyndicationSummaryEntry[] = [];
+    // Every registered destination, withheld ones included: this reads a post's OWN history, and a
+    // post that went to Dev.to before the gate went up must keep saying so. See index.ts.
     for (const id of BLOG_DESTINATION_IDS) {
         const entry = blob[id];
         if (!entry || typeof entry !== 'object') continue;
@@ -136,6 +138,9 @@ export async function syndicatePublishedPost(
     // "my site only", and collapsing the two would silently push a post the author excluded.
     const selected = Array.isArray(stored.selected) ? stored.selected.map(String) : null;
 
+    // listBlogDestinations reports only AVAILABLE destinations, so a withheld one is not published
+    // to even if its credential is still in the vault — deliberate: withholding exists precisely to
+    // keep unproven code away from a customer's public blog. See WITHHELD_BLOG_DESTINATIONS.
     const connected = (await listBlogDestinations(db, organisationId))
         .filter((d) => d.connected)
         .filter((d) => selected === null || selected.includes(d.id));

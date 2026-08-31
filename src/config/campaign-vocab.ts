@@ -3,8 +3,15 @@
 // decision kind and outcome metric — plus the cost model that prices an order in WORK ITEMS.
 //
 // ⚠️ Every list here is CHECK-constrained in db/campaigns.sql and mirrored in db/schema.ts.
-// tests/campaign-vocab.test.ts parses all three and fails if they disagree. Adding a value means
-// changing all three in the same commit.
+// Adding a value means changing all three in the same commit.
+//
+// ⚠️ NOTHING CHECKS THAT FOR YOU on most of these lists. This comment used to claim
+// "tests/campaign-vocab.test.ts parses all three and fails if they disagree" — that file has never
+// existed. What does exist: tests/campaign-prompt-surfaces.test.ts pins CAMPAIGN_ORDER_ACTIONS and
+// the outcome metrics against the PROMPTS, and tests/campaign-attribution.test.ts is the only
+// suite that actually parses the SQL and the drizzle mirror to compare them, and it covers
+// CAMPAIGN_LINK_MEDIUMS alone. So for every other list here, a value added in one place and
+// forgotten in another fails at runtime as a constraint violation, not in CI.
 //
 // ── Why these are closed ─────────────────────────────────────────────────────
 // Same argument as LEAD_REJECT_REASONS and LOSS_REASONS: these values are GROUP BY keys and UI
@@ -231,8 +238,24 @@ export const DECISION_TTL_DAYS: Record<CampaignDecisionKind, number> = {
     halt: 2,
 };
 
+// ── Tracked-link medium ──────────────────────────────────────────────────────
+/**
+ * Where a tracked link is published. CHECK-constrained as `campaign_links_medium_check` in
+ * db/campaign-attribution.sql and mirrored in db/schema.ts; tests/campaign-attribution.test.ts
+ * asserts all three agree.
+ *
+ * ⚠️ `paid` is legal HERE while paid CAMPAIGNS are not, and that is deliberate rather than a leak.
+ * A tenant already running ads by hand on their own account can tag a link today and get real
+ * cost-per-outcome out of it — the funnel does not care who pressed "launch" on the ad platform.
+ * The mode lock in CREATABLE_CAMPAIGN_MODES governs whether WE spend money, which is a different
+ * question and stays shut.
+ */
+export const CAMPAIGN_LINK_MEDIUMS = ['organic', 'paid', 'email', 'social', 'other'] as const;
+export type CampaignLinkMedium = typeof CAMPAIGN_LINK_MEDIUMS[number];
+
 // ── Narrowing helpers (untyped JSON bodies, DB rows) ─────────────────────────
 const MODES = new Set<string>(CAMPAIGN_MODES);
+const LINK_MEDIUMS = new Set<string>(CAMPAIGN_LINK_MEDIUMS);
 const STATUSES = new Set<string>(CAMPAIGN_STATUSES);
 const ACTIONS = new Set<string>(CAMPAIGN_ORDER_ACTIONS);
 const KINDS = new Set<string>(CAMPAIGN_DECISION_KINDS);
@@ -243,6 +266,7 @@ export const isCampaignStatus = (v: unknown): v is CampaignStatus => typeof v ==
 export const isOrderAction = (v: unknown): v is CampaignOrderAction => typeof v === 'string' && ACTIONS.has(v);
 export const isDecisionKind = (v: unknown): v is CampaignDecisionKind => typeof v === 'string' && KINDS.has(v);
 export const isOutcomeMetric = (v: unknown): v is CampaignOutcomeMetric => typeof v === 'string' && METRICS.has(v);
+export const isLinkMedium = (v: unknown): v is CampaignLinkMedium => typeof v === 'string' && LINK_MEDIUMS.has(v);
 
 /** An outcome a tenant may actually pick — excludes the ones nothing can count yet. */
 export function isSelectableOutcomeMetric(v: unknown): v is CampaignOutcomeMetric {

@@ -312,6 +312,56 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
 
         // ── STAGE query_gen: generate queries once, cache, resume next tick ──────
         if (!cursor || !Array.isArray(cursor.flat)) {
+            // ── Re-queue the leads a BROKEN provider lookup stranded on earlier runs ────────────
+            //
+            // `paidLookupFailedAt` marks a lead whose paid lookup never got an answer — the
+            // account was dry, rate limited, or the response did not parse. Those leads still
+            // carry `enrichAttemptedAt` (the free scrape really did run, and the worker's
+            // "anything left to enrich?" count needs every row to settle or a run with a dead
+            // provider would never reach `remaining === 0` and never complete). So the retry has
+            // to come from somewhere else, and this is it.
+            //
+            // ⚠️ IT LIVES HERE, IN query_gen, FOR A REASON: this branch executes EXACTLY ONCE per
+            // job — the very next thing it does is write `cursor.flat`, and every later tick takes
+            // one of the stage branches below instead. Clearing the stamp anywhere inside the
+            // enriching stage would un-settle rows that the same stage is trying to settle, and
+            // `remaining` would never reach zero: the job would loop until the cron gave up.
+            // Once per RUN is the correct cadence anyway — if the provider is still down, these
+            // are simply re-marked and the run after that tries again.
+            //
+            // Record first, discovery row second: the second statement deletes the very key the
+            // first one selects on.
+            //
+            // ⚠️ `->> ... IS NOT NULL` rather than the jsonb `?` containment operator, which would
+            // read more naturally here. `?` is the placeholder character for several Postgres
+            // drivers, and nothing else in this codebase puts one in a raw SQL string — so this
+            // would be the first, with no precedent proving it survives the driver. The stamp is
+            // always a timestamp string, so the two forms are equivalent, and this one matches the
+            // `signals ->> 'paidLookupAt' IS NOT NULL` idiom the cap query already uses.
+            await db.execute(
+                `UPDATE assistant_records r
+                    SET data = COALESCE(r.data, '{}'::jsonb) - 'enrichAttemptedAt',
+                        updated_at = now()
+                   FROM discovered_leads dl
+                  WHERE dl.assistant_record_id = r.id
+                    AND dl.campaign_id = ${job.campaign_id}
+                    AND dl.contact_email IS NULL
+                    AND dl.signals ->> 'paidLookupFailedAt' IS NOT NULL`
+            );
+            const requeued = await db.execute<{ id: number }>(
+                `UPDATE discovered_leads dl
+                    SET signals = COALESCE(dl.signals, '{}'::jsonb)
+                                    - 'enrichAttemptedAt' - 'paidLookupFailedAt' - 'paidLookupFailedReason',
+                        updated_at = now()
+                  WHERE dl.campaign_id = ${job.campaign_id}
+                    AND dl.contact_email IS NULL
+                    AND dl.signals ->> 'paidLookupFailedAt' IS NOT NULL
+                  RETURNING dl.id`
+            );
+            if (requeued.length > 0) {
+                console.log(`[discovery] job ${job.job_id} re-queued ${requeued.length} lead(s) whose paid lookup previously failed`);
+            }
+
             // ── Continue an area sweep, if this campaign is running one ──────────────
             //
             // ⚠️ Deterministic, and it makes NO model call. The territories and the query templates
@@ -740,7 +790,7 @@ async function enrichBatch(db: Db, job: JobRow, guardrails: Guardrails, counters
         } catch {
             // Best-effort: a scrape failure must never fail the run.
         }
-        return { lead, found, paidAttempted: false };
+        return { lead, found, paidAttempted: false, paidFailedReason: null as string | null };
     }));
 
     // ── Tier 2: BUY an address for the leads the free scrape could not reach ────────────────
@@ -782,24 +832,52 @@ async function enrichBatch(db: Db, job: JobRow, guardrails: Guardrails, counters
         }
         const deadline = Date.now() + PAID_ENRICH_BUDGET_MS;
         await Promise.all(misses.slice(0, allowed).map(async (s) => {
-            const bought = await lookupProviderContact(s.lead.domain, { timeoutMs: deadline - Date.now() });
-            // Stamp the ATTEMPT whether or not it found anything — that is what the cap counts,
-            // and it stops a later slice paying again for the same domain.
+            const outcome = await lookupProviderContact(s.lead.domain, { timeoutMs: deadline - Date.now() });
+            // ⚠️ THE THREE OUTCOMES ARE NOT TWO. `error` means the provider never answered us —
+            // out of credits, rate limited, timed out — so nothing was spent and nothing was
+            // learned about this company. Charging it and stamping it as a purchase is precisely
+            // how the 2026-08-27 outage disguised itself as 172 schools with no published address,
+            // and the tenant deleted 104 of them by hand on the strength of that. See
+            // src/lib/discovery-enrich-provider.ts.
+            if (outcome.status === 'error') {
+                s.paidFailedReason = outcome.reason;
+                return;
+            }
+            // Answered. Stamp the ATTEMPT whether or not it found anything — a miss costs the same
+            // as a find, that is what the cap counts, and it stops a later slice paying again for
+            // the same domain.
             s.paidAttempted = true;
             counters.costGbp += ENRICH_COST_GBP_PER_LOOKUP;
-            if (bought) {
+            if (outcome.status === 'hit') {
+                const bought = outcome.contact;
                 s.found = {
                     ...s.found,
                     contact: { email: bought.email, kind: bought.kind, source: 'provider', foundOn: bought.provider },
                 };
             }
         }));
+
+        // ── Say it out loud when the provider is the thing that failed ──────────────────────────
+        //
+        // ⚠️ A run that buys nothing because the account is dry looks EXACTLY like a run whose
+        // companies publish nothing — until someone counts. Counting it here is the cheapest
+        // possible alarm, and it names the reason, so `http_401` (bad key) and `http_429` (out of
+        // credits) can be told apart without reproducing anything.
+        const failed = misses.slice(0, allowed).filter((s) => s.paidFailedReason);
+        if (failed.length > 0) {
+            const reasons = [...new Set(failed.map((s) => s.paidFailedReason))].join(', ');
+            console.warn(
+                `[discovery] job ${job.job_id} paid enrichment FAILED for ${failed.length}/${allowed} lookup(s) — ${reasons}. ` +
+                `Nothing was charged and these leads are NOT settled; the next run on campaign ${job.campaign_id} will retry them.`,
+            );
+        }
     }
 
     await Promise.all(scraped.map((s) => recordEnrichment(
         db, s.lead.id, s.lead.assistant_record_id, s.found,
         { organisationId: job.organisation_id, aiAssistantId: s.lead.ai_assistant_id, blueprintVersion, icpSnapshot },
         s.paidAttempted === true,
+        s.paidFailedReason,
     )));
 
     const [{ remaining } = { remaining: 0 }] = await db.execute<{ remaining: number }>(

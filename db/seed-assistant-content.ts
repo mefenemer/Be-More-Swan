@@ -89,13 +89,17 @@ const MIGRATED: RoleContent[] = [
     {
         roleKey: 'blog_writer',
         tagline: 'Long-form content in your voice — researched, written, and published on a cadence you set.',
-        description: 'Researches, drafts, and schedules long-form blog posts in your brand voice, then publishes them to your site via the native widget — or straight to WordPress, Ghost, Hashnode and Dev.to. You review and approve each one; it handles the rest.',
+        description: 'Researches, drafts, and schedules long-form blog posts in your brand voice, then publishes them to your site via the native widget on a cadence you set. Each published post can also be shared to your LinkedIn feed and submitted to The Swan Index, always linking back to your own page. You review and approve each one; it handles the rest.',
         keyFeatures: [
             'Long-form Drafting in Your Brand Voice',
             'Human-in-the-loop Review & Approval',
             'Native Site Widget + One-Click Publishing',
         ],
-        integrations: ['Native Widget', 'WordPress', 'Ghost', 'Hashnode', 'Dev.to', 'Google Search Console'],
+        // ⚠️ Every entry here must be a destination a customer can connect TODAY — this list is read
+        // as a promise, not a roadmap. WordPress, WordPress.com, Ghost, Hashnode and Dev.to are
+        // built but withheld (WITHHELD_BLOG_DESTINATIONS in src/utils/blog-destinations/index.ts);
+        // put them back the same day the gate comes down, not before.
+        integrations: ['Native Widget', 'LinkedIn', 'The Swan Index', 'Google Search Console'],
     },
     {
         roleKey: 'lead_qualifier',

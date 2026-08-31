@@ -1373,8 +1373,11 @@
     api('connect-blog-destination', { method: 'GET' }).then(function (res) {
       var connected = ((res.ok && res.body.destinations) || []).filter(function (d) { return d.connected; });
       if (!connected.length) {
-        setStatus('bs-dist-status', 'No other platforms connected yet. Connect WordPress, Ghost, '
-          + 'Dev.to or Hashnode from your assistant\u2019s Connections tab and they\u2019ll appear here.');
+        // Names only what the Connections tab can actually offer today — see
+        // WITHHELD_BLOG_DESTINATIONS. Listing a platform here that has no card there sends the
+        // author looking for a button that is not on the screen.
+        setStatus('bs-dist-status', 'No other platforms connected yet. Connect LinkedIn or '
+          + 'The Swan Index from your assistant\u2019s Connections tab and they\u2019ll appear here.');
         return;
       }
       connected.forEach(function (d) {
@@ -1391,8 +1394,11 @@
         // appearing on someone's public blog and waiting for them there.
         text.innerHTML = bsEscape(d.label + (d.accountLabel ? ' \u00b7 ' + d.accountLabel : ''))
           + '<span class="bs-dest-note">'
-          + (d.publishMode === 'live' ? 'Published live as soon as this post goes out.'
-                                      : 'Sent as a draft for you to release over there.')
+          // A social destination receives a short lead-in and a link, not the article — saying
+          // "published live" there would promise the reader gets the whole post over there.
+          + (d.social ? 'Shared to your feed as a short lead-in linking back to this post.'
+              : d.publishMode === 'live' ? 'Published live as soon as this post goes out.'
+                                         : 'Sent as a draft for you to release over there.')
           + '</span>';
         label.appendChild(box);
         label.appendChild(text);

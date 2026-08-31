@@ -20,9 +20,27 @@
 //
 // ── Contract ─────────────────────────────────────────────────────────────────
 // NEVER THROWS. Every failure path — unconfigured, HTTP error, rate limit, malformed body,
-// timeout — returns null, and the caller keeps whatever the free scrape produced. A paid lookup
-// is an enhancement to a pipeline that already works without it; it must never be able to fail a
-// discovery run.
+// timeout — is reported, not raised, and the caller keeps whatever the free scrape produced. A
+// paid lookup is an enhancement to a pipeline that already works without it; it must never be
+// able to fail a discovery run.
+//
+// ⚠️ IT RETURNS AN OUTCOME, NOT AN ADDRESS-OR-NULL, and that distinction is the whole point of
+// this module's shape. `null` used to mean BOTH "the provider answered and this company publishes
+// nothing" and "the provider never answered us". Those are opposite facts — one is about the
+// lead, the other is about our account — and collapsing them cost a real customer their pipeline:
+//
+//   Prod, 2026-08-27. The Hunter account was on the Free plan (50 searches/month) and ran dry at
+//   ~14:00 UTC. The next 172 lookups all returned null. The worker read that as "no address
+//   published", stamped every one of those leads `paidLookupAt` + `enrichAttemptedAt` — which
+//   permanently suppresses a retry — and charged £1.46 of phantom spend for calls that were
+//   rejected and cost nothing. The tenant then spent a day and a half MANUALLY DELETING 104
+//   schools, because the product told them those schools had no contact address. Hunter had
+//   addresses for them; we simply had no credits left to ask.
+//
+// The header below already predicted this ("a silent zero hit rate reads identically to 'these
+// companies publish nothing'") and pointed at a console.warn as the only discriminator. That was
+// not enough: the warning went to a log nobody can read (`netlify logs:function` is dead), while
+// the DATA said the companies were unreachable. The discriminator has to be in the return value.
 //
 // Config:
 //   DISCOVERY_ENRICH_PROVIDER   — 'none' (DEFAULT — nothing is bought) | 'hunter'
@@ -48,6 +66,22 @@ export interface ProviderContact {
     /** Which provider supplied it — provenance for the Review Queue and the ledger. */
     provider: string;
 }
+
+/**
+ * What a lookup ACTUALLY established. Three outcomes, because there are three facts:
+ *
+ *   • `hit`   — the provider answered and we have an address.
+ *   • `miss`  — the provider answered and this domain publishes nothing we can use. A fact about
+ *               the LEAD. Money was spent; the lead is settled and should not be retried.
+ *   • `error` — the provider did not answer: no credits, rate limited, timed out, or its response
+ *               did not parse. A fact about US. ⚠️ Nothing was learned about the lead, so the
+ *               caller must not spend a cap slot on it, must not charge the run budget, and must
+ *               NOT record it as "we looked and found nothing".
+ */
+export type ProviderOutcome =
+    | { status: 'hit'; contact: ProviderContact }
+    | { status: 'miss' }
+    | { status: 'error'; reason: string };
 
 /** Is a paid provider configured AND named? False is the normal state. */
 export function isEnrichProviderConfigured(): boolean {
@@ -100,21 +134,29 @@ function confidenceOf(raw: unknown): number | null {
  * a silent zero hit rate reads identically to "these companies publish nothing", and the
  * console.warn below is the only thing that tells them apart.
  */
-async function lookupHunter(domain: string, timeoutMs: number): Promise<ProviderContact | null> {
+async function lookupHunter(domain: string, timeoutMs: number): Promise<ProviderOutcome> {
     const url = `${HUNTER_ENDPOINT}?domain=${encodeURIComponent(domain)}&api_key=${encodeURIComponent(HUNTER_API_KEY as string)}`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
         const res = await fetch(url, { signal: controller.signal });
         if (!res.ok) {
-            // 429/401 are operational facts worth seeing in the logs — a silent zero hit rate
-            // reads identically to "these companies publish nothing", which is the wrong lesson.
-            console.warn(`[enrich-provider] hunter ${res.status} for ${domain}`);
-            return null;
+            // ⚠️ EVERY non-2xx is an `error`, never a miss. 401 (bad key) and 429 (out of credits
+            // / rate limited) are the two that actually happen, and both mean the account is the
+            // problem — the domain was never even looked at. Treating these as "publishes
+            // nothing" is the exact bug described in the header.
+            console.warn(`[enrich-provider] hunter HTTP ${res.status} for ${domain} — NOT a miss, the lookup did not happen`);
+            return { status: 'error', reason: `http_${res.status}` };
         }
         const body = await res.json().catch(() => null) as { data?: { emails?: unknown } } | null;
         const raw = body?.data?.emails;
-        if (!Array.isArray(raw)) return null;
+        // A 200 whose body does not carry the array we map is a CONTRACT CHANGE, not an empty
+        // result — the one failure the module header calls out as indistinguishable by eye. It
+        // must not settle the lead either.
+        if (!Array.isArray(raw)) {
+            console.warn(`[enrich-provider] hunter 200 but data.emails was not an array for ${domain} — response shape changed?`);
+            return { status: 'error', reason: 'bad_body' };
+        }
 
         const candidates = raw
             .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object')
@@ -124,37 +166,47 @@ async function lookupHunter(domain: string, timeoutMs: number): Promise<Provider
             }))
             .filter((e) => e.email.includes('@'));
 
+        // Answered, parsed, and genuinely nothing usable on this domain. THIS is a miss: a fact
+        // about the company, worth recording and worth a cap slot, because we paid to learn it.
         const best = pickBest(candidates);
-        if (!best) return null;
-        return { email: best.email, kind: best.kind, confidence: best.confidence, provider: 'hunter' };
+        if (!best) return { status: 'miss' };
+        return {
+            status: 'hit',
+            contact: { email: best.email, kind: best.kind, confidence: best.confidence, provider: 'hunter' },
+        };
     } catch (err) {
-        console.warn(`[enrich-provider] hunter lookup failed for ${domain}:`,
+        // Aborted by our own timeout, DNS, TLS, socket — we never got an answer.
+        const reason = err instanceof Error && err.name === 'AbortError' ? 'timeout' : 'network';
+        console.warn(`[enrich-provider] hunter lookup ${reason} for ${domain}:`,
             err instanceof Error ? err.message : err);
-        return null;
+        return { status: 'error', reason };
     } finally {
         clearTimeout(timer);
     }
 }
 
 /**
- * Buy a contact address for one domain, or null.
+ * Buy a contact address for one domain.
  *
- * Returns null — never throws — when no provider is configured, which is the default state and
- * not an error. The caller checks isEnrichProviderConfigured() before spending a slot from the
- * per-run cap, so an unconfigured environment costs nothing and behaves exactly as it did before
- * this module existed.
+ * ⚠️ Every early return here is an `error`, not a `miss` — none of them asked the provider
+ * anything, so none of them learned that the company publishes no address. `not_configured` is
+ * the normal, un-alarming case (the caller checks isEnrichProviderConfigured() first and skips
+ * the whole phase), but it is still not a fact about the lead, and a caller that settled a lead
+ * on it would mark the entire backlog unreachable the moment the provider was switched off.
  */
 export async function lookupProviderContact(
     domain: string | null,
     opts: { timeoutMs?: number } = {},
-): Promise<ProviderContact | null> {
-    if (!isEnrichProviderConfigured() || !domain) return null;
+): Promise<ProviderOutcome> {
+    if (!isEnrichProviderConfigured()) return { status: 'error', reason: 'not_configured' };
+    if (!domain) return { status: 'error', reason: 'no_domain' };
     const host = domain.toLowerCase().replace(/^www\./, '').replace(/\/+$/, '');
-    if (!host || !host.includes('.')) return null;
+    if (!host || !host.includes('.')) return { status: 'error', reason: 'no_domain' };
     // A caller draining a shared slice budget passes what is left of it; a lookup that cannot
     // finish inside the tick is worth abandoning rather than risking a 504 that strands the job.
+    // Abandoning it is emphatically NOT a miss — we ran out of OUR time, not their addresses.
     const timeoutMs = Math.min(opts.timeoutMs ?? TIMEOUT_MS, TIMEOUT_MS);
-    if (timeoutMs <= 0) return null;
+    if (timeoutMs <= 0) return { status: 'error', reason: 'no_budget' };
     if (PROVIDER === 'hunter') return lookupHunter(host, timeoutMs);
-    return null;
+    return { status: 'error', reason: 'not_configured' };
 }

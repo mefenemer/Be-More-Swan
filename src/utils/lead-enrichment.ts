@@ -63,6 +63,11 @@ export async function recordEnrichment(
     found: EnrichmentFound,
     ledger?: EnrichmentLedgerContext,
     paidAttempted = false,
+    /**
+     * Set when the paid provider was called and DID NOT ANSWER (no credits, rate limited, timed
+     * out, unparseable). Mutually exclusive with `paidAttempted` — see the stamp below.
+     */
+    paidFailedReason: string | null = null,
 ): Promise<void> {
     const hit = found.contact;
     const handles = found.handles ?? {};
@@ -71,6 +76,20 @@ export async function recordEnrichment(
     // per-run cap counts, so it has to record money SPENT rather than addresses found. It also
     // stops a later slice paying a second time for a domain the provider already had nothing for.
     if (paidAttempted) stamp.paidLookupAt = new Date().toISOString();
+    // ⚠️ A FAILED lookup is stamped DIFFERENTLY, and never as `paidLookupAt`. Nothing was bought,
+    // nothing was learned about this company, and the cap must not count it — the cap exists to
+    // bound SPEND, and a rejected request costs nothing. Recording it as a purchase is what made
+    // the 2026-08-27 outage invisible (see discovery-enrich-provider.ts).
+    //
+    // `enrichAttemptedAt` above IS still written, deliberately: the free scrape genuinely ran, and
+    // the worker's "any leads left to enrich?" query counts unstamped rows — leaving them unstamped
+    // would mean a run whose provider is down never reaches `remaining === 0` and never completes.
+    // The retry route is the once-per-run sweep in process-discovery-jobs.ts, which finds leads by
+    // THIS key and clears the attempt stamp at the start of the next run on the campaign.
+    if (paidFailedReason) {
+        stamp.paidLookupFailedAt = new Date().toISOString();
+        stamp.paidLookupFailedReason = paidFailedReason;
+    }
     if (hit) {
         stamp.emailKind = hit.kind;        // 'role' | 'personal' — personal needs a closer look
         stamp.emailSource = hit.source;    // 'scrape' | 'provider' — drives the personal-inbox gate
@@ -200,26 +219,37 @@ export async function enrichOneLead(
     // actually asked about. The refusal that DOES apply is in lead-generation.ts `look_again`, which
     // turns down the types no address can help.
     let paidAttempted = false;
+    let paidFailedReason: string | null = null;
     if (!found.contact && opts.allowPaid !== false && isEnrichProviderConfigured()) {
-        paidAttempted = true;
         try {
-            const bought = await lookupProviderContact(opts.domain);
-            if (bought) {
-                found = {
-                    // `foundOn` is the provider's name for a bought address — the same shape the
-                    // worker writes, so `emailSource: 'provider'` and the personal-inbox gate
-                    // downstream behave identically whichever path produced the lead.
-                    contact: { email: bought.email, kind: bought.kind, source: 'provider', foundOn: bought.provider },
-                    handles: found.handles,
-                };
+            const outcome = await lookupProviderContact(opts.domain);
+            if (outcome.status === 'error') {
+                // The provider never answered. This lead learned nothing, so it is not "attempted"
+                // — the user pressed a button and deserves to be able to press it again.
+                paidFailedReason = outcome.reason;
+            } else {
+                paidAttempted = true;
+                if (outcome.status === 'hit') {
+                    found = {
+                        // `foundOn` is the provider's name for a bought address — the same shape the
+                        // worker writes, so `emailSource: 'provider'` and the personal-inbox gate
+                        // downstream behave identically whichever path produced the lead.
+                        contact: {
+                            email: outcome.contact.email, kind: outcome.contact.kind,
+                            source: 'provider', foundOn: outcome.contact.provider,
+                        },
+                        handles: found.handles,
+                    };
+                }
             }
         } catch {
             // The provider contract is never-throws, but a caller must not depend on a third
             // party's promise about its own error handling.
+            paidFailedReason = 'threw';
         }
     }
 
-    await recordEnrichment(db, opts.discoveredLeadId, opts.assistantRecordId, found, opts.ledger, paidAttempted);
+    await recordEnrichment(db, opts.discoveredLeadId, opts.assistantRecordId, found, opts.ledger, paidAttempted, paidFailedReason);
 
     return {
         found: Boolean(found.contact),

@@ -6,7 +6,7 @@ import { systemConnections, scheduledPosts, users, userOrganisations, auditLogs,
 import { createNotification } from '../../src/utils/notify';
 import { storeSecret, deleteSecret, buildRefKey } from '../../src/utils/vault';
 import { deleteIntegration, getIntegration, isIntegrationProvider, serviceAutoRefreshes } from '../../src/utils/workspace-integrations';
-import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant, usesOutreachMailbox, MAILBOX_PROVIDERS } from '../../src/utils/connection-map';
+import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant, usesOutreachMailbox, MAILBOX_PROVIDERS, usesSearchConsole, SEARCH_CONSOLE_PROVIDER } from '../../src/utils/connection-map';
 import { getXUsage } from '../../src/utils/ai-credits';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
@@ -220,7 +220,23 @@ export default withLambda(async (event) => {
                         };
                     }))
                     : [];
-                return { statusCode: 200, body: JSON.stringify({ connections: visible, allowedServices, supportedTools, mailboxProviders, xCredits }) };
+                // Google Search Console, for the roles whose policy includes it. Same story as the
+                // mailboxes above: the grant lives in workspace_integrations, so it is invisible to
+                // the system_connections list and needs its own lookup — without it the Connections
+                // grid said "Search Console — Coming soon" over a live, connectable integration that
+                // Blog Studio was already offering a Connect button for.
+                const searchConsole = usesSearchConsole(assistant) && currentOrgId
+                    ? await (async () => {
+                        const row = await getIntegration(db, currentOrgId, SEARCH_CONSOLE_PROVIDER as never);
+                        return {
+                            provider: SEARCH_CONSOLE_PROVIDER,
+                            connected: row?.status === 'active',
+                            status: row?.status ?? null,
+                            accountName: row?.externalAccountName ?? null,
+                        };
+                    })()
+                    : null;
+                return { statusCode: 200, body: JSON.stringify({ connections: visible, allowedServices, supportedTools, mailboxProviders, searchConsole, xCredits }) };
             }
 
             return { statusCode: 200, body: JSON.stringify({ connections: merged, xCredits }) };

@@ -100,9 +100,30 @@ export const CATEGORY_LABELS: Record<string, { label: string; description: strin
 
 // Categories that are LIVE via a subsystem OTHER than the OAuth connector catalog, so they have no
 // entry in CONNECTOR_CATEGORY but must still count as available (suppressing the "coming soon" card
-// and letting integrations.js draw their real cards). `cms` is served by the blog-destinations
-// subsystem (connect-blog-destination + src/utils/blog-destinations), not the OAuth flow.
-export const EXTERNALLY_LIVE_CATEGORIES = new Set<string>(['cms']);
+// and letting integrations.js draw their real cards).
+//
+// · `cms` is served by the blog-destinations subsystem (connect-blog-destination +
+//   src/utils/blog-destinations), not the OAuth flow.
+// · `search_console` is served by oauth-integrations (provider 'searchconsole') and rendered by
+//   _searchConsoleCard() in integrations.js. It was missing here until 2026-08-31, which meant the
+//   Connections tab badged Google Search Console "Coming soon" while Blog Studio offered a working
+//   Connect button for the same integration, the daily decay cron read it, two KPI cards were
+//   computed from it and a goal metric depended on it. ⚠️ Adding a key here without a card renderer
+//   makes the category VANISH — no connector card AND no coming-soon card — so the two must land
+//   together; see this module's header.
+export const EXTERNALLY_LIVE_CATEGORIES = new Set<string>(['cms', 'search_console']);
+
+/** The OAuth provider behind the `search_console` category (workspace_integrations). */
+export const SEARCH_CONSOLE_PROVIDER = 'searchconsole';
+
+/**
+ * Does this assistant's policy include Search Console? Decides whether the server looks its
+ * connection state up and sends it — the same shape as usesOutreachMailbox below.
+ */
+export function usesSearchConsole(a: AssistantRole | null | undefined): boolean {
+    const cats = allowedCategoriesForAssistant(a);
+    return !!cats?.has('search_console');
+}
 
 // The mailbox providers an assistant can send outreach from. These live in
 // `workspace_integrations` (OAuth via /api/oauth/:provider/connect), NOT in CONNECTOR_CATEGORY —

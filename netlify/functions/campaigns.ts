@@ -11,6 +11,9 @@
 //   POST { action: 'stop_all',    assistantId }            → pause every live campaign
 //   POST { action: 'list_orders', campaignId }
 //   POST { action: 'place_order', campaignId, orderAction, brief?, quantity? }
+//   POST { action: 'create_link',  campaignId, destinationUrl, label?, medium?, network? }
+//   POST { action: 'list_links',   campaignId }            → links + clicks + conversions
+//   POST { action: 'archive_link', linkId }                → stops the redirect, keeps the clicks
 //   POST { action: 'list_decisions', assistantId }
 //   POST { action: 'decide',      decisionId, verdict: 'approve'|'reject', reason?, note? }
 //
@@ -26,9 +29,10 @@
 // 4. EVERY PAUSE HAS A REASON AND A RESUME. `pause` requires a reason; `start` is the documented
 //    way back and works from 'paused' as well as 'draft'.
 
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
-    aiAssistants, campaignBudgets, campaignDecisions, campaignOrders, campaigns,
+    aiAssistants, campaignAttributions, campaignBudgets, campaignClickEvents, campaignDecisions,
+    campaignLinks, campaignOrders, campaigns,
 } from '../../db/schema';
 import { getDb } from '../../db/client';
 import { requireTenant } from '../../src/utils/tenant';
@@ -37,8 +41,10 @@ import { placeOrder } from '../../src/utils/campaign-orders';
 import { settleDecisionMirror } from '../../src/utils/campaign-mirror';
 import {
     CREATABLE_CAMPAIGN_MODES, LIVE_CAMPAIGN_STATUSES,
-    isOrderAction, isSelectableOutcomeMetric, orderWorkItems,
+    isLinkMedium, isOrderAction, isSelectableOutcomeMetric, orderWorkItems,
 } from '../../src/config/campaign-vocab';
+import { isSafeDestination, mintLinkToken } from '../../src/utils/campaign-attribution';
+import { resolveBaseUrl } from '../../src/utils/base-url';
 import {
     applyRejectionToConstraints, isCampaignRejectReason, type CampaignConstraints,
 } from '../../src/config/campaign-reject-reasons';
@@ -52,6 +58,9 @@ function json(statusCode: number, body: unknown) {
 function str(v: unknown, max: number): string | null {
     return typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null;
 }
+
+/** Active tracked links one campaign may hold. A real campaign runs a handful of creatives. */
+const MAX_LINKS_PER_CAMPAIGN = 50;
 
 /** Clamp an untrusted integer into a sane range, falling back to a default. */
 function int(v: unknown, min: number, max: number, dflt: number): number {
@@ -389,6 +398,150 @@ export default withLambda(async (event) => {
         });
         if (result.status === 'failed') return json(400, { error: result.message ?? 'The order could not be placed.' });
         return json(200, { orderId: result.orderId, status: result.status, workItems: result.workItems });
+    }
+
+    // ── create_link ───────────────────────────────────────────────────────────
+    // Mint a tracked link: https://<host>/go/<token> → the tenant's own destination.
+    if (action === 'create_link') {
+        const campaign = await requireCampaign(Number(body.campaignId));
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+
+        const destinationUrl = str(body.destinationUrl, 2000);
+        if (!destinationUrl) return json(400, { error: 'Where should this link send people?' });
+
+        // ⚠️ VALIDATED HERE, AT THE WRITE. A link on our domain that forwards anywhere is an open
+        // redirector — the classic phishing gift, and it would be OUR domain lending the
+        // credibility. Checking only at redirect time would leave a bad destination sitting in the
+        // database looking legitimate until someone clicked it.
+        if (!isSafeDestination(destinationUrl)) {
+            return json(400, {
+                error: 'That destination cannot be used. Links must be a normal http:// or https:// web address, without a username or password in them, and cannot point at another tracked link.',
+            });
+        }
+
+        const medium = body.medium === undefined ? 'organic' : body.medium;
+        if (!isLinkMedium(medium)) return json(400, { error: 'Unknown link medium.' });
+        const network = str(body.network, 60);
+        // Mirrors campaign_links_paid_network_check. Enforced here too so the caller gets a
+        // sentence rather than a constraint violation — and because a UI-only guard holds for
+        // exactly one caller.
+        if (medium === 'paid' && !network) {
+            return json(400, { error: 'A paid link needs to say which network it runs on, or its results cannot be broken down by channel.' });
+        }
+
+        // Bounded so one campaign cannot grow an unbounded table. Generous: a real campaign runs a
+        // handful of creatives, not hundreds.
+        const [{ existing } = { existing: 0 }] = await db
+            .select({ existing: sql<number>`count(*)::int` })
+            .from(campaignLinks)
+            .where(and(eq(campaignLinks.campaignId, campaign.id), isNull(campaignLinks.archivedAt)));
+        if (existing >= MAX_LINKS_PER_CAMPAIGN) {
+            return json(400, { error: `This campaign already has ${MAX_LINKS_PER_CAMPAIGN} active links. Archive one you are no longer using.` });
+        }
+
+        const token = mintLinkToken();
+        const [row] = await db.insert(campaignLinks).values({
+            organisationId: orgId,
+            campaignId: campaign.id,
+            createdBy: userId,
+            token,
+            destinationUrl,
+            label: str(body.label, 120),
+            medium,
+            network: medium === 'paid' ? network : null,
+        }).returning({ id: campaignLinks.id });
+
+        const base = resolveBaseUrl(event.headers as Record<string, string | undefined>);
+        return json(200, {
+            id: row.id,
+            token,
+            // ⚠️ Null rather than a guessed host when BASE_URL is unset. A tracked link with the
+            // wrong origin is pasted into an advert and cannot be recalled — the caller must be
+            // able to tell "we could not build this" from "here it is".
+            url: base ? `${base}/go/${token}` : null,
+        });
+    }
+
+    // ── list_links ────────────────────────────────────────────────────────────
+    if (action === 'list_links') {
+        const campaign = await requireCampaign(Number(body.campaignId));
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+
+        const links = await db.select()
+            .from(campaignLinks)
+            .where(eq(campaignLinks.campaignId, campaign.id))
+            .orderBy(desc(campaignLinks.createdAt))
+            .limit(200);
+        if (links.length === 0) return json(200, { links: [] });
+
+        // Two GROUPED queries, not two per link. countRoiActivityByAssistant settled this shape:
+        // the N+1 version is invisible until a tenant has thirty links and the tab takes a second.
+        //
+        // ⚠️ ::int on both counts. postgres-js hands back a bigint count as a STRING, and a string
+        // reaching the client turns "12" + 1 into "121" in any arithmetic the UI does.
+        const clickRows = await db
+            .select({
+                linkId: campaignClickEvents.linkId,
+                clicks: sql<number>`count(*) FILTER (WHERE ${campaignClickEvents.isProbableBot} = false)::int`,
+                botClicks: sql<number>`count(*) FILTER (WHERE ${campaignClickEvents.isProbableBot})::int`,
+            })
+            .from(campaignClickEvents)
+            .where(eq(campaignClickEvents.campaignId, campaign.id))
+            .groupBy(campaignClickEvents.linkId);
+
+        const conversionRows = await db
+            .select({
+                linkId: campaignAttributions.linkId,
+                conversions: sql<number>`count(*)::int`,
+            })
+            .from(campaignAttributions)
+            .where(eq(campaignAttributions.campaignId, campaign.id))
+            .groupBy(campaignAttributions.linkId);
+
+        const clicksBy = new Map(clickRows.map((r) => [r.linkId, r]));
+        const conversionsBy = new Map(conversionRows.map((r) => [r.linkId, r.conversions]));
+        const base = resolveBaseUrl(event.headers as Record<string, string | undefined>);
+
+        return json(200, {
+            links: links.map((l) => ({
+                id: l.id,
+                token: l.token,
+                url: base ? `${base}/go/${l.token}` : null,
+                destinationUrl: l.destinationUrl,
+                label: l.label,
+                medium: l.medium,
+                network: l.network,
+                archivedAt: l.archivedAt,
+                createdAt: l.createdAt,
+                clicks: clicksBy.get(l.id)?.clicks ?? 0,
+                // Reported separately rather than folded into `clicks`. Mail scanners and
+                // link-preview bots hit these constantly; adding them to the headline number
+                // inflates every click-through rate in the product, and hiding them entirely
+                // leaves a tenant unable to explain why the ad platform's count is higher.
+                botClicks: clicksBy.get(l.id)?.botClicks ?? 0,
+                conversions: conversionsBy.get(l.id) ?? 0,
+            })),
+        });
+    }
+
+    // ── archive_link ──────────────────────────────────────────────────────────
+    if (action === 'archive_link') {
+        const linkId = Number(body.linkId);
+        // IDOR: the link must belong to the caller's organisation. Scoped on organisation_id
+        // rather than trusting a campaignId the caller also supplied.
+        const [link] = await db.select({ id: campaignLinks.id })
+            .from(campaignLinks)
+            .where(and(eq(campaignLinks.id, linkId), eq(campaignLinks.organisationId, orgId)))
+            .limit(1);
+        if (!link) return json(404, { error: 'Link not found.' });
+
+        // ⚠️ A SOFT DELETE, and it has to stay one. The clicks already recorded against this link
+        // are history the funnel counts; a hard delete would cascade them away and silently
+        // reduce a past campaign's results. Archiving stops the redirect and keeps the record.
+        await db.update(campaignLinks)
+            .set({ archivedAt: new Date(), updatedAt: new Date() })
+            .where(eq(campaignLinks.id, link.id));
+        return json(200, { ok: true });
     }
 
     // ── list_decisions ────────────────────────────────────────────────────────

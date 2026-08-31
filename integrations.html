@@ -282,6 +282,18 @@
       // "sync actions to it" copy the action-target connectors use doesn't apply.
       inbound: true,
     },
+    {
+      id: 'searchconsole',
+      name: 'Google Search Console',
+      emoji: '🔍',
+      iconBg: 'bg-blue-100',
+      tagline: 'Your Blog Writer reads search impressions and clicks for published posts, and flags one for a refresh when its traffic starts sliding.',
+      usedBy: 'Blog Writer',
+      // Read-only, like Canva: nothing is ever published to Google. It was connectable only from
+      // Blog Studio's Search performance panel until 2026-08-31, which left the workspace-wide
+      // page silent about a workspace-wide connection.
+      inbound: true,
+    },
   ];
 
   const grid = document.getElementById('integrations-grid');
@@ -357,7 +369,11 @@
               '</div>' +
               '<p class="hidden text-xs font-semibold text-red-600" data-subdomain-error="' + p.id + '">Enter your Zendesk subdomain — the bit before .zendesk.com.</p>' +
             '</div>'
-          : '<a href="/api/oauth/' + p.id + '/connect" class="block w-full text-center px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition">' + connectLabel + '</a>';
+          // ?returnTo=integrations brings the user back HERE afterwards. Without it the callback
+          // picks a destination from the provider alone, and Search Console (whose other home is
+          // Blog Studio) would land a user who started on this page inside the Blog Studio modal.
+          // Harmless for the rest: it resolves to the same /integrations.html they already got.
+          : '<a href="/api/oauth/' + p.id + '/connect?returnTo=integrations" class="block w-full text-center px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition">' + connectLabel + '</a>';
 
       return (
         '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">' +

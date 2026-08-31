@@ -161,6 +161,19 @@ const RETURN_DESTINATIONS: Record<string, { tab: string; rqStatus?: string }> = 
     outreach: { tab: 'review-queue', rqStatus: 'approved' },
 };
 
+/**
+ * Where a connect flow started OUTSIDE any assistant returns to. Same table-not-pass-through rule
+ * as RETURN_DESTINATIONS above, for the same reason: `state` is unsigned.
+ *
+ * Without this the non-assistant branch picked its destination from the PROVIDER alone, so
+ * Search Console always landed in Blog Studio — correct while Blog Studio was the only place that
+ * offered it, and wrong the moment the workspace-wide Integrations page did too.
+ */
+const STANDALONE_RETURNS: Record<string, string> = {
+    integrations: '/integrations.html',
+    blogstudio: '/blog-studio.html',
+};
+
 function buildState(payload: object): string {
     return Buffer.from(JSON.stringify(payload)).toString('base64url');
 }
@@ -293,7 +306,8 @@ export default withLambda(async (event) => {
         // dropped here and the resolved value is looked up from our own table on the way back,
         // rather than echoing a caller-supplied tab name into a redirect.
         const rawReturnTo = event.queryStringParameters?.returnTo;
-        const returnTo = rawReturnTo && RETURN_DESTINATIONS[rawReturnTo] ? rawReturnTo : null;
+        const returnTo = rawReturnTo && (RETURN_DESTINATIONS[rawReturnTo] || STANDALONE_RETURNS[rawReturnTo])
+            ? rawReturnTo : null;
 
         const redirectUri = `${baseUrl}/api/oauth/${provider}/callback`;
         const state = buildState({
@@ -1071,6 +1085,10 @@ export default withLambda(async (event) => {
                 : '';
             return redirect(`/workspace.html?oauth_success=${provider}&assistantId=${returnAssistantId}${where}`);
         }
+        // A flow that named where it started goes back there; otherwise fall back to the
+        // provider-based default (Blog Studio owns the two blog-side connectors).
+        const standalone = state.returnTo ? STANDALONE_RETURNS[state.returnTo] : null;
+        if (standalone) return redirect(`${standalone}?connected=${provider}`);
         const blogProvider = provider === 'wordpresscom' || provider === 'searchconsole';
         return redirect(blogProvider ? `/blog-studio.html?connected=${provider}` : `/integrations.html?connected=${provider}`);
     }

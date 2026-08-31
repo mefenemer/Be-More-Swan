@@ -412,8 +412,10 @@ To help Google find them faster, submit this address in Google Search Console:
 
     https://bemoreswan.com/b/wgt_your_key_here/sitemap.xml
 
-You can also connect Search Console from the **Search performance** panel in Blog Studio. Your
-assistant will then spot posts that are losing search traffic and flag them for a refresh.
+You can also connect Search Console from the assistant's **Connections** tab, or from the
+**Search performance** panel in Blog Studio — they are the same connection, so either will do. Your
+assistant will then spot posts that are losing search traffic and flag them for a refresh, and the
+Search Impressions and Organic Clicks figures on its Overview start filling in.
 
 ### The Your site URL and Post URL pattern settings
 
@@ -427,25 +429,29 @@ Only fill them in if your website genuinely serves each post at its own address,
 `https://yoursite.com/blog/a-post-title`. If your blog lives on one page with the embed on it — which
 is the normal setup described above — leave both blank.
 
-## Publishing somewhere else instead
+## Sharing each post further
 
-If you already have a blog elsewhere, your assistant can publish straight into it. Open the
-assistant, go to the **Connections** tab, and connect any of:
+Your blog is always the original. From the assistant's **Connections** tab you can also send every
+published post to:
 
-- WordPress (self-hosted)
-- WordPress.com
-- Ghost
-- Hashnode
-- Dev.to
+- **LinkedIn** — each post is shared to your feed as a short lead-in linking back to the full
+  article, so the reading (and the search credit) stays on your own page. It uses the same LinkedIn
+  connection as the rest of your workspace, and turning it off here never disconnects LinkedIn.
+- **The Swan Index** — our own business magazine. Posts are submitted under your byline for an
+  editor to review, again linking back to you as the original.
 
-Once connected, approved posts are sent there automatically at publish time. You can use this
-alongside the embed, or instead of it.
+Both are optional and both are per-post: open a post in Blog Studio and untick anywhere you would
+rather it did not go.
+
+Publishing straight into a blog you already own elsewhere — WordPress, Ghost and the like — is
+built but not switched on yet. It is not in the Connections tab today, and we will say so here when
+it is.
 
 ## If something is not working
 
 **The blog area is empty.** Check the page actually contains `<div id="bms-blog"></div>` — the embed
 needs something to render into, and the id must match exactly. Also confirm your builder did not strip
-the script tag; some page builders only allow scripts inside a dedicated Embed or Custom Code block.
+the script tag — some page builders only allow scripts inside a dedicated Embed or Custom Code block.
 
 **It says "No posts yet."** The embed is connected and working — you simply have no *published*
 posts. Drafts and scheduled posts do not appear until they go live. Check the Review Queue for posts

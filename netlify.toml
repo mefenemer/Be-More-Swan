@@ -386,6 +386,19 @@
   to = "/.netlify/functions/audience-public"
   status = 200
 
+# Campaign Assistant Phase A: tracked-link click recorder. Rewrite (status 200) — the original
+# /go/:token path survives in event.rawUrl, which campaign-link-redirect.ts parses; the function
+# then issues the real 302 itself, because it must record the click and set the visitor cookie on
+# the way past. A `status = 302` rule here would send the browser straight to the destination and
+# the function would never run.
+#
+# ⚠️ /go/ is a SHORT, PUBLIC, TOP-LEVEL namespace and it is now taken. It appears in adverts and
+# printed material, so it can never be reassigned to anything else.
+[[redirects]]
+  from = "/go/*"
+  to = "/.netlify/functions/campaign-link-redirect"
+  status = 200
+
 # Autonomous Content Engine (US 3.2 §A.4): per-widget RSS 2.0 feed. MUST precede the /api/widget/*
 # catch-all below — Netlify evaluates redirects top-to-bottom, first match wins, so without this an
 # RSS request would fall through to widget-api, which parses "rss" as a resource name and 404s.

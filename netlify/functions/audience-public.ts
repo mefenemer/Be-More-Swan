@@ -28,6 +28,7 @@ import {
 } from '../../db/schema';
 import { looksLikeEmail, normaliseEmail, cleanName } from '../../src/utils/audience-contacts';
 import { addToSegment, recordConsentEvent, setContactStatus, upsertContact } from '../../src/utils/audience-store';
+import { bindConversion } from '../../src/utils/campaign-attribution-store';
 import { enrolInWelcomeSequence } from '../../src/utils/newsletter-sequence';
 import {
     FORM_KEY_RE, MIN_FILL_MS, originAllowed,
@@ -515,6 +516,12 @@ export default withLambda(async (event: HandlerEvent) => {
     const ipHash = pseudonymiseIp(ip);
     const userAgent = event.headers?.['user-agent'] || null;
     const sourceUrl = String(body.url || '').slice(0, 500) || null;
+    // ⚠️ Separate from sourceUrl, and deliberately capped LONGER. sourceUrl is consent evidence and
+    // 500 chars is plenty to identify a page; this one is parsed for the ?bmsc= click ref, which
+    // sits at the END of the query string and would be silently truncated away on any long URL —
+    // producing a campaign that mysteriously attributes nothing on exactly the pages that carry
+    // the most tracking parameters. 2000 is the practical URL ceiling browsers agree on.
+    const pageUrl = String(body.url || '').slice(0, 2000) || null;
 
     try {
         const [existing] = await db
@@ -581,6 +588,30 @@ export default withLambda(async (event: HandlerEvent) => {
             userAgent,
             formId: form.id,
             evidence: returning ? 'Signed up again after previously unsubscribing.' : null,
+        });
+
+        // Which advert, post or email brought this person here — if any.
+        //
+        // Placed here, above the double opt-in branch, so BOTH paths bind: attribution is a fact
+        // about where somebody came from, and a pending contact who never confirms still came from
+        // somewhere. Deferring it to confirmation would lose the signal entirely, because the
+        // confirmation arrives from an email client with no page URL and no cookie.
+        //
+        // Never throws, and its result is deliberately ignored: a person who filled in this form
+        // must end up subscribed whether or not we can work out which campaign sent them. It sits
+        // after recordConsentEvent for the same reason — consent is the load-bearing write.
+        //
+        // ⚠️ Awaited, not fire-and-forget. An un-awaited promise here would be killed the moment
+        // the handler returns its response, so the binding would land only when the function
+        // happened to stay warm — which is the worst kind of bug, because it works locally and
+        // attributes a random subset in production. It returns before touching the database when
+        // there is no click ref and no cookie, which is most sign-ups.
+        await bindConversion(db, {
+            organisationId: orgId,
+            subjectType: 'audience_contact',
+            subjectId: contactId,
+            pageUrl,
+            cookieHeader: event.headers?.cookie || null,
         });
 
         if (!form.doubleOptIn) {
