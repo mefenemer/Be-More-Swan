@@ -14,6 +14,7 @@
 //   POST { action: 'create_link',  campaignId, destinationUrl, label?, medium?, network? }
 //   POST { action: 'list_links',   campaignId }            → links + clicks + conversions
 //   POST { action: 'archive_link', linkId }                → stops the redirect, keeps the clicks
+//   POST { action: 'stage_paid',   campaignId, dailyBudgetGbp, variants[], campaignGroupUrn }
 //   POST { action: 'list_decisions', assistantId }
 //   POST { action: 'decide',      decisionId, verdict: 'approve'|'reject', reason?, note? }
 //
@@ -31,8 +32,8 @@
 
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
-    aiAssistants, campaignAttributions, campaignBudgets, campaignClickEvents, campaignDecisions,
-    campaignLinks, campaignOrders, campaigns,
+    adVariants, aiAssistants, campaignAttributions, campaignBudgets, campaignClickEvents,
+    campaignDecisions, campaignLinks, campaignOrders, campaigns,
 } from '../../db/schema';
 import { getDb } from '../../db/client';
 import { requireTenant } from '../../src/utils/tenant';
@@ -45,6 +46,10 @@ import {
 } from '../../src/config/campaign-vocab';
 import { isSafeDestination, mintLinkToken } from '../../src/utils/campaign-attribution';
 import { resolveBaseUrl } from '../../src/utils/base-url';
+import { hasFeatureByOrg } from '../../src/utils/plan-features';
+import { PAID_ADS_FEATURE } from '../../src/config/ad-networks';
+import { linkedInAdapter } from '../../src/utils/ad-networks/registry';
+import { assessAdsReadiness, getAdsConnection, getAdsToken } from '../../src/utils/linkedin-ads-connection';
 import {
     applyRejectionToConstraints, isCampaignRejectReason, type CampaignConstraints,
 } from '../../src/config/campaign-reject-reasons';
@@ -542,6 +547,168 @@ export default withLambda(async (event) => {
             .set({ archivedAt: new Date(), updatedAt: new Date() })
             .where(eq(campaignLinks.id, link.id));
         return json(200, { ok: true });
+    }
+
+    // ── stage_paid ────────────────────────────────────────────────────────────
+    // Turn a campaign into a PAID one: create it on the ad network, PAUSED, with its creatives.
+    // Nothing here spends. Approval is a separate, human act.
+    //
+    // ⚠️ THIS IS WHERE PAID BECOMES POSSIBLE, and it is deliberately the only place. The `create`
+    // action above still refuses every mode but 'organic'; this action does not widen that, it adds
+    // a second, separately-gated door with its own guards. Reading `CREATABLE_CAMPAIGN_MODES` alone
+    // and concluding "paid is impossible" would therefore be wrong from here on — the guard that
+    // matters now is the adapter registry, which resolves nothing in production.
+    if (action === 'stage_paid') {
+        const campaign = await requireCampaign(Number(body.campaignId));
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+
+        // Gate 1 — the commercial entitlement.
+        if (!await hasFeatureByOrg(db, orgId, PAID_ADS_FEATURE)) {
+            return json(403, { error: 'Paid advertising is not available on this plan.' });
+        }
+
+        // A campaign that is already running organically must not be silently converted: its work
+        // ledger, its orders and its reporting all assume one mode for its lifetime.
+        if (campaign.mode !== 'organic') {
+            return json(400, { error: 'This campaign has already been set up for advertising.' });
+        }
+        if (LIVE_CAMPAIGN_STATUSES.includes(campaign.status as never)) {
+            return json(400, { error: 'Pause this campaign before adding advertising to it.' });
+        }
+
+        // Gate 2 — a connected ad account the user has actually chosen.
+        const readiness = assessAdsReadiness(await getAdsConnection(db, orgId));
+        if (!readiness.ready) return json(400, { error: readiness.reason });
+        const conn = readiness.connection;
+
+        // ⚠️ GBP ONLY, for now, and refused rather than converted. `campaign_budgets.max_spend_gbp`
+        // is named for its currency, and writing euros into it would be the same mistake the
+        // adapter refuses to make with `costInLocalCurrency`. Converting needs a rate we do not
+        // have and would silently misreport every cost-per-outcome figure downstream.
+        if (conn.selectedCurrency !== 'GBP') {
+            return json(400, {
+                error: `That LinkedIn ad account bills in ${conn.selectedCurrency}. We can only manage accounts that bill in GBP at the moment.`,
+            });
+        }
+
+        const dailyBudgetGbp = Number(body.dailyBudgetGbp);
+        if (!Number.isFinite(dailyBudgetGbp) || dailyBudgetGbp <= 0) {
+            return json(400, { error: 'Set a daily budget for this campaign.' });
+        }
+        // A ceiling on the ceiling. Not a judgement about what is affordable — a guard against a
+        // typo becoming a five-figure day.
+        if (dailyBudgetGbp > 1000) {
+            return json(400, { error: 'Daily budgets above £1,000 need to be set up with us directly.' });
+        }
+
+        const rawVariants = Array.isArray(body.variants) ? body.variants : [];
+        if (rawVariants.length < 1 || rawVariants.length > 3) {
+            return json(400, { error: 'Stage between one and three ad variants.' });
+        }
+        const variants = rawVariants.map((v: any, i: number) => ({
+            headline: str(v?.headline, 200),
+            bodyText: str(v?.body, 600),
+            destinationUrl: str(v?.destinationUrl, 2000),
+            format: str(v?.format, 40) ?? 'single_image',
+            index: i,
+        }));
+        for (const v of variants) {
+            if (!v.headline || !v.bodyText || !v.destinationUrl) {
+                return json(400, { error: 'Every variant needs a headline, body text and a destination link.' });
+            }
+            // The destination is public-facing and ours to vouch for — same check the tracked-link
+            // creator runs, for the same reason.
+            if (!isSafeDestination(v.destinationUrl)) {
+                return json(400, { error: 'One of the destination links cannot be used. Links must be a normal http:// or https:// web address.' });
+            }
+        }
+
+        // Gate 3 — an adapter. In production this THROWS: the LinkedIn adapter is Development Tier
+        // and registered for development only, so a production caller gets an honest refusal here
+        // rather than a half-built campaign.
+        const token = await getAdsToken(db, orgId);
+        if (!token) return json(400, { error: 'The LinkedIn advertising connection needs reconnecting.' });
+        let adapter;
+        try {
+            adapter = linkedInAdapter({
+                accessToken: token,
+                accountUrn: conn.selectedAccountUrn!,
+                campaignGroupUrn: str(body.campaignGroupUrn, 120) ?? '',
+                currencyCode: 'GBP',
+            });
+        } catch (err) {
+            return json(400, { error: err instanceof Error ? err.message : 'Advertising is not available here yet.' });
+        }
+
+        // ── The network call comes BEFORE any local write. ──
+        // If it fails we have changed nothing. If a local write fails afterwards we have an orphan
+        // campaign on LinkedIn — which is PAUSED, so it cannot spend, and that is the right way
+        // round for the failure to land. Logged loudly because it still needs cleaning up.
+        let staged;
+        try {
+            staged = await adapter.stageCampaign({
+                campaignId: campaign.id,
+                organisationId: orgId,
+                name: campaign.objective.slice(0, 100),
+                dailyBudgetGbp,
+                variants: variants.map((v, i) => ({
+                    variantId: i,
+                    headline: v.headline!,
+                    body: v.bodyText!,
+                    destinationUrl: v.destinationUrl!,
+                    targeting: (body.targeting && typeof body.targeting === 'object') ? body.targeting as Record<string, unknown> : {},
+                })),
+            });
+        } catch (err) {
+            console.error('[campaigns] stage_paid failed at the network', { campaignId: campaign.id }, err);
+            return json(502, { error: 'LinkedIn would not accept the campaign. Nothing has been created and nothing has been spent.' });
+        }
+
+        // ⚠️ ORDER MATTERS. campaigns.mode must be 'paid' BEFORE a non-zero budget is written:
+        // db/campaigns.sql carries a trigger that refuses any non-zero max_spend_gbp on a campaign
+        // still marked organic. That trigger is a feature, not an obstacle — it is what makes
+        // "an organic campaign can never spend" true in the database rather than in a comment.
+        try {
+            await db.update(campaigns).set({
+                mode: 'paid',
+                adNetwork: 'linkedin',
+                externalCampaignId: staged.externalCampaignId,
+                updatedAt: new Date(),
+            }).where(eq(campaigns.id, campaign.id));
+
+            await db.update(campaignBudgets)
+                .set({ maxSpendGbp: String(dailyBudgetGbp), updatedAt: new Date() })
+                .where(eq(campaignBudgets.campaignId, campaign.id));
+
+            await db.insert(adVariants).values(variants.map((v, i) => ({
+                organisationId: orgId,
+                campaignId: campaign.id,
+                network: 'linkedin',
+                externalVariantId: staged.externalVariantIds[i] ?? null,
+                headline: v.headline!,
+                body: v.bodyText!,
+                format: v.format!,
+                targeting: {},
+                // Never 'active'. A CHECK constraint also requires approved_by on anything live.
+                status: 'staged',
+            })));
+        } catch (err) {
+            console.error('[campaigns] stage_paid created a LinkedIn campaign but failed to record it', {
+                campaignId: campaign.id, externalCampaignId: staged.externalCampaignId,
+            }, err);
+            return json(500, {
+                error: 'The campaign was created on LinkedIn but we could not record it here. It is paused and cannot spend. Please contact support with this campaign id.',
+            });
+        }
+
+        return json(200, {
+            ok: true,
+            externalCampaignId: staged.externalCampaignId,
+            variantsStaged: variants.length,
+            // Said out loud so no caller has to infer it.
+            status: 'paused',
+            message: 'Staged on LinkedIn and paused. Nothing will be spent until you approve it.',
+        });
     }
 
     // ── list_decisions ────────────────────────────────────────────────────────
