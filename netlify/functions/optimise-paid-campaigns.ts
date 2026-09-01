@@ -54,12 +54,26 @@ interface OrgNotice {
     halted: { name: string; reason: string }[];
 }
 
-export default withLambda(async () => {
+export interface PaidSweepResult {
+    examined: number;
+    paused: number;
+    halted: number;
+    skipped?: string;
+}
+
+/**
+ * The sweep itself, exported so the staging poke (run-paid-optimiser.ts) drives the SAME code.
+ *
+ * ⚠️ One implementation, two callers. If staging ran a copy of this logic, the thing being tested
+ * on staging would not be the thing running in production — which is the entire point of having a
+ * staging poke at all.
+ */
+export async function runPaidOptimiserSweep(): Promise<PaidSweepResult> {
     const db = getDb();
 
     // Same global switch every other autonomous run respects.
     if (await isGlobalAiDisabled()) {
-        return { statusCode: 200, body: JSON.stringify({ skipped: 'ai_disabled' }) };
+        return { examined: 0, paused: 0, halted: 0, skipped: 'ai_disabled' };
     }
 
     const now = new Date();
@@ -266,11 +280,14 @@ export default withLambda(async () => {
     await notifyOwners(db, notices);
     await setPlatformConfig('paid_optimiser.last_run', { at: now.toISOString(), examined, pausedTotal, haltedTotal });
 
-    return {
-        statusCode: 200,
-        body: JSON.stringify({ examined, paused: pausedTotal, halted: haltedTotal }),
-    };
-});
+    return { examined, paused: pausedTotal, halted: haltedTotal };
+}
+
+export default withLambda(async () => ({
+    statusCode: 200,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(await runPaidOptimiserSweep()),
+}));
 
 /** Record that we looked. This is what keeps the heartbeat quiet on the next run. */
 async function stamp(db: any, campaignId: number, now: Date): Promise<void> {

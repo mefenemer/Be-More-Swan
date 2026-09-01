@@ -215,4 +215,54 @@ check('it respects the global AI switch, like every other autonomous run', () =>
     assert.match(code(cron), /if \(await isGlobalAiDisabled\(\)\)/);
 });
 
+console.log('\n──── the staging poke ────');
+
+const poke = read('netlify/functions/run-paid-optimiser.ts');
+const workflow = read('.github/workflows/staging-crons.yml');
+
+check('the poke drives the SAME sweep, not a copy of it', () => {
+    // If staging ran a copy, the thing tested on staging would not be the thing running in
+    // production — which is the entire point of having a staging poke.
+    assert.match(code(poke), /import \{ runPaidOptimiserSweep \} from '\.\/optimise-paid-campaigns'/);
+    assert.match(code(poke), /await runPaidOptimiserSweep\(\)/);
+    assert.match(code(cron), /export async function runPaidOptimiserSweep/);
+});
+
+check('the poke FAILS CLOSED without its secret', () => {
+    // ⚠️ It matters more here than on the other pokes: a successful sweep STAMPS
+    // optimiser_last_run_at, which is exactly what silences the staleness watchdog. An open
+    // endpoint on a loop would keep the alarm quiet while the real scheduler was dead.
+    assert.match(code(poke), /if \(!secret\) \{/);
+    assert.match(code(poke), /statusCode: 503/);
+    assert.ok(
+        landmark(poke, 'if (!secret)') < landmark(poke, 'await runPaidOptimiserSweep()'),
+        'the sweep can run before the secret is checked',
+    );
+});
+
+check('the poke is POST-only and bearer-guarded', () => {
+    assert.match(code(poke), /event\.httpMethod !== 'POST'/);
+    assert.match(code(poke), /token !== secret/);
+});
+
+check('the workflow calls it, and NOT at the production cadence', () => {
+    // ⚠️ 12h, not 24h. GitHub delivers a fraction of requested ticks with observed gaps to 3h17m,
+    // so a 24h interval plus slop lands past OPTIMISER_STALE_HOURS (26) and staging campaigns
+    // would halt themselves at random — the watchdog working correctly, in the one place nobody
+    // would believe it.
+    const row = workflow.match(/^\s*run-paid-optimiser\s+(\d+)\s+(\d+)\s*$/m);
+    assert.ok(row, 'run-paid-optimiser is not in the staging JOBS table');
+    const intervalHours = Number(row![1]) / 3600;
+    assert.ok(intervalHours < OPTIMISER_STALE_HOURS - 6,
+        `the staging interval (${intervalHours}h) leaves too little margin under the ${OPTIMISER_STALE_HOURS}h staleness window`);
+});
+
+check('the note about that interval sits OUTSIDE the JOBS string', () => {
+    // ⚠️ The reader loop skips empty lines and nothing else, so a `#` inside JOBS is read as an
+    // endpoint name and curl'd as ${BASE}/# — a 404 counted as a failed endpoint every tick.
+    const jobs = workflow.slice(landmark(workflow, 'JOBS="'), landmark(workflow, '"', landmark(workflow, 'JOBS="') + 6));
+    assert.ok(!jobs.includes('#'), 'a comment leaked into the JOBS string');
+    assert.match(workflow, /OPTIMISER_STALE_HOURS is 26/);
+});
+
 console.log(`\n${passed} checks passed.\n`);

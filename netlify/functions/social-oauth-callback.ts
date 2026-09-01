@@ -105,6 +105,7 @@ export default withLambda(async (event) => {
         }
 
         // US1 AC1.3: reject if this LinkedIn tenant is already live in another workspace (before storing the token).
+        // PARKED by default — see src/utils/connection-collision.ts (ENFORCE_TENANT_COLLISION).
         const linkedinCollision = await findTenantCollision(db, { serviceName: 'linkedin', externalUserId: linkedinId, organisationId });
         if (linkedinCollision) {
             await recordCollisionAttempt(db, { requestingOrgId: organisationId, existingOrgId: linkedinCollision.organisationId, serviceName: 'linkedin', externalUserId: linkedinId });
@@ -183,6 +184,7 @@ export default withLambda(async (event) => {
         const xUsername = meData.data?.username ?? '';
 
         // US1 AC1.3: reject if this X tenant is already live in another workspace (before storing the token).
+        // PARKED by default — see src/utils/connection-collision.ts (ENFORCE_TENANT_COLLISION).
         // Keyed on the stable user id (matches externalUserId = xUsername || xUserId).
         const xCollision = await findTenantCollision(db, { serviceName: 'x', externalUserId: xUsername || xUserId, organisationId });
         if (xCollision) {

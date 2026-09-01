@@ -328,6 +328,7 @@ export default withLambda(async (event) => {
                 .limit(1);
 
             // US1 AC1.3: block if this account/handle is already live in another workspace.
+            // PARKED by default — see src/utils/connection-collision.ts (ENFORCE_TENANT_COLLISION).
             if (handle && currentOrgId) {
                 const collision = await findTenantCollision(db, { serviceName: serviceKey, externalUserId: handle, organisationId: currentOrgId });
                 if (collision) {

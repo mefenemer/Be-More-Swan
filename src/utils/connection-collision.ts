@@ -7,6 +7,14 @@
 // already holds an active connection to the same (service_name, external_user_id), so OAuth callbacks
 // can reject the attempt before persisting a token. The DB also enforces this with a partial unique
 // index (db/connection-tenant-uniqueness.sql) as the race-proof backstop.
+//
+// ── TEMPORARILY DISABLED ──────────────────────────────────────────────────────────────────────
+// The block is OFF by default: findTenantCollision() short-circuits to null unless
+// ENFORCE_TENANT_COLLISION is set truthy. Real accounts were being locked out of reconnecting
+// (a stale active row in another workspace is indistinguishable from genuine abuse), so the gate
+// is parked rather than deleted. To turn it back on: set ENFORCE_TENANT_COLLISION=true AND
+// re-apply db/connection-tenant-uniqueness.sql (the DB backstop index is dropped by
+// db/system-connections-drop-provider-tenant-unique.sql, so the flag alone is not enough).
 
 import { and, eq, ne } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -23,13 +31,26 @@ export type TenantCollision = { connectionId: number; organisationId: number };
 const canonicalService = (serviceName: string): string => serviceName.toLowerCase();
 
 /**
+ * Kill switch for the whole US1 block. Unset/false — the current default — means every OAuth
+ * callback treats the tenant as free, exactly as it did before US1 shipped. Set
+ * ENFORCE_TENANT_COLLISION to 1/true/yes to re-arm it.
+ */
+export const tenantCollisionEnforced = (): boolean =>
+    ['1', 'true', 'yes'].includes(String(process.env.ENFORCE_TENANT_COLLISION ?? '').trim().toLowerCase());
+
+/**
  * Returns the colliding connection (active, owned by a different org) for this provider tenant,
  * or null when the tenant is free to connect. A null/empty externalUserId never collides.
+ *
+ * While ENFORCE_TENANT_COLLISION is unset this ALWAYS returns null — callers keep their existing
+ * `if (collision)` branches, which simply never fire, so re-arming is a config change not a deploy.
  */
 export async function findTenantCollision(
     db: PostgresJsDatabase<any>,
     params: { serviceName: string; externalUserId: string | null | undefined; organisationId: number },
 ): Promise<TenantCollision | null> {
+    if (!tenantCollisionEnforced()) return null;
+
     const tenantId = params.externalUserId;
     if (!tenantId) return null;
 

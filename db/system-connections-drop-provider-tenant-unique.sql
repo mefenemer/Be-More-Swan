@@ -1,0 +1,23 @@
+-- Security & Fair Usage — Multi-Account Abuse Prevention: US1 tenant-collision block PARKED.
+--
+-- Drops the partial unique index created by db/connection-tenant-uniqueness.sql. That index was
+-- the race-proof backstop behind the app-level check in src/utils/connection-collision.ts; with
+-- the app check now off by default (ENFORCE_TENANT_COLLISION), the index alone would still reject
+-- the reconnect with a bare 23505 — and no callback catches that SQLSTATE, so the user would get
+-- a 500 instead of the (removed) "Account already connected" screen. Both halves have to go.
+--
+-- Filename note: this MUST sort AFTER connection-tenant-uniqueness.sql in db/*.sql — the runner
+-- (scripts/db-migrate.mjs) applies root files in plain alphabetical order, so on a fresh database
+-- the CREATE runs first and this DROP undoes it. Do not rename it to connection-*.
+--
+-- APPLY MANUALLY (Neon SQL editor / psql as owner) or via the db-migrate runner.
+-- Idempotent — safe to re-run.
+--
+-- TO REVERSE (re-arm the block): re-apply db/connection-tenant-uniqueness.sql and set
+-- ENFORCE_TENANT_COLLISION=true. Duplicate active (service_name, external_user_id) pairs may have
+-- accumulated while the index was absent, and the CREATE will fail until they are resolved:
+--   SELECT service_name, external_user_id, count(*) FROM system_connections
+--   WHERE is_active = true AND status = 'active' AND external_user_id IS NOT NULL
+--   GROUP BY 1,2 HAVING count(*) > 1;
+
+DROP INDEX IF EXISTS system_connections_provider_tenant_unique;

@@ -114,6 +114,15 @@ jobs:
           # 6h rather than daily: all three are no-ops when nothing is due, and a shorter interval
           # means a change gets tested the same working day. 300s of curl budget because the
           # enrichment sweep does real per-lead work when it is switched on.
+          # `run-paid-optimiser` (12h) is the paid-campaign sweep: fatigue pauses, the control
+          # check, and the staleness watchdog.
+          #
+          # ⚠️ 12h, NOT the 24h the production cron uses, and the gap is deliberate. The sweep
+          # stamps `optimiser_last_run_at`, and campaign-optimiser's OPTIMISER_STALE_HOURS is 26 —
+          # a campaign not swept within that window HALTS ITSELF. GitHub delivers a fraction of the
+          # requested ticks with observed gaps up to 3h17m, so a 24h interval plus delivery slop
+          # lands at ~27h and would make staging campaigns halt themselves at random. 12h leaves
+          # roughly a 14h margin. If OPTIMISER_STALE_HOURS ever changes, this number moves with it.
           JOBS="
           run-content-jobs          300     120
           run-discovery-jobs        300     120
@@ -125,6 +134,7 @@ jobs:
           run-follower-counts       14400   120
           run-insights-ingest       21600   120
           run-lead-sweeps           21600   300
+          run-paid-optimiser        43200   300
           run-campaign-agent        86400   300
           run-strategy-agent        604800  300
           "

@@ -313,6 +313,8 @@ export default withLambda(async (event) => {
 
         // US1 AC1.3: block if this tenant is already live in a different workspace. Checked before
         // any token is persisted, so nothing is stored on rejection.
+        // PARKED: findTenantCollision returns null unless ENFORCE_TENANT_COLLISION is set, so this
+        // branch is dead by default. See src/utils/connection-collision.ts.
         const collision = await findTenantCollision(db, { serviceName, externalUserId, organisationId });
         if (collision) {
             await recordCollisionAttempt(db, { requestingOrgId: organisationId, existingOrgId: collision.organisationId, serviceName, externalUserId });
