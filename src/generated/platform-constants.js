@@ -216,6 +216,7 @@
   var CAMPAIGN_REJECT_REASONS = ["wrong_channel","too_expensive","bad_timing","evidence_unconvincing","off_brand","doing_it_myself","other"];
   var CAMPAIGN_REJECT_REASON_LABELS = {"wrong_channel":"Wrong channel","too_expensive":"Too much work for the return","bad_timing":"Bad timing","evidence_unconvincing":"I disagree with the evidence","off_brand":"Off brand","doing_it_myself":"I’m doing this myself","other":"Something else"};
   var UNAVAILABLE_OUTCOME_METRICS = ["signups"];
+  var CAMPAIGN_LINK_MEDIUMS = ["organic","paid","email","social","other"];
   // Only the fields the browser renders. artefactKind/assignedRole stay server-side — the client
   // has no business routing an order, and shipping the routing table would invite it to try.
   var ORDER_ACTIONS = [{"key":"draft_social_posts","label":"Draft social posts","description":"Queues extra posts for the Social Media Assistant to draft, on this campaign’s message. They land in its Posts queue for your approval like any other draft."},{"key":"draft_blog_pillar","label":"Write a pillar article","description":"Briefs the Blog Writing Assistant to write one long-form article for this campaign, carrying its keywords and call to action."},{"key":"run_lead_search","label":"Run a lead search","description":"Creates a saved search for the Lead Generation Assistant aimed at this campaign’s audience. Created as a draft — starting it is a separate, human click, because a run costs money and reaches real strangers."},{"key":"narrow_targeting","label":"Narrow the targeting","description":"Edits an existing saved search — tightens the ideal-customer description and adds negative keywords — so it stops finding the wrong kind of company."},{"key":"adjust_messaging","label":"Adjust the messaging","description":"Changes the angle this campaign asks for. Applies to work drafted from now on; it does not rewrite drafts that already exist."}];
@@ -266,6 +267,12 @@
       for (var i = 0; i < ORDER_ACTIONS.length; i++) if (ORDER_ACTIONS[i].key === k) return ORDER_ACTIONS[i].label;
       return k;
     },
+
+    // Where a tracked link is published. CHECK-constrained in db/campaign-attribution.sql and
+    // validated again at the HTTP boundary, so this list is for building the picker only — it is
+    // not the guard. Generated rather than hand-copied: a client-side fork of a closed vocabulary
+    // is how the browser's private cadence regex quietly disagreed with the scheduler for weeks.
+    linkMediums: CAMPAIGN_LINK_MEDIUMS,
   };
 
   // ── Posting cadence ───────────────────────────────────────────────────────

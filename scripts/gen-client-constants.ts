@@ -35,6 +35,7 @@ import {
 import {
     CAMPAIGN_STATUS_LABELS, CAMPAIGN_ORDER_STATUS_LABELS, CAMPAIGN_DECISION_LABELS,
     CAMPAIGN_OUTCOME_LABELS, ORDER_ACTION_SPECS, UNAVAILABLE_OUTCOME_METRICS,
+    CAMPAIGN_LINK_MEDIUMS,
 } from '../src/config/campaign-vocab';
 import {
     POSTING_CADENCES, NUMBER_WORDS, DEFAULT_POSTING_FREQUENCY, postsPerWeekFor, readCadence,
@@ -305,6 +306,7 @@ ${formatRows}
   var CAMPAIGN_REJECT_REASONS = ${JSON.stringify(CAMPAIGN_REJECT_REASONS)};
   var CAMPAIGN_REJECT_REASON_LABELS = ${JSON.stringify(CAMPAIGN_REJECT_REASON_LABELS)};
   var UNAVAILABLE_OUTCOME_METRICS = ${JSON.stringify(UNAVAILABLE_OUTCOME_METRICS)};
+  var CAMPAIGN_LINK_MEDIUMS = ${JSON.stringify(CAMPAIGN_LINK_MEDIUMS)};
   // Only the fields the browser renders. artefactKind/assignedRole stay server-side — the client
   // has no business routing an order, and shipping the routing table would invite it to try.
   var ORDER_ACTIONS = ${JSON.stringify(
@@ -359,6 +361,12 @@ ${formatRows}
       for (var i = 0; i < ORDER_ACTIONS.length; i++) if (ORDER_ACTIONS[i].key === k) return ORDER_ACTIONS[i].label;
       return k;
     },
+
+    // Where a tracked link is published. CHECK-constrained in db/campaign-attribution.sql and
+    // validated again at the HTTP boundary, so this list is for building the picker only — it is
+    // not the guard. Generated rather than hand-copied: a client-side fork of a closed vocabulary
+    // is how the browser's private cadence regex quietly disagreed with the scheduler for weeks.
+    linkMediums: CAMPAIGN_LINK_MEDIUMS,
   };
 
   // ── Posting cadence ───────────────────────────────────────────────────────

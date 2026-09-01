@@ -47,6 +47,11 @@
     loadError: null,
     rendered: false,
     busy: false,
+    /** get-campaign-funnel payload. Null until it arrives; a failure renders no panel, not zeroes. */
+    funnel: null,
+    funnelError: null,
+    /** Per campaign: { open, loaded, rows, error }. Lazily loaded — most campaigns have no links. */
+    links: {},
   };
 
   function esc(v) {
@@ -178,6 +183,12 @@
             </button>` : ''}
         </div>
         <p class="hidden mt-2 text-xs font-semibold text-gray-600" data-cmp-status="${esc(String(c.id))}"></p>
+
+        <button type="button" data-cmp-toggle-links="${esc(String(c.id))}"
+          class="mt-3 text-xs font-bold text-gray-500 hover:text-gray-700 underline transition">
+          ${state.links[c.id] && state.links[c.id].open ? 'Hide' : 'Tracked links'}
+        </button>
+        ${linksPanel(c.id)}
       </div>`;
   }
 
@@ -264,6 +275,169 @@
     `;
   }
 
+  // ── The funnel ─────────────────────────────────────────────────────────────
+  // Fed by get-campaign-funnel; the arithmetic is src/utils/campaign-funnel.ts. This renderer's
+  // whole job is to not undo the honesty that module builds in:
+  //
+  //   • `value: null` means NOT KNOWABLE and must render as the server's own `display` string
+  //     ("Not tracked", "—"). Coercing it with `|| 0` would turn "we cannot see revenue for this
+  //     kind of conversion" into "this campaign earned nothing" — the exact lie the null exists
+  //     to prevent, reintroduced in the last three characters of the pipeline.
+  //   • The attribution caveat is rendered VERBATIM and is never hidden when it is inconvenient.
+  //   • `unavailable` is shown as a plain line. An empty surface must say why it is empty.
+  function funnelStage(s, isLast) {
+    const known = s.value !== null && s.value !== undefined;
+    return `
+      <div class="flex-1 min-w-0">
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">${esc(s.label)}</p>
+        <p class="text-xl font-bold ${known ? 'text-gray-900' : 'text-gray-400'} mt-0.5 truncate">${esc(s.display)}</p>
+        <p class="text-xs text-gray-500 mt-1 leading-relaxed">${esc(s.note)}</p>
+      </div>
+      ${isLast ? '' : '<div class="text-gray-300 font-bold shrink-0 px-1">&rarr;</div>'}`;
+  }
+
+  /** A 0–1 rate as a percentage, or an em dash. NEVER "0%" for a rate we could not compute. */
+  function pct(v) {
+    return (v === null || v === undefined) ? '—' : `${(v * 100).toFixed(v < 0.01 && v > 0 ? 2 : 1)}%`;
+  }
+
+  function funnelHtml() {
+    // No campaigns, a load failure, or a funnel that has never had data: render NOTHING. The tab's
+    // own empty state already explains the situation, and a row of dashes above it would read as a
+    // broken panel rather than an unstarted campaign.
+    //
+    // ⚠️ Returns a string rather than writing to a host element. render() owns the whole tab's
+    // innerHTML, so a renderer that looked up its own host would depend on render() having already
+    // run — and would silently no-op on the first paint, which is the one that matters.
+    if (state.funnelError || !state.funnel || !state.funnel.hasData) return '';
+
+    const f = state.funnel;
+    const r = f.rates || {};
+    const a = f.attribution || {};
+    const stages = (f.stages || []).map((s, i, arr) => funnelStage(s, i === arr.length - 1)).join('');
+
+    // Rates are only worth showing once there is something to divide by. Four dashes in a row is
+    // noise, not information.
+    const rateBits = [
+      r.clickToConversion != null ? `${pct(r.clickToConversion)} of clicks convert` : '',
+      r.conversionToWon != null ? `${pct(r.conversionToWon)} of tracked leads win` : '',
+      // ⚠️ The £ is not decoration. "50.00 per conversion" next to "3.2 work items each" reads as
+      // two counts of the same kind of thing, and this is the one figure on the page denominated
+      // in real money.
+      r.costPerConversion != null ? `£${esc(String(r.costPerConversion.toFixed(2)))} per conversion` : '',
+      r.effortPerConversion != null ? `${esc(String(Math.round(r.effortPerConversion * 10) / 10))} work items each` : '',
+    ].filter(Boolean);
+
+    return `
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-4">
+        <div class="flex items-center justify-between gap-4 mb-4">
+          <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">What the work turned into</p>
+          <p class="text-xs text-gray-400">All time</p>
+        </div>
+
+        <div class="flex items-start gap-3 overflow-x-auto">${stages}</div>
+
+        ${rateBits.length ? `
+          <p class="text-xs text-gray-600 mt-4 pt-4 border-t border-gray-100">${rateBits.map(esc).join(' · ')}</p>` : ''}
+
+        ${a.caveat ? `
+          <p class="text-xs text-gray-500 mt-3 leading-relaxed">${esc(a.caveat)}</p>` : ''}
+
+        ${(f.unavailable || []).length ? `
+          <div class="mt-3 pt-3 border-t border-gray-100">
+            <p class="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-1">Not shown yet</p>
+            ${f.unavailable.map((u) => `
+              <p class="text-xs text-gray-500 leading-relaxed">
+                <span class="font-bold text-gray-600">${esc(u.label)}</span> — ${esc(u.reason)}
+              </p>`).join('')}
+          </div>` : ''}
+      </div>`;
+  }
+
+  // ── Tracked links ──────────────────────────────────────────────────────────
+  // Per campaign, collapsed by default: most campaigns have none, and an always-open empty panel
+  // on every row buries the campaign list itself.
+  //
+  // ⚠️ The destination is validated SERVER-side (campaigns.ts → isSafeDestination). The check here
+  // is only to give a faster answer — never treat it as the guard. A link on our own domain that
+  // forwards anywhere is an open redirector, and a client-side check holds for exactly as long as
+  // nobody opens devtools.
+  function linkRow(l) {
+    const url = l.url || '';
+    const archived = !!l.archivedAt;
+    return `
+      <div class="flex items-start justify-between gap-3 py-2 border-b border-gray-100">
+        <div class="min-w-0 flex-1">
+          <p class="text-xs font-bold text-gray-900 truncate">${esc(l.label || l.destinationUrl)}</p>
+          <p class="text-[11px] text-gray-500 font-mono truncate mt-0.5">${esc(url || '(link unavailable)')}</p>
+          <p class="text-[11px] text-gray-500 mt-1">
+            <span class="font-bold text-gray-700">${esc(String(l.clicks ?? 0))}</span> clicks ·
+            <span class="font-bold text-gray-700">${esc(String(l.conversions ?? 0))}</span> conversions
+            ${l.botClicks ? ` · ${esc(String(l.botClicks))} automated (excluded)` : ''}
+            ${l.medium && l.medium !== 'organic' ? ` · ${esc(l.medium)}${l.network ? ` (${esc(l.network)})` : ''}` : ''}
+            ${archived ? ' · <span class="font-bold">archived</span>' : ''}
+          </p>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          ${url && !archived ? `
+            <button type="button" data-cmp-copy="${esc(url)}"
+              class="px-2 py-1 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-[11px] font-bold rounded-lg transition">
+              Copy
+            </button>` : ''}
+          ${archived ? '' : `
+            <button type="button" data-cmp-archive-link="${esc(String(l.id))}"
+              class="px-2 py-1 bg-white border border-gray-300 text-gray-500 hover:bg-gray-50 text-[11px] font-bold rounded-lg transition">
+              Archive
+            </button>`}
+        </div>
+      </div>`;
+  }
+
+  function linksPanel(campaignId) {
+    const st = state.links[campaignId];
+    if (!st || !st.open) return '';
+    // Generated from src/config/campaign-vocab.ts — never hand-copied ([[client-constants-generated]]).
+    // If the constants bundle has not loaded, offer nothing rather than a forked list: an empty
+    // picker is obviously broken, a stale one is silently wrong.
+    const mediums = (C() && C().linkMediums) || [];
+
+    const body = st.error
+      ? `<p class="text-xs text-red-600">${esc(st.error)}</p>`
+      : !st.loaded
+        ? '<p class="text-xs text-gray-400">Loading links…</p>'
+        : st.rows.length
+          ? st.rows.map(linkRow).join('')
+          // ⚠️ Says what a tracked link IS and what it costs to make one. "No links yet" alone
+          // leaves the user with no reason to make the first one.
+          : `<p class="text-xs text-gray-500 leading-relaxed">
+               No tracked links yet. A tracked link is an ordinary web address that counts who
+               clicks it and ties any sign-up back to this campaign. Making one changes nothing
+               about the page it points at.
+             </p>`;
+
+    return `
+      <div class="mt-3 pt-3 border-t border-gray-100" data-cmp-links="${esc(String(campaignId))}">
+        <div class="space-y-2">${body}</div>
+        <div class="mt-3 flex flex-wrap items-center gap-2">
+          <input type="url" data-cmp-link-url="${esc(String(campaignId))}" placeholder="https://your-site.com/offer"
+            class="flex-1 min-w-0 px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
+          <input type="text" data-cmp-link-label="${esc(String(campaignId))}" placeholder="Label (optional)"
+            class="px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
+          <select data-cmp-link-medium="${esc(String(campaignId))}"
+            class="px-2 py-1.5 border border-gray-300 rounded-lg text-xs">
+            ${mediums.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join('')}
+          </select>
+          <input type="text" data-cmp-link-network="${esc(String(campaignId))}" placeholder="Network"
+            class="hidden px-3 py-1.5 border border-gray-300 rounded-lg text-xs" style="display:none" />
+          <button type="button" data-cmp-add-link="${esc(String(campaignId))}"
+            class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+            Create link
+          </button>
+        </div>
+        <p class="hidden mt-2 text-xs font-semibold text-gray-600" data-cmp-link-status="${esc(String(campaignId))}"></p>
+      </div>`;
+  }
+
   // ── Tab badge ──────────────────────────────────────────────────────────────
   /** Amber count on the tab button — the same affordance the Review Queue uses. */
   function updateBadge() {
@@ -297,6 +471,7 @@
     if (!state.campaigns.length) { host.innerHTML = emptyState(); return; }
 
     host.innerHTML = `
+      ${funnelHtml()}
       ${neverLaunchedNote(state.campaigns)}
       <div class="space-y-4">${state.campaigns.map(campaignRow).join('')}</div>`;
   }
@@ -333,6 +508,48 @@
     }
     state.loaded = true;
     rerender();
+    loadFunnel();
+  }
+
+  /**
+   * The funnel, fetched separately and deliberately NOT awaited by load().
+   *
+   * It reads five tables and joins the revenue ledger, so it is the slowest thing on this tab —
+   * blocking the campaign list on it would leave the user staring at "Loading campaigns…" while
+   * the part they came for was already available. A failure here sets funnelError and renders no
+   * panel at all: the campaign list is the feature, the funnel is commentary on it.
+   */
+  async function loadFunnel() {
+    if (!state.assistantId) return;
+    try {
+      const res = await fetch(`/.netlify/functions/get-campaign-funnel?id=${encodeURIComponent(state.assistantId)}`, {
+        credentials: 'same-origin',
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      state.funnel = await res.json();
+      state.funnelError = null;
+    } catch (err) {
+      console.error('[AssistantCampaigns] funnel load failed:', err);
+      state.funnelError = err.message;
+      state.funnel = null;
+    }
+    if (state.rendered) render();
+  }
+
+  /** Load one campaign's tracked links. Lazy: only when the disclosure is opened. */
+  async function loadLinks(campaignId) {
+    const st = state.links[campaignId];
+    if (!st) return;
+    try {
+      const data = await post({ action: 'list_links', campaignId });
+      st.rows = Array.isArray(data.links) ? data.links : [];
+      st.error = null;
+    } catch (err) {
+      st.error = err.message || 'Could not load the links for this campaign.';
+      st.rows = [];
+    }
+    st.loaded = true;
+    if (state.rendered) render();
   }
 
   function say(id, text, tone) {
@@ -402,6 +619,131 @@
     }
     state.busy = false;
     await load();
+  });
+
+  // ── Tracked-link actions ───────────────────────────────────────────────────
+  // A SECOND listener rather than more branches in the one above: that handler early-returns for
+  // anything that is not start/pause/stop-all, and threading link actions through it would put the
+  // spend-committing controls and a link form in the same busy flag. They are unrelated risks.
+  document.addEventListener('click', async (e) => {
+    const toggle = e.target.closest('[data-cmp-toggle-links]');
+    const addBtn = e.target.closest('[data-cmp-add-link]');
+    const archBtn = e.target.closest('[data-cmp-archive-link]');
+    const copyBtn = e.target.closest('[data-cmp-copy]');
+    if (!toggle && !addBtn && !archBtn && !copyBtn) return;
+
+    if (copyBtn) {
+      const url = copyBtn.dataset.cmpCopy || '';
+      try {
+        await navigator.clipboard.writeText(url);
+        window.showToast?.('Link copied.', 'success');
+      } catch {
+        // Clipboard access is refused outside a secure context and in some embedded browsers.
+        // Showing the URL is a worse experience than copying it, and a far better one than a
+        // button that appears to do nothing.
+        window.prompt('Copy this link:', url);
+      }
+      return;
+    }
+
+    if (toggle) {
+      const id = Number(toggle.dataset.cmpToggleLinks);
+      if (!id) return;
+      const st = state.links[id] || (state.links[id] = { open: false, loaded: false, rows: [], error: null });
+      st.open = !st.open;
+      if (state.rendered) render();
+      // Fetched on first open only. Re-opening shows what we already have rather than re-querying
+      // on every toggle.
+      if (st.open && !st.loaded) loadLinks(id);
+      return;
+    }
+
+    if (archBtn) {
+      const linkId = Number(archBtn.dataset.cmpArchiveLink);
+      if (!linkId) return;
+      // Confirmed, and the wording is the point: a tracked link may already be printed in an
+      // advert, so "it stops working" is the consequence the user needs stated before they act.
+      // It is also honest that the history survives — archiving is not a way to erase results.
+      const ok = window.confirm(
+        'Archive this link?\n\n'
+        + 'It will stop working immediately, so anyone clicking it from an advert or a post already '
+        + 'published will be sent to your homepage instead. The clicks and conversions it has '
+        + 'already recorded are kept, and stay in your funnel.',
+      );
+      if (!ok) return;
+      archBtn.disabled = true;
+      try {
+        await post({ action: 'archive_link', linkId });
+        // Both the link list and the funnel change, so reload the funnel too — leaving a stale
+        // click count above a link that no longer exists is the kind of small disagreement that
+        // makes a user distrust every other number on the page.
+        for (const cid of Object.keys(state.links)) {
+          if (state.links[cid].loaded) { state.links[cid].loaded = false; loadLinks(Number(cid)); }
+        }
+        loadFunnel();
+      } catch (err) {
+        window.showToast?.(err.message || 'Could not archive that link.', 'error');
+        archBtn.disabled = false;
+      }
+      return;
+    }
+
+    const id = Number(addBtn.dataset.cmpAddLink);
+    if (!id) return;
+    const urlEl = document.querySelector(`[data-cmp-link-url="${id}"]`);
+    const labelEl = document.querySelector(`[data-cmp-link-label="${id}"]`);
+    const mediumEl = document.querySelector(`[data-cmp-link-medium="${id}"]`);
+    const networkEl = document.querySelector(`[data-cmp-link-network="${id}"]`);
+    const destinationUrl = (urlEl?.value || '').trim();
+    if (!destinationUrl) { sayLink(id, 'Enter the web address this link should send people to.', 'error'); return; }
+
+    addBtn.disabled = true;
+    sayLink(id, 'Creating…');
+    try {
+      await post({
+        action: 'create_link',
+        campaignId: id,
+        destinationUrl,
+        label: (labelEl?.value || '').trim() || undefined,
+        medium: mediumEl?.value || undefined,
+        network: (networkEl?.value || '').trim() || undefined,
+      });
+      // Success re-renders, which clears the form — correct, the link is made.
+      state.links[id].loaded = false;
+      await loadLinks(id);
+      loadFunnel();
+    } catch (err) {
+      // ⚠️ Deliberately does NOT re-render on failure. render() rewrites the whole tab's innerHTML,
+      // so it would wipe the address the user just typed and hand them an error plus an empty box
+      // to retype into. The server's sentence goes into the status line and the form stays put.
+      sayLink(id, err.message || 'Could not create that link.', 'error');
+      addBtn.disabled = false;
+    }
+  });
+
+  /** Status line under one campaign's link form. */
+  function sayLink(id, text, tone) {
+    const el = document.querySelector(`[data-cmp-link-status="${id}"]`);
+    if (!el) return;
+    el.textContent = text;
+    el.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-gray-600'}`;
+    // `hidden` loses to a class that sets display, so pin it directly as well — the same trap the
+    // tab badge above documents.
+    el.style.display = '';
+  }
+
+  // The network box only means anything for a paid link, and the server refuses a paid link
+  // without one. Revealed on demand rather than always shown, so the common (organic) case is a
+  // three-field form instead of a four-field one.
+  document.addEventListener('change', (e) => {
+    const sel = e.target.closest('[data-cmp-link-medium]');
+    if (!sel) return;
+    const id = sel.dataset.cmpLinkMedium;
+    const net = document.querySelector(`[data-cmp-link-network="${id}"]`);
+    if (!net) return;
+    const paid = sel.value === 'paid';
+    net.classList.toggle('hidden', !paid);
+    net.style.display = paid ? '' : 'none';
   });
 
   // ── Writes made from outside this tab ──────────────────────────────────────

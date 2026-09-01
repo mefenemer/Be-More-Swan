@@ -244,4 +244,98 @@ check('it is lifetime — no window parameter to cliff-drop at rollover', () => 
     assert.ok(!/queryStringParameters\?\.days/.test(api), 'a window parameter appeared');
 });
 
+console.log('\n──── the renderer does not undo the arithmetic\'s honesty ────');
+
+const ui = read('src/components/assistant-campaigns.js');
+
+check('a null value renders the server\'s own display string, never coerced to 0', () => {
+    // ⚠️ The whole point of the null, defeated in three characters. `s.value || 0` would turn
+    // "Not tracked" into "0" and tell the user their campaign earned nothing.
+    const fn = ui.slice(landmark(ui, 'function funnelStage('), landmark(ui, 'function pct('));
+    assert.match(fn, /const known = s\.value !== null && s\.value !== undefined/);
+    assert.match(fn, /esc\(s\.display\)/, 'the stage stopped rendering the server-formatted value');
+    assert.ok(!/s\.value \|\| 0/.test(fn), 'a null value is being coerced to zero');
+});
+
+check('a rate we could not compute is an em dash, not 0%', () => {
+    const fn = ui.slice(landmark(ui, 'function pct('), landmark(ui, 'function funnelHtml('));
+    assert.match(fn, /\(v === null \|\| v === undefined\) \? '—'/);
+});
+
+check('the funnel renders nothing at all rather than a row of dashes', () => {
+    // A load failure or an unstarted assistant must not leave a skeleton panel above the tab's own
+    // empty state — that reads as broken rather than as "not started".
+    assert.match(ui, /if \(state\.funnelError \|\| !state\.funnel \|\| !state\.funnel\.hasData\) return '';/);
+});
+
+check('the attribution caveat is rendered verbatim and unconditionally', () => {
+    // The honesty claim lives in this sentence. It must not be behind a "only if it looks bad"
+    // condition, and it must not be re-worded client-side.
+    const fn = ui.slice(landmark(ui, 'function funnelHtml('), landmark(ui, '── Tracked links'));
+    assert.match(fn, /\$\{a\.caveat \? `[\s\S]{0,200}esc\(a\.caveat\)/);
+});
+
+check('what cannot be shown is rendered with its reason', () => {
+    const fn = ui.slice(landmark(ui, 'function funnelHtml('), landmark(ui, '── Tracked links'));
+    assert.match(fn, /esc\(u\.label\)/);
+    assert.match(fn, /esc\(u\.reason\)/, 'the blocker reason stopped being rendered');
+});
+
+check('the funnel never blocks the campaign list', () => {
+    // It reads five tables and joins the revenue ledger. Awaiting it would leave the user on
+    // "Loading campaigns…" while the part they came for was already in hand.
+    assert.match(ui, /rerender\(\);\n    loadFunnel\(\);/);
+});
+
+console.log('\n──── the tracked-link form ────');
+
+check('the medium picker reads the GENERATED vocabulary, never a local copy', () => {
+    // A client-side fork of a closed vocabulary is how the browser's private cadence regex came to
+    // disagree with the scheduler for weeks.
+    assert.match(ui, /const mediums = \(C\(\) && C\(\)\.linkMediums\) \|\| \[\];/);
+    assert.match(read('src/generated/platform-constants.js'), /linkMediums: CAMPAIGN_LINK_MEDIUMS/);
+});
+
+check('a failed create does NOT re-render, so the typed address survives', () => {
+    // render() rewrites the whole tab's innerHTML. Re-rendering on failure hands the user an error
+    // and an empty box to retype the URL into.
+    const branch = ui.slice(landmark(ui, "sayLink(id, err.message || 'Could not create that link."), landmark(ui, "/** Status line under one campaign's link form. */"));
+    assert.ok(!/render\(\)/.test(branch), 'a failed link creation now wipes the form');
+});
+
+check('the link status line pins style.display, not just the class', () => {
+    // `hidden` loses to a class that sets display — the trap the tab badge above already documents.
+    const fn = ui.slice(landmark(ui, 'function sayLink('), landmark(ui, 'document.addEventListener(\'change\''));
+    assert.match(fn, /el\.style\.display = '';/);
+});
+
+check('the paid-only network box toggles BOTH the class and the inline style', () => {
+    const fn = ui.slice(landmark(ui, "const sel = e.target.closest('[data-cmp-link-medium]')"), landmark(ui, '── Writes made from outside this tab'));
+    assert.match(fn, /net\.classList\.toggle\('hidden', !paid\)/);
+    assert.match(fn, /net\.style\.display = paid \? '' : 'none'/);
+});
+
+check('archiving states the consequence and that the history is kept', () => {
+    // A tracked link may already be printed in an advert. "It stops working" is the fact the user
+    // needs before they act, and "the clicks are kept" stops archive reading as a way to erase
+    // results.
+    const c = ui.slice(landmark(ui, "const ok = window.confirm(\n        'Archive this link?"), landmark(ui, 'archBtn.disabled = true;'));
+    assert.match(c, /stop working immediately/);
+    assert.match(c, /already recorded are kept/);
+});
+
+check('every rendered server value is escaped', () => {
+    // The destination URL and label are tenant-supplied and land in innerHTML.
+    const row = ui.slice(landmark(ui, 'function linkRow('), landmark(ui, 'function linksPanel('));
+    for (const field of ['l.label || l.destinationUrl', 'l.medium', 'l.network']) {
+        assert.ok(row.includes(`esc(${field})`), `${field} reaches innerHTML unescaped`);
+    }
+});
+
+check('the money rate carries a currency symbol', () => {
+    // "50.00 per conversion" beside "3.2 work items each" reads as two counts of the same kind of
+    // thing. This is the only figure on the panel denominated in real money.
+    assert.match(ui, /`£\$\{esc\(String\(r\.costPerConversion\.toFixed\(2\)\)\)\} per conversion`/);
+});
+
 console.log(`\n${passed} checks passed.\n`);
