@@ -20,7 +20,7 @@
  *
  * Run with:
  *   npx tsx db/seed-demo-tenant.ts
- * (Requires NETLIFY_DATABASE_URL / DATABASE_URL pointing at the DEMO db.)
+ * (Requires NETLIFY_DATABASE_URL, or --url-var <NAME>, pointing at the DEMO db.)
  */
 
 import { config } from 'dotenv';
@@ -28,6 +28,7 @@ import * as path from 'path';
 config({ path: path.resolve(process.cwd(), '.env') });
 
 import postgres from 'postgres';
+import { seedConnection } from './seed-connection';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import {
@@ -36,8 +37,10 @@ import {
     contentRules, platformConfig,
 } from './schema';
 
-const connectionString = process.env.NETLIFY_DATABASE_URL || process.env.DATABASE_URL;
-if (!connectionString) throw new Error('NETLIFY_DATABASE_URL / DATABASE_URL is not set.');
+// ⚠️ NO `|| process.env.DATABASE_URL` FALLBACK. In this repo NETLIFY_DATABASE_URL is staging
+// and bare DATABASE_URL is PRODUCTION, so that fallback's only effect was to silently seed
+// prod whenever .env failed to load. Pass --url-var <NAME> to target another database.
+const connectionString = seedConnection('db:seed-demo-tenant');
 
 // Guard-rail: refuse obviously-live hosts unless the operator opts in.
 if (/neon\.tech/.test(connectionString) && !process.env.ALLOW_DEMO_SEED_ON_NEON) {

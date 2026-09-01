@@ -24,10 +24,13 @@ config({ path: path.resolve(process.cwd(), '.env') });
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { masterAssistants, integrationProviders, integrationScenarios, featureRequests } from './schema';
+import { seedConnection } from './seed-connection';
 import { sql, eq } from 'drizzle-orm';
 
-const connectionString = process.env.NETLIFY_DATABASE_URL || process.env.DATABASE_URL;
-if (!connectionString) throw new Error('NETLIFY_DATABASE_URL / DATABASE_URL is not set.');
+// ⚠️ NO `|| process.env.DATABASE_URL` FALLBACK. In this repo NETLIFY_DATABASE_URL is staging
+// and bare DATABASE_URL is PRODUCTION, so that fallback's only effect was to silently seed
+// prod whenever .env failed to load. Pass --url-var <NAME> to target another database.
+const connectionString = seedConnection('db:seed-catalog');
 
 const client = postgres(connectionString, { max: 1 });
 const db = drizzle({ client });

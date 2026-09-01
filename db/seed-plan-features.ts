@@ -14,7 +14,7 @@
  * Idempotent: upserts catalog rows by `key` and merges feature values into each plan's jsonb.
  *
  * Run with:  npx tsx db/seed-plan-features.ts
- * (Requires NETLIFY_DATABASE_URL / DATABASE_URL. Apply db/plan-features.sql first.)
+ * (Requires NETLIFY_DATABASE_URL, or --url-var <NAME>. Apply db/plan-features.sql first.)
  */
 
 import { config } from 'dotenv';
@@ -25,9 +25,12 @@ import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { eq } from 'drizzle-orm';
 import { masterPlans, planFeatures } from './schema';
+import { seedConnection } from './seed-connection';
 
-const connectionString = process.env.NETLIFY_DATABASE_URL || process.env.DATABASE_URL;
-if (!connectionString) throw new Error('NETLIFY_DATABASE_URL / DATABASE_URL is not set.');
+// ⚠️ NO `|| process.env.DATABASE_URL` FALLBACK. In this repo NETLIFY_DATABASE_URL is staging
+// and bare DATABASE_URL is PRODUCTION, so that fallback's only effect was to silently seed
+// prod whenever .env failed to load. Pass --url-var <NAME> to target another database.
+const connectionString = seedConnection('db:seed-plan-features');
 
 const client = postgres(connectionString, { max: 1 });
 const db = drizzle({ client });
