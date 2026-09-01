@@ -812,6 +812,23 @@ node_bundler = "esbuild"
 [functions.resume-quota-paused]
   schedule = "15 0 * * *"
 
+# US4 of the paid-ads brief: the daily pass over LIVE PAID campaigns — pause fatigued or
+# over-priced ads, and stop any campaign we can no longer watch or control.
+#
+# 06:40 UTC. Deliberately AFTER the ad networks have settled the previous day's figures (LinkedIn's
+# performance metrics are near real-time but its day boundary is the ad account's timezone), and
+# clear of the :00/:15/:20/:30 batch so it is not competing for a cold Neon compute.
+#
+# ⚠️ ONCE A DAY IS THE CONTRACT, not a preference. campaign-optimiser's OPTIMISER_STALE_HOURS is 26
+# — a paid campaign whose optimiser has not run in that long HALTS ITSELF. Moving this to a longer
+# interval would make every live campaign stop on its own; changing one without the other is the
+# bug.
+#
+# ⚠️ Netlify runs scheduled functions on PRODUCTION only, so staging needs a poke (the pattern
+# .github/workflows/staging-campaign-cron.yml uses) before this can be exercised there.
+[functions.optimise-paid-campaigns]
+  schedule = "40 6 * * *"
+
 # US 5.2: resolve widget A/B hook tests (promote the winning variant) — hourly
 [functions.resolve-ab-tests]
   schedule = "0 * * * *"

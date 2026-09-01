@@ -367,6 +367,37 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        templateKey: 'paid_campaign_optimised',
+        name: 'Advertising adjusted',
+        category: 'Assistants',
+        type: 'paid_campaign_optimised',
+        title: 'We adjusted your advertising',
+        // ⚠️ Names WHAT changed and WHY, because this notification reports an action already taken
+        // with the customer's money. "We optimised your campaign" tells them nothing they can
+        // check, disagree with, or undo.
+        message: '{{assistant.name}} paused {{change.summary}}. {{change.reason}} Your daily budget is unchanged.',
+        variables: [
+            ASSISTANT_NAME,
+            v('change.summary', 'What was paused', '1 ad on "Book 20 demos"'),
+            v('change.reason', 'Why', 'Its click-through fell to 0.20% against a 1.00% average.'),
+        ],
+    },
+    {
+        templateKey: 'paid_campaign_halted',
+        name: 'Advertising stopped',
+        category: 'Assistants',
+        type: 'paid_campaign_halted',
+        title: 'We stopped your advertising',
+        // The two cases that reach this: we lost control of the ad account, or we stopped being
+        // able to check on the campaign. Both mean money was at risk, so both say so plainly and
+        // both name the way back.
+        message: '{{campaign.name}} has been stopped. {{campaign.reason}} You can restart it once things are working again.',
+        variables: [
+            v('campaign.name', 'Campaign objective', 'Book 20 demos with ops leads'),
+            v('campaign.reason', 'Why it stopped', 'We could not reach your LinkedIn ad account.'),
+        ],
+    },
+    {
         templateKey: 'goal_data_disconnected',
         name: 'Goal tracking paused',
         category: 'Assistants',
