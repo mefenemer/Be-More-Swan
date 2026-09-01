@@ -15,6 +15,7 @@
 //   POST { action: 'list_links',   campaignId }            → links + clicks + conversions
 //   POST { action: 'archive_link', linkId }                → stops the redirect, keeps the clicks
 //   POST { action: 'stage_paid',   campaignId, dailyBudgetGbp, variants[], campaignGroupUrn }
+//   POST { action: 'approve_launch', campaignId, confirmDailyBudgetGbp }   ⚠️ starts real spend
 //   POST { action: 'list_decisions', assistantId }
 //   POST { action: 'decide',      decisionId, verdict: 'approve'|'reject', reason?, note? }
 //
@@ -32,8 +33,8 @@
 
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
-    adVariants, aiAssistants, campaignAttributions, campaignBudgets, campaignClickEvents,
-    campaignDecisions, campaignLinks, campaignOrders, campaigns,
+    adVariants, aiAssistants, auditLogs, campaignAttributions, campaignBudgets,
+    campaignClickEvents, campaignDecisions, campaignLinks, campaignOrders, campaigns,
 } from '../../db/schema';
 import { getDb } from '../../db/client';
 import { requireTenant } from '../../src/utils/tenant';
@@ -708,6 +709,167 @@ export default withLambda(async (event) => {
             // Said out loud so no caller has to infer it.
             status: 'paused',
             message: 'Staged on LinkedIn and paused. Nothing will be spent until you approve it.',
+        });
+    }
+
+    // ── approve_launch ────────────────────────────────────────────────────────
+    // ⚠️ THE ONLY ACTION IN THIS PRODUCT THAT CAN START SPENDING A CUSTOMER'S MONEY.
+    //
+    // Everything else — proposing, staging, drafting, optimising — either costs nothing or can only
+    // ever reduce spend. This one call flips a LinkedIn campaign from PAUSED to ACTIVE, and from
+    // that moment the customer is being charged by a third party on a schedule we do not control.
+    // Read the ordering notes before changing anything here.
+    //
+    // Three properties this must keep:
+    //   1. A HUMAN, WITH THE NUMBER IN FRONT OF THEM. The caller must echo back the daily budget it
+    //      is approving, and it must match what is stored. A model turn plus a click must never be
+    //      enough — chat-creates-draft-campaigns settled that for the whole product, and this is the
+    //      case it was settled for.
+    //   2. CONTROL IS RE-CHECKED, NOT ASSUMED. `control_state` in our database is a cached opinion.
+    //      Before starting a spend we ask LinkedIn directly, because the failure we are guarding
+    //      against — a dead token — is invisible until the moment we need to stop the campaign.
+    //   3. WE CAN ALWAYS SEE WHAT WE STARTED. See the ordering note below.
+    if (action === 'approve_launch') {
+        const campaign = await requireCampaign(Number(body.campaignId));
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+
+        if (!await hasFeatureByOrg(db, orgId, PAID_ADS_FEATURE)) {
+            return json(403, { error: 'Paid advertising is not available on this plan.' });
+        }
+        if (campaign.mode !== 'paid' || !campaign.externalCampaignId) {
+            return json(400, { error: 'This campaign has not been set up for advertising yet.' });
+        }
+        if (LIVE_CAMPAIGN_STATUSES.includes(campaign.status as never)) {
+            return json(400, { error: 'This campaign is already running.' });
+        }
+
+        const [budget] = await db.select({ maxSpendGbp: campaignBudgets.maxSpendGbp })
+            .from(campaignBudgets).where(eq(campaignBudgets.campaignId, campaign.id)).limit(1);
+        const dailyBudget = Number(budget?.maxSpendGbp ?? 0);
+        if (!(dailyBudget > 0)) {
+            return json(400, { error: 'This campaign has no daily budget set, so there is nothing to approve.' });
+        }
+
+        // Property 1. The caller states the figure it believes it is approving.
+        // ⚠️ Not belt-and-braces. Between staging and approval the budget can be edited, in another
+        // tab or by a colleague, and approving a number you were never shown is exactly the kind of
+        // consent that is worthless afterwards. Mismatch REFUSES and reports both figures.
+        const confirmed = Number(body.confirmDailyBudgetGbp);
+        if (!Number.isFinite(confirmed) || Math.abs(confirmed - dailyBudget) > 0.001) {
+            return json(409, {
+                error: `This campaign's daily budget is £${dailyBudget.toFixed(2)}, not £${Number.isFinite(confirmed) ? confirmed.toFixed(2) : '—'}. Check the figure and approve again.`,
+                dailyBudgetGbp: dailyBudget,
+            });
+        }
+
+        const staged = await db.select({ id: adVariants.id, externalVariantId: adVariants.externalVariantId })
+            .from(adVariants)
+            .where(and(eq(adVariants.campaignId, campaign.id), eq(adVariants.status, 'staged')));
+        if (staged.length === 0) {
+            return json(400, { error: 'There are no staged ads on this campaign to launch.' });
+        }
+
+        const readiness = assessAdsReadiness(await getAdsConnection(db, orgId));
+        if (!readiness.ready) return json(400, { error: readiness.reason });
+
+        const token = await getAdsToken(db, orgId);
+        if (!token) return json(400, { error: 'The LinkedIn advertising connection needs reconnecting.' });
+
+        let adapter;
+        try {
+            adapter = linkedInAdapter({
+                accessToken: token,
+                accountUrn: readiness.connection.selectedAccountUrn!,
+                campaignGroupUrn: '',
+                currencyCode: 'GBP',
+            });
+        } catch (err) {
+            return json(400, { error: err instanceof Error ? err.message : 'Advertising is not available here yet.' });
+        }
+
+        // Property 2. Ask LinkedIn, now, whether we can still control this campaign.
+        // A campaign we cannot stop is a campaign we must not start.
+        const control = await adapter.checkControl(campaign.externalCampaignId);
+        if (!control.ok) {
+            await db.update(campaigns).set({
+                controlState: 'lost', controlDetail: control.detail ?? null,
+                controlCheckedAt: new Date(), updatedAt: new Date(),
+            }).where(eq(campaigns.id, campaign.id));
+            return json(400, {
+                error: 'We cannot reach your LinkedIn ad account, so we will not start this campaign — we would not be able to stop it. Reconnect and try again.',
+            });
+        }
+
+        // ── Property 3: ORDER. Local write FIRST, network SECOND. ──
+        // This is the OPPOSITE of stage_paid, deliberately, and the reason is money.
+        //
+        // At staging, the network call creates something PAUSED — it cannot spend — so calling it
+        // first is safe and leaves nothing behind on failure. Here the network call is the thing
+        // that STARTS the spend. If it succeeded and our write then failed, we would have a live,
+        // charging campaign that our own records show as paused: the optimiser reads our records,
+        // so nothing would ever check on it, and the kill switch would never fire. That is the one
+        // outcome worth contorting the code to prevent.
+        //
+        // So we record the intent first and roll back if LinkedIn refuses. A campaign we believe is
+        // live but is actually paused is wrong in the harmless direction: it shows as running,
+        // spends nothing, and the next optimiser pass reports no data.
+        const approvedAt = new Date();
+        await db.update(adVariants).set({
+            status: 'active', approvedBy: userId, approvedAt, updatedAt: approvedAt,
+        }).where(and(eq(adVariants.campaignId, campaign.id), eq(adVariants.status, 'staged')));
+
+        await db.update(campaigns).set({
+            status: 'active',
+            startsAt: campaign.startsAt ?? approvedAt,
+            controlState: 'ok',
+            controlCheckedAt: approvedAt,
+            // ⚠️ Stamped at approval, and this is NOT cosmetic. assessHeartbeat() treats a null
+            // last-run as STALE and halts the campaign — so without this, every campaign would be
+            // halted by the watchdog within a day of launching, before the optimiser had ever had
+            // a chance to run. Approval is itself a check: we just asked LinkedIn about this
+            // campaign and it answered.
+            optimiserLastRunAt: approvedAt,
+            updatedAt: approvedAt,
+        }).where(eq(campaigns.id, campaign.id));
+
+        try {
+            await adapter.activateCampaign(campaign.externalCampaignId);
+        } catch (err) {
+            console.error('[campaigns] approve_launch: LinkedIn refused activation, rolling back', {
+                campaignId: campaign.id,
+            }, err);
+            // Roll back to exactly where we were. Reverting the variants to 'staged' also clears
+            // the approval stamp, because they were never live and an audit trail saying otherwise
+            // would be a lie.
+            await db.update(adVariants).set({
+                status: 'staged', approvedBy: null, approvedAt: null, updatedAt: new Date(),
+            }).where(and(eq(adVariants.campaignId, campaign.id), eq(adVariants.status, 'active')));
+            await db.update(campaigns).set({
+                status: campaign.status, updatedAt: new Date(),
+            }).where(eq(campaigns.id, campaign.id));
+            return json(502, { error: 'LinkedIn would not start the campaign. Nothing has been launched and nothing has been spent.' });
+        }
+
+        // A money action, so it leaves a permanent record of who authorised it.
+        await db.insert(auditLogs).values({
+            actionType: 'campaign_paid_launched',
+            resourceType: 'campaigns',
+            resourceId: String(campaign.id),
+            newState: {
+                organisationId: orgId, approvedByUserId: userId,
+                dailyBudgetGbp: dailyBudget, variants: staged.length,
+                externalCampaignId: campaign.externalCampaignId,
+            },
+        });
+
+        return json(200, {
+            ok: true,
+            status: 'active',
+            dailyBudgetGbp: dailyBudget,
+            variantsLive: staged.length,
+            // Say what happens next, including how to stop it. A launch confirmation without a
+            // route back is the pattern connection-pause-needs-a-resume is named after.
+            message: `Live on LinkedIn, spending up to £${dailyBudget.toFixed(2)} a day. You can pause it from this page at any time.`,
         });
     }
 

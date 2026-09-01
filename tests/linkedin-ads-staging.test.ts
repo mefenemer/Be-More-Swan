@@ -30,7 +30,11 @@ const read = (p: string) => readFileSync(join(root, p), 'utf8');
 const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
 
 const api = read('netlify/functions/campaigns.ts');
-const stage = api.slice(landmark(api, "if (action === 'stage_paid')"), landmark(api, "if (action === 'list_decisions')"));
+// ⚠️ The slice ENDS at approve_launch, not at list_decisions. It used to end at list_decisions and
+// silently swallowed approve_launch the moment that action was inserted between them — so checks
+// asserting "staging never activates" started reading approve_launch's activateCampaign call and
+// failing against correct code. A slice bound is only as stable as the thing that comes next.
+const stage = api.slice(landmark(api, "if (action === 'stage_paid')"), landmark(api, "if (action === 'approve_launch')"));
 const picker = read('netlify/functions/linkedin-ads-account.ts');
 
 const conn = (over: Partial<AdsConnection> = {}): AdsConnection => ({
