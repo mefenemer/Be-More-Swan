@@ -44,7 +44,11 @@ export type AdNetwork = typeof AD_NETWORKS[number];
 
 /** Why each real network is unreachable, in the words the surface shows. */
 export const AD_NETWORK_BLOCKERS: Record<string, string> = {
-    linkedin: 'LinkedIn advertising needs Marketing Developer Platform access, which is a product application we have not yet been granted.',
+    // ⚠️ Development Tier WAS granted (2026-09-01, app 247000116) — read-only on unlimited ad
+    // accounts, EDIT on at most five. So this sentence is about the cap, not about access: we
+    // cannot offer it to every workspace until Standard Tier, and promising it to the sixth
+    // customer would be a control that works for everyone but them.
+    linkedin: 'LinkedIn advertising is in limited testing. Our current access lets us manage only a handful of ad accounts, so it is not open to every workspace yet.',
     meta: 'Meta advertising needs business verification and the ads_management permission, neither of which is approved yet.',
     google: 'Google Ads needs a developer token, which this workspace does not hold.',
 };

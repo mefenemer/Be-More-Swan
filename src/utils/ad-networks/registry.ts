@@ -31,6 +31,7 @@
 import { AD_NETWORK_BLOCKERS, type AdNetwork } from '../../config/ad-networks';
 import type { AdNetworkAdapter } from './types';
 import { mockAdapter } from './mock';
+import { createLinkedInAdapter, type LinkedInAdapterConfig } from './linkedin';
 
 /**
  * Real, reachable adapters.
@@ -40,10 +41,34 @@ import { mockAdapter } from './mock';
  * against the real API.
  */
 const ADAPTERS: Partial<Record<AdNetwork, AdNetworkAdapter>> = {
-    // linkedin: linkedInAdapter,   ← blocked on Marketing Developer Platform access
+    // linkedin: ← Development Tier granted 2026-09-01 (app 247000116). Deliberately NOT registered
+    //             here: see linkedInAdapter() below, which is DEV-ONLY until the ads OAuth flow
+    //             exists and the 5-account edit cap has been exercised for real.
     // meta:     metaAdapter,       ← blocked on business verification
     // google:   googleAdapter,     ← blocked on a developer token
 };
+
+/**
+ * LinkedIn, for development only.
+ *
+ * ⚠️ Deliberately NOT in ADAPTERS. Development Tier permits EDIT on at most five ad accounts, so
+ * registering it for production would give the sixth tenant — and every tenant after — a control
+ * that works for everybody else and fails for them. That is the `follower-counts-availability`
+ * shape this whole phase was arranged to avoid, and it would fail at the worst possible moment:
+ * mid-launch, on someone's money.
+ *
+ * It also cannot authenticate yet. There is no token carrying `rw_ads` / `r_ads_reporting`; the
+ * workspace LinkedIn connection holds `w_member_social` only, and those scopes must not simply be
+ * appended to it (see the header of linkedin.ts).
+ *
+ * Requires config the caller supplies, which is why it is a factory rather than a singleton.
+ */
+export function linkedInAdapter(cfg: LinkedInAdapterConfig): AdNetworkAdapter {
+    if (process.env.NODE_ENV === 'production') {
+        throw new Error('The LinkedIn ads adapter is Development Tier only and must not be used in production.');
+    }
+    return createLinkedInAdapter(cfg);
+}
 
 export interface ResolveResult {
     adapter: AdNetworkAdapter | null;
@@ -59,6 +84,9 @@ export interface ResolveResult {
  * (a no-op adapter, say) would produce a campaign that reports success and does nothing.
  */
 export function resolveAdapter(network: string, opts: { allowMock?: boolean } = {}): ResolveResult {
+    // LinkedIn resolves to nothing here on purpose — it needs per-workspace config, so it is
+    // constructed by linkedInAdapter() rather than looked up. The blocker below still explains why
+    // a tenant cannot have it.
     if (network === 'mock') {
         // Two independent conditions. The env check alone would let a misconfigured production
         // deploy expose it; the flag alone would let any caller opt in.

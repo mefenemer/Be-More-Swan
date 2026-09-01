@@ -316,7 +316,12 @@ check('no real network resolves, and each refusal names its blocker', () => {
         assert.equal(adapter, null, `${network} resolved to an adapter`);
         assert.ok(blocker && blocker.length > 30, `${network} has no real blocker sentence`);
     }
-    assert.match(resolveAdapter('linkedin').blocker!, /Marketing Developer Platform/);
+    // ⚠️ Updated 2026-09-01: Development Tier WAS granted, so the blocker is now about the
+    // five-account EDIT CAP, not about access being refused. Copy still claiming we were never
+    // approved would be the stale-claim failure this project keeps repeating.
+    assert.ok(!/not yet been granted/i.test(resolveAdapter('linkedin').blocker!),
+        'the LinkedIn blocker still says access was refused, which is no longer true');
+    assert.match(resolveAdapter('linkedin').blocker!, /handful of ad accounts|limited testing/i);
 });
 
 check('the availability list is honest about every network', () => {
