@@ -3964,6 +3964,21 @@ export const campaigns = pgTable("campaigns", {
   haltReason: text("halt_reason"),
   haltedAt: timestamp("halted_at"),
   haltedBy: integer("halted_by").references(() => users.id, { onDelete: "set null" }),
+
+  // ── Paid rails (db/campaign-paid.sql). NULL on every organic campaign, which is all of them. ──
+  adNetwork: text("ad_network"),
+  externalCampaignId: text("external_campaign_id"),
+  // 'ok' | 'lost' — whether we can still STOP this campaign. ⚠️ Deliberately ORTHOGONAL to status
+  // rather than another status value: the dangerous case is a campaign that is still ACTIVE and no
+  // longer controllable, and a single column could only say one of those at a time.
+  controlState: text("control_state").notNull().default("ok"),
+  controlCheckedAt: timestamp("control_checked_at"),
+  controlDetail: text("control_detail"),
+  // ⚠️ Read by assessHeartbeat(). A paid campaign whose optimiser has gone quiet halts itself — a
+  // dead cron is invisible here, and its invisibility is the danger: every guardrail stops being
+  // enforced while the spend continues.
+  optimiserLastRunAt: timestamp("optimiser_last_run_at"),
+
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
@@ -3972,6 +3987,67 @@ export const campaigns = pgTable("campaigns", {
   check("campaigns_mode_check", sql`${t.mode} IN ('organic','paid','blended')`),
   check("campaigns_status_check", sql`${t.status} IN ('draft','active','throttled','paused','finished','archived')`),
   check("campaigns_halt_reason_check", sql`${t.status} <> 'paused' OR ${t.haltReason} IS NOT NULL`),
+  check("campaigns_control_state_check", sql`${t.controlState} IN ('ok','lost')`),
+]);
+
+// ── Ad variants (db/campaign-paid.sql) ──────────────────────────────────────────────────────────
+// The creatives, and the audit trail for "a human authorised this spend".
+export const adVariants = pgTable("ad_variants", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  campaignId: integer("campaign_id").notNull().references(() => campaigns.id, { onDelete: "cascade" }),
+  // The tracked link this creative points at, so clicks reach the attribution ledger and not only
+  // the network's own reporting.
+  linkId: integer("link_id").references(() => campaignLinks.id, { onDelete: "set null" }),
+  network: text().notNull(),
+  externalVariantId: text("external_variant_id"),
+  headline: text().notNull(),
+  body: text().notNull(),
+  // 'thought_leader' | 'single_image' | 'video_script'
+  format: text().notNull().default("single_image"),
+  targeting: jsonb().notNull().default({}),
+  // ⚠️ 'staged' IS NOT 'paused'. staged = pushed to the network paused, never approved, never
+  // spent. paused = it ran and was stopped. Collapsing them makes "never launched" and "launched
+  // and stopped" identical everywhere, and lets a Resume start something nobody approved.
+  status: text().notNull().default("staged"),
+  pauseReason: text("pause_reason"),
+  approvedBy: integer("approved_by").references(() => users.id, { onDelete: "set null" }),
+  approvedAt: timestamp("approved_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("ad_variants_campaign_idx").on(t.campaignId, t.status),
+  uniqueIndex("ad_variants_external_uidx").on(t.externalVariantId).where(sql`external_variant_id IS NOT NULL`),
+  check("ad_variants_status_check", sql`${t.status} IN ('staged','active','paused','archived','rejected')`),
+  check("ad_variants_pause_reason_check", sql`${t.pauseReason} IS NULL OR ${t.pauseReason} IN ('creative_fatigue','cost_per_outcome','budget_exhausted','human','control_lost')`),
+  // The database half of the human-in-the-loop rule. Without it, "approved" is a field the
+  // application merely promises to set.
+  check("ad_variants_approval_check", sql`${t.status} NOT IN ('active','paused') OR ${t.approvedBy} IS NOT NULL`),
+]);
+
+// One row per variant per day. Stored rather than re-fetched: the optimiser needs a 7-day window
+// every day, and re-pulling it would multiply our rate-limit exposure by seven for no benefit —
+// and the evidence behind a pause would not survive for the user to question.
+export const adVariantMetrics = pgTable("ad_variant_metrics", {
+  id: bigint({ mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  variantId: integer("variant_id").notNull().references(() => adVariants.id, { onDelete: "cascade" }),
+  // The NETWORK's day boundary, as a date: ad platforms report in their account's timezone and
+  // converting would invent precision we do not have.
+  day: date().notNull(),
+  impressions: integer().notNull().default(0),
+  clicks: integer().notNull().default(0),
+  spendGbp: numeric("spend_gbp", { precision: 12, scale: 2 }).notNull().default("0.00"),
+  // ⚠️ What the NETWORK claims, kept apart from our own attributed conversions. They WILL disagree
+  // — every platform counts view-through conversions we cannot see, and we count some it cannot.
+  // One column for both would silently pick a winner.
+  reportedConversions: integer("reported_conversions").notNull().default(0),
+  fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
+}, (t) => [
+  // A re-fetch UPSERTs on this rather than appending, or every rate is divided by a doubled
+  // denominator.
+  uniqueIndex("ad_variant_metrics_day_uidx").on(t.variantId, t.day),
+  check("ad_variant_metrics_nonneg_check", sql`${t.impressions} >= 0 AND ${t.clicks} >= 0 AND ${t.spendGbp} >= 0 AND ${t.reportedConversions} >= 0`),
 ]);
 
 // The two ceilings + the autonomy dial, one row per campaign.
