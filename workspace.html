@@ -12256,13 +12256,29 @@ async function rqReviewApprove() {
         if (!(await rqEnsurePlatformConnection(pl))) { rqReviewSetConnectGate(); return; }
     }
     // Instagram needs an image.
-    const igNoImg = targets.filter(t => t.platform === 'instagram' && !t.thumbnailUrl);
+    //
+    // ⚠️ Gated on hasMedia, NOT on thumbnailUrl. They are different facts and conflating them
+    // produced a refusal nobody could act on: get-social-drafts resolves the preview URL inside a
+    // `catch { /* ignore */ }`, so a single failed R2 presign made a post with a perfectly good
+    // picture insist "Instagram needs an image" — while the canvas beside it kept showing that
+    // picture. Anything with no `hasMedia` field at all is a pre-deploy cached row; fall back to the
+    // old signal for those rather than blocking a post we cannot answer for.
+    const _igHasImage = t => (t.hasMedia !== undefined ? t.hasMedia : !!t.thumbnailUrl);
+    const igNoImg = targets.filter(t => t.platform === 'instagram' && !_igHasImage(t));
     if (igNoImg.length) {
         const msg = igNoImg.length === targets.length
             ? 'Instagram needs an image. Use "Add or change image" before approving.'
             : 'Your Instagram post needs an image. Switch to the Instagram tab and use "Add or change image" before approving.';
         window.showToast?.(msg, { icon: '🖼️', duration: 5000 });
         return;
+    }
+
+    // Media IS attached but we could not build a preview for it. Approval is allowed — approve-post
+    // re-resolves the media server-side and is the real gate — but say so, because a post whose
+    // picture we cannot fetch is worth a second look before it publishes.
+    const igNoPreview = targets.filter(t => t.platform === 'instagram' && t.hasMedia && !t.thumbnailUrl);
+    if (igNoPreview.length) {
+        window.showToast?.('We could not load a preview of this image, so check it before it goes out.', { icon: '⚠️', duration: 6000 });
     }
     await _rqApproveTargets(targets, 'approve');
 }
@@ -14650,6 +14666,44 @@ async function _pceSuggestOverlayText(postId, mode, currentText) {
     return d.text;
 }
 
+/**
+ * A URL the overlay canvas can actually BAKE from — i.e. one that will not taint it.
+ *
+ * Two sources, tried in this order, because they fail in opposite directions:
+ *
+ *   • `directUrl` is the media itself (presigned R2). It has NO size ceiling and keeps a 6 MB photo
+ *     off our function entirely — but the canvas only stays clean if the bucket returns CORS
+ *     headers, so the load can fail.
+ *   • `dataUrl` is the same bytes inlined by get-post-image. Same-origin by definition and always
+ *     canvas-clean, but capped at 4 MB because base64 inflates ~33% against Netlify's response
+ *     limit. A real phone photo (4284×5712, 6.4 MB) is well past it.
+ *
+ * ⚠️ crossOrigin="anonymous" is what makes the first branch safe to TRY: the browser refuses the
+ * load outright unless CORS allows it, so a successful onload PROVES the image is canvas-clean.
+ * There is no need to bake and catch SecurityError to find out.
+ */
+async function _pceCorsCleanImageUrl(base) {
+    if (base && base.directUrl) {
+        const usable = await new Promise(resolve => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => resolve(true);
+            img.onerror = () => resolve(false);
+            img.src = base.directUrl;
+        });
+        if (usable) return base.directUrl;
+    }
+    return (base && base.dataUrl) || null;
+}
+
+/** Why we could not get one, written for the reviewer rather than for us. */
+function _pceNoBackdropMessage(base) {
+    const mb = base && base.byteLength ? (base.byteLength / 1048576).toFixed(1) : null;
+    return mb
+        ? `This image is ${mb} MB, which is too large to add text to here. Attach a smaller version (under 4 MB) and try again.`
+        : 'Could not load this image for editing.';
+}
+
 async function _pceOpenOverlayEditor(postId) {
     if (!postId) return;
     if (!window.ImageOverlayEditor) { _pceSetOverlayMsg('Text editor could not load. Please refresh.', 'error'); return; }
@@ -14665,7 +14719,8 @@ async function _pceOpenOverlayEditor(postId) {
     }
 
     // Video posts have no image to hand back, so build the backdrop here from a frame of the clip.
-    let backdrop = base.dataUrl;
+    let backdrop = base.isVideo ? null : await _pceCorsCleanImageUrl(base);
+    if (!base.isVideo && !backdrop) { _pceSetOverlayMsg(_pceNoBackdropMessage(base), 'error'); return; }
     if (base.isVideo) {
         _pceSetOverlayMsg('Grabbing a frame from your video…');
         const onCanvas = document.querySelector('#post-review-body [data-media-video]');
@@ -14877,7 +14932,11 @@ async function gpApplyOverlaysBeforeApprove(postId, opts = {}) {
     const overlays = Array.isArray(base.overlays) ? base.overlays.filter(o => String(o.text || '').trim()) : [];
     if (!overlays.length) return;    // nothing to bake
 
-    const blob = await window.ImageOverlayEditor.bake(base.dataUrl, overlays);
+    // Same two-source resolution as the editor — a post whose image only loads via CORS must be
+    // BAKEABLE too, or approval would fail on exactly the images the editor just let through.
+    const bakeFrom = await _pceCorsCleanImageUrl(base);
+    if (!bakeFrom) throw new Error(_pceNoBackdropMessage(base));
+    const blob = await window.ImageOverlayEditor.bake(bakeFrom, overlays);
     const file = new File([blob], `overlay-post-${postId}.png`, { type: 'image/png' });
     const asset = await gpUploadContentAsset(file);
     const attachRes = await fetch('/.netlify/functions/attach-draft-media', {

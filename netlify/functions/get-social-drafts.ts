@@ -357,6 +357,15 @@ export default withLambda(async (event) => {
             // editor shows the copy, and an edit-and-save persists the repair.
             // brandCard non-null ⇒ the review UI offers "Edit card" for this draft.
             return { ...d, caption: displayCaption(d.caption), thumbnailUrl, mediaType, archiveDeletesAt, daysRemaining, failureMessage, failure,
+                // Is anything ATTACHED — a different question from "did we manage to build a preview
+                // URL for it", and the one the approve gate actually wants.
+                //
+                // ⚠️ thumbnailUrl was standing in for this, and it is not the same fact. Resolving a
+                // preview presigns R2 inside a `catch { /* ignore */ }`, so one failed presign made a
+                // post with a perfectly good picture report "Instagram needs an image" — while the
+                // canvas went on showing that picture. Derived from the same id list resolvePostMedia
+                // reads, so the two can never disagree about what is attached.
+                hasMedia: Array.isArray(contentAssetIds) && contentAssetIds.length > 0,
                 // Why the video render failed, when it did — null in every other state.
                 renderError: d.renderStatus === 'failed' ? (renderErrors.get(d.id) ?? null) : null,
                 brandCard: brandCards.get(d.id) ?? null,

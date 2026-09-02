@@ -117,15 +117,30 @@ async function dataUrlFor(
 
     try {
         const bytes = await fetchImageBytes(image.url);
+        // Over the cap is NOT an error any more — it is just a picture we cannot inline. A 413 here
+        // told the reviewer "Image is too large to edit in the browser" and left them with nothing
+        // to do; a real 6.4 MB phone photo hits it easily. `directUrl` is the way out: the browser
+        // loads it with crossOrigin="anonymous", which has no size ceiling at all and never touches
+        // this function. It needs CORS on the media bucket — until that is configured the client
+        // falls back to `dataUrl`, so nothing regresses for images that already worked.
         if (bytes.byteLength > MAX_IMAGE_BYTES) {
-            return { statusCode: 413, body: JSON.stringify({ error: 'Image is too large to edit in the browser.' }) };
+            return {
+                statusCode: 200,
+                headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+                body: JSON.stringify({
+                    dataUrl: null, directUrl: image.url, assetId, mimeType: image.mimeType, overlays,
+                    inlineSkipped: 'too_large', byteLength: bytes.byteLength,
+                }),
+            };
         }
         const b64 = Buffer.from(bytes).toString('base64');
         const dataUrl = `data:${image.mimeType};base64,${b64}`;
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-            body: JSON.stringify({ dataUrl, assetId, mimeType: image.mimeType, overlays }),
+            // directUrl rides along even when the image DID inline: it is the faster path when the
+            // bucket allows it, and the client prefers it. dataUrl remains the guaranteed fallback.
+            body: JSON.stringify({ dataUrl, directUrl: image.url, assetId, mimeType: image.mimeType, overlays }),
         };
     } catch (err) {
         console.error(`[get-post-image] ${label} error:`, err instanceof Error ? err.message : err);
