@@ -17,7 +17,7 @@ import { markPostMediaPosted } from '../../src/utils/release-post-media';
 import { resolvePostMediaList } from '../../src/utils/social-publish';
 import { composePostText } from '../../src/utils/post-link';
 import { withLambda } from '@netlify/aws-lambda-compat';
-import { isMetaAppBlocked, APP_BLOCK_HOLD_MS } from '../../src/utils/meta-app-block';
+import { isMetaAppBlocked, APP_BLOCK_HOLD_MS, recordMetaAppBlock, clearMetaAppBlock } from '../../src/utils/meta-app-block';
 
 const BATCH = 100;
 // Backoff in minutes: attempt 1→2m, 2→8m, 3→30m
@@ -495,6 +495,11 @@ export default withLambda(async () => {
         }
     }));
 
+    // A publish got through, so any block is over. Clears the marker so it can never go stale and
+    // claim an outage that ended days ago. Cheap: platform config is cached, and the helper returns
+    // immediately when nothing is set — which is the normal case.
+    if (succeeded > 0) await clearMetaAppBlock();
+
     const durationMs = Date.now() - tickStart;
     const overrunAlert = durationMs > OVERRUN_MS;
 
@@ -528,6 +533,9 @@ async function handlePublishFailure(
     // and there is no notification, because a per-post alert storm during a platform-wide outage
     // tells the customer nothing they can act on.
     if (isMetaAppBlocked(reason.errorMessage)) {
+        // The outage's only voice. Throttled to one email per 6h inside the helper, and swallowed
+        // on error — alerting must never become a publishing failure.
+        await recordMetaAppBlock('instagram', now);
         const heldUntil = new Date(now.getTime() + APP_BLOCK_HOLD_MS);
         await db.execute(
             `INSERT INTO rate_limit_states (organisation_id, platform, rate_limited_until, updated_at)

@@ -20,7 +20,7 @@ import { getDb } from '../../db/client';
 import { scheduledPosts, publishCronLog } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { resolvePostMediaList, hasAttachedMedia, publishFacebook, resolveFacebookPageCredentials, type DriverResult } from '../../src/utils/social-publish';
-import { isMetaAppBlocked, APP_BLOCK_HOLD_MS } from '../../src/utils/meta-app-block';
+import { isMetaAppBlocked, APP_BLOCK_HOLD_MS, recordMetaAppBlock, clearMetaAppBlock } from '../../src/utils/meta-app-block';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { markPostMediaPosted } from '../../src/utils/release-post-media';
 import { composePostText } from '../../src/utils/post-link';
@@ -161,6 +161,9 @@ export default withLambda(async () => {
         }
     }));
 
+    // A publish got through, so any block is over — see publish-instagram.
+    if (succeeded > 0) await clearMetaAppBlock();
+
     const durationMs = Date.now() - tickStart;
     await db.insert(publishCronLog).values({ postsProcessed: processed, postsSucceeded: succeeded, postsFailed: failed, durationMs });
     return { statusCode: 200, body: JSON.stringify({ processed, succeeded, failed, durationMs }) };
@@ -178,6 +181,8 @@ async function handleFailure(db: ReturnType<typeof getDb>, post: PostRow, reason
     // as it comes due; the extra calls are the cost of keeping this hotfix small.
     // See src/utils/meta-app-block.ts.
     if (isMetaAppBlocked(reason.errorMessage)) {
+        // See publish-instagram — one throttled operator alert, never a per-post storm.
+        await recordMetaAppBlock('facebook', now);
         const heldUntil = new Date(now.getTime() + APP_BLOCK_HOLD_MS).toISOString();
         await db.execute(
             `UPDATE scheduled_posts SET status = 'scheduled', retry_at = '${heldUntil}', failure_reason = '${esc(JSON.stringify(reason))}', updated_at = now() WHERE id = ${post.id}`

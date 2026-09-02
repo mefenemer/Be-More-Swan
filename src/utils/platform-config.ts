@@ -50,6 +50,15 @@ export const CONFIG_KEYS = {
     // When we last emailed a human about the sweep being unhealthy, so an ongoing incident does
     // not send an alert on every scheduled run.
     PAID_OPTIMISER_LAST_ALERT: 'paid_optimiser.last_alert',
+    // ── Meta app block ──
+    // When Meta last refused the whole app ({ at, platform }). Written by both Meta publishers the
+    // moment they see "API access blocked.", cleared by the next successful publish.
+    // ⚠️ This is the ONLY evidence a Meta outage is in force. The publishers deliberately HOLD
+    // posts and stay silent per-post during one — which is right, but it means the outage itself
+    // has no other voice. Without this row a block is indistinguishable from a quiet week.
+    META_APP_BLOCK_SINCE:      'meta.app_block_since',
+    // When we last emailed a human about it, so an ongoing block does not alert every ten minutes.
+    META_APP_BLOCK_LAST_ALERT: 'meta.app_block_last_alert',
 } as const;
 
 export type ConfigKey = typeof CONFIG_KEYS[keyof typeof CONFIG_KEYS];
