@@ -105,9 +105,13 @@ check('it cannot change a budget', () => {
     for (const w of writes) {
         assert.ok(!/maxSpendGbp/.test(w), `a write touches the budget: ${w.slice(0, 80)}`);
     }
-    // And the cost ceiling stays null until a customer-set field exists — passing the daily budget
-    // would be the agent deciding what a lead is worth.
-    assert.match(code(cron), /maxCostPerOutcomeGbp: null/);
+    // ⚠️ The cost ceiling now comes from the CUSTOMER'S column, not from a hard-coded null and
+    // never from the daily budget — passing the budget would be the agent deciding what a lead is
+    // worth. Null still flows through when they have not set one, which is most campaigns.
+    assert.match(code(cron), /maxCostPerOutcomeGbp: ceiling,/);
+    assert.match(code(cron), /budget\?\.maxCostPerOutcomeGbp != null \? Number\(budget\.maxCostPerOutcomeGbp\) : null/);
+    assert.ok(!/maxCostPerOutcomeGbp: dailyBudget|maxCostPerOutcomeGbp: budget\.maxSpendGbp/.test(code(cron)),
+        'the daily budget is being used as a cost-per-result ceiling');
 });
 
 check('a decision that would stop the whole campaign is NOT applied', () => {

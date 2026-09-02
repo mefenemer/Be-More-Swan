@@ -440,6 +440,41 @@ async function main() {
 
     console.log(`  ${movable.length} row(s) sole-owner of a legacy key, ${contested.length} row(s) sharing one\n`);
 
+    // ── Attribution without Graph ───────────────────────────────────────────────────────────────
+    // Printed BEFORE any write: it is the evidence for what the run is about to do, and under
+    // --no-verify it is the ONLY evidence there is. When Graph will not answer, the rows can still
+    // testify: meta-oauth.ts vaults the token and upserts the row in the SAME request, so the most
+    // recently updated row of a contested group is
+    // the one whose connect last overwrote the shared secret. If that row's metadata.fbUserId
+    // differs from a sibling's, the sibling's own token is definitively gone — no Graph needed.
+    //
+    // ⚠️ This is STRONGER than the Graph probe when the API refuses to answer, which on prod
+    // 2026-09-02 it did (`API access blocked. code 200`) for every token tried.
+    if (contested.length > 0) {
+        const contestedRows = contested;
+        const groups = new Map<string, typeof contestedRows>();
+        for (const p of contestedRows) groups.set(p.fromKey!, [...(groups.get(p.fromKey!) ?? []), p]);
+        const fbUserOf = (id: number) => ((byId.get(id)!.metadata ?? {}) as Record<string, unknown>).fbUserId as string | undefined ?? null;
+
+        for (const [key, group] of groups) {
+            const owner = group.find(p => p.newestOfGroup);
+            if (!owner) continue;
+            const ownerUser = fbUserOf(owner.row.id);
+            const displaced = group.filter(p => !p.newestOfGroup && fbUserOf(p.row.id) && fbUserOf(p.row.id) !== ownerUser);
+            if (!ownerUser || displaced.length === 0) continue;
+
+            console.log('\n  ── Attribution from the rows themselves (no Graph needed) ──');
+            console.log(`  ${key}`);
+            console.log(`  Last written by ${label(owner.row.id)} (${new Date(owner.row.updatedAt!).toISOString().slice(0, 10)}, Meta user ${ownerUser}).`);
+            for (const d of displaced) {
+                console.log(`  ${label(d.row.id)} was connected by a DIFFERENT Meta user (${fbUserOf(d.row.id)}), so the`);
+                console.log('  stored token cannot be its own: its token was destroyed by the later connect.');
+            }
+            console.log('  This rests on the writer\'s ordering (token then row, one request), not on Graph, so it');
+            console.log('  holds while the API is blocked. --no-verify applies exactly this rule.');
+        }
+    }
+
     const applied: Applied[] = [];
     const needReconnect: string[] = [];
     /** Contested rows Graph would neither confirm nor deny. NOT a customer action — see the control probe. */
@@ -501,8 +536,8 @@ async function main() {
         if (entry.action === 'contested') {
             if (noVerify) {
                 if (!entry.newestOfGroup) {
-                    needReconnect.push(`${name}: shares ${entry.fromKey} with ${entry.sharedWith - 1} other row(s); --no-verify gives the secret to the newest row only`);
-                    console.log(`  ✗ ${name}\n      shared key, not the newest row — left alone (run without --no-verify to prove it)`);
+                    needReconnect.push(`${name}: shares ${entry.fromKey} with ${entry.sharedWith - 1} other row(s) and is not the newest — the later connect overwrote its token`);
+                    console.log(`  ✗ ${name}\n      shared key, not the newest row — the later connect overwrote its token; left alone`);
                     continue;
                 }
             } else {
@@ -617,36 +652,6 @@ async function main() {
                 console.log('        Re-run with --include-inactive, or probe a connection made by someone else.');
             }
             console.log('      Either way: do NOT ask anyone to reconnect on the strength of this run.');
-        }
-    }
-
-    // ── Attribution without Graph ───────────────────────────────────────────────────────────────
-    // When Graph will not answer, the rows can still testify. meta-oauth.ts vaults the token and
-    // upserts the row in the SAME request, so the most recently updated row of a contested group is
-    // the one whose connect last overwrote the shared secret. If that row's metadata.fbUserId
-    // differs from a sibling's, the sibling's own token is definitively gone — no Graph needed.
-    if (unproven.length > 0) {
-        const contestedRows = plan.filter(p => p.action === 'contested');
-        const groups = new Map<string, typeof contestedRows>();
-        for (const p of contestedRows) groups.set(p.fromKey!, [...(groups.get(p.fromKey!) ?? []), p]);
-        const fbUserOf = (id: number) => ((byId.get(id)!.metadata ?? {}) as Record<string, unknown>).fbUserId as string | undefined ?? null;
-
-        for (const [key, group] of groups) {
-            const owner = group.find(p => p.newestOfGroup);
-            if (!owner) continue;
-            const ownerUser = fbUserOf(owner.row.id);
-            const displaced = group.filter(p => !p.newestOfGroup && fbUserOf(p.row.id) && fbUserOf(p.row.id) !== ownerUser);
-            if (!ownerUser || displaced.length === 0) continue;
-
-            console.log('\n  ── Attribution from the rows themselves (no Graph needed) ──');
-            console.log(`  ${key}`);
-            console.log(`  Last written by ${label(owner.row.id)} (${new Date(owner.row.updatedAt!).toISOString().slice(0, 10)}, Meta user ${ownerUser}).`);
-            for (const d of displaced) {
-                console.log(`  ${label(d.row.id)} was connected by a DIFFERENT Meta user (${fbUserOf(d.row.id)}), so the`);
-                console.log('  stored token cannot be its own: its token was destroyed by the later connect.');
-            }
-            console.log('  This rests on the writer\'s ordering (token then row, one request), not on Graph, so it');
-            console.log('  holds while the API is blocked. --no-verify applies exactly this rule.');
         }
     }
 

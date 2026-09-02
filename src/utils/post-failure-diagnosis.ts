@@ -22,6 +22,8 @@
 // Server-side on purpose: the Review Queue, the Data Hub's Content Library and the failure
 // notification should never disagree about why a post died.
 
+import { isMetaAppBlocked } from './meta-app-block';
+
 /** The raw jsonb a publisher writes. Older/foreign rows may hold a bare string instead. */
 export type StoredFailureReason =
     | string
@@ -116,6 +118,23 @@ export function diagnosePostFailure(reason: StoredFailureReason, platformLabel =
             title: `${P} didn’t accept this post, and no reason was recorded.`,
             remedy: 'Try publishing it again. If it fails a second time, reject it and let your assistant draft a fresh one.',
             raw: null,
+            retryable: true,
+            needsReconnect: false,
+        };
+    }
+
+    // ── The platform has blocked the whole app ──────────────────────────────────────────────────
+    // Ahead of the connection branch, which would otherwise claim this: Meta sends "API access
+    // blocked." under code 200, and 200 is in AUTH_CODES. That made every post in a platform-wide
+    // outage tell its owner to reconnect — advice that cannot work (the OAuth dialog is refused
+    // before consent) and that is actively risky, since a reconnect rebinds whichever Page Meta
+    // returns first. See src/utils/meta-app-block.ts.
+    if (isMetaAppBlocked(message)) {
+        return {
+            kind: 'platform',
+            title: `${P} has temporarily blocked publishing for Be More Swan — this isn’t a problem with your account.`,
+            remedy: `Your post is being held and will go out automatically once ${P} restores access. There is nothing to fix at your end, and reconnecting won’t help.`,
+            raw,
             retryable: true,
             needsReconnect: false,
         };

@@ -331,3 +331,90 @@ export function createLinkedInAdapter(cfg: LinkedInAdapterConfig): AdNetworkAdap
         },
     };
 }
+
+// ── Targeting search ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Facets we let a user target on.
+ *
+ * ⚠️ Deliberately a SHORT list. LinkedIn exposes dozens, and every one added here is another field
+ * on a form that a founder has to understand before they can spend money. These three are the ones
+ * the brief's AC 1.2 named, and they are the ones that change who sees an ad most.
+ */
+export const TARGETING_FACETS = {
+    locations: 'urn:li:adTargetingFacet:locations',
+    jobFunctions: 'urn:li:adTargetingFacet:titles',
+    seniorities: 'urn:li:adTargetingFacet:seniorities',
+} as const;
+export type TargetingFacet = keyof typeof TARGETING_FACETS;
+
+export interface TargetingEntity { urn: string; name: string }
+
+/**
+ * Typeahead against LinkedIn's own targeting vocabulary.
+ *
+ * ⚠️ WHY THIS IS A LIVE LOOKUP AND NOT A HARDCODED LIST. Targeting values are opaque URNs
+ * (`urn:li:geo:101165590` is the United Kingdom) that only LinkedIn can map to a name. A baked-in
+ * list would be wrong the moment they revise it, and a WRONG geo URN does not error — it silently
+ * targets somewhere else and spends the customer's money there. The only two URNs anywhere in this
+ * codebase are the fallbacks below, and both are documented.
+ */
+export async function searchTargeting(
+    accessToken: string,
+    accountUrn: string,
+    facet: TargetingFacet,
+    query: string,
+): Promise<TargetingEntity[]> {
+    const params = new URLSearchParams({
+        q: 'typeahead',
+        query,
+        facet: TARGETING_FACETS[facet],
+        queryVersion: 'QUERY_USES_URNS',
+        'locale.language': 'en',
+        'locale.country': 'GB',
+        lixEntity: accountUrn,
+    });
+    const res = await call(`${BASE}/adTargetingEntities?${params.toString()}`, {
+        method: 'GET', headers: headers(accessToken),
+    });
+    const data = await res.json() as { elements?: { urn?: string; name?: string }[] };
+    if (!Array.isArray(data.elements)) return [];
+    return data.elements
+        .filter((e) => e.urn && e.name)
+        .map((e) => ({ urn: String(e.urn), name: String(e.name) }))
+        .slice(0, 20);
+}
+
+/**
+ * The two geo URNs this codebase knows by heart, used only as a starting suggestion when the
+ * typeahead is unavailable. Verified against LinkedIn's own documentation rather than guessed —
+ * a wrong geo spends real money in the wrong country without erroring.
+ */
+export const FALLBACK_GEOS: TargetingEntity[] = [
+    { urn: 'urn:li:geo:101165590', name: 'United Kingdom' },
+    { urn: 'urn:li:geo:103644278', name: 'United States' },
+];
+
+/**
+ * Turn chosen entities into the `targetingCriteria` LinkedIn expects.
+ *
+ * ⚠️ A LOCATION IS MANDATORY. LinkedIn rejects a campaign with no location facet, and until now
+ * this codebase sent `targetingCriteria: {}` — so every staging attempt would have failed at the
+ * API with an opaque error. Refusing here, with a sentence, is the difference between "you need to
+ * choose where these ads run" and a 400 from a third party.
+ *
+ * The shape is `include.and[]` of `or` groups: every group must match (AND), any value within a
+ * group will do (OR). So locations AND seniorities narrows; two locations widens.
+ */
+export function buildTargetingCriteria(selected: Partial<Record<TargetingFacet, string[]>>): Record<string, unknown> {
+    const locations = selected.locations ?? [];
+    if (locations.length === 0) {
+        throw new Error('Choose at least one location — LinkedIn will not run an advert without one.');
+    }
+    const and: unknown[] = [{ or: { [TARGETING_FACETS.locations]: locations } }];
+    for (const facet of ['jobFunctions', 'seniorities'] as const) {
+        const values = selected[facet] ?? [];
+        if (values.length > 0) and.push({ or: { [TARGETING_FACETS[facet]]: values } });
+    }
+    return { include: { and } };
+}

@@ -15,7 +15,8 @@
 //   POST { action: 'list_links',   campaignId }            → links + clicks + conversions
 //   POST { action: 'archive_link', linkId }                → stops the redirect, keeps the clicks
 //   POST { action: 'list_variants', campaignId }            → ads + the budget to echo back
-//   POST { action: 'stage_paid',   campaignId, dailyBudgetGbp, variants[], campaignGroupUrn }
+//   POST { action: 'stage_paid',   campaignId, dailyBudgetGbp, maxCostPerOutcomeGbp?, variants[],
+//                                  targeting: { locations[], jobFunctions?[], seniorities?[] } }
 //   POST { action: 'approve_launch', campaignId, confirmDailyBudgetGbp }   ⚠️ starts real spend
 //   POST { action: 'list_decisions', assistantId }
 //   POST { action: 'decide',      decisionId, verdict: 'approve'|'reject', reason?, note? }
@@ -47,6 +48,7 @@ import {
     isLinkMedium, isOrderAction, isSelectableOutcomeMetric, orderWorkItems,
 } from '../../src/config/campaign-vocab';
 import { isSafeDestination, mintLinkToken } from '../../src/utils/campaign-attribution';
+import { buildTargetingCriteria } from '../../src/utils/ad-networks/linkedin';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import { PAID_ADS_FEATURE } from '../../src/config/ad-networks';
@@ -617,10 +619,15 @@ export default withLambda(async (event) => {
             .where(eq(adVariants.campaignId, campaign.id))
             .orderBy(adVariants.id)
             .limit(50);
-        const [budget] = await db.select({ maxSpendGbp: campaignBudgets.maxSpendGbp })
-            .from(campaignBudgets).where(eq(campaignBudgets.campaignId, campaign.id)).limit(1);
+        const [budget] = await db.select({
+            maxSpendGbp: campaignBudgets.maxSpendGbp,
+            maxCostPerOutcomeGbp: campaignBudgets.maxCostPerOutcomeGbp,
+        }).from(campaignBudgets).where(eq(campaignBudgets.campaignId, campaign.id)).limit(1);
         return json(200, {
             variants: rows,
+            // null means no ceiling. The surface says "not set" rather than showing a number that
+            // would imply a rule is running when none is.
+            maxCostPerOutcomeGbp: budget?.maxCostPerOutcomeGbp != null ? Number(budget.maxCostPerOutcomeGbp) : null,
             // Returned so the client can SHOW the figure next to the approve button and echo the
             // same number back — approve_launch refuses a mismatch, which is what makes "a human,
             // with the number in front of them" true rather than aspirational.
@@ -683,6 +690,20 @@ export default withLambda(async (event) => {
             return json(400, { error: 'Daily budgets above £1,000 need to be set up with us directly.' });
         }
 
+        // The customer's own cost ceiling. Optional, and NULL is a first-class answer meaning
+        // "never pause on cost" — the optimiser's cost rule simply does not run. We do not pick a
+        // default, because any number we chose would be us deciding what their lead is worth.
+        let maxCostPerOutcomeGbp: string | null = null;
+        if (body.maxCostPerOutcomeGbp !== undefined && body.maxCostPerOutcomeGbp !== null && body.maxCostPerOutcomeGbp !== '') {
+            const ceiling = Number(body.maxCostPerOutcomeGbp);
+            // Zero would pause every variant on its first conversion. That is a typo, not a ceiling.
+            if (!Number.isFinite(ceiling) || ceiling <= 0) {
+                return json(400, { error: 'A cost-per-result ceiling has to be more than £0. Leave it blank if you do not want one.' });
+            }
+            if (ceiling > 100000) return json(400, { error: 'That cost-per-result ceiling looks like a typo.' });
+            maxCostPerOutcomeGbp = String(ceiling);
+        }
+
         const rawVariants = Array.isArray(body.variants) ? body.variants : [];
         if (rawVariants.length < 1 || rawVariants.length > 3) {
             return json(400, { error: 'Stage between one and three ad variants.' });
@@ -694,6 +715,21 @@ export default withLambda(async (event) => {
             format: str(v?.format, 40) ?? 'single_image',
             index: i,
         }));
+        // ⚠️ TARGETING IS MANDATORY AND WAS PREVIOUSLY SENT EMPTY. LinkedIn refuses a campaign with
+        // no location facet, so every staging attempt would have failed at the API with an opaque
+        // error. buildTargetingCriteria refuses here instead, in a sentence the user can act on.
+        let targetingCriteria: Record<string, unknown>;
+        try {
+            const t = (body.targeting && typeof body.targeting === 'object') ? body.targeting as Record<string, string[]> : {};
+            targetingCriteria = buildTargetingCriteria({
+                locations: Array.isArray(t.locations) ? t.locations.slice(0, 20) : [],
+                jobFunctions: Array.isArray(t.jobFunctions) ? t.jobFunctions.slice(0, 20) : [],
+                seniorities: Array.isArray(t.seniorities) ? t.seniorities.slice(0, 20) : [],
+            });
+        } catch (err) {
+            return json(400, { error: err instanceof Error ? err.message : 'Choose where these ads should run.' });
+        }
+
         for (const v of variants) {
             if (!v.headline || !v.bodyText || !v.destinationUrl) {
                 return json(400, { error: 'Every variant needs a headline, body text and a destination link.' });
@@ -738,7 +774,9 @@ export default withLambda(async (event) => {
                     headline: v.headline!,
                     body: v.bodyText!,
                     destinationUrl: v.destinationUrl!,
-                    targeting: (body.targeting && typeof body.targeting === 'object') ? body.targeting as Record<string, unknown> : {},
+                    // Campaign-level in LinkedIn; carried on each variant because that is the
+                    // adapter's input shape, and it reads the first.
+                    targeting: targetingCriteria,
                 })),
             });
         } catch (err) {
@@ -759,7 +797,7 @@ export default withLambda(async (event) => {
             }).where(eq(campaigns.id, campaign.id));
 
             await db.update(campaignBudgets)
-                .set({ maxSpendGbp: String(dailyBudgetGbp), updatedAt: new Date() })
+                .set({ maxSpendGbp: String(dailyBudgetGbp), maxCostPerOutcomeGbp, updatedAt: new Date() })
                 .where(eq(campaignBudgets.campaignId, campaign.id));
 
             await db.insert(adVariants).values(variants.map((v, i) => ({
@@ -770,7 +808,11 @@ export default withLambda(async (event) => {
                 headline: v.headline!,
                 body: v.bodyText!,
                 format: v.format!,
-                targeting: {},
+                // ⚠️ The REAL criteria, not `{}`. This column is the local record of who an ad was
+                // aimed at, and it is the only thing that can answer "why did this run in Germany"
+                // after the fact — LinkedIn's own copy can be edited in Campaign Manager, and a
+                // deleted campaign takes its targeting with it.
+                targeting: targetingCriteria,
                 // Never 'active'. A CHECK constraint also requires approved_by on anything live.
                 status: 'staged',
             })));

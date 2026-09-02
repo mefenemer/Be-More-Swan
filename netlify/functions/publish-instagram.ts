@@ -17,6 +17,7 @@ import { markPostMediaPosted } from '../../src/utils/release-post-media';
 import { resolvePostMediaList } from '../../src/utils/social-publish';
 import { composePostText } from '../../src/utils/post-link';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { isMetaAppBlocked, APP_BLOCK_HOLD_MS } from '../../src/utils/meta-app-block';
 
 const BATCH = 100;
 // Backoff in minutes: attempt 1→2m, 2→8m, 3→30m
@@ -514,6 +515,30 @@ async function handlePublishFailure(
     now: Date,
 ) {
     const attempt = post.attempt_count + 1;
+
+    // ── Meta has blocked the APP, not this connection ───────────────────────────────────────────
+    // Checked before everything else, because it is the one failure where both of the other
+    // branches are actively harmful: the permanent branch would burn a post over an outage nobody
+    // in this org caused, and the customer-facing message would tell them to reconnect an account
+    // that is not broken. See src/utils/meta-app-block.ts.
+    //
+    // Held exactly like a throttle — the mechanism is already here and already tested — with two
+    // deliberate differences: attempt_count is NOT incremented (the post has not had a real
+    // attempt, and burning through three of them during an outage would defeat the whole point),
+    // and there is no notification, because a per-post alert storm during a platform-wide outage
+    // tells the customer nothing they can act on.
+    if (isMetaAppBlocked(reason.errorMessage)) {
+        const heldUntil = new Date(now.getTime() + APP_BLOCK_HOLD_MS);
+        await db.execute(
+            `INSERT INTO rate_limit_states (organisation_id, platform, rate_limited_until, updated_at)
+             VALUES (${post.organisation_id}, 'instagram', '${heldUntil.toISOString()}', now())
+             ON CONFLICT (organisation_id, platform) DO UPDATE SET rate_limited_until = EXCLUDED.rate_limited_until, updated_at = now()`
+        );
+        await db.execute(
+            `UPDATE scheduled_posts SET status = 'scheduled', retry_at = '${heldUntil.toISOString()}', failure_reason = '${JSON.stringify(reason).replace(/'/g, "''")}', updated_at = now() WHERE id = ${post.id}`
+        );
+        return;
+    }
 
     // Handle a rate limit: defer ALL posts for this org, not just this one — the limit is on the
     // app/page/user, so the next post in the batch would hit the same wall.

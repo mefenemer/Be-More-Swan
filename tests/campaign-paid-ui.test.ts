@@ -63,10 +63,18 @@ check('network names come from a LABEL, never from CSS capitalize', () => {
     assert.ok(networkAvailability().every((r) => r.label), 'the server does not send a label');
 });
 
-check('the actionable blocker offers a way to act', () => {
+check('the actionable blocker offers a way to act, in place', () => {
     // The one a user can fix. A sentence with no route is a dead end.
+    //
+    // ⚠️ The account choice is made HERE, not on the connections page. That page's grid is shared
+    // by every assistant role, and putting an org-level ads connection in it would have meant
+    // widening connection-map — a fail-open surface where a mistake hands a role every connector
+    // in the product.
     assert.match(locked, /esc\(p\.adsReason \|\| ''\)/);
-    assert.match(locked, /href="\/integrations\.html"/);
+    assert.match(locked, /data-cmp-account-select/);
+    assert.match(locked, /data-cmp-account-save/);
+    assert.match(locked, /linkedin-ads-oauth-init/);
+    assert.ok(!/href="\/integrations\.html"/.test(locked), 'the picker regressed to a link out');
 });
 
 check('no "coming soon" anywhere on the locked surface', () => {

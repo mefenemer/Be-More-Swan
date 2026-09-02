@@ -4059,6 +4059,11 @@ export const campaignBudgets = pgTable("campaign_budgets", {
   // ⚠️ Also guarded by a BEFORE trigger in db/campaigns.sql: an organic campaign cannot carry a
   // non-zero money ceiling. The trigger is invisible to Drizzle — do not "clean it up".
   maxSpendGbp: numeric("max_spend_gbp", { precision: 10, scale: 2 }).notNull().default("0.00"),
+  // ⚠️ NULLABLE, and null means "no ceiling — never pause on cost". That is the only safe default:
+  // any number we chose would be us deciding what a customer's lead is worth, and being wrong in
+  // the expensive direction quietly pauses ads that were working. A ceiling exists only because a
+  // human typed one. db/campaign-cost-ceiling.sql.
+  maxCostPerOutcomeGbp: numeric("max_cost_per_outcome_gbp", { precision: 10, scale: 2 }),
   // A reallocation at or below this many work items happens on its own; larger ones become a
   // decision. 0 (the default) means nothing is automatic.
   autonomyThresholdWork: integer("autonomy_threshold_work").notNull().default(0),
@@ -4073,6 +4078,9 @@ export const campaignBudgets = pgTable("campaign_budgets", {
   check("campaign_budgets_max_work_check", sql`${t.maxWorkItems} > 0`),
   check("campaign_budgets_spend_nonneg_check", sql`${t.maxSpendGbp} >= 0`),
   check("campaign_budgets_autonomy_check", sql`${t.autonomyThresholdWork} >= 0`),
+  // Zero is not a ceiling anyone means to set — it would pause every variant on its first
+  // conversion. A typo, and a costly one.
+  check("campaign_budgets_cost_ceiling_check", sql`${t.maxCostPerOutcomeGbp} IS NULL OR ${t.maxCostPerOutcomeGbp} > 0`),
 ]);
 
 // One instruction to one colleague. The orchestrator's only output.

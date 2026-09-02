@@ -56,8 +56,12 @@
     optimiserHealth: null,
     /** What the paid surface may offer: feature flag, network availability, ads readiness. */
     paid: null,
-    /** Per campaign: { open, loaded, variants, dailyBudgetGbp }. */
+    /** Per campaign: { open, loaded, variants, dailyBudgetGbp, maxCostPerOutcomeGbp }. */
     paid_: {},
+    /** Ad accounts this connection can reach. null = not asked yet, [] = none reachable. */
+    adAccounts: null,
+    /** Chosen targeting entities, per campaign: { locations: [{urn,name}], ... }. */
+    targeting: {},
   };
 
   function esc(v) {
@@ -519,14 +523,39 @@
       // The one blocker the user can act on. `adsReason` is the server's sentence — connect,
       // reconnect, pick an account, or create one in Campaign Manager — and each leads somewhere
       // different, which is why it is not collapsed into a single "not ready".
+      //
+      // ⚠️ The account CHOICE is made here rather than on the connections page. That page's grid is
+      // shared by every assistant role, and putting an org-level ads connection in it would mean
+      // widening connection-map — a fail-open surface where a mistake hands a role every connector
+      // in the product. Choosing here also puts the decision where it is needed.
+      const acc = state.adAccounts;
+      const picker = acc === null
+        ? '<p class="text-xs text-gray-500 mt-2">Checking your ad accounts…</p>'
+        : acc.length === 0
+          ? ''
+          : `
+            <div class="flex flex-wrap items-center gap-2 mt-3">
+              <select data-cmp-account-select
+                class="flex-1 min-w-0 px-3 py-1.5 border border-gray-300 rounded-lg text-xs">
+                <option value="">Choose an ad account…</option>
+                ${acc.map((a) => `<option value="${esc(a.urn)}">${esc(a.name)}${a.currency ? ` (${esc(a.currency)})` : ''}</option>`).join('')}
+              </select>
+              <button type="button" data-cmp-account-save
+                class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+                Use this account
+              </button>
+            </div>`;
       return `
         <div class="bg-amber-50 border border-amber-200 rounded-xl p-4">
           <p class="text-xs font-bold text-amber-900">Before you can advertise</p>
           <p class="text-xs text-amber-900 mt-1 leading-relaxed">${esc(p.adsReason || '')}</p>
-          <a href="/integrations.html"
-            class="inline-flex items-center mt-3 px-3 py-1.5 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs font-bold rounded-lg transition">
-            Open connections
-          </a>
+          ${picker}
+          ${acc !== null && acc.length === 0 ? `
+            <a href="/.netlify/functions/linkedin-ads-oauth-init"
+              class="inline-flex items-center mt-3 px-3 py-1.5 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs font-bold rounded-lg transition">
+              Connect LinkedIn advertising
+            </a>` : ''}
+          <p class="hidden mt-2 text-xs font-semibold text-gray-600" data-cmp-account-status></p>
         </div>`;
     }
     return '';
@@ -585,6 +614,13 @@
                 These ads are staged on LinkedIn and paused. Approving starts real spending of
                 <span class="font-bold">£${esc(budget.toFixed(2))} a day</span> until you pause it.
               </p>
+              <p class="text-xs text-amber-900 mt-1 leading-relaxed">
+                ${st.maxCostPerOutcomeGbp != null
+                  ? `We will pause any ad costing more than <span class="font-bold">£${esc(Number(st.maxCostPerOutcomeGbp).toFixed(2))}</span> per result.`
+                  // Null is not "£0" and not silence — it is a rule that is switched off, and the
+                  // user should know which rules are actually running on their money.
+                  : 'No cost limit is set, so ads are only paused when their click-through falls well below their own average.'}
+              </p>
               <button type="button" data-cmp-approve="${esc(String(c.id))}" data-cmp-budget="${esc(String(budget))}"
                 class="mt-3 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
                 Approve &amp; launch
@@ -595,28 +631,69 @@
     }
 
     // Not staged yet: the staging form.
+    const chosen = (state.targeting[c.id] && state.targeting[c.id].locations) || [];
     return `
       <div class="mt-3 pt-3 border-t border-gray-100" data-cmp-paid="${esc(String(c.id))}">
         <p class="text-xs text-gray-500 leading-relaxed mb-3">
           Write up to three ads. They are created on LinkedIn <span class="font-bold">paused</span> —
           nothing is spent until you approve them on this page.
         </p>
+
         <div class="flex flex-wrap items-center gap-2 mb-2">
           <label class="text-xs font-bold text-gray-600">Daily budget £</label>
           <input type="number" min="1" max="1000" step="1" value="20" data-cmp-paid-budget="${esc(String(c.id))}"
             style="max-width:7rem" class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
-          <input type="url" placeholder="https://your-site.com/offer" data-cmp-paid-url="${esc(String(c.id))}"
-            class="flex-1 min-w-0 px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
+          <label class="text-xs font-bold text-gray-600">Stop an ad above £</label>
+          <input type="number" min="1" step="1" placeholder="no limit" data-cmp-paid-ceiling="${esc(String(c.id))}"
+            style="max-width:7rem" class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
+          <span class="text-xs text-gray-400">per result</span>
         </div>
+        <p class="text-[11px] text-gray-400 mb-3 leading-relaxed">
+          Leave the limit blank and we will never pause an ad on cost — only when its click-through
+          falls well below its own average. We do not guess what a result is worth to you.
+        </p>
+
+        <div class="mb-3">
+          <label class="text-xs font-bold text-gray-600">Where should these ads run?</label>
+          <div class="flex flex-wrap items-center gap-2 mt-1">
+            <input type="text" placeholder="Search a country or city…" data-cmp-geo-q="${esc(String(c.id))}"
+              class="flex-1 min-w-0 px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
+            <button type="button" data-cmp-geo-search="${esc(String(c.id))}"
+              class="px-3 py-1.5 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs font-bold rounded-lg transition">
+              Search
+            </button>
+          </div>
+          <div class="mt-2" data-cmp-geo-results="${esc(String(c.id))}"></div>
+          ${chosen.length ? `
+            <div class="flex flex-wrap gap-2 mt-2">
+              ${chosen.map((g) => `
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border bg-emerald-50 text-emerald-700 border-emerald-200">
+                  ${esc(g.name)}
+                  <button type="button" data-cmp-geo-remove="${esc(String(c.id))}|${esc(g.urn)}" class="font-bold">&times;</button>
+                </span>`).join('')}
+            </div>`
+            // ⚠️ Said out loud, because the server refuses without one and an unexplained 400 at
+            // the end of a filled-in form is a worse experience than a sentence here.
+            : '<p class="text-[11px] text-gray-400 mt-2">LinkedIn will not run an advert without at least one location.</p>'}
+        </div>
+
         <div class="space-y-2">
           ${[0, 1, 2].map((i) => `
-            <div class="flex flex-wrap items-center gap-2">
-              <input type="text" placeholder="Ad ${i + 1} headline${i ? ' (optional)' : ''}" data-cmp-paid-headline="${esc(String(c.id))}-${i}"
-                class="flex-1 min-w-0 px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
-              <input type="text" placeholder="Body text" data-cmp-paid-body="${esc(String(c.id))}-${i}"
-                class="flex-1 min-w-0 px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
+            <div class="space-y-2">
+              <div class="flex flex-wrap items-center gap-2">
+                <input type="text" placeholder="Ad ${i + 1} headline${i ? ' (optional)' : ''}" data-cmp-paid-headline="${esc(String(c.id))}-${i}"
+                  class="flex-1 min-w-0 px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
+                <input type="text" placeholder="Body text" data-cmp-paid-body="${esc(String(c.id))}-${i}"
+                  class="flex-1 min-w-0 px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
+              </div>
+              <input type="url" placeholder="Where ad ${i + 1} sends people${i ? ' (blank = same as ad 1)' : ''}" data-cmp-paid-url="${esc(String(c.id))}-${i}"
+                class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
             </div>`).join('')}
         </div>
+        <p class="text-[11px] text-gray-400 mt-2 leading-relaxed">
+          Use a tracked link from above as the destination and its clicks and sign-ups land in your funnel.
+        </p>
+
         <button type="button" data-cmp-stage="${esc(String(c.id))}"
           class="mt-3 px-3 py-1.5 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
           Stage on LinkedIn (paused)
@@ -955,6 +1032,10 @@
       if (state.rendered) render();
       const campaign = state.campaigns.find((c) => c.id === id);
       if (st.open && !st.loaded && campaign && campaign.mode === 'paid') loadVariants(id);
+      // Only when the panel is open AND the workspace could actually use an account — no point
+      // asking LinkedIn about a workspace whose plan does not include advertising.
+      if (st.open && state.paid && state.paid.featureEnabled && state.paid.anyNetwork
+          && !state.paid.adsReady && state.adAccounts === null) loadAdAccounts();
       return;
     }
 
@@ -962,20 +1043,36 @@
       const id = Number(stageBtn.dataset.cmpStage);
       if (!id) return;
       const budget = Number(document.querySelector(`[data-cmp-paid-budget="${id}"]`)?.value);
-      const url = (document.querySelector(`[data-cmp-paid-url="${id}"]`)?.value || '').trim();
+      const ceilingRaw = (document.querySelector(`[data-cmp-paid-ceiling="${id}"]`)?.value || '').trim();
+      const url = (u) => (document.querySelector(`[data-cmp-paid-url="${id}-${u}"]`)?.value || '').trim();
+      // Ad 1's link is the default for any variant left blank — three identical URLs is the common
+      // case, and making someone paste the same thing three times to A/B a headline is a tax on
+      // the thing we are asking them to do.
+      const firstUrl = url(0);
       const variants = [0, 1, 2].map((i) => ({
         headline: (document.querySelector(`[data-cmp-paid-headline="${id}-${i}"]`)?.value || '').trim(),
         body: (document.querySelector(`[data-cmp-paid-body="${id}-${i}"]`)?.value || '').trim(),
-        destinationUrl: url,
+        destinationUrl: url(i) || firstUrl,
       })).filter((v) => v.headline && v.body);
 
-      if (!url) { sayPaid(id, 'Where should the ads send people?', 'error'); return; }
+      if (!firstUrl) { sayPaid(id, 'Where should the first ad send people?', 'error'); return; }
       if (variants.length === 0) { sayPaid(id, 'Write at least one ad — a headline and body text.', 'error'); return; }
+      const locations = ((state.targeting[id] || {}).locations || []).map((g) => g.urn);
+      if (locations.length === 0) { sayPaid(id, 'Choose at least one location — LinkedIn will not run an advert without one.', 'error'); return; }
 
       stageBtn.disabled = true;
       sayPaid(id, 'Creating them on LinkedIn, paused…');
       try {
-        const res = await post({ action: 'stage_paid', campaignId: id, dailyBudgetGbp: budget, variants });
+        const res = await post({
+          action: 'stage_paid',
+          campaignId: id,
+          dailyBudgetGbp: budget,
+          // Blank means NO ceiling — passed as undefined so the server stores null rather than 0.
+          // Zero would pause every ad on its first conversion.
+          maxCostPerOutcomeGbp: ceilingRaw === '' ? undefined : Number(ceilingRaw),
+          targeting: { locations },
+          variants,
+        });
         window.showToast?.(res.message || 'Staged and paused.', 'success');
         state.paid_[id].loaded = false;
         await load();
@@ -1041,11 +1138,113 @@
       const data = await post({ action: 'list_variants', campaignId });
       st.variants = Array.isArray(data.variants) ? data.variants : [];
       st.dailyBudgetGbp = Number(data.dailyBudgetGbp || 0);
+      // null is meaningful: no cost rule is running. Never coerced to 0.
+      st.maxCostPerOutcomeGbp = data.maxCostPerOutcomeGbp != null ? Number(data.maxCostPerOutcomeGbp) : null;
     } catch (err) {
       console.error('[AssistantCampaigns] variants load failed:', err);
       st.variants = [];
     }
     st.loaded = true;
+    if (state.rendered) render();
+  }
+
+  // ── Ad account + targeting pickers ─────────────────────────────────────────
+  document.addEventListener('click', async (e) => {
+    const saveAcc = e.target.closest('[data-cmp-account-save]');
+    const geoBtn = e.target.closest('[data-cmp-geo-search]');
+    const geoPick = e.target.closest('[data-cmp-geo-pick]');
+    const geoRm = e.target.closest('[data-cmp-geo-remove]');
+    if (!saveAcc && !geoBtn && !geoPick && !geoRm) return;
+
+    if (saveAcc) {
+      const sel = document.querySelector('[data-cmp-account-select]');
+      const urn = sel && sel.value;
+      if (!urn) { sayAccount('Choose an account first.', 'error'); return; }
+      saveAcc.disabled = true;
+      sayAccount('Saving…');
+      try {
+        await fetch('/.netlify/functions/linkedin-ads-account', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+          body: JSON.stringify({ action: 'select', accountUrn: urn }),
+        }).then(async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not save that.'); });
+        await load();
+      } catch (err) {
+        sayAccount(err.message || 'Could not save that.', 'error');
+        saveAcc.disabled = false;
+      }
+      return;
+    }
+
+    if (geoRm) {
+      const [cid, urn] = geoRm.dataset.cmpGeoRemove.split('|');
+      const t = state.targeting[cid];
+      if (t) t.locations = (t.locations || []).filter((g) => g.urn !== urn);
+      if (state.rendered) render();
+      return;
+    }
+
+    if (geoPick) {
+      const [cid, urn, ...nameParts] = geoPick.dataset.cmpGeoPick.split('|');
+      const t = state.targeting[cid] || (state.targeting[cid] = { locations: [] });
+      // De-duped: picking the same place twice would send LinkedIn a repeated URN and read, in the
+      // chip list, as two different targets.
+      if (!t.locations.some((g) => g.urn === urn)) t.locations.push({ urn, name: nameParts.join('|') });
+      if (state.rendered) render();
+      return;
+    }
+
+    const id = Number(geoBtn.dataset.cmpGeoSearch);
+    const q = (document.querySelector(`[data-cmp-geo-q="${id}"]`)?.value || '').trim();
+    const box = document.querySelector(`[data-cmp-geo-results="${id}"]`);
+    if (!box) return;
+    if (q.length < 2) { box.innerHTML = '<p class="text-[11px] text-gray-400">Type at least two letters.</p>'; return; }
+    box.innerHTML = '<p class="text-[11px] text-gray-400">Searching LinkedIn…</p>';
+    try {
+      const res = await fetch('/.netlify/functions/linkedin-ads-targeting', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ action: 'search', facet: 'locations', query: q }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not search.');
+      const list = data.entities || [];
+      // ⚠️ Never render results WITHOUT saying they came from a fallback. A short list that looks
+      // like LinkedIn's real answer would have someone conclude their country is unavailable.
+      box.innerHTML = list.length
+        ? `${data.fallback ? '<p class="text-[11px] text-amber-700 mb-1">We could not reach LinkedIn, so this is a short list. Try again for the full one.</p>' : ''}
+           <div class="flex flex-wrap gap-2">${list.map((en) => `
+             <button type="button" data-cmp-geo-pick="${esc(String(id))}|${esc(en.urn)}|${esc(en.name)}"
+               class="px-2 py-1 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-[11px] font-bold rounded-lg transition">
+               ${esc(en.name)}
+             </button>`).join('')}</div>`
+        : '<p class="text-[11px] text-gray-400">Nothing matched. Try a country or a large city.</p>';
+    } catch (err) {
+      box.innerHTML = `<p class="text-[11px] text-red-600">${esc(err.message || 'Could not search.')}</p>`;
+    }
+  });
+
+  function sayAccount(text, tone) {
+    const el = document.querySelector('[data-cmp-account-status]');
+    if (!el) return;
+    el.textContent = text;
+    el.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-gray-600'}`;
+    el.style.display = '';
+  }
+
+  /** The ad accounts this connection can reach. Fetched once, when the paid surface needs them. */
+  async function loadAdAccounts() {
+    try {
+      const res = await fetch('/.netlify/functions/linkedin-ads-account', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ action: 'list' }),
+      });
+      const data = await res.json();
+      // ⚠️ `accounts: null` from the server means "we could not ask", NOT "you have none". Both
+      // land as [] here only because the panel's copy already distinguishes them via adsReason —
+      // do not add a "you have no ad accounts" message on this value alone.
+      state.adAccounts = Array.isArray(data.accounts) ? data.accounts : [];
+    } catch {
+      state.adAccounts = [];
+    }
     if (state.rendered) render();
   }
 

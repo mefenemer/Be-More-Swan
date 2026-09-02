@@ -32,7 +32,7 @@
 import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
-    adVariantMetrics, adVariants, aiAssistants, campaigns, userOrganisations,
+    adVariantMetrics, adVariants, aiAssistants, campaignBudgets, campaigns, userOrganisations,
 } from '../../db/schema';
 import { linkedInAdapter } from '../../src/utils/ad-networks/registry';
 import { getAdsConnection, getAdsToken, assessAdsReadiness } from '../../src/utils/linkedin-ads-connection';
@@ -214,6 +214,13 @@ export async function runPaidOptimiserSweep(): Promise<PaidSweepResult> {
 
             // ── Step 4: optimise, from what we have STORED rather than what we just fetched, so a
             // partial fetch cannot make a variant look like it collapsed.
+            // ⚠️ THE LINE THAT TURNS THE COST RULE ON. It passed a hard-coded null from the day
+            // this cron was written, because there was no column to read. Null still means "no
+            // ceiling — never pause on cost", and that is still most campaigns.
+            const [budget] = await db.select({ maxCostPerOutcomeGbp: campaignBudgets.maxCostPerOutcomeGbp })
+                .from(campaignBudgets).where(eq(campaignBudgets.campaignId, c.id)).limit(1);
+            const ceiling = budget?.maxCostPerOutcomeGbp != null ? Number(budget.maxCostPerOutcomeGbp) : null;
+
             const windows: VariantWindow[] = [];
             for (const v of withExternal) {
                 const stored = await db.select({
@@ -244,13 +251,10 @@ export async function runPaidOptimiserSweep(): Promise<PaidSweepResult> {
 
             const result = optimise({
                 variants: windows,
-                // ⚠️ NULL, and that is not a placeholder. The cost-per-outcome rule only ever fires
-                // against a ceiling the CUSTOMER set, and there is nowhere for them to set one yet
-                // — no column, no field, no UI. Passing the daily budget here instead would be the
-                // agent inventing what a lead is worth, which is a commercial judgement it has no
-                // standing to make. So only the fatigue rule is live today. When a ceiling field
-                // exists, this is the line that reads it.
-                maxCostPerOutcomeGbp: null,
+                // The CUSTOMER's ceiling, or null. Never the daily budget: that would be the agent
+                // inventing what a lead is worth, which is a commercial judgement it has no
+                // standing to make.
+                maxCostPerOutcomeGbp: ceiling,
                 maxActionsPerDay: 3,
                 actionsTakenToday: 0,
             });

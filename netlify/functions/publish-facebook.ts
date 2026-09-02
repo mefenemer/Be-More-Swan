@@ -20,6 +20,7 @@ import { getDb } from '../../db/client';
 import { scheduledPosts, publishCronLog } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { resolvePostMediaList, hasAttachedMedia, publishFacebook, resolveFacebookPageCredentials, type DriverResult } from '../../src/utils/social-publish';
+import { isMetaAppBlocked, APP_BLOCK_HOLD_MS } from '../../src/utils/meta-app-block';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { markPostMediaPosted } from '../../src/utils/release-post-media';
 import { composePostText } from '../../src/utils/post-link';
@@ -169,6 +170,20 @@ export default withLambda(async () => {
 // ── Failure handling (rate-limit defer / retry backoff / permanent fail) ──────
 async function handleFailure(db: ReturnType<typeof getDb>, post: PostRow, reason: FailureReason, now: Date) {
     const attempt = post.attempt_count + 1;
+
+    // Meta has blocked the APP, not this Page — hold the post instead of burning it, and say
+    // nothing to the customer, because there is nothing they can do. attempt_count deliberately
+    // does NOT move: an outage must not eat the post's three real attempts. Unlike Instagram this
+    // publisher has no rate_limit_states gate to defer the whole org through, so each post is held
+    // as it comes due; the extra calls are the cost of keeping this hotfix small.
+    // See src/utils/meta-app-block.ts.
+    if (isMetaAppBlocked(reason.errorMessage)) {
+        const heldUntil = new Date(now.getTime() + APP_BLOCK_HOLD_MS).toISOString();
+        await db.execute(
+            `UPDATE scheduled_posts SET status = 'scheduled', retry_at = '${heldUntil}', failure_reason = '${esc(JSON.stringify(reason))}', updated_at = now() WHERE id = ${post.id}`
+        );
+        return;
+    }
 
     if (!reason.isRetryable || attempt >= MAX_ATTEMPTS) {
         await db.execute(
