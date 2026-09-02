@@ -16,3 +16,8 @@ node_modules/
 # Scratch scripts written into the repo root (node_modules resolution); never commit.
 .*.tmp.mjs
 .*.tmp.ts
+
+# Backfill/rollback reports written into the repo root by scripts/backfill-meta-vault-keys.ts.
+# Not secret (no tokens), but it is an operational record of vault key names and connection ids,
+# and this repo commits the whole working tree — so it would ship to GitHub on the next push.
+meta-vault-backfill-report.json
