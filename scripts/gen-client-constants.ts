@@ -37,6 +37,7 @@ import {
     CAMPAIGN_OUTCOME_LABELS, ORDER_ACTION_SPECS, UNAVAILABLE_OUTCOME_METRICS,
     CAMPAIGN_LINK_MEDIUMS,
 } from '../src/config/campaign-vocab';
+import { PAUSE_REASON_LABELS } from '../src/config/ad-networks';
 import {
     POSTING_CADENCES, NUMBER_WORDS, DEFAULT_POSTING_FREQUENCY, postsPerWeekFor, readCadence,
     MONDAY_FIRST, DEFAULT_POSTING_DAYS, DEFAULT_POSTING_TIMES, selectWeeklySlots,
@@ -307,6 +308,7 @@ ${formatRows}
   var CAMPAIGN_REJECT_REASON_LABELS = ${JSON.stringify(CAMPAIGN_REJECT_REASON_LABELS)};
   var UNAVAILABLE_OUTCOME_METRICS = ${JSON.stringify(UNAVAILABLE_OUTCOME_METRICS)};
   var CAMPAIGN_LINK_MEDIUMS = ${JSON.stringify(CAMPAIGN_LINK_MEDIUMS)};
+  var PAUSE_REASON_LABELS = ${JSON.stringify(PAUSE_REASON_LABELS)};
   // Only the fields the browser renders. artefactKind/assignedRole stay server-side — the client
   // has no business routing an order, and shipping the routing table would invite it to try.
   var ORDER_ACTIONS = ${JSON.stringify(
@@ -367,6 +369,13 @@ ${formatRows}
     // not the guard. Generated rather than hand-copied: a client-side fork of a closed vocabulary
     // is how the browser's private cadence regex quietly disagreed with the scheduler for weeks.
     linkMediums: CAMPAIGN_LINK_MEDIUMS,
+
+    // Why an ad was paused, in words. ⚠️ An ad that stopped without saying why is the assistant
+    // making a decision the user cannot argue with — so this must never fall back to a raw enum.
+    pauseReasonLabel: function (r) {
+      var k = String(r == null ? "" : r);
+      return PAUSE_REASON_LABELS[k] || k;
+    },
   };
 
   // ── Posting cadence ───────────────────────────────────────────────────────

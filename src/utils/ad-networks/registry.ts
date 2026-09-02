@@ -28,7 +28,7 @@
 // tenant: `resolveAdapter` refuses it unless allowMock is passed, and the HTTP boundary never
 // passes it.
 
-import { AD_NETWORK_BLOCKERS, type AdNetwork } from '../../config/ad-networks';
+import { AD_NETWORK_BLOCKERS, AD_NETWORK_LABELS, type AdNetwork } from '../../config/ad-networks';
 import type { AdNetworkAdapter } from './types';
 import { mockAdapter } from './mock';
 import { createLinkedInAdapter, type LinkedInAdapterConfig } from './linkedin';
@@ -118,9 +118,9 @@ export function anyNetworkAvailable(): boolean {
 }
 
 /** Every network we can name, with whether it is reachable and why not. For the locked state. */
-export function networkAvailability(): { network: string; available: boolean; blocker: string | null }[] {
+export function networkAvailability(): { network: string; label: string; available: boolean; blocker: string | null }[] {
     return Object.keys(AD_NETWORK_BLOCKERS).map((network) => {
         const { adapter, blocker } = resolveAdapter(network);
-        return { network, available: !!adapter, blocker };
+        return { network, label: AD_NETWORK_LABELS[network] ?? network, available: !!adapter, blocker };
     });
 }

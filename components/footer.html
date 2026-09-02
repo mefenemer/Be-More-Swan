@@ -49,8 +49,29 @@
         </ul>
       </div>
     </div>
-    <div class="border-t border-gray-800 mt-12 pt-8 text-xs text-center" data-i18n="footer.copyright">
-      &copy; 2026 Be More Swan. All rights reserved.
+    <!-- Statutory trading disclosure (Companies Act 2006 / Companies (Trading Disclosures)
+         Regulations): a UK Ltd must publish its registered name, place of registration, company
+         number and registered office on its website.
+
+         This is ALSO the corroboration Meta's business verification crawls for, so the name,
+         number and address below must stay character-for-character identical to the Companies
+         House record for company 17378263. "LTD" is the registered form -- do NOT "correct" it
+         to "LIMITED", and do not swap the registered office for a trading address.
+
+         Deliberately NOT translated: i18n's apply() sets textContent, so a data-i18n on any
+         ancestor of these facts would wipe them, and a statutory disclosure is a legal
+         statement rather than marketing copy. Only the copyright line keeps its key. -->
+    <div class="border-t border-gray-800 mt-12 pt-8 text-xs text-center space-y-2 leading-relaxed">
+      <p>
+        <span class="text-gray-300">Be More Swan Ltd</span> is a company registered in England and Wales, company number 17378263.
+      </p>
+      <p>
+        Registered office: 167 - 169 Great Portland Street, 5th Floor, London, W1W 5PF, England.
+      </p>
+      <p>
+        <a href="mailto:hello@bemoreswan.com" class="hover:text-emerald-400 transition">hello@bemoreswan.com</a>
+      </p>
+      <p data-i18n="footer.copyright">&copy; 2026 Be More Swan. All rights reserved.</p>
     </div>
   </div>
 </footer>

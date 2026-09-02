@@ -42,6 +42,20 @@ export const PAID_ADS_FEATURE = 'paid_ads';
 export const AD_NETWORKS = ['linkedin', 'meta', 'google', 'mock'] as const;
 export type AdNetwork = typeof AD_NETWORKS[number];
 
+/**
+ * How each network writes its own name.
+ *
+ * ⚠️ Not derivable from the key. CSS `capitalize` turns "linkedin" into "Linkedin", which is
+ * simply the wrong name for the company — and getting a partner's name wrong on the one screen
+ * that explains why we cannot use them yet is a poor look.
+ */
+export const AD_NETWORK_LABELS: Record<string, string> = {
+    linkedin: 'LinkedIn',
+    meta: 'Meta',
+    google: 'Google Ads',
+    mock: 'Mock network',
+};
+
 /** Why each real network is unreachable, in the words the surface shows. */
 export const AD_NETWORK_BLOCKERS: Record<string, string> = {
     // ⚠️ Development Tier WAS granted (2026-09-01, app 247000116) — read-only on unlimited ad

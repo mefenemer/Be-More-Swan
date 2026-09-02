@@ -217,6 +217,7 @@
   var CAMPAIGN_REJECT_REASON_LABELS = {"wrong_channel":"Wrong channel","too_expensive":"Too much work for the return","bad_timing":"Bad timing","evidence_unconvincing":"I disagree with the evidence","off_brand":"Off brand","doing_it_myself":"I’m doing this myself","other":"Something else"};
   var UNAVAILABLE_OUTCOME_METRICS = ["signups"];
   var CAMPAIGN_LINK_MEDIUMS = ["organic","paid","email","social","other"];
+  var PAUSE_REASON_LABELS = {"creative_fatigue":"Click-through rate fell well below its own average","cost_per_outcome":"Each result was costing more than the ceiling you set","budget_exhausted":"The campaign reached its spending limit","human":"You paused it","control_lost":"We lost the connection to the ad account and stopped it as a precaution"};
   // Only the fields the browser renders. artefactKind/assignedRole stay server-side — the client
   // has no business routing an order, and shipping the routing table would invite it to try.
   var ORDER_ACTIONS = [{"key":"draft_social_posts","label":"Draft social posts","description":"Queues extra posts for the Social Media Assistant to draft, on this campaign’s message. They land in its Posts queue for your approval like any other draft."},{"key":"draft_blog_pillar","label":"Write a pillar article","description":"Briefs the Blog Writing Assistant to write one long-form article for this campaign, carrying its keywords and call to action."},{"key":"run_lead_search","label":"Run a lead search","description":"Creates a saved search for the Lead Generation Assistant aimed at this campaign’s audience. Created as a draft — starting it is a separate, human click, because a run costs money and reaches real strangers."},{"key":"narrow_targeting","label":"Narrow the targeting","description":"Edits an existing saved search — tightens the ideal-customer description and adds negative keywords — so it stops finding the wrong kind of company."},{"key":"adjust_messaging","label":"Adjust the messaging","description":"Changes the angle this campaign asks for. Applies to work drafted from now on; it does not rewrite drafts that already exist."}];
@@ -273,6 +274,13 @@
     // not the guard. Generated rather than hand-copied: a client-side fork of a closed vocabulary
     // is how the browser's private cadence regex quietly disagreed with the scheduler for weeks.
     linkMediums: CAMPAIGN_LINK_MEDIUMS,
+
+    // Why an ad was paused, in words. ⚠️ An ad that stopped without saying why is the assistant
+    // making a decision the user cannot argue with — so this must never fall back to a raw enum.
+    pauseReasonLabel: function (r) {
+      var k = String(r == null ? "" : r);
+      return PAUSE_REASON_LABELS[k] || k;
+    },
   };
 
   // ── Posting cadence ───────────────────────────────────────────────────────

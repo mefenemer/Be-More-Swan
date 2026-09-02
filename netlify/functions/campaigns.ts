@@ -14,6 +14,7 @@
 //   POST { action: 'create_link',  campaignId, destinationUrl, label?, medium?, network? }
 //   POST { action: 'list_links',   campaignId }            → links + clicks + conversions
 //   POST { action: 'archive_link', linkId }                → stops the redirect, keeps the clicks
+//   POST { action: 'list_variants', campaignId }            → ads + the budget to echo back
 //   POST { action: 'stage_paid',   campaignId, dailyBudgetGbp, variants[], campaignGroupUrn }
 //   POST { action: 'approve_launch', campaignId, confirmDailyBudgetGbp }   ⚠️ starts real spend
 //   POST { action: 'list_decisions', assistantId }
@@ -49,7 +50,7 @@ import { isSafeDestination, mintLinkToken } from '../../src/utils/campaign-attri
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import { PAID_ADS_FEATURE } from '../../src/config/ad-networks';
-import { linkedInAdapter } from '../../src/utils/ad-networks/registry';
+import { anyNetworkAvailable, linkedInAdapter, networkAvailability } from '../../src/utils/ad-networks/registry';
 import { assessAdsReadiness, getAdsConnection, getAdsToken } from '../../src/utils/linkedin-ads-connection';
 import { assessOptimiserHealth, readLastRunAt } from '../../src/utils/optimiser-health';
 import { CONFIG_KEYS, getPlatformConfig } from '../../src/utils/platform-config';
@@ -193,7 +194,31 @@ export default withLambda(async (event) => {
             // cheerful "ok" here would be a claim about machinery this workspace does not use.
             : null;
 
-        return json(200, { campaigns: items, planGate, optimiserHealth });
+        // ── What the paid surface may offer this workspace ────────────────────
+        // ⚠️ The whole point is the LOCKED state, because that is what almost every workspace
+        // sees. plan §1.1: the paid surface renders as a locked state that NAMES the blocker —
+        // never as a button that fails. `follower-counts-availability` is what the alternative
+        // costs: a control that rendered, promised, and could never return a value.
+        //
+        // Three separate facts, because they unblock in different ways and a single boolean would
+        // send people to the wrong place:
+        //   featureEnabled — commercial: the plan does not include it
+        //   networks       — platform:   we have no reachable ad network (each names its own reason)
+        //   adsReason      — workspace:  connect an account, or pick one
+        const featureEnabled = await hasFeatureByOrg(db, orgId, PAID_ADS_FEATURE);
+        const adsReadiness = featureEnabled
+            ? assessAdsReadiness(await getAdsConnection(db, orgId))
+            : null;
+        const paid = {
+            featureEnabled,
+            networks: networkAvailability(),
+            anyNetwork: anyNetworkAvailable(),
+            adsReady: adsReadiness?.ready ?? false,
+            adsReason: adsReadiness && !adsReadiness.ready ? adsReadiness.reason : null,
+            selectedAccountUrn: adsReadiness?.ready ? adsReadiness.connection.selectedAccountUrn : null,
+        };
+
+        return json(200, { campaigns: items, planGate, optimiserHealth, paid });
     }
 
     // ── create ────────────────────────────────────────────────────────────────
@@ -572,6 +597,38 @@ export default withLambda(async (event) => {
             .set({ archivedAt: new Date(), updatedAt: new Date() })
             .where(eq(campaignLinks.id, link.id));
         return json(200, { ok: true });
+    }
+
+    // ── list_variants ─────────────────────────────────────────────────────────
+    // The ads on a paid campaign, with why any of them stopped.
+    if (action === 'list_variants') {
+        const campaign = await requireCampaign(Number(body.campaignId));
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+        const rows = await db.select({
+            id: adVariants.id,
+            headline: adVariants.headline,
+            body: adVariants.body,
+            format: adVariants.format,
+            status: adVariants.status,
+            pauseReason: adVariants.pauseReason,
+            approvedAt: adVariants.approvedAt,
+            createdAt: adVariants.createdAt,
+        }).from(adVariants)
+            .where(eq(adVariants.campaignId, campaign.id))
+            .orderBy(adVariants.id)
+            .limit(50);
+        const [budget] = await db.select({ maxSpendGbp: campaignBudgets.maxSpendGbp })
+            .from(campaignBudgets).where(eq(campaignBudgets.campaignId, campaign.id)).limit(1);
+        return json(200, {
+            variants: rows,
+            // Returned so the client can SHOW the figure next to the approve button and echo the
+            // same number back — approve_launch refuses a mismatch, which is what makes "a human,
+            // with the number in front of them" true rather than aspirational.
+            dailyBudgetGbp: Number(budget?.maxSpendGbp ?? 0),
+            mode: campaign.mode,
+            status: campaign.status,
+            controlState: campaign.controlState,
+        });
     }
 
     // ── stage_paid ────────────────────────────────────────────────────────────

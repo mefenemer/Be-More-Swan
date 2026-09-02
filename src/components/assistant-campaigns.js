@@ -52,6 +52,12 @@
     funnelError: null,
     /** Per campaign: { open, loaded, rows, error }. Lazily loaded — most campaigns have no links. */
     links: {},
+    /** The read-path uptime check on the paid sweep. Null when this workspace has no live paid work. */
+    optimiserHealth: null,
+    /** What the paid surface may offer: feature flag, network availability, ads readiness. */
+    paid: null,
+    /** Per campaign: { open, loaded, variants, dailyBudgetGbp }. */
+    paid_: {},
   };
 
   function esc(v) {
@@ -184,11 +190,18 @@
         </div>
         <p class="hidden mt-2 text-xs font-semibold text-gray-600" data-cmp-status="${esc(String(c.id))}"></p>
 
-        <button type="button" data-cmp-toggle-links="${esc(String(c.id))}"
-          class="mt-3 text-xs font-bold text-gray-500 hover:text-gray-700 underline transition">
-          ${state.links[c.id] && state.links[c.id].open ? 'Hide' : 'Tracked links'}
-        </button>
+        <div class="flex flex-wrap items-center gap-3 mt-3">
+          <button type="button" data-cmp-toggle-links="${esc(String(c.id))}"
+            class="text-xs font-bold text-gray-500 hover:text-gray-700 underline transition">
+            ${state.links[c.id] && state.links[c.id].open ? 'Hide' : 'Tracked links'}
+          </button>
+          <button type="button" data-cmp-toggle-paid="${esc(String(c.id))}"
+            class="text-xs font-bold text-gray-500 hover:text-gray-700 underline transition">
+            ${state.paid_[c.id] && state.paid_[c.id].open ? 'Hide' : (c.mode === 'paid' ? 'Advertising' : 'Add advertising')}
+          </button>
+        </div>
         ${linksPanel(c.id)}
+        ${paidPanel(c)}
       </div>`;
   }
 
@@ -438,6 +451,180 @@
       </div>`;
   }
 
+  // ── Optimiser health ───────────────────────────────────────────────────────
+  // The read-path uptime check, rendered. This is the ONLY watcher of the paid sweep whose failure
+  // mode is uncorrelated with the sweep's own — it runs because a person opened this tab, not
+  // because a scheduler fired — so it is worth surfacing even though it is usually silent.
+  //
+  // The server returns null when this workspace has no live paid campaigns. That is not "healthy";
+  // it is "nothing to report", and rendering a green tick for it would be a claim about machinery
+  // the workspace does not use.
+  function optimiserHealthHtml() {
+    const h = state.optimiserHealth;
+    if (!h || !h.actionable) return '';
+    // 'down' is unsupervised spend; 'late' means the campaigns are already halting themselves, so
+    // the customer is protected and the tone should not be identical.
+    const severe = h.state === 'down' || h.state === 'never_run';
+    return `
+      <div class="${severe ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'} border rounded-xl p-4 mb-4">
+        <p class="text-xs ${severe ? 'text-red-900' : 'text-amber-900'} leading-relaxed">
+          <span class="font-bold">${severe ? 'Your ads are not being supervised.' : 'We are behind on checking your ads.'}</span>
+          ${esc(h.message)}
+        </p>
+      </div>`;
+  }
+
+  // ── The paid surface ───────────────────────────────────────────────────────
+  // ⚠️ ALMOST EVERY WORKSPACE SEES THE LOCKED STATE, so that is the case this code is arranged
+  // around, not an afterthought. plan §1.1: the paid surface renders as a locked state that NAMES
+  // the blocker — never as a button that fails. follower-counts-availability is what the
+  // alternative costs: a control that rendered, promised, and could never return a value.
+  //
+  // Three blockers, kept separate because they unblock in completely different ways:
+  //   the plan does not include it        → a commercial conversation
+  //   no ad network is reachable          → we are waiting on LinkedIn, and it says so
+  //   no account connected / none chosen  → the user can fix it right now
+  function paidLockedHtml() {
+    const p = state.paid;
+    if (!p) return '';
+
+    if (!p.featureEnabled) {
+      return `
+        <div class="bg-gray-50 border border-gray-200 rounded-xl p-4">
+          <p class="text-xs font-bold text-gray-700">Advertising is not part of your plan</p>
+          <p class="text-xs text-gray-500 mt-1 leading-relaxed">
+            This campaign is running on your assistants' work rather than on ad spend. Talk to us if
+            you want to add paid advertising.
+          </p>
+        </div>`;
+    }
+
+    if (!p.anyNetwork) {
+      // Names each network AND its own reason. "Coming soon" would be a date we cannot keep.
+      const rows = (p.networks || []).map((n) => `
+        <li class="text-xs text-gray-500 leading-relaxed">
+          <span class="font-bold text-gray-600">${esc(n.label || n.network)}</span> — ${esc(n.blocker || 'not available')}
+        </li>`).join('');
+      return `
+        <div class="bg-gray-50 border border-gray-200 rounded-xl p-4">
+          <p class="text-xs font-bold text-gray-700">Advertising is not switched on yet</p>
+          <p class="text-xs text-gray-500 mt-1 mb-2 leading-relaxed">
+            We are waiting on the ad platforms, not on ourselves. Here is exactly where each one stands:
+          </p>
+          <ul class="space-y-1">${rows}</ul>
+        </div>`;
+    }
+
+    if (!p.adsReady) {
+      // The one blocker the user can act on. `adsReason` is the server's sentence — connect,
+      // reconnect, pick an account, or create one in Campaign Manager — and each leads somewhere
+      // different, which is why it is not collapsed into a single "not ready".
+      return `
+        <div class="bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <p class="text-xs font-bold text-amber-900">Before you can advertise</p>
+          <p class="text-xs text-amber-900 mt-1 leading-relaxed">${esc(p.adsReason || '')}</p>
+          <a href="/integrations.html"
+            class="inline-flex items-center mt-3 px-3 py-1.5 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs font-bold rounded-lg transition">
+            Open connections
+          </a>
+        </div>`;
+    }
+    return '';
+  }
+
+  /** One staged or live ad. */
+  function variantRow(v) {
+    const chip = v.status === 'active'
+      ? { cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', label: 'Live' }
+      : v.status === 'staged'
+        ? { cls: 'bg-gray-50 text-gray-600 border-gray-200', label: 'Waiting for you' }
+        : { cls: 'bg-gray-50 text-gray-500 border-gray-200', label: 'Paused' };
+    // ⚠️ The pause reason is rendered whenever there is one. An ad that stopped without saying why
+    // is the assistant making a decision the user cannot argue with.
+    const why = v.pauseReason && window.CampaignConstants?.pauseReasonLabel
+      ? window.CampaignConstants.pauseReasonLabel(v.pauseReason)
+      : v.pauseReason;
+    return `
+      <div class="py-2 border-b border-gray-100">
+        <div class="flex items-start justify-between gap-3">
+          <p class="text-xs font-bold text-gray-900 min-w-0 break-words">${esc(v.headline)}</p>
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold border shrink-0 ${chip.cls}">${esc(chip.label)}</span>
+        </div>
+        <p class="text-xs text-gray-500 mt-1 leading-relaxed break-words">${esc(v.body)}</p>
+        ${why ? `<p class="text-[11px] text-gray-500 mt-1"><span class="font-bold">Stopped:</span> ${esc(why)}</p>` : ''}
+      </div>`;
+  }
+
+  /** The paid panel on one campaign row. */
+  function paidPanel(c) {
+    const st = state.paid_[c.id];
+    if (!st || !st.open) return '';
+    const p = state.paid || {};
+    const locked = paidLockedHtml();
+
+    if (locked) {
+      return `<div class="mt-3 pt-3 border-t border-gray-100" data-cmp-paid="${esc(String(c.id))}">${locked}</div>`;
+    }
+
+    // Already staged: show the ads and, if nothing is live yet, the approve button.
+    if (c.mode === 'paid') {
+      const rows = !st.loaded
+        ? '<p class="text-xs text-gray-400">Loading ads…</p>'
+        : st.variants.length
+          ? st.variants.map(variantRow).join('')
+          : '<p class="text-xs text-gray-500">No ads on this campaign yet.</p>';
+      const awaiting = (st.variants || []).some((v) => v.status === 'staged');
+      const budget = Number(st.dailyBudgetGbp || 0);
+      return `
+        <div class="mt-3 pt-3 border-t border-gray-100" data-cmp-paid="${esc(String(c.id))}">
+          <div class="space-y-2">${rows}</div>
+          ${awaiting ? `
+            <div class="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <p class="text-xs font-bold text-amber-900">Ready to go live</p>
+              <p class="text-xs text-amber-900 mt-1 leading-relaxed">
+                These ads are staged on LinkedIn and paused. Approving starts real spending of
+                <span class="font-bold">£${esc(budget.toFixed(2))} a day</span> until you pause it.
+              </p>
+              <button type="button" data-cmp-approve="${esc(String(c.id))}" data-cmp-budget="${esc(String(budget))}"
+                class="mt-3 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+                Approve &amp; launch
+              </button>
+            </div>` : ''}
+          <p class="hidden mt-2 text-xs font-semibold text-gray-600" data-cmp-paid-status="${esc(String(c.id))}"></p>
+        </div>`;
+    }
+
+    // Not staged yet: the staging form.
+    return `
+      <div class="mt-3 pt-3 border-t border-gray-100" data-cmp-paid="${esc(String(c.id))}">
+        <p class="text-xs text-gray-500 leading-relaxed mb-3">
+          Write up to three ads. They are created on LinkedIn <span class="font-bold">paused</span> —
+          nothing is spent until you approve them on this page.
+        </p>
+        <div class="flex flex-wrap items-center gap-2 mb-2">
+          <label class="text-xs font-bold text-gray-600">Daily budget £</label>
+          <input type="number" min="1" max="1000" step="1" value="20" data-cmp-paid-budget="${esc(String(c.id))}"
+            style="max-width:7rem" class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
+          <input type="url" placeholder="https://your-site.com/offer" data-cmp-paid-url="${esc(String(c.id))}"
+            class="flex-1 min-w-0 px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
+        </div>
+        <div class="space-y-2">
+          ${[0, 1, 2].map((i) => `
+            <div class="flex flex-wrap items-center gap-2">
+              <input type="text" placeholder="Ad ${i + 1} headline${i ? ' (optional)' : ''}" data-cmp-paid-headline="${esc(String(c.id))}-${i}"
+                class="flex-1 min-w-0 px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
+              <input type="text" placeholder="Body text" data-cmp-paid-body="${esc(String(c.id))}-${i}"
+                class="flex-1 min-w-0 px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
+            </div>`).join('')}
+        </div>
+        <button type="button" data-cmp-stage="${esc(String(c.id))}"
+          class="mt-3 px-3 py-1.5 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          Stage on LinkedIn (paused)
+        </button>
+        <p class="hidden mt-2 text-xs font-semibold text-gray-600" data-cmp-paid-status="${esc(String(c.id))}"></p>
+      </div>`;
+  }
+
   // ── Tab badge ──────────────────────────────────────────────────────────────
   /** Amber count on the tab button — the same affordance the Review Queue uses. */
   function updateBadge() {
@@ -471,6 +658,7 @@
     if (!state.campaigns.length) { host.innerHTML = emptyState(); return; }
 
     host.innerHTML = `
+      ${optimiserHealthHtml()}
       ${funnelHtml()}
       ${neverLaunchedNote(state.campaigns)}
       <div class="space-y-4">${state.campaigns.map(campaignRow).join('')}</div>`;
@@ -501,6 +689,9 @@
       const data = await post({ action: 'list', assistantId: state.assistantId });
       state.campaigns = Array.isArray(data.campaigns) ? data.campaigns : [];
       state.planGate = data.planGate || null;
+      // Null is meaningful for both: "nothing to report" rather than "healthy" / "available".
+      state.optimiserHealth = data.optimiserHealth || null;
+      state.paid = data.paid || null;
       state.loadError = null;
     } catch (err) {
       console.error('[AssistantCampaigns] load failed:', err);
@@ -745,6 +936,118 @@
     net.classList.toggle('hidden', !paid);
     net.style.display = paid ? '' : 'none';
   });
+
+  // ── Advertising actions ────────────────────────────────────────────────────
+  // A THIRD listener. The link handler already explained why these are not branches in the
+  // start/pause one; this goes further — approving a launch commits real money, and it must not
+  // share a busy flag or an error path with a form that creates a tracked link.
+  document.addEventListener('click', async (e) => {
+    const toggle = e.target.closest('[data-cmp-toggle-paid]');
+    const stageBtn = e.target.closest('[data-cmp-stage]');
+    const approveBtn = e.target.closest('[data-cmp-approve]');
+    if (!toggle && !stageBtn && !approveBtn) return;
+
+    if (toggle) {
+      const id = Number(toggle.dataset.cmpTogglePaid);
+      if (!id) return;
+      const st = state.paid_[id] || (state.paid_[id] = { open: false, loaded: false, variants: [], dailyBudgetGbp: 0 });
+      st.open = !st.open;
+      if (state.rendered) render();
+      const campaign = state.campaigns.find((c) => c.id === id);
+      if (st.open && !st.loaded && campaign && campaign.mode === 'paid') loadVariants(id);
+      return;
+    }
+
+    if (stageBtn) {
+      const id = Number(stageBtn.dataset.cmpStage);
+      if (!id) return;
+      const budget = Number(document.querySelector(`[data-cmp-paid-budget="${id}"]`)?.value);
+      const url = (document.querySelector(`[data-cmp-paid-url="${id}"]`)?.value || '').trim();
+      const variants = [0, 1, 2].map((i) => ({
+        headline: (document.querySelector(`[data-cmp-paid-headline="${id}-${i}"]`)?.value || '').trim(),
+        body: (document.querySelector(`[data-cmp-paid-body="${id}-${i}"]`)?.value || '').trim(),
+        destinationUrl: url,
+      })).filter((v) => v.headline && v.body);
+
+      if (!url) { sayPaid(id, 'Where should the ads send people?', 'error'); return; }
+      if (variants.length === 0) { sayPaid(id, 'Write at least one ad — a headline and body text.', 'error'); return; }
+
+      stageBtn.disabled = true;
+      sayPaid(id, 'Creating them on LinkedIn, paused…');
+      try {
+        const res = await post({ action: 'stage_paid', campaignId: id, dailyBudgetGbp: budget, variants });
+        window.showToast?.(res.message || 'Staged and paused.', 'success');
+        state.paid_[id].loaded = false;
+        await load();
+        loadVariants(id);
+      } catch (err) {
+        // ⚠️ No re-render on failure. render() rewrites the tab's innerHTML and would wipe three
+        // ads the user just wrote — the same rule the tracked-link form follows, and it matters
+        // more here because there is more to lose.
+        sayPaid(id, err.message || 'LinkedIn would not accept that.', 'error');
+        stageBtn.disabled = false;
+      }
+      return;
+    }
+
+    // ── Approve & launch. The only control in this product that starts real spending. ──
+    const id = Number(approveBtn.dataset.cmpApprove);
+    const budget = Number(approveBtn.dataset.cmpBudget);
+    if (!id) return;
+
+    // ⚠️ The figure is in the confirm text AND echoed to the server, which refuses a mismatch.
+    // That pair is what makes "a human, with the number in front of them" true rather than a claim:
+    // the number the user agreed to is the number the server checks.
+    const ok = window.confirm(
+      `Start spending £${budget.toFixed(2)} a day on LinkedIn?\n\n`
+      + 'Your ads go live immediately and LinkedIn begins charging your ad account. '
+      + 'You can pause them from this page at any time, and we check on them daily.',
+    );
+    if (!ok) return;
+
+    approveBtn.disabled = true;
+    sayPaid(id, 'Going live…');
+    try {
+      const res = await post({ action: 'approve_launch', campaignId: id, confirmDailyBudgetGbp: budget });
+      window.showToast?.(res.message || 'Live on LinkedIn.', 'success');
+      state.paid_[id].loaded = false;
+      await load();
+      loadVariants(id);
+    } catch (err) {
+      // A 409 here means the budget changed since this page was drawn — someone else edited it, or
+      // another tab. Reloading is the right answer: the user must see the NEW number before they
+      // can agree to it.
+      sayPaid(id, err.message || 'That did not work.', 'error');
+      approveBtn.disabled = false;
+      await load();
+    }
+  });
+
+  /** Status line inside one campaign's advertising panel. */
+  function sayPaid(id, text, tone) {
+    const el = document.querySelector(`[data-cmp-paid-status="${id}"]`);
+    if (!el) return;
+    el.textContent = text;
+    el.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-gray-600'}`;
+    // `hidden` loses to a class that sets display — pin it, same as everywhere else here.
+    el.style.display = '';
+  }
+
+  /** Load one campaign's ads and the budget figure the approve button has to echo. */
+  async function loadVariants(campaignId) {
+    const st = state.paid_[campaignId];
+    if (!st) return;
+    try {
+      const data = await post({ action: 'list_variants', campaignId });
+      st.variants = Array.isArray(data.variants) ? data.variants : [];
+      st.dailyBudgetGbp = Number(data.dailyBudgetGbp || 0);
+    } catch (err) {
+      console.error('[AssistantCampaigns] variants load failed:', err);
+      st.variants = [];
+    }
+    st.loaded = true;
+    if (state.rendered) render();
+  }
 
   // ── Writes made from outside this tab ──────────────────────────────────────
   /**
