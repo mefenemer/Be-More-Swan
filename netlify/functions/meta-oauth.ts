@@ -1,7 +1,11 @@
 // netlify/functions/meta-oauth.ts
 // US-SMM-3.2.1: Meta OAuth flow for Instagram Business/Creator accounts.
-// GET ?action=start  — redirects to Meta OAuth dialog
-// GET ?action=callback — exchanges code, validates, stores token in vault, upserts system_connections
+// GET  ?action=start    — redirects to Meta OAuth dialog
+// GET  ?action=callback — exchanges code, validates, then either connects the single account the
+//                         login reached or parks the token and redirects to the picker
+// GET  ?action=choose   — renders the account picker (see src/utils/meta-accounts.ts)
+// POST ?action=select   — connects the chosen account: stores the token in the vault under its
+//                         account-scoped key and upserts system_connections
 
 import { Handler } from '@netlify/functions';
 import { eq, and } from 'drizzle-orm';
@@ -9,7 +13,7 @@ import { createHmac, randomBytes } from 'crypto';
 import { getDb } from '../../db/client';
 import { systemConnections, users, auditLogs, userOrganisations } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
-import { storeSecret, buildSocialRefKey } from '../../src/utils/vault';
+import { storeSecret, getSecret, deleteSecret, deleteSecretsByPrefix, buildSocialRefKey } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
@@ -17,6 +21,10 @@ import { resolveActionNotifications, CONNECTION_RESTORED_TYPES } from '../../src
 import { restoreConnectionDependents } from '../../src/utils/connection-recovery';
 import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
 import { requireTenant } from '../../src/utils/tenant';
+import {
+    accountsFor, renderAccountPicker, pendingRefKey, signPickerHandle, parsePickerHandle,
+    PENDING_TTL_MS, type IgPage, type MetaAccount, type PendingConnect,
+} from '../../src/utils/meta-accounts';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret   = process.env.JWT_SECRET!;
@@ -48,6 +56,176 @@ function parseState(state: string): Record<string, string> | null {
 
 function validateStateCsrf(state: Record<string, string>, stored: string): boolean {
     return createHmac('sha256', jwtSecret).update(state.csrf ?? '').digest('hex') === stored;
+}
+
+// ── Account resolution + the picker ───────────────────────────────────────────────────────────
+// accountsFor / renderAccountPicker and the handle signing are pure and live in
+// src/utils/meta-accounts.ts, where they are unit-tested. This file owns the flow around them.
+
+/** Error redirect that keeps the user on the assistant's Connections tab and labels the toast. */
+function metaErrUrl(code: string, platform: 'instagram' | 'facebook', assistantId: number | null): string {
+    return `/workspace.html?meta_error=${code}&platform=${platform}` + (assistantId ? `&assistantId=${assistantId}` : '');
+}
+
+const signHandle = (organisationId: number, userId: number, nonce: string) =>
+    signPickerHandle(jwtSecret, organisationId, userId, nonce);
+const parseHandle = (handle: string | undefined | null) => parsePickerHandle(jwtSecret, handle);
+
+/** Read a parked choice, treating an expired one as absent — and not leaving its token parked. */
+async function readPending(
+    db: ReturnType<typeof getDb>,
+    handle: { organisationId: number; userId: number; nonce: string },
+): Promise<PendingConnect | null> {
+    const key = pendingRefKey(handle.organisationId, handle.userId, handle.nonce);
+    const pending = await getSecret(db, key) as PendingConnect | null;
+    if (!pending) return null;
+    if (!pending.createdAt || Date.now() - pending.createdAt > PENDING_TTL_MS) {
+        await deleteSecret(db, key);
+        return null;
+    }
+    return pending;
+}
+
+/**
+ * Persist the chosen account: vault the token under its account-scoped key, upsert the connection,
+ * notify, audit and hand the user back to the workspace. Shared by the single-account fast path
+ * (straight out of the callback) and the picker's `select` step, so both write an identical row.
+ */
+async function finaliseConnection(db: ReturnType<typeof getDb>, opts: {
+    organisationId: number;
+    stateUserId: number | null;
+    assistantId: number | null;
+    platform: 'instagram' | 'facebook';
+    account: MetaAccount;
+    longLivedToken: string;
+    fbUserId: string | null;
+    baseUrl: string;
+}) {
+    const { organisationId, stateUserId, assistantId, platform, longLivedToken, fbUserId, baseUrl } = opts;
+    const serviceName = platform;
+    const { externalUserId, fbPageId, pageName, igUsername } = opts.account;
+    const metaErr = (code: string) => metaErrUrl(code, platform, assistantId);
+    const accountType = 'BUSINESS';
+    const connMetadata = { accountType, fbPageId, igUsername, pageName, fbUserId };
+
+    // US1 AC1.3: block if this tenant is already live in a different workspace. Checked before
+    // any token is persisted, so nothing is stored on rejection.
+    // PARKED: findTenantCollision returns null unless ENFORCE_TENANT_COLLISION is set, so this
+    // branch is dead by default. See src/utils/connection-collision.ts.
+    const collision = await findTenantCollision(db, { serviceName, externalUserId, organisationId });
+    if (collision) {
+        await recordCollisionAttempt(db, { requestingOrgId: organisationId, existingOrgId: collision.organisationId, serviceName, externalUserId });
+        return { statusCode: 302, headers: { Location: metaErr('tenant_collision') }, body: '' };
+    }
+
+    // Store token in vault — a separate ref per product so disconnecting one leaves the other's
+    // token intact.
+    // Account-scoped: a workspace may hold several Facebook Pages / Instagram accounts, and an
+    // org+service key made them share one secret (see buildSocialRefKey). Reconnecting an
+    // existing row rewrites vaultRefKey below, so legacy rows heal on their next connect.
+    const refKey = buildSocialRefKey(organisationId, serviceName, externalUserId);
+    await storeSecret(db, refKey, { token: longLivedToken });
+
+    const tokenExpiresAt = new Date(Date.now() + TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
+
+    // The org's first member — the notification recipient below, and the owner of last resort
+    // for a connection whose state predates `userId` riding in it (an OAuth flow already in
+    // flight across this deploy). Resolved before the upsert because the row now needs it.
+    const [orgUser] = await db.select({ id: users.id }).from(users).innerJoin(userOrganisations, eq(users.id, userOrganisations.userId)).where(eq(userOrganisations.organisationId, organisationId)).limit(1);
+    const connectionUserId = stateUserId ?? orgUser?.id ?? null;
+
+    // Upsert system_connections — update existing if same external id, else create.
+    const [existing] = await db
+        .select({ id: systemConnections.id, userId: systemConnections.userId })
+        .from(systemConnections)
+        .where(and(
+            eq(systemConnections.organisationId, organisationId),
+            eq(systemConnections.serviceName, serviceName),
+            eq(systemConnections.externalUserId, externalUserId),
+        ))
+        .limit(1);
+
+    let isReconnect = false;
+    if (existing) {
+        isReconnect = true;
+        await db.update(systemConnections).set({
+            vaultRefKey: refKey,
+            tokenExpiresAt,
+            status: 'active',
+            isActive: true,
+            metadata: connMetadata,
+            ...(assistantId ? { assistantId } : {}),
+            // Heal a row stored before this was set, but never reassign one that already has an
+            // owner: a teammate reconnecting a shared account must not take it over.
+            ...(existing.userId == null && connectionUserId ? { userId: connectionUserId } : {}),
+            updatedAt: new Date(),
+        }).where(eq(systemConnections.id, existing.id));
+    } else {
+        await db.insert(systemConnections).values({
+            organisationId,
+            userId: connectionUserId,
+            assistantId,
+            serviceName,
+            connectionType: 'oauth',
+            externalUserId,
+            vaultRefKey: refKey,
+            tokenExpiresAt,
+            status: 'active',
+            isActive: true,
+            scopes: SCOPES,
+            metadata: connMetadata,
+        });
+    }
+
+    if (orgUser) {
+        if (serviceName === 'instagram') {
+            await createNotification(db, isReconnect ? 'instagram_reconnected' : 'instagram_connected', {
+                userId: orgUser.id,
+                context: { instagram: { page_warning: !fbPageId ? ' Note: No Facebook Page linked — some features may be limited.' : '' } },
+                metadata: { igUserId: externalUserId, accountType, fbPageId, assistantId },
+            });
+        } else {
+            await createNotification(db, isReconnect ? 'facebook_reconnected' : 'facebook_connected', {
+                userId: orgUser.id,
+                context: { facebook: { page_name: pageName || 'your Page' } },
+                metadata: { fbPageId, pageName, assistantId },
+            });
+        }
+        // Connection is live again — un-pause the posts and assistants the failure halted, and
+        // clear any open "reconnect" action items. Must run AFTER the status='active' write
+        // above: the assistant-resume guard reads current connection statuses.
+        if (isReconnect && existing) {
+            await restoreConnectionDependents(db, {
+                connectionId: existing.id,
+                organisationId,
+                assistantId,
+                serviceName,
+                userId: orgUser.id,
+            });
+        } else {
+            await resolveActionNotifications(db, orgUser.id, CONNECTION_RESTORED_TYPES);
+        }
+    }
+
+    await db.insert(auditLogs).values({ actionType: isReconnect ? `${serviceName}_reconnected` : `${serviceName}_connected`, resourceType: 'system_connections', resourceId: externalUserId, newState: { organisationId, accountType, fbPageId } });
+
+    // US-SMM-4.2.2 / 4.3.1: trigger profile sync + pre-flight audit fire-and-forget after OAuth.
+    fetch(`${baseUrl}/.netlify/functions/social-profile-sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ organisationId }),
+    }).catch(() => {});
+    fetch(`${baseUrl}/.netlify/functions/social-preflight-audit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ organisationId, platform: serviceName }),
+    }).catch(() => {});
+
+    return {
+        statusCode: 302,
+        headers: { Location: `/workspace.html?oauth_success=${serviceName}${assistantId ? `&assistantId=${assistantId}` : ''}` },
+        body: '',
+    };
 }
 
 export default withLambda(async (event) => {
@@ -122,12 +300,10 @@ export default withLambda(async (event) => {
         const assistantId   = state.assistantId ? parseInt(state.assistantId) : null;
         const platform      = state.platform === 'instagram' ? 'instagram' : 'facebook';
 
-        // Build an error redirect that keeps the user on the assistant's Connections tab (not the
-        // Dashboard) and labels the toast for the platform they were connecting. workspace.html reads
+        // Error redirect that keeps the user on the assistant's Connections tab (not the Dashboard)
+        // and labels the toast for the platform they were connecting. workspace.html reads
         // assistantId + platform to route back and colour the message.
-        const metaErr = (code: string) =>
-            `/workspace.html?meta_error=${code}&platform=${platform}` +
-            (assistantId ? `&assistantId=${assistantId}` : '');
+        const metaErr = (code: string) => metaErrUrl(code, platform, assistantId);
 
         // Connection sandboxing: if this connect was initiated for a specific
         // assistant, the platform being connected must be relevant to that assistant's role.
@@ -180,7 +356,6 @@ export default withLambda(async (event) => {
         // /me for it always returned undefined, so every connect fell straight through to
         // `not_business` no matter how the user's Instagram was set up. Same for `account_type`,
         // which is an Instagram-node field and never present on a Facebook User.
-        type IgPage = { id: string; name?: string; instagram_business_account?: { id: string; username?: string } };
 
         const pagesRes = await fetch(
             `https://graph.facebook.com/v19.0/me/accounts?fields=id,name,instagram_business_account{id,username}&access_token=${longLivedToken}`
@@ -280,155 +455,123 @@ export default withLambda(async (event) => {
         // publish-instagram), so the token model is identical — only the row differs.
         const db = getDb();
 
-        let serviceName: 'instagram' | 'facebook';
-        let externalUserId: string;          // the id the connection row is keyed on
-        let fbPageId: string;                // the Facebook Page id (both products need a Page)
-        let pageName: string | null = null;
-        let igUsername: string | null = null;
-
-        if (platform === 'instagram') {
-            // Only a Business/Creator account can be linked to a Page as an
-            // instagram_business_account, so the presence of the link IS the account-type check.
-            const linkedPage = pageList.find(p => p.instagram_business_account?.id);
-            if (!linkedPage) {
-                return { statusCode: 302, headers: { Location: metaErr('not_business') }, body: '' };
-            }
-            serviceName = 'instagram';
-            externalUserId = linkedPage.instagram_business_account!.id;
-            igUsername = linkedPage.instagram_business_account!.username ?? null;
-            fbPageId = linkedPage.id;        // the Page that owns the IG account
-            pageName = linkedPage.name ?? null;
-        } else {
-            // Facebook needs only a Page. Prefer the Page that also carries the Instagram account
-            // (so Facebook and Instagram align on one Page); otherwise the first Page shared.
-            const fbPage = pageList.find(p => p.instagram_business_account?.id) ?? pageList[0];
-            serviceName = 'facebook';
-            externalUserId = fbPage.id;      // the connection is keyed on the Page id
-            fbPageId = fbPage.id;
-            pageName = fbPage.name ?? null;
-            igUsername = fbPage.instagram_business_account?.username ?? null;
-        }
-        const accountType = 'BUSINESS';
-        const connMetadata = { accountType, fbPageId, igUsername, pageName, fbUserId };
-
-        // US1 AC1.3: block if this tenant is already live in a different workspace. Checked before
-        // any token is persisted, so nothing is stored on rejection.
-        // PARKED: findTenantCollision returns null unless ENFORCE_TENANT_COLLISION is set, so this
-        // branch is dead by default. See src/utils/connection-collision.ts.
-        const collision = await findTenantCollision(db, { serviceName, externalUserId, organisationId });
-        if (collision) {
-            await recordCollisionAttempt(db, { requestingOrgId: organisationId, existingOrgId: collision.organisationId, serviceName, externalUserId });
-            return { statusCode: 302, headers: { Location: metaErr('tenant_collision') }, body: '' };
+        const accounts = accountsFor(platform, pageList);
+        if (accounts.length === 0) {
+            // Instagram only: pageList is non-empty by here, so Facebook always has a candidate.
+            // Nothing linked means the Page↔Instagram link is missing, not that the login failed.
+            return { statusCode: 302, headers: { Location: metaErr('not_business') }, body: '' };
         }
 
-        // Store token in vault — a separate ref per product so disconnecting one leaves the other's
-        // token intact.
-        // Account-scoped: a workspace may hold several Facebook Pages / Instagram accounts, and an
-        // org+service key made them share one secret (see buildSocialRefKey). Reconnecting an
-        // existing row rewrites vaultRefKey below, so legacy rows heal on their next connect.
-        const refKey = buildSocialRefKey(organisationId, serviceName, externalUserId);
-        await storeSecret(db, refKey, { token: longLivedToken });
-
-        const tokenExpiresAt = new Date(Date.now() + TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
-
-        // The org's first member — the notification recipient below, and the owner of last resort
-        // for a connection whose state predates `userId` riding in it (an OAuth flow already in
-        // flight across this deploy). Resolved before the upsert because the row now needs it.
-        const [orgUser] = await db.select({ id: users.id }).from(users).innerJoin(userOrganisations, eq(users.id, userOrganisations.userId)).where(eq(userOrganisations.organisationId, organisationId)).limit(1);
-        const connectionUserId = stateUserId ?? orgUser?.id ?? null;
-
-        // Upsert system_connections — update existing if same external id, else create.
-        const [existing] = await db
-            .select({ id: systemConnections.id, userId: systemConnections.userId })
-            .from(systemConnections)
-            .where(and(
-                eq(systemConnections.organisationId, organisationId),
-                eq(systemConnections.serviceName, serviceName),
-                eq(systemConnections.externalUserId, externalUserId),
-            ))
-            .limit(1);
-
-        let isReconnect = false;
-        if (existing) {
-            isReconnect = true;
-            await db.update(systemConnections).set({
-                vaultRefKey: refKey,
-                tokenExpiresAt,
-                status: 'active',
-                isActive: true,
-                metadata: connMetadata,
-                ...(assistantId ? { assistantId } : {}),
-                // Heal a row stored before this was set, but never reassign one that already has an
-                // owner: a teammate reconnecting a shared account must not take it over.
-                ...(existing.userId == null && connectionUserId ? { userId: connectionUserId } : {}),
-                updatedAt: new Date(),
-            }).where(eq(systemConnections.id, existing.id));
-        } else {
-            await db.insert(systemConnections).values({
-                organisationId,
-                userId: connectionUserId,
-                assistantId,
-                serviceName,
-                connectionType: 'oauth',
-                externalUserId,
-                vaultRefKey: refKey,
-                tokenExpiresAt,
-                status: 'active',
-                isActive: true,
-                scopes: SCOPES,
-                metadata: connMetadata,
+        // One reachable account is not a choice — connect it and keep the flow a single hop.
+        if (accounts.length === 1) {
+            return await finaliseConnection(db, {
+                organisationId, stateUserId, assistantId, platform,
+                account: accounts[0], longLivedToken, fbUserId, baseUrl,
             });
         }
 
-        if (orgUser) {
-            if (serviceName === 'instagram') {
-                await createNotification(db, isReconnect ? 'instagram_reconnected' : 'instagram_connected', {
-                    userId: orgUser.id,
-                    context: { instagram: { page_warning: !fbPageId ? ' Note: No Facebook Page linked — some features may be limited.' : '' } },
-                    metadata: { igUserId: externalUserId, accountType, fbPageId, assistantId },
-                });
-            } else {
-                await createNotification(db, isReconnect ? 'facebook_reconnected' : 'facebook_connected', {
-                    userId: orgUser.id,
-                    context: { facebook: { page_name: pageName || 'your Page' } },
-                    metadata: { fbPageId, pageName, assistantId },
-                });
-            }
-            // Connection is live again — un-pause the posts and assistants the failure halted, and
-            // clear any open "reconnect" action items. Must run AFTER the status='active' write
-            // above: the assistant-resume guard reads current connection statuses.
-            if (isReconnect && existing) {
-                await restoreConnectionDependents(db, {
-                    connectionId: existing.id,
-                    organisationId,
-                    assistantId,
-                    serviceName,
-                    userId: orgUser.id,
-                });
-            } else {
-                await resolveActionNotifications(db, orgUser.id, CONNECTION_RESTORED_TYPES);
-            }
-        }
-
-        await db.insert(auditLogs).values({ actionType: isReconnect ? `${serviceName}_reconnected` : `${serviceName}_connected`, resourceType: 'system_connections', resourceId: externalUserId, newState: { organisationId, accountType, fbPageId } });
-
-        // US-SMM-4.2.2 / 4.3.1: trigger profile sync + pre-flight audit fire-and-forget after OAuth.
-        fetch(`${baseUrl}/.netlify/functions/social-profile-sync`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ organisationId }),
-        }).catch(() => {});
-        fetch(`${baseUrl}/.netlify/functions/social-preflight-audit`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ organisationId, platform: serviceName }),
-        }).catch(() => {});
+        // Several are reachable, so the workspace must not be bound to whichever one Meta happened
+        // to list first. Park the token and ask. Nothing is written to system_connections yet: an
+        // abandoned picker leaves the existing connection exactly as it was.
+        const pendingOwner = stateUserId ?? 0;
+        const nonce = randomBytes(32).toString('hex');
+        // One live choice per user — a fresh attempt supersedes an abandoned one rather than
+        // leaving its token parked in the vault until the 60-day grant lapses. The prefix is built
+        // from digits only, so no LIKE wildcard can ride in.
+        await deleteSecretsByPrefix(db, `aura/org-${organisationId}/meta-pending-u${pendingOwner}-`);
+        const pending: PendingConnect = {
+            token: longLivedToken, fbUserId, organisationId, userId: stateUserId,
+            assistantId, platform, accounts, createdAt: Date.now(),
+        };
+        await storeSecret(db, pendingRefKey(organisationId, pendingOwner, nonce), pending);
+        console.log(`[meta-oauth] ${accounts.length} ${platform} accounts reachable for org ${organisationId} — asking the user to choose`);
 
         return {
             statusCode: 302,
-            headers: { Location: `/workspace.html?oauth_success=${serviceName}${assistantId ? `&assistantId=${assistantId}` : ''}` },
+            headers: { Location: `/.netlify/functions/meta-oauth?action=choose&h=${signHandle(organisationId, pendingOwner, nonce)}` },
             body: '',
         };
+    }
+
+    // ── CHOOSE: show the picker ───────────────────────────────────────────────────────────────
+    // Reached by redirect out of the callback, so it stands on the handle alone: a session cookie
+    // is not guaranteed to survive a cross-site redirect chain, and this step only shows back the
+    // accounts the user has just authorised. The write is gated in `select` below.
+    if (action === 'choose') {
+        const handle = parseHandle(event.queryStringParameters?.h);
+        if (!handle) return { statusCode: 302, headers: { Location: metaErrUrl('picker_invalid', 'facebook', null) }, body: '' };
+
+        const db = getDb();
+        const pending = await readPending(db, handle);
+        if (!pending) return { statusCode: 302, headers: { Location: metaErrUrl('picker_expired', 'facebook', null) }, body: '' };
+
+        // Badge the account this workspace already posts to — the one a reconnect used to replace
+        // silently. Deliberately not filtered to a single row: an org may hold several.
+        const live = await db
+            .select({ externalUserId: systemConnections.externalUserId })
+            .from(systemConnections)
+            .where(and(
+                eq(systemConnections.organisationId, pending.organisationId),
+                eq(systemConnections.serviceName, pending.platform),
+                eq(systemConnections.isActive, true),
+            ));
+
+        return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+            body: renderAccountPicker({
+                handle: signHandle(handle.organisationId, handle.userId, handle.nonce),
+                platform: pending.platform,
+                accounts: pending.accounts,
+                connectedIds: live.map(c => c.externalUserId).filter((id): id is string => Boolean(id)),
+                // Cancelling writes nothing: the parked choice simply expires.
+                cancelUrl: metaErrUrl('picker_cancelled', pending.platform, pending.assistantId),
+            }),
+        };
+    }
+
+    // ── SELECT: finish the connection with the account the user chose ─────────────────────────
+    if (action === 'select') {
+        // Netlify base64-encodes some function bodies; a form post that arrives encoded would
+        // otherwise parse to an empty handle and look like tampering.
+        const rawBody = event.isBase64Encoded ? Buffer.from(event.body ?? '', 'base64').toString('utf8') : (event.body ?? '');
+        const form = new URLSearchParams(rawBody);
+        const handle = parseHandle(form.get('h'));
+        if (!handle) return { statusCode: 302, headers: { Location: metaErrUrl('picker_invalid', 'facebook', null) }, body: '' };
+
+        const db = getDb();
+        const pending = await readPending(db, handle);
+        if (!pending) return { statusCode: 302, headers: { Location: metaErrUrl('picker_expired', 'facebook', null) }, body: '' };
+
+        const metaErr = (code: string) => metaErrUrl(code, pending.platform, pending.assistantId);
+
+        // This form is submitted from our own page, so unlike the Meta callback this step CAN
+        // insist on a session — and must, because it is the write. The handle is unguessable, but
+        // a leaked one must not be enough on its own to rebind a workspace's account.
+        const ctx = await requireTenant(event, db);
+        if ('error' in ctx) return { statusCode: 302, headers: { Location: metaErr('unauthenticated') }, body: '' };
+        if (ctx.organisationId !== pending.organisationId || (pending.userId != null && ctx.userId !== pending.userId)) {
+            return { statusCode: 302, headers: { Location: metaErr('picker_invalid') }, body: '' };
+        }
+
+        // The posted id only ever SELECTS from the list this login produced — page ids, names and
+        // the Instagram link are all taken from the parked account, never from the form.
+        const account = pending.accounts.find(a => a.externalUserId === form.get('account'));
+        if (!account) return { statusCode: 302, headers: { Location: metaErr('picker_invalid') }, body: '' };
+
+        // Single use. The token is about to be re-vaulted under its own account-scoped key.
+        await deleteSecret(db, pendingRefKey(handle.organisationId, handle.userId, handle.nonce));
+
+        return await finaliseConnection(db, {
+            organisationId: pending.organisationId,
+            stateUserId: pending.userId,
+            assistantId: pending.assistantId,
+            platform: pending.platform,
+            account,
+            longLivedToken: pending.token,
+            fbUserId: pending.fbUserId,
+            baseUrl,
+        });
     }
 
     return { statusCode: 400, body: 'Unknown action' };

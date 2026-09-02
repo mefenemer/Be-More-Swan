@@ -829,6 +829,17 @@ node_bundler = "esbuild"
 [functions.optimise-paid-campaigns]
   schedule = "40 6 * * *"
 
+# Is the paid sweep above still running? 09:20 UTC — a DIFFERENT schedule entry from
+# optimise-paid-campaigns on purpose, so one broken entry cannot silently take both.
+#
+# ⚠️ CORRELATED FAILURE, and it is documented rather than pretended away: this shares the Netlify
+# scheduler with the thing it watches, so a platform-wide scheduler outage takes both. It catches
+# the likely faults (an exception in the sweep, a bad deploy, a schedule entry that stopped matching
+# a filename). The uncorrelated watchers are the staging-crons GitHub workflow and the read path in
+# campaigns.ts `list`.
+[functions.check-optimiser-health]
+  schedule = "20 9 * * *"
+
 # US 5.2: resolve widget A/B hook tests (promote the winning variant) — hourly
 [functions.resolve-ab-tests]
   schedule = "0 * * * *"

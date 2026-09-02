@@ -3614,6 +3614,11 @@ function formatCurrency(amount, currency) {
         business_permission: 'Your Facebook Page is owned by a Business portfolio, but you didn’t grant Be More Swan access to your business assets, so we couldn’t reach the Page. Try connecting again and, on Meta’s screen, make sure the business/portfolio access stays switched on.',
         not_business: 'We can see your Facebook Page, but no Instagram account is linked to it. In Meta Business Suite, open your Page’s settings and link your Instagram account — it must be a Business or Creator account, not a personal one. Then try connecting again.',
         personal_account: 'Personal Instagram accounts can’t be connected. Click “Connect with Instagram” and follow the setup checklist to switch to a Business or Creator account, then try again.',
+        // The account picker (meta-oauth ?action=choose). Nothing is written until an account is
+        // chosen, so every one of these leaves the existing connection exactly as it was.
+        picker_cancelled: 'Connection cancelled — no account was chosen, so your connections are unchanged.',
+        picker_expired: 'That connection took too long to finish. Please connect again and choose your account.',
+        picker_invalid: 'We couldn’t confirm which account you chose. Please connect again.',
         // US1 AC1.4: tenant collision — this third-party account is already linked elsewhere.
         tenant_collision: `This ${label} account is already connected to another Be More Swan workspace. To use it, you must join the existing workspace or disconnect it from the other account.`,
       };

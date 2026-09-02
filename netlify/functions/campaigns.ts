@@ -51,6 +51,8 @@ import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import { PAID_ADS_FEATURE } from '../../src/config/ad-networks';
 import { linkedInAdapter } from '../../src/utils/ad-networks/registry';
 import { assessAdsReadiness, getAdsConnection, getAdsToken } from '../../src/utils/linkedin-ads-connection';
+import { assessOptimiserHealth, readLastRunAt } from '../../src/utils/optimiser-health';
+import { CONFIG_KEYS, getPlatformConfig } from '../../src/utils/platform-config';
 import {
     applyRejectionToConstraints, isCampaignRejectReason, type CampaignConstraints,
 } from '../../src/config/campaign-reject-reasons';
@@ -169,7 +171,29 @@ export default withLambda(async (event) => {
         // The plan gate travels with the list so the Budget & Control strip can render in one
         // round trip — and so the client never has to compute it and get it wrong.
         const planGate = await readPlanTaskGate(db, orgId);
-        return json(200, { campaigns: items, planGate });
+
+        // ── The read-path uptime check ────────────────────────────────────────
+        // ⚠️ THE ONLY WATCHER WITH UNCORRELATED FAILURE. `check-optimiser-health` shares the
+        // Netlify scheduler with the sweep it watches; the staging GitHub workflow is separate
+        // infrastructure but unreliable. This one is driven by USER TRAFFIC, so it cannot fail the
+        // way a scheduler fails — it is silent only when nobody is looking, which is the one time
+        // an unwatched campaign is nobody's immediate problem.
+        //
+        // Scoped to THIS workspace's live paid campaigns, so a tenant with none never sees a
+        // warning about machinery that is not touching them.
+        const livePaid = items.filter((c) => c.mode === 'paid'
+            && LIVE_CAMPAIGN_STATUSES.includes(c.status as never)).length;
+        const optimiserHealth = livePaid > 0
+            ? assessOptimiserHealth(
+                readLastRunAt(await getPlatformConfig(CONFIG_KEYS.PAID_OPTIMISER_LAST_RUN)),
+                livePaid,
+                new Date(),
+            )
+            // No live paid campaigns: nothing to supervise, so no health to report. Returning a
+            // cheerful "ok" here would be a claim about machinery this workspace does not use.
+            : null;
+
+        return json(200, { campaigns: items, planGate, optimiserHealth });
     }
 
     // ── create ────────────────────────────────────────────────────────────────

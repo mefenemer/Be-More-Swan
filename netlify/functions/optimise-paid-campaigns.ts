@@ -41,7 +41,7 @@ import {
 } from '../../src/utils/campaign-optimiser';
 import { FATIGUE_WINDOW_DAYS } from '../../src/config/ad-networks';
 import { createNotification } from '../../src/utils/notify';
-import { isGlobalAiDisabled, setPlatformConfig } from '../../src/utils/platform-config';
+import { CONFIG_KEYS, isGlobalAiDisabled, setPlatformConfig } from '../../src/utils/platform-config';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /** Campaigns examined per run. A cap so one enormous workspace cannot starve the rest. */
@@ -278,7 +278,7 @@ export async function runPaidOptimiserSweep(): Promise<PaidSweepResult> {
     }
 
     await notifyOwners(db, notices);
-    await setPlatformConfig('paid_optimiser.last_run', { at: now.toISOString(), examined, pausedTotal, haltedTotal });
+    await setPlatformConfig(CONFIG_KEYS.PAID_OPTIMISER_LAST_RUN, { at: now.toISOString(), examined, pausedTotal, haltedTotal });
 
     return { examined, paused: pausedTotal, halted: haltedTotal };
 }

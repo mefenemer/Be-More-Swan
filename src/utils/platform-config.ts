@@ -40,6 +40,16 @@ export const CONFIG_KEYS = {
     // be answerable without the function logs. It is also the only place that answer survives now
     // that the run is a background function and its HTTP response is just an ack.
     STRATEGY_AGENT_LAST_RUN: 'strategy_agent.last_run',
+    // ── Paid-campaign optimiser (Phase C) ──
+    // The sweep's own heartbeat marker: { at, examined, pausedTotal, haltedTotal }. Written by
+    // optimise-paid-campaigns, read by check-optimiser-health and by campaigns.ts `list`.
+    // ⚠️ This is the ONLY evidence that ad spend is being supervised. A dead sweep is invisible
+    // by nature — nothing happens — so this row is what turns its silence into something a human
+    // can be told about.
+    PAID_OPTIMISER_LAST_RUN:   'paid_optimiser.last_run',
+    // When we last emailed a human about the sweep being unhealthy, so an ongoing incident does
+    // not send an alert on every scheduled run.
+    PAID_OPTIMISER_LAST_ALERT: 'paid_optimiser.last_alert',
 } as const;
 
 export type ConfigKey = typeof CONFIG_KEYS[keyof typeof CONFIG_KEYS];
