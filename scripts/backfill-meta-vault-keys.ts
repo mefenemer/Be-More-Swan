@@ -67,9 +67,16 @@
 //   npx tsx scripts/backfill-meta-vault-keys.ts                           # dry run, staging
 //   npx tsx scripts/backfill-meta-vault-keys.ts --org=37                  # dry run, one org
 //   npx tsx scripts/backfill-meta-vault-keys.ts --apply                   # write, staging
-//   npx tsx scripts/backfill-meta-vault-keys.ts --url-var=PROD_DATABASE_URL
-//   npx tsx scripts/backfill-meta-vault-keys.ts --apply --url-var=PROD_DATABASE_URL
+//   npx tsx scripts/backfill-meta-vault-keys.ts --url-var=DATABASE_URL_PROD
+//   npx tsx scripts/backfill-meta-vault-keys.ts --apply --url-var=DATABASE_URL_PROD
 //   npx tsx scripts/backfill-meta-vault-keys.ts --apply --prune           # also delete the old secrets
+//
+// ⚠️ The production variable in THIS repo is `DATABASE_URL_PROD`. Both spellings appear across the
+// scripts (see tests/seed-connection.test.ts) and only this one is actually set — an earlier draft
+// of these lines said PROD_DATABASE_URL, which is unset and fails at the `--url-var` check.
+//
+// ⚠️ Reading or writing a secret needs the KEK, which lives in the deploy environment and NOT in
+// .env:  export VAULT_KEK_1=$(npx netlify env:get VAULT_KEK_1 --context production)
 
 import { config } from 'dotenv';
 import { writeFileSync } from 'node:fs';
