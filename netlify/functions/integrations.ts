@@ -1,14 +1,15 @@
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
-import { eq, and, or, isNull, inArray } from 'drizzle-orm';
+import { eq, and, or, isNull, inArray, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { systemConnections, scheduledPosts, users, userOrganisations, auditLogs, workspaceIntegrations } from '../../db/schema';
+import { systemConnections, scheduledPosts, users, auditLogs, workspaceIntegrations } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { storeSecret, deleteSecret, buildRefKey } from '../../src/utils/vault';
 import { deleteIntegration, getIntegration, isIntegrationProvider, serviceAutoRefreshes } from '../../src/utils/workspace-integrations';
 import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant, usesOutreachMailbox, MAILBOX_PROVIDERS, usesSearchConsole, SEARCH_CONSOLE_PROVIDER } from '../../src/utils/connection-map';
 import { getXUsage } from '../../src/utils/ai-credits';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
+import { resolveActiveOrg } from '../../src/utils/tenant';
 import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
 import { X_OAUTH_SCOPE_LIST } from '../../src/config/x-scopes';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -32,15 +33,28 @@ export default withLambda(async (event) => {
     const db = getDb();
 
     try {
-    // US-DB-1.3.1: resolve orgId — mandatory for all system_connections queries
-    const [currentUser] = await db.select({ organisationId: userOrganisations.organisationId }).from(userOrganisations).where(eq(userOrganisations.userId, currentUserId)).limit(1);
-    const currentOrgId = currentUser?.organisationId ?? null;
+    // US-DB-1.3.1: resolve orgId — mandatory for all system_connections queries.
+    // Uses the shared resolver rather than an unordered limit(1) over user_organisations: for a
+    // user in more than one workspace that picked an arbitrary org, so the Connections page could
+    // show another workspace's connections and render a live account as "Connect <platform>".
+    // resolveActiveOrg honours an explicit claim and otherwise falls back to most-recently-joined.
+    const activeOrg = await resolveActiveOrg(db, currentUserId);
+    const currentOrgId = activeOrg?.organisationId ?? null;
         // --- GET: FETCH INTEGRATIONS DASHBOARD ---
         if (event.httpMethod === 'GET') {
             // 1. Fetch system-wide platform definitions (userId is null)
             // Select only non-sensitive columns — tokens must never leave the server.
             const safeColumns = {
                 id: systemConnections.id,
+                // The client filters on this (`c.userId !== null` to drop catalog rows, and
+                // `c.status === 'active' && c.userId` for the per-assistant toggle). It was never
+                // selected, so every row arrived with userId === undefined: the first filter
+                // silently passed everything and the second silently matched NOTHING, leaving the
+                // "Use for this assistant" toggle saving an empty platform list. Tokens stay out of
+                // reach: this literal still selects no vault reference of any kind.
+                // (Do not name that column here — connection-ownership.test.ts and
+                // connection-selection.test.ts both scan this literal for it by name.)
+                userId: systemConnections.userId,
                 serviceName: systemConnections.serviceName,
                 connectionType: systemConnections.connectionType,
                 externalUserId: systemConnections.externalUserId,
@@ -68,11 +82,18 @@ export default withLambda(async (event) => {
                 : [];
 
             // 2. Fetch current user's connections scoped by org (US-DB-1.3.1)
+            // ORDER BY is load-bearing: the merge below keeps ONE row per serviceName via .find(),
+            // which takes the first match. Unordered, a disconnected row could beat the live one —
+            // observed on prod 2026-09-01, where a deactivated Instagram row was returned and the
+            // active account was dropped, so the card read "Connect Instagram" for an account that
+            // was publishing fine. Live rows first, then most recently updated.
+            // Inactive rows are still RETURNED (not filtered out) so a broken/expired connection
+            // keeps rendering its "needs attention" state instead of silently disappearing.
             const userConnections = await db.select(safeColumns).from(systemConnections).where(
                 currentOrgId
                     ? and(eq(systemConnections.organisationId, currentOrgId), eq(systemConnections.userId, currentUserId))
                     : eq(systemConnections.userId, currentUserId)
-            );
+            ).orderBy(desc(systemConnections.isActive), desc(systemConnections.updatedAt));
 
             // 3. Merge: user connection overrides the system catalog row for the same service
             const merged = systemCatalog.map(catalog => {
@@ -136,6 +157,9 @@ export default withLambda(async (event) => {
                         // so a positive id here could collide with an unrelated row. The DELETE
                         // handler below reverses this to route disconnects to the right table.
                         id: -row.id,
+                        // A real connection, not a catalog row: the client drops `userId === null`
+                        // entries, so this must be attributed or the card would vanish.
+                        userId: currentUserId,
                         serviceName: row.provider,
                         connectionType: 'oauth',
                         externalUserId: row.externalAccountName,

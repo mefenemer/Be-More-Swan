@@ -9,7 +9,7 @@ import { createHmac, randomBytes } from 'crypto';
 import { getDb } from '../../db/client';
 import { systemConnections, users, auditLogs, userOrganisations } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
-import { storeSecret } from '../../src/utils/vault';
+import { storeSecret, buildSocialRefKey } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
@@ -323,7 +323,10 @@ export default withLambda(async (event) => {
 
         // Store token in vault — a separate ref per product so disconnecting one leaves the other's
         // token intact.
-        const refKey = `aura/org-${organisationId}/${serviceName}-token`;
+        // Account-scoped: a workspace may hold several Facebook Pages / Instagram accounts, and an
+        // org+service key made them share one secret (see buildSocialRefKey). Reconnecting an
+        // existing row rewrites vaultRefKey below, so legacy rows heal on their next connect.
+        const refKey = buildSocialRefKey(organisationId, serviceName, externalUserId);
         await storeSecret(db, refKey, { token: longLivedToken });
 
         const tokenExpiresAt = new Date(Date.now() + TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);

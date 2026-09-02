@@ -9,7 +9,7 @@
 
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, desc } from 'drizzle-orm';
 import { contentAssets, systemConnections } from '../../db/schema';
 import { getSecret, storeSecret } from './vault';
 import { WORKSPACE_BACKED_PLATFORMS } from './live-social-connections';
@@ -312,11 +312,13 @@ export async function resolveSocialCredentials(
             eq(systemConnections.serviceName, platform),
             eq(systemConnections.isActive, true),
           );
+    // Newest-first: an org can hold several accounts per platform, and an unordered limit(1)
+    // returned an arbitrary one. Callers that must hit a specific account pass connectionId.
     const [conn] = await db.select({
         id: systemConnections.id,
         vaultRefKey: systemConnections.vaultRefKey,
         externalUserId: systemConnections.externalUserId,
-    }).from(systemConnections).where(connWhere).limit(1);
+    }).from(systemConnections).where(connWhere).orderBy(desc(systemConnections.updatedAt)).limit(1);
 
     const source = chooseCredentialSource(platform, conn);
 
@@ -1387,11 +1389,12 @@ export async function resolveFacebookPageCredentials(
             eq(systemConnections.serviceName, 'facebook'),
             eq(systemConnections.isActive, true),
           );
+    // Newest-first — see resolveSocialCredentials above.
     const [fbConn] = await db.select({
         vaultRefKey: systemConnections.vaultRefKey,
         externalUserId: systemConnections.externalUserId,
         metadata: systemConnections.metadata,
-    }).from(systemConnections).where(fbWhere).limit(1);
+    }).from(systemConnections).where(fbWhere).orderBy(desc(systemConnections.updatedAt)).limit(1);
 
     if (fbConn?.vaultRefKey) {
         const secret = await getSecret(db, fbConn.vaultRefKey);
@@ -1404,6 +1407,7 @@ export async function resolveFacebookPageCredentials(
     }
 
     // 2) Fall back to the org's Meta/Instagram connection (the only place a linked Page lives).
+    // Newest-first — see resolveSocialCredentials above.
     const [meta] = await db.select({
         vaultRefKey: systemConnections.vaultRefKey,
         metadata: systemConnections.metadata,
@@ -1411,7 +1415,7 @@ export async function resolveFacebookPageCredentials(
         eq(systemConnections.organisationId, args.organisationId),
         eq(systemConnections.serviceName, 'instagram'),
         eq(systemConnections.isActive, true),
-    )).limit(1);
+    )).orderBy(desc(systemConnections.updatedAt)).limit(1);
 
     const pageId = (meta?.metadata as any)?.fbPageId as string | undefined;
     if (!meta?.vaultRefKey || !pageId) {

@@ -131,6 +131,29 @@ export function buildRefKey(userId: number, serviceName: string, connectionType:
 }
 
 /**
+ * Vault key for a SOCIAL connection, scoped to the connected account as well as the org.
+ *
+ * ⚠️ The previous format was `aura/org-<id>/<service>-token` — org + service only. Two accounts of
+ * the same service in one workspace therefore shared ONE secret, so connecting the second silently
+ * overwrote the first's token. The row kept its own external_user_id, so publishing then paired
+ * account A's id with account B's token and Meta answered
+ * "(#10) Application does not have permission for this action" — a message that reads like an App
+ * Review problem and sends you to the Meta dashboard instead of here. Hit on prod 2026-09-01.
+ *
+ * Existing rows are NOT migrated: every reader takes the key from system_connections.vault_ref_key
+ * rather than rebuilding it, so legacy rows keep working against their old secret and move to this
+ * format the next time they are reconnected. A legacy secret left behind by a reconnect is orphaned
+ * but harmless — nothing reads a key that no row points at.
+ */
+export function buildSocialRefKey(organisationId: number, serviceName: string, externalUserId: string): string {
+    const safeService = serviceName.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    // Provider ids are digits in practice; sanitised anyway so a key can never contain a path
+    // separator or wildcard that would collide with another account's key.
+    const safeAccount = String(externalUserId).replace(/[^A-Za-z0-9_-]/g, '-');
+    return `aura/org-${organisationId}/${safeService}-${safeAccount}-token`;
+}
+
+/**
  * Store (or overwrite) a secret in the vault using KEK/DEK encryption.
  */
 export async function storeSecret(

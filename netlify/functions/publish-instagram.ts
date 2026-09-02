@@ -4,7 +4,7 @@
 // rate-limit state table, permanent-error classification, push notifications, cron log.
 
 import { Handler } from '@netlify/functions';
-import { and, eq, lte, or, isNull, inArray, sql } from 'drizzle-orm';
+import { and, eq, lte, or, isNull, inArray, sql, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     scheduledPosts, systemConnections, rateLimitStates, publishCronLog,
@@ -267,10 +267,16 @@ export default withLambda(async () => {
                     eq(systemConnections.serviceName, 'instagram'),
                     eq(systemConnections.isActive, true),
                   );
+            // ORDER BY matters: an org can hold several Instagram accounts, and an unordered
+            // limit(1) picked one arbitrarily — including a DISCONNECTED row, because connWhere
+            // only filters isActive when no explicit connection_id was given. Newest-first makes
+            // the fallback deterministic; a post that must target a specific account carries
+            // connection_id and never reaches this branch.
             const [conn] = await db
                 .select({ vaultRefKey: systemConnections.vaultRefKey, externalUserId: systemConnections.externalUserId })
                 .from(systemConnections)
                 .where(connWhere)
+                .orderBy(desc(systemConnections.updatedAt))
                 .limit(1);
             if (!conn?.vaultRefKey) throw new Error('No active Instagram connection for this post.');
 
