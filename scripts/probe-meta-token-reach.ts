@@ -145,6 +145,7 @@ async function main() {
         }
 
         // 4) What Pages does this token actually reach? This is the list the connect flow read.
+        let reachedDirect = false;
         const accounts = await graph(`me/accounts?fields=id,name,instagram_business_account{id,username}&${at}`);
         if (accounts.ok) {
             const list = accounts.data.data ?? [];
@@ -153,10 +154,10 @@ async function main() {
                 const ig = p.instagram_business_account;
                 console.log(`      • page ${p.id}  "${p.name}"${ig ? `   ig ${ig.id} @${ig.username ?? '?'}` : '   (no IG linked)'}`);
             }
-            const reaches = row.serviceName === 'facebook'
+            reachedDirect = row.serviceName === 'facebook'
                 ? list.some((p: any) => String(p.id) === String(row.externalUserId))
                 : list.some((p: any) => String(p.instagram_business_account?.id) === String(row.externalUserId));
-            console.log(reaches
+            console.log(reachedDirect
                 ? `  ✅ this token reaches its own external_user_id`
                 : `  🔴 this token does NOT reach ${row.externalUserId} — the row is bound to an account this token cannot administer`);
         } else {
@@ -191,7 +192,9 @@ async function main() {
                     }
                 }
             }
-            console.log(foundHere
+            console.log(reachedDirect
+                ? `  ✅ VERDICT: reachable via /me/accounts — the publisher's own lookup path. Nothing to fix here.${foundHere ? ' (also present in a portfolio.)' : ''}`
+                : foundHere
                 ? `  🟠 VERDICT: reachable via a portfolio but NOT via /me/accounts — meta-oauth.ts:382\n              suppresses the portfolio scan whenever any directly-administered Page has an\n              IG linked, so the picker never offers this account. CODE FIX, not a re-consent.`
                 : `  🔴 VERDICT: not reachable via /me/accounts OR any portfolio — this token has no granted\n              relationship to ${row.externalUserId}. Needs a re-consent with the account ticked.`);
         }
