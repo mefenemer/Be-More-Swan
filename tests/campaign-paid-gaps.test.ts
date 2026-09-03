@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { landmark } from './landmark';
 import {
     COMPANY_SIZES, FALLBACK_GEOS, INCOMPATIBLE_WITH_FUNCTION_OR_SENIORITY, TARGETING_FACETS,
-    buildTargetingCriteria,
+    buildTargetingCriteria, campaignGroupName,
 } from '../src/utils/ad-networks/linkedin';
 
 let passed = 0;
@@ -36,6 +36,7 @@ const api = read('netlify/functions/campaigns.ts');
 const cron = read('netlify/functions/optimise-paid-campaigns.ts');
 const ui = read('src/components/assistant-campaigns.js');
 const ddl = read('db/campaign-cost-ceiling.sql');
+const lk = read('src/utils/ad-networks/linkedin.ts');
 const stage = api.slice(landmark(api, "if (action === 'stage_paid')"), landmark(api, "if (action === 'approve_launch')"));
 
 console.log('\n──── 1. the cost ceiling is the CUSTOMER\'s number, or none ────');
@@ -235,6 +236,62 @@ check('a picked value carrying the delimiter keeps its whole name', () => {
     // The pick payload is `cid|facet|urn|name`, and a LinkedIn display name is theirs to choose.
     // A naive 4-way destructure would truncate any name containing the delimiter.
     assert.match(code(ui), /const name = parts\.slice\(3\)\.join\('\|'\);/);
+});
+
+console.log('\n──── the campaign group, without which nothing could ever stage ────');
+
+check('no caller passes an empty campaign group any more', () => {
+    // ⚠️ THE BUG. `campaignGroup` is Required:True on campaign creation — LinkedIn has mandated it
+    // since 30 October 2020 — and every caller passed ''. The FIRST real stage_paid would have
+    // failed at the very first API call, before reaching a creative.
+    for (const f of ['netlify/functions/campaigns.ts', 'netlify/functions/optimise-paid-campaigns.ts']) {
+        assert.ok(!/campaignGroupUrn: ''/.test(read(f)), `${f} still sends an empty campaign group`);
+    }
+    // And it is optional on the config now, resolved per campaign instead.
+    assert.match(lk, /campaignGroupUrn\?: string;/);
+});
+
+check('the group is resolved per campaign at stage time', () => {
+    assert.match(code(lk), /const groupUrn = cfg\.campaignGroupUrn\s*\n\s*\|\| await ensureCampaignGroup\(/);
+    assert.match(code(lk), /campaignGroupUrn: groupUrn,/);
+});
+
+check('the group name is DETERMINISTIC, so a retry cannot duplicate it', () => {
+    // stage_paid can fail after the group is created — the creative call is the next thing that
+    // can go wrong. A retry that minted a second group would litter Campaign Manager with empty
+    // duplicates.
+    assert.equal(campaignGroupName(7), 'Be More Swan — campaign 7');
+    assert.notEqual(campaignGroupName(7), campaignGroupName(8));
+    assert.match(code(lk), /const wanted = campaignGroupName\(campaignId\);/);
+});
+
+check('an existing group is matched EXACTLY, not by contains', () => {
+    // ⚠️ LinkedIn's name search is a contains-match, so "campaign 1" would return "campaign 12"
+    // and a retry would attach ads to the wrong campaign's group.
+    assert.match(code(lk), /\.find\(\(g\) => g\.name === wanted && g\.id\)/);
+});
+
+check('a failed search still creates rather than blocking the stage', () => {
+    // The worst case is an untidy duplicate. Refusing would block the campaign entirely.
+    const fn = lk.slice(landmark(lk, 'export async function ensureCampaignGroup'), landmark(lk, 'const created = await call('));
+    assert.match(fn, /catch \(err\) \{/);
+    assert.match(fn, /campaign group search failed, creating a new one/);
+});
+
+check('the group is created ACTIVE while the campaign is created PAUSED', () => {
+    // ⚠️ LinkedIn applies the MOST RESTRICTIVE status across levels, so nothing serves. Creating
+    // the group paused too would mean approval had to flip TWO things — two writes that could
+    // half-succeed and leave a live group over a paused campaign, or the reverse.
+    const create = lk.slice(landmark(lk, 'const created = await call('), landmark(lk, 'return parseRestliId(created);'));
+    assert.match(create, /status: 'ACTIVE',/);
+    assert.match(code(lk), /status: 'PAUSED',/);
+});
+
+check('no lifetime budget is invented for the group', () => {
+    // We only ever ask for a DAILY figure. A totalBudget would be us deciding something the
+    // customer never told us.
+    const create = lk.slice(landmark(lk, 'const created = await call('), landmark(lk, 'return parseRestliId(created);'));
+    assert.ok(!/totalBudget/.test(create), 'a lifetime budget is being invented for the campaign group');
 });
 
 console.log(`\n${passed} checks passed.\n`);

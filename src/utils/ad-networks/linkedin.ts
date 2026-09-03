@@ -213,8 +213,13 @@ export interface LinkedInAdapterConfig {
     /** Token carrying rw_ads + r_ads_reporting. NOT the workspace's w_member_social token. */
     accessToken: string;
     accountUrn: string;          // urn:li:sponsoredAccount:N
-    campaignGroupUrn: string;    // urn:li:sponsoredCampaignGroup:N
     currencyCode: string;        // the AD ACCOUNT's currency, read from LinkedIn — never assumed
+    /**
+     * Optional override. Normally left unset and resolved per campaign by ensureCampaignGroup —
+     * ⚠️ this used to be a required field that every caller passed as an empty string, which would
+     * have failed every campaign creation, since LinkedIn requires a real group.
+     */
+    campaignGroupUrn?: string;
 }
 
 export function createLinkedInAdapter(cfg: LinkedInAdapterConfig): AdNetworkAdapter {
@@ -225,12 +230,16 @@ export function createLinkedInAdapter(cfg: LinkedInAdapterConfig): AdNetworkAdap
         label: 'LinkedIn Ads',
 
         async stageCampaign(input: StageCampaignInput): Promise<StageCampaignResult> {
+            // Resolved per campaign, and idempotent — see ensureCampaignGroup.
+            const groupUrn = cfg.campaignGroupUrn
+                || await ensureCampaignGroup(cfg.accessToken, cfg.accountUrn, input.campaignId);
+
             const res = await call(`${BASE}/adAccounts/${acct}/adCampaigns`, {
                 method: 'POST',
                 headers: headers(cfg.accessToken),
                 body: JSON.stringify(campaignCreateBody({
                     accountUrn: cfg.accountUrn,
-                    campaignGroupUrn: cfg.campaignGroupUrn,
+                    campaignGroupUrn: groupUrn,
                     name: input.name,
                     dailyBudgetAmount: String(input.dailyBudgetGbp),
                     currencyCode: cfg.currencyCode,
@@ -460,4 +469,69 @@ export function buildTargetingCriteria(selected: Partial<Record<TargetingFacet, 
         if (values.length > 0) and.push({ or: { [TARGETING_FACETS[facet]]: values } });
     }
     return { include: { and } };
+}
+
+// ── Campaign groups ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The name we give the group for one Be More Swan campaign.
+ *
+ * ⚠️ DETERMINISTIC, and that is the whole point. `stage_paid` can fail after creating a group (the
+ * creative call is the next thing that can go wrong), and a retry that minted a second group would
+ * silently litter the customer's Campaign Manager with empty duplicates. Searching for this exact
+ * name first makes the operation idempotent without needing a column to remember it in.
+ */
+export const campaignGroupName = (campaignId: number) => `Be More Swan — campaign ${campaignId}`;
+
+/**
+ * Find or create the campaign group for one of our campaigns.
+ *
+ * ⚠️ `campaignGroup` is REQUIRED on campaign creation — LinkedIn has mandated it since 30 October
+ * 2020 — and this codebase was sending an empty string. Every `stage_paid` would have failed at the
+ * very first API call, before it ever reached a creative.
+ *
+ * Created ACTIVE, deliberately, while the campaign under it is created PAUSED. LinkedIn applies the
+ * MOST RESTRICTIVE status across levels, so nothing serves — and approval then stays a single flip
+ * of the campaign, rather than two writes that could half-succeed and leave a group live with a
+ * paused campaign or vice versa.
+ *
+ * No `totalBudget` is set. We only ever ask the customer for a DAILY figure, and inventing a
+ * lifetime cap would be us deciding something they did not tell us.
+ */
+export async function ensureCampaignGroup(
+    accessToken: string,
+    accountUrn: string,
+    campaignId: number,
+): Promise<string> {
+    const acct = accountId(accountUrn);
+    const wanted = campaignGroupName(campaignId);
+
+    // Search first. Filtered client-side on an EXACT name match: LinkedIn's name search is a
+    // contains-match, and "campaign 1" would happily return "campaign 12".
+    try {
+        const res = await call(
+            `${BASE}/adAccounts/${acct}/adCampaignGroups?q=search&search=(status:(values:List(ACTIVE,DRAFT)))&pageSize=100`,
+            { method: 'GET', headers: headers(accessToken) },
+        );
+        const data = await res.json() as { elements?: { id?: number; name?: string }[] };
+        const hit = (data.elements ?? []).find((g) => g.name === wanted && g.id);
+        if (hit) return `urn:li:sponsoredCampaignGroup:${hit.id}`;
+    } catch (err) {
+        // A failed search is not a failed stage — fall through and create. The worst case is a
+        // duplicate group, which is untidy; refusing here would block the campaign entirely.
+        console.warn('[linkedin] campaign group search failed, creating a new one', err);
+    }
+
+    const created = await call(`${BASE}/adAccounts/${acct}/adCampaignGroups`, {
+        method: 'POST',
+        headers: headers(accessToken),
+        body: JSON.stringify({
+            account: accountUrn,
+            name: wanted,
+            // Required. Open-ended: the campaign's own schedule governs when ads actually run.
+            runSchedule: { start: Date.now() },
+            status: 'ACTIVE',
+        }),
+    });
+    return parseRestliId(created);
 }

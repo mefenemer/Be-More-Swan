@@ -753,7 +753,9 @@ export default withLambda(async (event) => {
             adapter = linkedInAdapter({
                 accessToken: token,
                 accountUrn: conn.selectedAccountUrn!,
-                campaignGroupUrn: str(body.campaignGroupUrn, 120) ?? '',
+                // ⚠️ No campaignGroupUrn. It used to be passed as '' — LinkedIn REQUIRES a real
+                // group on campaign creation, so every stage would have failed at the first call.
+                // The adapter now resolves one per campaign, idempotently.
                 currencyCode: 'GBP',
             });
         } catch (err) {
@@ -905,7 +907,6 @@ export default withLambda(async (event) => {
             adapter = linkedInAdapter({
                 accessToken: token,
                 accountUrn: readiness.connection.selectedAccountUrn!,
-                campaignGroupUrn: '',
                 currencyCode: 'GBP',
             });
         } catch (err) {

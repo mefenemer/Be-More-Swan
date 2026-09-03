@@ -11,6 +11,7 @@ import { sendNewSubscriberAlert } from '../../src/utils/founder-alerts';
 import { grantXCredits } from '../../src/utils/ai-credits';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { releasePausedLimit } from '../../src/utils/release-paused-limit';
+import { backfillLivePlanForOrg } from '../../src/utils/plan-stripe-refs';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' });
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
@@ -150,7 +151,15 @@ export default withLambda(async (event) => {
             newPlan = inserted;
         } catch (planErr: any) {
             if (planErr?.code === '23505' || planErr?.message?.includes('plans_one_active_per_org_unique')) {
-                console.warn('[stripe-webhook] checkout.session.completed — active plan already exists, returning 200');
+                // confirm-payment.ts won the race. Do not just walk away: fill in any reference it
+                // could not supply, or the org keeps an active plan that admin-billing-override.ts
+                // will refuse to act on. Idempotent, so a redelivered event is harmless.
+                console.warn('[stripe-webhook] checkout.session.completed — active plan already exists, backfilling refs and returning 200');
+                await backfillLivePlanForOrg(db, orgIdInt, {
+                    stripeCustomerId,
+                    stripeSubscriptionId,
+                    masterPlanIdInt,
+                }, 'stripe-webhook/checkout.session.completed');
                 return { statusCode: 200, body: JSON.stringify({ received: true, duplicate_plan: true }) };
             }
             throw planErr;
@@ -330,7 +339,15 @@ export default withLambda(async (event) => {
             newPlan = inserted;
         } catch (planErr: any) {
             if (planErr?.code === '23505' || planErr?.message?.includes('plans_one_active_per_org_unique')) {
-                console.warn('[stripe-webhook] Duplicate active plan insert blocked by unique constraint — returning 200 to stop retries');
+                // Same reasoning as the checkout.session.completed handler above: the row that won
+                // the race may be missing references this event carries, and nothing else would
+                // ever fill them in if the customer never returns to the success URL.
+                console.warn('[stripe-webhook] Duplicate active plan insert blocked by unique constraint — backfilling refs, returning 200 to stop retries');
+                await backfillLivePlanForOrg(db, orgIdInt, {
+                    stripeCustomerId,
+                    stripeSubscriptionId: createdStripeSubscriptionId,
+                    masterPlanIdInt,
+                }, 'stripe-webhook/payment_intent.succeeded');
                 return { statusCode: 200, body: JSON.stringify({ received: true, duplicate_plan: true }) };
             }
             throw planErr;

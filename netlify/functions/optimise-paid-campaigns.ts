@@ -137,7 +137,7 @@ export async function runPaidOptimiserSweep(): Promise<PaidSweepResult> {
                 adapter = linkedInAdapter({
                     accessToken: token,
                     accountUrn: readiness.connection.selectedAccountUrn!,
-                    campaignGroupUrn: '',
+                    // No group needed here — this adapter only pauses and reads metrics.
                     currencyCode: 'GBP',
                 });
             } catch {

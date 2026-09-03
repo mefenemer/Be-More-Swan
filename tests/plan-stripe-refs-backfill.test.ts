@@ -88,7 +88,7 @@ const newRow = (orgId: number, userId: number, refs: Refs): Omit<Row, 'id'> => (
 
 const main = async () => {
     // The REAL decision function out of confirm-payment.ts — not a copy of it.
-    const { missingPlanRefs } = await import('../netlify/functions/confirm-payment');
+    const { missingPlanRefs } = await import('../src/utils/plan-stripe-refs');
 
     // Mirrors the COALESCE write; the SQL that actually runs is asserted separately below.
     const applyBackfill = (row: Row, refs: Refs) => {
@@ -112,10 +112,15 @@ const main = async () => {
         }
     };
 
-    // stripe-webhook.ts is UNCHANGED: it still swallows the conflict.
+    // stripe-webhook.ts, both handlers: insert, and on 23505 backfill the row that won instead
+    // of swallowing. It is the ONLY writer when the customer never returns to the success URL.
     const webhook = (t: PlansTable, orgId: number, userId: number, refs: Refs) => {
         try { t.insert(newRow(orgId, userId, refs)); }
-        catch (e: any) { if (e.code !== '23505') throw e; }
+        catch (e: any) {
+            if (e.code !== '23505') throw e;
+            const raced = t.findActiveByOrg(orgId);
+            if (raced) applyBackfill(raced, refs);
+        }
     };
 
     console.log('\nplan stripe refs — interleaving + backfill\n');
@@ -205,6 +210,46 @@ const main = async () => {
         assert.strictEqual(t.findActiveByOrg(41)!.stripeSubscriptionId, 'sub_LIVE');
     });
 
+    await check('the webhook heals a row the other writer left without ids', () => {
+        const t = new PlansTable();
+        // The browser got there first but its PaymentIntent carried no subscription reference.
+        t.insert({ organisationId: 41, userId: 7, status: 'active', masterPlanId: null, stripeCustomerId: null, stripeSubscriptionId: null });
+        webhook(t, 41, 7, REFS);
+        const row = t.findActiveByOrg(41)!;
+        assert.strictEqual(row.stripeCustomerId, 'cus_LIVE', 'the webhook must fill the customer id');
+        assert.strictEqual(row.stripeSubscriptionId, 'sub_LIVE', 'the webhook must fill the subscription id');
+        assert.strictEqual(t.activeCount(41), 1);
+    });
+
+    await check('customer closes the tab: the webhook alone still completes the row', () => {
+        const t = new PlansTable();
+        // confirm-payment never runs — nobody lands on workspace.html?payment=success.
+        webhook(t, 41, 7, REFS);
+        const row = t.findActiveByOrg(41)!;
+        assert.strictEqual(row.stripeCustomerId, 'cus_LIVE');
+        assert.strictEqual(row.stripeSubscriptionId, 'sub_LIVE');
+    });
+
+    await check('a redelivered webhook event changes nothing', () => {
+        const t = new PlansTable();
+        webhook(t, 41, 7, REFS);
+        const after1 = JSON.stringify(t.rows);
+        webhook(t, 41, 7, REFS);   // Stripe redelivery
+        webhook(t, 41, 7, REFS);
+        assert.strictEqual(JSON.stringify(t.rows), after1, 'redelivery must be a no-op');
+        assert.strictEqual(t.activeCount(41), 1, 'and must never add a second active row');
+    });
+
+    await check('the webhook cannot clobber ids the browser already wrote', () => {
+        const t = new PlansTable();
+        confirmPayment(t, 41, 7, REFS);
+        webhook(t, 41, 7, { stripeCustomerId: 'cus_OTHER', stripeSubscriptionId: 'sub_OTHER', masterPlanIdInt: 9 });
+        const row = t.findActiveByOrg(41)!;
+        assert.strictEqual(row.stripeCustomerId, 'cus_LIVE');
+        assert.strictEqual(row.stripeSubscriptionId, 'sub_LIVE');
+        assert.strictEqual(row.masterPlanId, 5);
+    });
+
     // ── The write that actually runs ───────────────────────────────────────────────────────
     await check('the backfill UPDATE is COALESCE, so it cannot clobber or null out a column', () => {
         const db = drizzle({ client: postgres('postgres://u:p@127.0.0.1:1/none') });
@@ -235,25 +280,62 @@ const main = async () => {
         );
     });
 
-    await check('confirm-payment scopes its lookup to the organisation, not the user', () => {
+    await check('the live-plan lookup is scoped to the organisation, not the user', () => {
+        // The scoping now lives in the shared helper, so assert it THERE — not at the call site,
+        // where a string match would only prove the marker still exists.
+        const util = read('src/utils/plan-stripe-refs.ts');
+        assert.ok(util.includes('eq(plans.organisationId, orgId)'), 'lookup must key on organisation_id');
+        assert.ok(
+            util.includes('inArray(plans.status, [...PLAN_LIVE_STATUSES])'),
+            'it must cover exactly what the partial unique index covers',
+        );
+        assert.ok(!util.includes('plans.userId'), 'a user-scoped lookup misses the row the INSERT collides with');
+
         const src = read('netlify/functions/confirm-payment.ts');
-        assert.ok(src.includes('eq(plans.organisationId, orgIdInt)'), 'lookup must key on organisation_id');
+        assert.ok(src.includes('findLivePlanForOrg(db, orgIdInt)'), 'confirm-payment must use the shared lookup');
         assert.ok(
             !src.includes("eq(plans.userId, userId), eq(plans.status, 'active')"),
-            'the old user-scoped lookup must be gone — it missed the row the insert collides with',
+            'the old user-scoped lookup must be gone',
         );
     });
 
     await check('confirm-payment backfills on BOTH the pre-check and the 23505 branch', () => {
         const src = read('netlify/functions/confirm-payment.ts');
-        const calls = src.split('backfillPlanRefs(').length - 1;
-        assert.ok(calls >= 3, `expected the definition plus two call sites, found ${calls} occurrences`);
+        assert.ok(src.includes('backfillPlanRefs(db, existingPlan'), 'the pre-check must backfill');
         const conflict = src.indexOf("planErr?.code === '23505'");
         assert.notStrictEqual(conflict, -1, 'the 23505 handler must still exist');
         assert.ok(
-            src.indexOf('backfillPlanRefs(', conflict) !== -1,
+            src.indexOf('backfillLivePlanForOrg(', conflict) !== -1,
             'the 23505 branch must backfill rather than swallow the conflict',
         );
+    });
+
+    await check('BOTH webhook conflict handlers backfill instead of swallowing', () => {
+        const src = read('netlify/functions/stripe-webhook.ts');
+        // Every 23505 guard in this file must be followed by a backfill before it returns 200.
+        const guards: number[] = [];
+        for (let i = src.indexOf("planErr?.code === '23505'"); i !== -1; i = src.indexOf("planErr?.code === '23505'", i + 1)) {
+            guards.push(i);
+        }
+        assert.strictEqual(guards.length, 2, `expected the two plan-insert conflict handlers, found ${guards.length}`);
+        for (const g of guards) {
+            const branch = src.slice(g, src.indexOf('throw planErr;', g));
+            assert.notStrictEqual(branch.length, 0, 'the 23505 branch must not be empty');
+            assert.ok(
+                branch.includes('backfillLivePlanForOrg('),
+                'a 23505 handler still returns 200 without backfilling the row that won the race',
+            );
+        }
+    });
+
+    await check('both writers share ONE backfill implementation', () => {
+        assert.ok(existsSync(join(root, 'src/utils/plan-stripe-refs.ts')), 'the shared helper must exist');
+        for (const f of ['netlify/functions/confirm-payment.ts', 'netlify/functions/stripe-webhook.ts']) {
+            assert.ok(
+                read(f).includes("from '../../src/utils/plan-stripe-refs'"),
+                `${f} must use the shared helper rather than its own copy`,
+            );
+        }
     });
 
     await check('create-subscription treats the metadata stamp as fatal, not best-effort', () => {

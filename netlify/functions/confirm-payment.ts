@@ -1,64 +1,16 @@
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import Stripe from 'stripe';
-import { eq, and, inArray, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, plans, payments, masterPlans } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { resolveActionNotifications, PAYMENT_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { backfillPlanRefs, backfillLivePlanForOrg, findLivePlanForOrg } from '../../src/utils/plan-stripe-refs';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' });
 const jwtSecret = process.env.JWT_SECRET!;
-
-/**
- * Fill in Stripe references an already-present plan row is missing, without ever clobbering
- * one that is already set.
- *
- * Both writers for a first subscription — this function and stripe-webhook.ts — race, and
- * either can arrive with metadata the other lacked. COALESCE makes the write idempotent and
- * order-independent in both directions: a populated column keeps its value, and a NULL we
- * have nothing to supply for stays NULL rather than being overwritten with NULL. Safe to run
- * on every landing, including repeat visits to workspace.html?payment=success.
- */
-export type PlanRefs = { stripeCustomerId?: string; stripeSubscriptionId?: string; masterPlanIdInt: number | null };
-
-/**
- * Which references the existing row is missing AND we can actually supply. Pure, so the
- * interleaving invariant is testable without a database or a Stripe key.
- *
- * A field is only "missing" when the row lacks it and we hold a value for it: that is what
- * makes the write a no-op on the common path (both writers holding the same metadata) and
- * keeps a populated id safe from a writer that arrived without one.
- */
-export function missingPlanRefs(existing: typeof plans.$inferSelect, refs: PlanRefs) {
-    return {
-        customer:     !existing.stripeCustomerId && !!refs.stripeCustomerId,
-        subscription: !existing.stripeSubscriptionId && !!refs.stripeSubscriptionId,
-        masterPlan:   existing.masterPlanId == null && refs.masterPlanIdInt != null,
-    };
-}
-
-async function backfillPlanRefs(
-    existing: typeof plans.$inferSelect,
-    refs: PlanRefs,
-): Promise<void> {
-    const { customer: missingCustomer, subscription: missingSub, masterPlan: missingMaster } =
-        missingPlanRefs(existing, refs);
-    if (!missingCustomer && !missingSub && !missingMaster) return; // nothing to add — leave updated_at alone
-
-    await getDb().update(plans).set({
-        stripeCustomerId:     sql`COALESCE(${plans.stripeCustomerId}, ${refs.stripeCustomerId ?? null})`,
-        stripeSubscriptionId: sql`COALESCE(${plans.stripeSubscriptionId}, ${refs.stripeSubscriptionId ?? null})`,
-        masterPlanId:         sql`COALESCE(${plans.masterPlanId}, ${refs.masterPlanIdInt ?? null})`,
-        updatedAt:            new Date(),
-    }).where(eq(plans.id, existing.id));
-
-    console.warn(
-        `[confirm-payment] Backfilled Stripe refs onto plan ${existing.id} (org ${existing.organisationId}):` +
-        `${missingCustomer ? ' customer' : ''}${missingSub ? ' subscription' : ''}${missingMaster ? ' masterPlan' : ''}`,
-    );
-}
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -138,17 +90,10 @@ export default withLambda(async (event) => {
         // Scoping it to the user instead (as this did) both missed the row the insert would
         // actually hit and skipped provisioning for a user who happened to hold an active plan
         // in some other organisation.
-        const [existingPlan] = await db
-            .select()
-            .from(plans)
-            .where(and(
-                eq(plans.organisationId, orgIdInt),
-                inArray(plans.status, ['active', 'past_due']),
-            ))
-            .limit(1);
+        const existingPlan = await findLivePlanForOrg(db, orgIdInt);
 
         if (existingPlan) {
-            await backfillPlanRefs(existingPlan, { stripeCustomerId, stripeSubscriptionId, masterPlanIdInt });
+            await backfillPlanRefs(db, existingPlan, { stripeCustomerId, stripeSubscriptionId, masterPlanIdInt }, 'confirm-payment');
             return { statusCode: 200, body: JSON.stringify({ ok: true, alreadyExists: true }) };
         }
 
@@ -169,17 +114,7 @@ export default withLambda(async (event) => {
             // Webhook won the race between the SELECT above and this INSERT. Re-read the row it
             // created and fill in anything it could not supply.
             if (planErr?.code === '23505' || planErr?.message?.includes('plans_one_active_per_org_unique')) {
-                const [racedPlan] = await db
-                    .select()
-                    .from(plans)
-                    .where(and(
-                        eq(plans.organisationId, orgIdInt),
-                        inArray(plans.status, ['active', 'past_due']),
-                    ))
-                    .limit(1);
-                if (racedPlan) {
-                    await backfillPlanRefs(racedPlan, { stripeCustomerId, stripeSubscriptionId, masterPlanIdInt });
-                }
+                await backfillLivePlanForOrg(db, orgIdInt, { stripeCustomerId, stripeSubscriptionId, masterPlanIdInt }, 'confirm-payment');
                 return { statusCode: 200, body: JSON.stringify({ ok: true, alreadyExists: true }) };
             }
             throw planErr;
