@@ -184,6 +184,35 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
     // job may have been attempted since, and the failure path below decides give-up-or-retry on it.
     const claimedAttempt = Number((claimed[0] as any).attempt);
 
+    // ── Idempotency: a job that has ALREADY produced a post must never generate again ────────────
+    // Winning the claim says nobody else is running this job right now. It does NOT say the job has
+    // never run — a job goes back to 'queued' whenever anything below throws, and everything below
+    // includes the post INSERT. So an attempt that died after inserting (or after the 'completed'
+    // update, on a notification) came back and generated a SECOND post, carrying the job's own
+    // crosspost_group_id, which put two independently-written posts inside ONE cross-post group.
+    //
+    // Measured on prod 2026-09-03: group 2c32415d had posts 511 (18:50) and 512+513 (19:01) from one
+    // job — two different captions, both 'scheduled' for the same 08:00 slot, so Instagram was due to
+    // receive two unrelated posts one after the other. Group f42e9903 was the same fault after a
+    // COMPLETE run: all four platforms duplicated, 8 posts from one job.
+    //
+    // Bailing is deliberately preferred to resuming. A first attempt that stopped mid-fan-out leaves
+    // a group short a platform, and that is the better failure: a missing sibling is a gap, a
+    // duplicate is a real post published twice to a real audience. The partial cross-post is already
+    // logged where it happens.
+    const producedRows = await db.execute<{ id: number }>(
+        `SELECT id FROM scheduled_posts WHERE job_id = '${job.job_id.replace(/'/g, "''")}' ORDER BY id LIMIT 1`
+    );
+    if (producedRows.length) {
+        const firstPostId = Number(producedRows[0].id);
+        console.warn(`[process-content-jobs] job ${job.job_id} already produced post ${firstPostId} `
+            + `(attempt ${claimedAttempt}) — completing without regenerating.`);
+        await db.execute(
+            `UPDATE content_generation_jobs SET status = 'completed', result_post_id = ${firstPostId}, updated_at = now() WHERE id = ${job.id}`
+        );
+        return;
+    }
+
     // "Create Post" → Suggest an idea: when a scheduled/conversion job carries no context of its
     // own, fold in the oldest pending user idea for this assistant (FIFO, consumed once). Best-effort
     // — a lookup failure must never fail the generation job. We mutate job.context_prompt so every
@@ -212,6 +241,11 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             console.warn(`[process-content-jobs] idea claim skipped for job ${job.job_id}:`, e instanceof Error ? e.message : e);
         }
     }
+
+    // Set the moment the job is recorded 'completed'. Everything after that point — notifications,
+    // the assistant-name lookup — is follow-up, and a follow-up failure must never re-queue a job
+    // that has already produced content. See the catch block.
+    let jobCompleted = false;
 
     try {
         const [bp] = await db
@@ -281,8 +315,13 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // `platform` is the representative used for the prompt aspect ratio + the primary post; the
         // rest are cloned after. Legacy single-platform jobs keep platforms empty → targetPlatforms is
         // just [platform], and everything below runs exactly as before.
+        // Deduped: the primary is fanoutPlatforms[0] and the siblings are slice(1), so a list that
+        // names a platform twice writes two rows for it into one group — the same duplicate the
+        // idempotency guard above exists to prevent, arriving by a different road. Every current
+        // writer of job.platforms already dedupes (generate-post via a Set, schedule-gap-fill via
+        // resolveConnectedDraftPlatforms); this makes the worker's behaviour independent of that.
         const fanoutPlatforms = Array.isArray(job.platforms)
-            ? job.platforms.filter((p): p is string => typeof p === 'string' && p.length > 0)
+            ? [...new Set(job.platforms.filter((p): p is string => typeof p === 'string' && p.length > 0))]
             : [];
         const fanOut = fanoutPlatforms.length > 1;
         const platform      = (fanoutPlatforms[0] || job.platform) || await resolveFallbackPlatform(db, job.organisation_id, platformScope);
@@ -1019,6 +1058,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         await db.execute(
             `UPDATE content_generation_jobs SET status = 'completed', result_post_id = ${post.id}${tokenCols}, updated_at = now() WHERE id = ${job.id}`
         );
+        jobCompleted = true;
 
         // Admin test jobs do not notify the consumer
         if (!isAdminTest) {
@@ -1076,6 +1116,17 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         const attempt = claimedAttempt;
         const errorMessage = err instanceof Error ? err.message : String(err);
         console.error(`[process-content-jobs] job ${job.job_id} attempt ${attempt} failed:`, errorMessage);
+
+        // The job is already 'completed' and its post already exists: this threw somewhere in the
+        // follow-up (a notification template, the assistant-name lookup, a Neon blip on either).
+        // Falling through would overwrite 'completed' with 'queued' and hand the job back to the
+        // drain, which is precisely how one job came to write two different posts into one
+        // cross-post group. The content stands; only the notification was lost, so say so and stop.
+        if (jobCompleted) {
+            console.error(`[process-content-jobs] job ${job.job_id} COMPLETED but its follow-up failed `
+                + `(not retried — the post exists): ${errorMessage}`);
+            return;
+        }
 
         // Release the idea we claimed up-front so this failure doesn't strand it in 'in_review'
         // forever — back to 'pending' (only if it never produced a post) so a retry can reclaim it.

@@ -1030,8 +1030,17 @@ window.detailRqOpenStatus = function(statusKey, btn) {
 
 // Re-render whichever column is currently open, e.g. after a new post is added elsewhere
 // (the Create Post sheet) so the list reflects it without the user manually switching tabs.
+//
+// ⚠️ The Overview card's Created / Scheduled / Published tiles count the SAME posts these columns
+// list, so they move together or they contradict each other. They used to be filled once, on page
+// open, by _fetchAndRenderAssistantMetrics alone — so approving a draft moved the Scheduled tab's
+// badge from 3 to 4 while the tile above it went on saying 3 until the user reloaded. Every mutation
+// site in the product already calls this function (approve/reject/publish-now in the post modal,
+// the Create Post sheet, the caption rewrites, the notification poll), so hanging the tiles off it
+// is what makes them current everywhere rather than at eleven separate call sites.
 window.detailRqRefresh = function() {
     if (!document.getElementById('detail-rq-groups')) return;
+    window._refreshAssistantMetrics?.();
     window._detailRqRefreshColumnCounts();
     return _detailRqRenderGroups(_detailRqCurrentStatus);
 };
@@ -1113,6 +1122,11 @@ function _detailRqSetColumnBadge(statusKey, count) {
 document.addEventListener('bms:notifications-arrived', () => {
     const panel = document.getElementById('maintab-review-queue');
     if (!panel) return;
+    // The Overview card's post totals are on screen from a DIFFERENT tab, and the notification that
+    // just arrived is usually the reason they moved (a post published, a draft landed). Recount them
+    // whichever tab the user is standing on — this is debounced and folds into the call below when
+    // the queue is the visible tab.
+    window._refreshAssistantMetrics?.();
     if (!panel.classList.contains('hidden')) { window.detailRqRefresh?.(); return; }
     // The panel is off screen, so there is no list to re-render — but the tab BUTTON is still
     // visible from wherever the user is standing, and on a records queue it carries the count.
@@ -7109,7 +7123,41 @@ async function _fetchAndRenderBlogRoi(assistantId, period = 'all') {
     }
 }
 
+// Which period the tiles/ROI strip are currently showing, and for which assistant. Remembered so a
+// refresh triggered by a queue change repaints the view the user is actually looking at — re-running
+// with the 'all' default would silently snap their This Week selection back to All Time mid-edit.
+let _detailMetricsPeriod = 'all';
+let _detailMetricsAssistantId = null;
+let _detailMetricsRefreshTimer = null;
+
+/**
+ * Recount the Overview tiles for the assistant on screen, in the period on screen.
+ *
+ * Debounced, because one user action fans out into several refresh calls: approving a post runs
+ * _rqReviewRefresh (list + badge + this), and the notification poll can land on top of it. Without
+ * the trailing debounce a single approve fired three identical aggregation queries.
+ */
+window._refreshAssistantMetrics = function() {
+    const aid = window._currentAssistantId;
+    // No assistant, or the tiles are not on this page at all (org-wide views, records roles that
+    // render a different card) — nothing to recount.
+    if (!aid || !document.getElementById('metrics-total-created')) return;
+    clearTimeout(_detailMetricsRefreshTimer);
+    _detailMetricsRefreshTimer = setTimeout(() => {
+        // Re-read the id at fire time: the user may have opened another assistant while we waited,
+        // and repainting this card with the previous one's totals is worse than not repainting.
+        const current = window._currentAssistantId;
+        if (!current) return;
+        const period = Number(current) === Number(_detailMetricsAssistantId) ? _detailMetricsPeriod : 'all';
+        _fetchAndRenderAssistantMetrics(current, period);
+    }, 250);
+};
+
 async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
+    // Remembered for _refreshAssistantMetrics above — the period toggle calls straight back into
+    // here, so this is the one place that knows which view is on screen.
+    _detailMetricsPeriod = period;
+    _detailMetricsAssistantId = assistantId;
     // Issue: the "Content by platform" breakdown moved into the Autopilot card. `card` now points at
     // that relocated block (#autopilot-platform-breakdown); the Created/Scheduled/Published totals it
     // breaks down live alongside it in the same card and stay visible regardless of platform count.
@@ -7150,7 +7198,13 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
         // Gate on any real ROI signal, not just post creation — hoursSaved already accounts for
         // completed task runs (see get-assistant-metrics.ts), so a task-driven assistant that
         // hasn't created any scheduledPosts yet still surfaces the card once it's done work.
-        if (!d.totalCreated && !d.hoursSaved) return; // no recorded activity yet — keep everything hidden
+        // ⚠️ "No recorded activity yet" hides the whole strip — but only while it IS still hidden.
+        // Once the tiles are on screen this refetch is a REFRESH, and returning early would freeze
+        // them at their last non-zero reading: an assistant whose only post is rejected would go on
+        // claiming "Created 1" over a Review Queue that is empty in every column. Falling through
+        // repaints the honest zeros instead.
+        const stripShown = !!roiStrip && !roiStrip.classList.contains('hidden');
+        if (!d.totalCreated && !d.hoursSaved && !stripShown) return;
         if (card.dataset.roleHidden === '1') return;  // role-hidden set while we were awaiting — respect it
 
         const el = id => document.getElementById(id);
@@ -7163,17 +7217,17 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
         const note = el('metrics-period-note');
         note.textContent = `Time & money saved ${periodLabel}`;
         note.title = `Time & money saved ${periodLabel} (matches the dashboard's ${dashLabel} view)`;
-        // These three now count POSTS, not per-platform rows, and 'Scheduled' no longer includes
-        // work still awaiting review — so they reconcile with the Review Queue's Scheduled tab and
-        // the calendar instead of contradicting both. The titles say which statuses each rolls up,
-        // because "Created 18" against a Review Queue showing 6 cards is only obvious once you know
-        // Created spans the whole lifecycle.
+        // These three count POSTS, not per-platform rows, and every status they roll up is served by
+        // a visible Review Queue column — the shared vocabulary in src/config/post-status.ts is what
+        // makes "Created 18" equal Review + Scheduled + Posted + Needs attention rather than
+        // out-running them. The titles still say what each spans, because a total that legitimately
+        // exceeds the tab you happen to be looking at needs explaining.
         el('metrics-total-created').textContent = d.totalCreated.toLocaleString();
-        el('metrics-total-created').title = 'Posts this assistant has produced, excluding ones you rejected or cancelled. Cross-posts count once.';
+        el('metrics-total-created').title = 'Every post this assistant has produced and you can still open — the Review, Scheduled, Posted and Needs attention tabs added together. Excludes ones you rejected or cancelled. Cross-posts count once.';
         el('metrics-total-scheduled').textContent = d.totalScheduled.toLocaleString();
-        el('metrics-total-scheduled').title = 'Posts committed to go out and not yet published. Excludes anything still awaiting your review. Cross-posts count once.';
+        el('metrics-total-scheduled').title = 'Posts committed to go out and not yet published — the Scheduled tab, including any paused by a disconnected account or waiting on quota. Excludes anything still awaiting your review. Cross-posts count once.';
         el('metrics-total-published').textContent = d.totalPublished.toLocaleString();
-        el('metrics-total-published').title = 'Posts that have gone live. Cross-posts count once, even when they reached several platforms.';
+        el('metrics-total-published').title = 'Posts that have gone live — the Posted tab. Cross-posts count once, even when they reached several platforms.';
 
         // Awaiting review + needs attention. The pending figure already has a home in the Autopilot
         // card ("Waiting for your review"), so it is reconciled there rather than given a fourth

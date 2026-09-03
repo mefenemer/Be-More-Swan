@@ -26,12 +26,18 @@ const ROOT = path.resolve(import.meta.dirname, '..');
 
 interface Row { id: number; crosspostGroupId: string | null; status: string }
 
-/** The server's grouping, mirrored from get-social-drafts.ts. */
+/**
+ * The server's grouping, mirrored from get-social-drafts.ts.
+ *
+ * ⚠️ No status in the key. It used to be there and it split one post into several cards: three
+ * columns request status FAMILIES, so a cross-post with a paused Instagram row and a scheduled
+ * LinkedIn row arrives in the Scheduled column as one post in two states.
+ */
 function pageIdsFor(rows: Row[], limit: number, offset: number) {
     const order: string[] = [];
     const byKey = new Map<string, number[]>();
     for (const r of rows) {
-        const key = r.crosspostGroupId ? `g:${r.crosspostGroupId}|${r.status ?? ''}` : `id:${r.id}`;
+        const key = r.crosspostGroupId ? `g:${r.crosspostGroupId}` : `id:${r.id}`;
         if (!byKey.has(key)) { byKey.set(key, []); order.push(key); }
         byKey.get(key)!.push(r.id);
     }
@@ -196,6 +202,70 @@ check('the detail Review badge reports the server total, not the first page', ()
     const js = readFileSync(path.join(ROOT, 'assistants.js'), 'utf8');
     assert.match(js, /const groupedCount = _detailRqTotal \?\? postGroups\.length/,
         'a paged first response is 10 cards — the badge must show the queue total');
+});
+
+// ── A cross-post whose platforms are in DIFFERENT states is still one post ───────────────────────
+// Three Review Queue columns request status FAMILIES, so a single response really can hold one
+// post's rows in two states: publish-instagram.ts pauses by connection_id, which takes the Instagram
+// row of a cross-post to 'paused' and leaves its LinkedIn sibling 'scheduled'. Both land in the
+// Scheduled column. While the group key carried the status, that rendered as two identical-looking
+// cards for one post, and the column's own total disagreed with the Overview tile — which has always
+// counted one cross-post as one post.
+const mixed: Row[] = [
+    { id: 21, crosspostGroupId: 'grp-x', status: 'scheduled' },
+    { id: 22, crosspostGroupId: 'grp-x', status: 'paused' },
+    { id: 23, crosspostGroupId: 'grp-x', status: 'scheduled' },
+    { id: 24, crosspostGroupId: null,    status: 'scheduled' },
+];
+
+check('a half-paused cross-post is ONE card, not one per state', () => {
+    const p = pageIdsFor(mixed, 10, 0);
+    assert.strictEqual(p.groupTotal, 2, '4 rows are 2 posts: one 3-platform cross-post and one single');
+    assert.deepEqual(p.keys, ['g:grp-x', 'id:24'], 'the key must not carry the status');
+    assert.deepEqual(p.ids, [21, 22, 23, 24], 'every sibling rides along, whatever state it is in');
+});
+
+check('the client and the server key a card identically', () => {
+    // They page against each other: the server decides where a page ends, the browser decides how
+    // many cards that is. A difference of one splits or merges a card across the boundary.
+    const fn = readFileSync(path.join(ROOT, 'netlify/functions/get-social-drafts.ts'), 'utf8');
+    const ws = readFileSync(path.join(ROOT, 'workspace.html'), 'utf8');
+    assert.match(fn, /const key = r\.crosspostGroupId \? `g:\$\{r\.crosspostGroupId\}` : `id:\$\{r\.id\}`;/,
+        'the server key must be group-or-id, with no status');
+    assert.match(ws, /if \(p\.crosspostGroupId\) return `g:\$\{p\.crosspostGroupId\}`;/,
+        'the browser key must match the server key exactly');
+    assert.ok(!/`g:\$\{r\.crosspostGroupId\}\|/.test(fn) && !/`g:\$\{p\.crosspostGroupId\}\|/.test(ws),
+        'putting the status back in either key splits one post into several cards');
+});
+
+check('the card reports the state that most needs the user, not the representative\'s', () => {
+    const ws = readFileSync(path.join(ROOT, 'workspace.html'), 'utf8');
+    // The representative is chosen for its THUMBNAIL (`siblings.find(s => s.thumbnailUrl)`), which
+    // has nothing to do with which sibling is in trouble. Leading with its status would hide a
+    // paused platform behind a scheduled one.
+    assert.match(ws, /const headline = _rqHeadlinePost\(group\);/);
+    assert.match(ws, /const chip = RENDER_CHIP\[renderState\] \|\| _rqStateChip\(headline\);/);
+    const priority = ws.match(/const RQ_STATE_PRIORITY = \[([\s\S]*?)\];/)?.[1] ?? '';
+    const order = [...priority.matchAll(/'([a-z_]+)'/g)].map(m => m[1]);
+    assert.ok(order.indexOf('paused') < order.indexOf('scheduled'),
+        'a paused platform must outrank a scheduled one, or the trouble hides');
+    assert.ok(order.indexOf('failed') < order.indexOf('published'),
+        'a failed platform must outrank a published one');
+    for (const s of ['paused', 'publishing']) {
+        assert.match(ws, new RegExp(`\\n\\s*${s}:\\s*\\{ cls:`),
+            `'${s}' needs a chip entry — without one the card states nothing at all`);
+    }
+});
+
+check('a mixed group states each platform, so nothing hides behind a sibling', () => {
+    const ws = readFileSync(path.join(ROOT, 'workspace.html'), 'utf8');
+    assert.match(ws, /const mixedState = new Set\(group\.map\(g => _rqStateChip\(g\)\.label\)\)\.size > 1;/,
+        'compared on the LABEL, so pending_approval + in_review (both "Needs review") is not a mix');
+    const card = ws.slice(landmark(ws, 'function rqRenderSocialCard('));
+    assert.match(card.slice(0, 6500), /if \(!mixedState\) return `<span[^`]*bg-gray-100 text-gray-600/,
+        'an agreeing group keeps its plain platform chips — per-platform state everywhere is noise');
+    assert.match(card.slice(0, 6500), /\$\{label\} · \$\{_rqEsc\(st\.label\)\}/,
+        'a disagreeing group must name each platform WITH its own state');
 });
 
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);

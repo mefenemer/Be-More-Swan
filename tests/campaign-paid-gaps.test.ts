@@ -18,7 +18,8 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { landmark } from './landmark';
 import {
-    FALLBACK_GEOS, TARGETING_FACETS, buildTargetingCriteria,
+    COMPANY_SIZES, FALLBACK_GEOS, INCOMPATIBLE_WITH_FUNCTION_OR_SENIORITY, TARGETING_FACETS,
+    buildTargetingCriteria,
 } from '../src/utils/ad-networks/linkedin';
 
 let passed = 0;
@@ -97,7 +98,7 @@ check('accounts are only fetched when the workspace could use one', () => {
 });
 
 check('a saved selection reloads from the server rather than guessing', () => {
-    const branch = ui.slice(landmark(ui, "action: 'select', accountUrn: urn"), landmark(ui, 'if (geoRm)'));
+    const branch = ui.slice(landmark(ui, "action: 'select', accountUrn: urn"), landmark(ui, 'if (facetRm)'));
     assert.match(branch, /await load\(\);/);
 });
 
@@ -168,6 +169,72 @@ check('each variant can have its own destination, defaulting to the first', () =
     assert.match(ui, /data-cmp-paid-url="\$\{esc\(String\(c\.id\)\)\}-\$\{i\}"/);
     // The server has always accepted per-variant URLs and validates every one of them.
     assert.match(stage, /isSafeDestination\(v\.destinationUrl\)/);
+});
+
+console.log('\n──── job function, seniority and company size ────');
+
+check('the job-function facet is jobFunctions, NOT titles', () => {
+    // ⚠️ A REAL BUG CAUGHT BEFORE SHIPPING. The first draft used
+    // `urn:li:adTargetingFacet:titles`, a DIFFERENT facet taking urn:li:title:N. It would have
+    // worked — silently targeting job titles while the form said "job function". A wrong facet
+    // does not error; it spends the money on the wrong audience.
+    assert.equal(TARGETING_FACETS.jobFunctions, 'urn:li:adTargetingFacet:jobFunctions');
+    assert.equal(TARGETING_FACETS.seniorities, 'urn:li:adTargetingFacet:seniorities');
+    assert.equal(TARGETING_FACETS.companySizes, 'urn:li:adTargetingFacet:staffCountRanges');
+});
+
+check('no job-TITLE picker is offered, because it cannot be AND-ed with these', () => {
+    // ⚠️ LinkedIn: job functions and seniorities "may not be AND'ed with any include clauses
+    // targeting Job Titles". buildTargetingCriteria ANDs every facet group, so a titles picker
+    // would make most combinations invalid — rejected by LinkedIn as an opaque 400 at staging.
+    assert.ok(!Object.values(TARGETING_FACETS).some((f) => INCOMPATIBLE_WITH_FUNCTION_OR_SENIORITY.includes(f as never)),
+        'an incompatible titles facet has been added to the offered set');
+    assert.ok(INCOMPATIBLE_WITH_FUNCTION_OR_SENIORITY.length >= 3, 'the incompatibility list lost entries');
+    // And the constraint is written where someone adding a picker will see it.
+    assert.match(read('src/utils/ad-networks/linkedin.ts'), /may not be AND'ed with any include\s*\n\s*\* clauses targeting Job Titles/);
+});
+
+check('all four facets reach the criteria builder', () => {
+    const c = buildTargetingCriteria({
+        locations: ['urn:li:geo:101165590'],
+        jobFunctions: ['urn:li:function:22'],
+        seniorities: ['urn:li:seniority:7'],
+        companySizes: ['urn:li:staffCountRange:(51,200)'],
+    }) as any;
+    assert.equal(c.include.and.length, 4);
+    assert.deepEqual(c.include.and[3].or[TARGETING_FACETS.companySizes], ['urn:li:staffCountRange:(51,200)']);
+});
+
+check('company sizes are a documented enum, served without a lookup', () => {
+    // A closed set with no typeahead behind it, and a format nobody could be expected to type.
+    assert.equal(COMPANY_SIZES.length, 9);
+    assert.ok(COMPANY_SIZES.every((c) => /^urn:li:staffCountRange:\(\d+,\d+\)$/.test(c.urn)));
+    // INT_MAX is LinkedIn's "no upper limit".
+    assert.ok(COMPANY_SIZES.some((c) => c.urn.includes('2147483647')));
+    const t = read('netlify/functions/linkedin-ads-targeting.ts');
+    assert.match(t, /if \(facet === 'companySizes'\) return json\(200, \{ entities: COMPANY_SIZES \}\)/);
+    assert.ok(landmark(t, "facet === 'companySizes'") < landmark(t, 'await searchTargeting('),
+        'company sizes are being sent to a typeahead that has nothing to return');
+});
+
+check('only the location picker nags when empty', () => {
+    // Saying "optional" and then warning about it being empty would be the form contradicting
+    // itself.
+    assert.match(ui, /required: true, search: true,/);
+    assert.match(code(ui), /f\.required\s*\n\s*\? '<p[^']*without at least one location/);
+});
+
+check('the client sends every facet, not just locations', () => {
+    assert.match(code(ui), /jobFunctions: urns\('jobFunctions'\)/);
+    assert.match(code(ui), /seniorities: urns\('seniorities'\)/);
+    assert.match(code(ui), /companySizes: urns\('companySizes'\)/);
+    assert.match(code(api), /companySizes: Array\.isArray\(t\.companySizes\)/);
+});
+
+check('a picked value carrying the delimiter keeps its whole name', () => {
+    // The pick payload is `cid|facet|urn|name`, and a LinkedIn display name is theirs to choose.
+    // A naive 4-way destructure would truncate any name containing the delimiter.
+    assert.match(code(ui), /const name = parts\.slice\(3\)\.join\('\|'\);/);
 });
 
 console.log(`\n${passed} checks passed.\n`);

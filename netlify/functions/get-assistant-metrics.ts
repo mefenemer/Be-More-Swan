@@ -8,28 +8,35 @@ import { and, eq, sql, type SQL } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
 import { aiAssistants, scheduledPosts, userProfiles } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
-import type { PostStatus } from '../../src/config/post-status';
+import {
+    BOOKED_STATUSES,
+    AWAITING_REVIEW_STATUSES,
+    ATTENTION_STATUSES,
+    CREATED_STATUSES,
+} from '../../src/config/post-status';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
 import { countRoiActivity } from '../../src/utils/roi-activity';
 import { parseRoiPeriod, roiPeriodStart } from '../../src/utils/roi-period';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 // ── What the Created / Scheduled / Published tiles actually mean ─────────────────────────────────
-// These lists are the headline card's vocabulary, and they are NOT the same question as
-// src/config/post-status.ts's SCHEDULE_ACTIVE_STATUSES (which answers "does this belong on the
+// The four lists live in src/config/post-status.ts and are read from there by BOTH ends of this
+// screen — the tiles here and the Review Queue columns in get-social-drafts.ts. They used to be
+// declared inline, against a shorter set of families on the queue side, and the two drifted: a post
+// paused by a dead connection ('paused') or mid-publish ('publishing') was counted in the Scheduled
+// tile and listed in no column at all, so the headline read higher than every tab beneath it.
+//
+// They are NOT the same question as SCHEDULE_ACTIVE_STATUSES (which answers "does this belong on the
 // calendar" and therefore includes 'published' and 'failed' — both wrong for a "Scheduled" tile).
 //
-// The previous version put 'pending_approval' and 'in_review' in SCHEDULED, so every draft waiting
-// in the Review Queue was reported to the user as booked to go out. On a real assistant that made
-// the Scheduled tile read 49 while the Scheduled tab listed 9 — the tile was counting work the user
-// had not yet approved, and counting it per-platform on top (see the grouping note below).
-const DISCARDED_STATUSES = ['rejected', 'cancelled', 'admin_test'] as const satisfies readonly PostStatus[];
-/** Committed to go out and not yet out. Excludes 'published' (already gone) and 'failed' (won't go without help). */
-const BOOKED_STATUSES = ['approved', 'scheduled', 'publishing', 'paused', 'paused_credits'] as const satisfies readonly PostStatus[];
-/** Waiting on a human. Reported separately so it can never be mistaken for a booked slot again. */
-const AWAITING_REVIEW_STATUSES = ['pending_approval', 'in_review'] as const satisfies readonly PostStatus[];
-/** Tried and stopped. Surfaced so a failed post is a number somewhere instead of nowhere. */
-const ATTENTION_STATUSES = ['failed'] as const satisfies readonly PostStatus[];
+// An earlier version put 'pending_approval' and 'in_review' in BOOKED, so every draft waiting in the
+// Review Queue was reported to the user as booked to go out. On a real assistant that made the
+// Scheduled tile read 49 while the Scheduled tab listed 9 — the tile was counting work the user had
+// not yet approved, and counting it per-platform on top (see the grouping note below).
+//
+// Created is the union of the surfaced buckets (CREATED_STATUSES), not "everything not discarded":
+// 'draft' (a blank composer row) and 'missed' (the legacy expiry) are shown on no screen by design,
+// so counting them gave the user a total no tab could account for.
 
 const quoted = (xs: readonly string[]) => sql.raw(xs.map(s => `'${s}'`).join(', '));
 
@@ -106,7 +113,7 @@ export default withLambda(async (event) => {
         // Plain db.select with an explicit organisationId predicate, matching the breakdown query
         // below — both are already tenant-scoped by `postScope`.
         const [totalsRow] = await db.select({
-            created: groupedCount(sql`${scheduledPosts.status} not in (${quoted(DISCARDED_STATUSES)})`, 'created'),
+            created: groupedCount(sql`${scheduledPosts.status} in (${quoted(CREATED_STATUSES)})`, 'created'),
             scheduled: groupedCount(sql`${scheduledPosts.status} in (${quoted(BOOKED_STATUSES)})`, 'scheduled'),
             published: groupedCount(sql`${scheduledPosts.status} = 'published'`, 'published'),
             // Aliases match their JS keys exactly (drizzle quotes them, so the case survives) —
@@ -151,12 +158,16 @@ export default withLambda(async (event) => {
 
         // Per-platform SENDS (rows). Uses the same vocabulary as the tiles so a platform's bar and
         // the headline can be reconciled, but stays row-level — see the note on the queries above.
-        const DISCARDED = new Set<string>(DISCARDED_STATUSES);
+        // Same vocabulary as the tiles, derived from the same lists rather than re-typed — a second
+        // hand-written copy is exactly how the bars came to contradict the totals above them.
+        // Filtered by what Created COUNTS (not merely by what it discards), so a 'draft' or 'missed'
+        // row cannot pad a platform's bar while being absent from the headline it breaks down.
+        const COUNTED = new Set<string>(CREATED_STATUSES);
         const BOOKED = new Set<string>(BOOKED_STATUSES);
         const byPlatform: Record<string, { created: number; scheduled: number; published: number }> = {};
 
         for (const r of postRows) {
-            if (DISCARDED.has(r.status)) continue;   // a turned-down post is not content this assistant produced
+            if (!COUNTED.has(r.status)) continue;   // turned down, or shown on no screen — not content the tiles claim
             const p = r.platform || 'unknown';
             if (!byPlatform[p]) byPlatform[p] = { created: 0, scheduled: 0, published: 0 };
             byPlatform[p].created += r.c;

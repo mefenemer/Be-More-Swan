@@ -28,6 +28,13 @@ import path from 'node:path';
 import {
     SCHEDULE_ACTIVE_STATUSES,
     SCHEDULE_INACTIVE_STATUSES,
+    DISCARDED_STATUSES,
+    BOOKED_STATUSES,
+    AWAITING_REVIEW_STATUSES,
+    ATTENTION_STATUSES,
+    UNSURFACED_STATUSES,
+    CREATED_STATUSES,
+    REVIEW_QUEUE_STATUS_FAMILIES,
     type PostStatus,
 } from '../src/config/post-status';
 
@@ -45,17 +52,15 @@ const assistantsJs = read('assistants.js');
 const detailHtml = read('assistant-detail.html');
 const socialDrafts = read('netlify/functions/get-social-drafts.ts');
 
-/** Pull one of the `const NAME_STATUSES = [...]` vocabulary lists back out of the handler. */
-function statusList(name: string): string[] {
-    const decl = metrics.match(new RegExp(`const ${name} = \\[([^\\]]*)\\]`))?.[1];
-    assert.ok(decl !== undefined, `${name} has been renamed or removed from get-assistant-metrics.ts`);
-    return [...decl!.matchAll(/'([a-z_]+)'/g)].map(m => m[1]);
-}
-
-const DISCARDED = statusList('DISCARDED_STATUSES');
-const BOOKED = statusList('BOOKED_STATUSES');
-const AWAITING = statusList('AWAITING_REVIEW_STATUSES');
-const ATTENTION = statusList('ATTENTION_STATUSES');
+// The vocabulary is IMPORTED now, not scraped back out of the handler with a regex. It used to be
+// declared inline in get-assistant-metrics.ts while get-social-drafts.ts kept its own, shorter
+// families for the Review Queue columns — which is precisely how the two drifted apart and the tiles
+// came to out-run the tabs beneath them. One home, both readers.
+const DISCARDED: readonly string[] = DISCARDED_STATUSES;
+const BOOKED: readonly string[] = BOOKED_STATUSES;
+const AWAITING: readonly string[] = AWAITING_REVIEW_STATUSES;
+const ATTENTION: readonly string[] = ATTENTION_STATUSES;
+const UNSURFACED: readonly string[] = UNSURFACED_STATUSES;
 
 console.log('\nThe tiles mean what they say\n');
 
@@ -83,9 +88,10 @@ check('a post parked on X quota still counts as scheduled', () => {
     assert.ok(BOOKED.includes('paused'));
 });
 
-check('the four lists are disjoint, so no post is counted in two tiles', () => {
-    const lists: Array<[string, string[]]> = [
-        ['DISCARDED', DISCARDED], ['BOOKED', BOOKED], ['AWAITING_REVIEW', AWAITING], ['ATTENTION', ATTENTION],
+check('the five lists are disjoint, so no post is counted in two tiles', () => {
+    const lists: Array<[string, readonly string[]]> = [
+        ['DISCARDED', DISCARDED], ['BOOKED', BOOKED], ['AWAITING_REVIEW', AWAITING],
+        ['ATTENTION', ATTENTION], ['UNSURFACED', UNSURFACED],
     ];
     for (let i = 0; i < lists.length; i++) {
         for (let j = i + 1; j < lists.length; j++) {
@@ -97,24 +103,38 @@ check('the four lists are disjoint, so no post is counted in two tiles', () => {
 });
 
 check('every status the app can write lands in exactly one bucket', () => {
-    // Created = everything not discarded, so a status nobody classified silently inflates it. This
-    // is the assertion that fires when a new PostStatus is added and this file is not revisited.
+    // A status nobody classified is a post that is either counted in nothing or counted in a tile
+    // with no screen behind it. This is the assertion that fires when a new PostStatus is added and
+    // this file is not revisited.
     //
-    // Three statuses are deliberately Created-only — real content, in no sub-tile:
-    //   'published' has its own tile; 'draft' is produced but uncommitted; 'missed' is the legacy
-    //   expiry (its writer, check-review-urgency, is deleted — see the calendar memo). None is
-    //   discarded: the user never turned them down, so they stay in the Created total.
-    const CREATED_ONLY = ['published', 'draft', 'missed'];
+    // 'published' is Created-only in the sense that it has its OWN tile rather than a sub-tile.
+    // 'draft' and 'missed' are UNSURFACED: real rows, shown on no screen by design (a blank composer
+    // row; the legacy expiry whose writer is gone), and therefore counted on none — including in
+    // Created, which used to sweep them up and hand the user a headline no tab could account for.
     const all = [...SCHEDULE_ACTIVE_STATUSES, ...SCHEDULE_INACTIVE_STATUSES] as readonly string[];
-    const classified = new Set([...DISCARDED, ...BOOKED, ...AWAITING, ...ATTENTION, ...CREATED_ONLY]);
+    const classified = new Set([...DISCARDED, ...BOOKED, ...AWAITING, ...ATTENTION, ...UNSURFACED, 'published']);
     for (const s of all) {
         assert.ok(classified.has(s),
             `'${s}' is in no tile bucket — decide whether it is discarded, booked, awaiting review, ` +
-            `attention, or (deliberately) counted only in Created`);
+            `attention, unsurfaced, or published`);
     }
-    for (const s of [...DISCARDED, ...BOOKED, ...AWAITING, ...ATTENTION]) {
+    for (const s of [...DISCARDED, ...BOOKED, ...AWAITING, ...ATTENTION, ...UNSURFACED]) {
         const known: readonly string[] = all;
         assert.ok(known.includes(s), `the tiles classify '${s}', which is not a PostStatus`);
+    }
+});
+
+check('Created is the union of the buckets that have a column, and nothing else', () => {
+    // The identity the user checks by eye: the Created tile == Review + Scheduled + Posted +
+    // Needs attention. It broke when Created was "everything not discarded", because that also
+    // swept in 'draft' and 'missed', which no column lists.
+    const expected = [...AWAITING, ...BOOKED, ...ATTENTION, 'published'].sort();
+    assert.deepEqual([...CREATED_STATUSES].sort(), expected,
+        'Created must be exactly the surfaced buckets — a status in it that no column serves is a ' +
+        'number the user cannot go and look at');
+    for (const s of [...DISCARDED, ...UNSURFACED]) {
+        assert.ok(!(CREATED_STATUSES as readonly string[]).includes(s),
+            `'${s}' inflates Created with rows that appear in no tab`);
     }
 });
 
@@ -123,22 +143,44 @@ check('rejected and cancelled never inflate Created', () => {
     // discarded — 16 cancelled rows were padding this tile.
     assert.ok(DISCARDED.includes('rejected') && DISCARDED.includes('cancelled'));
     assert.ok(DISCARDED.includes('admin_test'), 'dry-runs are not the user\'s content either');
-    // And the row-level breakdown loop (same handler, below the totals query) has to skip them too,
-    // or the bars contradict the tiles.
-    assert.match(metrics, /if \(DISCARDED\.has\(r\.status\)\) continue;/,
-        'the per-platform loop must skip discarded statuses the same way the totals query does');
+    // And the row-level breakdown loop (same handler, below the totals query) has to apply the same
+    // rule, or the bars contradict the tiles they break down. It filters by what Created COUNTS
+    // rather than by what it discards, so an unsurfaced 'draft' cannot pad a platform's bar either.
+    assert.match(metrics, /if \(!COUNTED\.has\(r\.status\)\) continue;/,
+        'the per-platform loop must skip anything the totals query does not count');
     // Both must read the SAME list — a second hand-written copy is how they drift apart.
-    assert.match(metrics, /const DISCARDED = new Set<string>\(DISCARDED_STATUSES\)/,
-        'the loop must derive its Set from DISCARDED_STATUSES, not re-list the statuses');
+    assert.match(metrics, /const COUNTED = new Set<string>\(CREATED_STATUSES\)/,
+        'the loop must derive its Set from CREATED_STATUSES, not re-list the statuses');
 });
 
 console.log('\nOne cross-post is one post\n');
+
+check('the vocabulary is imported, not re-declared in the handler', () => {
+    // The whole class of bug: two files answering the same question from two hand-written lists.
+    assert.match(metrics, /from '\.\.\/\.\.\/src\/config\/post-status'/);
+    assert.ok(!/const (DISCARDED|BOOKED|AWAITING_REVIEW|ATTENTION)_STATUSES = \[/.test(metrics),
+        'get-assistant-metrics.ts must read the lists from src/config/post-status.ts, not re-declare them');
+    assert.match(metrics, /status\} in \(\$\{quoted\(CREATED_STATUSES\)\}\)/,
+        "Created must select the surfaced statuses, not merely exclude the discarded ones");
+});
 
 check('the totals count distinct cross-post groups, not rows', () => {
     assert.match(metrics, /count\(distinct coalesce\(/,
         'counting rows here is what made the Scheduled tile read 49 against a Scheduled tab of 9');
     assert.match(metrics, /crosspostGroupId[\s\S]{0,60}?'id:' \|\| /,
         'a post with no group must fall back to its own id, or every ungrouped post collapses into one');
+});
+
+check('the tile and the column agree on what one card is', () => {
+    // The tile counts distinct crosspost groups REGARDLESS of status; the Review Queue used to key a
+    // card on group + status, so a cross-post half-paused by a dead connection was one post in the
+    // tile and two cards in the Scheduled column — the tab out-running the tile by one, for the same
+    // post. Both keys are now group-or-id, and the card carries per-platform state instead.
+    const socialKey = socialDrafts.match(/const key = r\.crosspostGroupId \? `[^`]*`/)?.[0] ?? '';
+    assert.ok(socialKey && !socialKey.includes('status'),
+        "get-social-drafts' page key must not split a group by status — see tests/review-queue-paging.test.ts");
+    const tileKey = metrics.match(/count\(distinct coalesce\([^)]*\)[^)]*\)/)?.[0] ?? '';
+    assert.ok(!/status/.test(tileKey), 'the tile counts groups, not group-and-status pairs');
 });
 
 check('the fallback key cannot collide with a group id', () => {
@@ -220,8 +262,88 @@ check('Archived covers cancelled as well as rejected', () => {
     // cancelled posts counted in nothing and listed nowhere.
     assert.match(assistantsJs, /archived:\s*\{ postStatus: 'archived' \}/,
         "the column must request the family, not the single 'rejected' status");
-    assert.match(socialDrafts, /archived: \['rejected', 'cancelled'\]/,
-        'get-social-drafts must expand the family, or the column returns nothing');
+    assert.deepEqual([...(REVIEW_QUEUE_STATUS_FAMILIES.archived ?? [])], ['rejected', 'cancelled'],
+        'Archived is rejected + cancelled — and NOT admin_test, which is an internal dry-run');
+});
+
+check('every status a tile counts is served by exactly one Review Queue column', () => {
+    // THE invariant. This is the mismatch the user reports as "the card totals don't match the
+    // tabs": a status counted in a tile that no column asks for is a post they can see a number for
+    // and never open. 'paused' (a dead connection) and 'publishing' were both in that hole, and
+    // 'in_review' was counted as awaiting review while the Review column asked for
+    // 'pending_approval' alone.
+    //
+    // The columns, as the client sends them (assistants.js _DETAIL_RQ_COLUMNS), expanded through the
+    // families the server applies.
+    const columnFilters = ['pending_approval', 'scheduled', 'published', 'failed'];
+    const served = new Map<string, string[]>();
+    for (const f of columnFilters) {
+        for (const st of (REVIEW_QUEUE_STATUS_FAMILIES[f] ?? [f]) as readonly string[]) {
+            served.set(st, [...(served.get(st) ?? []), f]);
+        }
+    }
+    for (const st of CREATED_STATUSES as readonly string[]) {
+        const cols = served.get(st);
+        assert.ok(cols, `'${st}' is counted in a tile but no Review Queue column lists it — that is ` +
+            `a number with no screen behind it`);
+        assert.equal(cols!.length, 1, `'${st}' is listed by ${cols!.join(' and ')} — one post, one column`);
+    }
+    // …and the client must actually be sending those filters.
+    for (const [key, filter] of [
+        ['review', 'pending_approval'], ['scheduled', 'scheduled'],
+        ['posted', 'published'], ['attention', 'failed'],
+    ] as const) {
+        assert.match(assistantsJs, new RegExp(`${key}:\\s*\\{ postStatus: '${filter}' \\}`),
+            `the ${key} column must request '${filter}'`);
+    }
+});
+
+check('the families are expanded from the shared vocabulary, not re-typed', () => {
+    assert.match(socialDrafts, /REVIEW_QUEUE_STATUS_FAMILIES/,
+        'get-social-drafts must read the families from src/config/post-status.ts');
+    assert.ok(!/const STATUS_FAMILIES: Record<string, string\[\]> = \{/.test(socialDrafts),
+        'a second hand-written family map is how the queue and the tiles drifted apart the first time');
+    assert.deepEqual([...(REVIEW_QUEUE_STATUS_FAMILIES.scheduled ?? [])], [...BOOKED],
+        "the Scheduled column must list exactly what the Scheduled tile counts");
+    assert.deepEqual([...(REVIEW_QUEUE_STATUS_FAMILIES.pending_approval ?? [])], [...AWAITING],
+        'the Review column must list exactly what the Autopilot card reports as awaiting review');
+});
+
+console.log('\nThe tiles keep up with the queue\n');
+
+check('a queue change recounts the tiles', () => {
+    // The tiles were filled once, on page open. Approving a draft moved the Scheduled tab's badge
+    // and left the tile above it saying the old number until a reload — the same contradiction as a
+    // vocabulary drift, arriving by a different route. detailRqRefresh is the hook every mutation
+    // site in the product already calls, which is why the recount hangs off it rather than off
+    // eleven separate callers.
+    assert.match(assistantsJs, /window\.detailRqRefresh = function\(\) \{[\s\S]{0,400}?window\._refreshAssistantMetrics\?\.\(\)/,
+        'detailRqRefresh must recount the Overview tiles as well as the columns');
+    assert.match(assistantsJs, /window\._refreshAssistantMetrics = function/);
+});
+
+check('the recount keeps the period the user is looking at', () => {
+    // Re-running with the 'all' default would snap a This Week / This Month selection back to All
+    // Time every time a post moved.
+    assert.match(assistantsJs, /_detailMetricsPeriod = period;/,
+        'the renderer must remember which period is on screen');
+    assert.match(assistantsJs, /_fetchAndRenderAssistantMetrics\(current, period\)/,
+        'the refresh must replay the remembered period, not the default');
+});
+
+check('the recount is debounced and re-reads the assistant at fire time', () => {
+    // One approve fans out into several refresh calls (list + badge + notification poll). And the
+    // user may have opened another assistant while the timer was pending — repainting this card
+    // with the previous assistant's totals is worse than not repainting at all.
+    assert.match(assistantsJs, /clearTimeout\(_detailMetricsRefreshTimer\)/);
+    assert.match(assistantsJs, /const current = window\._currentAssistantId;/);
+});
+
+check('a refresh may repaint zeros, so a tile cannot freeze at its last non-zero reading', () => {
+    // The "no recorded activity yet" guard hides the strip on a brand-new assistant. Applying it to
+    // a REFRESH would leave "Created 1" over an empty queue after the only post was rejected.
+    assert.match(assistantsJs, /const stripShown = !!roiStrip && !roiStrip\.classList\.contains\('hidden'\);/);
+    assert.match(assistantsJs, /if \(!d\.totalCreated && !d\.hoursSaved && !stripShown\) return;/);
 });
 
 check('the awaiting-review figure is reconciled where it already has a home', () => {

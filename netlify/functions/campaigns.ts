@@ -16,7 +16,8 @@
 //   POST { action: 'archive_link', linkId }                → stops the redirect, keeps the clicks
 //   POST { action: 'list_variants', campaignId }            → ads + the budget to echo back
 //   POST { action: 'stage_paid',   campaignId, dailyBudgetGbp, maxCostPerOutcomeGbp?, variants[],
-//                                  targeting: { locations[], jobFunctions?[], seniorities?[] } }
+//                                  targeting: { locations[], jobFunctions?[], seniorities?[],
+//                                               companySizes?[] } }
 //   POST { action: 'approve_launch', campaignId, confirmDailyBudgetGbp }   ⚠️ starts real spend
 //   POST { action: 'list_decisions', assistantId }
 //   POST { action: 'decide',      decisionId, verdict: 'approve'|'reject', reason?, note? }
@@ -725,6 +726,7 @@ export default withLambda(async (event) => {
                 locations: Array.isArray(t.locations) ? t.locations.slice(0, 20) : [],
                 jobFunctions: Array.isArray(t.jobFunctions) ? t.jobFunctions.slice(0, 20) : [],
                 seniorities: Array.isArray(t.seniorities) ? t.seniorities.slice(0, 20) : [],
+                companySizes: Array.isArray(t.companySizes) ? t.companySizes.slice(0, 20) : [],
             });
         } catch (err) {
             return json(400, { error: err instanceof Error ? err.message : 'Choose where these ads should run.' });

@@ -11,6 +11,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { displayCaption } from '../../src/utils/model-json';
 import { diagnosePostFailure } from '../../src/utils/post-failure-diagnosis';
 import { PLATFORM_FORMATS } from '../../src/config/platform-formats';
+import { REVIEW_QUEUE_STATUS_FAMILIES } from '../../src/config/post-status';
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -50,26 +51,35 @@ export default withLambda(async (event) => {
         const pageSize = paged ? Math.min(50, Math.max(1, Number(rawLimit) || 10)) : 0;
         const pageOffset = Math.max(0, Number(event.queryStringParameters?.offset) || 0);
 
-        // Two filters are FAMILIES, not statuses — the Review Queue column they back covers more
-        // than one lifecycle value, and the expansion belongs here so every caller gets it:
-        //   'scheduled' → committed work, including a post parked on X quota (paused_credits),
-        //                 which is still booked and must not vanish from the Scheduled tab.
-        //   'archived'  → rejected + cancelled. Both mean "not going out"; they differ only in who
+        // ── Three filters are FAMILIES, not statuses ────────────────────────────────────────────
+        // The column they back covers more than one lifecycle value, and the expansion lives in
+        // src/config/post-status.ts so that the Review Queue's columns and the assistant Overview's
+        // Created / Scheduled / Published tiles (get-assistant-metrics.ts) read the SAME lists:
+        //
+        //   'pending_approval' → AWAITING_REVIEW: pending_approval + in_review. score-post-confidence
+        //                 routes an amber/red caption to 'in_review', and that is a resting state
+        //                 meaning "a human must look at this" — the Review column asked for
+        //                 'pending_approval' alone, so those posts were counted as awaiting review on
+        //                 the Autopilot card and listed nowhere.
+        //   'scheduled'  → BOOKED: approved + scheduled + publishing + paused + paused_credits. This
+        //                 column read ['scheduled','paused_credits'], so a post paused because its
+        //                 connection died (refresh-social-tokens / refresh-meta-tokens /
+        //                 publish-instagram all write 'paused') or one caught mid-publish was in the
+        //                 Scheduled TILE and in no tab — the mismatch the user sees as "the card
+        //                 totals don't match the tabs".
+        //   'archived'   → rejected + cancelled. Both mean "not going out"; they differ only in who
         //                 stopped it. The column read 'rejected' alone, so cancelled posts were
         //                 reachable from nowhere in the product.
+        //
         // Anything else is an exact status match, as before.
-        const STATUS_FAMILIES: Record<string, string[]> = {
-            scheduled: ['scheduled', 'paused_credits'],
-            archived: ['rejected', 'cancelled'],
-        };
-        const family = STATUS_FAMILIES[statusFilter];
+        const family = REVIEW_QUEUE_STATUS_FAMILIES[statusFilter];
         const baseWhere = and(
             eq(scheduledPosts.organisationId, organisationId),
-            family ? inArray(scheduledPosts.status, family) : eq(scheduledPosts.status, statusFilter),
+            family ? inArray(scheduledPosts.status, family as unknown as string[]) : eq(scheduledPosts.status, statusFilter),
             ...(assistantIdFilter ? [eq(scheduledPosts.assistantId, assistantIdFilter)] : []),
         );
 
-        // Which post ids make up this page. Three narrow columns, no joins and no presigned URLs —
+        // Which post ids make up this page. Two narrow columns, no joins and no presigned URLs —
         // the expensive part of this endpoint is resolving media per row, and that is exactly what
         // paging exists to avoid doing 50 times to show 10 cards.
         let pageIds: number[] | null = null;
@@ -79,7 +89,6 @@ export default withLambda(async (event) => {
                 .select({
                     id: scheduledPosts.id,
                     crosspostGroupId: scheduledPosts.crosspostGroupId,
-                    status: scheduledPosts.status,
                 })
                 .from(scheduledPosts)
                 .where(baseWhere)
@@ -87,10 +96,19 @@ export default withLambda(async (event) => {
 
             // Same key as the browser's _rqGroupKey, so the server's idea of "one card" and the
             // client's cannot disagree about where a page ends.
+            //
+            // ⚠️ The STATUS is not part of it. It used to be, described as a no-op because "a render
+            // pass is single-status" — which stopped being true the moment three columns started
+            // requesting status FAMILIES. A dead Instagram connection pauses only the Instagram row
+            // of a cross-post (publish-instagram.ts updates by connection_id), so the Scheduled
+            // column really does return one post's rows in two states; keying on status split it
+            // into two identical-looking cards and made the column's own total disagree with the
+            // Overview tile, which has always counted one cross-post as one post. The card renders
+            // per-platform state instead (rqRenderSocialCard).
             const order: string[] = [];
             const byKey = new Map<string, number[]>();
             for (const r of keys) {
-                const key = r.crosspostGroupId ? `g:${r.crosspostGroupId}|${r.status ?? ''}` : `id:${r.id}`;
+                const key = r.crosspostGroupId ? `g:${r.crosspostGroupId}` : `id:${r.id}`;
                 if (!byKey.has(key)) { byKey.set(key, []); order.push(key); }
                 byKey.get(key)!.push(r.id);
             }

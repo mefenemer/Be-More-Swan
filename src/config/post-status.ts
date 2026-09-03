@@ -84,6 +84,80 @@ export const SCHEDULE_INACTIVE_STATUSES = [
     'admin_test',
 ] as const satisfies readonly PostStatus[];
 
+// ── Review Queue vocabulary: what the tiles count and what the columns list ──────────────────────
+//
+// ⚠️ ONE list per idea, read by BOTH ends. These lived in get-assistant-metrics.ts (the Created /
+// Scheduled / Published tiles on the assistant Overview card) while get-social-drafts.ts kept its
+// own, shorter families for the Review Queue columns — so the two answered the same question
+// differently and the screen contradicted itself:
+//
+//   • the Scheduled tile counted 'approved' | 'publishing' | 'paused' as booked, and the Scheduled
+//     column asked for ['scheduled','paused_credits'] only. A post paused because its connection
+//     died (refresh-social-tokens.ts, refresh-meta-tokens.ts, publish-instagram.ts) was therefore
+//     counted in the tile and listed in NO column — invisible in the product, and the tile above it
+//     read higher than every tab underneath.
+//   • 'in_review' (score-post-confidence.ts routes amber/red captions there) counted as awaiting
+//     review — which drives the Autopilot card's "Waiting for your review" — while the Review column
+//     asked for 'pending_approval' alone.
+//
+// The rule these encode: EVERY status counted in a tile is served by exactly one visible column.
+// Locked by tests/assistant-metric-counters.test.ts.
+
+/** Turned down or never real. Counted in no tile; 'rejected'/'cancelled' are listed under Archived. */
+export const DISCARDED_STATUSES = ['rejected', 'cancelled', 'admin_test'] as const satisfies readonly PostStatus[];
+
+/**
+ * Committed to go out and not yet out — the "Scheduled" tile and the Scheduled column.
+ * Excludes 'published' (already gone) and 'failed' (won't go without help).
+ *
+ * 'approved' is a legacy resting state — approve-post.ts commits straight to 'scheduled', which is
+ * what approval MEANS here — but it stays in the list because a row holding it is still booked work
+ * and dropping it would put those rows back in the "counted nowhere" hole this list exists to close.
+ */
+export const BOOKED_STATUSES = ['approved', 'scheduled', 'publishing', 'paused', 'paused_credits'] as const satisfies readonly PostStatus[];
+
+/** Waiting on a human — the Review column, and the Autopilot card's "Waiting for your review". */
+export const AWAITING_REVIEW_STATUSES = ['pending_approval', 'in_review'] as const satisfies readonly PostStatus[];
+
+/** Tried and stopped — the Needs attention column. */
+export const ATTENTION_STATUSES = ['failed'] as const satisfies readonly PostStatus[];
+
+/**
+ * Produced but deliberately shown on NO screen, so counted on none either.
+ *
+ * 'draft' is create-manual-post.ts's blank row: the three-pane editor edits a row, so a row has to
+ * exist before there is anything to write, and it is held out of the Review Queue precisely so an
+ * abandoned blank composer does not clutter it (see that handler's comment, and the 118 stray rows
+ * on one assistant that prompted archive-cleanup's blank sweep). 'missed' is the legacy expiry whose
+ * writer is gone. Counting either in Created put a number on screen that no tab could account for.
+ */
+export const UNSURFACED_STATUSES = ['draft', 'missed'] as const satisfies readonly PostStatus[];
+
+/**
+ * The "Created" tile: real content, reachable from a column. Deliberately the UNION of the surfaced
+ * buckets rather than "everything not discarded" — an unclassified status then reads as zero rather
+ * than silently inflating the headline figure with rows the user cannot go and look at.
+ */
+export const CREATED_STATUSES = [
+    ...AWAITING_REVIEW_STATUSES,
+    ...BOOKED_STATUSES,
+    ...ATTENTION_STATUSES,
+    'published',
+] as const satisfies readonly PostStatus[];
+
+/**
+ * Status FAMILIES the Review Queue's columns send as a single `status=` value; get-social-drafts.ts
+ * expands them. Keyed by the value the client sends, so the browser never has to know the expansion.
+ *
+ * 'archived' is rejected + cancelled and NOT the whole of DISCARDED_STATUSES: 'admin_test' is an
+ * internal dry-run, not something the user turned down, and it has no business in their Archive.
+ */
+export const REVIEW_QUEUE_STATUS_FAMILIES: Record<string, readonly PostStatus[]> = {
+    pending_approval: AWAITING_REVIEW_STATUSES,
+    scheduled: BOOKED_STATUSES,
+    archived: ['rejected', 'cancelled'],
+};
+
 const ACTIVE = new Set<string>(SCHEDULE_ACTIVE_STATUSES);
 
 /** True when the post is committed to publish — i.e. it belongs on the Content Calendar. */

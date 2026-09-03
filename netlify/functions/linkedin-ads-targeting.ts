@@ -21,7 +21,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import { PAID_ADS_FEATURE } from '../../src/config/ad-networks';
 import { assessAdsReadiness, getAdsConnection, getAdsToken } from '../../src/utils/linkedin-ads-connection';
-import { FALLBACK_GEOS, TARGETING_FACETS, searchTargeting } from '../../src/utils/ad-networks/linkedin';
+import { COMPANY_SIZES, FALLBACK_GEOS, TARGETING_FACETS, searchTargeting } from '../../src/utils/ad-networks/linkedin';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 function json(statusCode: number, body: unknown) {
@@ -46,6 +46,10 @@ export default withLambda(async (event) => {
 
     const facet = String(body.facet || 'locations');
     if (!(facet in TARGETING_FACETS)) return json(400, { error: 'Unknown targeting type.' });
+    // Company sizes are a closed, documented enum with no lookup behind them — served straight
+    // back rather than sent to a typeahead that would return nothing.
+    if (facet === 'companySizes') return json(200, { entities: COMPANY_SIZES });
+
     const query = String(body.query || '').trim().slice(0, 80);
     if (query.length < 2) return json(200, { entities: [] });
 

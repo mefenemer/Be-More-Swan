@@ -434,135 +434,6 @@
           </div>
         </div>
 
-        <!-- Lifecycle Transition Modal — US-ADM-4.1.1 -->
-        <div id="lifecycle-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
-          <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 relative">
-            <button onclick="document.getElementById('lifecycle-modal').classList.add('hidden')" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold">✕</button>
-            <h3 class="text-base font-bold text-gray-900 mb-1">Change Lifecycle State</h3>
-            <p id="lifecycle-modal-label" class="text-sm text-gray-500 mb-4"></p>
-            <div class="space-y-3">
-              <div>
-                <label class="text-xs font-bold text-gray-500 uppercase">New State</label>
-                <select id="lifecycle-new-state" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></select>
-              </div>
-              <div>
-                <label class="text-xs font-bold text-gray-500 uppercase">Changelog Note <span class="text-red-500">*</span></label>
-                <textarea id="lifecycle-note" rows="2" placeholder="Reason for this transition…" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none"></textarea>
-              </div>
-              <div id="lifecycle-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
-              <button onclick="submitLifecycleTransition()" class="w-full py-2.5 text-sm font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Apply Transition</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Version History Modal — US-ADM-4.1.1 -->
-        <div id="version-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
-          <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-6 relative max-h-[85vh] flex flex-col">
-            <button onclick="document.getElementById('version-modal').classList.add('hidden')" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold">✕</button>
-            <h3 id="version-modal-title" class="text-base font-bold text-gray-900 mb-1">Version History</h3>
-            <div class="flex gap-2 mb-4">
-              <button onclick="openNewVersionForm()" class="px-3 py-1.5 text-xs font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">+ New Version</button>
-            </div>
-            <!-- New version form (hidden by default) -->
-            <div id="new-version-form" class="hidden mb-4 p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-3">
-              <p class="text-xs font-bold text-gray-500 uppercase">New Version</p>
-              <div>
-                <label class="text-xs text-gray-500">System Prompt</label>
-                <textarea id="nv-system-prompt" rows="4" placeholder="System prompt…" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono resize-y"></textarea>
-              </div>
-              <div>
-                <label class="text-xs text-gray-500">Changelog Note <span class="text-red-500">*</span></label>
-                <input id="nv-change-note" type="text" placeholder="What changed and why…" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-              </div>
-              <div class="flex gap-2">
-                <button onclick="submitNewVersion()" class="px-4 py-1.5 text-xs font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">Save Version</button>
-                <button onclick="document.getElementById('new-version-form').classList.add('hidden')" class="px-4 py-1.5 text-xs font-bold bg-gray-100 text-gray-600 rounded-lg">Cancel</button>
-              </div>
-            </div>
-            <div id="version-history-list" class="overflow-y-auto flex-1 space-y-2"></div>
-          </div>
-        </div>
-
-        <!-- Bulk Publish Modal — US-ADM-4.1.1 -->
-        <div id="bulk-publish-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
-          <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 relative max-h-[80vh] overflow-y-auto">
-            <button onclick="document.getElementById('bulk-publish-modal').classList.add('hidden')" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold">✕</button>
-            <h3 class="text-base font-bold text-gray-900 mb-1">Bulk Publish — Beta → Live</h3>
-            <p class="text-sm text-gray-500 mb-4">Each assistant requires an individual changelog note before publishing.</p>
-            <div id="bulk-publish-list" class="space-y-3 mb-4"></div>
-            <div id="bulk-publish-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3"></div>
-            <button onclick="submitBulkPublish()" class="w-full py-2.5 text-sm font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700">🚀 Publish All to Live</button>
-          </div>
-        </div>
-
-        <!-- Billing Override Modal — US-ADM-2.1.1 -->
-        <div id="billing-override-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
-          <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 relative">
-            <button onclick="document.getElementById('billing-override-modal').classList.add('hidden')" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold">✕</button>
-            <h3 class="text-base font-bold text-gray-900 mb-1">Override Subscription</h3>
-            <p id="billing-override-target-label" class="text-sm text-gray-500 mb-4"></p>
-            <div class="space-y-3">
-              <div>
-                <label class="text-xs font-bold text-gray-500 uppercase">Action</label>
-                <select id="billing-override-action" onchange="renderBillingOverrideFields()" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
-                  <option value="comp_month">💰 Comp Month (credit MRR to balance)</option>
-                  <option value="upgrade_tier">⬆️ Upgrade Tier</option>
-                  <option value="downgrade_tier">⬇️ Downgrade Tier</option>
-                  <option value="extend_trial">📅 Extend Trial</option>
-                  <option value="pause_subscription">⏸ Pause Subscription</option>
-                </select>
-              </div>
-              <!-- Dynamic fields injected here -->
-              <div id="billing-override-dynamic-fields"></div>
-              <div>
-                <label class="text-xs font-bold text-gray-500 uppercase">Admin Note <span class="text-red-500">*</span></label>
-                <textarea id="billing-override-reason" rows="2" placeholder="Mandatory reason / note…" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none"></textarea>
-              </div>
-              <div id="billing-override-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
-              <button onclick="submitBillingOverride()" class="w-full py-2.5 text-sm font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700">Apply Override</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- AI Credits Modal — Epic 2 US4 -->
-        <div id="ai-credits-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
-          <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 relative max-h-[85vh] overflow-y-auto">
-            <button onclick="document.getElementById('ai-credits-modal').classList.add('hidden')" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold">✕</button>
-            <h3 class="text-base font-bold text-gray-900 mb-1">AI Generation Credits</h3>
-            <p id="ai-credits-target-label" class="text-sm text-gray-500 mb-4"></p>
-
-            <div class="flex items-center gap-4 mb-5 p-4 bg-pink-50 border border-pink-200 rounded-xl">
-              <div>
-                <p class="text-xs font-bold text-gray-500 uppercase">Balance</p>
-                <p id="ai-credits-balance" class="text-2xl font-extrabold text-gray-900">—</p>
-              </div>
-              <div>
-                <p class="text-xs font-bold text-gray-500 uppercase">Held</p>
-                <p id="ai-credits-held" class="text-2xl font-extrabold text-gray-400">—</p>
-              </div>
-            </div>
-
-            <div class="space-y-3">
-              <div>
-                <label class="text-xs font-bold text-gray-500 uppercase">Adjust (credits)</label>
-                <input id="ai-credits-delta" type="number" step="1" placeholder="e.g. 50 to grant, -10 to deduct"
-                  class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
-              </div>
-              <div>
-                <label class="text-xs font-bold text-gray-500 uppercase">Admin Note <span class="text-red-500">*</span></label>
-                <textarea id="ai-credits-reason" rows="2" placeholder="Mandatory reason / note…" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none"></textarea>
-              </div>
-              <div id="ai-credits-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
-              <button onclick="submitAiCredits()" class="w-full py-2.5 text-sm font-bold bg-pink-600 text-white rounded-lg hover:bg-pink-700">Apply Adjustment</button>
-            </div>
-
-            <div class="mt-5">
-              <p class="text-xs font-bold text-gray-400 uppercase mb-2">Recent activity</p>
-              <div id="ai-credits-ledger" class="text-sm text-gray-500">No activity yet.</div>
-            </div>
-          </div>
-        </div>
-
         <!-- State diff modal -->
         <div id="audit-diff-modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
           <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-6 relative max-h-[80vh] overflow-y-auto">
@@ -1502,20 +1373,6 @@
           </div>
         </div>
         <p id="swan-queue-truncated" class="hidden text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3"></p>
-
-        <!-- The reading desk. A pending piece is not public — by design — so this slide-over is the
-             only place an editor can read one. Wider than the issue panel (max-w-3xl vs max-w-lg)
-             because judging an article on a 32rem column is judging a different article. -->
-        <div id="swan-read-panel" class="hidden fixed inset-0 z-40">
-          <div class="absolute inset-0 bg-black/40" onclick="closeSwanRead()"></div>
-          <div class="absolute right-0 top-0 bottom-0 w-full max-w-3xl bg-white shadow-2xl overflow-y-auto">
-            <div class="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between gap-3 z-10">
-              <h2 id="swan-read-title" class="font-bold text-gray-900 truncate">Reading</h2>
-              <button onclick="closeSwanRead()" class="text-gray-400 hover:text-gray-700 text-2xl shrink-0" aria-label="Close">&times;</button>
-            </div>
-            <div id="swan-read-body" class="p-6 space-y-5"></div>
-          </div>
-        </div>
       </section>
 
       <section id="view-swan-front-page" class="admin-view hidden space-y-5 overflow-y-auto" style="max-height:calc(100vh - 130px)">
@@ -2020,6 +1877,158 @@
 
     </div><!-- /p-8 -->
   </main>
+</div>
+
+<!-- ── Cross-view modals ───────────────────────────────────────────────
+     These five dialogs are opened from the Users and Catalogue views, so they must NOT
+     live inside an `.admin-view` section. `adminNav()` puts `hidden` (display:none) on
+     every section but the active one, and a display:none ancestor hides its subtree no
+     matter what — so `classList.remove('hidden')` on the modal itself did nothing and
+     the buttons read as dead. They sat inside #view-audit-log until 2026-09-03. Keep any
+     dialog reachable from more than one view at body level. ──────────────────────── -->
+<!-- Lifecycle Transition Modal — US-ADM-4.1.1 -->
+<div id="lifecycle-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 relative">
+    <button onclick="document.getElementById('lifecycle-modal').classList.add('hidden')" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold">✕</button>
+    <h3 class="text-base font-bold text-gray-900 mb-1">Change Lifecycle State</h3>
+    <p id="lifecycle-modal-label" class="text-sm text-gray-500 mb-4"></p>
+    <div class="space-y-3">
+      <div>
+        <label class="text-xs font-bold text-gray-500 uppercase">New State</label>
+        <select id="lifecycle-new-state" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></select>
+      </div>
+      <div>
+        <label class="text-xs font-bold text-gray-500 uppercase">Changelog Note <span class="text-red-500">*</span></label>
+        <textarea id="lifecycle-note" rows="2" placeholder="Reason for this transition…" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none"></textarea>
+      </div>
+      <div id="lifecycle-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
+      <button onclick="submitLifecycleTransition()" class="w-full py-2.5 text-sm font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Apply Transition</button>
+    </div>
+  </div>
+</div>
+
+<!-- Version History Modal — US-ADM-4.1.1 -->
+<div id="version-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-6 relative max-h-[85vh] flex flex-col">
+    <button onclick="document.getElementById('version-modal').classList.add('hidden')" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold">✕</button>
+    <h3 id="version-modal-title" class="text-base font-bold text-gray-900 mb-1">Version History</h3>
+    <div class="flex gap-2 mb-4">
+      <button onclick="openNewVersionForm()" class="px-3 py-1.5 text-xs font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">+ New Version</button>
+    </div>
+    <!-- New version form (hidden by default) -->
+    <div id="new-version-form" class="hidden mb-4 p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-3">
+      <p class="text-xs font-bold text-gray-500 uppercase">New Version</p>
+      <div>
+        <label class="text-xs text-gray-500">System Prompt</label>
+        <textarea id="nv-system-prompt" rows="4" placeholder="System prompt…" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono resize-y"></textarea>
+      </div>
+      <div>
+        <label class="text-xs text-gray-500">Changelog Note <span class="text-red-500">*</span></label>
+        <input id="nv-change-note" type="text" placeholder="What changed and why…" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+      </div>
+      <div class="flex gap-2">
+        <button onclick="submitNewVersion()" class="px-4 py-1.5 text-xs font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">Save Version</button>
+        <button onclick="document.getElementById('new-version-form').classList.add('hidden')" class="px-4 py-1.5 text-xs font-bold bg-gray-100 text-gray-600 rounded-lg">Cancel</button>
+      </div>
+    </div>
+    <div id="version-history-list" class="overflow-y-auto flex-1 space-y-2"></div>
+  </div>
+</div>
+
+<!-- Bulk Publish Modal — US-ADM-4.1.1 -->
+<div id="bulk-publish-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 relative max-h-[80vh] overflow-y-auto">
+    <button onclick="document.getElementById('bulk-publish-modal').classList.add('hidden')" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold">✕</button>
+    <h3 class="text-base font-bold text-gray-900 mb-1">Bulk Publish — Beta → Live</h3>
+    <p class="text-sm text-gray-500 mb-4">Each assistant requires an individual changelog note before publishing.</p>
+    <div id="bulk-publish-list" class="space-y-3 mb-4"></div>
+    <div id="bulk-publish-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3"></div>
+    <button onclick="submitBulkPublish()" class="w-full py-2.5 text-sm font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700">🚀 Publish All to Live</button>
+  </div>
+</div>
+
+<!-- Billing Override Modal — US-ADM-2.1.1 -->
+<div id="billing-override-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 relative">
+    <button onclick="document.getElementById('billing-override-modal').classList.add('hidden')" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold">✕</button>
+    <h3 class="text-base font-bold text-gray-900 mb-1">Override Subscription</h3>
+    <p id="billing-override-target-label" class="text-sm text-gray-500 mb-4"></p>
+    <div class="space-y-3">
+      <div>
+        <label class="text-xs font-bold text-gray-500 uppercase">Action</label>
+        <select id="billing-override-action" onchange="renderBillingOverrideFields()" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+          <option value="comp_month">💰 Comp Month (credit MRR to balance)</option>
+          <option value="upgrade_tier">⬆️ Upgrade Tier</option>
+          <option value="downgrade_tier">⬇️ Downgrade Tier</option>
+          <option value="extend_trial">📅 Extend Trial</option>
+          <option value="pause_subscription">⏸ Pause Subscription</option>
+        </select>
+      </div>
+      <!-- Dynamic fields injected here -->
+      <div id="billing-override-dynamic-fields"></div>
+      <div>
+        <label class="text-xs font-bold text-gray-500 uppercase">Admin Note <span class="text-red-500">*</span></label>
+        <textarea id="billing-override-reason" rows="2" placeholder="Mandatory reason / note…" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none"></textarea>
+      </div>
+      <div id="billing-override-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
+      <button onclick="submitBillingOverride()" class="w-full py-2.5 text-sm font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700">Apply Override</button>
+    </div>
+  </div>
+</div>
+
+<!-- AI Credits Modal — Epic 2 US4 -->
+<div id="ai-credits-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 relative max-h-[85vh] overflow-y-auto">
+    <button onclick="document.getElementById('ai-credits-modal').classList.add('hidden')" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold">✕</button>
+    <h3 class="text-base font-bold text-gray-900 mb-1">AI Generation Credits</h3>
+    <p id="ai-credits-target-label" class="text-sm text-gray-500 mb-4"></p>
+
+    <div class="flex items-center gap-4 mb-5 p-4 bg-pink-50 border border-pink-200 rounded-xl">
+      <div>
+        <p class="text-xs font-bold text-gray-500 uppercase">Balance</p>
+        <p id="ai-credits-balance" class="text-2xl font-extrabold text-gray-900">—</p>
+      </div>
+      <div>
+        <p class="text-xs font-bold text-gray-500 uppercase">Held</p>
+        <p id="ai-credits-held" class="text-2xl font-extrabold text-gray-400">—</p>
+      </div>
+    </div>
+
+    <div class="space-y-3">
+      <div>
+        <label class="text-xs font-bold text-gray-500 uppercase">Adjust (credits)</label>
+        <input id="ai-credits-delta" type="number" step="1" placeholder="e.g. 50 to grant, -10 to deduct"
+          class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+      </div>
+      <div>
+        <label class="text-xs font-bold text-gray-500 uppercase">Admin Note <span class="text-red-500">*</span></label>
+        <textarea id="ai-credits-reason" rows="2" placeholder="Mandatory reason / note…" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none"></textarea>
+      </div>
+      <div id="ai-credits-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
+      <button onclick="submitAiCredits()" class="w-full py-2.5 text-sm font-bold bg-pink-600 text-white rounded-lg hover:bg-pink-700">Apply Adjustment</button>
+    </div>
+
+    <div class="mt-5">
+      <p class="text-xs font-bold text-gray-400 uppercase mb-2">Recent activity</p>
+      <div id="ai-credits-ledger" class="text-sm text-gray-500">No activity yet.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Reading desk — same rule: the Front Page view opens this too, so it cannot live inside
+     #view-swan-queue. -->
+<!-- The reading desk. A pending piece is not public — by design — so this slide-over is the
+     only place an editor can read one. Wider than the issue panel (max-w-3xl vs max-w-lg)
+     because judging an article on a 32rem column is judging a different article. -->
+<div id="swan-read-panel" class="hidden fixed inset-0 z-40">
+  <div class="absolute inset-0 bg-black/40" onclick="closeSwanRead()"></div>
+  <div class="absolute right-0 top-0 bottom-0 w-full max-w-3xl bg-white shadow-2xl overflow-y-auto">
+    <div class="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between gap-3 z-10">
+      <h2 id="swan-read-title" class="font-bold text-gray-900 truncate">Reading</h2>
+      <button onclick="closeSwanRead()" class="text-gray-400 hover:text-gray-700 text-2xl shrink-0" aria-label="Close">&times;</button>
+    </div>
+    <div id="swan-read-body" class="p-6 space-y-5"></div>
+  </div>
 </div>
 
 <!-- ── US-ADM-1.6.1: Cascade Delete Bottom Sheet ──────────────────────── -->

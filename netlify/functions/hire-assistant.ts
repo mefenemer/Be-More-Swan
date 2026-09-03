@@ -2,7 +2,7 @@
 // POST { roleKey: string } → { assistantId, name, roleKey, alreadyHired? }
 //
 // Creates the org's aiAssistants instance for a catalogue role WITHOUT the Social Media
-// Manager blueprint flow (onboarding.ts / create-checkout-intent.ts): schema-driven roles
+// Manager blueprint flow (onboarding.ts): schema-driven roles
 // (see src/config/assistant-onboarding-schemas.js) capture their configuration AFTER hire
 // via AssistantOnboardingShell → update-assistant-context. The row is inserted with
 // provisioningStatus 'complete' + isActive=true, which the lifecycle trigger

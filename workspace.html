@@ -5430,7 +5430,16 @@ function _rqSetAttentionBadge(count) {
 // Column = a lifecycle stage. postStatus filters scheduled_posts.
 // Kept in step with _DETAIL_RQ_COLUMNS in assistants.js — the same queue, scoped to one assistant
 // there and org-wide here, so a post must not be reachable in one and invisible in the other.
-// 'scheduled' and 'archived' are status FAMILIES expanded server-side (get-social-drafts.ts).
+// 'pending_approval', 'scheduled' and 'archived' are status FAMILIES expanded server-side from
+// src/config/post-status.ts (get-social-drafts.ts) — the same lists the assistant Overview's
+// Created / Scheduled / Published tiles count, so the two can no longer disagree.
+//
+// ⚠️ `approved` survives here for BLOG posts (RQ_BLOG_STATUSES.approved), which do rest in that
+// state. A SOCIAL post never does — approve-post.ts commits straight to 'scheduled', because that
+// is what approval means here — which is why the assistant-detail copy of these columns hides it.
+// It is inside the 'scheduled' family too, so a legacy row holding it is listed twice rather than
+// not at all; that is the deliberate direction, since "counted in the tile, listed nowhere" is the
+// bug this vocabulary exists to prevent.
 const RQ_COLUMNS = {
     review:    { label: 'Review',    postStatus: 'pending_approval' },
     approved:  { label: 'Approved',  postStatus: 'approved' },
@@ -5728,41 +5737,91 @@ function rqOriginPill(draft) {
     }
 }
 
+// ── One post's state, and what to do when its platforms disagree ─────────────────────────────────
+// Hoisted out of rqRenderSocialCard because a card now describes a GROUP: since _rqGroupKey stopped
+// splitting on status, a cross-post whose Instagram row is paused and whose LinkedIn row is still
+// scheduled is one card, and both facts have to reach the screen.
+const RQ_STATE_CHIP = {
+    pending_approval: { cls: 'bg-amber-50 border-amber-200 text-amber-700',       label: 'Needs review' },
+    draft:            { cls: 'bg-amber-50 border-amber-200 text-amber-700',       label: 'Needs review' },
+    in_review:        { cls: 'bg-amber-50 border-amber-200 text-amber-700',       label: 'Needs review' },
+    approved:         { cls: 'bg-emerald-50 border-emerald-200 text-emerald-700', label: 'Approved' },
+    scheduled:        { cls: 'bg-blue-50 border-blue-200 text-blue-700',          label: 'Scheduled' },
+    // Both were unreachable while the Scheduled column asked for ['scheduled','paused_credits'] —
+    // a post in either sat in the Scheduled TILE and in no tab. They have entries now for the same
+    // reason 'failed' got one: without one the chip renders empty and the card states nothing.
+    publishing:       { cls: 'bg-blue-50 border-blue-200 text-blue-700',          label: 'Publishing…' },
+    paused:           { cls: 'bg-amber-50 border-amber-200 text-amber-700',       label: 'Paused · reconnect' },
+    paused_credits:   { cls: 'bg-amber-50 border-amber-200 text-amber-700',       label: 'Paused · X credits' },
+    published:        { cls: 'bg-emerald-50 border-emerald-200 text-emerald-700', label: 'Posted' },
+    // Alongside the 'Needs attention' and widened 'Archived' columns. Without an entry the chip
+    // renders empty, so a failed post would show a card with no state on it at all.
+    failed:           { cls: 'bg-red-50 border-red-200 text-red-700',             label: 'Failed to publish' },
+    cancelled:        { cls: 'bg-gray-100 border-gray-200 text-gray-500',         label: 'Cancelled' },
+    rejected:         { cls: 'bg-gray-100 border-gray-200 text-gray-500',         label: 'Archived' },
+};
+
+/**
+ * Which sibling's state the card leads with, most-needing-the-user first.
+ *
+ * Same principle the render-state override has always used: one sibling stuck rendering holds up
+ * nothing else but is still the thing to say out loud. A half-paused post must not lead with
+ * "Scheduled" — the whole reason it is one card is that the trouble would otherwise hide behind an
+ * identical-looking sibling.
+ */
+const RQ_STATE_PRIORITY = [
+    'failed', 'paused', 'paused_credits', 'publishing', 'missed',
+    'pending_approval', 'in_review', 'draft',
+    'approved', 'scheduled', 'published', 'rejected', 'cancelled',
+];
+
+/** The chip for ONE post row. `rejected` carries its own deletion countdown, so it is per-post. */
+function _rqStateChip(post) {
+    const base = RQ_STATE_CHIP[post?.status];
+    if (!base) return { cls: 'bg-gray-100 border-gray-200 text-gray-500', label: post?.status || '' };
+    if (post.status === 'rejected' && post.daysRemaining != null) {
+        return { ...base, label: `Archived · ${post.daysRemaining}d left` };
+    }
+    return base;
+}
+
+/** The sibling whose state the card leads with. Ties keep the platform order the group arrived in. */
+function _rqHeadlinePost(group) {
+    const rank = (p) => {
+        const i = RQ_STATE_PRIORITY.indexOf(p?.status);
+        return i === -1 ? RQ_STATE_PRIORITY.length : i;
+    };
+    return group.reduce((best, p) => (rank(p) < rank(best) ? p : best), group[0]);
+}
+
 // A clean, clickable summary row. The full per-platform mock-up + approve/amend/request-changes/reject
 // actions live in openPostReview() so the list itself stays scannable (the old cramped inline-button
 // card was the source of the "confusing layout" feedback).
 function rqRenderSocialCard(draft) {
     // `draft` is a group representative from rqGroupSocialDrafts (falls back to itself as a lone group).
     const group = draft._group || [draft];
-    const platforms = draft._platforms || [draft.platform];
     const multi = group.length > 1;
     rqCachePost(draft);
     const ago = rqTimeAgo(draft.generatedAt || draft.rejectedAt);
     const origin = rqOriginPill(draft);
+    // The sibling the card speaks for. `draft` stays the REPRESENTATIVE (chosen for its thumbnail,
+    // and the id the click opens); this is the one whose STATE the card reports, which is a
+    // different question the moment a group's platforms disagree.
+    const headline = _rqHeadlinePost(group);
+    // Do the platforms disagree in a way the user could SEE? Compared on the rendered label, not the
+    // raw status, on purpose: 'pending_approval' and 'in_review' both read "Needs review", so
+    // annotating that group per-platform would be noise about a distinction it does not show.
+    const mixedState = new Set(group.map(g => _rqStateChip(g).label)).size > 1;
     // Drives the struck-through, de-emphasised treatment for work that is not going out. Covers
     // 'cancelled' as well as 'rejected' now that the Archived column shows both — keying on
     // 'rejected' alone left a cancelled post styled like a live one.
-    const isArchived = draft.status === 'rejected' || draft.status === 'cancelled';
+    const isArchived = headline.status === 'rejected' || headline.status === 'cancelled';
     const isVideo = _rqMediaIsVideo(draft);
     const thumb = draft.thumbnailUrl
         ? (isVideo
             ? `<video src="${draft.thumbnailUrl}" muted class="w-16 h-16 rounded-lg object-cover bg-black shrink-0"></video>`
             : `<img src="${draft.thumbnailUrl}" alt="" class="w-16 h-16 rounded-lg object-cover shrink-0">`)
         : `<div class="w-16 h-16 rounded-lg bg-gray-100 flex items-center justify-center text-gray-300 text-[10px] shrink-0">no media</div>`;
-    const chipMap = {
-        pending_approval: { cls: 'bg-amber-50 border-amber-200 text-amber-700',       label: 'Needs review' },
-        draft:            { cls: 'bg-amber-50 border-amber-200 text-amber-700',       label: 'Needs review' },
-        in_review:        { cls: 'bg-amber-50 border-amber-200 text-amber-700',       label: 'Needs review' },
-        approved:         { cls: 'bg-emerald-50 border-emerald-200 text-emerald-700', label: 'Approved' },
-        scheduled:        { cls: 'bg-blue-50 border-blue-200 text-blue-700',          label: 'Scheduled' },
-        paused_credits:   { cls: 'bg-amber-50 border-amber-200 text-amber-700',       label: 'Paused · X credits' },
-        published:        { cls: 'bg-emerald-50 border-emerald-200 text-emerald-700', label: 'Posted' },
-        // Both new, alongside the 'Needs attention' and widened 'Archived' columns. Without an entry
-        // the chip renders empty, so a failed post would show a card with no state on it at all.
-        failed:           { cls: 'bg-red-50 border-red-200 text-red-700',             label: 'Failed to publish' },
-        cancelled:        { cls: 'bg-gray-100 border-gray-200 text-gray-500',         label: 'Cancelled' },
-        rejected:         { cls: 'bg-gray-100 border-gray-200 text-gray-500',         label: `Archived${draft.daysRemaining != null ? ` · ${draft.daysRemaining}d left` : ''}` },
-    };
     // A pending/rendering/failed video render OVERRIDES the status chip. The post's own status still
     // reads 'scheduled', but every publisher skips it while render_status is non-terminal — so the
     // plain "Scheduled" chip is an outright lie: it promises a post that cannot go out. On 'failed'
@@ -5775,26 +5834,34 @@ function rqRenderSocialCard(draft) {
         rendering: { cls: 'bg-violet-50 border-violet-200 text-violet-700', label: 'Rendering text…' },
         failed:    { cls: 'bg-red-50 border-red-200 text-red-700',          label: 'Render failed' },
     };
-    const chip = RENDER_CHIP[renderState]
-        || chipMap[draft.status]
-        || { cls: 'bg-gray-100 border-gray-200 text-gray-500', label: draft.status || '' };
+    const chip = RENDER_CHIP[renderState] || _rqStateChip(headline);
     const statusChip = `<span class="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border ${chip.cls}">${_rqEsc(chip.label)}</span>`;
     // Title: single platform reads "Instagram post"; a group reads "Post · N platforms" with a chip
     // per platform so the reviewer sees the reach at a glance without opening it.
     const title = multi
         ? `Post <span class="text-gray-400 font-medium">· ${group.length} platforms</span>`
         : `${_rqEsc(rqPlatformLabel(draft.platform))} post`;
+    // Platform chips. They normally just name the reach; when the platforms are in different states
+    // each chip carries its OWN, because the headline pill above can only say one thing and the
+    // point of collapsing these into a single card is that nothing hides behind a sibling. Without
+    // this, "Paused · reconnect" over a three-platform card would read as all three being stuck.
     const chips = multi
-        ? `<div class="flex flex-wrap items-center gap-1 mt-1">${platforms.map(p =>
-              `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">${_rqEsc(rqPlatformLabel(p))}</span>`).join('')}</div>`
+        ? `<div class="flex flex-wrap items-center gap-1 mt-1">${group.map(g => {
+              const label = _rqEsc(rqPlatformLabel(g.platform));
+              if (!mixedState) return `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">${label}</span>`;
+              const st = _rqStateChip(g);
+              return `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${st.cls}">${label} · ${_rqEsc(st.label)}</span>`;
+          }).join('')}</div>`
         : '';
     const anyMediaMissing = group.some(g => g.mediaMissing);
     // Why it failed, on the card. "Failed to publish" alone made the Needs-attention column a list
     // of identical red chips: the user had to open every one to find out which was a dead connection
     // and which was a rejected picture. One line of the diagnosis (get-social-drafts → the `failure`
     // object) is enough to triage the column without opening anything.
-    const failureLine = draft.status === 'failed' && (draft.failure?.title || draft.failureMessage)
-        ? `<p class="text-xs text-red-600 truncate mt-0.5">${_rqEsc(draft.failure?.title || draft.failureMessage)}</p>`
+    // Read off the HEADLINE, not the representative: in a mixed group the failed sibling is the one
+    // with something to explain, and the representative was picked for its thumbnail.
+    const failureLine = headline.status === 'failed' && (headline.failure?.title || headline.failureMessage)
+        ? `<p class="text-xs text-red-600 truncate mt-0.5">${_rqEsc(headline.failure?.title || headline.failureMessage)}</p>`
         : '';
     return `<div onclick="openPostReview(${draft.id})" class="py-3.5 flex items-center gap-3 cursor-pointer hover:bg-gray-50 -mx-4 px-4 transition" data-post-id="${draft.id}">
       ${thumb}
@@ -5914,9 +5981,19 @@ function rqCachePost(p) { if (p && p.id != null) _rqPostCache[p.id] = p; return 
 const _RQ_PLATFORM_ORDER = window.PlatformConstants.all.map(p => p.id);
 function _rqPlatformRank(p) { const i = _RQ_PLATFORM_ORDER.indexOf(p); return i < 0 ? 99 : i; }
 function _rqGroupKey(p) {
-    // Status keeps siblings in the same lifecycle column together (a render pass is single-status, so
-    // this is a no-op in practice, but it guards against a mixed list).
-    if (p.crosspostGroupId) return `g:${p.crosspostGroupId}|${p.status ?? ''}`;
+    // ⚠️ The STATUS is deliberately NOT part of this key, and putting it back splits one post into
+    // several cards. It used to be there, described as a no-op because "a render pass is
+    // single-status" — which stopped being true the moment three columns started requesting status
+    // FAMILIES (src/config/post-status.ts → get-social-drafts.ts). A dead Instagram connection
+    // pauses only the Instagram row of a cross-post (publish-instagram.ts updates by
+    // connection_id), so the Scheduled column really does hold one post's rows in two states.
+    // Keying on status rendered that as two identical-looking cards and made the column's own total
+    // disagree with the Overview tile, which has always counted one cross-post as one post.
+    //
+    // The mixed state is not lost — rqRenderSocialCard shows it PER PLATFORM on the single card and
+    // takes its headline chip from the sibling that most needs the user. Must stay identical to the
+    // server's page key in get-social-drafts.ts, or the page boundary and the cards drift apart.
+    if (p.crosspostGroupId) return `g:${p.crosspostGroupId}`;
     return `id:${p.id}`;
 }
 

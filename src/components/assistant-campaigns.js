@@ -561,6 +561,64 @@
     return '';
   }
 
+  /**
+   * The four things a user can narrow an audience by.
+   *
+   * ⚠️ NO JOB-TITLE PICKER, and that is not an omission. LinkedIn documents that job functions and
+   * seniorities "may not be AND'ed with any include clauses targeting Job Titles" — and this form
+   * ANDs every facet together, so offering titles alongside would make most combinations invalid
+   * and the rejection would arrive from LinkedIn as an opaque 400 at staging time. See
+   * INCOMPATIBLE_WITH_FUNCTION_OR_SENIORITY in src/utils/ad-networks/linkedin.ts.
+   */
+  const TARGET_FACETS = [
+    {
+      key: 'locations', label: 'Where should these ads run?', placeholder: 'Search a country or city…',
+      // The only required one — LinkedIn refuses a campaign without it.
+      required: true, search: true,
+    },
+    { key: 'jobFunctions', label: 'Job function (optional)', placeholder: 'Search a job function…', required: false, search: true },
+    { key: 'seniorities', label: 'Seniority (optional)', placeholder: 'Search a seniority…', required: false, search: true },
+    // A closed documented enum, so it lists rather than searches.
+    { key: 'companySizes', label: 'Company size (optional)', placeholder: '', required: false, search: false },
+  ];
+
+  function facetPicker(campaignId, f) {
+    const chosen = ((state.targeting[campaignId] || {})[f.key]) || [];
+    const control = f.search
+      ? `<div class="flex flex-wrap items-center gap-2 mt-1">
+           <input type="text" placeholder="${esc(f.placeholder)}" data-cmp-facet-q="${esc(String(campaignId))}|${esc(f.key)}"
+             class="flex-1 min-w-0 px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
+           <button type="button" data-cmp-facet-search="${esc(String(campaignId))}|${esc(f.key)}"
+             class="px-3 py-1.5 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs font-bold rounded-lg transition">
+             Search
+           </button>
+         </div>`
+      : `<button type="button" data-cmp-facet-search="${esc(String(campaignId))}|${esc(f.key)}"
+           class="mt-1 px-3 py-1.5 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs font-bold rounded-lg transition">
+           Choose company sizes
+         </button>`;
+
+    return `
+      <div class="mb-3">
+        <label class="text-xs font-bold text-gray-600">${esc(f.label)}</label>
+        ${control}
+        <div class="mt-2" data-cmp-facet-results="${esc(String(campaignId))}|${esc(f.key)}"></div>
+        ${chosen.length ? `
+          <div class="flex flex-wrap gap-2 mt-2">
+            ${chosen.map((g) => `
+              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border bg-emerald-50 text-emerald-700 border-emerald-200">
+                ${esc(g.name)}
+                <button type="button" data-cmp-facet-remove="${esc(String(campaignId))}|${esc(f.key)}|${esc(g.urn)}" class="font-bold">&times;</button>
+              </span>`).join('')}
+          </div>`
+          // ⚠️ Only the required facet nags. Saying "optional" and then warning about it being
+          // empty would be the form contradicting itself.
+          : (f.required
+            ? '<p class="text-[11px] text-gray-400 mt-2">LinkedIn will not run an advert without at least one location.</p>'
+            : '')}
+      </div>`;
+  }
+
   /** One staged or live ad. */
   function variantRow(v) {
     const chip = v.status === 'active'
@@ -631,7 +689,6 @@
     }
 
     // Not staged yet: the staging form.
-    const chosen = (state.targeting[c.id] && state.targeting[c.id].locations) || [];
     return `
       <div class="mt-3 pt-3 border-t border-gray-100" data-cmp-paid="${esc(String(c.id))}">
         <p class="text-xs text-gray-500 leading-relaxed mb-3">
@@ -653,29 +710,7 @@
           falls well below its own average. We do not guess what a result is worth to you.
         </p>
 
-        <div class="mb-3">
-          <label class="text-xs font-bold text-gray-600">Where should these ads run?</label>
-          <div class="flex flex-wrap items-center gap-2 mt-1">
-            <input type="text" placeholder="Search a country or city…" data-cmp-geo-q="${esc(String(c.id))}"
-              class="flex-1 min-w-0 px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
-            <button type="button" data-cmp-geo-search="${esc(String(c.id))}"
-              class="px-3 py-1.5 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs font-bold rounded-lg transition">
-              Search
-            </button>
-          </div>
-          <div class="mt-2" data-cmp-geo-results="${esc(String(c.id))}"></div>
-          ${chosen.length ? `
-            <div class="flex flex-wrap gap-2 mt-2">
-              ${chosen.map((g) => `
-                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border bg-emerald-50 text-emerald-700 border-emerald-200">
-                  ${esc(g.name)}
-                  <button type="button" data-cmp-geo-remove="${esc(String(c.id))}|${esc(g.urn)}" class="font-bold">&times;</button>
-                </span>`).join('')}
-            </div>`
-            // ⚠️ Said out loud, because the server refuses without one and an unexplained 400 at
-            // the end of a filled-in form is a worse experience than a sentence here.
-            : '<p class="text-[11px] text-gray-400 mt-2">LinkedIn will not run an advert without at least one location.</p>'}
-        </div>
+        ${TARGET_FACETS.map((f) => facetPicker(c.id, f)).join('')}
 
         <div class="space-y-2">
           ${[0, 1, 2].map((i) => `
@@ -1057,7 +1092,9 @@
 
       if (!firstUrl) { sayPaid(id, 'Where should the first ad send people?', 'error'); return; }
       if (variants.length === 0) { sayPaid(id, 'Write at least one ad — a headline and body text.', 'error'); return; }
-      const locations = ((state.targeting[id] || {}).locations || []).map((g) => g.urn);
+      const picked = state.targeting[id] || {};
+      const urns = (k) => (picked[k] || []).map((g) => g.urn);
+      const locations = urns('locations');
       if (locations.length === 0) { sayPaid(id, 'Choose at least one location — LinkedIn will not run an advert without one.', 'error'); return; }
 
       stageBtn.disabled = true;
@@ -1070,7 +1107,12 @@
           // Blank means NO ceiling — passed as undefined so the server stores null rather than 0.
           // Zero would pause every ad on its first conversion.
           maxCostPerOutcomeGbp: ceilingRaw === '' ? undefined : Number(ceilingRaw),
-          targeting: { locations },
+          targeting: {
+            locations,
+            jobFunctions: urns('jobFunctions'),
+            seniorities: urns('seniorities'),
+            companySizes: urns('companySizes'),
+          },
           variants,
         });
         window.showToast?.(res.message || 'Staged and paused.', 'success');
@@ -1151,10 +1193,10 @@
   // ── Ad account + targeting pickers ─────────────────────────────────────────
   document.addEventListener('click', async (e) => {
     const saveAcc = e.target.closest('[data-cmp-account-save]');
-    const geoBtn = e.target.closest('[data-cmp-geo-search]');
-    const geoPick = e.target.closest('[data-cmp-geo-pick]');
-    const geoRm = e.target.closest('[data-cmp-geo-remove]');
-    if (!saveAcc && !geoBtn && !geoPick && !geoRm) return;
+    const facetBtn = e.target.closest('[data-cmp-facet-search]');
+    const facetPick = e.target.closest('[data-cmp-facet-pick]');
+    const facetRm = e.target.closest('[data-cmp-facet-remove]');
+    if (!saveAcc && !facetBtn && !facetPick && !facetRm) return;
 
     if (saveAcc) {
       const sel = document.querySelector('[data-cmp-account-select]');
@@ -1175,34 +1217,46 @@
       return;
     }
 
-    if (geoRm) {
-      const [cid, urn] = geoRm.dataset.cmpGeoRemove.split('|');
+    if (facetRm) {
+      const [cid, key, urn] = facetRm.dataset.cmpFacetRemove.split('|');
       const t = state.targeting[cid];
-      if (t) t.locations = (t.locations || []).filter((g) => g.urn !== urn);
+      if (t && t[key]) t[key] = t[key].filter((g) => g.urn !== urn);
       if (state.rendered) render();
       return;
     }
 
-    if (geoPick) {
-      const [cid, urn, ...nameParts] = geoPick.dataset.cmpGeoPick.split('|');
-      const t = state.targeting[cid] || (state.targeting[cid] = { locations: [] });
-      // De-duped: picking the same place twice would send LinkedIn a repeated URN and read, in the
+    if (facetPick) {
+      // ⚠️ Split with a LIMIT on the first three fields only — a place name can legitimately
+      // contain the delimiter ("Washington, D.C. | United States" does not, but user-facing names
+      // are LinkedIn's to choose). The name is whatever remains, rejoined.
+      const parts = facetPick.dataset.cmpFacetPick.split('|');
+      const [cid, key, urn] = parts;
+      const name = parts.slice(3).join('|');
+      const t = state.targeting[cid] || (state.targeting[cid] = {});
+      const list = t[key] || (t[key] = []);
+      // De-duped: picking the same value twice would send LinkedIn a repeated URN and read, in the
       // chip list, as two different targets.
-      if (!t.locations.some((g) => g.urn === urn)) t.locations.push({ urn, name: nameParts.join('|') });
+      if (!list.some((g) => g.urn === urn)) list.push({ urn, name });
       if (state.rendered) render();
       return;
     }
 
-    const id = Number(geoBtn.dataset.cmpGeoSearch);
-    const q = (document.querySelector(`[data-cmp-geo-q="${id}"]`)?.value || '').trim();
-    const box = document.querySelector(`[data-cmp-geo-results="${id}"]`);
+    const [cid, key] = facetBtn.dataset.cmpFacetSearch.split('|');
+    const spec = TARGET_FACETS.find((f) => f.key === key);
+    const q = spec && spec.search
+      ? (document.querySelector(`[data-cmp-facet-q="${cid}|${key}"]`)?.value || '').trim()
+      : '';
+    const box = document.querySelector(`[data-cmp-facet-results="${cid}|${key}"]`);
     if (!box) return;
-    if (q.length < 2) { box.innerHTML = '<p class="text-[11px] text-gray-400">Type at least two letters.</p>'; return; }
-    box.innerHTML = '<p class="text-[11px] text-gray-400">Searching LinkedIn…</p>';
+    if (spec && spec.search && q.length < 2) {
+      box.innerHTML = '<p class="text-[11px] text-gray-400">Type at least two letters.</p>';
+      return;
+    }
+    box.innerHTML = '<p class="text-[11px] text-gray-400">Asking LinkedIn…</p>';
     try {
       const res = await fetch('/.netlify/functions/linkedin-ads-targeting', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-        body: JSON.stringify({ action: 'search', facet: 'locations', query: q }),
+        body: JSON.stringify({ action: 'search', facet: key, query: q }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not search.');
@@ -1212,11 +1266,11 @@
       box.innerHTML = list.length
         ? `${data.fallback ? '<p class="text-[11px] text-amber-700 mb-1">We could not reach LinkedIn, so this is a short list. Try again for the full one.</p>' : ''}
            <div class="flex flex-wrap gap-2">${list.map((en) => `
-             <button type="button" data-cmp-geo-pick="${esc(String(id))}|${esc(en.urn)}|${esc(en.name)}"
+             <button type="button" data-cmp-facet-pick="${esc(cid)}|${esc(key)}|${esc(en.urn)}|${esc(en.name)}"
                class="px-2 py-1 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-[11px] font-bold rounded-lg transition">
                ${esc(en.name)}
              </button>`).join('')}</div>`
-        : '<p class="text-[11px] text-gray-400">Nothing matched. Try a country or a large city.</p>';
+        : '<p class="text-[11px] text-gray-400">Nothing matched.</p>';
     } catch (err) {
       box.innerHTML = `<p class="text-[11px] text-red-600">${esc(err.message || 'Could not search.')}</p>`;
     }

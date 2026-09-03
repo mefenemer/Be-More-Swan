@@ -309,22 +309,52 @@ export default withLambda(async (event) => {
     // records exactly as before — and so it (and confirm-payment.ts) reuse THIS
     // subscription instead of creating another. The PaymentIntent id is the prefix
     // of its client secret (pi_xxx_secret_yyy).
+    //
+    // This stamp is LOAD-BEARING, not best-effort. Both consumers key off it and both bail
+    // without it: the webhook returns early on the missing stripeCustomerId
+    // (stripe-webhook.ts payment_intent.succeeded) and confirm-payment.ts rejects the PI as
+    // not belonging to the user because metadata.userId is absent. Swallowing a failure here
+    // therefore hands the browser a confirmable client secret that takes the customer's money
+    // and provisions nothing — a paid customer with no plan row at all. Retry once for a
+    // transient Stripe error, then fail the checkout and cancel the subscription so no
+    // payment can be taken against a stamp we could never complete.
     const paymentIntentId = clientSecret.split('_secret_')[0];
-    try {
-      await stripe.paymentIntents.update(paymentIntentId, {
-        metadata: {
-          userId:               user.id.toString(),
-          organisationId:       orgId.toString(),
-          tier:                 tierKey,
-          masterPlanId:         masterPlan.id.toString(),
-          stripePriceId,
-          stripeCustomerId:     customer.id,
-          billingCycle,
-          stripeSubscriptionId: subscription.id,
-        },
-      });
-    } catch (metaErr: any) {
-      console.error('[create-subscription] Failed to stamp PaymentIntent metadata:', metaErr?.message);
+    const piMetadata = {
+      userId:               user.id.toString(),
+      organisationId:       orgId.toString(),
+      tier:                 tierKey,
+      masterPlanId:         masterPlan.id.toString(),
+      stripePriceId,
+      stripeCustomerId:     customer.id,
+      billingCycle,
+      stripeSubscriptionId: subscription.id,
+    };
+    let stamped = false;
+    for (let attempt = 1; attempt <= 2 && !stamped; attempt++) {
+      try {
+        await stripe.paymentIntents.update(paymentIntentId, { metadata: piMetadata });
+        stamped = true;
+      } catch (metaErr: any) {
+        console.error(
+          `[create-subscription] PaymentIntent metadata stamp attempt ${attempt}/2 failed:`,
+          metaErr?.message,
+        );
+        if (attempt === 1) await new Promise((r) => setTimeout(r, 250));
+      }
+    }
+    if (!stamped) {
+      // Cancel rather than leave an incomplete subscription the customer could still confirm.
+      try {
+        await stripe.subscriptions.cancel(subscription.id);
+      } catch (cancelErr: any) {
+        console.error('[create-subscription] Could not cancel unstamped subscription:', cancelErr?.message);
+      }
+      return {
+        statusCode: 502,
+        body: JSON.stringify({
+          error: 'Could not initialise checkout with Stripe. No payment has been taken — please try again.',
+        }),
+      };
     }
 
     return {

@@ -341,14 +341,57 @@ export function createLinkedInAdapter(cfg: LinkedInAdapterConfig): AdNetworkAdap
  * on a form that a founder has to understand before they can spend money. These three are the ones
  * the brief's AC 1.2 named, and they are the ones that change who sees an ad most.
  */
+export interface TargetingEntity { urn: string; name: string }
+
 export const TARGETING_FACETS = {
     locations: 'urn:li:adTargetingFacet:locations',
-    jobFunctions: 'urn:li:adTargetingFacet:titles',
+    // ⚠️ `jobFunctions`, NOT `titles`. This said `titles` in its first draft, which is a DIFFERENT
+    // facet taking urn:li:title:N — it would have worked, silently targeting job titles while the
+    // form said "job function". A wrong facet does not error; it spends the money on the wrong
+    // audience. Values here are urn:li:function:N.
+    jobFunctions: 'urn:li:adTargetingFacet:jobFunctions',
     seniorities: 'urn:li:adTargetingFacet:seniorities',
+    // Fixed enum rather than a typeahead — LinkedIn documents the exact ranges, so there is
+    // nothing to look up. AC 1.2 of the brief asked for company size.
+    companySizes: 'urn:li:adTargetingFacet:staffCountRanges',
 } as const;
 export type TargetingFacet = keyof typeof TARGETING_FACETS;
 
-export interface TargetingEntity { urn: string; name: string }
+/**
+ * ⚠️ FACETS WE MUST NEVER OFFER ALONGSIDE THE ABOVE.
+ *
+ * LinkedIn documents that job functions and seniorities "may not be AND'ed with any include
+ * clauses targeting Job Titles". Since buildTargetingCriteria AND-s every facet group together,
+ * adding a titles picker would make every combination that also used a function or a seniority
+ * invalid — and the rejection would arrive from LinkedIn, at staging time, as an opaque 400.
+ *
+ * This constant exists so that constraint is written down where someone adding a picker will see
+ * it, rather than rediscovered from an error code.
+ */
+export const INCOMPATIBLE_WITH_FUNCTION_OR_SENIORITY = [
+    'urn:li:adTargetingFacet:titles',
+    'urn:li:adTargetingFacet:titlesAll',
+    'urn:li:adTargetingFacet:titlesPast',
+] as const;
+
+/**
+ * Company sizes, exactly as LinkedIn enumerates them.
+ *
+ * Hardcoded deliberately, unlike locations: these are a closed, documented set of range URNs with
+ * no lookup endpoint behind them, and the format (`(51,200)`, with INT_MAX for "no upper limit")
+ * is not something a user could be expected to type.
+ */
+export const COMPANY_SIZES: TargetingEntity[] = [
+    { urn: 'urn:li:staffCountRange:(1,1)', name: 'Self-employed' },
+    { urn: 'urn:li:staffCountRange:(2,10)', name: '2–10 employees' },
+    { urn: 'urn:li:staffCountRange:(11,50)', name: '11–50 employees' },
+    { urn: 'urn:li:staffCountRange:(51,200)', name: '51–200 employees' },
+    { urn: 'urn:li:staffCountRange:(201,500)', name: '201–500 employees' },
+    { urn: 'urn:li:staffCountRange:(501,1000)', name: '501–1,000 employees' },
+    { urn: 'urn:li:staffCountRange:(1001,5000)', name: '1,001–5,000 employees' },
+    { urn: 'urn:li:staffCountRange:(5001,10000)', name: '5,001–10,000 employees' },
+    { urn: 'urn:li:staffCountRange:(10001,2147483647)', name: '10,001+ employees' },
+];
 
 /**
  * Typeahead against LinkedIn's own targeting vocabulary.
@@ -412,7 +455,7 @@ export function buildTargetingCriteria(selected: Partial<Record<TargetingFacet, 
         throw new Error('Choose at least one location — LinkedIn will not run an advert without one.');
     }
     const and: unknown[] = [{ or: { [TARGETING_FACETS.locations]: locations } }];
-    for (const facet of ['jobFunctions', 'seniorities'] as const) {
+    for (const facet of ['jobFunctions', 'seniorities', 'companySizes'] as const) {
         const values = selected[facet] ?? [];
         if (values.length > 0) and.push({ or: { [TARGETING_FACETS[facet]]: values } });
     }
