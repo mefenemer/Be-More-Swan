@@ -376,10 +376,19 @@ export default withLambda(async (event) => {
         // Business/Meta-portfolio fallback. /me/accounts only lists Pages the user administers
         // DIRECTLY, so a Page owned by a Business portfolio (the now-default setup) never appears
         // above — its linked Instagram account is invisible and every connect dead-ends at no_pages.
-        // When nothing here has a linked Instagram account, enumerate the user's businesses and their
-        // owned + client Pages instead. Needs business_management (see SCOPES).
+        // So also enumerate the user's businesses and their owned + client Pages, and merge the two
+        // lists. Needs business_management (see SCOPES).
+        // ⚠️ UNCONDITIONAL. This used to run only `if (!pageList.some(p => p.instagram_business_account?.id))`
+        // — "we found nothing usable directly, so go looking in the portfolios". That guard is wrong
+        // whenever a user administers ONE personal Page that happens to have an Instagram account
+        // linked: the guard goes false, the scan is skipped, and every portfolio-owned Page they own
+        // stays invisible. The picker then offers the personal Page as the only option, and a
+        // reconnect silently REBINDS the workspace to it. That is what happened to org 37 twice —
+        // the owner of both accounts could never be offered the one she was trying to connect.
+        // The cost is one /me/businesses call plus two per portfolio, on an interactive flow that
+        // runs once per connect; `seen` already dedupes against /me/accounts.
         let businessMgmtDenied = false;
-        if (!pageList.some(p => p.instagram_business_account?.id)) {
+        {
             const bizRes = await fetch(`https://graph.facebook.com/v19.0/me/businesses?fields=id,name&access_token=${longLivedToken}`);
             const biz: { data?: Array<{ id: string; name?: string }>; error?: { message: string } } = await bizRes.json();
             if (biz.error) {

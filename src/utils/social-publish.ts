@@ -1401,7 +1401,22 @@ export async function resolveFacebookPageCredentials(
         const token = secret?.token as string | undefined;
         const pageId = fbConn.externalUserId || ((fbConn.metadata as any)?.fbPageId ?? null);
         if (token && pageId) {
-            const pageToken = await derivePageToken(token, pageId) ?? token;
+            // ⚠️ NO `?? token` fallback here. It used to fall back to the raw USER token when the
+            // Page token could not be derived — and a user token POSTed to /{pageId}/feed makes
+            // Meta reply "(#200) The permission(s) publish_actions are not available. It has been
+            // deprecated." We have never requested publish_actions; the message describes Meta's
+            // guess at what we wanted, not our request. It reads as an App Review problem and costs
+            // hours in the dashboard, when the real cause is local and specific: this token has no
+            // granted relationship to this Page. The fallback branch below already threw in exactly
+            // this situation — the two disagreed, and this one was wrong.
+            const pageToken = await derivePageToken(token, pageId);
+            if (!pageToken) {
+                throw new Error(
+                    `Could not obtain a Page access token for Facebook Page ${pageId}. The stored Meta ` +
+                    `token does not administer this Page — reconnect the Page and make sure it is ticked ` +
+                    `on Meta's consent screen.`,
+                );
+            }
             return { pageId, pageToken };
         }
     }

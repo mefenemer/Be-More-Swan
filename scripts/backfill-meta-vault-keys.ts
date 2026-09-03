@@ -540,7 +540,19 @@ async function main() {
             continue;
         }
 
-        if (entry.action === 'contested') {
+        // Verified before the copy — `migrate` INCLUDED.
+        //
+        // ⚠️ "Sole owner of its legacy key" does NOT establish that the secret is this row's. The
+        // legacy writer OVERWROTE, so a key can be shared ACROSS TIME by an account that never got
+        // a row of its own: a reconnect under a different account replaces the secret and leaves
+        // this row's external_user_id pointing at the old one. Copying that unverified BLESSES the
+        // wrong token onto a correct-looking account-scoped key.
+        //
+        // That is exactly what this script did to org 37 on 2026-09-02: both rows came out active,
+        // account-scoped, all 9 scopes granted — and holding a token that reached neither account.
+        // The failure surfaced days later as "(#200) publish_actions" and "Object … does not
+        // exist", and every later dry run reported "already account-scoped — nothing to do".
+        if (entry.action === 'contested' || entry.action === 'migrate') {
             if (noVerify) {
                 if (!entry.newestOfGroup) {
                     needReconnect.push(`${name}: shares ${entry.fromKey} with ${entry.sharedWith - 1} other row(s) and is not the newest — the later connect overwrote its token`);
@@ -553,7 +565,7 @@ async function main() {
                 if (reach.kind === 'out_of_reach') {
                     needReconnect.push(`${name}: PROVEN out of reach — ${reach.message}`);
                     unansweredOwners.push({ organisationId: row.organisationId, fbUserId: ((row.metadata ?? {}) as Record<string, unknown>).fbUserId as string | undefined ?? null });
-                    console.log(`  ✗ ${name}\n      the shared token cannot see this account: ${reach.message}`);
+                    console.log(`  ✗ ${name}\n      the stored token cannot see this account: ${reach.message}`);
                     continue;
                 }
                 if (reach.kind === 'inconclusive') {
@@ -566,8 +578,8 @@ async function main() {
                     continue;
                 }
                 if (reach.kind === 'token_dead') {
-                    needReconnect.push(`${name}: shared token is dead — ${reach.message}`);
-                    console.log(`  ✗ ${name}\n      shared token is dead — every row on this key needs a reconnect: ${reach.message}`);
+                    needReconnect.push(`${name}: stored token is dead — ${reach.message}`);
+                    console.log(`  ✗ ${name}\n      stored token is dead — every row on this key needs a reconnect: ${reach.message}`);
                     continue;
                 }
                 if (reach.kind === 'network_error') {
