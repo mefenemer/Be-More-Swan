@@ -54,6 +54,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import { PAID_ADS_FEATURE } from '../../src/config/ad-networks';
 import { anyNetworkAvailable, linkedInAdapter, networkAvailability } from '../../src/utils/ad-networks/registry';
+import { isProductionDeploy } from '../../src/utils/deploy-context';
 import { assessAdsReadiness, getAdsConnection, getAdsToken } from '../../src/utils/linkedin-ads-connection';
 import { assessOptimiserHealth, readLastRunAt } from '../../src/utils/optimiser-health';
 import { CONFIG_KEYS, getPlatformConfig } from '../../src/utils/platform-config';
@@ -757,7 +758,7 @@ export default withLambda(async (event) => {
                 // group on campaign creation, so every stage would have failed at the first call.
                 // The adapter now resolves one per campaign, idempotently.
                 currencyCode: 'GBP',
-            });
+            }, { isProduction: isProductionDeploy(event.headers as Record<string, string | undefined>) });
         } catch (err) {
             return json(400, { error: err instanceof Error ? err.message : 'Advertising is not available here yet.' });
         }
@@ -908,7 +909,7 @@ export default withLambda(async (event) => {
                 accessToken: token,
                 accountUrn: readiness.connection.selectedAccountUrn!,
                 currencyCode: 'GBP',
-            });
+            }, { isProduction: isProductionDeploy(event.headers as Record<string, string | undefined>) });
         } catch (err) {
             return json(400, { error: err instanceof Error ? err.message : 'Advertising is not available here yet.' });
         }

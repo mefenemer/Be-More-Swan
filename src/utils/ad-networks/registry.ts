@@ -63,8 +63,12 @@ const ADAPTERS: Partial<Record<AdNetwork, AdNetworkAdapter>> = {
  *
  * Requires config the caller supplies, which is why it is a factory rather than a singleton.
  */
-export function linkedInAdapter(cfg: LinkedInAdapterConfig): AdNetworkAdapter {
-    if (process.env.NODE_ENV === 'production') {
+export function linkedInAdapter(cfg: LinkedInAdapterConfig, env: { isProduction: boolean }): AdNetworkAdapter {
+    // ⚠️ The verdict is PASSED IN, not read from the environment. This used to check
+    // `process.env.NODE_ENV`, which Netlify sets to 'production' on EVERY context including branch
+    // deploys — so the gate was closed on staging too and this adapter could never have been
+    // exercised anywhere. See src/utils/deploy-context.ts.
+    if (env.isProduction) {
         throw new Error('The LinkedIn ads adapter is Development Tier only and must not be used in production.');
     }
     return createLinkedInAdapter(cfg);
@@ -83,14 +87,19 @@ export interface ResolveResult {
  * use, or a sentence it can show — those are the only two outcomes, and code that assumes a third
  * (a no-op adapter, say) would produce a campaign that reports success and does nothing.
  */
-export function resolveAdapter(network: string, opts: { allowMock?: boolean } = {}): ResolveResult {
+export function resolveAdapter(
+    network: string,
+    opts: { allowMock?: boolean; isProduction?: boolean } = {},
+): ResolveResult {
     // LinkedIn resolves to nothing here on purpose — it needs per-workspace config, so it is
     // constructed by linkedInAdapter() rather than looked up. The blocker below still explains why
     // a tenant cannot have it.
     if (network === 'mock') {
-        // Two independent conditions. The env check alone would let a misconfigured production
-        // deploy expose it; the flag alone would let any caller opt in.
-        if (opts.allowMock && process.env.NODE_ENV !== 'production') {
+        // Two independent conditions. The flag alone would let any caller opt in; the environment
+        // alone would let a misconfigured deploy expose it.
+        // ⚠️ `isProduction` defaults to TRUE when the caller does not say — fail closed. Tests pass
+        // it explicitly; no HTTP path ever asks for the mock.
+        if (opts.allowMock && opts.isProduction === false) {
             return { adapter: mockAdapter, blocker: null };
         }
         return { adapter: null, blocker: 'The mock ad network is not available here.' };

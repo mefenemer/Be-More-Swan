@@ -35,6 +35,7 @@ import {
     adVariantMetrics, adVariants, aiAssistants, campaignBudgets, campaigns, userOrganisations,
 } from '../../db/schema';
 import { linkedInAdapter } from '../../src/utils/ad-networks/registry';
+import { isProductionDeploy } from '../../src/utils/deploy-context';
 import { getAdsConnection, getAdsToken, assessAdsReadiness } from '../../src/utils/linkedin-ads-connection';
 import {
     assessHeartbeat, optimise, type DailyMetric, type VariantWindow,
@@ -68,7 +69,7 @@ export interface PaidSweepResult {
  * on staging would not be the thing running in production — which is the entire point of having a
  * staging poke at all.
  */
-export async function runPaidOptimiserSweep(): Promise<PaidSweepResult> {
+export async function runPaidOptimiserSweep(headers?: Record<string, string | undefined>): Promise<PaidSweepResult> {
     const db = getDb();
 
     // Same global switch every other autonomous run respects.
@@ -139,7 +140,7 @@ export async function runPaidOptimiserSweep(): Promise<PaidSweepResult> {
                     accountUrn: readiness.connection.selectedAccountUrn!,
                     // No group needed here — this adapter only pauses and reads metrics.
                     currencyCode: 'GBP',
-                });
+                }, { isProduction: isProductionDeploy(headers) });
             } catch {
                 // Production: Development Tier is dev-only. There should be no live paid campaigns
                 // here at all, so this is logged and skipped rather than treated as a halt — a halt

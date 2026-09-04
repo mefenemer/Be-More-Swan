@@ -45,7 +45,10 @@ export default withLambda(async (event) => {
     try {
         // The result is the real thing, not an ack: the sweep is a handful of queries and at most a
         // few network calls per campaign, so it finishes inline well inside the function budget.
-        const result = await runPaidOptimiserSweep();
+        // ⚠️ The request headers are passed so the sweep can tell staging from production by HOST.
+        // Without them it would fail closed to "production" and the dev-only adapter would refuse —
+        // which is the correct default, and exactly why the poke must supply them.
+        const result = await runPaidOptimiserSweep(event.headers as Record<string, string | undefined>);
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json' },

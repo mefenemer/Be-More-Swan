@@ -19,6 +19,7 @@ import {
     dateParam, parseAnalytics, parseRestliId, statusPatchBody,
 } from '../src/utils/ad-networks/linkedin';
 import { anyNetworkAvailable, linkedInAdapter, resolveAdapter } from '../src/utils/ad-networks/registry';
+import { isProductionDeploy } from '../src/utils/deploy-context';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -197,14 +198,32 @@ check('the blocker copy describes the CAP, not a refusal that no longer applies'
 });
 
 check('the dev adapter refuses to construct in production', () => {
-    const prev = process.env.NODE_ENV;
-    process.env.NODE_ENV = 'production';
+    // ⚠️ The verdict is passed IN now. It used to read process.env.NODE_ENV, which Netlify sets to
+    // 'production' on EVERY context including branch deploys — so the gate was shut on staging too
+    // and this adapter could never have been exercised anywhere at all.
+    const cfg = { accessToken: 't', accountUrn: 'urn:li:sponsoredAccount:1', currencyCode: 'GBP' };
+    assert.throws(() => linkedInAdapter(cfg, { isProduction: true }), /Development Tier only/);
+    assert.ok(linkedInAdapter(cfg, { isProduction: false }), 'the adapter is unreachable on staging');
+});
+
+check('production is derived from the HOST, and fails closed without one', () => {
+    // CONTEXT/BRANCH are BUILD-time vars and are often absent at function runtime — the host is
+    // the only signal always available. No host means a scheduled function, which Netlify runs on
+    // production only.
+    const prevC = process.env.CONTEXT; const prevB = process.env.BRANCH;
+    delete process.env.CONTEXT; delete process.env.BRANCH;
     try {
-        assert.throws(() => linkedInAdapter({
-            accessToken: 't', accountUrn: 'urn:li:sponsoredAccount:1',
-            campaignGroupUrn: 'urn:li:sponsoredCampaignGroup:1', currencyCode: 'GBP',
-        }), /Development Tier only/);
-    } finally { process.env.NODE_ENV = prev; }
+        assert.equal(isProductionDeploy({ host: 'bemoreswan.com' }), true);
+        assert.equal(isProductionDeploy({ host: 'www.bemoreswan.com' }), true);
+        assert.equal(isProductionDeploy({ host: 'staging--bemoreswan.netlify.app' }), false);
+        assert.equal(isProductionDeploy({ host: 'bemoreswan.com:443' }), true, 'a port defeats the host match');
+        // Fail closed.
+        assert.equal(isProductionDeploy(undefined), true);
+        assert.equal(isProductionDeploy({}), true);
+    } finally {
+        if (prevC !== undefined) process.env.CONTEXT = prevC;
+        if (prevB !== undefined) process.env.BRANCH = prevB;
+    }
 });
 
 check('the API version is pinned and documented as a sunset risk', () => {

@@ -330,15 +330,16 @@ check('the availability list is honest about every network', () => {
     assert.ok(rows.every((r) => !r.available && r.blocker));
 });
 
-check('the mock needs BOTH an explicit opt-in and a non-production env', () => {
-    // Either alone is a single point of failure: the env check alone would let a misconfigured
+check('the mock needs BOTH an explicit opt-in and a non-production verdict', () => {
+    // Either alone is a single point of failure: the environment alone would let a misconfigured
     // deploy expose it, the flag alone would let any caller opt in.
+    // ⚠️ `isProduction` is PASSED IN and defaults to TRUE when unstated — fail closed. It used to
+    // read process.env.NODE_ENV, which Netlify sets to 'production' on every context including
+    // branch deploys, so the gate was shut on staging too.
     assert.equal(resolveAdapter('mock').adapter, null, 'the mock resolved without opt-in');
-    assert.ok(resolveAdapter('mock', { allowMock: true }).adapter, 'the mock is unreachable in tests');
-    const prev = process.env.NODE_ENV;
-    process.env.NODE_ENV = 'production';
-    assert.equal(resolveAdapter('mock', { allowMock: true }).adapter, null, 'the mock resolved in production');
-    process.env.NODE_ENV = prev;
+    assert.equal(resolveAdapter('mock', { allowMock: true }).adapter, null, 'the mock resolved with no verdict');
+    assert.ok(resolveAdapter('mock', { allowMock: true, isProduction: false }).adapter, 'the mock is unreachable in tests');
+    assert.equal(resolveAdapter('mock', { allowMock: true, isProduction: true }).adapter, null, 'the mock resolved in production');
 });
 
 check('the plan feature is off by ABSENCE, so no environment starts exposed', () => {

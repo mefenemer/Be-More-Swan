@@ -13,11 +13,11 @@
 // every path 409s on status 'published' (mirrors blog-posts.ts's delete guard).
 
 import { HandlerEvent } from '@netlify/functions';
-import { and, eq, gte, lte, ne, sql } from 'drizzle-orm';
+import { and, eq, gte, ne, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, blogPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
-import { resolvePostingSchedule, computeScheduleSlots, resolveHorizonDays, DEFAULT_HORIZON_DAYS } from '../../src/config/posting-cadence';
+import { resolvePostingSchedule, computeScheduleSlots, resolveHorizonDays, intervalHoursFor, DEFAULT_HORIZON_DAYS, MAX_HORIZON_DAYS } from '../../src/config/posting-cadence';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 type Db = ReturnType<typeof getDb>;
@@ -29,7 +29,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // jsonb key of the same name must not be read),
 // skipping slots already taken by its other active posts. Mirrors approve-post.ts's pickOptimalSlot.
 // Falls back to the post's own future date, else now+24h, when the cadence is on-demand (no slots).
-async function pickCadenceSlot(
+//
+// Exported for tests/blog-approve-slot-collision.test.ts only — the collision this function used to
+// produce (two approvals, one instant) is behaviour, not text, so the test drives it against a stub
+// db rather than scanning the source for a fixed phrase.
+export async function pickCadenceSlot(
     db: Db,
     orgId: number,
     post: { id: number; assistantId: number | null; publishDate: Date | null },
@@ -57,15 +61,27 @@ async function pickCadenceSlot(
         }
     }
 
-    const slots = computeScheduleSlots({ schedule: resolvePostingSchedule(ctx), horizonDays, now });
+    const schedule = resolvePostingSchedule(ctx);
+    // Look BEYOND the draft horizon when hunting for a free slot — same widening as approve-post.ts.
+    // The horizon governs how far ahead the assistant pre-DRAFTS; it must not cap where an approved
+    // post may land. A weekly Blog Writer on the default 7-day horizon has exactly ONE slot in the
+    // window, so searching only the horizon meant the second approval of the day had nowhere to go.
+    // computeScheduleSlots caps horizon at 30 days internally.
+    const searchDays = Math.min(MAX_HORIZON_DAYS, Math.max(horizonDays, horizonDays * 3, 14));
+    const slots = computeScheduleSlots({ schedule, horizonDays: searchDays, now });
     if (!slots.length) {
         // On-demand cadence: honour a future manual date, else default to tomorrow.
         return post.publishDate && post.publishDate.getTime() > now.getTime()
             ? post.publishDate : new Date(now.getTime() + DAY_MS);
     }
 
-    // Skip slots already occupied by this org's other active blog posts.
-    const windowEnd = slots[slots.length - 1];
+    // Slots already occupied by this org's other active blog posts.
+    //
+    // Deliberately NOT capped at the last slot of the window. The overflow branch below hunts for a
+    // free instant PAST it, and bounding this query by windowEnd made every one of those candidates
+    // look unoccupied. 'draft' is included so the statuses match blog-gap-fill's coverage query: a
+    // draft sitting on a future slot is holding it (a chat-saved draft has no publish_date at all,
+    // so it is excluded by the `gte` and cannot block anything).
     const taken = await db
         .select({ publishDate: blogPosts.publishDate })
         .from(blogPosts)
@@ -73,11 +89,51 @@ async function pickCadenceSlot(
             eq(blogPosts.organisationId, orgId),
             ne(blogPosts.id, post.id),
             gte(blogPosts.publishDate, now),
-            lte(blogPosts.publishDate, windowEnd),
-            sql`status IN ('pending_approval','in_review','approved','scheduled','publishing')`,
+            sql`status IN ('draft','pending_approval','in_review','approved','scheduled','publishing')`,
         ));
     const takenMs = new Set(taken.map(r => new Date(r.publishDate as unknown as string).getTime()));
-    return slots.find(s => !takenMs.has(s.getTime())) ?? slots[0];
+
+    // Keep the slot it is already on, when that is a real future cadence slot and nothing else has
+    // claimed it. Autopilot drafts are CREATED on a cadence slot (process-blog-jobs stamps the job's
+    // target_publish_date onto the post), so rehoming them to the earliest opening is not scheduling
+    // — it is churn, and with two posts approved back to back it is what collapsed both onto one
+    // date. A past date, or a hand-picked time that is not a cadence slot, still falls through and
+    // gets rehomed.
+    const ownMs = post.publishDate ? new Date(post.publishDate).getTime() : NaN;
+    if (Number.isFinite(ownMs)
+        && ownMs > now.getTime()
+        && slots.some(s => s.getTime() === ownMs)
+        && !takenMs.has(ownMs)) {
+        return new Date(ownMs);
+    }
+
+    const free = slots.find(s => !takenMs.has(s.getTime()));
+    if (free) return free;
+
+    // Every slot in the search window is occupied, so this post has to go past the end of it. Roll
+    // the SAME slot machinery forward rather than doing arithmetic on the last slot: real slots
+    // respect the assistant's posting days, times and timezone (including DST). This is where the
+    // old code gave up and returned slots[0] — the first slot of the window, which is exactly the
+    // instant the previous approval had just taken.
+    let cursor = slots[slots.length - 1];
+    for (let round = 0; round < 6; round++) {
+        const next = computeScheduleSlots({ schedule, horizonDays: searchDays, now: cursor });
+        if (!next.length) break;
+        const nextFree = next.find(s => s.getTime() > cursor.getTime() && !takenMs.has(s.getTime()));
+        if (nextFree) return nextFree;
+        const last = next[next.length - 1];
+        if (last.getTime() <= cursor.getTime()) break;   // no forward progress; don't spin
+        cursor = last;
+    }
+
+    // Roughly six months out and every slot still taken. Step by the cadence interval so the
+    // function always returns something schedulable; in practice unreachable.
+    const stepHours = intervalHoursFor(schedule.frequency) ?? 24;
+    let candidate = new Date(cursor.getTime() + stepHours * 3600 * 1000);
+    for (let guard = 0; guard < 60 && takenMs.has(candidate.getTime()); guard++) {
+        candidate = new Date(candidate.getTime() + stepHours * 3600 * 1000);
+    }
+    return candidate;
 }
 
 export default withLambda(async (event: HandlerEvent) => {

@@ -228,8 +228,13 @@ check('the poke drives the SAME sweep, not a copy of it', () => {
     // If staging ran a copy, the thing tested on staging would not be the thing running in
     // production — which is the entire point of having a staging poke.
     assert.match(code(poke), /import \{ runPaidOptimiserSweep \} from '\.\/optimise-paid-campaigns'/);
-    assert.match(code(poke), /await runPaidOptimiserSweep\(\)/);
+    assert.match(code(poke), /await runPaidOptimiserSweep\(event\.headers/);
     assert.match(code(cron), /export async function runPaidOptimiserSweep/);
+    // ⚠️ The headers are load-bearing, not incidental. isProductionDeploy() derives staging vs
+    // production from the HOST — CONTEXT/BRANCH are build-time vars often absent at runtime — and
+    // with no headers it fails CLOSED to production, where the dev-only adapter refuses. So a poke
+    // that dropped them would silently sweep nothing on staging.
+    assert.match(code(cron), /isProductionDeploy\(headers\)/);
 });
 
 check('the poke FAILS CLOSED without its secret', () => {
@@ -239,7 +244,7 @@ check('the poke FAILS CLOSED without its secret', () => {
     assert.match(code(poke), /if \(!secret\) \{/);
     assert.match(code(poke), /statusCode: 503/);
     assert.ok(
-        landmark(poke, 'if (!secret)') < landmark(poke, 'await runPaidOptimiserSweep()'),
+        landmark(poke, 'if (!secret)') < landmark(poke, 'await runPaidOptimiserSweep(event.headers'),
         'the sweep can run before the secret is checked',
     );
 });

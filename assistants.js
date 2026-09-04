@@ -5421,7 +5421,13 @@ function _applyDashboardRegistry(data) {
     toggle('maintab-btn-inspo', !!inspo);
     if (inspo) {
         setText('inspo-tab-label', inspo.label);
-        window.AssistantInspo?.init({ inspo, assistantId: data.id });
+        // roleKey/name/role are for the card's "Write a … from this" button, which opens this
+        // assistant's chat seeded with the item — the wording and the chat header both come
+        // from the role, so a Blog Writer is never asked for a "social post".
+        window.AssistantInspo?.init({
+            inspo, assistantId: data.id,
+            roleKey: data.roleKey, assistantName: data.name, assistantRole: data.role,
+        });
     }
 
     // My Content tab — only the content roles (myContentTab: social_media_manager, blog_writer):

@@ -58,7 +58,82 @@
 
   const KIND_LABELS = { text: 'Note', voice: 'Voice note', url: 'Link', file: 'File' };
 
-  const state = { inspo: null, assistantId: null, items: [], embeddingsConfigured: false, editingId: null };
+  const state = {
+    inspo: null, assistantId: null, roleKey: null, assistantName: null, assistantRole: null,
+    items: [], embeddingsConfigured: false, editingId: null,
+  };
+
+  // ── "Draft one from this": hand an inspo item to the assistant in chat ───────────────────────
+  // The tab collected taste and then did nothing with it on demand: inspo steered the NEXT
+  // scheduled draft, whenever that was, and there was no way to say "this one — now". This button
+  // is that. It seeds the assistant's chat with the item and asks for a draft, so the work happens
+  // through the assistant's own drafting path (a social post is saved to the Review Queue for real;
+  // a blog comes back as a Save/Discard card that opens in Blog Studio) rather than through a
+  // second generator that would drift from it.
+  //
+  // The chat modal lives in workspace.html, so on any standalone page the button hides itself
+  // rather than failing on click — the same rule blog-studio-modal.js applies to "Ask Swan".
+  function swanAvailable() {
+    return typeof window.openAssistantChatModal === 'function' && state.assistantId != null;
+  }
+
+  // What this assistant makes, in the user's words. Keyed on roleKey rather than assumed, because
+  // the Inspo tab is registry-driven: a role that gains one later must not be told to write a
+  // "post" when it writes something else. The fallback is the neutral noun, never a social one.
+  const DRAFT_NOUNS = {
+    blog_writer: { noun: 'blog post', button: 'Write a blog from this' },
+    social_media_manager: { noun: 'social post', button: 'Write a post from this' },
+  };
+  function draftNoun(roleKey) {
+    return DRAFT_NOUNS[roleKey !== undefined ? roleKey : state.roleKey]
+      || { noun: 'post', button: 'Write a post from this' };
+  }
+
+  // Long inspo (a pasted article, a transcript) is trimmed for the chat turn only — the full item
+  // stays indexed and keeps steering drafts as it always did. Sending 50k characters would spend
+  // the turn's context on material the assistant already has through retrieval.
+  const SEED_BODY_CHARS = 4000;
+
+  function buildSeed(item, roleKey) {
+    const { noun } = draftNoun(roleKey);
+    const parts = [
+      `Please write a ${noun} based on this idea from my Inspo. Use it as the starting point — `
+      + `match what I liked about it, and give me something I can actually use.`,
+      '',
+      `Inspo: ${item.title || 'Untitled'}`,
+    ];
+    // The note is "what I like about this", and it is the strongest signal on the item — it is why
+    // the composer asks for it every time. Only ever included when the user actually wrote one.
+    if (item.userNote) parts.push('', `What I like about it: ${item.userNote}`);
+    const body = String(item.body || '').trim();
+    if (body) {
+      parts.push('', body.length > SEED_BODY_CHARS
+        ? body.slice(0, SEED_BODY_CHARS) + '\n\n(…trimmed — the full item is in my Inspo.)'
+        : body);
+    }
+    return parts.join('\n');
+  }
+
+  async function draftFromItem(id) {
+    // The list carries PREVIEWS only (bodyPreview / notePreview are truncated server-side), so the
+    // full item is re-read here. Seeding from a preview would hand the assistant an idea cut off
+    // mid-sentence and it would draft from the fragment without ever saying so.
+    const res = await fetch(`${API}?id=${id}`, { credentials: 'same-origin' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Could not load that item.');
+
+    const session = window.openAssistantChatModal(
+      state.assistantId,
+      state.assistantName || 'Your assistant',
+      state.assistantRole || 'Digital Assistant',
+      state.roleKey,
+    );
+    const seed = buildSeed(data.item || {});
+    // sendMessage is exposed by ChatSession.mount(); give the fresh mount a tick to settle.
+    // Same handshake as blog-studio-modal.js's askSwanImprove and workspace.html's
+    // askSwanAboutDraft — the modal returns its session synchronously for exactly this.
+    setTimeout(() => { try { if (session) session.sendMessage(seed); } catch (_) { /* ignore */ } }, 60);
+  }
 
   async function api(method, body) {
     const res = await fetch(API, {
@@ -279,6 +354,12 @@
       return;
     }
 
+    // Paused items deliberately have NO draft button. Pausing means "stop considering this on my
+    // drafts", and a button on a card badged Paused would offer the exact thing the badge says is
+    // switched off. Reactivate is right there next to it.
+    const canDraft = swanAvailable();
+    const draftLabel = draftNoun().button;
+
     host.innerHTML = `
       <div class="space-y-3">
         ${state.items.map((i) => {
@@ -303,7 +384,13 @@
               </div>
             </div>
             <p class="hidden mt-3 text-xs font-semibold" data-inspo-row-status></p>
-            <div class="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
+            <div class="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100 flex-wrap">
+              ${canDraft && i.isActive ? `
+              <button type="button" data-inspo-draft="${i.id}"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                ${esc(draftLabel)}
+              </button>` : ''}
               <button type="button" data-inspo-edit="${i.id}"
                 class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition">
                 Edit
@@ -320,6 +407,15 @@
           </div>`;
         }).join('')}
       </div>`;
+
+    host.querySelectorAll('[data-inspo-draft]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try { await draftFromItem(Number(btn.getAttribute('data-inspo-draft'))); }
+        catch (err) { rowStatus(btn, err.message); }
+        finally { btn.disabled = false; }
+      });
+    });
 
     host.querySelectorAll('[data-inspo-edit]').forEach((btn) => {
       btn.addEventListener('click', async () => {
@@ -403,10 +499,15 @@
     });
   }
 
-  async function init({ inspo, assistantId }) {
+  async function init({ inspo, assistantId, roleKey, assistantName, assistantRole }) {
     if (!inspo || !assistantId) return;
     state.inspo = inspo;
     state.assistantId = assistantId;
+    // Used only by the seeded chat (see swanAvailable / draftFromItem). All three are optional:
+    // an older caller that passes neither still gets a working tab, with the neutral wording.
+    state.roleKey = roleKey || null;
+    state.assistantName = assistantName || null;
+    state.assistantRole = assistantRole || null;
     state.items = [];
     state.editingId = null;
     closeComposer();
@@ -422,5 +523,8 @@
     }
   }
 
-  window.AssistantInspo = { init };
+  // `_test` exposes the two pure functions behind the "Write a … from this" button.
+  // tests/inspo-draft-from-item.test.ts calls them directly: the wording is role-dependent, and a
+  // Blog Writer being asked for a "social post" is a bug no source scan would catch.
+  window.AssistantInspo = { init, _test: { buildSeed, draftNoun } };
 })();

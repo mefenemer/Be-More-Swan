@@ -574,7 +574,7 @@ function _renderMonth() {
         const dayFollowUps = _followUpsOnDate(date);
         // Pending outreach sits ABOVE the reminders and the completed runs: it is the only entry
         // in the cell that is going to do something on its own.
-        html += `<div class="space-y-1">${dayGroups.map(g => _postChip(g, 'month')).join('')}${dayBlogs.map(_blogChip).join('')}${dayIssues.map(_issueChip).join('')}${dayFollowUps.map(f => _followUpChip(f, 'month')).join('')}${dayRecords.map(r => _recordChip(r, 'month')).join('')}${dayActs.map(a => _activityChip(a, 'month')).join('')}</div>`;
+        html += `<div class="space-y-1">${dayGroups.map(g => _postChip(g, 'month')).join('')}${dayBlogs.map(b => _blogChip(b, 'month')).join('')}${dayIssues.map(_issueChip).join('')}${dayFollowUps.map(f => _followUpChip(f, 'month')).join('')}${dayRecords.map(r => _recordChip(r, 'month')).join('')}${dayActs.map(a => _activityChip(a, 'month')).join('')}</div>`;
         html += `</div>`;
     }
 
@@ -608,7 +608,7 @@ function _renderWeek() {
             ondragover="window._calDragOver(event, '${dateKey}')"
             ondragleave="window._calDragLeave(event)"
             ondrop="window._calDrop(event, '${dateKey}')">
-            ${dayGroups.map(g => _postChip(g, 'week')).join('')}${_blogPostsOnDate(d).map(_blogChip).join('')}${_newsletterIssuesOnDate(d).map(_issueChip).join('')}${_followUpsOnDate(d).map(f => _followUpChip(f, 'week')).join('')}${_scheduledRecordsOnDate(d).map(r => _recordChip(r, 'week')).join('')}${_activitiesOnDate(d).map(a => _activityChip(a, 'week')).join('')}
+            ${dayGroups.map(g => _postChip(g, 'week')).join('')}${_blogPostsOnDate(d).map(b => _blogChip(b, 'week')).join('')}${_newsletterIssuesOnDate(d).map(_issueChip).join('')}${_followUpsOnDate(d).map(f => _followUpChip(f, 'week')).join('')}${_scheduledRecordsOnDate(d).map(r => _recordChip(r, 'week')).join('')}${_activitiesOnDate(d).map(a => _activityChip(a, 'week')).join('')}
         </div>`;
     }
     html += `</div>`;
@@ -706,7 +706,7 @@ function _renderList() {
                 </span>
                 <div class="flex-1 h-px bg-gray-200"></div>
             </div>
-            <div class="space-y-2">${postGroups.map(g => _listRow(g)).join('')}${(blogs || []).map(_blogChip).join('')}${(issues || []).map(_issueChip).join('')}${(followUps || []).map(_listFollowUpRow).join('')}${(records || []).map(_listRecordRow).join('')}</div>
+            <div class="space-y-2">${postGroups.map(g => _listRow(g)).join('')}${(blogs || []).map(b => _blogChip(b, 'list')).join('')}${(issues || []).map(_issueChip).join('')}${(followUps || []).map(_listFollowUpRow).join('')}${(records || []).map(_listRecordRow).join('')}</div>
         </div>`;
     });
     html += `</div>`;
@@ -1170,10 +1170,11 @@ window._calRefreshAfterEdit = async function () {
 };
 
 // ── Drag & Drop rescheduling ──────────────────────────────────────
-// THREE kinds of thing are draggable on this grid and they move three different columns:
+// FOUR kinds of thing are draggable on this grid and they move four different columns:
 //   post     → scheduled_posts.publish_date   (confirm modal, then PATCH per cross-post sibling)
 //   record   → assistant_records.scheduled_for (a chase reminder / due date — moves immediately)
 //   followup → sequence_enrolments.next_send_at (a real send — moves immediately, past refused)
+//   blog     → blog_posts.publish_date        (moves immediately, past refused)
 //
 // `_dragItem` is the general form; `_dragPostId` is kept as-is because the post path already reads
 // it in several places and rewriting that flow was not what this change is for.
@@ -1231,6 +1232,7 @@ window._calDrop = function (e, dateKey) {
     const item = _dragItem;
     if (item && item.kind === 'followup') { _dragItem = null; void _dropFollowUp(item.id, dateKey); return; }
     if (item && item.kind === 'record')   { _dragItem = null; void _dropRecord(item.id, dateKey); return; }
+    if (item && item.kind === 'blog')     { _dragItem = null; void _dropBlog(item.id, dateKey); return; }
     _dragItem = null;
 
     if (!_dragPostId) return;
@@ -1384,11 +1386,62 @@ async function _dropRecord(recordId, dateKey) {
     await _loadAndRender();
 }
 
+// ── Dropping a scheduled blog post ───────────────────────────────────────────
+// Long-form was the one thing on this grid that could be SEEN but not MOVED: blog chips carried no
+// draggable attribute at all, so a user who wanted next Tuesday's article on Thursday had to open
+// Blog Studio and re-pick the date. It moves like a record — immediately, no confirm modal — rather
+// than like a post, because there are no cross-post siblings to warn about: a blog post is one
+// artifact on one date.
+//
+// The past is refused HERE as well as on the server. schedule-blog.ts rejects a non-future
+// publishDate with a 400, so without this the only feedback would be a bare "Could not move" toast
+// for something the user could have been told plainly. Note the rule is finer-grained than the
+// record path's: dropping onto TODAY is legitimate, but only if the post's own time of day has not
+// already gone by — the server compares instants, so the client must too or the two disagree about
+// the same drop.
+async function _dropBlog(blogId, dateKey) {
+    const post = _blogPosts.find(p => p.id === blogId);
+    if (!post || !post.publishDate) return;
+
+    const original = new Date(post.publishDate);
+    if (_dateKey(original) === dateKey) return;   // same day — nothing to do
+
+    const newDate = _dropTarget(dateKey, post.publishDate);
+    if (newDate.getTime() <= Date.now()) {
+        const title = post.title || 'This post';
+        await (window.alertModal
+            ? window.alertModal(
+                `A blog post can't be scheduled in the past. <strong>${_escHtml(title)}</strong> stays `
+                + `where it was, on ${_escHtml(_dayLabel(original))} at `
+                + `${_escHtml(original.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }))}.`
+                + `<br><br>To publish it sooner than that, open it in Blog Studio and publish it now.`,
+                { title: `Can't move it to ${_dayLabel(newDate)}` })
+            : Promise.resolve(window.showToast?.('That time has already passed.', { icon: '⚠️' })));
+        _render();
+        return;
+    }
+
+    try {
+        const res = await fetch('/.netlify/functions/schedule-blog', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ id: blogId, publishDate: newDate.toISOString() }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not move that post.');
+        window.showToast?.(`${post.title || 'Post'} moved to ${_dayLabel(newDate)}.`);
+    } catch (err) {
+        window.showToast?.(err.message || 'Could not move that post.', { icon: '⚠️' });
+    }
+    await _loadAndRender();
+}
+
 function _attachDragDrop() {
-    // After DOM render, add dragend listeners to chips to clean up opacity. Covers all three
-    // draggable kinds — a record or follow-up chip left at 50% after a cancelled drag looks
+    // After DOM render, add dragend listeners to chips to clean up opacity. Covers all four
+    // draggable kinds — a record, follow-up or blog chip left at 50% after a cancelled drag looks
     // exactly like one that is mid-save.
-    document.querySelectorAll('[data-post-id], [data-cal-record-id], [data-cal-followup-thread]').forEach(el => {
+    document.querySelectorAll('[data-post-id], [data-cal-record-id], [data-cal-followup-thread], [data-cal-blog-id]').forEach(el => {
         el.addEventListener('dragend', () => {
             el.classList.remove('opacity-50');
         });
@@ -1500,7 +1553,7 @@ window._calOpenIssue = function (id) {
 
 // Read-only blog chip (month/week/list). Blog posts are managed in Blog Studio, so — unlike social
 // chips — these aren't draggable and don't open the social governance panel; clicking opens the studio.
-function _blogChip(post) {
+function _blogChip(post, viewType) {
     const sm = STATUS_META[post.status] || STATUS_META.draft;
     const posted = post.status === 'published';
     const when = posted ? (post.publishedAt || post.publishDate) : post.publishDate;
@@ -1511,9 +1564,19 @@ function _blogChip(post) {
         ? `<span class="text-emerald-600 text-xs font-extrabold shrink-0" title="Published ${time}">✓</span>`
         : `<span class="w-1.5 h-1.5 rounded-full ${sm.dot} shrink-0" title="${sm.label}"></span>`;
     const title = post.title || 'Untitled';
+    // A SCHEDULED blog is the only one that moves, and only on the grids. The calendar feed
+    // (blog-posts.ts) returns 'scheduled' and 'published' only, so the status test is really
+    // "everything but published" — written as the positive test so that widening the feed later
+    // cannot silently make a LIVE article draggable. The list view is excluded because only the
+    // month and week grids carry drop targets; a draggable chip there could be picked up and never
+    // put down. Dragging moves the DATE and keeps the time of day, exactly as a post chip does —
+    // the time of day itself is changed in Blog Studio.
+    const isDraggable = post.status === 'scheduled' && viewType !== 'list';
     return `<div
         onclick="window._calOpenBlog(${post.id})"
+        ${isDraggable ? `draggable="true" ondragstart="window._calDragStart(event, { kind: 'blog', id: ${post.id} })"` : ''}
         data-blog-id="${post.id}"
+        ${isDraggable ? `data-cal-blog-id="${post.id}"` : ''}
         class="group flex items-center gap-1.5 px-2 py-1 rounded-lg ${chipBg} shadow-sm cursor-pointer transition select-none text-left w-full"
         style="border-left:3px solid #7c3aed"
         aria-label="Blog · ${_escHtml(title)}">

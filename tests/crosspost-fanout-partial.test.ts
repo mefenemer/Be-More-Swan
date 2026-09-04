@@ -86,3 +86,6 @@ check('a short group is reported, not swallowed', () => {
 });
 
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);
+// The runner (scripts/run-tests.mjs) decides pass/fail from this process's exit status alone.
+// Without this line a failed check prints its ✗ and the file still reports green.
+if (passed !== total) process.exitCode = 1;

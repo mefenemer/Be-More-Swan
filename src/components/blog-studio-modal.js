@@ -454,6 +454,12 @@
     + '        <h3>Where this post gets published</h3>'
     + '        <p class="bs-help">Your own blog always gets it. Tick any other connected platform'
     + ' you want this post sent to when it goes live.</p>'
+    // Filled per post by loadDistribution. The panel used to describe the mechanic and never
+    // the TIMING, so a scheduled post showed every destination ticked and read as though
+    // distribution had already been arranged — it has not, and will not be until the post
+    // publishes. That misread is what sent an author looking for their scheduled posts in a
+    // review queue nothing had submitted them to.
+    + '        <p id="bs-dist-when" class="bs-help" style="font-weight:600;"></p>'
     + '        <label class="bs-dest" style="border-color:#fbcfe8;background:#fdf2f8;cursor:default;">'
     + '          <input type="checkbox" checked disabled>'
     + '          <span class="bs-dest-name">Your blog<span class="bs-dest-note">Your embedded widget and its public permalink \u2014 always included.</span></span>'
@@ -1364,10 +1370,58 @@
       });
   }
 
+  // When does anything on this panel actually happen? Nothing here is sent on save, on schedule, or
+  // on approval — syndicatePublishedPost runs inside publishBlogPost and nowhere else. A scheduled
+  // post therefore has an untouched set of destinations for as long as it stays scheduled, which is
+  // invisible unless the panel says so.
+  function distributionTiming(post) {
+    var status = (post && post.status) || '';
+    if (status === 'published') {
+      // Past tense on purpose. After publication the ticks are a record of where it went, and a
+      // platform connected since then needs the re-push button lower down — it is not retroactive.
+      return 'This post is live — these are where it was sent when it published. '
+        + 'Connected something since? Use “Send to connected platforms” below to send it there too.';
+    }
+    var when = post && post.publishDate ? new Date(post.publishDate) : null;
+    var dated = when && !isNaN(when) && when.getTime() > Date.now()
+      ? ' when it publishes on ' + when.toLocaleString('en-GB', {
+          weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+        })
+      : ' when it publishes';
+    return 'Nothing has been sent anywhere yet — this happens' + dated + '.';
+  }
+
+  // What this destination does with the post, in one line under its name.
+  //
+  // The FIRST-PARTY destination (The Swan Index) used to fall through to the generic draft line —
+  // "sent as a draft for you to release over there" — which is wrong in the part that matters: the
+  // author cannot release it. It is submitted to the magazine's EDITORS as `pending` and appears
+  // when one of them approves it. That is also why a published post can be absent from the Index
+  // for days with nothing wrong, which is worth saying before it happens rather than after.
+  //
+  // Worded without naming the publication: the label directly above this line already does, and a
+  // note that repeats it reads as boilerplate.
+  function destinationNote(d) {
+    // A social destination receives a short lead-in and a link, not the article — saying
+    // "published live" there would promise the reader gets the whole post over there.
+    if (d.social) return 'Shared to your feed as a short lead-in linking back to this post.';
+    if (d.firstParty) {
+      return d.publishMode === 'live'
+        ? 'Goes straight onto the magazine when this post publishes.'
+        : 'Submitted to the editors for review when this post publishes — it appears on the '
+          + 'magazine once one of them approves it.';
+    }
+    return d.publishMode === 'live'
+      ? 'Published live as soon as this post goes out.'
+      : 'Sent as a draft for you to release over there.';
+  }
+
   function loadDistribution(post) {
     var list = el('bs-dist-list');
     if (!list) return;
     list.innerHTML = '';
+    var whenEl = el('bs-dist-when');
+    if (whenEl) whenEl.textContent = distributionTiming(post);
     setStatus('bs-dist-status', 'Checking connected platforms…');
     var selected = selectedDestinations(post);
     api('connect-blog-destination', { method: 'GET' }).then(function (res) {
@@ -1393,13 +1447,7 @@
         // Say which way it lands over there. "draft" vs "live" is the difference between a post
         // appearing on someone's public blog and waiting for them there.
         text.innerHTML = bsEscape(d.label + (d.accountLabel ? ' \u00b7 ' + d.accountLabel : ''))
-          + '<span class="bs-dest-note">'
-          // A social destination receives a short lead-in and a link, not the article — saying
-          // "published live" there would promise the reader gets the whole post over there.
-          + (d.social ? 'Shared to your feed as a short lead-in linking back to this post.'
-              : d.publishMode === 'live' ? 'Published live as soon as this post goes out.'
-                                         : 'Sent as a draft for you to release over there.')
-          + '</span>';
+          + '<span class="bs-dest-note">' + bsEscape(destinationNote(d)) + '</span>';
         label.appendChild(box);
         label.appendChild(text);
         list.appendChild(label);
@@ -2046,6 +2094,7 @@
     state.widgetTheme = null;
     ['bs-save-status', 'bs-media-status', 'bs-ai-draft-status', 'bs-dist-status', 'bs-widget-status'].forEach(function (id) { setStatus(id, ''); });
     var dist = el('bs-dist-list'); if (dist) dist.innerHTML = '';
+    var when = el('bs-dist-when'); if (when) when.textContent = '';
     var picker = el('bs-media-picker');
     if (picker) { picker.innerHTML = ''; picker.classList.add('bs-hidden'); }
     ['bs-ai-form', 'bs-pexels-form'].forEach(function (id) { var e = el(id); if (e) e.classList.add('bs-hidden'); });
@@ -2107,6 +2156,10 @@
     window.ScrollLock.release('blog-studio');
   }
 
+  // The two pure functions behind the "Where this post gets published" panel's copy.
+  // tests/blog-destinations-panel-copy.test.ts calls them directly — the claims they make about
+  // WHEN a post is sent and WHO releases it are the kind that render perfectly while being false.
+  window._blogStudioCopy = { distributionTiming: distributionTiming, destinationNote: destinationNote };
   window.openBlogStudio = openBlogStudio;
   window.closeBlogStudio = closeBlogStudio;
   window.blogStudioAvailable = blogStudioAvailable;
