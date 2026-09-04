@@ -189,6 +189,15 @@ interface HopResult {
     location?: string;
     contentType: string;
     body: string;
+    /**
+     * The undecoded bytes.
+     *
+     * ⚠️ Carried alongside `body` because a binary caller CANNOT use the decoded string:
+     * `Buffer.toString('utf-8')` replaces every invalid sequence with U+FFFD, which silently and
+     * irreversibly corrupts a JPEG. An image fetched through the text path would upload as a
+     * broken file with no error anywhere.
+     */
+    bytes: Buffer;
 }
 
 /**
@@ -249,7 +258,7 @@ function requestOnce(
                 // Redirect: don't read the body, the caller re-validates the new target.
                 if (status >= 300 && status < 400 && res.headers.location) {
                     res.destroy();
-                    resolve({ status, location: String(res.headers.location), contentType, body: '' });
+                    resolve({ status, location: String(res.headers.location), contentType, body: '', bytes: Buffer.alloc(0) });
                     return;
                 }
 
@@ -273,11 +282,10 @@ function requestOnce(
                     }
                     chunks.push(chunk);
                 });
-                res.on('end', () => resolve({
-                    status,
-                    contentType,
-                    body: Buffer.concat(chunks).toString('utf-8'),
-                }));
+                res.on('end', () => {
+                    const bytes = Buffer.concat(chunks);
+                    resolve({ status, contentType, body: bytes.toString('utf-8'), bytes });
+                });
                 res.on('error', () => reject(new SafeFetchError("We couldn't read that link.", 'read_error')));
             },
         );
@@ -311,6 +319,12 @@ export interface SafeFetchResult {
     finalUrl: string;
     contentType: string;
     body: string;
+}
+
+export interface SafeFetchBinaryResult {
+    finalUrl: string;
+    contentType: string;
+    bytes: Buffer;
 }
 
 /**
@@ -360,6 +374,57 @@ export async function safeFetchText(
             throw new SafeFetchError(`That link returned an error (${res.status}).`, 'http_error');
         }
         return { finalUrl: url.toString(), contentType: res.contentType, body: res.body };
+    }
+
+    throw new SafeFetchError('That link redirected too many times.', 'too_many_redirects');
+}
+
+/**
+ * The same fenced fetch, returning UNDECODED bytes.
+ *
+ * ⚠️ Use this for anything that is not text. `safeFetchText` decodes as UTF-8, which replaces every
+ * invalid byte sequence with U+FFFD — a JPEG round-tripped through it is silently destroyed, with
+ * no error at any layer. The corruption only surfaces as "the advert has a broken image".
+ *
+ * Everything that makes safeFetchText safe applies unchanged: DNS resolved once and PINNED to the
+ * socket, every redirect hop re-validated, private ranges refused, and a streaming byte cap that
+ * does not trust Content-Length.
+ */
+export async function safeFetchBinary(
+    rawUrl: string,
+    opts: { maxBytes?: number; timeoutMs?: number; maxRedirects?: number; userAgent?: string } = {},
+): Promise<SafeFetchBinaryResult> {
+    const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
+    const maxRedirects = opts.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
+    const deadline = Date.now() + (opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    const userAgent = opts.userAgent ?? USER_AGENTS.inspo;
+
+    let url = parseAndValidateUrl(rawUrl);
+
+    for (let hop = 0; hop <= maxRedirects; hop++) {
+        // Re-validated on EVERY hop, exactly as in safeFetchText — a public URL redirecting to
+        // 169.254.169.254 is the textbook bypass.
+        const addresses = await resolveToPublicAddresses(url.hostname);
+        const res = await requestOnce(url, addresses, { maxBytes, deadline, userAgent });
+
+        if (res.location) {
+            let next: URL;
+            try {
+                next = new URL(res.location, url);
+            } catch {
+                throw new SafeFetchError('That link redirected somewhere invalid.', 'bad_redirect');
+            }
+            if (next.protocol !== 'http:' && next.protocol !== 'https:') {
+                throw new SafeFetchError('That link redirected to an unsupported address.', 'bad_redirect');
+            }
+            url = parseAndValidateUrl(next.toString());
+            continue;
+        }
+
+        if (res.status < 200 || res.status >= 300) {
+            throw new SafeFetchError(`That link returned an error (${res.status}).`, 'http_error');
+        }
+        return { finalUrl: url.toString(), contentType: res.contentType, bytes: res.bytes };
     }
 
     throw new SafeFetchError('That link redirected too many times.', 'too_many_redirects');

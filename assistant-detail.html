@@ -312,11 +312,18 @@
              is an assistant id and a non-empty _goalsCache, and reveals it in the same breath. Drop
              the class and the button is visible-but-dead during the skeleton, on a detail page opened
              with no ?id, and whenever the goals fetch fails — the silent no-op it exists to end. -->
+        <!-- Both are pill buttons matching #autopilot-adjust-btn ("Adjust schedule") and
+             #btn-audience-connections ("Manage connections"), so every card-level action on this
+             page is the same control in the same top-right slot. They were underlined text links,
+             which read as page chrome rather than as things this card can do.
+             ⚠️ Same display-utility trap as the connections button: `hidden` is display:none and
+             the compiled style.css orders `.inline-flex` after it, so #btn-refresh-goals — which
+             ships hidden and is revealed by _wireGoalRefreshButton — must not take one. -->
         <button type="button" id="btn-refresh-goals"
           title="Re-measure these goals now instead of waiting for the next background check"
-          class="hidden text-xs font-bold text-gray-500 hover:text-gray-800 underline underline-offset-2 cursor-pointer transition-colors">Check again now</button>
+          class="hidden shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Check again now</button>
         <button type="button" onclick="window._activateMainTab && window._activateMainTab('goals')"
-          class="text-xs font-bold text-emerald-700 hover:text-emerald-800 underline underline-offset-2 cursor-pointer transition-colors">Manage goals</button>
+          class="shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Manage goals</button>
       </div>
     </div>
     <!-- The loading skeleton is applied to this inner panel, not to #goal-progress-card: the overlay
@@ -437,28 +444,38 @@
            hidden when there's nothing to plot: _fetchAndRenderFollowerCounts always reveals the
            block, falling back to an empty state (no connections) or an error state. A block that
            only appeared once numbers arrived was indistinguishable from a block that didn't exist.
-           #audience-updated-note (header, right) carries how stale the figures are;
+           #audience-updated-note (header, under the title) carries how stale the figures are;
            #audience-refresh-note (footer) carries the refresh policy — see the renderer for why the
            next refresh is worded as a page-load condition rather than a scheduled job. -->
       <div id="autopilot-audience" class="mt-4 pt-4 border-t border-gray-100 hidden">
-        <div class="flex items-center justify-between gap-3 mb-2">
-          <h4 class="text-[11px] font-bold text-gray-400 uppercase tracking-wide shrink-0">Audience</h4>
-          <p id="audience-updated-note" class="text-[11px] text-gray-400 shrink-0">Followers &amp; subscribers</p>
+        <!-- Header row: title + freshness note on the left, the section's action top-right — the
+             same shape as the Autopilot card header above it, so "Manage connections" and "Adjust
+             schedule" sit in the same place and read as the same kind of control.
+             #audience-updated-note moved UNDER the h4 rather than beside it: the button now owns
+             the right-hand slot, and in the narrow split column there is not room for a title, a
+             note and a button on one line. items-start so the button aligns with the title, not
+             with the centre of a note that may wrap to two lines. -->
+        <div class="flex items-start justify-between gap-3 mb-2">
+          <div class="min-w-0">
+            <h4 class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Audience</h4>
+            <p id="audience-updated-note" class="text-[11px] text-gray-400">Followers &amp; subscribers</p>
+          </div>
+          <!-- "Manage connections" — the route into the Connections panel, sitting with the list it
+               manages rather than in the hero strip two cards up: on the Blog Writer this block IS
+               the list of systems the blog publishes to, and on a social role it is the list of
+               connected accounts. _syncManageConnectionsPlacement (assistants.js) chooses between
+               this button and the hero one and hides whichever it didn't pick, so exactly one route
+               is ever on the page.
+               ⚠️ Ships `hidden` and deliberately carries NO display utility: `.hidden` is
+               display:none, but the compiled style.css orders `.inline-flex` AFTER it, so an
+               inline-flex button here would stay visible on the roles meant to keep the hero one.
+               (`shrink-0` is a flex utility, not a display one, so it is safe.) -->
+          <button type="button" id="btn-audience-connections"
+            onclick="window._openBriefDrawer && window._openBriefDrawer('platforms')"
+            class="hidden shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Manage connections</button>
         </div>
         <div id="audience-by-platform"></div>
         <p id="audience-refresh-note" class="text-[10px] text-gray-400 mt-2 leading-relaxed hidden"></p>
-        <!-- "Manage connections" — the route into the Connections panel, sitting with the list it
-             manages rather than in the hero strip two cards up: on the Blog Writer this block IS
-             the list of systems the blog publishes to, and on a social role it is the list of
-             connected accounts. _syncManageConnectionsPlacement (assistants.js) chooses between
-             this button and the hero one and hides whichever it didn't pick, so exactly one route
-             is ever on the page.
-             ⚠️ Ships `hidden` and deliberately carries NO display utility: `.hidden` is
-             display:none, but the compiled style.css orders `.inline-flex` AFTER it, so an
-             inline-flex button here would stay visible on the roles meant to keep the hero one. -->
-        <button type="button" id="btn-audience-connections"
-          onclick="window._openBriefDrawer && window._openBriefDrawer('platforms')"
-          class="hidden mt-3 px-3 py-1.5 text-xs font-bold rounded-lg border border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Manage connections</button>
       </div>
       </div>
     </div>

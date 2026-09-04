@@ -160,4 +160,31 @@ check('the editor is locked while the worker writes into the post', () => {
     assert.ok(/function stopAiDraftPoll\(\)/.test(modal), 'no way to abandon a poll when the post changes');
 });
 
+console.log('\n──── the page underneath is told the draft landed ────');
+
+check('a finished draft refreshes the list behind the modal', () => {
+    // Blog Studio covers the Assistant Detail page, so notifyChanged() is the ONLY channel to it —
+    // and it was wired exclusively to lifecycle moves (publish, approve, schedule, unschedule). An
+    // AI draft moves no lifecycle column: the post was already 'draft' and stays 'draft'. So the
+    // card underneath went on reading "Untitled draft" with no excerpt, which is indistinguishable
+    // from a draft that never ran.
+    const apply = modal.slice(landmark(modal, 'function applyAiDraft('), landmark(modal, 'function loadExistingPost('));
+    assert.ok(/notifyChanged\(\)/.test(apply), 'a landed draft never tells the host page');
+    // The rename must land FIRST or the list repaints with the title it already had.
+    assert.ok(landmark(apply, 'titled.then(') < landmark(apply, 'notifyChanged()'),
+        'the refresh does not wait for the title write — the list repaints as "Untitled draft"');
+});
+
+check('closing after an ordinary edit refreshes too', () => {
+    // Renaming a post, or writing its body, changes what the card renders without moving a status.
+    const close = modal.slice(landmark(modal, 'function closeBlogStudio()'));
+    assert.ok(/state\.contentChanged/.test(close.slice(0, 1200)), 'a plain edit closes without a refresh');
+    // Firing before teardown would repaint the list while the modal still covers it.
+    assert.ok(landmark(close, 'state.editor.destroy') < landmark(close, 'notifyChanged()'),
+        'the host is refreshed before the modal is torn down');
+    // Whatever sets the flag must also be reachable: the editor's onChange and the title blur.
+    assert.ok(/state\.contentChanged = true;/.test(modal), 'nothing ever marks the session dirty');
+    assert.ok(/state\.contentChanged = false;/.test(modal), 'the flag is never reset, so it fires on every close');
+});
+
 console.log(`\n${passed} checks passed.`);

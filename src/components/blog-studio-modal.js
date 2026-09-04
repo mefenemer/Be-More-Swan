@@ -53,6 +53,10 @@
     // token: every tick bails when this stops matching, so closing the modal or opening another
     // post cannot have a stale timer paint a draft into the wrong editor.
     aiDraftJobId: null,
+    // Whether anything the list underneath RENDERS (title, body) changed this session. The modal
+    // covers the Assistant Detail page, so nothing it does reaches that list on its own —
+    // notifyChanged() is the only channel, and until now only LIFECYCLE moves used it.
+    contentChanged: false,
     // Resolved lazily when no assistantId was passed in (the standalone page, the Calendar) so the
     // "Ask <name> to…" buttons can still name somebody. '' = looked and found none.
     assistantName: null, postStatus: null,
@@ -632,6 +636,7 @@
     // Whatever was being drafted, it isn't this post — and the busy lock belongs to the editor
     // being replaced.
     stopAiDraftPoll();
+    state.contentChanged = false;   // a fresh post, and the list behind is current for it
     state.postId = postId;
     el('bs-workspace').classList.remove('bs-hidden');
     el('bs-title').value = title;
@@ -643,6 +648,8 @@
       title: title,
       placeholder: 'Write your post here… (Markdown supported — or ask your assistant to draft it)',
       onChange: function (nextMd) {
+        // The editor autosaves this, so the card in the list behind the modal is now out of date.
+        state.contentChanged = true;
         refreshReadout(nextMd);
         setStatus('bs-save-status', 'Saving…');
         setTimeout(function () { setStatus('bs-save-status', 'Saved'); }, 1400);
@@ -811,14 +818,26 @@
         setStatus('bs-ai-draft-status', 'The draft finished but could not be loaded. Reopen this post to see it.');
         return;
       }
+      // ⚠️ The rename has to LAND before the page underneath re-renders, or the list repaints
+      // itself with the title it already had — "Untitled draft", the very thing that makes a
+      // finished draft look unfinished.
+      var titled = Promise.resolve();
       if (!el('bs-title').value.trim() || el('bs-title').value.trim() === 'Untitled draft') {
         el('bs-title').value = topic;
-        api('save-blog-draft', { method: 'POST', body: JSON.stringify({ id: state.postId, title: topic }) });
+        titled = api('save-blog-draft', { method: 'POST', body: JSON.stringify({ id: state.postId, title: topic }) });
       }
       state.editor.setMarkdown(md);
       refreshReadout(md);                      // setMarkdown doesn't fire onChange
       setStatus('bs-ai-draft-status', '');
       el('bs-ai-draft-form').classList.add('bs-hidden');
+
+      // The post's STATUS did not move, which is why this needed saying explicitly: notifyChanged
+      // was only ever called by lifecycle actions (publish, approve, unschedule), and a draft that
+      // gains a title and a body changes nothing those watch. The card underneath still read
+      // "Untitled draft" with no excerpt, so a finished article looked like a draft that never ran.
+      // setMarkdown does not fire onChange, so nothing else marks this dirty either.
+      state.contentChanged = false;            // this notify covers it; don't fire twice on close
+      titled.then(function () { notifyChanged(); });
     });
   }
 
@@ -1632,6 +1651,7 @@
 
     el('bs-title').addEventListener('blur', function () {
       if (!state.postId) return;
+      state.contentChanged = true;   // the title is what the card in the list is labelled with
       api('save-blog-draft', { method: 'POST', body: JSON.stringify({ id: state.postId, title: this.value }) });
     });
 
@@ -2294,6 +2314,17 @@
     if (state.editor && state.editor.destroy) { state.editor.destroy(); state.editor = null; }
     el('bms-blog-backdrop').classList.remove('bs-open');
     window.ScrollLock.release('blog-studio');
+    // Edits that never moved the post between lifecycle columns still change what the list behind
+    // this modal draws — its title and its excerpt. Those had no refresh at all: notifyChanged was
+    // wired only to publish/approve/schedule/unschedule, so renaming a post or writing its body and
+    // closing left the card underneath showing the state it was opened in.
+    //
+    // AFTER the teardown, and last: the host re-renders synchronously, and doing it first would
+    // repaint the list while this modal is still on screen over the top of it.
+    if (state.contentChanged) {
+      state.contentChanged = false;
+      notifyChanged();
+    }
   }
 
   // The two pure functions behind the "Where this post gets published" panel's copy.

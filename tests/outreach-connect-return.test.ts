@@ -108,6 +108,25 @@ check('the audience/destinations block carries its own Manage connections button
         'and it must open the same Connections panel the hero button does');
 });
 
+check('it sits in the section header, top-right, not under the list', () => {
+    // Same slot and same pill as #autopilot-adjust-btn ("Adjust schedule") one card up, so the two
+    // card-level actions on this page read as the same control.
+    assert.ok(
+        landmark(AUDIENCE, 'id="btn-audience-connections"') < landmark(AUDIENCE, 'id="audience-by-platform"'),
+        'the button must be in the header row, ABOVE the destinations/audience list it heads',
+    );
+    const adjust = DETAIL.slice(landmark(DETAIL, 'id="autopilot-adjust-btn"'));
+    const adjustCls = /class="([^"]+)"/.exec(adjust.slice(0, landmark(adjust, '</button>')))?.[1] ?? '';
+    const btnAll = AUDIENCE.slice(landmark(AUDIENCE, 'id="btn-audience-connections"'));
+    const btnCls = /class="([^"]+)"/.exec(btnAll.slice(0, landmark(btnAll, '</button>')))?.[1] ?? '';
+    // `hidden` is this button's own (it starts invisible); everything else must match Adjust schedule.
+    assert.deepStrictEqual(
+        btnCls.split(/\s+/).filter(c => c && c !== 'hidden').sort(),
+        adjustCls.split(/\s+/).filter(Boolean).sort(),
+        'the two buttons must be styled identically',
+    );
+});
+
 check('it ships hidden, and with no display utility that would outrank .hidden', () => {
     // ⚠️ style.css is prebuilt and orders `.inline-flex` AFTER `.hidden`, so an inline-flex button
     // stays visible with the hidden class on it — which would put BOTH buttons on the page for
@@ -170,6 +189,56 @@ check('the registry pass re-runs placement', () => {
         landmark(SHELL, "toggle('module-social-strategy'"),
     );
     assert.match(REG, /window\._syncManageConnectionsPlacement\(\)/);
+});
+
+console.log('\n──── the Goal Progress actions are the same control ────');
+
+// "Check again now" and "Manage goals" were underlined text links, which read as page chrome
+// rather than as things the Goal Progress card can do. Both are now the same pill as
+// "Adjust schedule" / "Manage connections", in the same top-right slot.
+
+const GOALS_HDR = DETAIL.slice(
+    landmark(DETAIL, 'id="goal-progress-card"'),
+    landmark(DETAIL, 'id="goal-progress-panel"'),
+);
+const ADJUST = (() => {
+    const from = DETAIL.slice(landmark(DETAIL, 'id="autopilot-adjust-btn"'));
+    return /class="([^"]+)"/.exec(from.slice(0, landmark(from, '</button>')))?.[1] ?? '';
+})();
+const clsOf = (hay: string, marker: string) => {
+    const from = hay.slice(landmark(hay, marker));
+    return /class="([^"]+)"/.exec(from.slice(0, landmark(from, '</button>')))?.[1] ?? '';
+};
+
+check('both actions carry the Adjust schedule pill, not a text-link style', () => {
+    for (const [name, marker] of [
+        ['Check again now', 'id="btn-refresh-goals"'],
+        ['Manage goals', "_activateMainTab('goals')"],
+    ] as const) {
+        const cls = clsOf(GOALS_HDR, marker);
+        assert.deepStrictEqual(
+            cls.split(/\s+/).filter(c => c && c !== 'hidden').sort(),
+            ADJUST.split(/\s+/).filter(Boolean).sort(),
+            `${name} must be styled as the shared pill button`,
+        );
+        assert.doesNotMatch(cls, /underline/, `${name} is a button now, not a link`);
+    }
+});
+
+check('they stay in the header\'s right-hand group', () => {
+    assert.ok(
+        landmark(GOALS_HDR, 'Goal Progress</h3>') < landmark(GOALS_HDR, 'id="btn-refresh-goals"'),
+        'the actions follow the title, so justify-between puts them top-right',
+    );
+});
+
+check('Check again now still has no display utility to beat its own `hidden`', () => {
+    // ⚠️ _wireGoalRefreshButton reveals it with classList.toggle('hidden') alone. An inline-flex
+    // here and it is visible-but-dead during the skeleton, on a detail page opened with no ?id,
+    // and whenever the goals fetch fails — the silent no-op the hidden class exists to prevent.
+    const cls = clsOf(GOALS_HDR, 'id="btn-refresh-goals"');
+    assert.match(cls, /^hidden\b/, 'it must still ship hidden');
+    assert.doesNotMatch(cls, /\b(inline-flex|inline-block|flex|block)\b/);
 });
 
 console.log('\n──── picking a provider starts the grant ────');

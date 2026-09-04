@@ -723,10 +723,13 @@
               </div>
               <input type="url" placeholder="Where ad ${i + 1} sends people${i ? ' (blank = same as ad 1)' : ''}" data-cmp-paid-url="${esc(String(c.id))}-${i}"
                 class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
+              <input type="url" placeholder="Image link for ad ${i + 1}${i ? ' (blank = same as ad 1)' : ''}" data-cmp-paid-image="${esc(String(c.id))}-${i}"
+                class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs" />
             </div>`).join('')}
         </div>
         <p class="text-[11px] text-gray-400 mt-2 leading-relaxed">
           Use a tracked link from above as the destination and its clicks and sign-ups land in your funnel.
+          LinkedIn requires an image on every advert — paste a public link to a JPG or PNG.
         </p>
 
         <button type="button" data-cmp-stage="${esc(String(c.id))}"
@@ -1097,7 +1100,39 @@
       const locations = urns('locations');
       if (locations.length === 0) { sayPaid(id, 'Choose at least one location — LinkedIn will not run an advert without one.', 'error'); return; }
 
+      const image = (u) => (document.querySelector(`[data-cmp-paid-image="${id}-${u}"]`)?.value || '').trim();
+      const firstImage = image(0);
+      if (!firstImage) { sayPaid(id, 'LinkedIn needs an image on every advert. Paste a link to a JPG or PNG for ad 1.', 'error'); return; }
+
       stageBtn.disabled = true;
+      try {
+        // ⚠️ Images are uploaded to LinkedIn FIRST, one call each, because staging needs their
+        // asset URNs. Doing it here rather than inside stage_paid keeps the failure specific: a
+        // rejected image says WHICH ad and why, instead of failing the whole campaign with one
+        // opaque message after the user has written three ads.
+        sayPaid(id, 'Uploading images to LinkedIn…');
+        const urlToUrn = new Map();
+        for (let i = 0; i < variants.length; i++) {
+          const src = image(i) || firstImage;
+          if (!urlToUrn.has(src)) {
+            const r = await fetch('/.netlify/functions/linkedin-ads-media', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+              body: JSON.stringify({ action: 'upload', imageUrl: src }),
+            });
+            const d = await r.json();
+            if (!r.ok) throw new Error(`Ad ${i + 1}: ${d.error || 'that image could not be used.'}`);
+            // Cached by URL: three ads sharing one image is the common case, and uploading the
+            // same file three times would be three round trips and three assets.
+            urlToUrn.set(src, d.mediaUrn);
+          }
+          variants[i].mediaUrn = urlToUrn.get(src);
+        }
+      } catch (err) {
+        sayPaid(id, err.message || 'That image could not be uploaded.', 'error');
+        stageBtn.disabled = false;
+        return;
+      }
+
       sayPaid(id, 'Creating them on LinkedIn, paused…');
       try {
         const res = await post({

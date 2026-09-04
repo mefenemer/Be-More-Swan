@@ -7454,7 +7454,7 @@ async function _fetchAndRenderBlogDestinations() {
         // own blog first. A reader seeing "0 connected" should not conclude nothing gets published.
         setFooter(connectedCount
             ? 'Every published post goes to your own blog first, then syndicates to the platforms above.'
-            : 'Published posts go to your own blog. Connect a platform below to syndicate them further.');
+            : 'Published posts go to your own blog. Use <span class="font-semibold">Manage connections</span> to syndicate them further.');
     } catch (err) {
         console.error('[blog-destinations] load failed:', err);
         // Its own copy, for the same reason the KPI cards keep error and no-data apart: a network

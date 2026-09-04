@@ -607,3 +607,95 @@ export async function fetchAccountOrganization(accessToken: string, accountUrn: 
     }
     return ref;
 }
+
+// ── Image upload ────────────────────────────────────────────────────────────────────────────────
+
+/** What LinkedIn's Images API accepts. Anything else is rejected after the bytes are sent. */
+export const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif'] as const;
+/** Its documented pixel ceiling. */
+export const MAX_IMAGE_PIXELS = 36_152_320;
+
+/**
+ * Upload an image and return its `urn:li:image:N`.
+ *
+ * Three steps, and the third is the one people skip:
+ *   1. `initializeUpload` reserves the URN and hands back a one-time upload URL.
+ *   2. PUT the bytes to that URL.
+ *   3. ⚠️ WAIT FOR IT TO BE `AVAILABLE`. A freshly uploaded image is `WAITING_UPLOAD`, then
+ *      `PROCESSING`. Referencing it in a creative before LinkedIn has finished processing is the
+ *      exact failure the Instagram image container taught us — the asset exists, the reference is
+ *      valid, and the thing silently does not work.
+ *
+ * ⚠️ `owner` is the ORGANISATION, not the ad account. Initialize only accepts a person or an
+ * organisation URN, and our permission to upload for that company comes from the ad account's DSC
+ * relationship with it.
+ */
+export async function uploadImage(
+    accessToken: string,
+    ownerOrganisationUrn: string,
+    bytes: ArrayBuffer,
+    contentType: string,
+): Promise<string> {
+    if (!ALLOWED_IMAGE_TYPES.includes(contentType as never)) {
+        throw new Error(`LinkedIn accepts JPG, PNG and GIF images. That file is ${contentType}.`);
+    }
+
+    const init = await call(`${BASE}/images?action=initializeUpload`, {
+        method: 'POST',
+        headers: headers(accessToken),
+        body: JSON.stringify({ initializeUploadRequest: { owner: ownerOrganisationUrn } }),
+    });
+    const initJson = await init.json() as { value?: { uploadUrl?: string; image?: string } };
+    const uploadUrl = initJson.value?.uploadUrl;
+    const imageUrn = initJson.value?.image;
+    if (!uploadUrl || !imageUrn) {
+        throw new Error('LinkedIn did not return an upload URL for the image.');
+    }
+
+    // ⚠️ The upload URL is pre-signed and takes the BYTES ONLY. Sending our Authorization header
+    // here is unnecessary and, on a signed URL, can be rejected outright.
+    const put = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': contentType },
+        body: bytes,
+    });
+    if (!put.ok) {
+        throw new Error(`Uploading the image to LinkedIn failed (${put.status}).`);
+    }
+
+    await waitForImageReady(accessToken, imageUrn);
+    return imageUrn;
+}
+
+/**
+ * Poll until the image is `AVAILABLE`.
+ *
+ * ⚠️ `PROCESSING_FAILED` is a terminal state and must be surfaced, not waited out — a file that is
+ * too large or the wrong format fails here, and a caller that only checks for AVAILABLE would spin
+ * until the timeout and then report the wrong problem.
+ *
+ * ⚠️ An ABSENT status is treated as NOT ready. The Instagram container bug was exactly the inverse
+ * assumption — a missing field read as "done" — and it published broken posts for weeks.
+ */
+export async function waitForImageReady(
+    accessToken: string,
+    imageUrn: string,
+    opts: { attempts?: number; delayMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<void> {
+    const attempts = opts.attempts ?? 10;
+    const delayMs = opts.delayMs ?? 1500;
+    const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+
+    for (let i = 0; i < attempts; i++) {
+        const res = await call(`${BASE}/images/${encodeURIComponent(imageUrn)}`, {
+            method: 'GET', headers: headers(accessToken),
+        });
+        const data = await res.json() as { status?: string };
+        if (data.status === 'AVAILABLE') return;
+        if (data.status === 'PROCESSING_FAILED') {
+            throw new Error('LinkedIn could not process that image. Try a different file — JPG or PNG, under 36 megapixels.');
+        }
+        if (i < attempts - 1) await sleep(delayMs);
+    }
+    throw new Error('LinkedIn is still processing that image. Try staging again in a moment.');
+}

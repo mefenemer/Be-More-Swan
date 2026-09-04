@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { landmark } from './landmark';
 import {
     COMPANY_SIZES, FALLBACK_GEOS, INCOMPATIBLE_WITH_FUNCTION_OR_SENIORITY, TARGETING_FACETS,
-    buildTargetingCriteria, campaignGroupName,
+    buildTargetingCriteria, campaignGroupName, ALLOWED_IMAGE_TYPES,
 } from '../src/utils/ad-networks/linkedin';
 
 let passed = 0;
@@ -345,6 +345,84 @@ check('mediaUrn is REQUIRED by the contract, so this cannot be forgotten again',
     // Expressed in the type, not just checked at the boundary — the compiler refuses any caller
     // that omits it.
     assert.match(read('src/utils/ad-networks/types.ts'), /mediaUrn: string;/);
+});
+
+console.log('\n──── the image upload — the last blocker, closed ────');
+
+const media = read('netlify/functions/linkedin-ads-media.ts');
+const sf = read('src/utils/safe-fetch.ts');
+
+check('image bytes go through the BINARY fetch, never the text one', () => {
+    // ⚠️ THE BUG THIS AVOIDS. safeFetchText decodes as UTF-8, replacing every invalid byte
+    // sequence with U+FFFD — a JPEG round-tripped through it is silently destroyed, with no error
+    // at any layer. It only surfaces as "the advert has a broken image".
+    assert.match(code(media), /safeFetchBinary\(imageUrl/);
+    assert.ok(!/safeFetchText/.test(code(media)), 'image bytes are being decoded as text');
+    assert.match(sf, /export async function safeFetchBinary/);
+});
+
+check('the binary path keeps the whole SSRF fence', () => {
+    // The valuable part of safe-fetch is the DNS pin and the per-hop re-validation, not the
+    // decoding. A binary variant that skipped them would be a fresh SSRF hole.
+    const fn = sf.slice(landmark(sf, 'export async function safeFetchBinary'));
+    assert.match(fn, /resolveToPublicAddresses\(url\.hostname\)/);
+    assert.match(fn, /parseAndValidateUrl\(next\.toString\(\)\)/);
+    assert.match(fn, /too_many_redirects/);
+});
+
+check('the Buffer is sliced to its own view before being sent', () => {
+    // ⚠️ Node Buffers share a POOLED ArrayBuffer. Handing over `.buffer` unsliced would upload the
+    // neighbouring allocations too — other requests' memory, sent to a third party.
+    assert.match(code(media), /res\.bytes\.buffer\.slice\(res\.bytes\.byteOffset, res\.bytes\.byteOffset \+ res\.bytes\.byteLength\)/);
+});
+
+check('the upload WAITS for the asset to be processed', () => {
+    // ⚠️ A fresh upload is WAITING_UPLOAD, then PROCESSING. Referencing it in a creative before
+    // LinkedIn finishes is the Instagram-container bug: the asset exists, the reference is valid,
+    // and it silently does not work.
+    assert.match(code(lk), /await waitForImageReady\(accessToken, imageUrn\)/);
+    assert.ok(landmark(lk, "method: 'PUT'") < landmark(lk, 'await waitForImageReady'));
+});
+
+check('a missing status is NOT read as ready, and a failure is terminal', () => {
+    const fn = lk.slice(landmark(lk, 'export async function waitForImageReady'));
+    assert.match(fn, /data\.status === 'AVAILABLE'/);
+    assert.match(fn, /data\.status === 'PROCESSING_FAILED'/);
+    // Only an explicit AVAILABLE returns; anything else keeps waiting or throws.
+    assert.ok(!/data\.status !== /.test(fn), 'readiness is being inferred from a negative check');
+});
+
+check('the pre-signed upload URL is not sent our bearer token', () => {
+    // It is already signed; attaching an Authorization header is needless credential exposure and
+    // some signed endpoints reject it outright.
+    const put = lk.slice(landmark(lk, 'const put = await fetch(uploadUrl'), landmark(lk, 'if (!put.ok)'));
+    assert.ok(!/Authorization/.test(put), 'the bearer token is being sent to the upload URL');
+    assert.match(put, /'Content-Type': contentType/);
+});
+
+check('only formats LinkedIn accepts are forwarded', () => {
+    assert.deepEqual([...ALLOWED_IMAGE_TYPES], ['image/jpeg', 'image/png', 'image/gif']);
+    assert.match(code(media), /ALLOWED_IMAGE_TYPES\.includes\(contentType as never\)/);
+});
+
+check('the SSRF refusal is not echoed back to the caller', () => {
+    // ⚠️ A refusal naming the internal address it blocked tells a prober what exists.
+    const branch = media.slice(landmark(media, '[linkedin-ads-media] fetch refused or failed'), landmark(media, 'const owner = await fetchAccountOrganization'));
+    assert.match(branch, /Use a public https:\/\/ link/);
+    assert.ok(!/err\.message/.test(branch), 'the fence\'s internal reason is being returned to the caller');
+});
+
+check('the UI uploads BEFORE staging, and names which ad failed', () => {
+    // A rejected image should say WHICH ad and why, not fail the whole campaign with one opaque
+    // message after three ads have been written.
+    assert.ok(landmark(ui, "action: 'upload', imageUrl: src") < landmark(ui, "action: 'stage_paid'"));
+    assert.match(code(ui), /`Ad \$\{i \+ 1\}: \$\{d\.error/);
+});
+
+check('one image shared by three ads is uploaded once', () => {
+    // The common case. Three uploads would be three round trips and three assets for one file.
+    assert.match(code(ui), /const urlToUrn = new Map\(\)/);
+    assert.match(code(ui), /if \(!urlToUrn\.has\(src\)\)/);
 });
 
 console.log(`\n${passed} checks passed.\n`);
