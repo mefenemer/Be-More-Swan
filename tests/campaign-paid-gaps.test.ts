@@ -361,13 +361,46 @@ check('image bytes go through the BINARY fetch, never the text one', () => {
     assert.match(sf, /export async function safeFetchBinary/);
 });
 
-check('the binary path keeps the whole SSRF fence', () => {
+check('the binary path keeps the whole SSRF fence — by sharing it, not copying it', () => {
     // The valuable part of safe-fetch is the DNS pin and the per-hop re-validation, not the
     // decoding. A binary variant that skipped them would be a fresh SSRF hole.
-    const fn = sf.slice(landmark(sf, 'export async function safeFetchBinary'));
-    assert.match(fn, /resolveToPublicAddresses\(url\.hostname\)/);
-    assert.match(fn, /parseAndValidateUrl\(next\.toString\(\)\)/);
-    assert.match(fn, /too_many_redirects/);
+    //
+    // ⚠️ It was first written as a COPY of safeFetchText's loop: twenty-one statements identical
+    // but for the return line. Asserting the copy still contains the guards cannot catch what
+    // actually goes wrong there — a NEW guard added to the text loop and not to the binary one.
+    // So what is pinned now is that there is exactly one loop and both entry points go through it.
+    const fence = sf.slice(landmark(sf, 'async function followRedirects('), landmark(sf, 'interface SafeFetchOptions'));
+    assert.match(fence, /resolveToPublicAddresses\(url\.hostname\)/);
+    assert.match(fence, /parseAndValidateUrl\(next\.toString\(\)\)/);
+    assert.match(fence, /too_many_redirects/);
+
+    for (const entry of ['safeFetchText', 'safeFetchBinary']) {
+        const fn = sf.slice(landmark(sf, `export async function ${entry}(`));
+        const body = fn.slice(0, landmark(fn, '\n}'));
+        assert.match(body, /await followRedirects\(rawUrl, \{/, `${entry} must go through the shared fence`);
+        assert.doesNotMatch(body, /\bfor \(let hop\b/, `${entry} has grown a redirect loop of its own`);
+        assert.doesNotMatch(body, /resolveToPublicAddresses/, `${entry} must not re-implement the check`);
+    }
+});
+
+check('a hop produces the decoded text or the raw bytes, never both', () => {
+    // A 10MB JPEG was being decoded into a ~10MB UTF-8 string that was allocated and thrown away,
+    // and on the text path the concatenated Buffer — collectable the instant .toString() returned —
+    // stayed reachable for the rest of the redirect loop.
+    const end = sf.slice(landmark(sf, "res.on('end'"), landmark(sf, "res.on('error'"));
+    assert.match(end, /opts\.binary/, 'the end handler must branch on what the caller asked for');
+    assert.match(end, /body: '', bytes \}/, 'binary: bytes only');
+    assert.match(end, /bytes: EMPTY \}/, 'text: string only');
+});
+
+check('an image request says it wants an image', () => {
+    // The text Accept list was sent for every request. A server doing content negotiation may
+    // answer that with HTML or a 406, which surfaced as "that link returned text/html" about a URL
+    // serving a perfectly good JPEG — our header, blamed on the user's link.
+    assert.match(sf, /'Accept': opts\.accept,/, 'the header must be per-caller, not hardcoded');
+    assert.match(sf, /accept: ACCEPT\.binary,/);
+    assert.match(sf, /accept: ACCEPT\.text,/);
+    assert.match(sf, /binary: 'image\/\*/, 'the binary list must lead with image types');
 });
 
 check('the Buffer is sliced to its own view before being sent', () => {

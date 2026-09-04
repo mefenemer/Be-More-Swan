@@ -27,8 +27,10 @@
 //                         a hostile endpoint can't stream us to OOM.
 //  7. Timeout           — wall-clock cap across the whole redirect chain, not per hop.
 //
-// Returns text only — callers are ingesting documents, and never needing to hand back a
-// binary body keeps the size cap simple.
+// Two public entry points over one fence: safeFetchText() decodes the body as UTF-8 for callers
+// ingesting documents, safeFetchBinary() hands back the undecoded bytes for callers moving images.
+// They share followRedirects() — the loop that re-validates every hop — precisely so a future
+// hardening fix cannot land in one and miss the other.
 //
 // Used by the Inspo tab's URL ingestion (docs/inspo-tab-plan.md). NOTE:
 // netlify/functions/process-asset-background.ts has an unguarded `fetch(asset.externalUrl)`
@@ -43,6 +45,9 @@ import type { LookupFunction } from 'node:net';
 export const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;   // 5 MB of HTML/PDF is a generous article
 export const DEFAULT_TIMEOUT_MS = 15_000;
 export const DEFAULT_MAX_REDIRECTS = 5;
+
+/** The field a hop did not produce. Shared, because allocating a fresh empty Buffer per hop is waste. */
+const EMPTY = Buffer.alloc(0);
 
 /** Thrown for every rejection so callers can surface one honest message to the user. */
 export class SafeFetchError extends Error {
@@ -184,19 +189,26 @@ async function resolveToPublicAddresses(rawHostname: string): Promise<Array<{ ad
 
 // ── The request itself ──────────────────────────────────────────────────────
 
+/**
+ * One hop's response, carrying EITHER the decoded text or the raw bytes — never both.
+ *
+ * ⚠️ The two are not interchangeable, which is why `binary` exists at all: `Buffer.toString('utf-8')`
+ * replaces every invalid sequence with U+FFFD, so a JPEG round-tripped through the text path is
+ * silently and irreversibly corrupted, with no error at any layer.
+ *
+ * Carrying both was the obvious first shape and it costs on both paths: a 10MB JPEG was decoded
+ * into a ~10MB string that was allocated and immediately discarded, and on the text path the
+ * concatenated Buffer — previously collectable the instant `.toString()` returned — stayed
+ * reachable for the rest of the redirect loop. Whichever field the caller did not ask for is now
+ * simply never produced.
+ */
 interface HopResult {
     status: number;
     location?: string;
     contentType: string;
+    /** Populated when the request was made with `binary: false`; empty otherwise. */
     body: string;
-    /**
-     * The undecoded bytes.
-     *
-     * ⚠️ Carried alongside `body` because a binary caller CANNOT use the decoded string:
-     * `Buffer.toString('utf-8')` replaces every invalid sequence with U+FFFD, which silently and
-     * irreversibly corrupts a JPEG. An image fetched through the text path would upload as a
-     * broken file with no error anywhere.
-     */
+    /** Populated when the request was made with `binary: true`; empty otherwise. */
     bytes: Buffer;
 }
 
@@ -208,7 +220,7 @@ interface HopResult {
 function requestOnce(
     url: URL,
     addresses: Array<{ address: string; family: number }>,
-    opts: { maxBytes: number; deadline: number; userAgent: string },
+    opts: { maxBytes: number; deadline: number; userAgent: string; accept: string; binary: boolean },
 ): Promise<HopResult> {
     return new Promise((resolve, reject) => {
         const lookup: LookupFunction = (_hostname, _options, callback) => {
@@ -245,7 +257,12 @@ function requestOnce(
                     // told the wrong thing about why we were there, and had no way to distinguish the
                     // two behaviours if they wanted to allow one and block the other.
                     'User-Agent': opts.userAgent,
-                    'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8',
+                    // ⚠️ Per-caller, like the User-Agent above. This was hardcoded to the text list
+                    // even when the caller wanted an image, and a server doing content negotiation
+                    // is entitled to answer that with HTML or a 406 — so a perfectly good image URL
+                    // came back as "that link returned text/html", blaming the user's link for our
+                    // header. See ACCEPT below.
+                    'Accept': opts.accept,
                     // Identity encoding keeps the byte cap meaningful: a compressed body could
                     // sit under the cap on the wire and explode into a zip bomb once decoded.
                     'Accept-Encoding': 'identity',
@@ -258,7 +275,7 @@ function requestOnce(
                 // Redirect: don't read the body, the caller re-validates the new target.
                 if (status >= 300 && status < 400 && res.headers.location) {
                     res.destroy();
-                    resolve({ status, location: String(res.headers.location), contentType, body: '', bytes: Buffer.alloc(0) });
+                    resolve({ status, location: String(res.headers.location), contentType, body: '', bytes: EMPTY });
                     return;
                 }
 
@@ -283,8 +300,11 @@ function requestOnce(
                     chunks.push(chunk);
                 });
                 res.on('end', () => {
+                    // Produce exactly the one the caller asked for. `chunks` is dropped either way.
                     const bytes = Buffer.concat(chunks);
-                    resolve({ status, contentType, body: bytes.toString('utf-8'), bytes });
+                    resolve(opts.binary
+                        ? { status, contentType, body: '', bytes }
+                        : { status, contentType, body: bytes.toString('utf-8'), bytes: EMPTY });
                 });
                 res.on('error', () => reject(new SafeFetchError("We couldn't read that link.", 'read_error')));
             },
@@ -315,6 +335,21 @@ export const USER_AGENTS = {
     leadDiscovery: 'BeMoreSwan-LeadDiscovery/1.0 (+https://bemoreswan.com)',
 } as const;
 
+/**
+ * What each entry point tells the server it will take.
+ *
+ * ⚠️ Not cosmetic. The text list was sent for EVERY request, image fetches included, and a server
+ * doing content negotiation is entitled to answer that with an HTML page or a 406 — which surfaced
+ * to the user as "that link returned text/html" about a URL that serves a perfectly good JPEG.
+ * Both lists keep a wildcard fallback at q=0.8, which is what makes the ordinary static-file case
+ * work either way — written as "star slash star" here on purpose, because the literal characters
+ * would close this comment block mid-sentence and take the next 130 lines with them.
+ */
+export const ACCEPT = {
+    text: 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8',
+    binary: 'image/*,*/*;q=0.8',
+} as const;
+
 export interface SafeFetchResult {
     finalUrl: string;
     contentType: string;
@@ -328,33 +363,37 @@ export interface SafeFetchBinaryResult {
 }
 
 /**
- * Fetch a user-supplied URL as text, refusing anything that could reach private
- * infrastructure. Throws SafeFetchError (with a user-safe `message`) on any rejection.
+ * The fence itself: validate → resolve → pin → request, following redirects and re-running the
+ * WHOLE check on every hop until a non-redirect response arrives.
+ *
+ * ⚠️ ONE COPY, ON PURPOSE. safeFetchText and safeFetchBinary differ only in which field of the
+ * final hop they hand back, and this loop was briefly duplicated between them — twenty-one
+ * statements identical but for the return line. That is precisely the shape where the next
+ * hardening fix (stripping credentials off a Location, refusing a port change on redirect, …)
+ * lands in one copy and silently misses the other. Neither entry point has a loop of its own.
  */
-export async function safeFetchText(
+async function followRedirects(
     rawUrl: string,
     opts: {
-        maxBytes?: number; timeoutMs?: number; maxRedirects?: number;
-        /**
-         * How this fetch introduces itself. Defaults to the Inspo Bot for the callers that were
-         * here first; every new caller should pass its own from USER_AGENTS below rather than
-         * inheriting a name that describes someone else's job.
-         */
-        userAgent?: string;
-    } = {},
-): Promise<SafeFetchResult> {
-    const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
-    const maxRedirects = opts.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
+        maxBytes: number; timeoutMs?: number; maxRedirects: number;
+        userAgent: string; accept: string; binary: boolean;
+    },
+): Promise<{ finalUrl: string; hop: HopResult }> {
+    // Wall-clock across the whole chain, not per hop — a redirect chain cannot buy more time.
     const deadline = Date.now() + (opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-    const userAgent = opts.userAgent ?? USER_AGENTS.inspo;
-
     let url = parseAndValidateUrl(rawUrl);
 
-    for (let hop = 0; hop <= maxRedirects; hop++) {
+    for (let hop = 0; hop <= opts.maxRedirects; hop++) {
         // Re-validated on EVERY hop — a public URL redirecting to 169.254.169.254 is the
         // textbook bypass, and only checking hop 0 would walk straight into it.
         const addresses = await resolveToPublicAddresses(url.hostname);
-        const res = await requestOnce(url, addresses, { maxBytes, deadline, userAgent });
+        const res = await requestOnce(url, addresses, {
+            maxBytes: opts.maxBytes,
+            deadline,
+            userAgent: opts.userAgent,
+            accept: opts.accept,
+            binary: opts.binary,
+        });
 
         if (res.location) {
             let next: URL;
@@ -373,10 +412,42 @@ export async function safeFetchText(
         if (res.status < 200 || res.status >= 300) {
             throw new SafeFetchError(`That link returned an error (${res.status}).`, 'http_error');
         }
-        return { finalUrl: url.toString(), contentType: res.contentType, body: res.body };
+        return { finalUrl: url.toString(), hop: res };
     }
 
     throw new SafeFetchError('That link redirected too many times.', 'too_many_redirects');
+}
+
+/** The options both entry points accept, so the two signatures cannot drift apart either. */
+interface SafeFetchOptions {
+    maxBytes?: number;
+    timeoutMs?: number;
+    maxRedirects?: number;
+    /**
+     * How this fetch introduces itself. Defaults to the Inspo Bot for the callers that were
+     * here first; every new caller should pass its own from USER_AGENTS rather than inheriting
+     * a name that describes someone else's job.
+     */
+    userAgent?: string;
+}
+
+/**
+ * Fetch a user-supplied URL as text, refusing anything that could reach private
+ * infrastructure. Throws SafeFetchError (with a user-safe `message`) on any rejection.
+ */
+export async function safeFetchText(
+    rawUrl: string,
+    opts: SafeFetchOptions = {},
+): Promise<SafeFetchResult> {
+    const { finalUrl, hop } = await followRedirects(rawUrl, {
+        maxBytes: opts.maxBytes ?? DEFAULT_MAX_BYTES,
+        timeoutMs: opts.timeoutMs,
+        maxRedirects: opts.maxRedirects ?? DEFAULT_MAX_REDIRECTS,
+        userAgent: opts.userAgent ?? USER_AGENTS.inspo,
+        accept: ACCEPT.text,
+        binary: false,
+    });
+    return { finalUrl, contentType: hop.contentType, body: hop.body };
 }
 
 /**
@@ -386,46 +457,21 @@ export async function safeFetchText(
  * invalid byte sequence with U+FFFD — a JPEG round-tripped through it is silently destroyed, with
  * no error at any layer. The corruption only surfaces as "the advert has a broken image".
  *
- * Everything that makes safeFetchText safe applies unchanged: DNS resolved once and PINNED to the
- * socket, every redirect hop re-validated, private ranges refused, and a streaming byte cap that
- * does not trust Content-Length.
+ * Everything that makes safeFetchText safe applies unchanged, because it is literally the same
+ * code: DNS resolved once and PINNED to the socket, every redirect hop re-validated, private
+ * ranges refused, and a streaming byte cap that does not trust Content-Length.
  */
 export async function safeFetchBinary(
     rawUrl: string,
-    opts: { maxBytes?: number; timeoutMs?: number; maxRedirects?: number; userAgent?: string } = {},
+    opts: SafeFetchOptions = {},
 ): Promise<SafeFetchBinaryResult> {
-    const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
-    const maxRedirects = opts.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
-    const deadline = Date.now() + (opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-    const userAgent = opts.userAgent ?? USER_AGENTS.inspo;
-
-    let url = parseAndValidateUrl(rawUrl);
-
-    for (let hop = 0; hop <= maxRedirects; hop++) {
-        // Re-validated on EVERY hop, exactly as in safeFetchText — a public URL redirecting to
-        // 169.254.169.254 is the textbook bypass.
-        const addresses = await resolveToPublicAddresses(url.hostname);
-        const res = await requestOnce(url, addresses, { maxBytes, deadline, userAgent });
-
-        if (res.location) {
-            let next: URL;
-            try {
-                next = new URL(res.location, url);
-            } catch {
-                throw new SafeFetchError('That link redirected somewhere invalid.', 'bad_redirect');
-            }
-            if (next.protocol !== 'http:' && next.protocol !== 'https:') {
-                throw new SafeFetchError('That link redirected to an unsupported address.', 'bad_redirect');
-            }
-            url = parseAndValidateUrl(next.toString());
-            continue;
-        }
-
-        if (res.status < 200 || res.status >= 300) {
-            throw new SafeFetchError(`That link returned an error (${res.status}).`, 'http_error');
-        }
-        return { finalUrl: url.toString(), contentType: res.contentType, bytes: res.bytes };
-    }
-
-    throw new SafeFetchError('That link redirected too many times.', 'too_many_redirects');
+    const { finalUrl, hop } = await followRedirects(rawUrl, {
+        maxBytes: opts.maxBytes ?? DEFAULT_MAX_BYTES,
+        timeoutMs: opts.timeoutMs,
+        maxRedirects: opts.maxRedirects ?? DEFAULT_MAX_REDIRECTS,
+        userAgent: opts.userAgent ?? USER_AGENTS.inspo,
+        accept: ACCEPT.binary,
+        binary: true,
+    });
+    return { finalUrl, contentType: hop.contentType, bytes: hop.bytes };
 }
