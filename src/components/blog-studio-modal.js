@@ -24,13 +24,35 @@
 
   var BLOG_WRITER_ROLE = 'blog_writer';
 
+  // ⚠️ THIS NEVER REJECTS, and that is the point. It used to call r.json() unconditionally, so any
+  // response that wasn't JSON — a function timeout's raw 502, a gateway error page, a dropped
+  // connection — rejected the promise. Most call sites in this file are a bare .then(), so the
+  // rejection went nowhere and the surface simply froze on whatever "…" message it had painted.
+  // That is what a hanging "Drafting…" was: not a slow draft, an error nobody could see.
+  //
+  // Failure now arrives as { ok: false, body: { error } }, which is the shape every call site
+  // already branches on for a 4xx, so their existing error paths light up instead.
   var api = function (path, opts) {
     return fetch('/.netlify/functions/' + path, Object.assign({
       credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
-    }, opts)).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); });
+    }, opts)).then(function (r) {
+      return r.json().then(function (j) { return { ok: r.ok, body: j }; }, function () {
+        // A body we can't parse. The status is the only honest thing we have, and 502/504 here
+        // means the function was killed rather than that it refused.
+        return { ok: false, body: { error: r.status >= 500
+          ? 'The server took too long or stopped responding. Please try again.'
+          : 'Unexpected response from the server (' + r.status + ').' } };
+      });
+    }, function () {
+      return { ok: false, body: { error: 'Could not reach the server. Check your connection and try again.' } };
+    });
   };
 
   var state = { injected: false, postId: null, editor: null, assistants: {}, assistantId: null,
+    // The generate-blog job currently being polled, or null. Doubles as the poll's cancellation
+    // token: every tick bails when this stops matching, so closing the modal or opening another
+    // post cannot have a stale timer paint a draft into the wrong editor.
+    aiDraftJobId: null,
     // Resolved lazily when no assistantId was passed in (the standalone page, the Calendar) so the
     // "Ask <name> to…" buttons can still name somebody. '' = looked and found none.
     assistantName: null, postStatus: null,
@@ -607,6 +629,9 @@
 
   // Reveal the editor workspace for a post (new or existing): mount the editor + side panels.
   function openWorkspace(postId, title, md, post) {
+    // Whatever was being drafted, it isn't this post — and the busy lock belongs to the editor
+    // being replaced.
+    stopAiDraftPoll();
     state.postId = postId;
     el('bs-workspace').classList.remove('bs-hidden');
     el('bs-title').value = title;
@@ -659,11 +684,54 @@
 
   // Inline "AI draft": collect a topic/keywords in the editor and draft straight into the open post
   // via generate-blog — the capability the old brief screen used to host.
+  //
+  // ⚠️ THIS IS ASYNCHRONOUS, and it has to be. generate-blog used to write the article inside the
+  // request and hand it back; a draft takes 30-60 seconds and a Netlify function is killed at 10,
+  // so in production the request died every time and this promise never settled. The endpoint now
+  // enqueues a job and answers at once, a background worker writes the body straight into the post,
+  // and we poll for it. See the header of netlify/functions/generate-blog.ts.
+
+  /** How long to keep asking before we stop and tell the author where their draft went. */
+  var DRAFT_POLL_TIMEOUT_MS = 240000;
+
+  function aiDraftBusy(busy) {
+    var go = el('bs-ai-draft-go');
+    if (go) go.disabled = busy;
+    // The editor is locked while the worker writes into this post. Not decoration: MarkdownEditor
+    // autosaves 1.2s after any keystroke, so typing here would race the server's write — one of
+    // the two bodies wins and the other is gone, with nothing on screen to say so.
+    var ed = el('bs-editor');
+    if (ed) {
+      ed.style.pointerEvents = busy ? 'none' : '';
+      ed.style.opacity = busy ? '0.55' : '';
+    }
+  }
+
+  /**
+   * Abandon the poll without touching the job.
+   *
+   * The work is server-side: it finishes, and the body is in the post the next time it is opened.
+   * What must not survive is the timer — it would keep polling after the modal closed and paint a
+   * draft into an editor that has been torn down, or into a different post. Nulling the token is
+   * the cancellation, because every tick re-checks it.
+   *
+   * Safe next to the editor teardown: the draft lock means no autosave is pending, so destroy()
+   * has nothing to flush over the worker's body.
+   */
+  function stopAiDraftPoll() {
+    state.aiDraftJobId = null;
+    aiDraftBusy(false);
+  }
+
   function runAiDraft() {
     if (!state.postId) return;
+    if (state.aiDraftJobId) return;             // already drafting; don't queue a second one
     var topic = el('bs-ai-topic').value.trim();
     if (!topic) { setStatus('bs-ai-draft-status', 'Add a topic to draft from.'); return; }
-    setStatus('bs-ai-draft-status', 'Drafting…');
+
+    aiDraftBusy(true);
+    setStatus('bs-ai-draft-status', 'Asking your assistant…');
+
     api('generate-blog', { method: 'POST', body: JSON.stringify({
       blogPostId: state.postId,
       topic: topic,
@@ -671,15 +739,86 @@
       notes: '',
       tone: assistantTone(),
     }) }).then(function (gen) {
-      if (gen.ok && gen.body.bodyMarkdown) {
-        if (!el('bs-title').value.trim() || el('bs-title').value.trim() === 'Untitled draft') el('bs-title').value = topic;
-        state.editor.setMarkdown(gen.body.bodyMarkdown);
-        refreshReadout(gen.body.bodyMarkdown);   // setMarkdown doesn't fire onChange
-        setStatus('bs-ai-draft-status', '');
-        el('bs-ai-draft-form').classList.add('bs-hidden');
-      } else {
+      if (!gen.ok || !gen.body || !gen.body.jobId) {
+        aiDraftBusy(false);
         setStatus('bs-ai-draft-status', (gen.body && gen.body.error) || 'Draft failed — try again.');
+        return;
       }
+      state.aiDraftJobId = gen.body.jobId;
+      // `started` is whether the worker was actually poked. When it wasn't (no CRON_TRIGGER_SECRET,
+      // or the dispatch failed) the job is still queued and correct — it just waits for the
+      // ten-minute cron, and saying so beats a progress message that quietly isn't true.
+      setStatus('bs-ai-draft-status', gen.body.started
+        ? 'Your assistant is writing — this takes about a minute…'
+        : 'Queued. Your assistant will start on this shortly…');
+      pollAiDraft(state.aiDraftJobId, topic, Date.now());
+    });
+  }
+
+  function pollAiDraft(jobId, topic, startedAt) {
+    // Cheap insurance against a stale timer: the author closed the modal, or opened another post.
+    if (state.aiDraftJobId !== jobId) return;
+
+    if (Date.now() - startedAt > DRAFT_POLL_TIMEOUT_MS) {
+      state.aiDraftJobId = null;
+      aiDraftBusy(false);
+      // The job is still running server-side — the body lands in the post whether we watched or
+      // not, so send them back to it rather than implying the work was lost.
+      setStatus('bs-ai-draft-status', 'This is taking longer than usual. Your draft is still being '
+        + 'written — close this post and reopen it in a minute to pick it up.');
+      return;
+    }
+
+    var elapsed = Date.now() - startedAt;
+    setTimeout(function () {
+      if (state.aiDraftJobId !== jobId) return;
+      api('generate-blog?jobId=' + encodeURIComponent(jobId), { method: 'GET' }).then(function (res) {
+        if (state.aiDraftJobId !== jobId) return;
+
+        // A transient read failure is not a failed draft — the job is untouched, so keep watching.
+        if (!res.ok) { pollAiDraft(jobId, topic, startedAt); return; }
+
+        var status = res.body && res.body.status;
+        if (status === 'completed') {
+          applyAiDraft(jobId, topic, res.body.resultBlogPostId || state.postId);
+          return;
+        }
+        if (status === 'failed') {
+          state.aiDraftJobId = null;
+          aiDraftBusy(false);
+          setStatus('bs-ai-draft-status', (res.body && res.body.errorMessage)
+            || 'Your assistant could not finish this draft. Try again, or reword the topic.');
+          return;
+        }
+        // queued / processing — including a retry after a failed attempt, which re-queues.
+        pollAiDraft(jobId, topic, startedAt);
+      });
+    // Start attentive, then ease off: a draft is rarely ready inside 10 seconds and there is no
+    // point asking 90 times for something that takes a minute.
+    }, elapsed < 15000 ? 2000 : 5000);
+  }
+
+  function applyAiDraft(jobId, topic, postId) {
+    // The worker wrote body_markdown itself, so this is a read of what is already saved — not the
+    // old setMarkdown() that painted text the server had never seen.
+    api('blog-posts?id=' + encodeURIComponent(postId), { method: 'GET' }).then(function (res) {
+      if (state.aiDraftJobId !== jobId) return;
+      state.aiDraftJobId = null;
+      aiDraftBusy(false);
+
+      var md = res.ok && res.body.post ? (res.body.post.bodyMarkdown || '') : '';
+      if (!md) {
+        setStatus('bs-ai-draft-status', 'The draft finished but could not be loaded. Reopen this post to see it.');
+        return;
+      }
+      if (!el('bs-title').value.trim() || el('bs-title').value.trim() === 'Untitled draft') {
+        el('bs-title').value = topic;
+        api('save-blog-draft', { method: 'POST', body: JSON.stringify({ id: state.postId, title: topic }) });
+      }
+      state.editor.setMarkdown(md);
+      refreshReadout(md);                      // setMarkdown doesn't fire onChange
+      setStatus('bs-ai-draft-status', '');
+      el('bs-ai-draft-form').classList.add('bs-hidden');
     });
   }
 
@@ -2151,6 +2290,7 @@
     // Widget settings autosave on a debounce; close inside that window and the last edit would be
     // lost. The editor's own destroy() flushes the body for the same reason.
     if (state.flushWidgetSettings) state.flushWidgetSettings();
+    stopAiDraftPoll();   // see the note on stopAiDraftPoll: the job survives, the timer must not
     if (state.editor && state.editor.destroy) { state.editor.destroy(); state.editor = null; }
     el('bms-blog-backdrop').classList.remove('bs-open');
     window.ScrollLock.release('blog-studio');

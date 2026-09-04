@@ -38,6 +38,7 @@
     "test:roi-period": "tsx tests/roi-period.test.ts",
     "test:blog-destinations": "tsx tests/blog-destinations.test.ts",
     "test:blog-blueprint": "tsx tests/blog-blueprint-injection.test.ts",
+    "test:blog-draft-async": "tsx tests/blog-draft-is-async.test.ts",
     "test:chat-blog-draft": "tsx tests/chat-blog-draft.test.ts",
     "test:gsc-decay": "tsx tests/gsc-decay.test.ts",
     "test:c2pa-sign": "tsx tests/c2pa-sign.test.ts",

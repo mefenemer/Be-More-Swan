@@ -89,10 +89,31 @@ export function campaignCreateBody(input: {
         campaignGroup: input.campaignGroupUrn,
         name: input.name,
         type: 'SPONSORED_UPDATES',
-        costType: 'CPC',
         creativeSelection: 'OPTIMIZED',
         audienceExpansionEnabled: false,
         offsiteDeliveryEnabled: false,
+
+        // ── Bidding: AUTO, and this trio must move together ──────────────────
+        // ⚠️ THE FIRST DRAFT WOULD HAVE CREATED A CAMPAIGN THAT NEVER DELIVERED. It sent
+        // `costType: 'CPC'` with no `optimizationTargetType` and no `unitCost`. Absent
+        // optimizationTargetType defaults to NONE, which is MANUAL bidding; unitCost then defaults
+        // to 0; and LinkedIn documents that under manual bidding "if unitCost is 0, the campaign
+        // does not deliver". No error — just an ad that never runs, which is the worst failure
+        // shape available: it looks launched.
+        //
+        // MAX_CLICK is auto-bidding: LinkedIn spends the daily budget chasing clicks without an
+        // advertiser specifying a bid. That is the right model for this product twice over — the
+        // destination is a tracked link, so clicks are the outcome we actually measure; and the
+        // whole premise is that a founder should never have to know what a CPC bid is.
+        //
+        // ⚠️ costType is CPM for every auto-bidding target type, NOT CPC. Auto-bidding charges by
+        // impression regardless of what it optimises for.
+        optimizationTargetType: 'MAX_CLICK',
+        costType: 'CPM',
+        // Required field. 0 is the documented default under auto-bidding and means "no manual
+        // bid" — it is only dangerous under MANUAL bidding, where it means "never deliver".
+        unitCost: { amount: '0', currencyCode: input.currencyCode },
+
         // Amount is a STRING in this API, and currency travels with it. Never a bare number.
         dailyBudget: { amount: input.dailyBudgetAmount, currencyCode: input.currencyCode },
         locale: { country: 'GB', language: 'en' },

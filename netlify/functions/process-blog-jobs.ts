@@ -20,6 +20,7 @@ import { getDb } from '../../db/client';
 import { generateBlogSeo } from '../../src/utils/blog-seo-generate';
 import { aiAssistants, blogPosts, contentGenerationJobs } from '../../db/schema';
 import { generateBlogBody } from '../../src/utils/blog-generate';
+import { decodeInteractiveBrief } from '../../src/utils/blog-interactive-brief';
 import { ideateBlogTopic } from '../../src/utils/blog-topic-ideation';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { createNotification } from '../../src/utils/notify';
@@ -33,6 +34,10 @@ type BlogJobRow = {
     id: number; job_id: string; assistant_id: number; organisation_id: number;
     user_id: number; attempt: number; max_attempts: number;
     context_prompt: string | null; target_publish_date: string | null;
+    // Pre-set by generate-blog.ts to the post already open in Blog Studio. NULL for every
+    // autopilot/campaign job, which ideate a topic and insert their own row. See the branch in
+    // processBlogJob and src/utils/blog-interactive-brief.ts.
+    result_blog_post_id: number | null;
 };
 
 /**
@@ -56,7 +61,7 @@ export async function drainBlogJobs(): Promise<number> {
 
     const jobs = await db.execute<BlogJobRow>(
         `SELECT id, job_id, assistant_id, organisation_id, user_id, attempt, max_attempts,
-                context_prompt, target_publish_date
+                context_prompt, target_publish_date, result_blog_post_id
          FROM content_generation_jobs
          WHERE status = 'queued'
            AND content_type = 'blog'
@@ -117,6 +122,22 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
     // Track the row we create so a mid-flight failure can clean it up.
     let createdPostId: number | null = null;
 
+    // Which of the two shapes this job is. An INTERACTIVE job (Blog Studio's "Ask your assistant to
+    // draft") arrives with result_blog_post_id ALREADY set, naming the post open in the author's
+    // editor: it has a human brief, it must not ideate a topic, and above all it must not insert a
+    // second post — the author is looking at the one it is writing into.
+    //
+    // ⚠️ result_blog_post_id is the discriminator and `trigger_type` is NOT: campaign orders enqueue
+    // blog jobs as 'on_demand' as well, and those take the autopilot path. See
+    // src/utils/blog-interactive-brief.ts.
+    const interactive = job.result_blog_post_id != null;
+
+    // Set with the 'completed' write. Everything after that point is a follow-up — a notification, a
+    // hand-off — and a failure there must not re-queue a job whose post is already written: the
+    // retry would draft the article a second time. Same fault, and the same latch, as
+    // process-content-jobs.ts (one job wrote eight posts on prod, 2026-09-03).
+    let jobCompleted = false;
+
     try {
         const [assistant] = await db
             .select({ id: aiAssistants.id, name: aiAssistants.name })
@@ -127,49 +148,85 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
             ))
             .limit(1);
         // The assistant was deleted (or moved org) after the job was enqueued — the slot is moot.
-        if (!assistant) {
+        // An interactive draft survives it: Blog Studio can be opened on a post with no Blog Writer
+        // at all, and the author asking for a draft is not asking about an assistant. Voice simply
+        // falls back to the tone on the brief.
+        if (!assistant && !interactive) {
             await failJob(db, job, attempt, 'Assistant no longer exists.', { terminal: true });
             return;
         }
 
-        const idea = await ideateBlogTopic(db, {
-            assistantId: job.assistant_id,
-            organisationId: job.organisation_id,
-            userId: job.user_id,
-        });
-        // Ideation returns null when it can't ground a topic (no business context, no Inspo) or the
-        // model reply was unusable. Retry rather than fail: the user may fill in their business
-        // profile at any point, and an ungrounded post is worse than a skipped slot.
-        if (!idea) {
-            await failJob(db, job, attempt, 'Could not ground a topic for this slot.');
-            return;
+        // What to write, and where. The two shapes converge on ONE generateBlogBody call below —
+        // deliberately, so voice, grounding, Inspo and provenance cannot drift between the button
+        // an author presses and the schedule that runs overnight.
+        let targetPostId: number;
+        let postTitle: string;
+        let topic: string | undefined;
+        let keywords: string | undefined;
+        let notes: string | undefined;
+        let tone: string | undefined;
+
+        if (interactive) {
+            // The author's own words. A brief that won't decode costs the steer, not the draft —
+            // generateBlogBody falls back to the post's stored title.
+            const brief = decodeInteractiveBrief(job.context_prompt);
+            targetPostId = job.result_blog_post_id as number;
+            postTitle = brief?.topic ?? '';
+            topic = brief?.topic;
+            keywords = brief?.keywords;
+            notes = brief?.notes;
+            tone = brief?.tone;
+            // NOTE: createdPostId stays null on this path, and that is load-bearing. failJob()
+            // DELETES the post it is given, which is right for a half-built autopilot draft and
+            // catastrophic here — it is the post the author has open.
+        } else {
+            const idea = await ideateBlogTopic(db, {
+                assistantId: job.assistant_id,
+                organisationId: job.organisation_id,
+                userId: job.user_id,
+            });
+            // Ideation returns null when it can't ground a topic (no business context, no Inspo) or
+            // the model reply was unusable. Retry rather than fail: the user may fill in their
+            // business profile at any point, and an ungrounded post is worse than a skipped slot.
+            if (!idea) {
+                await failJob(db, job, attempt, 'Could not ground a topic for this slot.');
+                return;
+            }
+
+            const targetDate = job.target_publish_date ? new Date(job.target_publish_date) : null;
+
+            const [post] = await db.insert(blogPosts).values({
+                organisationId: job.organisation_id,
+                userId: job.user_id,
+                assistantId: job.assistant_id,
+                ownerLabel: `AI: ${assistant.name}`,
+                title: idea.title,
+                // Drafts land for review, never straight to 'scheduled'. Blog has no auto-publish
+                // path (decideAutoPublish is post-shaped and social-gated), so review is the only
+                // route out.
+                status: 'pending_approval',
+                publishDate: targetDate,
+                isAutonomous: true,
+                generationReason: 'autopilot_schedule',
+                jobId: job.job_id,
+            }).returning({ id: blogPosts.id });
+            createdPostId = post.id;
+
+            targetPostId = post.id;
+            postTitle = idea.title;
+            topic = idea.topic;
+            keywords = idea.keywords;
+            notes = job.context_prompt ?? undefined;
         }
 
-        const targetDate = job.target_publish_date ? new Date(job.target_publish_date) : null;
-
-        const [post] = await db.insert(blogPosts).values({
-            organisationId: job.organisation_id,
-            userId: job.user_id,
-            assistantId: job.assistant_id,
-            ownerLabel: `AI: ${assistant.name}`,
-            title: idea.title,
-            // Drafts land for review, never straight to 'scheduled'. Blog has no auto-publish path
-            // (decideAutoPublish is post-shaped and social-gated), so review is the only route out.
-            status: 'pending_approval',
-            publishDate: targetDate,
-            isAutonomous: true,
-            generationReason: 'autopilot_schedule',
-            jobId: job.job_id,
-        }).returning({ id: blogPosts.id });
-        createdPostId = post.id;
-
         await generateBlogBody(db, {
-            blogPostId: post.id,
+            blogPostId: targetPostId,
             organisationId: job.organisation_id,
             userId: job.user_id,
-            topic: idea.topic,
-            keywords: idea.keywords,
-            notes: job.context_prompt ?? undefined,
+            topic,
+            keywords,
+            notes,
+            tone,
         });
 
         // SEO, while the body is fresh. This used to be reachable ONLY from Blog Studio's
@@ -181,40 +238,62 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
         // metadata failure must not fail the job, because the retry would redraft the whole post to
         // fix a title tag. The button stays as "Regenerate SEO" for exactly this case, and for
         // re-running after an edit.
-        try {
-            await generateBlogSeo(db, {
-                blogPostId: post.id,
-                organisationId: job.organisation_id,
-                userId: job.user_id,
-            });
-        } catch (err) {
-            console.warn(`[process-blog-jobs] SEO generation failed for post ${post.id} (draft kept)`,
-                err instanceof Error ? err.message : err);
+        //
+        // ⚠️ Autopilot only. An interactive draft skips it: the author is sitting in Blog Studio
+        // waiting, SEO is another model round trip on top of the one they are already waiting
+        // through, and that surface has its own "Generate SEO" button for when they want it.
+        if (!interactive) {
+            try {
+                await generateBlogSeo(db, {
+                    blogPostId: targetPostId,
+                    organisationId: job.organisation_id,
+                    userId: job.user_id,
+                });
+            } catch (err) {
+                console.warn(`[process-blog-jobs] SEO generation failed for post ${targetPostId} (draft kept)`,
+                    err instanceof Error ? err.message : err);
+            }
         }
 
         await db.update(contentGenerationJobs)
-            .set({ status: 'completed', resultBlogPostId: post.id, errorMessage: null, updatedAt: new Date() })
+            .set({ status: 'completed', resultBlogPostId: targetPostId, errorMessage: null, updatedAt: new Date() })
             .where(eq(contentGenerationJobs.id, job.id));
+        // The body is written and the job is settled. Nothing below may re-queue it.
+        jobCompleted = true;
 
-        await createNotification(db, 'blog_draft_ready', {
-            userId: job.user_id,
-            context: { assistant: { name: assistant.name }, post: { title: idea.title } },
-            metadata: { assistantId: job.assistant_id, blogPostId: post.id },
-        }).catch(err => console.error('[process-blog-jobs] notification failed', err));
+        // Autopilot's follow-ups. An interactive draft wants neither: the author is looking at the
+        // post, so a "your draft is ready" notification is noise, and a hand-off on 'drafts_a_post'
+        // would set other assistants working off an article its author has not even read yet. This
+        // matches what the button did when it generated in-request, which fired neither.
+        if (!interactive) {
+            await createNotification(db, 'blog_draft_ready', {
+                userId: job.user_id,
+                context: { assistant: { name: assistant?.name ?? '' }, post: { title: postTitle } },
+                metadata: { assistantId: job.assistant_id, blogPostId: targetPostId },
+            }).catch(err => console.error('[process-blog-jobs] notification failed', err));
 
-        // Cross-assistant hand-off on the drafting seam, mirroring process-content-jobs.ts. The
-        // publish-side counterpart lives in blog-publish.ts. Never throws by contract.
-        await fireOrchestrations(db, {
-            sourceAssistantId: job.assistant_id,
-            orgId: job.organisation_id,
-            userId: job.user_id,
-            event: 'drafts_a_post',
-            sourcePostId: post.id,
-            sourceCaption: idea.title,
-        });
+            // Cross-assistant hand-off on the drafting seam, mirroring process-content-jobs.ts. The
+            // publish-side counterpart lives in blog-publish.ts. Never throws by contract.
+            await fireOrchestrations(db, {
+                sourceAssistantId: job.assistant_id,
+                orgId: job.organisation_id,
+                userId: job.user_id,
+                event: 'drafts_a_post',
+                sourcePostId: targetPostId,
+                sourceCaption: postTitle,
+            });
+        }
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[process-blog-jobs] job ${job.job_id} failed`, err);
+        // A throw AFTER the job completed is a failed follow-up, not a failed draft. Re-queuing here
+        // is what let one content job write eight posts on prod (2026-09-03): the retry regenerates
+        // an article that already exists, and on the interactive path it would overwrite the draft
+        // under the author's cursor.
+        if (jobCompleted) {
+            console.error(`[process-blog-jobs] job ${job.job_id} completed but a follow-up threw — not re-queued`);
+            return;
+        }
         await failJob(db, job, attempt, message, { orphanPostId: createdPostId });
     }
 }

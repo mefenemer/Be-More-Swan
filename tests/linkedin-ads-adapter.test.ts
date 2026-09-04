@@ -61,10 +61,44 @@ check('the budget carries its currency and is a STRING', () => {
 
 check('the create body carries every field the API requires', () => {
     const b = body();
+    // ⚠️ `unitCost` is Required:True and was MISSING from the first draft — the same class of
+    // omission as campaignGroup, and both were invisible until the field table was read.
     for (const f of ['account', 'campaignGroup', 'name', 'type', 'costType', 'dailyBudget',
-        'locale', 'runSchedule', 'targetingCriteria', 'status']) {
+        'locale', 'runSchedule', 'targetingCriteria', 'status', 'unitCost', 'optimizationTargetType']) {
         assert.ok(f in b, `create body is missing ${f}`);
     }
+});
+
+check('bidding is AUTO, so a campaign cannot be created that never delivers', () => {
+    // ⚠️ THE SILENT FAILURE THIS PREVENTS. Absent optimizationTargetType means NONE, which is
+    // MANUAL bidding; unitCost then defaults to 0; and LinkedIn documents that under manual
+    // bidding "if unitCost is 0, the campaign does not deliver". No error — an ad that looks
+    // launched and never runs.
+    const b = body() as any;
+    assert.equal(b.optimizationTargetType, 'MAX_CLICK');
+    assert.notEqual(b.optimizationTargetType, 'NONE');
+    assert.ok(b.unitCost, 'unitCost is absent, so it defaults to 0');
+});
+
+check('costType is CPM, because auto-bidding always charges by impression', () => {
+    // ⚠️ Not CPC. Auto-bidding charges by impression regardless of what it OPTIMISES for, and the
+    // first draft paired CPC with auto-bidding-shaped intent.
+    assert.equal((body() as any).costType, 'CPM');
+});
+
+check('the unit cost carries the account currency, not a bare zero', () => {
+    assert.deepEqual((body() as any).unitCost, { amount: '0', currencyCode: 'GBP' });
+});
+
+check('no founder is ever asked to set a bid', () => {
+    // The premise of the product: MAX_CLICK spends the daily budget without an advertiser
+    // specifying one. A manual bidding mode would put a CPC field in front of someone whose whole
+    // reason for being here is not knowing what that is.
+    const src = read('src/utils/ad-networks/linkedin.ts');
+    assert.match(src, /MAX_CLICK is auto-bidding/);
+    const ui = readFileSync(join(root, 'src/components/assistant-campaigns.js'), 'utf8');
+    assert.ok(!/bid/i.test(ui.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')),
+        'a bid field has appeared in the staging form');
 });
 
 console.log('\n──── status changes use the shapes Rest.li expects ────');
