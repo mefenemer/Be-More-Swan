@@ -31,18 +31,28 @@ export default withLambda(async (event) => {
 
     const auth = event.headers['authorization'] || event.headers['Authorization'] || '';
     if (auth.replace(/^Bearer\s+/i, '').trim() !== secret) {
+        // Logged because this is INVISIBLE from outside: Netlify answers 202 on accept, before the
+        // handler runs, so a rejected poke looks identical to a successful one to whoever sent it.
+        // A caller reading a fast 202 would conclude the drain ran.
+        console.warn('[run-blog-jobs-background] rejected a poke with a bad or missing token — '
+            + 'the queued draft will wait for the ten-minute cron.');
         return { statusCode: 401, body: JSON.stringify({ ok: false, error: 'Unauthorized.' }) };
     }
 
     // Respect the global kill switch, as every other cost-incurring drain entry point does. The
     // job stays queued rather than failing, so it runs when AI is switched back on.
     if (await isGlobalAiDisabled()) {
+        console.warn('[run-blog-jobs-background] global AI kill switch is ON — the job stays queued.');
         return { statusCode: 200, body: JSON.stringify({ ok: true, ran: false, reason: 'ai_disabled' }) };
     }
 
     try {
         const processed = await drainBlogJobs();
-        console.log(`[run-blog-jobs-background] drained ${processed} job(s)`);
+        // ⚠️ 0 is the diagnostic case, not the boring one: it means the poke arrived but the queue
+        // had nothing claimable — a job still 'processing' from a previous run, a next_retry_at in
+        // the future, or a row that was never written.
+        console.log(`[run-blog-jobs-background] drained ${processed} job(s)`
+            + (processed === 0 ? ' — nothing claimable in the blog queue' : ''));
         return { statusCode: 200, body: JSON.stringify({ ok: true, processed }) };
     } catch (err) {
         // Nothing is listening for this response — the caller got its 202 long ago. Log loudly so a

@@ -89,6 +89,89 @@ check('the button lives in the card it re-reveals', () => {
         + 'thing that decides whether it is on the page');
 });
 
+console.log('\n──── …and puts the button in the card that lists what is connected ────');
+
+// The hero strip is the FALLBACK home. A role whose Overview already lists its destinations — the
+// Blog Writer's "Publishing to" block, a social role's per-account Audience bars — carries the
+// button inside that list instead, and hides the strip. Exactly one of the two is ever on the page.
+
+const DETAIL = read('assistant-detail.html');
+const AUDIENCE = DETAIL.slice(
+    landmark(DETAIL, 'id="autopilot-audience"'),
+    landmark(DETAIL, 'Connections status card moved into the hero'),
+);
+
+check('the audience/destinations block carries its own Manage connections button', () => {
+    assert.match(AUDIENCE, /id="btn-audience-connections"/,
+        'the button that belongs with the list of systems this assistant publishes to');
+    assert.match(AUDIENCE, /_openBriefDrawer\('platforms'\)/,
+        'and it must open the same Connections panel the hero button does');
+});
+
+check('it ships hidden, and with no display utility that would outrank .hidden', () => {
+    // ⚠️ style.css is prebuilt and orders `.inline-flex` AFTER `.hidden`, so an inline-flex button
+    // stays visible with the hidden class on it — which would put BOTH buttons on the page for
+    // every role that is supposed to keep the hero one.
+    const btn = AUDIENCE.slice(landmark(AUDIENCE, 'id="btn-audience-connections"'));
+    const tag = btn.slice(0, landmark(btn, '</button>'));
+    assert.match(tag, /class="hidden /, 'the placement function reveals it; markup must not');
+    assert.doesNotMatch(tag, /\b(inline-flex|inline-block|flex|block)\b/,
+        'no display utility on this button — .hidden has to win');
+});
+
+const PLACEMENT = SHELL.slice(
+    landmark(SHELL, 'window._syncManageConnectionsPlacement = function'),
+    landmark(SHELL, '// The Posting Schedule controls drive both autopilot engines'),
+);
+
+check('placement reads the strip\'s verdict rather than re-deriving it', () => {
+    // Two copies of "does this role have connectors" is how the strip and the button start
+    // disagreeing about whether there is anything behind them.
+    assert.match(PLACEMENT, /strip\?\.dataset\.hasConnectors === '1'/);
+    assert.match(STATUS_CARD, /card\.dataset\.hasConnectors = \(nothingRelevant && !keepForSocial\) \? '0' : '1'/,
+        '_renderConnectionsStatusCard must publish that verdict');
+});
+
+check('the two buttons are mutually exclusive', () => {
+    assert.match(PLACEMENT, /audienceBtn\.classList\.toggle\('hidden', !inAudience\)/);
+    assert.match(PLACEMENT, /strip\.classList\.toggle\('hidden', !hasConnectors \|\| inAudience\)/,
+        'the strip must hide when the audience block has the button — without it the strip is a '
+        + 'lone "Connections" heading restating the list below it');
+});
+
+check('the Newsletter Assistant keeps the hero button', () => {
+    // Its audience block is "Your list" — subscriber counts for a mailing list that lives in this
+    // product. There is nothing connected in it to manage, so the button must not move there.
+    assert.match(PLACEMENT, /audienceSource !== 'newsletter_list'/);
+});
+
+check('placement is decided from the role, not from the block un-hiding itself', () => {
+    // ⚠️ _fetchAndRenderBlogDestinations / _fetchAndRenderFollowerCounts are deliberately NOT
+    // awaited. Keying off #autopilot-audience's hidden class would leave both buttons off the page
+    // for the length of that request.
+    assert.match(PLACEMENT, /autopilot\.classList\.contains\('hidden'\)/,
+        'the Autopilot card (role-gated, synchronous) is the right signal');
+    assert.doesNotMatch(PLACEMENT, /getElementById\('autopilot-audience'\)/,
+        'the audience block itself must not be the signal');
+});
+
+check('both exits from the connections card hand over to placement', () => {
+    const calls = STATUS_CARD.match(/_syncManageConnectionsPlacement\(\)/g) || [];
+    assert.ok(calls.length >= 2,
+        'the early return hides the strip and the normal path reveals it — placement has the last '
+        + `word on both, or the strip and the button drift apart (found ${calls.length})`);
+});
+
+check('the registry pass re-runs placement', () => {
+    // _applyDashboardRegistry is what decides whether this role HAS an audience block at all, and
+    // it can run after the connections fetch has already resolved.
+    const REG = SHELL.slice(
+        landmark(SHELL, "toggle('autopilot-status-card', mods.hasPostingSchedule !== false)"),
+        landmark(SHELL, "toggle('module-social-strategy'"),
+    );
+    assert.match(REG, /window\._syncManageConnectionsPlacement\(\)/);
+});
+
 console.log('\n──── picking a provider starts the grant ────');
 
 const OFFER = SHELL.slice(

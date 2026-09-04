@@ -744,6 +744,22 @@ export default withLambda(async (event) => {
             }
         }
 
+        // ⚠️ GATE: LINKEDIN REQUIRES AN IMAGE, AND WE CANNOT MAKE ONE YET.
+        // A Sponsored Content ad is a post with media — both of LinkedIn's own createInline
+        // examples carry `content.media.id`, and there is no documented text-only variant of this
+        // ad type. We have no upload path, so every stage would be rejected by the API with an
+        // opaque error AFTER the user had written three ads and chosen their targeting.
+        //
+        // Refusing here, before any of that work, is the honest version. This is the LAST thing
+        // standing between the built pipeline and a real advert.
+        const mediaUrns = rawVariants.map((v: any) => (typeof v?.mediaUrn === 'string' ? v.mediaUrn.trim() : ''));
+        if (mediaUrns.some((m: string) => !m)) {
+            return json(400, {
+                error: 'LinkedIn adverts need an image, and we cannot upload one for you yet. This is the last piece we are missing — everything else about this campaign is ready.',
+                code: 'creative_media_required',
+            });
+        }
+
         // Gate 3 — an adapter. In production this THROWS: the LinkedIn adapter is Development Tier
         // and registered for development only, so a production caller gets an honest refusal here
         // rather than a half-built campaign.
@@ -779,6 +795,7 @@ export default withLambda(async (event) => {
                     headline: v.headline!,
                     body: v.bodyText!,
                     destinationUrl: v.destinationUrl!,
+                    mediaUrn: mediaUrns[i],
                     // Campaign-level in LinkedIn; carried on each variant because that is the
                     // adapter's input shape, and it reads the first.
                     targeting: targetingCriteria,

@@ -30,6 +30,15 @@ export interface StageVariantInput {
     destinationUrl: string;
     /** Network-specific targeting, already validated. Opaque here on purpose. */
     targeting: Record<string, unknown>;
+    /**
+     * The uploaded image or video this ad shows, as the network's own asset URN.
+     *
+     * ⚠️ REQUIRED BY LINKEDIN, and we cannot produce one yet. A Sponsored Content ad is a post with
+     * media; both of LinkedIn's own createInline examples carry `content.media.id`, and there is no
+     * documented text-only variant of this ad type. Until an upload path exists, `stage_paid`
+     * refuses with a sentence rather than sending a payload the API will reject.
+     */
+    mediaUrn: string;
 }
 
 export interface StageCampaignInput {

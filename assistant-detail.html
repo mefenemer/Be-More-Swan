@@ -189,7 +189,14 @@
     </div>
     <!-- Connections summary — moved into the hero card (no longer its own Overview card). Filled and
          shown/hidden by _renderConnectionsStatusCard (integrations.js); full connect / manage / the
-         per-assistant channel switches live behind "Manage connections". -->
+         per-assistant channel switches live behind "Manage connections".
+         This strip is now the FALLBACK home for that button. Roles whose Overview already lists
+         what they connect to — the Blog Writer's "Publishing to" destinations, a social role's
+         per-account Audience bars — carry it inside that list instead (#btn-audience-connections),
+         and _syncManageConnectionsPlacement hides this strip for them: without the button it is a
+         lone "Connections" heading restating what the list beneath it already says. Roles with no
+         such list (the Lead Generator, whose only connectors are mailboxes) keep it here, and this
+         stays their one route in. -->
     <div id="connections-status-card" class="hidden mt-4 pt-4 border-t border-gray-100 z-10 relative">
       <div class="flex items-center justify-between gap-3 flex-wrap">
         <div class="flex items-center gap-2 min-w-0 flex-wrap">
@@ -440,6 +447,18 @@
         </div>
         <div id="audience-by-platform"></div>
         <p id="audience-refresh-note" class="text-[10px] text-gray-400 mt-2 leading-relaxed hidden"></p>
+        <!-- "Manage connections" — the route into the Connections panel, sitting with the list it
+             manages rather than in the hero strip two cards up: on the Blog Writer this block IS
+             the list of systems the blog publishes to, and on a social role it is the list of
+             connected accounts. _syncManageConnectionsPlacement (assistants.js) chooses between
+             this button and the hero one and hides whichever it didn't pick, so exactly one route
+             is ever on the page.
+             ⚠️ Ships `hidden` and deliberately carries NO display utility: `.hidden` is
+             display:none, but the compiled style.css orders `.inline-flex` AFTER it, so an
+             inline-flex button here would stay visible on the roles meant to keep the hero one. -->
+        <button type="button" id="btn-audience-connections"
+          onclick="window._openBriefDrawer && window._openBriefDrawer('platforms')"
+          class="hidden mt-3 px-3 py-1.5 text-xs font-bold rounded-lg border border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Manage connections</button>
       </div>
       </div>
     </div>

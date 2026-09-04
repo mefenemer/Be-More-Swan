@@ -405,8 +405,8 @@ async function main(): Promise<void> {
         const res = await mockAdapter.stageCampaign({
             campaignId: 1, organisationId: 1, name: 'Test', dailyBudgetGbp: 50,
             variants: [
-                { variantId: 10, headline: 'A', body: 'b', destinationUrl: 'https://x.example/go', targeting: {} },
-                { variantId: 11, headline: 'B', body: 'b', destinationUrl: 'https://x.example/go', targeting: {} },
+                { variantId: 10, headline: 'A', body: 'b', destinationUrl: 'https://x.example/go', targeting: {}, mediaUrn: 'urn:li:image:M1' },
+                { variantId: 11, headline: 'B', body: 'b', destinationUrl: 'https://x.example/go', targeting: {}, mediaUrn: 'urn:li:image:M2' },
             ],
         });
         assert.equal(res.status, 'paused');
@@ -419,7 +419,7 @@ async function main(): Promise<void> {
         _resetMock();
         const res = await mockAdapter.stageCampaign({
             campaignId: 1, organisationId: 1, name: 'T', dailyBudgetGbp: 50,
-            variants: [{ variantId: 10, headline: 'A', body: 'b', destinationUrl: 'https://x.example/go', targeting: {} }],
+            variants: [{ variantId: 10, headline: 'A', body: 'b', destinationUrl: 'https://x.example/go', targeting: {}, mediaUrn: 'urn:li:image:M1' }],
         });
         await mockAdapter.activateCampaign(res.externalCampaignId);
         assert.equal(_inspect(res.externalCampaignId)!.status, 'active');
@@ -429,7 +429,7 @@ async function main(): Promise<void> {
         _resetMock();
         const res = await mockAdapter.stageCampaign({
             campaignId: 1, organisationId: 1, name: 'T', dailyBudgetGbp: 50,
-            variants: [{ variantId: 10, headline: 'A', body: 'b', destinationUrl: 'https://x.example/go', targeting: {} }],
+            variants: [{ variantId: 10, headline: 'A', body: 'b', destinationUrl: 'https://x.example/go', targeting: {}, mediaUrn: 'urn:li:image:M1' }],
         });
         _breakControl(res.externalCampaignId);
         const control = await mockAdapter.checkControl(res.externalCampaignId);
@@ -449,7 +449,7 @@ async function main(): Promise<void> {
         _resetMock();
         const res = await mockAdapter.stageCampaign({
             campaignId: 1, organisationId: 1, name: 'T', dailyBudgetGbp: 50,
-            variants: [{ variantId: 10, headline: 'A', body: 'b', destinationUrl: 'https://x.example/go', targeting: {} }],
+            variants: [{ variantId: 10, headline: 'A', body: 'b', destinationUrl: 'https://x.example/go', targeting: {}, mediaUrn: 'urn:li:image:M1' }],
         });
         const vid = res.externalVariantIds[10];
         _seedMetrics(vid, [

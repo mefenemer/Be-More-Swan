@@ -274,15 +274,43 @@ export function createLinkedInAdapter(cfg: LinkedInAdapterConfig): AdNetworkAdap
             // documents that the parent's status overrides the creative's. So nothing serves, and
             // approval later is ONE field on ONE entity rather than N updates that could half-
             // succeed and leave a campaign live with only some of its ads.
+            // ⚠️ SPONSORED CONTENT IS AUTHORED BY A COMPANY PAGE, not a person. The author is the
+            // organisation the AD ACCOUNT references — read live, because we have no other source
+            // for it and guessing an organisation URN would post under the wrong company.
+            const author = await fetchAccountOrganization(cfg.accessToken, cfg.accountUrn);
+
             const externalVariantIds: Record<number, string> = {};
             for (const v of input.variants) {
-                const cres = await call(`${BASE}/adAccounts/${acct}/creatives`, {
+                // ⚠️ `?action=createInline`, NOT the plain create. The first draft posted
+                // `content: { reference: url }` to the plain endpoint — `content` there is a URN of
+                // ALREADY-EXISTING content, and that object shape does not exist in the API at all.
+                // We have no pre-existing post, so createInline is the only path: it creates the
+                // Direct Sponsored Content post and the creative in one call.
+                const cres = await call(`${BASE}/adAccounts/${acct}/creatives?action=createInline`, {
                     method: 'POST',
                     headers: headers(cfg.accessToken),
                     body: JSON.stringify({
-                        campaign: externalCampaignId,
-                        intendedStatus: 'ACTIVE',
-                        content: { reference: v.destinationUrl },
+                        creative: {
+                            campaign: externalCampaignId,
+                            intendedStatus: 'ACTIVE',
+                            inlineContent: {
+                                post: {
+                                    // Marks this as Direct Sponsored Content: an ad-only post that
+                                    // does NOT appear on the company's own page feed.
+                                    adContext: { dscAdAccount: cfg.accountUrn, dscStatus: 'ACTIVE' },
+                                    author,
+                                    commentary: v.body,
+                                    visibility: 'PUBLIC',
+                                    lifecycleState: 'PUBLISHED',
+                                    isReshareDisabledByAuthor: false,
+                                    contentCallToActionLabel: 'LEARN_MORE',
+                                    // Where the click goes — normally one of our own /go/ tracked
+                                    // links, so the click lands in the attribution ledger.
+                                    contentLandingPage: v.destinationUrl,
+                                    content: { media: { title: v.headline, id: v.mediaUrn } },
+                                },
+                            },
+                        },
                     }),
                 });
                 externalVariantIds[v.variantId] = parseRestliId(cres);
@@ -555,4 +583,27 @@ export async function ensureCampaignGroup(
         }),
     });
     return parseRestliId(created);
+}
+
+/**
+ * The organisation a sponsored post is authored by.
+ *
+ * ⚠️ An ad account references a Company Page, and Direct Sponsored Content must be authored by it —
+ * a person URN is not valid here. There is no other source for this value, so it is read live
+ * rather than stored: an organisation URN guessed or gone stale would publish an advert under the
+ * wrong company's name.
+ */
+export async function fetchAccountOrganization(accessToken: string, accountUrn: string): Promise<string> {
+    const res = await call(`${BASE}/adAccounts/${accountId(accountUrn)}`, {
+        method: 'GET', headers: headers(accessToken),
+    });
+    const data = await res.json() as { reference?: string };
+    const ref = data.reference;
+    if (!ref || !/^urn:li:organization:\d+$/.test(ref)) {
+        throw new Error(
+            'This LinkedIn ad account is not linked to a Company Page, so we cannot create adverts on it. '
+            + 'Adverts are published by a Page, not by a person.',
+        );
+    }
+    return ref;
 }

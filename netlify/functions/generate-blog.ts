@@ -97,17 +97,23 @@ export default withLambda(async (event: HandlerEvent) => {
         .limit(1);
     if (!post) return { statusCode: 404, body: JSON.stringify({ error: 'Blog post not found.' }) };
 
-    const [{ jobCount }] = await db.execute<{ jobCount: number }>(
-        `SELECT COUNT(*)::int AS "jobCount" FROM content_generation_jobs
-         WHERE organisation_id = ${organisationId} AND status IN ('queued','processing')`
-    );
-    if (jobCount >= MAX_PENDING_JOBS) {
-        return { statusCode: 429, body: JSON.stringify({ error: 'Too many jobs are already running. Please wait for them to finish.' }) };
-    }
+    // ⚠️ EVERYTHING BELOW IS WRAPPED. The first version of this handler was not, and an unhandled
+    // throw here does NOT reach the browser as { error }: Lambda answers 500 with its own
+    // { errorType, errorMessage } shape, which has no `error` key, so the Studio fell through to its
+    // bare "Draft failed — try again." with the real cause visible nowhere. A queue write that fails
+    // must say so in the logs and send a sentence a human can act on.
+    try {
+        const [{ jobCount }] = await db.execute<{ jobCount: number }>(
+            `SELECT COUNT(*)::int AS "jobCount" FROM content_generation_jobs
+             WHERE organisation_id = ${organisationId} AND status IN ('queued','processing')`
+        );
+        if (jobCount >= MAX_PENDING_JOBS) {
+            return { statusCode: 429, body: JSON.stringify({ error: 'Too many jobs are already running. Please wait for them to finish.' }) };
+        }
 
-    const jobId = randomUUID();
+        const jobId = randomUUID();
 
-    await db.insert(contentGenerationJobs).values({
+        await db.insert(contentGenerationJobs).values({
         jobId,
         // No blueprintId: blog drafting doesn't read one (see blog-gap-fill.ts).
         assistantId: post.assistantId,
@@ -129,15 +135,27 @@ export default withLambda(async (event: HandlerEvent) => {
         resultBlogPostId: post.id,
     });
 
-    // Someone is watching this one, so start the drain rather than leaving it for the ten-minute
-    // cron. Best-effort: a failed poke leaves the job queued and the cron picks it up, which is why
-    // the answer says which of the two happened instead of letting the UI guess.
-    const started = await triggerBlogDrain(
-        event.headers as Record<string, string | undefined>, jobId, 'generate-blog');
+        // Someone is watching this one, so start the drain rather than leaving it for the ten-minute
+        // cron. Best-effort: a failed poke leaves the job queued and the cron picks it up, which is
+        // why the answer says which of the two happened instead of letting the UI guess.
+        const started = await triggerBlogDrain(
+            event.headers as Record<string, string | undefined>, jobId, 'generate-blog');
 
-    return {
-        statusCode: 202,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId, status: 'queued', started }),
-    };
+        console.log(`[generate-blog] queued ${jobId} for post ${post.id} (org ${organisationId}), drain started=${started}`);
+
+        return {
+            statusCode: 202,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jobId, status: 'queued', started }),
+        };
+    } catch (error) {
+        // Log the CAUSE as well as the error: a postgres-js failure reports a generic "Failed query"
+        // and puts the real message (a missing column, a violated constraint) on `cause`.
+        console.error('[generate-blog] could not queue the draft:', error,
+            (error as { cause?: unknown })?.cause ?? '');
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: 'Could not start the draft. Please try again — if it keeps happening, the queue write is failing.' }),
+        };
+    }
 });

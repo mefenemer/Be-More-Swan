@@ -1458,9 +1458,17 @@ window._renderConnectionsStatusCard = function () {
     // rather than vanishing. Other roles (whose "connectors" are Synced-action recipes living
     // in the drawer) still hide the card when they have none.
     const keepForSocial = window._detailCurrentData?.roleKey === 'social_media_manager';
+    // This function owns ONE question — does this role have connectors at all — and the answer is
+    // published here so _syncManageConnectionsPlacement (assistants.js) can read it rather than
+    // re-derive it from a second copy of the fetched arrays. That function owns the other question:
+    // WHERE the "Manage connections" button goes, since roles whose Overview already lists their
+    // destinations carry it in that list and hide this strip. It has the last word on `hidden`,
+    // which is why both exits from here end by calling it.
+    card.dataset.hasConnectors = (nothingRelevant && !keepForSocial) ? '0' : '1';
     if (nothingRelevant && !keepForSocial) {
         card.classList.add('hidden');
         window._syncStatusRow && window._syncStatusRow();
+        window._syncManageConnectionsPlacement && window._syncManageConnectionsPlacement();
         return;
     }
     card.classList.remove('hidden');
@@ -1475,6 +1483,8 @@ window._renderConnectionsStatusCard = function () {
     // What remains is the label and the button, which need nothing fetched at all. The per-connection
     // list and toggles went the same way earlier, for the same reason.
     window._syncStatusRow && window._syncStatusRow();
+    // …and this may hide the strip again, on the roles that carry the button in their own list.
+    window._syncManageConnectionsPlacement && window._syncManageConnectionsPlacement();
 };
 
 // Status row for a blog destination in the Overview card. Same shell as _sourceStatusRow, no switch

@@ -294,4 +294,57 @@ check('no lifetime budget is invented for the group', () => {
     assert.ok(!/totalBudget/.test(create), 'a lifetime budget is being invented for the campaign group');
 });
 
+console.log('\n──── the creative call, and the one thing still missing ────');
+
+check('creatives go through createInline, not the plain create', () => {
+    // ⚠️ The first draft POSTed `content: { reference: url }` to the plain endpoint. On that
+    // endpoint `content` is a URN of ALREADY-EXISTING content, and that object shape does not
+    // exist in the API at all. We have no pre-existing post, so createInline is the only path.
+    assert.match(code(lk), /\/creatives\?action=createInline/);
+    assert.ok(!/content: \{ reference:/.test(code(lk)), 'the invalid content shape is back');
+});
+
+check('the post is authored by the ACCOUNT\'S ORGANISATION, read live', () => {
+    // ⚠️ Sponsored Content is published by a Company Page, not a person — a person URN is invalid
+    // here. There is no other source for the value, and a guessed or stale organisation URN would
+    // publish an advert under the wrong company's name.
+    assert.match(code(lk), /const author = await fetchAccountOrganization\(/);
+    assert.match(code(lk), /author,/);
+    assert.match(code(lk), /urn:li:organization/);
+});
+
+check('an ad account with no Company Page is refused, with a sentence', () => {
+    const fn = lk.slice(landmark(lk, 'export async function fetchAccountOrganization'));
+    assert.match(fn, /not linked to a Company Page/);
+    assert.match(fn, /Adverts are published by a Page, not by a person/);
+});
+
+check('it is Direct Sponsored Content, so nothing appears on the Page feed', () => {
+    // dscAdAccount marks the post as ad-only. Without it we would be publishing to the customer's
+    // actual company page.
+    assert.match(code(lk), /adContext: \{ dscAdAccount: cfg\.accountUrn, dscStatus: 'ACTIVE' \}/);
+});
+
+check('the tracked link is the landing page, and the body is the commentary', () => {
+    assert.match(code(lk), /contentLandingPage: v\.destinationUrl/);
+    assert.match(code(lk), /commentary: v\.body/);
+});
+
+check('a missing image REFUSES before any work is thrown away', () => {
+    // ⚠️ THE LAST MISSING PIECE. A Sponsored Content ad is a post WITH MEDIA — both of LinkedIn's
+    // createInline examples carry content.media.id and there is no documented text-only variant.
+    // Without an upload path every stage would be rejected by the API, AFTER the user had written
+    // three ads and chosen their targeting.
+    assert.match(stage, /code: 'creative_media_required'/);
+    assert.match(stage, /we cannot upload one for you yet/);
+    assert.ok(landmark(stage, 'creative_media_required') < landmark(stage, 'await adapter.stageCampaign('),
+        'the media check runs after the network call');
+});
+
+check('mediaUrn is REQUIRED by the contract, so this cannot be forgotten again', () => {
+    // Expressed in the type, not just checked at the boundary — the compiler refuses any caller
+    // that omits it.
+    assert.match(read('src/utils/ad-networks/types.ts'), /mediaUrn: string;/);
+});
+
 console.log(`\n${passed} checks passed.\n`);
