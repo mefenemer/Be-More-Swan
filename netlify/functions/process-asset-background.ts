@@ -7,7 +7,7 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getDb } from '../../db/client';
 import { workspaceAssets } from '../../db/schema';
 import { logAuditEvent } from '../../src/utils/audit';
-import { safeFetchText } from '../../src/utils/safe-fetch';
+import { safeFetchBinary, safeFetchText } from '../../src/utils/safe-fetch';
 import { stripPromptInjection } from '../../src/utils/prompt-injection';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -114,9 +114,33 @@ export default withLambda(async (event: HandlerEvent) => {
                 // ---------------------------------------------------------
             else if (asset.assetType === 'file' && asset.storageUrl) {
                 const fname = (asset.name || '').toLowerCase();
-                const response = await fetch(asset.storageUrl);
-                if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-                const buffer = Buffer.from(await response.arrayBuffer());
+                // SSRF, same reasoning as the URL branch above — this one was simply missed,
+                // and the note in safe-fetch.ts pointed at the wrong line for months.
+                //
+                // ⚠️ safeFetchBINARY, not safeFetchText. This branch hands the bytes to PDFParse;
+                // decoding them as UTF-8 first replaces every invalid sequence with U+FFFD and
+                // destroys the PDF, with no error until the extracted text comes back empty.
+                //
+                // ── Reachability, so the next reader doesn't over- or under-rate this ──
+                // No writer in the codebase sets workspaceAssets.storageUrl to a non-null value any
+                // more: upload-asset.ts returns 501 before its insert, storage-request-upload.ts
+                // writes r2Key instead, and the purge paths only ever null it. The r2Key branch is
+                // also checked FIRST. So this runs only for pre-R2 rows created by an uploader that
+                // no longer exists — dead code holding a live hazard, which is the shape that gets
+                // re-animated by a migration or a restore rather than by an attacker today.
+                //
+                // maxBytes is set explicitly and generously: the raw fetch() this replaces had NO
+                // cap, and these rows predate the 200KB limit the Knowledge Base uploader applies
+                // now (src/components/assistant-knowledge-base.js), so the 5MB default could start
+                // failing an old PDF that extracts fine today. The extracted text is truncated to
+                // 100k characters below regardless.
+                //
+                // The User-Agent is left at the default: it exists to tell a THIRD-PARTY site owner
+                // who is crawling them, and this fetches our own legacy storage, not someone's site.
+                const fetched = await safeFetchBinary(asset.storageUrl, { maxBytes: 25 * 1024 * 1024 });
+                // safeFetchBinary throws SafeFetchError on any non-2xx, so the old `response.ok`
+                // check would now be unreachable.
+                const buffer = fetched.bytes;
 
                 if (fname.endsWith('.pdf')) {
                     const parser = new PDFParse({ data: buffer });

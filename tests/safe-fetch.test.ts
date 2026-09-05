@@ -17,7 +17,16 @@
 // inherits the classification guarantees proven here.
 
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isPublicIp, safeFetchText, SafeFetchError } from '../src/utils/safe-fetch';
+import { landmark } from './landmark';
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const read = (p: string) => readFileSync(join(root, p), 'utf8');
+/** Source with comments removed — a check for "no bare fetch(" must not trip on prose about one. */
+const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -147,6 +156,50 @@ check('garbage is not treated as public', () => {
         // Not a literal — this is the DNS path, and the same thing an attacker's own
         // domain pointed at 127.0.0.1 would do.
         rejects('http://localhost:8888/', 'private_address'));
+
+    console.log('\nevery server-side fetch of a stored URL goes through the fence');
+
+    // ⚠️ A guard is only worth what its LEAST-guarded call site is. process-asset-background
+    // fetches three ways — a user's URL, an R2 object, and a legacy storageUrl — and for months
+    // only the first was fenced. What makes that hard to notice is that the file reads as guarded:
+    // the URL branch carries a long, correct SSRF comment a few lines above the bare fetch().
+    // ⚠️ Comments stripped first. Both checks below reason about CALLS, and this file is dense with
+    // prose about fetch() and about safeFetchText — a raw-text scan reports the explanation of the
+    // bug as the bug.
+    const ASSET = code(read('netlify/functions/process-asset-background.ts'));
+
+    check('no bare fetch() survives in the asset extractor', () => {
+        const calls = ASSET.replace(/safeFetch\w+\(/g, '');
+        assert.ok(!/(^|[^\w.])fetch\(/.test(calls),
+            'a raw fetch() of a stored URL is an SSRF hole and skips the byte cap and the timeout');
+    });
+
+    check('the legacy storageUrl branch uses the BINARY entry point', () => {
+        // It feeds PDFParse. safeFetchText would decode the bytes as UTF-8 and destroy the PDF —
+        // which is exactly what the stale TODO in safe-fetch.ts used to recommend.
+        const branch = ASSET.slice(
+            landmark(ASSET, "asset.assetType === 'file' && asset.storageUrl"),
+            landmark(ASSET, 'if (fname.endsWith(\'.pdf\'))'),
+        );
+        assert.match(branch, /await safeFetchBinary\(asset\.storageUrl/);
+        assert.doesNotMatch(branch, /safeFetchText/, 'text decoding here corrupts every PDF');
+        assert.match(branch, /maxBytes:/,
+            'the fetch it replaced had NO cap, and these rows predate the uploader size limit — '
+            + 'inheriting the 5MB default would start failing old PDFs that extract fine today');
+    });
+
+    check('the user-supplied URL branch is still text, and still fenced', () => {
+        assert.match(ASSET, /await safeFetchText\(asset\.externalUrl\)/,
+            'that branch feeds cheerio and must NOT be switched to bytes');
+    });
+
+    check('safe-fetch no longer carries the TODO that pointed at the wrong line', () => {
+        // It named fetch(asset.externalUrl) — already guarded — and recommended safeFetchText for a
+        // branch that parses PDFs. Both halves wrong, in a file people trust to be precise.
+        const SF = read('src/utils/safe-fetch.ts');
+        assert.ok(!/should be moved onto safeFetchText\(\)/.test(SF),
+            'the stale TODO is back');
+    });
 
     console.log(`\n${passed} passed`);
 })();

@@ -32,9 +32,14 @@
 // They share followRedirects() — the loop that re-validates every hop — precisely so a future
 // hardening fix cannot land in one and miss the other.
 //
-// Used by the Inspo tab's URL ingestion (docs/inspo-tab-plan.md). NOTE:
-// netlify/functions/process-asset-background.ts has an unguarded `fetch(asset.externalUrl)`
-// predating this and should be moved onto safeFetchText().
+// Used by the Inspo tab's URL ingestion (docs/inspo-tab-plan.md).
+//
+// ⚠️ This paragraph used to carry a TODO that was wrong in both halves, which is worth recording
+// because a misleading note in a security file is worse than no note. It said
+// process-asset-background.ts had an unguarded `fetch(asset.externalUrl)` — that call had already
+// been guarded; the unguarded one was `fetch(asset.storageUrl)` on a different branch. And it said
+// to move it onto safeFetchText(), which would have DESTROYED the PDFs that branch parses. Both
+// are now fixed: it calls safeFetchBinary(). Name the exact call site, and the right entry point.
 
 import http from 'node:http';
 import https from 'node:https';
