@@ -137,6 +137,37 @@ check('blog.html carries exactly the key in src/config/site-blog.ts', () => {
         'blog.html and src/config/site-blog.ts disagree: the page and the route would serve different orgs');
 });
 
+check('robots.txt advertises OUR blog sitemap, at the key site-blog.ts declares', () => {
+    // The GSC submission used to be the only way Google could reach this sitemap, and it sat on
+    // "Couldn't fetch" with no Last read. robots.txt is the independent discovery path.
+    //
+    // ⚠️ The key is spelled out in robots.txt because that file is plain text — it cannot import
+    // a constant — so this is the ONLY thing keeping it honest. publicKey is rotatable
+    // (db/schema.ts calls it so); rotate it without this test and robots.txt would keep pointing
+    // Google at a sitemap for a key that no longer resolves, failing silently and for ever.
+    const robots = read('robots.txt');
+    const lines = robots.split('\n').filter((l) => /^Sitemap:/i.test(l.trim()));
+    assert.equal(lines.length, 2, `expected exactly two Sitemap lines, got ${lines.length}`);
+    assert.ok(lines.some((l) => l.includes('https://bemoreswan.com/sitemap.xml')),
+        'the marketing sitemap must stay listed');
+
+    const blogLine = lines.find((l) => l.includes('/b/'));
+    assert.ok(blogLine, 'the blog sitemap is no longer advertised in robots.txt');
+    const m = blogLine!.match(/\/b\/([^/]+)\/sitemap\.xml/);
+    assert.ok(m, 'the blog Sitemap line is not the /b/<key>/sitemap.xml form the route serves');
+    assert.equal(m![1], SITE_BLOG_WIDGET_KEY,
+        'robots.txt points Google at a DIFFERENT widget key than the site serves — the sitemap it names will not resolve');
+});
+
+check('robots.txt does not advertise a cross-tenant sitemap', () => {
+    // Listing our own blog must never grow into listing everyone's: one public URL enumerating
+    // every customer's posts is precisely what the file's own comment refuses.
+    const robots = read('robots.txt');
+    const blogLines = robots.split('\n').filter((l) => /^Sitemap:/i.test(l.trim()) && l.includes('/b/'));
+    assert.equal(blogLines.length, 1,
+        'exactly one blog sitemap — ours. A second means a customer key was added to a public file.');
+});
+
 check('blog.html links its cards at the path SITE_BLOG_POST_PATH declares', () => {
     const html = read('blog.html');
     const m = html.match(/data-bms-post-url'\s*,\s*'([^']+)'/);

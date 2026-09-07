@@ -4,11 +4,25 @@
 # to be crawled and shared — they are the indexable form of posts the embeddable widget renders
 # client-side (the widget's hash-routed Shadow DOM is invisible to crawlers).
 #
-# The sitemap below covers the MARKETING pages only. Customer blog sitemaps are PER BLOG, not
-# global: each workspace's published posts are listed at
+# TWO sitemaps are advertised below, and the split is deliberate.
+#
+#   1. /sitemap.xml — the marketing pages.
+#   2. /b/wgt_a29af16bd7af9af3499cd70c/sitemap.xml — BE MORE SWAN'S OWN blog posts, which are
+#      served from this host at /blog/<slug>. A sitemap belongs in the robots.txt of the host
+#      whose URLs it lists, and these are ours. The key is already public — it ships in a
+#      <script> tag on blog.html and in every customer's embed snippet — so naming it here
+#      discloses nothing new.
+#
+# ⚠️ Listing OUR blog is not the same as listing everyone's, and this must not grow into that.
+# Customer blog sitemaps stay PER BLOG:
 #   https://bemoreswan.com/b/<widget-public-key>/sitemap.xml
-# Submit that URL in Google Search Console for your blog. There is deliberately no single
-# cross-tenant sitemap (it would enumerate every customer's posts at one public URL).
+# Each workspace submits its own in Google Search Console. There is deliberately no single
+# cross-tenant sitemap — it would enumerate every customer's posts at one public URL — and adding
+# a customer's key to this file would do the same thing one line at a time.
+#
+# Why ours is here at all: the GSC submission was previously the ONLY way Google could find it,
+# which left discovery of every published post resting on a single fetch that had not succeeded
+# (submitted 2026-09-07, "Couldn't fetch", never read). robots.txt is an independent path to it.
 #
 # NOTE: authenticated app pages (dashboard, admin, workspace, billing, …) are not blocked here
 # because their names collide on prefixes with public marketing pages (e.g. assistants.html is
@@ -22,3 +36,4 @@ Allow: /
 Disallow: /api/
 
 Sitemap: https://bemoreswan.com/sitemap.xml
+Sitemap: https://bemoreswan.com/b/wgt_a29af16bd7af9af3499cd70c/sitemap.xml
