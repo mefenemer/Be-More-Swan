@@ -120,6 +120,12 @@
 
     function showSetupPanel() {
         document.getElementById('bms-blog-setup').style.display = '';
+        // The build bakes a crawler-visible post list into #bms-blog (Job 3 in
+        // scripts/build-seo-html.mjs). It is normally hidden by the widget's shadow root — but
+        // we are here precisely because the widget is NOT mounting, so nothing would hide it and
+        // a list of live posts would sit under a panel saying there are none yet. Guarded: the
+        // region does not exist in an unbuilt checkout.
+        document.getElementById('blog-static')?.remove();
     }
 
     function mountWidgetScript() {

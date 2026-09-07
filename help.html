@@ -153,12 +153,31 @@ async function loadArticles() {
     const data = await res.json();
     _articles = data.articles || [];
   } catch {
-    document.getElementById('help-loading').textContent = 'Could not load articles. Please try again later.';
-    document.getElementById('help-loading').classList.remove('animate-pulse');
+    // The build bakes every article into #help-static as a fallback, so on a built deploy the
+    // articles are already on screen underneath this line — an error telling the visitor they
+    // could not be loaded would contradict what they can plainly see. Drop the line instead,
+    // and only show the error when there is genuinely nothing to read (unbuilt checkout, or a
+    // deploy that used SEO_ALLOW_STALE).
+    const loading = document.getElementById('help-loading');
+    if (document.getElementById('help-static')) {
+      loading.remove();
+    } else {
+      loading.textContent = 'Could not load articles. Please try again later.';
+      loading.classList.remove('animate-pulse');
+    }
     return;
   }
   buildNav();
   renderList();
+
+  // The build bakes a static, crawlable copy of every article into #help-static — see Job 4 in
+  // scripts/build-seo-html.mjs and the comment on the region itself. The interactive list has
+  // rendered, so drop it rather than show the same articles twice.
+  //
+  // Guarded because it does not exist in an unbuilt checkout, and reached only on a SUCCESSFUL
+  // load — the catch above returns early, which deliberately leaves the static copy in place as
+  // a fallback when the articles endpoint is down.
+  document.getElementById('help-static')?.remove();
 
   // Handle hash-based deep-link (AC14)
   const hash = window.location.hash.slice(1);

@@ -19,7 +19,7 @@ import { normaliseSocial, parseSocials, readSocials, socialEntries, SWAN_SOCIAL_
 import {
     SEVERE_CATEGORIES, PUBLICATION_SEVERE_CATEGORIES, PUBLICATION_EXTRA_SEVERE,
 } from '../src/config/moderation-severity';
-import { guessSection, toDek, SECTION_TAG_ALIASES } from '../src/utils/blog-destinations/swanindex';
+import { guessSection, toDek, SECTION_TAG_ALIASES, buildDeskEmail, editorialInbox, notifyEditorialDesk } from '../src/utils/blog-destinations/swanindex';
 import {
     runSafetyScreen, readSafetyReport, summariseSafety, textOf, imagesOf, linksOf, SAFETY_VERSION,
     type Moderator, type ModerationOutcome,
@@ -219,6 +219,75 @@ check('a re-publish never demotes a piece that is already published', () => {
         'live must be carried through untouched, exactly as featured is');
     // And the liveAt reset must not reach either of them.
     assert.match(src, /nextStatus === 'live' \|\| nextStatus === 'featured' \? \{\} : \{ liveAt: null \}/);
+});
+
+// ── Editorial desk notification ─────────────────────────────────────────────
+console.log('\nEditorial desk alert');
+
+const alert = (over: Partial<Parameters<typeof buildDeskEmail>[0]> = {}) => ({
+    title: 'How we cut churn by a third',
+    dek: 'A year of unglamorous work.',
+    handle: 'acme',
+    section: 'growth',
+    tags: ['churn', 'retention'],
+    authorCanonicalUrl: 'https://acme.com/blog/churn',
+    ...over,
+});
+
+check('the desk alert goes to support@ by default, and honours the override', () => {
+    const prev = process.env.SWAN_INDEX_EDITOR_EMAIL;
+    delete process.env.SWAN_INDEX_EDITOR_EMAIL;
+    assert.equal(editorialInbox(), 'support@bemoreswan.com');
+    process.env.SWAN_INDEX_EDITOR_EMAIL = 'editors@example.com';
+    assert.equal(editorialInbox(), 'editors@example.com', 'read at call time, not module load');
+    if (prev === undefined) delete process.env.SWAN_INDEX_EDITOR_EMAIL; else process.env.SWAN_INDEX_EDITOR_EMAIL = prev;
+});
+
+check('the alert names the piece and links straight to the queue', () => {
+    const { subject, html, text } = buildDeskEmail(alert(), 'https://bemoreswan.com/admin.html?view=swan-queue');
+    assert.match(subject, /New Swan Index submission/);
+    assert.ok(subject.includes('How we cut churn by a third'), 'the title belongs in the subject line');
+    assert.ok(html.includes('href="https://bemoreswan.com/admin.html?view=swan-queue"'), 'the deep link must survive escaping');
+    assert.ok(html.includes('@acme'), 'the author is named');
+    assert.ok(text.includes('Review it: https://bemoreswan.com/admin.html?view=swan-queue'));
+    assert.ok(text.includes('churn, retention'), 'tags reach the plain-text part too');
+});
+
+check('an unsectioned piece SAYS so rather than shipping a blank row', () => {
+    const { html } = buildDeskEmail(alert({ section: null }), null);
+    assert.match(html, /Unsectioned — needs placing/);
+});
+
+check('with no configured origin the alert omits the link instead of guessing one', () => {
+    // resolveBaseUrl() returns null when neither BASE_URL nor DEPLOY_PRIME_URL is set. A guessed
+    // origin would send an editor to another environment's desk.
+    const { html, text } = buildDeskEmail(alert(), null);
+    assert.ok(!html.includes('<a href'), 'no link at all is better than a wrong one');
+    assert.match(html, /Open admin ▸ The Swan Index ▸ Review Queue/);
+    assert.ok(!text.includes('Review it:'));
+});
+
+check('a hostile title cannot inject markup into the alert', () => {
+    const { html } = buildDeskEmail(alert({ title: '<img src=x onerror=alert(1)>', dek: '"quoted" & <b>' }), null);
+    assert.ok(!html.includes('<img src=x'), 'the tag must be escaped, not rendered');
+    assert.ok(html.includes('&lt;img src=x'), 'escaped form present');
+    assert.ok(html.includes('&amp;'), 'ampersands escaped');
+});
+
+check('the desk is told on FIRST arrival only, and the send is awaited', () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..',
+        'src/utils/blog-destinations/swanindex.ts'), 'utf8');
+    const callSite = src.slice(
+        landmark(src, 'Tell the editorial desk'),
+        landmark(src, 'Backfill liveAt', landmark(src, 'Tell the editorial desk')),
+    );
+    assert.ok(callSite.length > 0, 'the call site must still be findable');
+    // !existing is the whole test: nextStatus can only be 'pending' for a new row or one that was
+    // ALREADY pending, so dropping this would email on every re-publish of an unreviewed piece.
+    assert.match(callSite, /if \(!existing && nextStatus === 'pending'\)/,
+        'must fire only when the piece is newly on the desk');
+    assert.match(callSite, /await notifyEditorialDesk\(/,
+        'un-awaited, the Lambda freezes on return and the send is cancelled mid-flight');
 });
 
 check('dek truncates on a word boundary and keeps short text intact', () => {
@@ -818,6 +887,13 @@ check('the admin UI cannot show green for a screen that did not run', () => {
 // awaited inside it, because an un-awaited assertion failure lands after the summary line as an
 // unhandled rejection, which reads as a passing suite.
 async function main() {
+    await acheck('a mail failure never propagates out of the notifier', async () => {
+        // It runs inside publishBlogPost's syndication step: a throw here would mark the destination
+        // errored for a piece that was in fact submitted, or fail the publish outright.
+        await notifyEditorialDesk(alert());   // no RESEND_API_KEY in tests → dev-mode no-op
+        await notifyEditorialDesk(alert({ title: '', handle: '', tags: [], dek: null, authorCanonicalUrl: null }));
+    });
+
     await acheck('a check that could not run reports unchecked, and unchecked is never confirmed', async () => {
         // THE rule this module exists for. With no API key the moderation calls cannot run, and an
         // editor told "all clear" by a screen that never ran stops looking — which is worse than being
