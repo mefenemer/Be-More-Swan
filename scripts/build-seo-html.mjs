@@ -185,7 +185,7 @@ function buildFaqJsonLd() {
     const jsonLd = {
         '@context': 'https://schema.org',
         '@type': 'FAQPage',
-        '@id': `${SITE_ORIGIN}/faq.html#faq`,
+        '@id': `${SITE_ORIGIN}/faq#faq`,
         isPartOf: { '@type': 'WebSite', url: `${SITE_ORIGIN}/` },
         publisher: { '@id': `${SITE_ORIGIN}/#organization` },
         mainEntity: unique.map(({ q, a }) => ({
