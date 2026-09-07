@@ -134,6 +134,22 @@ export default withLambda(async (event) => {
     const willSpanMany = survivors.length + toAdd.length > 1;
     const sharedGroupId = groupId ?? (willSpanMany ? randomUUID() : null);
 
+    // ── What a new sibling inherits when the anchor has TEXT ON ITS PICTURE ─────────────────────
+    // The anchor's overlay design is flattened into a NEW asset the moment the reviewer finishes
+    // editing it, and that flattened asset becomes the anchor's attachment. Copying it verbatim gave
+    // the new platform an image with the words already burnt in AND the same design as an editable
+    // layer — the text showed twice on the new tab, and it would have PUBLISHED twice, because the
+    // sibling's own bake at approval had no base pin and so composited on top of the baked pixels.
+    //
+    // So the copy takes the CLEAN original (overlay_base_asset_id) plus the pin itself. The new row
+    // is then in exactly the state the anchor was in before it baked: clean picture, editable design,
+    // and a pin telling its own bake what to composite onto.
+    const anchorBaseAssetId = anchor.overlayBaseAssetId ?? null;
+    const anchorAssetIds = Array.isArray(anchor.contentAssetIds) ? anchor.contentAssetIds as number[] : [];
+    const copyAssetIds = (anchorBaseAssetId != null && anchorAssetIds.length === 1 && anchorAssetIds[0] !== anchorBaseAssetId)
+        ? [anchorBaseAssetId]
+        : anchorAssetIds;
+
     for (const dest of toAdd) {
         const platform = dest.platform;
         // The format comes from the DESTINATION, never from the anchor. Copying the anchor's key
@@ -146,14 +162,15 @@ export default withLambda(async (event) => {
             assistantId: anchor.assistantId,
             platform,
             postFormat: dest.formatKey
-                ? legacyPostFormat(dest, Array.isArray(anchor.contentAssetIds) && (anchor.contentAssetIds as unknown[]).length > 0)
+                ? legacyPostFormat(dest, copyAssetIds.length > 0)
                 : (anchor.postFormat ?? platformFormat(canonicalPlatform(platform)).defaultPostFormat),
             formatKey: dest.formatKey,
             publishDate: anchor.publishDate,
             caption: anchor.caption,
             hashtags: anchor.hashtags,
-            contentAssetIds: anchor.contentAssetIds,
+            contentAssetIds: copyAssetIds,
             imageOverlays: anchor.imageOverlays,
+            overlayBaseAssetId: anchorBaseAssetId,
             audioOverlays: anchor.audioOverlays,
             status: anchor.status,
             triggerType: anchor.triggerType ?? 'manual',
@@ -167,7 +184,7 @@ export default withLambda(async (event) => {
         // Mirror the junction rows too — scheduled_post_assets is the source of truth for newer
         // queries, and a sibling with media in the legacy column but no junction rows renders
         // correctly in the editor and then resolves nothing at publish time.
-        const assetIds = Array.isArray(anchor.contentAssetIds) ? anchor.contentAssetIds as number[] : [];
+        const assetIds = copyAssetIds;
         if (assetIds.length) {
             await db.insert(scheduledPostAssets)
                 .values(assetIds.map((contentAssetId, position) => ({

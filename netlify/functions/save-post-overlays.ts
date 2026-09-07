@@ -7,10 +7,11 @@
 // POST { postId, overlays, baseAssetId? } → { ok, count }
 //   Auth: aura_session (requireTenant). The post must belong to the caller's org.
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, scheduledPostAssets, contentAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { mediaTargetPostIds } from '../../src/utils/crosspost-media';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 // Keep server-side validation permissive but bounded — the editor is the source of truth for shape,
@@ -77,7 +78,7 @@ export default withLambda(async (event) => {
     if ('error' in ctx) return ctx.error;
     const { organisationId: orgId } = ctx;
 
-    let body: { postId?: number; overlays?: unknown; baseAssetId?: number | null };
+    let body: { postId?: number; overlays?: unknown; baseAssetId?: number | null; applyToGroup?: boolean };
     try { body = JSON.parse(event.body || '{}'); }
     catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON.' }) }; }
 
@@ -87,8 +88,24 @@ export default withLambda(async (event) => {
     const overlays = sanitise(body.overlays);
     if (overlays === null) return { statusCode: 422, body: JSON.stringify({ error: 'Invalid overlays payload.' }) };
 
-    // Ownership: the post must belong to this org.
-    const [post] = await db
+    // ── Which platforms this design lands on ────────────────────────────────────────────────────
+    // A cross-post is one row per platform but ONE post to the reviewer, so "put this text on the
+    // picture" normally means all of them — the same rule, and the same helper, as every other media
+    // write (src/utils/crosspost-media.ts). applyToGroup:false is how the reviewer says "just this
+    // platform", which is what the "Apply to all platforms" tick-box in the Text layer sends.
+    //
+    // Deliberately NOT defaulted to true here: the client states the scope on every call, and a
+    // caller that says nothing gets the old single-post behaviour rather than a silent fan-out.
+    const targetIds = await mediaTargetPostIds(db, {
+        postId,
+        orgId,
+        applyToGroup: body.applyToGroup === true,
+    });
+
+    // Ownership: the posts must belong to this org. mediaTargetPostIds already filters by org, but
+    // the requested post itself has not been checked yet — that is what turns a foreign id into a
+    // 404 rather than a write.
+    const rows = await db
         .select({
             id: scheduledPosts.id,
             overlayBaseAssetId: scheduledPosts.overlayBaseAssetId,
@@ -96,15 +113,17 @@ export default withLambda(async (event) => {
             contentAssetIds: scheduledPosts.contentAssetIds,
         })
         .from(scheduledPosts)
-        .where(and(eq(scheduledPosts.id, postId), eq(scheduledPosts.organisationId, orgId)))
-        .limit(1);
-    if (!post) return { statusCode: 404, body: JSON.stringify({ error: 'Post not found.' }) };
+        .where(and(inArray(scheduledPosts.id, targetIds), eq(scheduledPosts.organisationId, orgId)));
+    // Target first, in the order mediaTargetPostIds gave — the client repaints the tab the reviewer
+    // is looking at from the head of postIds.
+    const posts = targetIds.map(id => rows.find(r => r.id === id)).filter((r): r is typeof rows[number] => !!r);
+    if (!posts.some(p => p.id === postId)) return { statusCode: 404, body: JSON.stringify({ error: 'Post not found.' }) };
 
-    // Resolve the base asset: the caller may pin the clean pre-bake image the first time overlays are
-    // added. Once set it is sticky (a later save without one keeps the original), so re-edits always
-    // composite onto the true original rather than an already-flattened image.
-    let baseAssetId: number | null = post.overlayBaseAssetId ?? null;
-    if (baseAssetId == null && body.baseAssetId != null) {
+    // The caller may pin the clean pre-bake image the first time overlays are added, and it names
+    // the asset THE EDITOR was showing — which is the post the user had open, not its siblings. So
+    // it is only ever accepted for that post; every other platform pins its own picture below.
+    let offeredBaseAssetId: number | null = null;
+    if (body.baseAssetId != null) {
         const candidate = Number(body.baseAssetId);
         if (Number.isInteger(candidate)) {
             const [asset] = await db
@@ -112,56 +131,73 @@ export default withLambda(async (event) => {
                 .from(contentAssets)
                 .where(and(eq(contentAssets.id, candidate), eq(contentAssets.organisationId, orgId)))
                 .limit(1);
-            if (asset) baseAssetId = asset.id;
+            if (asset) offeredBaseAssetId = asset.id;
         }
     }
-    // Clearing all overlays also releases the base pin, so the next overlay session re-pins fresh.
-    const nextBase = overlays.length ? baseAssetId : null;
 
-    // ── Removing the text has to remove it from the PICTURE too ─────────────────────────────────
-    // Once a design has been baked, the post's attached asset IS the flattened image — the words are
-    // pixels in it, not a layer over it. Clearing the overlay list therefore emptied the editable
-    // design while leaving the burnt-in copy attached, and the post published the very text the user
-    // had just deleted. Nothing downstream caught it: approve-post's bake guard is skipped when there
-    // are no overlays, and the base pin — the only record of which asset was the clean original —
-    // was being nulled in the same write.
-    //
-    // So restore the original FIRST, then release the pin. Order matters: once the pin is gone the
-    // clean image is unfindable.
-    //
-    // This post only, never the cross-post siblings. The flattened image was made against ONE
-    // platform's design (which is why attach-draft-media opts the bake out of the fan-out), so its
-    // undo has exactly the same scope.
-    if (!overlays.length && baseAssetId != null) {
+    /** The asset a post currently has attached — junction table first, legacy array as fallback. */
+    const attachedAssetId = async (p: { id: number; contentAssetIds: unknown }): Promise<number | null> => {
         const [attached] = await db
             .select({ id: scheduledPostAssets.contentAssetId })
             .from(scheduledPostAssets)
-            .where(eq(scheduledPostAssets.scheduledPostId, postId))
+            .where(eq(scheduledPostAssets.scheduledPostId, p.id))
             .orderBy(scheduledPostAssets.position)
             .limit(1);
-        const current = attached?.id ?? (post.contentAssetIds as number[] | null)?.[0] ?? null;
-        // Equal means nothing was ever baked — the post still carries its original, so there is
-        // nothing to undo and re-attaching would be a pointless write.
-        if (current !== baseAssetId) {
-            await db.delete(scheduledPostAssets).where(eq(scheduledPostAssets.scheduledPostId, postId));
-            await db.insert(scheduledPostAssets)
-                .values({ scheduledPostId: postId, contentAssetId: baseAssetId, position: 0 })
-                .onConflictDoNothing();
-            // publish-social-posts.ts still reads media from the deprecated array, so a post restored
-            // in the junction table alone would publish the flattened image regardless.
-            await db.update(scheduledPosts)
-                .set({ contentAssetIds: [baseAssetId], updatedAt: new Date() })
-                .where(eq(scheduledPosts.id, postId));
-        }
-    }
+        return attached?.id ?? (p.contentAssetIds as number[] | null)?.[0] ?? null;
+    };
 
-    await db.update(scheduledPosts)
-        .set({ imageOverlays: overlays, overlayBaseAssetId: nextBase, updatedAt: new Date() })
-        .where(eq(scheduledPosts.id, postId));
+    for (const target of posts) {
+        // Resolve this post's base asset: its existing pin wins (sticky, so re-edits always composite
+        // onto the true original rather than an already-flattened image), then the pin the editor
+        // offered for the post it was open on, then whatever this platform currently has attached —
+        // which is what lets a sibling with its OWN picture take the design without inheriting the
+        // anchor's photo.
+        let baseAssetId: number | null = target.overlayBaseAssetId ?? null;
+        if (baseAssetId == null) {
+            baseAssetId = target.id === postId
+                ? (offeredBaseAssetId ?? await attachedAssetId(target))
+                : await attachedAssetId(target);
+        }
+        // Clearing all overlays also releases the base pin, so the next overlay session re-pins fresh.
+        const nextBase = overlays.length ? baseAssetId : null;
+
+        // ── Removing the text has to remove it from the PICTURE too ─────────────────────────────
+        // Once a design has been baked, the post's attached asset IS the flattened image — the words
+        // are pixels in it, not a layer over it. Clearing the overlay list therefore emptied the
+        // editable design while leaving the burnt-in copy attached, and the post published the very
+        // text the user had just deleted. Nothing downstream caught it: approve-post's bake guard is
+        // skipped when there are no overlays, and the base pin — the only record of which asset was
+        // the clean original — was being nulled in the same write.
+        //
+        // So restore the original FIRST, then release the pin. Order matters: once the pin is gone
+        // the clean image is unfindable.
+        if (!overlays.length && baseAssetId != null) {
+            const current = await attachedAssetId(target);
+            // Equal means nothing was ever baked — the post still carries its original, so there is
+            // nothing to undo and re-attaching would be a pointless write.
+            if (current !== baseAssetId) {
+                await db.delete(scheduledPostAssets).where(eq(scheduledPostAssets.scheduledPostId, target.id));
+                await db.insert(scheduledPostAssets)
+                    .values({ scheduledPostId: target.id, contentAssetId: baseAssetId, position: 0 })
+                    .onConflictDoNothing();
+                // publish-social-posts.ts still reads media from the deprecated array, so a post
+                // restored in the junction table alone would publish the flattened image regardless.
+                await db.update(scheduledPosts)
+                    .set({ contentAssetIds: [baseAssetId], updatedAt: new Date() })
+                    .where(eq(scheduledPosts.id, target.id));
+            }
+        }
+
+        await db.update(scheduledPosts)
+            .set({ imageOverlays: overlays, overlayBaseAssetId: nextBase, updatedAt: new Date() })
+            .where(eq(scheduledPosts.id, target.id));
+    }
 
     return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ok: true, count: overlays.length }),
+        // postIds is every row this design landed on, so the editor can repaint the sibling tabs
+        // and bake each of them — a correct server fan-out still LOOKS broken without it.
+        body: JSON.stringify({ ok: true, count: overlays.length, postIds: posts.map(p => p.id) }),
     };
 });

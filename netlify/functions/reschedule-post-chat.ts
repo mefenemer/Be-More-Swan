@@ -101,6 +101,22 @@ export default withLambda(async (event) => {
     const now = new Date();
     let newPublishDate: Date;
 
+    // The zone every date in this response is SPOKEN in — the assistant's, not the Lambda's (which
+    // is UTC, and so an hour out all through British Summer Time) and not a hardcoded London for an
+    // org that does not live there. Resolved once: the natural-language parser needs it to read
+    // "3pm" correctly, and the confirmation needs it to say the result back in the same zone.
+    let timezone = 'Europe/London';
+    if (post.assistantId) {
+        const [assistant] = await db
+            .select({ onboardingContext: aiAssistants.onboardingContext })
+            .from(aiAssistants)
+            .where(eq(aiAssistants.id, post.assistantId))
+            .limit(1);
+        const ctxTz = (assistant?.onboardingContext as Record<string, unknown>)?.posting_timezone
+            ?? (assistant?.onboardingContext as Record<string, unknown>)?.timezone;
+        if (typeof ctxTz === 'string' && ctxTz) timezone = ctxTz;
+    }
+
     if (rescheduleAt) {
         // Explicit datetime from the picker — use directly.
         const parsed = new Date(rescheduleAt);
@@ -112,18 +128,7 @@ export default withLambda(async (event) => {
         }
         newPublishDate = parsed;
     } else {
-        // Natural-language path — resolve the assistant's timezone for correct parsing.
-        let timezone = 'Europe/London';
-        if (post.assistantId) {
-            const [assistant] = await db
-                .select({ onboardingContext: aiAssistants.onboardingContext })
-                .from(aiAssistants)
-                .where(eq(aiAssistants.id, post.assistantId))
-                .limit(1);
-            const tz = (assistant?.onboardingContext as Record<string, unknown>)?.timezone;
-            if (typeof tz === 'string' && tz) timezone = tz;
-        }
-
+        // Natural-language path — parsed against the assistant's timezone resolved above.
         let parsed: Date | null = null;
         try {
             parsed = await parseInstruction(instruction, now, timezone);
@@ -186,7 +191,7 @@ export default withLambda(async (event) => {
         newState: { publishDate: newPublishDate.toISOString(), status: newStatus, instruction: instruction || null },
     }).catch(() => {});
 
-    const friendlyDate = newPublishDate.toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
+    const friendlyDate = newPublishDate.toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: timezone });
     const confirmation = instruction
         ? `Got it — your assistant has moved this post to ${friendlyDate}.${conflictWarning ? ' ' + conflictWarning : ''}`
         : `Post rescheduled to ${friendlyDate}.${conflictWarning ? ' ' + conflictWarning : ''}`;

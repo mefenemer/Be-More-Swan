@@ -17,7 +17,7 @@ import { aiAssistants, auditLogs, contentAssets, contentRules, postIdeaSuggestio
 import { isBakedFor, renderableOverlays } from '../../src/lib/post-render';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { resolvePostImage, resolvePostVideo } from '../../src/utils/social-publish';
-import { resolvePostingSchedule, computeScheduleSlots, intervalHoursFor, resolveHorizonDays } from '../../src/config/posting-cadence';
+import { resolvePostingSchedule, computeScheduleSlots, intervalHoursFor, resolveHorizonDays, DEFAULT_POSTING_TIMEZONE } from '../../src/config/posting-cadence';
 import { formatBlockedReason, postFormatSpec } from '../../src/config/post-formats';
 import { loadAssetMetrics, validateAgainstFormat } from '../../src/utils/format-router';
 import { platformFormat, normalizePlatform, PLATFORM_FORMATS } from '../../src/config/platform-formats';
@@ -474,6 +474,35 @@ export default withLambda(async (event) => {
     let newPublishDate = scheduledFor;
     let assistantName: string | null = null;
 
+    // ── The timezone every date in this response is SPOKEN in ───────────────────
+    // toLocaleString with no timeZone uses the host's, and a Netlify function's host is UTC. So a
+    // post scheduled for 15:00 was confirmed as "14:00" all through British Summer Time, while the
+    // calendar — rendered in the browser, in the reader's own zone — showed 15:00. Two surfaces
+    // disagreeing about the same row reads as a scheduling bug rather than a formatting one.
+    //
+    // The assistant's posting timezone is the right zone to say it in: it is the zone the cadence
+    // slots are computed in, so the confirmation and the schedule the user agreed now match.
+    //
+    // Loaded once here rather than inside the 'approve' branch, because 'reschedule' and
+    // 'publish_now' quote dates too and never went near the assistant row.
+    const [assistant] = post.assistantId
+        ? await db
+            .select({
+                id:                aiAssistants.id,
+                name:              aiAssistants.name,
+                onboardingContext: aiAssistants.onboardingContext,
+                draftHorizonDays:  aiAssistants.draftHorizonDays,
+            })
+            .from(aiAssistants)
+            .where(eq(aiAssistants.id, post.assistantId))
+            .limit(1)
+        : [];
+    const displayTimezone = assistant
+        ? resolvePostingSchedule((assistant.onboardingContext as Record<string, unknown>) ?? {}).timezone
+        : DEFAULT_POSTING_TIMEZONE;
+    /** A date as the user reads it, never as the Lambda's clock reads it. */
+    const say = (d: Date) => d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: displayTimezone });
+
     if (action === 'publish_now') {
         newPublishDate = now;
     } else if (action === 'reschedule') {
@@ -492,21 +521,9 @@ export default withLambda(async (event) => {
         // The assistant "picks the task up and schedules it": land the post in the next free slot of
         // its posting cadence. Falls back to the draft's own future date for on-demand assistants.
         let optimal: Date | null = null;
-        if (post.assistantId) {
-            const [assistant] = await db
-                .select({
-                    id:                aiAssistants.id,
-                    name:              aiAssistants.name,
-                    onboardingContext: aiAssistants.onboardingContext,
-                    draftHorizonDays:  aiAssistants.draftHorizonDays,
-                })
-                .from(aiAssistants)
-                .where(eq(aiAssistants.id, post.assistantId))
-                .limit(1);
-            if (assistant) {
-                assistantName = assistant.name;
-                optimal = await pickOptimalSlot(db, assistant, post, now).catch(() => null);
-            }
+        if (assistant) {
+            assistantName = assistant.name;
+            optimal = await pickOptimalSlot(db, assistant, post, now).catch(() => null);
         }
         if (optimal) {
             newPublishDate = optimal;
@@ -519,7 +536,7 @@ export default withLambda(async (event) => {
                     pastSchedule: true,
                     scheduledFor: scheduledFor.toISOString(),
                     platform: post.platform,
-                    message: `The scheduled time for this post (${scheduledFor.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}) has passed. Would you like to reschedule or publish now?`,
+                    message: `The scheduled time for this post (${say(scheduledFor)}) has passed. Would you like to reschedule or publish now?`,
                 }),
             };
         }
@@ -583,7 +600,7 @@ export default withLambda(async (event) => {
     }).catch(() => {});
 
     // ── Build confirmation message ─────────────────────────────────────────────
-    const dateLabel = newPublishDate.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+    const dateLabel = say(newPublishDate);
     const scheduler = assistantName || 'Your assistant';
     const confirmation = action === 'publish_now'
         ? `Post approved and queued to publish now on ${post.platform}.`

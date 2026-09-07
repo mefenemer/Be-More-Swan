@@ -259,10 +259,17 @@ check('nothing-to-bake is answered without a round trip', () => {
     assert.match(helper.slice(0, 900), /looksVideo/, 'a video still needs its Lambda render');
     assert.match(helper.slice(0, 900), /if \(!cached\) return false/, 'an unknown post must ask the server, as before');
 
-    // The early bake must not fire for video, or every edit queues a paid Lambda render.
+    // The early bake must not fire for video, or every edit queues a paid Lambda render. It now
+    // takes a LIST (a design applied across a cross-post is flattened into each platform's own
+    // picture), so the video exclusion is a filter over that list rather than an early return.
     const sched = ws.slice(landmark(ws, 'function _pceScheduleOverlayBake('));
-    assert.match(sched.slice(0, 600), /if \(looksVideo\) return/,
+    const schedBody = sched.slice(0, 900);
+    assert.match(schedBody, /looksVideo/,
         'baking on edit is for photos only — video would queue a render per keystroke-pause');
+    assert.match(schedBody, /return !looksVideo/,
+        'the video exclusion must survive the change to a list — a filter that keeps videos bakes them');
+    assert.match(schedBody, /if \(!photos\.length\) return/,
+        'an all-video group must schedule nothing at all');
 });
 
 // Deleting every text box must take the words off the PICTURE, not just out of the design. A baked
@@ -284,11 +291,108 @@ check('clearing the text restores the clean image', () => {
     assert.ok(restore !== -1 && release !== -1, 'expected both the restore and the pin release');
     assert.ok(restore < release, 'the base pin must not be cleared before the restore that needs it');
 
-    // Same scope as the bake it undoes: one post, never the cross-post siblings.
+    // Same scope as the design write it undoes — no wider, no narrower. The reviewer chooses that
+    // scope ("Apply to all platforms" in the Text layer), and the undo has to honour the SAME choice:
+    // removing text from three platforms while restoring only one platform's picture would leave two
+    // of them publishing words that no longer exist in the design.
     const block = save.slice(restore, release);
-    assert.match(block, /eq\(scheduledPostAssets\.scheduledPostId, postId\)/,
-        'the undo is per-post, exactly like the bake that created the flattened image');
-    assert.ok(!/mediaTargetPostIds/.test(block), 'the undo must not fan out across the group');
+    assert.match(block, /eq\(scheduledPostAssets\.scheduledPostId, target\.id\)/,
+        'the undo runs per target row, inside the same loop the design write does');
+    assert.ok(!/mediaTargetPostIds/.test(block),
+        'the undo must not resolve its own scope — it rides the list the design write already settled');
+});
+
+// Text on the picture is the reviewer's, and a cross-post is ONE post to them. Adding it on
+// Instagram and finding Facebook bare — then adding it there too, and getting two designs on one
+// post — was the whole complaint. So the design fans out on the same rule as every other media
+// write, and the tick-box is how "just this platform" is said.
+check('the text design takes the scope the reviewer chose', () => {
+    const save = fn('netlify/functions/save-post-overlays.ts');
+    assert.match(save, /mediaTargetPostIds\(db, \{/,
+        'the design must resolve its targets through the one shared rule, like every other media write');
+    assert.match(save, /applyToGroup: body\.applyToGroup === true/,
+        'a caller that states no scope keeps the old single-post behaviour rather than fanning out silently');
+    assert.match(save, /postIds: posts\.map\(p => p\.id\)/,
+        'the client repaints the sibling tabs from this — a correct fan-out still LOOKS broken without it');
+
+    // Each platform pins its OWN clean picture. Copying the anchor's base would make a sibling with
+    // a different photo bake its text onto somebody else's image.
+    assert.match(save, /target\.overlayBaseAssetId \?\? null/,
+        "an existing pin wins, so a re-edit still composites onto the true original");
+    assert.match(save, /await attachedAssetId\(target\)/,
+        'a sibling with no pin yet takes the picture it actually has attached');
+
+    const ws = fn('workspace.html');
+    assert.match(ws, /id="insp-overlay-apply-all"[^>]*checked/,
+        'all platforms is the DEFAULT here too, so it ships ticked');
+    assert.match(ws, /applyToGroup: _pceOverlayApplyToGroup\(\)/,
+        'removing the text must state the same scope as adding it');
+    assert.match(ws, /baseAssetId: base\.assetId, applyToGroup/,
+        'saving the design must state its scope rather than relying on the server default');
+});
+
+// ── The text appeared TWICE ─────────────────────────────────────────────────────────────────────
+// A photo's design is flattened into a NEW asset as soon as the reviewer finishes editing it, and
+// that asset becomes the post's attachment. The Review canvas paints `overlays` as a live layer over
+// whatever preview the server hands back — so once the list was refetched, the words were on screen
+// twice: burnt into the pixels, and again as the layer.
+check('the review canvas never paints the live text layer over already-baked pixels', () => {
+    const drafts = fn('netlify/functions/get-social-drafts.ts');
+    assert.match(drafts, /overlayBaseAssetId: scheduledPosts\.overlayBaseAssetId/,
+        'the endpoint cannot prefer the clean original without reading the pin');
+    assert.match(drafts, /const previewAssetIds = \(/,
+        'the preview resolves the clean pre-bake picture, not the flattened attachment');
+    assert.match(drafts, /return \[overlayBaseAssetId\]/, 'the pinned original is what the canvas shows');
+    assert.match(drafts, /if \(ids\.length !== 1 \|\| ids\[0\] === overlayBaseAssetId\) return contentAssetIds/,
+        'an unbaked post, and a carousel, must be left exactly as they are');
+    assert.match(drafts, /isVideoMedia\(media\)/,
+        "a video keeps showing its rendered clip — the timeline is measured against that clip's length");
+    // Publishing is untouched: every publisher reads content_asset_ids, which still holds the bake.
+    assert.match(drafts, /hasMedia: Array\.isArray\(contentAssetIds\)/,
+        'the approve gate must still answer from what is ATTACHED, not from the preview');
+});
+
+// The rule above, RUN rather than pattern-matched — lifted verbatim out of the handler so the four
+// cases are checked against the code that ships, not against a copy of it that can drift.
+check('the preview swap fires on exactly the baked photos and nothing else', () => {
+    const drafts = fn('netlify/functions/get-social-drafts.ts');
+    const from = drafts.indexOf('const previewAssetIds = (');
+    assert.ok(from !== -1, 'expected the preview rule to exist');
+    const to = drafts.indexOf('\n        };', from);
+    assert.ok(to !== -1, 'expected the preview rule to be a self-contained arrow function');
+    const src = drafts.slice(from, to + '\n        };'.length)
+        .replace(/: unknown|: number \| null/g, '')       // strip the annotations; this is JS now
+        .replace(/ as number\[\]/g, '');
+    // eslint-disable-next-line no-new-func
+    const previewAssetIds = new Function(`${src} return previewAssetIds;`)() as
+        (ids: unknown, base: number | null, overlays: unknown) => unknown;
+
+    const design = [{ text: 'hello' }];
+    assert.deepEqual(previewAssetIds([77], 42, design), [42],
+        'a baked photo must preview its CLEAN original, or the live layer doubles the words');
+    assert.deepEqual(previewAssetIds([42], 42, design), [42],
+        'a design that has not been baked yet is already showing the original — leave it alone');
+    assert.deepEqual(previewAssetIds([77], null, design), [77],
+        'no pin means no known original, so there is nothing safe to swap to');
+    assert.deepEqual(previewAssetIds([77], 42, []), [77],
+        'a post with no text has no live layer to double');
+    assert.deepEqual(previewAssetIds([77, 78], 42, design), [77, 78],
+        'a carousel has no single baked slide — swapping would drop the other slides');
+    assert.deepEqual(previewAssetIds(null, 42, design), null,
+        'a post with nothing attached must pass straight through');
+});
+
+// A cross-post sibling created AFTER the anchor baked its text inherited the flattened picture and
+// the design — so the new platform showed the words twice and would have published them twice, since
+// its own bake had no base pin and composited straight onto the baked pixels.
+check('a new platform inherits the CLEAN picture, not the baked one', () => {
+    const setp = fn('netlify/functions/set-post-platforms.ts');
+    assert.match(setp, /overlayBaseAssetId: anchorBaseAssetId/,
+        "the pin must travel with the design, or the sibling's bake has no clean original to composite onto");
+    assert.match(setp, /contentAssetIds: copyAssetIds/,
+        'the copy takes the clean original when the anchor has already baked');
+    assert.match(setp, /const assetIds = copyAssetIds;/,
+        'the junction rows must mirror the SAME assets as the legacy array, or the two disagree at publish time');
 });
 
 check('the editor sends the scope it showed, and can narrow it', () => {

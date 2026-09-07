@@ -161,6 +161,10 @@ export default withLambda(async (event) => {
                 platformPostUrl: scheduledPosts.platformPostUrl,
                 disclosureFooterDisabled: scheduledPosts.disclosureFooterDisabled,
                 imageOverlays: scheduledPosts.imageOverlays,
+                // The CLEAN pre-bake picture. The editor paints image_overlays as a live layer over
+                // whatever preview this endpoint hands back, so it must never hand back the already
+                // flattened copy — see previewAssetIds below.
+                overlayBaseAssetId: scheduledPosts.overlayBaseAssetId,
                 audioOverlays: scheduledPosts.audioOverlays,
                 // Phase 4 video overlay render state. Every publisher claims only rows where this is
                 // NULL or 'done', so a post stuck at 'pending'/'rendering'/'failed' will NEVER go out
@@ -318,11 +322,44 @@ export default withLambda(async (event) => {
         // hour rather than ten minutes, which is what streaming one across an editing session needs.
         const ARCHIVE_RETENTION_DAYS = 30;
         const now = Date.now();
-        const withThumbs = await Promise.all(drafts.map(async ({ contentAssetIds, imageOverlays, audioOverlays, ...d }) => {
+        // ── Preview the CLEAN picture, never the baked one ──────────────────────────────────────
+        // A photo's text overlays are flattened into a NEW asset as soon as the reviewer finishes
+        // editing them (_pceScheduleOverlayBake), and that flattened asset becomes the post's
+        // attachment. `overlays` below is still returned so the editor can paint the design as a
+        // live, draggable layer — which meant the words appeared TWICE on every refetch: once burnt
+        // into the pixels, once as the layer on top. Switching platform tabs on a cross-post is one
+        // of the refetches, which is where it was first noticed.
+        //
+        // So the preview resolves the pinned pre-bake original whenever it differs from what is
+        // attached, exactly as get-post-image and resolveOverlayVideoBase already do for editing.
+        // Publishing is untouched — every publisher reads content_asset_ids, which still points at
+        // the flattened image.
+        //
+        // Photos only, and single attachments only. A video's overlays are burned in by Remotion and
+        // the rendered clip is what the timeline is measured against (its length can differ from the
+        // source once audio is mixed in), and a carousel has no single baked slide — so both keep
+        // showing exactly what they show today.
+        const previewAssetIds = (
+            contentAssetIds: unknown, overlayBaseAssetId: number | null, imageOverlays: unknown,
+        ): unknown => {
+            const ids = Array.isArray(contentAssetIds) ? (contentAssetIds as number[]) : [];
+            const hasDesign = Array.isArray(imageOverlays) && imageOverlays.length > 0;
+            if (!hasDesign || overlayBaseAssetId == null) return contentAssetIds;
+            if (ids.length !== 1 || ids[0] === overlayBaseAssetId) return contentAssetIds;
+            return [overlayBaseAssetId];
+        };
+
+        const withThumbs = await Promise.all(drafts.map(async ({ contentAssetIds, imageOverlays, overlayBaseAssetId, audioOverlays, ...d }) => {
             let thumbnailUrl: string | null = null;
             let mediaType: 'image' | 'video' | null = null;
             try {
-                const media = await resolvePostMedia(db, contentAssetIds);
+                const preview = previewAssetIds(contentAssetIds, overlayBaseAssetId, imageOverlays);
+                let media = await resolvePostMedia(db, preview);
+                // A video never takes the base swap (see above). If the pin happens to hold a clip,
+                // fall back to what is actually attached rather than previewing the wrong thing.
+                if (media && preview !== contentAssetIds && isVideoMedia(media)) {
+                    media = await resolvePostMedia(db, contentAssetIds);
+                }
                 thumbnailUrl = media?.url ?? null;
                 // The client decides <video> vs <img> from this. It used to infer the kind from the
                 // post FORMAT, which is right for a Reel and wrong for a clip on a plain feed post —

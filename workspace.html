@@ -1347,6 +1347,14 @@ window.showComplianceModals = function showComplianceModals(force) {
 
               <!-- Timing moved to the stage strip under the canvas — see #pce-stage-timing. -->
 
+              <!-- Which platforms the text lands on. Same idiom as the media panel's
+                   #gp-ai-apply-all: a cross-post is one post to the reviewer, so the text goes on
+                   every platform by default and this is how they say "just this one". -->
+              <label id="insp-overlay-apply-all-row" class="hidden items-center gap-2 mb-3 text-[11px] text-gray-600 cursor-pointer">
+                <input type="checkbox" id="insp-overlay-apply-all" checked class="rounded text-emerald-700 focus:ring-emerald-700">
+                <span>Apply to all platforms <span id="insp-overlay-apply-all-list" class="text-gray-400"></span></span>
+              </label>
+
               <div class="flex flex-wrap items-center gap-2">
                 <button type="button" onclick="_pceOpenOverlayEditor(_rqReviewPostId)"
                   class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer">Add or edit text</button>
@@ -6720,6 +6728,8 @@ async function openPostReview(postId, opts = {}) {
     // reviewer who narrowed the last post to one platform would otherwise carry that choice into the
     // next one — silently, since the media panel may not even be open yet.
     gpAiSyncApplyAllRow(postId);
+    // Same reasoning for the text layer's own scope box — see _pceResetOverlayApplyAll.
+    _pceResetOverlayApplyAll();
 
     const modal = document.getElementById('post-review-modal');
     modal.classList.remove('hidden');
@@ -10552,7 +10562,46 @@ function _pceRefreshOverlayInspector() {
         ? 'Click a text box or a timeline segment to time it. Burned into the published video on approval.'
         : "Click a text box on the image to jump back here. It's baked into the picture when you approve.";
     _pceEl('insp-overlay-clear')?.classList.toggle('hidden', !n);
+    _pceSyncOverlayApplyAllRow();
     _pceRefreshOverlayTiming();
+}
+
+// ── Cross-post scope for the TEXT on the picture ────────────────────────────────────────────────
+// The design used to be strictly per-platform with no way to share it, which read as a bug rather
+// than a rule: text added on Instagram simply was not on Facebook, and adding it there a second time
+// produced two designs on one cross-post. It now follows the same rule as every other media write —
+// all platforms by default, this one only when the reviewer says so.
+//
+// Deliberately NOT re-armed on every render the way gpAiSyncApplyAllRow re-ticks its box: this panel
+// re-renders on every canvas repaint (selecting a text box does it), so resetting here would undo the
+// reviewer's choice between unticking the box and pressing the button.
+
+/** True when the text design about to be saved should go on every platform of this post. */
+function _pceOverlayApplyToGroup() {
+    const cb = document.getElementById('insp-overlay-apply-all');
+    // No checkbox on screen ⇒ no siblings to fan out to, so the answer cannot matter.
+    return !cb || !!cb.checked;
+}
+
+/** Show the scope row only for a post that actually has other platforms, and name them. */
+function _pceSyncOverlayApplyAllRow() {
+    const row = document.getElementById('insp-overlay-apply-all-row');
+    if (!row) return;
+    const active = _rqReviewPostId;
+    const others = (_rqReviewGroupIds || []).filter(id => id != null && id !== active);
+    const show = active != null && others.length > 0;
+    row.classList.toggle('hidden', !show);
+    row.classList.toggle('flex', show);
+    if (!show) return;
+    const names = others.map(id => _rqPostCache[id]?.platform).filter(Boolean).map(p => rqPlatformLabel(p));
+    const list = document.getElementById('insp-overlay-apply-all-list');
+    if (list) list.textContent = names.length ? `(also ${names.join(', ')})` : '';
+}
+
+/** Re-arm the scope box to its default. Called when a DIFFERENT post is opened, not on every repaint. */
+function _pceResetOverlayApplyAll() {
+    const cb = document.getElementById('insp-overlay-apply-all');
+    if (cb) cb.checked = true;
 }
 
 // The per-box Start/End controls. Shown only for a video with a box selected; seeded from that box
@@ -10747,13 +10796,19 @@ async function _pceClearOverlays() {
     if (!postId) return;
     _pceSetOverlayMsg('Removing…');
     try {
+        // Removal takes the same scope as the design it undoes — the tick-box is on screen while the
+        // button is, so the reviewer is removing exactly what they can see they applied.
         const res = await fetch('/.netlify/functions/save-post-overlays', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ postId, overlays: [] }),
+            body: JSON.stringify({ postId, overlays: [], applyToGroup: _pceOverlayApplyToGroup() }),
         });
         if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Could not remove the text.'); }
-        if (_rqPostCache[postId]) _rqPostCache[postId].overlays = [];
-        _gpOverlayCountByPost[postId] = 0;
+        const cleared = await res.json().catch(() => ({}));
+        const written = Array.isArray(cleared.postIds) && cleared.postIds.length ? cleared.postIds : [postId];
+        written.forEach(id => {
+            if (_rqPostCache[id]) _rqPostCache[id].overlays = [];
+            _gpOverlayCountByPost[id] = 0;
+        });
         // Clearing the text also swaps the PICTURE back to the clean original, because a baked post's
         // attached image has the words burnt into it (see save-post-overlays). The cached thumbnail
         // still points at the flattened copy, so without this refetch the canvas keeps showing the
@@ -12445,7 +12500,11 @@ async function _rqApproveOne(post, action, opts = {}) {
         if (res.status === 409 && d.complianceBlocked) return { complianceBlocked: true, warnings: d.warnings || [] };
         if (rqHandleNotConnected(res.status, d, post.assistantId)) { rqReviewSetConnectGate(); return { handled: true }; }
         if (!res.ok) return { ok: false, error: d.error };
-        return { ok: true, confirmation: d.confirmation };
+        // scheduledFor is the time the SERVER settled on, which is not always the time the cache
+        // holds: "Pick a time myself" sends a new one, and a plain approve lets the assistant choose
+        // a cadence slot. Reporting the cached publishDate meant the confirmation named the draft's
+        // old proposed slot while the calendar showed the real one.
+        return { ok: true, confirmation: d.confirmation, scheduledFor: d.post?.publishDate ?? null };
     } catch { return { ok: false, error: 'Network error — please try again.' }; }
 }
 
@@ -12541,10 +12600,19 @@ async function _rqApproveTargetsInner(targets, action, opts = {}) {
     // less. (Promise.all resolves them all — _rqApproveOne returns its errors rather than throwing.)
     const failed = results.find(r => !r.ok);
     if (failed) { window.showToast?.(failed.error || 'Failed to approve.', { icon: '⚠️' }); return; }
+    // Land the settled time on the cached rows before anything reads them back. Without this the
+    // queue, the modal header and the approved panel all keep quoting the draft's old proposed slot
+    // — the calendar reloads from the server and shows the real one, so the two disagree on screen.
+    const settledAt = r0.scheduledFor || null;
+    [{ p: first, r: r0 }, ...rest.map((p, i) => ({ p, r: results[i] }))].forEach(({ p, r }) => {
+        const when = r?.scheduledFor || settledAt;
+        if (!when || !p || _rqPostCache[p.id] == null) return;
+        _rqPostCache[p.id].publishDate = when;
+    });
     // Say what the assistant is going to do about it, in the modal, and let the user close it. A
     // toast was the only confirmation before, so "approved" and "what happens next" were both gone
     // in three seconds — on the one action in the queue that hands work to somebody else.
-    if (_rqShowApprovedPanel(targets, action)) return;
+    if (_rqShowApprovedPanel(targets, action, settledAt)) return;
     if (window.showToast) {
         window.showToast(targets.length > 1
             ? `Approved across ${targets.length} platforms.`
@@ -12559,7 +12627,7 @@ async function _rqApproveTargetsInner(targets, action, opts = {}) {
  * Returns false when the modal isn't the surface that approved (the queue's own card buttons call
  * the same path), so that caller keeps its toast.
  */
-function _rqShowApprovedPanel(targets, action) {
+function _rqShowApprovedPanel(targets, action, scheduledFor) {
     const modal = document.getElementById('post-review-modal');
     const panel = document.getElementById('post-review-approved');
     const msg = document.getElementById('post-review-approved-msg');
@@ -12568,8 +12636,13 @@ function _rqShowApprovedPanel(targets, action) {
     const post = targets[0] || {};
     const who = post.assistantName || 'Your assistant';
     const where = targets.length > 1 ? ` across all ${targets.length} platforms` : '';
-    const when = post.publishDate
-        ? new Date(post.publishDate).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+    // The SERVER's answer first. `targets` are cache entries captured before the call, so their
+    // publishDate is the slot the draft was proposing — not the time the user just picked, and not
+    // the cadence slot the assistant chose. Quoting it is what made this panel name one date while
+    // the calendar showed another.
+    const at = scheduledFor || post.publishDate;
+    const when = at
+        ? new Date(at).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
         : null;
     msg.textContent = action === 'publish_now'
         ? `${who} is publishing it now${where}.`
@@ -14826,18 +14899,27 @@ async function _pceOpenOverlayEditor(postId) {
             if (overlays == null) return;   // cancelled — leave everything as it was
             _pceSetOverlayMsg('Saving your text…');
             try {
+                const applyToGroup = _pceOverlayApplyToGroup();
                 const res = await fetch('/.netlify/functions/save-post-overlays', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ postId, overlays, baseAssetId: base.assetId }),
+                    body: JSON.stringify({ postId, overlays, baseAssetId: base.assetId, applyToGroup }),
                 });
                 if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Could not save your text.'); }
-                if (_rqPostCache[postId]) _rqPostCache[postId].overlays = overlays;
-                _gpOverlayCountByPost[postId] = overlays.length;
+                const saved = await res.json().catch(() => ({}));
+                // Every platform the server actually wrote — not what we asked for. A design applied
+                // to three rows and mirrored into one cache entry leaves the other two tabs showing
+                // the text they had before, which is how the reviewer ends up adding it twice.
+                const written = Array.isArray(saved.postIds) && saved.postIds.length ? saved.postIds : [postId];
+                written.forEach(id => {
+                    if (_rqPostCache[id]) _rqPostCache[id].overlays = overlays;
+                    _gpOverlayCountByPost[id] = overlays.length;
+                });
                 if (overlays.length) {
                     // Burn the text in NOW, while the reviewer is still here and a second costs
                     // nothing — rather than at approval, where it was the slowest part of the one
-                    // click they wait on.
-                    _pceScheduleOverlayBake(postId);
+                    // click they wait on. Every platform the design landed on needs its own bake:
+                    // the flattened image is one post's picture, not the group's.
+                    _pceScheduleOverlayBake(written);
                 } else {
                     // Deleting every box swaps the picture back to the clean original server-side,
                     // so the cached flattened thumbnail has to go — otherwise the canvas shows text
@@ -14846,8 +14928,9 @@ async function _pceOpenOverlayEditor(postId) {
                 }
                 // Repaint the canvas + inspector for the post on screen, then land back on this layer.
                 if (postId === _rqReviewPostId) { _rqReviewRenderActive(); _pceSelect('overlays'); }
+                const where = written.length > 1 ? ` on all ${written.length} platforms` : '';
                 _pceSetOverlayMsg(overlays.length
-                    ? `${overlays.length} text box${overlays.length > 1 ? 'es' : ''} on the ${base.isVideo ? 'video' : 'image'} — ${base.isVideo
+                    ? `${overlays.length} text box${overlays.length > 1 ? 'es' : ''} on the ${base.isVideo ? 'video' : 'image'}${where} — ${base.isVideo
                         ? 'rendered into the published clip on approval. Time each box on the timeline.'
                         : 'baked into the published picture on approval.'}`
                     : 'Text removed.', 'ok');
@@ -14945,19 +15028,29 @@ async function gpQueueVideoRender(postId) {
 let _pceOverlayBakeTimer = null;
 let _pceOverlayBakeBusy = false;
 
-function _pceScheduleOverlayBake(postId) {
-    const cached = (typeof _rqPostCache !== 'undefined' && _rqPostCache[postId]) || null;
-    const looksVideo = !!cached && (cached.mediaType === 'video' || /video|reel/i.test(cached.postFormat || ''));
-    if (looksVideo) return;
+// Takes a post id OR a list of them. A design applied across a cross-post has to be flattened into
+// EVERY platform's own picture — one flattened image is one post's pixels, which is exactly why the
+// bake opts out of attach-draft-media's media fan-out.
+function _pceScheduleOverlayBake(postIds) {
+    const ids = (Array.isArray(postIds) ? postIds : [postIds]).filter(id => id != null);
+    const photos = ids.filter(id => {
+        const cached = (typeof _rqPostCache !== 'undefined' && _rqPostCache[id]) || null;
+        const looksVideo = !!cached && (cached.mediaType === 'video' || /video|reel/i.test(cached.postFormat || ''));
+        return !looksVideo;
+    });
+    if (!photos.length) return;
     clearTimeout(_pceOverlayBakeTimer);
-    _pceOverlayBakeTimer = setTimeout(() => { _pceOverlayBakeTimer = null; void _pceRunOverlayBake(postId); }, 800);
+    _pceOverlayBakeTimer = setTimeout(() => { _pceOverlayBakeTimer = null; void _pceRunOverlayBake(photos); }, 800);
 }
 
-async function _pceRunOverlayBake(postId) {
-    if (_pceOverlayBakeBusy) { _pceScheduleOverlayBake(postId); return; }
+async function _pceRunOverlayBake(postIds) {
+    const ids = Array.isArray(postIds) ? postIds : [postIds];
+    if (_pceOverlayBakeBusy) { _pceScheduleOverlayBake(ids); return; }
     _pceOverlayBakeBusy = true;
     try {
-        await gpApplyOverlaysBeforeApprove(postId, { force: true });
+        // Sequential, not Promise.all: each bake decodes a full-resolution image and uploads it, and
+        // running a cross-post's worth of that at once is what makes the tab stall.
+        for (const id of ids) await gpApplyOverlaysBeforeApprove(id, { force: true });
     } catch (e) {
         // Deliberately quiet: this is opportunistic pre-work, and the approval path still bakes and
         // still refuses to publish an unbaked image (approve-post's OVERLAYS_NOT_BAKED). Shouting
