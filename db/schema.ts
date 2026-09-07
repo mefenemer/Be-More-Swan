@@ -1940,6 +1940,10 @@ export const scheduledPosts = pgTable("scheduled_posts", {
 
   // US-SMM-2.2.2: structured rejection — revised post chain
   revisedFromPostId: integer("revised_from_post_id"),    // FK to scheduledPosts.id (self-ref)
+  // The PUBLISHED post this draft was copied from, when the user sent an already-live post out to a
+  // second platform. Distinct from both crosspost_group_id (same post, several places, at once) and
+  // revised_from_post_id (this post REPLACES that one). See db/post-copied-from.sql.
+  copiedFromPostId: integer("copied_from_post_id"),      // FK to scheduledPosts.id (self-ref)
   isRevised: boolean("is_revised").notNull().default(false),
 
   // Cross-post fan-out identity (db/crosspost-group-id.sql). A post the user asks to cross-post is

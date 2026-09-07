@@ -12020,8 +12020,10 @@ function _rqReviewRenderActive() {
         noteEl.className = 'mt-4 text-xs rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-emerald-700';
         noteEl.innerHTML = `<p class="font-semibold">Posted</p>
           <p class="mt-0.5">${when ? `Published ${_rqEsc(when)}.` : 'Published.'}</p>
-          ${post.platformPostUrl ? `<a href="${_rqEsc(post.platformPostUrl)}" target="_blank" rel="noopener" class="mt-1 inline-block font-semibold underline">View live post →</a>` : ''}`;
+          ${post.platformPostUrl ? `<a href="${_rqEsc(post.platformPostUrl)}" target="_blank" rel="noopener" class="mt-1 inline-block font-semibold underline">View live post →</a>` : ''}
+          ${_rqCopyElsewhereHtml()}`;
         noteEl.classList.remove('hidden');
+        _rqCopyReset();
     } else if (post.status === 'failed') {
         // A failed post reached this modal with NOTHING: no reason (this branch didn't exist, so the
         // note stayed hidden), no action footer (`reviewable` excludes 'failed'), and no editing rail
@@ -12040,6 +12042,150 @@ function _rqReviewRenderActive() {
     document.getElementById('post-review-feedback').value = '';
     document.getElementById('post-review-reason').value = '';
     rqReviewToggle();
+}
+
+// ── "Post this somewhere else too" ──────────────────────────────────────────────────────────────
+// A post that has gone out is a matter of record: its platform cannot be changed, its media cannot
+// be swapped, and set-post-platforms refuses it outright. But wanting the SAME post on a second
+// platform afterwards is an ordinary thing to want, and until now there was no way to express it
+// short of writing the whole post again by hand.
+//
+// So this makes a NEW draft rather than editing the published row — copy-post-to-platform.ts
+// explains why that distinction is load-bearing. The copy lands in the Review Queue like any other
+// draft, which is deliberate: a caption written for Instagram reads differently on LinkedIn, and the
+// person who wrote it should see it before it goes out again.
+let _rqCopyTargets = new Set();
+let _rqCopyBusy = false;
+
+/** Clear the picker's state. Called whenever the published banner is (re)painted for a post. */
+function _rqCopyReset() {
+    _rqCopyTargets = new Set();
+    _rqCopyBusy = false;
+}
+
+/**
+ * Platforms this post could still go to: connected, and not already part of the post's own group.
+ *
+ * "Already copied once" is deliberately NOT filtered here. The client cannot know it without another
+ * round trip, and the server refuses those copies by name — showing the chip and reporting
+ * "a LinkedIn copy is already in your Review Queue" tells the user something true, whereas hiding it
+ * silently leaves them wondering where LinkedIn went.
+ */
+function _rqCopyCandidates() {
+    const wentOutOn = new Set(_rqReviewTargets().map(p => String(p.platform || '').toLowerCase()));
+    return (window.PlatformConstants?.all || [])
+        .filter(p => !wentOutOn.has(p.id))
+        .filter(p => rqPlatformConnected(p.id));
+}
+
+function _rqCopyElsewhereHtml() {
+    const options = _rqCopyCandidates();
+    if (!options.length) {
+        // Two different reasons, and the difference matters: nothing left to connect is a finished
+        // state, nothing CONNECTED is an action the user can take.
+        const anyUnconnected = (window.PlatformConstants?.all || [])
+            .some(p => !rqPlatformConnected(p.id));
+        return `<p class="mt-2 pt-2 border-t border-emerald-200 text-emerald-600">${anyUnconnected
+            ? 'Connect another account to also post this there.'
+            : 'This post has gone out on every connected platform.'}</p>`;
+    }
+    const chips = options.map(p => `
+        <button type="button" data-copy-chip="${_rqEsc(p.id)}" onclick="_rqCopyToggle('${_rqEsc(p.id)}')"
+          class="px-2.5 py-1 rounded-full border border-emerald-300 text-emerald-700 font-semibold hover:bg-emerald-100 transition cursor-pointer">
+          ${_rqEsc(p.label)}</button>`).join('');
+    return `
+      <div class="mt-2 pt-2 border-t border-emerald-200">
+        <p class="font-semibold">Post this somewhere else too</p>
+        <p class="mt-0.5 text-emerald-600">Creates a new draft in your Review Queue — nothing goes out until you approve it.</p>
+        <div class="mt-2 flex flex-wrap gap-1.5">${chips}</div>
+        <button type="button" id="rq-copy-go" onclick="_rqCopyToPlatforms()" disabled
+          class="mt-2 py-1.5 px-3 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+          Create draft</button>
+        <span id="rq-copy-msg" class="block mt-1.5 text-emerald-600"></span>
+      </div>`;
+}
+
+function _rqCopyToggle(platformId) {
+    if (_rqCopyBusy) return;
+    if (_rqCopyTargets.has(platformId)) _rqCopyTargets.delete(platformId);
+    else _rqCopyTargets.add(platformId);
+    const chip = document.querySelector(`[data-copy-chip="${platformId}"]`);
+    if (chip) {
+        const on = _rqCopyTargets.has(platformId);
+        chip.className = on
+            ? 'px-2.5 py-1 rounded-full border border-emerald-600 bg-emerald-600 text-white font-semibold transition cursor-pointer'
+            : 'px-2.5 py-1 rounded-full border border-emerald-300 text-emerald-700 font-semibold hover:bg-emerald-100 transition cursor-pointer';
+    }
+    const go = document.getElementById('rq-copy-go');
+    if (go) {
+        go.disabled = _rqCopyTargets.size === 0;
+        const n = _rqCopyTargets.size;
+        go.textContent = n > 1 ? `Create ${n} drafts` : 'Create draft';
+    }
+}
+
+function _rqCopySay(text, kind) {
+    const el = document.getElementById('rq-copy-msg');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'block mt-1.5 font-semibold '
+        + (kind === 'error' ? 'text-red-600' : kind === 'ok' ? 'text-emerald-700' : 'text-emerald-600');
+}
+
+async function _rqCopyToPlatforms() {
+    const postId = _rqReviewPostId;
+    if (!postId || _rqCopyBusy || !_rqCopyTargets.size) return;
+    const go = document.getElementById('rq-copy-go');
+    _rqCopyBusy = true;
+    if (go) { go.disabled = true; go.textContent = 'Creating…'; }
+    _rqCopySay('Creating the draft…');
+    try {
+        const res = await fetch('/.netlify/functions/copy-post-to-platform', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                postId,
+                // No formatKey: the format belongs to the DESTINATION and the server derives it from
+                // the media. Copying this post's key would put an ig_reel on a LinkedIn row.
+                destinations: [..._rqCopyTargets].map(platform => ({ platform, formatKey: null })),
+            }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            // A 422 still carries `skipped`, and those reasons are the useful part — "already went
+            // out on Facebook" is an answer, "Failed" is not.
+            const detail = Array.isArray(d.skipped) && d.skipped.length
+                ? d.skipped.map(x => x.reason).join(' ')
+                : (d.error || 'Could not create the draft.');
+            _rqCopySay(detail, 'error');
+            if (go) { go.disabled = false; go.textContent = _rqCopyTargets.size > 1 ? `Create ${_rqCopyTargets.size} drafts` : 'Create draft'; }
+            _rqCopyBusy = false;
+            return;
+        }
+        const made = Array.isArray(d.copies) ? d.copies : [];
+        const names = made.map(c => rqPlatformLabel(c.platform)).join(', ');
+        const reworded = made.filter(c => c.captionReworded).map(c => rqPlatformLabel(c.platform));
+        const skipped = Array.isArray(d.skipped) ? d.skipped : [];
+        _rqCopySay(
+            `Draft created for ${names}.`
+            // Said out loud, never silently: the assistant changed the user's words, and the only
+            // honest place to mention it is next to the thing that did it.
+            + (reworded.length ? ` The caption was shortened to fit ${reworded.join(' and ')} — check it before approving.` : '')
+            + (skipped.length ? ` ${skipped.map(x => x.reason).join(' ')}` : ''),
+            'ok');
+        if (go) go.classList.add('hidden');
+        // The queue behind the modal now has rows it did not have. Refresh the surfaces that count
+        // pending work, exactly as the approve path does.
+        if (typeof refreshPendingBadge === 'function') { try { refreshPendingBadge(); } catch { /* ignore */ } }
+        if (typeof rqLoadItems === 'function') { try { rqLoadItems('pending_approval', 'social'); } catch { /* ignore */ } }
+        if (typeof window.detailRqRefresh === 'function') { try { window.detailRqRefresh(); } catch { /* ignore */ } }
+        window.showToast?.(made.length > 1
+            ? `${made.length} drafts created — review them when you're ready.`
+            : 'Draft created — review it when you\'re ready.', { icon: '📋' });
+    } catch {
+        _rqCopySay('Network error — please try again.', 'error');
+        if (go) { go.disabled = false; go.textContent = 'Create draft'; }
+        _rqCopyBusy = false;
+    }
 }
 
 // The per-platform posts currently under review (falls back to the lone active post).
