@@ -230,6 +230,13 @@ export const swanindexAdapter: BlogDestinationAdapter<SwanIndexCreds> = {
                 metaDescription: blogPosts.metaDescription,
                 tags: blogPosts.tags,
                 publishedAt: blogPosts.publishedAt,
+                // The thumbnail, already derived at publish time by blog-publish.ts. Copied rather
+                // than re-derived from published_payload: one derivation point means the magazine
+                // and the author's own blog cannot end up showing different pictures for the same
+                // post — and it keeps whole article bodies out of this query.
+                cardImageAssetId: blogPosts.cardImageAssetId,
+                cardImageUrl: blogPosts.cardImageUrl,
+                cardImageAlt: blogPosts.cardImageAlt,
             })
             .from(blogPosts)
             .where(and(
@@ -297,6 +304,12 @@ export const swanindexAdapter: BlogDestinationAdapter<SwanIndexCreds> = {
             // The author's own URL. Emitted as rel=canonical on the magazine page and named in
             // words in the provenance block — the promise the whole network rests on.
             authorCanonicalUrl: source.canonicalUrl ?? null,
+            // All three, every time — so an author who removes the image and re-publishes clears
+            // it here too. Copying only the non-null ones would leave the magazine showing a
+            // picture the post no longer has.
+            cardImageAssetId: source.cardImageAssetId,
+            cardImageUrl: source.cardImageUrl,
+            cardImageAlt: source.cardImageAlt,
             updatedAt: now,
         };
 

@@ -65,6 +65,34 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
+  // A published date a reader recognises, in THEIR locale — this script runs on a customer's site
+  // for whoever visits it, so there is no one right format to hard-code. Returns '' rather than
+  // "Invalid Date" for anything unparseable, so a bad value costs the line and not the card.
+  function formatDate(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    try {
+      return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+    } catch (e) {
+      return d.toISOString().slice(0, 10);
+    }
+  }
+
+  // Tags come from the post's own metadata, so the widget must not assume they are strings, short,
+  // or few. Capped at three: a card is a summary, and a post carrying twelve tags would otherwise
+  // push the excerpt out of view on every row in the list.
+  var TAG_LIMIT = 3;
+  function tagsHtml(tags) {
+    if (!tags || !tags.length) return '';
+    var out = [];
+    for (var i = 0; i < tags.length && out.length < TAG_LIMIT; i++) {
+      var t = String(tags[i] == null ? '' : tags[i]).trim();
+      if (t) out.push('<li>' + esc(t.slice(0, 40)) + '</li>');
+    }
+    return out.length ? '<ul class="bms-tags">' + out.join('') + '</ul>' : '';
+  }
+
   // Remove the body's own leading <h1>.
   //
   // The published payload is a render of the post's Markdown, so it ALREADY opens with an <h1>
@@ -215,7 +243,35 @@
       '.bms a.bms-card{display:block;color:inherit;text-decoration:none;}' +
       '.bms .bms-badge{display:inline-block;margin-top:24px;padding:4px 10px;border-radius:999px;' +
         'background:#f3f4f6;color:#6b7280;font-size:12px;}' +
-      '.bms .bms-back{background:none;border:0;color:' + accent + ';cursor:pointer;padding:8px 0;font-size:14px;}';
+      '.bms .bms-back{background:none;border:0;color:' + accent + ';cursor:pointer;padding:8px 0;font-size:14px;}' +
+      // font:inherit — :host{all:initial} resets the shadow tree, and a <button> left to the UA
+      // stylesheet renders in 13px Arial on an otherwise themed page.
+      '.bms .bms-more{display:block;width:100%;margin:20px 0 0;padding:10px 16px;font:inherit;' +
+        'font-size:14px;border:1px solid #e5e7eb;border-radius:8px;background:none;' +
+        'color:' + accent + ';cursor:pointer;}' +
+      '.bms .bms-more[disabled]{opacity:.6;cursor:default;}' +
+      // The card becomes a row: thumbnail beside the text. `min-width:0` on the text column is
+      // load-bearing — a flex item defaults to min-width:auto, so a long unbroken title would
+      // refuse to shrink and push the layout wider than the customer's column.
+      // ⚠️ `a.bms-card` must be named explicitly. The linked-card rule above sets display:block at
+      // specificity (0,2,1); a bare `.bms .bms-card` is (0,2,0) and loses — so on every embed that
+      // opts into data-bms-post-url (the common case, and what bemoreswan.com/blog uses) the
+      // thumbnail would stack above the text while unlinked embeds got the row.
+      '.bms .bms-card,.bms a.bms-card{display:flex;gap:16px;align-items:flex-start;}' +
+      '.bms .bms-card-text{min-width:0;flex:1;}' +
+      '.bms .bms-card-text > :first-child{margin-top:0;}' +
+      // Fixed box + object-fit so portrait and landscape sources line up down the list instead of
+      // each card being a different height.
+      '.bms .bms-thumb{flex:0 0 auto;width:120px;height:80px;object-fit:cover;border-radius:8px;}' +
+      // On a phone the thumbnail beside the text leaves neither enough room.
+      '.bms .bms-meta{font-size:13px;color:#6b7280;margin:6px 0 0;}' +
+      // list-style:none and padding:0 are not cosmetic here: :host{all:initial} resets the shadow
+      // tree, but a <ul> still picks up the UA stylesheet's discs and 40px indent.
+      '.bms .bms-tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0;padding:0;list-style:none;}' +
+      '.bms .bms-tags li{font-size:12px;line-height:1;padding:5px 9px;border-radius:999px;' +
+        'background:#f3f4f6;color:#4b5563;}' +
+      '@media (max-width:520px){.bms .bms-card,.bms a.bms-card{display:block;}' +
+        '.bms .bms-thumb{width:100%;height:160px;margin-bottom:12px;}}';
     shadow.appendChild(base);
     if (theme.customCss) {
       var custom = document.createElement('style');
@@ -239,22 +295,93 @@
 
     var config = { theme: {}, badgeEnabled: true };
 
-    function renderList() {
-      getJSON(API + '/posts').then(function (data) {
-        var posts = data.posts || [];
-        view.innerHTML = posts.map(function (p) {
-          var href = postHref(p.slug);
-          var body = '<h2>' + esc(p.title) + '</h2><p>' + esc(p.excerpt) + '</p>';
-          // A real anchor, not a div with a click handler: middle-click, ctrl-click, "copy link
-          // address" and a crawler following the list all need an href to exist.
-          return href
-            ? '<a class="bms-card" href="' + esc(href) + '">' + body + '</a>'
-            : '<div class="bms-card" data-slug="' + esc(p.slug) + '">' + body + '</div>';
-        }).join('') || '<p>No posts yet.</p>';
-        Array.prototype.forEach.call(view.querySelectorAll('div.bms-card'), function (card) {
-          card.addEventListener('click', function () { navigate(card.getAttribute('data-slug')); });
+    // ── the post list, paged ──────────────────────────────────────────────────
+    // The endpoint used to answer with a hard 50 and no way to ask for the rest, so a blog's 51st
+    // post simply stopped appearing — no message, no control, the oldest just fell off the end.
+    // It now returns a page plus a nextCursor, and this walks it a page at a time.
+    var PAGE_SIZE = 12;
+    var listState = null;
+
+    function cardHtml(p) {
+      var href = postHref(p.slug);
+      // The thumbnail is optional and its absence is a normal state, not a failure — a text-only
+      // essay gets a text-only card rather than a placeholder box. loading="lazy" because a long
+      // blog is exactly where a list of images costs the reader something.
+      var thumb = p.imageUrl
+        ? '<img class="bms-thumb" src="' + esc(p.imageUrl) + '" alt="' + esc(p.imageAlt || '') + '" loading="lazy">'
+        : '';
+      // Byline and date on one line, tags under it. Each part is independently optional — a post
+      // with no tags must not leave an empty strip, and a missing date must not leave a stray
+      // separator, so the dot is built from what is actually present rather than hard-coded.
+      var meta = [p.author, formatDate(p.publishedAt)].filter(Boolean).map(esc).join(' · ');
+      var metaHtml = meta
+        ? '<p class="bms-meta">' + (p.publishedAt ? '<time datetime="' + esc(p.publishedAt) + '">' : '<span>')
+          + meta + (p.publishedAt ? '</time>' : '</span>') + '</p>'
+        : '';
+      var body = thumb + '<div class="bms-card-text">'
+        + '<h2>' + esc(p.title) + '</h2>'
+        + '<p>' + esc(p.excerpt) + '</p>'
+        + metaHtml + tagsHtml(p.tags)
+        + '</div>';
+      // A real anchor, not a div with a click handler: middle-click, ctrl-click, "copy link
+      // address" and a crawler following the list all need an href to exist.
+      return href
+        ? '<a class="bms-card" href="' + esc(href) + '">' + body + '</a>'
+        : '<div class="bms-card" data-slug="' + esc(p.slug) + '">' + body + '</div>';
+    }
+
+    function paintList() {
+      if (!listState.posts.length) { view.innerHTML = '<p>No posts yet.</p>'; return; }
+      var html = listState.posts.map(cardHtml).join('');
+      if (listState.cursor) {
+        html += '<button class="bms-more" type="button"' + (listState.loading ? ' disabled' : '') + '>' +
+          (listState.loading ? 'Loading…' : listState.error ? 'Could not load more — try again' : 'Load more posts') +
+          '</button>';
+      }
+      view.innerHTML = html;
+      Array.prototype.forEach.call(view.querySelectorAll('div.bms-card'), function (card) {
+        card.addEventListener('click', function () { navigate(card.getAttribute('data-slug')); });
+      });
+      var more = view.querySelector('.bms-more');
+      if (more) more.addEventListener('click', loadMore);
+    }
+
+    function loadMore() {
+      if (!listState.cursor || listState.loading) return;
+      listState.loading = true;
+      listState.error = false;
+      paintList();
+      // Snapshot the state this request belongs to. renderPost() can replace listState while the
+      // fetch is in flight (a reader clicks a post, then Back); without this the response would
+      // append its page onto whatever list exists by the time it lands.
+      var mine = listState;
+      getJSON(API + '/posts?limit=' + PAGE_SIZE + '&cursor=' + encodeURIComponent(listState.cursor))
+        .then(function (data) {
+          mine.posts = mine.posts.concat(data.posts || []);
+          mine.cursor = data.nextCursor || null;
+        })
+        .catch(function () {
+          // Keep what is already rendered. Replacing a part-read list with "Unable to load posts."
+          // would throw away the posts they came for because page four timed out.
+          mine.error = true;
+        })
+        .finally(function () {
+          mine.loading = false;
+          if (mine === listState) paintList();
         });
-      }).catch(function () { view.innerHTML = '<p>Unable to load posts.</p>'; });
+    }
+
+    function renderList() {
+      listState = { posts: [], cursor: null, loading: true, error: false };
+      var mine = listState;
+      getJSON(API + '/posts?limit=' + PAGE_SIZE).then(function (data) {
+        mine.posts = data.posts || [];
+        mine.cursor = data.nextCursor || null;
+        mine.loading = false;
+        if (mine === listState) paintList();
+      }).catch(function () {
+        if (mine === listState) view.innerHTML = '<p>Unable to load posts.</p>';
+      });
     }
 
     function renderPost(slug) {

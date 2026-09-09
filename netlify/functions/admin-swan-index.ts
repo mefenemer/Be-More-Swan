@@ -8,7 +8,8 @@
 // GET    ?resource=featured                → the front page, in editorial order
 // GET    ?resource=contributors            → profiles with their live/pending counts
 // PATCH  ?resource=post&id=N               → { status?, section?, editorScore?, editorNote?, dek? }
-// POST   ?resource=move&id=N               → { direction: 'up' | 'down' } — reorder the front page
+// POST   ?resource=move&id=N               → { direction: 'up' | 'down' } — nudge one place
+// POST   ?resource=reorder                 → { order: [id, ...] } — set the whole running order
 // PATCH  ?resource=profile&id=N            → { status?, frontPageTier?, monthlyPostCap?, ... }
 //
 // Gated on `curate_swan_index` (platform_admin and above). Every mutation writes an admin_audit_log
@@ -32,7 +33,7 @@ import { hasPermission } from '../../src/utils/rbac';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import {
     canTransition, isCurationStatus, transitionPatch, resequenceFeatured, moveFeatured,
-    parseEditorScore, parseMonthlyCap, normaliseNote, countByStatus, queueFilter,
+    reorderFeatured, parseEditorScore, parseMonthlyCap, normaliseNote, countByStatus, queueFilter,
     type CurationStatus,
 } from '../../src/utils/swan-index/curation';
 import { articlePath } from '../../src/utils/swan-index/render';
@@ -379,6 +380,41 @@ export default withLambda(async (event) => {
             targetType: 'swan_index_post',
             targetId: id!,
             newState: { moved: body.direction },
+            ipAddress: getAdminIp(event.headers as Record<string, string | undefined>),
+        });
+
+        const items = await listQuery(db).where(eq(swanIndexPosts.status, 'featured')).orderBy(swanIndexPosts.featuredRank);
+        return json(200, { items });
+    }
+
+    // ── POST ?resource=reorder ─────────────────────────────────────────────────────────────────
+    // The whole running order in one request — what drag-to-reorder and "move to position N" both
+    // send. No `id`: the body IS the order. Rejected with 409 when the featured set has changed
+    // underneath the editor, because silently applying a drag decided against a list that no longer
+    // exists is how one editor's promotion disappears without either of them seeing it happen.
+    if (event.httpMethod === 'POST' && resource === 'reorder') {
+        let body: { order?: unknown };
+        try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON.' }); }
+
+        // Read the order BEFORE the write, so the audit row can say what it was as well as what it
+        // became. "Someone reordered the front page" is not an answer to "why is my piece third now".
+        const before = await db
+            .select({ id: swanIndexPosts.id })
+            .from(swanIndexPosts)
+            .where(eq(swanIndexPosts.status, 'featured'))
+            .orderBy(swanIndexPosts.featuredRank);
+
+        const result = await reorderFeatured(db, body.order);
+        if (!result.ok) return json(result.conflict ? 409 : 400, { error: result.error });
+
+        void insertAdminAuditLog({
+            adminId: admin.id,
+            action: 'swan_index_curation',
+            // The front page as a whole, not one piece — a reorder is a single decision about the
+            // running order, and splitting it into N per-post rows would lose that it was one act.
+            targetType: 'swan_index_front_page',
+            previousState: { order: before.map((r) => r.id) },
+            newState: { order: body.order },
             ipAddress: getAdminIp(event.headers as Record<string, string | undefined>),
         });
 

@@ -20,6 +20,7 @@ import { stripMediaForSyndication as stripMedia } from '../public/marked-bms-dir
 import { resolveCanonical } from './blog-seo';
 import { isAiAssisted } from './blog-ai-assisted';
 import { fireOrchestrations } from './orchestration';
+import { pickCardImage, cardImageColumns } from './blog-card-image';
 
 const jwtSecret = process.env.JWT_SECRET || 'fallback';
 const C2PA_SCHEMA_VERSION = '1.0';
@@ -182,6 +183,12 @@ export async function publishBlogPost(db: any, post: BlogPostRow, organisationId
             slug,
             canonicalUrl,
             publishedPayload,
+            // The list thumbnail, derived ONCE here from the payload being frozen on this very
+            // line. Every list surface then reads three small columns instead of dragging whole
+            // article bodies out of the heap to find an <img> — see db/blog-card-image.sql.
+            // cardImageColumns always returns all three, so removing an image and re-publishing
+            // clears it rather than leaving the old one behind.
+            ...cardImageColumns(pickCardImage(publishedPayload)),
             provenanceContentId: contentId,
             publishedAt: post.publishedAt || now,
             destinations,

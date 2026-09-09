@@ -8,15 +8,21 @@
 //
 // Behind a netlify.toml rewrite:  /api/widget/*  →  /.netlify/functions/widget-api
 //   GET /api/widget/:key/config          → { theme, badgeEnabled, name }
-//   GET /api/widget/:key/posts           → { posts: [summary] }
+//   GET /api/widget/:key/posts[?limit=&cursor=]  → { posts: [summary + author/tags/date], nextCursor }
 //   GET /api/widget/:key/posts/:slug     → { post: {...payload, aiAssisted, hookVariants, abState} }
 
 import { HandlerEvent } from '@netlify/functions';
 import { and, desc, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { widgetConfigs, blogPosts } from '../../db/schema';
-import { resolveInlineMedia, resolveFeatureImageUrl } from '../../src/utils/blog-media-resolve';
+import { widgetConfigs, blogPosts, organisations } from '../../db/schema';
+import {
+    resolveInlineMedia, resolveFeatureImageUrl, resolveCardImageUrls,
+} from '../../src/utils/blog-media-resolve';
+import { cardImageRef } from '../../src/utils/blog-card-image';
 import { isAiAssisted } from '../../src/utils/blog-ai-assisted';
+import {
+    listSortKey, afterCursor, pageSize, parseCursor, takePage,
+} from '../../src/utils/blog-list-paging';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const CORS = {
@@ -52,8 +58,14 @@ export default withLambda(async (event: HandlerEvent) => {
             theme: widgetConfigs.theme,
             badgeEnabled: widgetConfigs.badgeEnabled,
             status: widgetConfigs.status,
+            // The BYLINE for every card in the list — the organisation, e.g. "Be More Swan".
+            // ⚠️ NOT widgetConfigs.name, which sits right above it and is the widget's own label
+            // ("Default" out of the box). Joined into the lookup that already runs on every
+            // request rather than fetched separately, so the byline costs nothing extra.
+            orgName: organisations.name,
         })
         .from(widgetConfigs)
+        .leftJoin(organisations, eq(organisations.id, widgetConfigs.organisationId))
         .where(eq(widgetConfigs.publicKey, publicKey))
         .limit(1);
     if (!cfg || cfg.status !== 'active') return json(404, { error: 'Widget not found.' });
@@ -65,8 +77,15 @@ export default withLambda(async (event: HandlerEvent) => {
     }
 
     if (resource === 'posts' && !slug) {
+        const qs = event.queryStringParameters || {};
+        const size = pageSize(qs.limit);
+        const cursorId = parseCursor(qs.cursor);
+
         const rows = await db
             .select({
+                // Selected for the cursor, not for the response — the id stays server-side, and
+                // nextCursor is the only form of it a caller ever sees.
+                id: blogPosts.id,
                 title: blogPosts.title,
                 slug: blogPosts.slug,
                 metaDescription: blogPosts.metaDescription,
@@ -76,20 +95,50 @@ export default withLambda(async (event: HandlerEvent) => {
                 blueprintId: blogPosts.blueprintId,
                 isAutonomous: blogPosts.isAutonomous,
                 generationReason: blogPosts.generationReason,
+                // The list thumbnail, denormalised at publish time. Three small columns instead of
+                // published_payload — pulling 50 full article bodies to find 50 <img> tags is the
+                // reason this is a column and not a read-time parse.
+                cardImageAssetId: blogPosts.cardImageAssetId,
+                cardImageUrl: blogPosts.cardImageUrl,
+                cardImageAlt: blogPosts.cardImageAlt,
             })
             .from(blogPosts)
-            .where(and(eq(blogPosts.organisationId, orgId), eq(blogPosts.status, 'published')))
-            .orderBy(desc(blogPosts.publishedAt))
-            .limit(50);
-        const posts = rows.map((r) => ({
+            .where(and(
+                eq(blogPosts.organisationId, orgId),
+                eq(blogPosts.status, 'published'),
+                ...(cursorId ? [afterCursor(cursorId, orgId)] : []),
+            ))
+            // id DESC is not decoration: two posts published in the same second would otherwise
+            // come back in whatever order the planner chose, and a keyset cursor built on an
+            // ambiguous order skips or repeats rows at exactly that boundary.
+            .orderBy(desc(listSortKey), desc(blogPosts.id))
+            // One more than asked for, purely to answer "is there another page?" without a
+            // second COUNT query over the whole table.
+            .limit(size + 1);
+
+        const { page, nextCursor } = takePage(rows, size);
+        // One batched query for the whole page's images, not one per post. Every row here belongs
+        // to the same org — this endpoint is keyed by a single widget — but the resolver is
+        // org-scoped per item regardless, so an asset id pointing outside the org resolves to null
+        // rather than to somebody else's picture.
+        const imageUrls = await resolveCardImageUrls(db, page.map((r) => ({ orgId, ref: cardImageRef(r) })));
+        const posts = page.map((r, i) => ({
             title: r.title,
             slug: r.slug,
             excerpt: r.metaDescription || '',
             tags: r.tags,
             publishedAt: r.publishedAt,
             aiAssisted: isAiAssisted(r),
+            // null when the post has no usable image. The widget then renders a text-only card,
+            // which is the right look for an essay — not a gap where a picture failed to load.
+            imageUrl: imageUrls[i],
+            imageAlt: r.cardImageAlt || r.title,
+            // The byline. Already selected above with the config, so it costs no extra query —
+            // and it is the same string blog-page.ts prints on the post itself, so the card and
+            // the page it opens cannot disagree about who published it.
+            author: cfg.orgName || null,
         }));
-        return json(200, { posts }, true);
+        return json(200, { posts, nextCursor }, true);
     }
 
     if (resource === 'posts' && slug) {
