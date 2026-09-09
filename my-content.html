@@ -177,8 +177,13 @@
 
         <!-- Result grid -->
         <div>
-          <p id="ai-results-hint" class="hidden text-xs text-gray-500 mb-2">Click a variation to add it to your content.</p>
+          <p id="ai-results-hint" class="hidden text-xs text-gray-500 mb-2">Pick as many variations as you want — this generation is already paid for, so keeping extras is free.</p>
           <div id="ai-results" class="hidden grid grid-cols-2 gap-3"></div>
+          <button id="ai-save-btn" type="button" onclick="window._mcSaveAiSelection()" style="display:none"
+            class="hidden w-full mt-3 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow transition cursor-pointer items-center justify-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+            <span id="ai-save-label">Add 1 to My Content</span>
+          </button>
         </div>
 
         <p id="ai-error" class="hidden text-sm text-red-600 font-medium"></p>

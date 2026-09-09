@@ -657,6 +657,8 @@ function _openUploadModal() {
     document.getElementById('link-name') && (document.getElementById('link-name').value = '');
     // Reset the Generate AI panel
     _mcAiJobId = null;
+    _mcAiSelected = new Set();
+    _mcAiRefreshSaveBtn();
     const aiPrompt = document.getElementById('ai-prompt');
     if (aiPrompt) aiPrompt.value = '';
     document.getElementById('ai-prompt-count') && (document.getElementById('ai-prompt-count').textContent = '0 / 1000');
@@ -752,6 +754,10 @@ function _mcDisableBtn(id, disabled) {
 
 // ── Generate AI Image ─────────────────────────────────────────────
 let _mcAiJobId = null;
+// Which variations of the current job the user has ticked. A generation costs a credit and
+// yields four; keeping more than one of them is free (handleSelect appends to resultAssetIds
+// and charges nothing), so the UI has no reason to make them choose just one.
+let _mcAiSelected = new Set();
 
 window._mcAiPromptInput = function () {
     const el = document.getElementById('ai-prompt');
@@ -802,6 +808,8 @@ window._mcGenerateAI = async function () {
     resultsEl.classList.add('hidden');
     hintEl.classList.add('hidden');
     resultsEl.innerHTML = '';
+    _mcAiSelected = new Set();
+    _mcAiRefreshSaveBtn();
 
     try {
         const res = await fetch('/.netlify/functions/generate-ai-image', {
@@ -842,11 +850,12 @@ window._mcGenerateAI = async function () {
             _mcSetAiAffordable(balance >= 1);
         }
         resultsEl.innerHTML = (images || []).map(img => `
-            <button type="button" onclick="window._mcSelectAI(${img.index})"
+            <button type="button" data-ai-index="${img.index}" onclick="window._mcToggleAI(this, ${img.index})"
               class="relative group rounded-xl overflow-hidden border border-gray-200 hover:border-emerald-500 hover:ring-2 hover:ring-emerald-400 transition cursor-pointer aspect-square">
               <img src="${img.url}" alt="" class="w-full h-full object-cover">
+              <span class="ai-pick-badge hidden absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold shadow">✓</span>
               <span class="absolute inset-0 flex items-center justify-center">
-                <span class="opacity-0 group-hover:opacity-100 bg-white text-emerald-700 text-xs font-bold px-3 py-1 rounded-full shadow transition">Use this</span>
+                <span class="ai-pick-label opacity-0 group-hover:opacity-100 bg-white text-emerald-700 text-xs font-bold px-3 py-1 rounded-full shadow transition">Use this</span>
               </span>
             </button>`).join('');
         resultsEl.classList.remove('hidden');
@@ -860,28 +869,89 @@ window._mcGenerateAI = async function () {
     }
 };
 
-window._mcSelectAI = async function (index) {
+// Tick / untick one variation. Nothing is persisted until "Add … to My Content" — clicking a tile
+// used to save it and close the modal outright, which threw away the other three variations the
+// same credit had already paid for.
+window._mcToggleAI = function (btn, index) {
+    const on = !_mcAiSelected.has(index);
+    if (on) _mcAiSelected.add(index); else _mcAiSelected.delete(index);
+    btn.classList.toggle('border-emerald-500', on);
+    btn.classList.toggle('ring-2', on);
+    btn.classList.toggle('ring-emerald-400', on);
+    btn.querySelector('.ai-pick-badge')?.classList.toggle('hidden', !on);
+    const label = btn.querySelector('.ai-pick-label');
+    if (label) {
+        label.textContent = on ? 'Picked' : 'Use this';
+        // The label is hover-only until picked, so a selection stays readable with the mouse away.
+        label.classList.toggle('opacity-0', !on);
+        label.classList.toggle('group-hover:opacity-100', !on);
+    }
+    _mcAiRefreshSaveBtn();
+};
+
+function _mcAiRefreshSaveBtn() {
+    const btn = document.getElementById('ai-save-btn');
+    const label = document.getElementById('ai-save-label');
+    if (!btn) return;
+    const n = _mcAiSelected.size;
+    // Both, because `hidden` and an inline-flex display can otherwise fight (see the tab badges).
+    btn.classList.toggle('hidden', n === 0);
+    btn.style.display = n === 0 ? 'none' : 'flex';
+    if (label) label.textContent = n === 1 ? 'Add 1 image to My Content' : `Add ${n} images to My Content`;
+}
+
+// Persist every ticked variation. Selection is free and the server appends to the job's
+// resultAssetIds, so this is just the same call once per pick.
+window._mcSaveAiSelection = async function () {
     const errorEl = document.getElementById('ai-error');
+    const btn = document.getElementById('ai-save-btn');
+    const label = document.getElementById('ai-save-label');
     errorEl.classList.add('hidden');
-    if (_mcAiJobId == null) return;
-    try {
-        const res = await fetch('/.netlify/functions/generate-ai-image', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'select', jobId: _mcAiJobId, index }),
-        });
-        if (!res.ok) {
-            errorEl.textContent = 'Could not save that image. Please try again.';
-            errorEl.classList.remove('hidden');
-            return;
+    if (_mcAiJobId == null || !_mcAiSelected.size) return;
+
+    const picks = [..._mcAiSelected].sort((a, b) => a - b);
+    btn.disabled = true;
+    let saved = 0;
+    const failed = [];
+
+    for (let i = 0; i < picks.length; i++) {
+        if (label) label.textContent = picks.length === 1 ? 'Saving…' : `Saving ${i + 1} of ${picks.length}…`;
+        try {
+            const res = await fetch('/.netlify/functions/generate-ai-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'select', jobId: _mcAiJobId, index: picks[i] }),
+            });
+            if (res.ok) { saved++; } else { failed.push(picks[i]); }
+        } catch {
+            failed.push(picks[i]);
         }
-        document.getElementById('modal-upload')?.classList.add('hidden');
+    }
+
+    btn.disabled = false;
+    if (saved) {
         await _loadAssets();
         _mcRefreshHeaderCredits();
-    } catch {
-        errorEl.textContent = 'Could not save that image. Please try again.';
-        errorEl.classList.remove('hidden');
     }
+    if (!failed.length) {
+        document.getElementById('modal-upload')?.classList.add('hidden');
+        return;
+    }
+    // Keep the picks that failed ticked so the button retries exactly those.
+    _mcAiSelected = new Set(failed);
+    document.querySelectorAll('#ai-results [data-ai-index]').forEach((tile) => {
+        const idx = Number(tile.dataset.aiIndex);
+        const on = _mcAiSelected.has(idx);
+        tile.classList.toggle('border-emerald-500', on);
+        tile.classList.toggle('ring-2', on);
+        tile.classList.toggle('ring-emerald-400', on);
+        tile.querySelector('.ai-pick-badge')?.classList.toggle('hidden', !on);
+    });
+    _mcAiRefreshSaveBtn();
+    errorEl.textContent = saved
+        ? `${saved} saved, ${failed.length} could not be saved — press the button to try those again.`
+        : 'Could not save that image. Please try again.';
+    errorEl.classList.remove('hidden');
 };
 
 // ── Generate AI Video ─────────────────────────────────────────────
