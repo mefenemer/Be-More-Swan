@@ -149,7 +149,14 @@ export default withLambda(async (event: HandlerEvent) => {
         tags: Array.isArray(post.tags) ? (post.tags as string[]) : [],
         publishedAt: post.publishedAt ? new Date(post.publishedAt).toISOString() : null,
         modifiedAt: post.updatedAt ? new Date(post.updatedAt).toISOString() : null,
-        authorName: post.ownerLabel || null,
+        // The organisation, NOT post.ownerLabel. ownerLabel is the internal creator label — for an
+        // assistant-drafted post it is literally "AI: Lyra", which is what this page published as
+        // its byline and as a schema.org Person until now. Who inside the workspace drafted a post
+        // is not the public author of it; the brand is. AI involvement is disclosed by the
+        // transparency badge, which is the mechanism actually designed for it.
+        // org.name, NOT siteName — siteName falls back to the literal 'Blog', which is a fine
+        // og:site_name and a ridiculous byline ("By Blog"). No name means no byline.
+        authorName: org?.name || null,
         publisher: { name: siteName, logoUrl: null },
         siteName,
         bodyHtml,

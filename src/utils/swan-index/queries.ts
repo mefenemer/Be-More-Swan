@@ -6,6 +6,8 @@ import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import type { getDb } from '../../../db/client';
 import { swanIndexPosts, swanIndexProfiles, swanIndexSections, blogPosts } from '../../../db/schema';
 import type { SwanCard, SwanSection } from './render';
+import { cardImageRef } from '../blog-card-image';
+import { resolveCardImageUrls } from '../blog-media-resolve';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -29,7 +31,9 @@ export async function listSections(db: Db): Promise<SwanSection[]> {
  *
  * ⚠️ No join to blog_posts. Every field here is denormalised onto swan_index_posts precisely so the
  * front page is one indexed scan; adding a join to pick up "just one more field" would undo that
- * for every list on the site at once.
+ * for every list on the site at once. The card thumbnail is here for that exact reason — the image
+ * itself lives in published_payload, and joining a table of full article bodies to find seven
+ * <img> tags is the cost this note is about. See db/swan-index-card-image.sql.
  */
 const CARD_COLUMNS = {
     slug: swanIndexPosts.slug,
@@ -44,16 +48,30 @@ const CARD_COLUMNS = {
     roleTitle: swanIndexProfiles.roleTitle,
     companyName: swanIndexProfiles.companyName,
     siteUrl: swanIndexProfiles.siteUrl,
+    // The thumbnail REFERENCE. Still needs resolving to a URL — one batched query for a whole
+    // list, via resolveCardImageUrls. organisationId travels with it because that resolution is
+    // tenant-scoped per card: a list legitimately spans contributors.
+    organisationId: swanIndexPosts.organisationId,
+    cardImageAssetId: swanIndexPosts.cardImageAssetId,
+    cardImageUrl: swanIndexPosts.cardImageUrl,
+    cardImageAlt: swanIndexPosts.cardImageAlt,
 };
 
 type CardRow = {
     slug: string; title: string; dek: string | null; section: string | null; sectionLabel: string | null;
     liveAt: Date | null; readCount: number;
     handle: string; displayName: string; roleTitle: string | null; companyName: string | null; siteUrl: string | null;
+    organisationId: number;
+    cardImageAssetId: number | null; cardImageUrl: string | null; cardImageAlt: string | null;
 };
 
 function toCard(r: CardRow): SwanCard {
     return {
+        // Carried through unresolved — attachCardImages() turns these into imageUrl in one query
+        // for the whole list. Every producer below calls it, so no caller has to remember to.
+        organisationId: r.organisationId,
+        imageRef: cardImageRef(r),
+        imageAlt: r.cardImageAlt,
         slug: r.slug,
         title: r.title,
         dek: r.dek,
@@ -92,7 +110,7 @@ export async function getFeatured(db: Db, limit = 7): Promise<SwanCard[]> {
         .where(and(eq(swanIndexPosts.status, 'featured'), eq(swanIndexProfiles.status, 'active')))
         .orderBy(swanIndexPosts.featuredRank)
         .limit(limit);
-    return (rows as CardRow[]).map(toCard);
+    return attachCardImages(db, (rows as CardRow[]).map(toCard));
 }
 
 /** Everything live across the network, newest first. */
@@ -101,7 +119,7 @@ export async function getLatest(db: Db, limit = 30, section?: string | null): Pr
         .where(section ? and(VISIBLE, eq(swanIndexPosts.section, section)) : VISIBLE)
         .orderBy(desc(swanIndexPosts.liveAt))
         .limit(limit);
-    return (rows as CardRow[]).map(toCard);
+    return attachCardImages(db, (rows as CardRow[]).map(toCard));
 }
 
 export async function getByAuthor(db: Db, profileId: number, limit = 60): Promise<SwanCard[]> {
@@ -109,7 +127,7 @@ export async function getByAuthor(db: Db, profileId: number, limit = 60): Promis
         .where(and(VISIBLE, eq(swanIndexPosts.profileId, profileId)))
         .orderBy(desc(swanIndexPosts.liveAt))
         .limit(limit);
-    return (rows as CardRow[]).map(toCard);
+    return attachCardImages(db, (rows as CardRow[]).map(toCard));
 }
 
 export interface ArticleRow {
@@ -239,4 +257,26 @@ export async function getIndexableUrls(db: Db, limit = 5000): Promise<Array<{ ha
         ))
         .orderBy(desc(swanIndexPosts.liveAt))
         .limit(limit);
+}
+
+/**
+ * Fill in `imageUrl` on a list of cards — ONE query for the whole list, whatever it contains.
+ *
+ * A separate step rather than part of toCard() because toCard is synchronous and per-row: doing it
+ * there would mean a query PER CARD, on the page whose whole design is a single indexed scan. It is
+ * called by every producer in this file rather than by their callers, so that adding a new list
+ * surface cannot silently ship one without pictures.
+ *
+ * Cards from different contributors are resolved together and each asset is matched back to the
+ * org that owns it — see resolveCardImageUrls. Anything unresolvable stays undefined and the
+ * renderer draws its plate.
+ */
+export async function attachCardImages(db: Db, cards: SwanCard[]): Promise<SwanCard[]> {
+    if (!cards.length) return cards;
+    const urls = await resolveCardImageUrls(
+        db,
+        cards.map((c) => ({ orgId: c.organisationId ?? 0, ref: c.imageRef ?? null })),
+    );
+    cards.forEach((c, i) => { c.imageUrl = urls[i]; });
+    return cards;
 }

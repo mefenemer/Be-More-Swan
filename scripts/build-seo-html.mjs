@@ -289,10 +289,21 @@ async function inlineBlogPosts() {
     if (!keyMatch) return fail('blog.html: BMS_BLOG_WIDGET_KEY not found');
     const key = keyMatch[1];
 
-    let posts;
+    // Follow nextCursor to the end. The widget pages for READERS — a crawler wants the whole
+    // index in one document, and baking only the first page would recreate, for search engines,
+    // exactly the invisible-after-N truncation the paging was added to fix.
+    let posts = [];
     try {
-        const data = await fetchJson(`${SITE_ORIGIN}/api/widget/${encodeURIComponent(key)}/posts`);
-        posts = data.posts || [];
+        let cursor = null;
+        // Bounded: 40 pages of 50 is 2,000 posts. A cursor that somehow never terminates costs a
+        // hung build otherwise, and a build that hangs is harder to diagnose than one that stops.
+        for (let page = 0; page < 40; page++) {
+            const qs = `?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+            const data = await fetchJson(`${SITE_ORIGIN}/api/widget/${encodeURIComponent(key)}/posts${qs}`);
+            posts = posts.concat(data.posts || []);
+            cursor = data.nextCursor || null;
+            if (!cursor) break;
+        }
     } catch (err) {
         return handleFetchFailure('blog.html', err);
     }
@@ -310,7 +321,18 @@ async function inlineBlogPosts() {
             '        <article>',
             `          <h2><a href="${escAttr(url)}">${escHtml(p.title || p.slug)}</a></h2>`,
             p.excerpt ? `          <p>${escHtml(p.excerpt)}</p>` : null,
-            date ? `          <p><time datetime="${escAttr(date)}">${escHtml(date)}</time></p>` : null,
+            // Byline and date in one line, matching what the widget shows readers. Crawlers see
+            // only this copy of the list — widget.js hides it behind a shadow root — so anything
+            // omitted here is omitted from the index for search engines specifically.
+            (p.author || date)
+                ? `          <p>${[
+                    p.author ? escHtml(p.author) : null,
+                    date ? `<time datetime="${escAttr(date)}">${escHtml(date)}</time>` : null,
+                ].filter(Boolean).join(' · ')}</p>`
+                : null,
+            Array.isArray(p.tags) && p.tags.length
+                ? `          <ul>${p.tags.slice(0, 3).map((t) => `<li>${escHtml(String(t))}</li>`).join('')}</ul>`
+                : null,
             '        </article>',
         ].filter(Boolean).join('\n');
     }).join('\n');

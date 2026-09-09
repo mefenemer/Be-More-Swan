@@ -171,6 +171,73 @@ export async function moveFeatured(db: Db, id: number, direction: 'up' | 'down')
     return true;
 }
 
+/**
+ * Set the WHOLE running order at once, from an explicit list of ids.
+ *
+ * The primitive behind both drag-to-reorder and "move to position N". The front page is small
+ * enough that the client already holds the entire order on screen, so the honest thing for it to
+ * send is the order it wants — not a sequence of nudges the server has to replay one at a time.
+ *
+ * Two things this does that a loop over moveFeatured() would not:
+ *
+ *  · It REFUSES A STALE LIST. A drag is decided against a list rendered some seconds earlier, and
+ *    in that gap another editor can promote a piece or take one off. Replaying the drag anyway
+ *    would silently drop the newcomer to the bottom, or resurrect one just taken off — a
+ *    colleague's decision undone by a mouse gesture that never knew about it. The submitted ids
+ *    must be exactly the featured set as it stands; anything else is a conflict, and the editor
+ *    reloads and looks at what actually changed.
+ *
+ *  · It writes every rank in ONE statement. resequenceFeatured issues N updates, and a reader
+ *    landing between two of them sees duplicate ranks — the very ambiguity it exists to remove.
+ *    A single UPDATE ... FROM (VALUES ...) has no interior for a reader to land in, so the front
+ *    page goes from one valid order straight to the next.
+ */
+export type ReorderResult =
+    | { ok: true; count: number }
+    | { ok: false; error: string; conflict?: boolean };
+
+export async function reorderFeatured(db: Db, ids: unknown): Promise<ReorderResult> {
+    if (!Array.isArray(ids) || ids.some((n) => !Number.isInteger(n) || (n as number) <= 0)) {
+        return { ok: false, error: 'The running order must be a list of post ids.' };
+    }
+    const order = ids as number[];
+    if (new Set(order).size !== order.length) {
+        return { ok: false, error: 'The running order lists the same piece twice.' };
+    }
+
+    return db.transaction(async (tx): Promise<ReorderResult> => {
+        const current = await tx
+            .select({ id: swanIndexPosts.id })
+            .from(swanIndexPosts)
+            .where(eq(swanIndexPosts.status, 'featured'));
+
+        // Set equality, not just length: a list of the right size holding one id that is no longer
+        // featured would otherwise write a rank onto a row the CHECK constraint says must have none.
+        const submitted = new Set(order);
+        if (current.length !== order.length || current.some((r) => !submitted.has(r.id))) {
+            return {
+                ok: false,
+                conflict: true,
+                error: 'The front page changed while you were reordering it. Reload the view and try again.',
+            };
+        }
+        if (order.length === 0) return { ok: true, count: 0 };
+
+        // Params joined ONE BY ONE. An interpolated JS array becomes a single ROW value in Postgres
+        // rather than a list of them (error 42809), and the ::int casts are load-bearing too: a
+        // VALUES list built from bound parameters with no cast is inferred as `text`, and the join
+        // to an integer id then fails with "operator does not exist: integer = text".
+        const rows = sql.join(order.map((id, i) => sql`(${id}::int, ${i + 1}::int)`), sql`, `);
+        await tx.execute(sql`
+            UPDATE ${swanIndexPosts} AS p
+               SET featured_rank = v.rank, updated_at = now()
+              FROM (VALUES ${rows}) AS v(id, rank)
+             WHERE p.id = v.id AND p.status = 'featured'
+        `);
+        return { ok: true, count: order.length };
+    });
+}
+
 /** Editor score, or null. Anything outside 1–5 is rejected rather than clamped — a 9 is a typo. */
 export function parseEditorScore(v: unknown): { ok: true; value: number | null } | { ok: false; error: string } {
     if (v === null || v === undefined || v === '') return { ok: true, value: null };

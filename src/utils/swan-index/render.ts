@@ -38,6 +38,10 @@ export interface SwanCard {
     imageAlt?: string | null;
     author: SwanAuthorRef;
     readCount?: number;
+    // Carried from the row so a whole list can be resolved in one query, then discarded — the
+    // renderer only ever reads imageUrl. See attachCardImages in queries.ts.
+    organisationId?: number;
+    imageRef?: import('../blog-card-image').CardImageRef;
 }
 
 export interface SwanHead {

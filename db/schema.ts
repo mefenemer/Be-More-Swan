@@ -3234,6 +3234,14 @@ export const blogPosts = pgTable("blog_posts", {
   // Distribution (per-target status): { widget, substack, medium, rss }
   destinations: jsonb("destinations").notNull().default({}),
 
+  // The list thumbnail, derived at publish time from published_payload by
+  // src/utils/blog-card-image.ts: feature image → first body image → nothing. Denormalised so a
+  // list of 50 posts costs three small columns rather than 50 full article bodies. A REFERENCE,
+  // never a URL to our own storage — presigned R2 URLs expire. See db/blog-card-image.sql.
+  cardImageAssetId: integer("card_image_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
+  cardImageUrl: text("card_image_url"),
+  cardImageAlt: text("card_image_alt"),
+
   // Workflow & governance
   status: text("status").notNull().default("draft"),
   publishDate: timestamp("publish_date"),
@@ -4882,6 +4890,14 @@ export const swanIndexPosts = pgTable("swan_index_posts", {
   // Copied from blogPosts.canonicalUrl at submit time; emitted as rel=canonical on every page here.
   authorCanonicalUrl: text("author_canonical_url"),
 
+  // The card thumbnail, denormalised at submit time as a REFERENCE, never a URL to our own storage
+  // (presigned R2 URLs expire). Chosen by src/utils/blog-card-image.ts: feature image → first body
+  // image → nothing. Exactly one of the two source columns is ever set — see the CHECK in
+  // db/swan-index-card-image.sql, and that file for why a list denormalises this at all.
+  cardImageAssetId: integer("card_image_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
+  cardImageUrl: text("card_image_url"),
+  cardImageAlt: text("card_image_alt"),
+
   submittedAt: timestamp("submitted_at").defaultNow().notNull(),
   liveAt: timestamp("live_at"),
   featuredAt: timestamp("featured_at"),
@@ -4908,6 +4924,9 @@ export const swanIndexPosts = pgTable("swan_index_posts", {
   check("swan_index_posts_score_check", sql`${t.editorScore} IS NULL OR ${t.editorScore} BETWEEN 1 AND 5`),
   // Featured ⇔ ranked. Either half alone leaves a silently empty front-page slot.
   check("swan_index_posts_featured_rank_check", sql`(${t.status} = 'featured' AND ${t.featuredRank} IS NOT NULL) OR (${t.status} <> 'featured' AND ${t.featuredRank} IS NULL)`),
+  // One image source or the other, never both — otherwise two readers are free to disagree about
+  // which wins, and the same post shows different thumbnails on different lists.
+  check("swan_index_posts_card_image_check", sql`${t.cardImageAssetId} IS NULL OR ${t.cardImageUrl} IS NULL`),
 ]);
 
 // The masthead's editorial taxonomy — deliberately NOT the authors' free-text tags. Tags are

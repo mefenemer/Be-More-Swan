@@ -82,6 +82,8 @@ export interface BlogHeadData {
     tags: string[];
     publishedAt: string | null; // ISO 8601
     modifiedAt: string | null;  // ISO 8601
+    // The BYLINE — the organisation publishing the post ("Be More Swan", "Restorative Futures"),
+    // not whoever in the workspace pressed the button. See the note on ld.author below.
     authorName: string | null;
     publisher: { name: string; logoUrl: string | null };
     siteName: string;           // og:site_name — the org's blog/site name
@@ -139,7 +141,19 @@ export function buildHeadTags(d: BlogHeadData): string {
     if (d.imageUrl) ld.image = [d.imageUrl];
     if (d.publishedAt) ld.datePublished = d.publishedAt;
     if (d.modifiedAt) ld.dateModified = d.modifiedAt;
-    if (d.authorName) ld.author = { '@type': 'Person', name: d.authorName };
+    // ⚠️ Organization, not Person.
+    //
+    // This was 'Person' and it was fed blog_posts.owner_label — the INTERNAL creator label, which
+    // for an assistant-drafted post reads "AI: Lyra". So every published post on every customer's
+    // blog declared a person named "AI: Lyra" in its structured data, and printed "By AI: Lyra"
+    // under the headline. Two separate problems: it leaked an internal name onto a public page,
+    // and it asserted personhood for something that is not a person — in the machine-readable
+    // field a search engine trusts, on a product whose whole disclosure posture is that AI
+    // involvement is declared honestly (the transparency badge, three lines up, does that job).
+    //
+    // The byline is the publishing organisation, so the type follows it. author == publisher here
+    // is normal and correct for a self-published company blog.
+    if (d.authorName) ld.author = { '@type': 'Organization', name: d.authorName };
     if (d.tags?.length) ld.keywords = d.tags.join(', ');
     ld.publisher = {
         '@type': 'Organization',

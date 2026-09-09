@@ -157,7 +157,10 @@
             showSetupPanel();
             return;
         }
-        fetch('/api/widget/' + encodeURIComponent(BMS_BLOG_WIDGET_KEY) + '/posts', { credentials: 'omit' })
+        // ?limit=1 — this asks "is there anything at all", and nothing here reads past .length.
+        // Pulling a full page of posts to answer a yes/no question delays the mount on the one
+        // request that sits in front of it.
+        fetch('/api/widget/' + encodeURIComponent(BMS_BLOG_WIDGET_KEY) + '/posts?limit=1', { credentials: 'omit' })
             .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)); })
             .then(function (data) {
                 if (data && data.posts && data.posts.length > 0) mountWidgetScript();

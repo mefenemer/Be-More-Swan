@@ -1391,7 +1391,12 @@
         <div id="swan-counts-front" class="grid grid-cols-2 lg:grid-cols-5 gap-3"></div>
 
         <div class="bg-white border border-gray-200 rounded-xl p-5">
-          <h3 class="font-bold text-gray-900 mb-3">Running order</h3>
+          <h3 class="font-bold text-gray-900 mb-1">Running order</h3>
+          <p class="text-xs text-gray-500 mb-3">
+            Drag a row by its <span class="text-gray-400">⠿</span> handle, set its position number, or nudge it with ▲▼.
+            <span class="font-semibold text-gray-700">Take off</span> removes a piece from the front page — it stays
+            published on its author's profile, and goes back to <code class="text-xs bg-gray-100 px-1 rounded">noindex,follow</code>.
+          </p>
           <div id="swan-front-list" class="space-y-2">
             <p class="text-gray-400 text-xs animate-pulse">Loading…</p>
           </div>
@@ -2272,6 +2277,14 @@
   }
   .admin-more-item:hover, .admin-more-item.active { color: #10b981; }
   .admin-more-item span.more-icon { font-size: 20px; width: 28px; text-align: center; }
+
+  /* ── The Swan Index front page — drag to reorder ─────────────────────
+     Grip-only dragging. The row itself is NOT draggable: a draggable ancestor swallows the
+     pointer interaction of the <select> and the buttons sitting inside it, and the position
+     control is the keyboard route to the same result. */
+  .swan-grip { cursor: grab; }
+  .swan-grip:active { cursor: grabbing; }
+  .swan-front-row.swan-dragging { opacity: .45; outline: 2px dashed #8b5cf6; outline-offset: 2px; }
 
   /* ── The Swan Index reading desk ─────────────────────────────────────
      The article body in the review panel is the post's own published_payload HTML — real <h2>,
@@ -9179,6 +9192,10 @@ let _swanQueueFilter = 'pending';   // survives a reload of the list; reset only
 let _swanSections = [];
 let _swanBaseUrl = '';
 let _swanReadId = null;
+// The running order as the server last handed it back. A drop compares against THIS, not against
+// the order at dragstart: dragover has already rearranged the DOM by then, so without a snapshot
+// taken at render time there is nothing left to tell a real move from a drag that went nowhere.
+let _swanOrderAtRender = [];
 
 const _swanEsc = (v) => window.escapeHtml(v);
 
@@ -9481,16 +9498,22 @@ async function loadSwanFrontPage() {
     const items = data.items || [];
 
     list.innerHTML = items.length ? items.map((p, i) => `
-      <div class="flex items-center gap-3 border border-gray-200 rounded-lg p-3 bg-white">
+      <div data-swan-id="${p.id}" class="swan-front-row flex items-center gap-3 border border-gray-200 rounded-lg p-3 bg-white">
+        <span data-swan-grip draggable="true" aria-hidden="true" title="Drag to reorder"
+          class="swan-grip shrink-0 select-none text-gray-300 hover:text-gray-500 text-lg leading-none px-0.5">⠿</span>
         <div class="flex flex-col gap-0.5 shrink-0">
           <button onclick="swanMove(${p.id}, 'up')" ${i === 0 ? 'disabled' : ''} aria-label="Move up"
             class="w-7 h-6 text-xs border border-gray-300 rounded hover:bg-gray-50 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed">▲</button>
           <button onclick="swanMove(${p.id}, 'down')" ${i === items.length - 1 ? 'disabled' : ''} aria-label="Move down"
             class="w-7 h-6 text-xs border border-gray-300 rounded hover:bg-gray-50 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed">▼</button>
         </div>
-        <div class="w-8 shrink-0 text-center">
-          <span class="text-lg font-extrabold ${i === 0 ? 'text-violet-600' : 'text-gray-300'}">${p.featuredRank}</span>
-        </div>
+        <!-- The position IS the control. A separate "move to" field beside a read-only rank number
+             would leave two things on the row claiming to be the position, disagreeing for as long
+             as it took to notice the select had not been submitted. -->
+        <select onchange="swanMoveTo(${p.id}, this.value)" aria-label="Position on the front page"
+          class="w-14 shrink-0 text-center text-sm font-extrabold border border-gray-300 rounded-lg py-1 cursor-pointer ${i === 0 ? 'text-violet-600' : 'text-gray-600'}">
+          ${items.map((_, n) => `<option value="${n + 1}"${n === i ? ' selected' : ''}>${n + 1}</option>`).join('')}
+        </select>
         <div class="min-w-0 flex-1">
           <p class="font-bold text-gray-900 text-sm leading-snug truncate">${_swanEsc(p.title)}</p>
           <p class="text-xs text-gray-400 mt-0.5">
@@ -9505,6 +9528,8 @@ async function loadSwanFrontPage() {
         </div>
       </div>`).join('')
       : '<p class="text-sm text-gray-400">The front page is empty. Promote something from below.</p>';
+    _swanOrderAtRender = items.map((p) => p.id);
+    _swanBindDrag(list);
 
     elig.innerHTML = (data.eligible || []).length ? data.eligible.map((p) => `
       <div class="flex items-center gap-3 border border-gray-200 rounded-lg p-3 bg-white">
@@ -9533,6 +9558,114 @@ async function swanMove(id, direction) {
     });
     loadSwanFrontPage();
   } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+// ── Reordering the running order ──────────────────────────────────────────────
+// Three ways to say the same thing, because they fail for different people. ▲▼ is keyboard- and
+// screen-reader-reachable; the position <select> is the only one that is not O(n) clicks when a
+// piece has to travel the length of the list; drag is the one an editor reaches for first.
+//
+// ▲▼ still goes through ?resource=move (a swap of two ranks, so two editors nudging different
+// pieces cannot clobber each other). The other two send the WHOLE order to ?resource=reorder,
+// which refuses it outright if the featured set changed underneath them — see curation.ts.
+
+/** The list as it currently stands in the DOM. The rendered rows are the model. */
+function _swanCurrentOrder(list) {
+  return [...list.querySelectorAll('[data-swan-id]')].map((r) => Number(r.dataset.swanId));
+}
+
+async function swanReorder(order) {
+  try {
+    await api(`${SWAN_API}?resource=reorder`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order }),
+    });
+  } catch (e) {
+    window.showToast?.(e.message, { icon: '⚠️' });
+  }
+  // Reload either way. On success it restamps the rank numbers and the <select> values; on failure
+  // it is the ONLY thing that undoes the optimistic move the drag already made in the DOM —
+  // without it a rejected reorder leaves the editor looking at an order the server never accepted.
+  loadSwanFrontPage();
+}
+
+/** Jump a piece to an absolute position, splicing the rest up or down around it. */
+function swanMoveTo(id, position) {
+  const list = document.getElementById('swan-front-list');
+  if (!list) return;
+  const order = _swanCurrentOrder(list);
+  const from = order.indexOf(Number(id));
+  const to = Math.min(Math.max(Number(position) || 1, 1), order.length) - 1;
+  if (from < 0 || from === to) return;
+  order.splice(to, 0, order.splice(from, 1)[0]);
+  swanReorder(order);
+}
+
+// Delegated, and bound ONCE per container. loadSwanFrontPage() replaces the rows via innerHTML but
+// KEEPS the container, so binding per render would stack a fresh copy of every handler on each
+// reload — and since a successful drop calls loadSwanFrontPage(), that stack grows every time the
+// feature is used. It does not double-send: the `_swanDragId === null` check below runs before the
+// request, so the second and later copies of the drop handler return early. What it costs is every
+// dragstart and every dragover running N times, N growing for as long as the view stays open —
+// measurable jank on a long drag, and a leak that a page left open all day never gets back.
+let _swanDragId = null;
+
+function _swanBindDrag(list) {
+  if (list.dataset.dragBound === '1') return;
+  list.dataset.dragBound = '1';
+
+  // Only the grip is draggable, not the whole row: a draggable ancestor swallows the pointer
+  // interaction of the <select> and the buttons inside it.
+  list.addEventListener('dragstart', (e) => {
+    const row = e.target.closest?.('[data-swan-grip]')?.closest('[data-swan-id]');
+    if (!row) return;
+    _swanDragId = row.dataset.swanId;
+    row.classList.add('swan-dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    // Firefox refuses to start a drag unless something is written to the transfer.
+    e.dataTransfer.setData('text/plain', _swanDragId);
+    // Drag the whole row, not the grip glyph it started from.
+    e.dataTransfer.setDragImage?.(row, 24, row.offsetHeight / 2);
+  });
+
+  list.addEventListener('dragend', () => {
+    list.querySelector('.swan-dragging')?.classList.remove('swan-dragging');
+    _swanDragId = null;
+  });
+
+  list.addEventListener('dragover', (e) => {
+    if (_swanDragId === null) return;
+    e.preventDefault();                       // without this the drop never fires
+    e.dataTransfer.dropEffect = 'move';
+    const dragged = list.querySelector('.swan-dragging');
+    if (!dragged) return;
+    const before = _swanRowUnder(list, e.clientY);
+    if (before === dragged) return;
+    if (before) list.insertBefore(dragged, before);
+    else list.appendChild(dragged);
+  });
+
+  list.addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (_swanDragId === null) return;
+    const order = _swanCurrentOrder(list);
+    _swanDragId = null;
+    // The DOM was already rearranged during dragover, so this only writes when the pointer
+    // actually left the piece somewhere new.
+    if (order.join() !== _swanOrderAtRender.join()) swanReorder(order);
+  });
+}
+
+/**
+ * The row a drop at this Y should insert BEFORE — the first one whose midpoint the pointer is
+ * above. Measured against midpoints rather than edges so the list settles halfway across a row
+ * instead of only once the pointer has cleared it entirely.
+ */
+function _swanRowUnder(list, y) {
+  return [...list.querySelectorAll('[data-swan-id]:not(.swan-dragging)')].find((r) => {
+    const box = r.getBoundingClientRect();
+    return y < box.top + box.height / 2;
+  }) || null;
 }
 
 async function _swanSetStatus(id, status, done) {
