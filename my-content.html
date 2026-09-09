@@ -88,26 +88,24 @@
             <svg class="w-7 h-7 text-gray-400 group-hover:text-emerald-600 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
           </div>
           <p class="text-sm font-bold text-gray-700 group-hover:text-emerald-700 transition">Drop files here or <span class="text-emerald-600 underline">browse</span></p>
-          <p class="text-xs text-gray-400 mt-1">Images (JPG, PNG, GIF, WebP) or Videos (MP4, MOV, WebM) — up to 500 MB</p>
+          <p class="text-xs text-gray-400 mt-1">Select or drop as many as you like — Images (JPG, PNG, GIF, WebP) or Videos (MP4, MOV, WebM), up to 500 MB each</p>
         </div>
-        <input type="file" id="file-input" accept="image/*,video/*" class="hidden" onchange="window._mcFileSelected(event)">
+        <input type="file" id="file-input" accept="image/*,video/*" multiple class="hidden" onchange="window._mcFileSelected(event)">
 
-        <!-- Selected file preview -->
-        <div id="file-preview" class="hidden mt-4 flex items-center gap-3 p-3 bg-gray-50 border border-gray-200 rounded-xl">
-          <div id="file-preview-icon" class="w-10 h-10 rounded-lg bg-gray-200 flex items-center justify-center shrink-0 overflow-hidden"></div>
-          <div class="flex-1 min-w-0">
-            <p id="file-preview-name" class="text-sm font-bold text-gray-800 truncate"></p>
-            <p id="file-preview-size" class="text-xs text-gray-500"></p>
+        <!-- Selected files (multi-select: the queue below uploads one after another) -->
+        <div id="file-preview" class="hidden mt-4">
+          <div class="flex items-center justify-between mb-2">
+            <p id="file-list-summary" class="text-xs font-bold text-gray-600"></p>
+            <button id="file-clear-all" type="button" onclick="window._mcClearFile()"
+              class="text-xs font-bold text-gray-400 hover:text-red-500 transition cursor-pointer">Clear all</button>
           </div>
-          <button type="button" onclick="window._mcClearFile()" class="text-gray-400 hover:text-red-500 transition cursor-pointer shrink-0">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-          </button>
+          <div id="file-list" class="space-y-2 max-h-60 overflow-y-auto pr-1"></div>
         </div>
 
         <!-- Upload progress -->
         <div id="upload-progress" class="hidden mt-4">
           <div class="flex items-center justify-between mb-1">
-            <span class="text-xs font-bold text-gray-600">Uploading…</span>
+            <span id="upload-status-label" class="text-xs font-bold text-gray-600">Uploading…</span>
             <span id="upload-percent" class="text-xs text-gray-500">0%</span>
           </div>
           <div class="w-full bg-gray-200 rounded-full h-2">

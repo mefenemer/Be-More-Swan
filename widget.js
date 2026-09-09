@@ -288,7 +288,16 @@
   ready(function () {
     var mountEl = document.querySelector(mountSel);
     if (!mountEl) { console.error('[bms-widget] mount element not found: ' + mountSel); return; }
-    var shadow = mountEl.attachShadow ? mountEl.attachShadow({ mode: 'open' }) : mountEl;
+    // Reuse a root the host page already attached. blog.html attaches one inline, before first
+    // paint, so its crawler-visible list never flashes; calling attachShadow again on the same
+    // element throws NotSupportedError and would take the whole widget down. Customer pages do
+    // not pre-attach, so for them this is the same single call it always was.
+    var shadow = mountEl.shadowRoot
+        || (mountEl.attachShadow ? mountEl.attachShadow({ mode: 'open' }) : mountEl);
+    // Clear that page's loading placeholder. Matched on our own marker, so anything else a host
+    // put in its shadow root is left alone.
+    var placeholder = shadow.querySelector && shadow.querySelector('[data-bms-placeholder]');
+    if (placeholder && placeholder.parentNode) placeholder.parentNode.removeChild(placeholder);
     var view = document.createElement('div');
     view.className = 'bms';
     shadow.appendChild(view);

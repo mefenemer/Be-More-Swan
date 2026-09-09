@@ -15,6 +15,7 @@ import { publishBlogPost } from '../../src/utils/blog-publish';
 import { summariseSyndication } from '../../src/utils/blog-destinations/syndicate';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { requestSeoRebuild } from '../../src/utils/seo-rebuild';
 
 export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -48,5 +49,10 @@ export default withLambda(async (event: HandlerEvent) => {
     // the post reached the connected platforms, failed on one, or went to the org's own site alone —
     // a distinction "Published ✓" could not draw, so a destination that was never connected (and is
     // therefore skipped without an error) was indistinguishable from a clean sweep.
+    // The post is live now, but the crawler-visible index on /blog is baked at deploy time and
+    // has just gone stale. Best-effort — publishing must not fail because a rebuild could not be
+    // asked for.
+    await requestSeoRebuild(`post ${post.id} published`);
+
     return { statusCode: 200, body: JSON.stringify({ post: updated, syndication: summariseSyndication(updated.destinations) }) };
 });
