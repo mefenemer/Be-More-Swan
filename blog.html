@@ -62,6 +62,47 @@
 <section class="py-20 bg-gray-50">
     <div class="max-w-7xl mx-auto px-4">
         <div id="bms-blog"></div>
+        <!-- ⚠️ Synchronous, and it must stay IMMEDIATELY after the mount element.
+             ────────────────────────────────────────────────────────────────────────────────
+             The build injects a crawler-visible post list INSIDE #bms-blog (Job 3 in
+             scripts/build-seo-html.mjs). It is meant to be invisible to human visitors, and it
+             was — but only from the moment widget.js attached its shadow root, which is two
+             network round trips away: the preflight fetch below, then the script itself. Until
+             then the raw list painted: bare headlines, excerpts and ISO dates with no styling,
+             on every single visit to /blog.
+             ────────────────────────────────────────────────────────────────────────────────
+             Attaching the shadow root HERE, inline and parser-blocking, closes that window
+             entirely — a shadow root replaces the light DOM for rendering, so the list never
+             gets a frame. widget.js reuses this root rather than attaching its own.
+
+             ⚠️ NOT display:none on #blog-static. Hiding it with CSS would work visually and
+             quietly undo the point of it: search engines discount hidden text, and this list
+             exists precisely so crawlers can find the post pages. A shadow root hides it from
+             people without making the markup a hidden-content signal. -->
+        <script>
+            (function () {
+                var el = document.getElementById('bms-blog');
+                if (!el || !el.attachShadow || el.shadowRoot) return;
+                var root;
+                try { root = el.attachShadow({ mode: 'open' }); } catch (e) { return; }
+                // A placeholder, so the section is a deliberate loading state rather than a hole
+                // that jumps when the real list lands. widget.js removes it by this marker.
+                // ⚠️ The <style> lives INSIDE the placeholder element, not beside it. widget.js
+                // clears this by its marker, and a sibling <style> would survive that removal —
+                // leaving dead rules in the shadow root of every visit, forever.
+                root.innerHTML =
+                    '<div class="ph" data-bms-placeholder aria-hidden="true">'
+                    + '<style>'
+                    + '.ph{max-width:760px;margin:0 auto;}'
+                    + '.ph i{display:block;height:14px;border-radius:7px;background:#eceef1;'
+                    + 'margin:0 0 12px;animation:p 1.4s ease-in-out infinite;}'
+                    + '.ph i:nth-of-type(3n){width:60%;margin-bottom:28px;}'
+                    + '@keyframes p{0%,100%{opacity:1}50%{opacity:.45}}'
+                    + '@media (prefers-reduced-motion:reduce){.ph i{animation:none}}'
+                    + '</style>'
+                    + '<i></i><i></i><i></i><i></i><i></i><i></i></div>';
+            })();
+        </script>
 
         <!-- Shown only when the widget key below has not been filled in yet. Without this, an
              unconfigured deploy publishes a Blog link in the main nav that leads to a blank
@@ -143,6 +184,16 @@
         // src/config/site-blog.ts and with the /blog/:slug rewrite in netlify.toml; the read on the
         // other end is netlify/functions/blog-page.ts. tests/blog-site-route.test.ts locks all four.
         s.setAttribute('data-bms-post-url', '/blog/{slug}');
+        // The shadow root above is permanent — there is no detachShadow — so a widget.js that
+        // never loads would leave this section blank where it used to show the (unstyled) list.
+        // Move the list into the light DOM instead: real links, unstyled, which is exactly what
+        // this page rendered before, and strictly better than nothing.
+        s.onerror = function () {
+            const mount = document.getElementById('bms-blog');
+            const stat = document.getElementById('blog-static');
+            if (stat && mount && mount.parentNode) mount.parentNode.insertBefore(stat, mount.nextSibling);
+            else showSetupPanel();
+        };
         document.body.appendChild(s);
     }
 

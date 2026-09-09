@@ -22,6 +22,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { unpublishBlogPost } from '../../src/utils/blog-publish';
 import { logAuditEvent } from '../../src/utils/audit';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { requestSeoRebuild } from '../../src/utils/seo-rebuild';
 
 // External targets in `destinations` that still hold a live copy after the native retraction.
 // 'widget' is the native copy itself, so it's never reported here.
@@ -75,6 +76,10 @@ export default withLambda(async (event: HandlerEvent) => {
         previousState: { status: post.status },
         newState: { status: updated.status, unpublishedFrom: 'widget' },
     });
+
+    // Same staleness, worse direction: leave it and the baked index keeps advertising a post
+    // whose page now 404s.
+    await requestSeoRebuild(`post ${id} unpublished`);
 
     return { statusCode: 200, body: JSON.stringify({ post: updated, stillLive }) };
 });

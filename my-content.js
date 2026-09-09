@@ -99,7 +99,9 @@ let _groupBy = 'status';
 // Which sections the user has opened or closed, by group key. Kept because filtering re-renders,
 // and re-applying defaultExpanded every time would slam a section shut mid-use.
 let _sectionOpen = {};
-let _pendingFile = null;
+let _pendingFiles = [];      // queued uploads: { id, file, url, status, pct, error }
+let _pendingSeq = 0;         // stable per-entry id, so removing one doesn't reshuffle DOM ids
+let _uploadingBatch = false; // true while the queue is being uploaded (locks removal)
 let _activeTab = 'file';
 let _assetToDelete = null;
 let _assetToDetach = null;
@@ -645,8 +647,9 @@ window._mcToggleSection = function (key) {
 
 // ── Upload Modal ──────────────────────────────────────────────────
 function _openUploadModal() {
-    _pendingFile = null;
+    _mcResetFileQueue();
     _mcSwitchTab('file');
+    document.getElementById('file-input') && (document.getElementById('file-input').value = '');
     document.getElementById('file-preview')?.classList.add('hidden');
     document.getElementById('upload-progress')?.classList.add('hidden');
     document.getElementById('upload-error')?.classList.add('hidden');
@@ -1029,9 +1032,16 @@ window._mcVideoDone = function () {
 };
 
 // ── File selection ────────────────────────────────────────────────
+// The picker and the drop zone both take MANY files. Each entry keeps its own status so a queue
+// can report per-file progress, and so a failure in the middle doesn't discard the ones that
+// already landed — pressing the button again retries only what isn't done.
+const _MC_MAX_UPLOAD_BYTES = 500 * 1024 * 1024;   // mirrors content-upload-url.ts
+const _UPLOAD_BTN_HTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg> Add to My Content';
+
 window._mcFileSelected = function (e) {
-    const file = e.target.files?.[0];
-    if (file) _setSelectedFile(file);
+    _mcAcceptFiles(e.target.files);
+    // Re-picking the same file after removing it fires no `change` unless the input is cleared.
+    e.target.value = '';
 };
 
 window._mcDragOver = function (e) {
@@ -1046,36 +1056,124 @@ window._mcDragLeave = function () {
 window._mcDrop = function (e) {
     e.preventDefault();
     document.getElementById('drop-zone')?.classList.remove('border-emerald-500', 'bg-emerald-50/40');
-    const file = e.dataTransfer?.files?.[0];
-    if (file) _setSelectedFile(file);
+    _mcAcceptFiles(e.dataTransfer?.files);
 };
 
-function _setSelectedFile(file) {
-    _pendingFile = file;
-    const preview = document.getElementById('file-preview');
-    const iconEl = document.getElementById('file-preview-icon');
-    const nameEl = document.getElementById('file-preview-name');
-    const sizeEl = document.getElementById('file-preview-size');
+function _mcAcceptFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    const errorEl = document.getElementById('upload-error');
+    const skipped = [];
 
-    if (file.type.startsWith('image/') && file.size < 10 * 1024 * 1024) {
-        const reader = new FileReader();
-        reader.onload = e => { iconEl.innerHTML = `<img src="${e.target.result}" class="w-full h-full object-cover">`; };
-        reader.readAsDataURL(file);
-    } else {
-        iconEl.innerHTML = file.type.startsWith('video/')
-            ? `<svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.72v6.56a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>`
-            : `<svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>`;
+    for (const file of files) {
+        if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+            skipped.push(`${file.name} (not an image or video)`);
+            continue;
+        }
+        if (file.size > _MC_MAX_UPLOAD_BYTES) {
+            skipped.push(`${file.name} (over 500 MB)`);
+            continue;
+        }
+        // Dropping the same batch twice shouldn't queue everything again.
+        const dupe = _pendingFiles.some(p => p.file.name === file.name
+            && p.file.size === file.size && p.file.lastModified === file.lastModified);
+        if (dupe) continue;
+        _pendingFiles.push({ id: ++_pendingSeq, file, url: null, status: 'queued', pct: 0, error: '' });
     }
-    nameEl.textContent = file.name;
-    sizeEl.textContent = _formatBytes(file.size);
-    preview.classList.remove('hidden');
+
+    if (errorEl) {
+        if (skipped.length) {
+            errorEl.textContent = `Skipped ${skipped.length} file${skipped.length === 1 ? '' : 's'}: ${skipped.join(', ')}`;
+            errorEl.classList.remove('hidden');
+        } else {
+            errorEl.classList.add('hidden');
+        }
+    }
+    _renderFileList();
 }
 
-window._mcClearFile = function () {
-    _pendingFile = null;
-    document.getElementById('file-preview')?.classList.add('hidden');
-    document.getElementById('file-input').value = '';
+function _iconForFile(p) {
+    const f = p.file;
+    // Object URLs beat FileReader here: a 20-file batch of data URLs would sit in memory as base64.
+    if (f.type.startsWith('image/')) {
+        if (!p.url) p.url = URL.createObjectURL(f);
+        return `<img src="${p.url}" class="w-full h-full object-cover" alt="">`;
+    }
+    return `<svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.72v6.56a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>`;
+}
+
+function _fileStatusHtml(p) {
+    if (p.status === 'uploading') return `<span class="text-xs font-bold text-emerald-600">${p.pct}%</span>`;
+    if (p.status === 'done') return `<svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`;
+    if (p.status === 'error') return `<span class="text-xs font-bold text-red-600" title="${_escHtml(p.error)}">Failed</span>`;
+    if (_uploadingBatch) return '<span class="text-xs text-gray-400">Queued</span>';
+    return `<button type="button" onclick="window._mcRemoveFile(${p.id})" aria-label="Remove ${_escHtml(p.file.name)}"
+        class="text-gray-400 hover:text-red-500 transition cursor-pointer shrink-0">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>`;
+}
+
+function _renderFileList() {
+    const wrap = document.getElementById('file-preview');
+    const list = document.getElementById('file-list');
+    const summary = document.getElementById('file-list-summary');
+    if (!wrap || !list) return;
+
+    if (!_pendingFiles.length) {
+        list.innerHTML = '';
+        wrap.classList.add('hidden');
+        return;
+    }
+
+    const totalBytes = _pendingFiles.reduce((n, p) => n + p.file.size, 0);
+    const doneCount = _pendingFiles.filter(p => p.status === 'done').length;
+    if (summary) {
+        summary.textContent = doneCount
+            ? `${doneCount} of ${_pendingFiles.length} uploaded · ${_formatBytes(totalBytes)}`
+            : `${_pendingFiles.length} file${_pendingFiles.length === 1 ? '' : 's'} selected · ${_formatBytes(totalBytes)}`;
+    }
+    document.getElementById('file-clear-all')?.classList.toggle('hidden', _uploadingBatch);
+
+    list.innerHTML = _pendingFiles.map(p => `
+      <div class="flex items-center gap-3 p-3 bg-gray-50 border border-gray-200 rounded-xl">
+        <div class="w-10 h-10 rounded-lg bg-gray-200 flex items-center justify-center shrink-0 overflow-hidden">${_iconForFile(p)}</div>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-bold text-gray-800 truncate">${_escHtml(p.file.name)}</p>
+          <p class="text-xs text-gray-500">${_formatBytes(p.file.size)}${p.status === 'error' ? ` · <span class="text-red-600">${_escHtml(p.error)}</span>` : ''}</p>
+        </div>
+        <div id="file-status-${p.id}" class="shrink-0 flex items-center">${_fileStatusHtml(p)}</div>
+      </div>`).join('');
+    wrap.classList.remove('hidden');
+}
+
+// Progress ticks land several times a second per file — repaint just the one status cell rather
+// than the whole list, which would blow away scroll position mid-upload.
+function _paintFileStatus(p) {
+    const cell = document.getElementById(`file-status-${p.id}`);
+    if (cell) cell.innerHTML = _fileStatusHtml(p);
+}
+
+window._mcRemoveFile = function (id) {
+    if (_uploadingBatch) return;
+    const idx = _pendingFiles.findIndex(p => p.id === id);
+    if (idx === -1) return;
+    if (_pendingFiles[idx].url) URL.revokeObjectURL(_pendingFiles[idx].url);
+    _pendingFiles.splice(idx, 1);
+    _renderFileList();
 };
+
+window._mcClearFile = function () {
+    if (_uploadingBatch) return;
+    _mcResetFileQueue();
+    document.getElementById('file-input') && (document.getElementById('file-input').value = '');
+};
+
+function _mcResetFileQueue() {
+    for (const p of _pendingFiles) { if (p.url) URL.revokeObjectURL(p.url); }
+    _pendingFiles = [];
+    _uploadingBatch = false;
+    _renderFileList();
+}
 
 // ── Submit upload ─────────────────────────────────────────────────
 window._mcSubmitUpload = async function () {
@@ -1118,115 +1216,182 @@ window._mcSubmitUpload = async function () {
             errorEl.classList.remove('hidden');
         } finally {
             btn.disabled = false;
-            btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg> Add to My Content';
+            btn.innerHTML = _UPLOAD_BTN_HTML;
         }
         return;
     }
 
-    // File upload
-    if (!_pendingFile) {
+    // File upload — one presign + PUT + record per file, run in series so a 20-file batch doesn't
+    // open 20 parallel PUTs (and so the progress bar means something). Anything not already
+    // uploaded is (re)queued, so pressing the button after a partial failure retries just those.
+    const retryable = _pendingFiles.filter(p => p.status !== 'done');
+    if (!retryable.length) {
         errorEl.textContent = 'Please select a file to upload.';
         errorEl.classList.remove('hidden');
         return;
     }
+    for (const p of retryable) { p.status = 'queued'; p.pct = 0; p.error = ''; }
 
+    _uploadingBatch = true;
     btn.disabled = true;
-    btn.textContent = 'Uploading…';
+    _renderFileList();
 
-    try {
-        // 1. Get presigned URL
-        const urlRes = await fetch('/.netlify/functions/content-upload-url', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                fileName: _pendingFile.name,
-                mimeType: _pendingFile.type,
-                fileSize: _pendingFile.size,
-                orgId: _orgId,
-            }),
-        });
-        if (!urlRes.ok) {
-            const err = await urlRes.json().catch(() => ({}));
-            throw new Error(err.error || 'Could not get upload URL.');
-        }
-        const { uploadUrl, storageKey, storageUrl, mock } = await urlRes.json();
+    const progressEl = document.getElementById('upload-progress');
+    const labelEl = document.getElementById('upload-status-label');
+    const barEl = document.getElementById('upload-bar');
+    const pctEl = document.getElementById('upload-percent');
+    progressEl.classList.remove('hidden');
 
-        // Show progress bar
-        document.getElementById('upload-progress').classList.remove('hidden');
+    let sentBytes = 0;
+    let processed = 0;
+    let anyRejected = false;
+    const failures = [];
 
-        if (!mock) {
-            // 2a. Real upload via XMLHttpRequest for progress
-            await new Promise((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
-                xhr.open('PUT', uploadUrl);
-                xhr.setRequestHeader('Content-Type', _pendingFile.type);
-                xhr.upload.onprogress = (e) => {
-                    if (e.lengthComputable) {
-                        const pct = Math.round((e.loaded / e.total) * 100);
-                        document.getElementById('upload-bar').style.width = pct + '%';
-                        document.getElementById('upload-percent').textContent = pct + '%';
-                    }
-                };
-                xhr.onload = () => xhr.status < 400 ? resolve() : reject(new Error('Upload failed'));
-                xhr.onerror = () => reject(new Error('Network error during upload'));
-                xhr.send(_pendingFile);
+    // Byte-weighted, so a 400 MB video doesn't tick over at the same rate as a 40 KB logo. Held
+    // at 99% until the last file actually lands — in a mixed batch the big file alone rounds the
+    // total to 100 while small ones are still queued, and a bar reading 100% mid-batch reads as
+    // "done, why is it still going?".
+    const stillQueued = () => _pendingFiles.filter(p => p.status === 'queued');
+    const paintOverall = (currentLoaded, remainingBytes, complete) => {
+        const totalBytes = sentBytes + currentLoaded + remainingBytes;
+        const raw = totalBytes ? Math.round(((sentBytes + currentLoaded) / totalBytes) * 100) : 100;
+        const pct = complete ? 100 : Math.min(99, raw);
+        barEl.style.width = pct + '%';
+        pctEl.textContent = pct + '%';
+    };
+
+    // Drained rather than iterated over a snapshot: the drop zone stays live during an upload, so
+    // a file dropped mid-batch has to join this run instead of being silently reset at the end.
+    let p;
+    while ((p = _pendingFiles.find(x => x.status === 'queued'))) {
+        p.status = 'uploading';
+        p.pct = 0;
+        p.error = '';
+        _paintFileStatus(p);
+        const queuedAfter = stillQueued();
+        const total = processed + 1 + queuedAfter.length;
+        const restBytes = queuedAfter.reduce((n, q) => n + q.file.size, 0);
+        if (labelEl) labelEl.textContent = total === 1
+            ? 'Uploading…'
+            : `Uploading ${processed + 1} of ${total} — ${p.file.name}`;
+        btn.textContent = total === 1 ? 'Uploading…' : `Uploading ${processed + 1} of ${total}…`;
+
+        try {
+            const created = await _mcUploadOne(p, (loaded) => {
+                p.pct = p.file.size ? Math.min(100, Math.round((loaded / p.file.size) * 100)) : 100;
+                _paintFileStatus(p);
+                paintOverall(loaded, restBytes, false);
             });
-        } else {
-            // 2b. Mock mode — simulate progress
-            for (let p = 0; p <= 100; p += 20) {
-                document.getElementById('upload-bar').style.width = p + '%';
-                document.getElementById('upload-percent').textContent = p + '%';
-                await new Promise(r => setTimeout(r, 80));
-            }
+            p.status = 'done';
+            if (created?.rejected) anyRejected = true;
+        } catch (e) {
+            p.status = 'error';
+            p.error = e.message || 'Upload failed';
+            failures.push(p);
         }
+        sentBytes += p.file.size;
+        processed++;
+        paintOverall(0, stillQueued().reduce((n, q) => n + q.file.size, 0), !stillQueued().length);
+        _paintFileStatus(p);
+    }
 
-        // 3. Create DB record (server also runs safety scan synchronously)
-        const assetType = _pendingFile.type.startsWith('video/') ? 'video' : 'image';
-        // Measure pixel dimensions before we hand the file off. The post preview compares these
-        // against the platform's recommended aspect ratio; with no dimensions stored it can only
-        // show a generic "verify your asset" reminder on every single post. Best-effort — a failed
-        // probe just means NULL, which the preview reads as "unknown" rather than as a mismatch.
-        const dims = await _probeDimensions(_pendingFile, assetType).catch(() => null);
-        const createRes = await fetch('/.netlify/functions/content-assets', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                name: _pendingFile.name,
-                assetType,
-                mimeType: _pendingFile.type,
-                fileSize: _pendingFile.size,
-                width: dims?.width ?? null,
-                height: dims?.height ?? null,
-                storageKey,
-                storageUrl,
-            }),
-        });
-        if (!createRes.ok) throw new Error('File uploaded but record save failed. Please contact support.');
+    _uploadingBatch = false;
+    btn.disabled = false;
+    btn.innerHTML = _UPLOAD_BTN_HTML;
+    _renderFileList();
 
-        const createData = await createRes.json();
+    const uploaded = processed - failures.length;
+    if (uploaded > 0) await _loadAssets();
+
+    if (!failures.length) {
         document.getElementById('modal-upload').classList.add('hidden');
-        await _loadAssets();
-
-        // If the safety scan flagged this asset, scroll the rejected section into view
-        if (createData.rejected) {
+        progressEl.classList.add('hidden');
+        _mcResetFileQueue();
+        // If the safety scan flagged anything, scroll the rejected section into view
+        if (anyRejected) {
             const rejectedSection = document.querySelector('[data-section="rejected"]');
             if (rejectedSection) {
-                // Expand the section if collapsed
                 const body = document.getElementById('section-body-rejected');
                 if (body?.classList.contains('hidden')) window._mcToggleSection('rejected');
                 setTimeout(() => rejectedSection.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
             }
         }
-
-    } catch (e) {
-        errorEl.textContent = e.message;
-        errorEl.classList.remove('hidden');
-        document.getElementById('upload-progress').classList.add('hidden');
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg> Add to My Content';
+        return;
     }
+
+    // Partial failure: keep the modal open with the successes ticked off, so pressing the button
+    // again retries only what failed.
+    progressEl.classList.add('hidden');
+    errorEl.textContent = uploaded > 0
+        ? `${uploaded} of ${processed} uploaded. ${failures.length} failed — press Add to My Content to retry, or remove them.`
+        : (failures[0].error || 'Upload failed.');
+    errorEl.classList.remove('hidden');
 };
+
+/** Presign → PUT → create the DB record for a single queued file. Resolves the created record. */
+async function _mcUploadOne(p, onProgress) {
+    const file = p.file;
+
+    // 1. Get presigned URL
+    const urlRes = await fetch('/.netlify/functions/content-upload-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            fileName: file.name,
+            mimeType: file.type,
+            fileSize: file.size,
+            orgId: _orgId,
+        }),
+    });
+    if (!urlRes.ok) {
+        const err = await urlRes.json().catch(() => ({}));
+        throw new Error(err.error || 'Could not get upload URL.');
+    }
+    const { uploadUrl, storageKey, storageUrl, mock } = await urlRes.json();
+
+    if (!mock) {
+        // 2a. Real upload via XMLHttpRequest for progress
+        await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('PUT', uploadUrl);
+            xhr.setRequestHeader('Content-Type', file.type);
+            xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded); };
+            xhr.onload = () => xhr.status < 400 ? resolve() : reject(new Error('Upload failed'));
+            xhr.onerror = () => reject(new Error('Network error during upload'));
+            xhr.send(file);
+        });
+    } else {
+        // 2b. Mock mode — simulate progress
+        for (let step = 0; step <= 5; step++) {
+            onProgress((file.size / 5) * step);
+            await new Promise(r => setTimeout(r, 80));
+        }
+    }
+
+    // 3. Create DB record (server also runs safety scan synchronously)
+    const assetType = file.type.startsWith('video/') ? 'video' : 'image';
+    // Measure pixel dimensions before we hand the file off. The post preview compares these
+    // against the platform's recommended aspect ratio; with no dimensions stored it can only
+    // show a generic "verify your asset" reminder on every single post. Best-effort — a failed
+    // probe just means NULL, which the preview reads as "unknown" rather than as a mismatch.
+    const dims = await _probeDimensions(file, assetType).catch(() => null);
+    const createRes = await fetch('/.netlify/functions/content-assets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            name: file.name,
+            assetType,
+            mimeType: file.type,
+            fileSize: file.size,
+            width: dims?.width ?? null,
+            height: dims?.height ?? null,
+            storageKey,
+            storageUrl,
+        }),
+    });
+    if (!createRes.ok) throw new Error('File uploaded but record save failed. Please contact support.');
+    return await createRes.json();
+}
 
 // ── Delete ────────────────────────────────────────────────────────
 // Issue #55: an asset can be attached to a draft/scheduled post (via attach-draft-media /

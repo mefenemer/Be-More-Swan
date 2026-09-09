@@ -13,6 +13,7 @@ import { blogPosts } from '../../db/schema';
 import { publishBlogPost } from '../../src/utils/blog-publish';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { requestSeoRebuild } from '../../src/utils/seo-rebuild';
 
 const BATCH = 50;
 const STALE_PUBLISHING_MINS = 15;
@@ -63,6 +64,11 @@ export default withLambda(async () => {
             failed++;
         }
     }
+
+    // Once for the whole tick, not once per post — several posts can come due together, and a
+    // build each would just queue builds that supersede one another. Awaited: the Lambda freezes
+    // on return, so an un-awaited hook POST is cancelled in flight.
+    if (published > 0) await requestSeoRebuild(`${published} scheduled post(s) published`);
 
     return { statusCode: 200, body: JSON.stringify({ due: due.length, claimed, published, failed }) };
 });
