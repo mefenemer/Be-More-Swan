@@ -332,7 +332,7 @@ window.showComplianceModals = function showComplianceModals(force) {
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
               <span>Upload</span>
             </button>
-            <input type="file" id="gpw-upload-input" class="hidden" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm" onchange="gpwUploadSelected(event)">
+            <input type="file" id="gpw-upload-input" multiple class="hidden" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm" onchange="gpwUploadSelected(event)">
           </div>
           <div id="gpw-media-grid" class="grid grid-cols-3 gap-2"></div>
           <p id="gpw-media-empty" class="hidden text-xs text-gray-400 text-center py-4">No media in your library yet — click Upload to add some.</p>
@@ -448,7 +448,7 @@ window.showComplianceModals = function showComplianceModals(force) {
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
           <span>Upload</span>
         </button>
-        <input type="file" id="gp-ai-upload-input" class="hidden" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm" onchange="gpAiUploadSelected(event)">
+        <input type="file" id="gp-ai-upload-input" multiple class="hidden" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm" onchange="gpAiUploadSelected(event)">
         <button type="button" onclick="gpAiBrowseCanva()" class="px-2.5 py-1 text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer flex items-center gap-1">
           <span>🎨</span>
           <span>Canva</span>
@@ -14208,6 +14208,25 @@ async function gpUploadContentAsset(file) {
     return asset;
 }
 
+/**
+ * Upload several files in series, reporting progress per file. In series on purpose: a batch of
+ * ten shouldn't open ten concurrent PUTs to R2. One file failing never sinks the rest — the
+ * caller gets the assets that landed and a list of what didn't.
+ */
+async function gpUploadContentAssets(files, onProgress) {
+    const assets = [];
+    const failures = [];
+    for (let i = 0; i < files.length; i++) {
+        if (onProgress) onProgress(i + 1, files.length, files[i].name);
+        try {
+            assets.push(await gpUploadContentAsset(files[i]));
+        } catch (err) {
+            failures.push({ name: files[i].name, message: err.message || 'Upload failed.' });
+        }
+    }
+    return { assets, failures };
+}
+
 // ── Mode 1: Write it yourself (no AI) ───────────────────────────────────────────────────────────
 // Close the create sheet and open the just-created draft in the post editor.
 //
@@ -14375,21 +14394,35 @@ function gpwBrowseCanva() {
     });
 }
 
+// Takes as many files as the picker hands over. A draft carries a LIST of assets
+// (_gpwSelectedAssets → contentAssetIds), and the Canva path already imports many and selects
+// them all — the upload button was the only single-file door left into the same picker.
 async function gpwUploadSelected(e) {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files || []);
     e.target.value = '';
-    if (!file) return;
-    gpSetPanelStatus('gpw-status', 'Uploading…');
-    try {
-        const asset = await gpUploadContentAsset(file);
+    if (!files.length) return;
+
+    const { assets, failures } = await gpUploadContentAssets(files, (n, total, name) => {
+        gpSetPanelStatus('gpw-status', total === 1 ? 'Uploading…' : `Uploading ${n} of ${total} — ${name}`);
+    });
+
+    if (assets.length) {
         const picker = document.getElementById('gpw-media-picker');
         if (picker) delete picker.dataset.loaded;
         await gpwLoadMedia();
-        const cell = document.querySelector(`.gpw-media-cell[data-asset-id="${asset.id}"]`);
-        if (cell && !_gpwSelectedAssets.includes(asset.id)) gpwToggleAsset(cell, asset.id);
+        // Auto-select everything that landed, exactly as an import does.
+        assets.forEach((asset) => {
+            const cell = document.querySelector(`.gpw-media-cell[data-asset-id="${asset.id}"]`);
+            if (cell && !_gpwSelectedAssets.includes(asset.id)) gpwToggleAsset(cell, asset.id);
+        });
+    }
+
+    if (!failures.length) {
         gpSetPanelStatus('gpw-status', '');
-    } catch (err) {
-        gpSetPanelStatus('gpw-status', err.message || 'Upload failed. Please try again.', 'error');
+    } else if (assets.length) {
+        gpSetPanelStatus('gpw-status', `${assets.length} of ${files.length} uploaded — ${failures.map(f => f.name).join(', ')} failed (${failures[0].message})`, 'error');
+    } else {
+        gpSetPanelStatus('gpw-status', failures[0].message, 'error');
     }
 }
 
@@ -15303,8 +15336,10 @@ async function gpAiUseOwn() {
     }
 }
 
+// Returns whether the attach landed, so a caller that uploaded a batch can add "the rest are in
+// My Content" without stepping on an error message.
 async function gpAiSelectOwn(assetId) {
-    if (!_gpCurrentPostId) return;
+    if (!_gpCurrentPostId) return false;
     gpAiMediaStatus('Attaching media…');
     try {
         const res = await fetch('/.netlify/functions/attach-draft-media', {
@@ -15313,12 +15348,14 @@ async function gpAiSelectOwn(assetId) {
             body: JSON.stringify({ postId: _gpCurrentPostId, assetId, applyToGroup: gpApplyToGroup() }),
         });
         const d = await res.json().catch(() => ({}));
-        if (!res.ok) { gpAiMediaStatus(d.error || 'Could not attach that media.', 'error'); return; }
+        if (!res.ok) { gpAiMediaStatus(d.error || 'Could not attach that media.', 'error'); return false; }
         gpAiMirrorToSiblings(d.postIds, d.thumbnailUrl, d.assetType);
         gpAiShowThumb(d.thumbnailUrl, d.assetType);
         gpAiMediaStatus(gpAiAttachedMsg(d.postIds, 'Media'));
+        return true;
     } catch {
         gpAiMediaStatus('Network error — please try again.', 'error');
+        return false;
     }
 }
 
@@ -15327,24 +15364,37 @@ function gpAiUpload() {
     document.getElementById('gp-ai-upload-input')?.click();
 }
 
+// Takes a multi-file pick, but a post here holds ONE media: everything is uploaded to the library
+// and the first is attached, which is exactly what the Canva import above does with a multi-page
+// design. Say so, rather than letting the other files look like they vanished.
 async function gpAiUploadSelected(e) {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files || []);
     e.target.value = '';
-    if (!file || !_gpCurrentPostId) return;
-    // Auto-switch the Image/Video toggle to match the uploaded file so the attach below (which
-    // reads _gpAiMediaType) stays consistent with what the user just picked.
-    const uploadType = file.type.startsWith('video/') ? 'video' : 'image';
+    if (!files.length || !_gpCurrentPostId) return;
+    // Auto-switch the Image/Video toggle to match the file being attached so the attach below
+    // (which reads _gpAiMediaType) stays consistent with what the user just picked.
+    const uploadType = files[0].type.startsWith('video/') ? 'video' : 'image';
     if (uploadType !== _gpAiMediaType) gpAiSetMediaType(uploadType);
     document.getElementById('gp-ai-own')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
     document.getElementById('gp-ai-find-box')?.classList.add('hidden');
     gpAiMediaBusy(true);
-    gpAiMediaStatus('Uploading…');
     try {
-        const asset = await gpUploadContentAsset(file);
-        await gpAiSelectOwn(asset.id);
-    } catch (err) {
-        gpAiMediaStatus(err.message || 'Upload failed. Please try again.', 'error');
+        const { assets, failures } = await gpUploadContentAssets(files, (n, total, name) => {
+            gpAiMediaStatus(total === 1 ? 'Uploading…' : `Uploading ${n} of ${total} — ${name}`);
+        });
+        if (!assets.length) {
+            gpAiMediaStatus(failures[0]?.message || 'Upload failed. Please try again.', 'error');
+            return;
+        }
+        const attached = await gpAiSelectOwn(assets[0].id);
+        const spare = assets.length - 1;
+        if (attached && spare > 0) {
+            gpAiMediaStatus(`Attached ${assets[0].name}. The other ${spare} ${spare === 1 ? 'file is' : 'files are'} saved in My Content.`);
+        }
+        if (attached && failures.length) {
+            gpAiMediaStatus(`${failures.map(f => f.name).join(', ')} failed to upload (${failures[0].message}).`, 'error');
+        }
     } finally {
         gpAiMediaBusy(false);
     }
