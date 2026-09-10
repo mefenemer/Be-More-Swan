@@ -48,8 +48,18 @@ check('clips are drawn ABOVE the timeline, because the cut decides its axis', ()
 });
 
 check('opening a post renders the clips before the timeline', () => {
-    const call = workspace.indexOf('_pceRenderClips();\n    _rqRenderTimeline(post);');
-    assert.notStrictEqual(call, -1, 'the open path must render clips, then the timeline');
+    // Order, not adjacency. This asserted the two calls were on consecutive lines and broke the
+    // moment the crop frame was added between them — a false failure about a true ordering. What
+    // matters is that the cut is computed before the axis that depends on it.
+    // Anchored on the comment, which is unique — _pceRenderClips() itself is also called from the
+    // measure callback, so the bare call is not a marker.
+    const at = only(workspace, "// Clips first: the cut decides how long the piece is", 'workspace.html');
+    const open = workspace.slice(at, at + 600);
+    const clips = open.indexOf('_pceRenderClips();');
+    const timeline = open.indexOf('_rqRenderTimeline(post);');
+    assert.notStrictEqual(clips, -1, 'the open path must render the clips');
+    assert.notStrictEqual(timeline, -1, 'the open path must render the timeline');
+    assert.ok(clips < timeline, 'clips must be rendered before the timeline that depends on them');
 });
 
 check('every mutation goes through one handler that saves AND redraws', () => {

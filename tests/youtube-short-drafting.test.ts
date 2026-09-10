@@ -133,8 +133,11 @@ test('the render is forced, because there is nothing to burn in', () => {
     assert.equal(readForceVideo(null), false, 'rows written before the flag existed must not force');
 
     const worker = src('netlify/functions/render-post-video-background.ts');
+    // Tolerates further conditions being added to the bail-out (a video EDIT is one now) while
+    // still insisting forceVideo is one of them. The literal form of this broke on an unrelated
+    // change that had not altered the behaviour it guards at all.
     assert.ok(
-        /!overlays\.length && !audio\.length && !readForceVideo\(job\.renderInput\)/.test(worker),
+        /!overlays\.length && !audio\.length && (?:[^)]*&& )?!readForceVideo\(job\.renderInput\)/.test(worker),
         'the bail-out must honour forceVideo',
     );
     const drafter = src('netlify/functions/process-content-jobs.ts');
