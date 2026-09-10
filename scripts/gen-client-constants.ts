@@ -39,6 +39,9 @@ import {
 } from '../src/config/campaign-vocab';
 import { PAUSE_REASON_LABELS } from '../src/config/ad-networks';
 import {
+    OVERLAY_FONTS, ALL_OVERLAY_GOOGLE_FAMILIES, googleFontsHref,
+} from '../src/lib/overlay-fonts';
+import {
     POSTING_CADENCES, NUMBER_WORDS, DEFAULT_POSTING_FREQUENCY, postsPerWeekFor, readCadence,
     MONDAY_FIRST, DEFAULT_POSTING_DAYS, DEFAULT_POSTING_TIMES, selectWeeklySlots,
 } from '../src/config/posting-cadence';
@@ -97,6 +100,19 @@ export function renderClientConstants(): string {
         category: f.category,
         url: googleFontUrl(f),
     })).map(j => `    ${j},`).join('\n');
+
+    // Overlay fonts, from src/lib/overlay-fonts.ts. The image-overlay editor is an unbundled IIFE
+    // and cannot import the module, so it reads these — and it MUST, because the stack it draws with
+    // has to be the same string the Remotion composition renders with. A hand copy that drifted here
+    // would put the preview and the published video back into disagreement, which is the entire bug
+    // this catalogue was created to fix.
+    const overlayFontRows = OVERLAY_FONTS.map(f => JSON.stringify({
+        id: f.id,
+        label: f.label,
+        stack: f.stack,
+        metricClone: f.metricClone,
+    })).map(j => `    ${j},`).join('\n');
+    const overlayFontsHref = googleFontsHref([...ALL_OVERLAY_GOOGLE_FAMILIES]);
 
     // The editor's per-format records. Short keys because this list is rendered per keystroke in a
     // page with no build step — and because the shape predates the generator, so keeping it means
@@ -689,6 +705,60 @@ ${fontRows}
 
     /** Drawn for rows belonging to no assistant (the "Be More Swan" actor). Never assignable. */
     neutral: ${JSON.stringify(ASSISTANT_COLOR_NEUTRAL)},
+  };
+
+  // ── Overlay fonts (src/lib/overlay-fonts.ts) ─────────────────────────────────────────────────
+  // The text-overlay picker, and the CSS stack each choice resolves to.
+  //
+  // The 'id' is the value STORED on an overlay and is unchanged from when the picker offered bare
+  // OS font names - this is a resolution layer, not a migration. The stack puts a webfont first so the
+  // editor, the browser bake and Remotion Lambda all draw with the same file rather than with
+  // whatever each machine happens to have installed. See the module for why that was necessary.
+  var OVERLAY_FONTS = [
+${overlayFontRows}
+  ];
+
+  window.OverlayFonts = {
+    /** [{ id, label, stack, metricClone }] in picker order. */
+    all: OVERLAY_FONTS,
+
+    /** The Google Fonts stylesheet covering every family the picker can ask for. */
+    href: ${JSON.stringify(overlayFontsHref)},
+
+    /** The CSS stack for a stored family name. Unknown names fall back to the first entry. */
+    stack: function (id) {
+      var want = String(id == null ? '' : id).trim().toLowerCase();
+      for (var i = 0; i < OVERLAY_FONTS.length; i++) {
+        if (OVERLAY_FONTS[i].id.toLowerCase() === want) return OVERLAY_FONTS[i].stack;
+      }
+      return OVERLAY_FONTS[0].stack;
+    },
+
+    /** Inject the stylesheet once, and resolve when the faces are actually usable. */
+    ready: function () {
+      if (!this._p) {
+        var href = this.href;
+        if (href && !document.getElementById('overlay-fonts-css')) {
+          var link = document.createElement('link');
+          link.id = 'overlay-fonts-css';
+          link.rel = 'stylesheet';
+          link.href = href;
+          document.head.appendChild(link);
+        }
+        // Canvas does NOT trigger a webfont download the way the DOM does: measureText on an
+        // unloaded face silently measures the fallback, so a bake fired before this resolves is
+        // exactly the drift we are removing. Each face is requested explicitly, and a failure
+        // resolves rather than rejects — a bake with a fallback font beats no bake at all.
+        var faces = OVERLAY_FONTS.map(function (f) { return f.stack.split(',')[0].trim(); });
+        this._p = (document.fonts && document.fonts.load)
+          ? Promise.all(faces.map(function (f) { return document.fonts.load('400 100px ' + f).catch(function () {}); }))
+              .then(function () { return document.fonts.ready; })
+              .catch(function () {})
+          : Promise.resolve();
+      }
+      return this._p;
+    },
+    _p: null,
   };
 
   window.BlogFonts = {

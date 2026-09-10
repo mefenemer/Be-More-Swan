@@ -96,6 +96,24 @@ export interface RenderInput {
     imageSrc?: string;
     /** Timed audio — voice notes and sound. Already resolved to fetchable URLs. */
     audio?: Array<{ id: string; src: string; startS?: number; endS?: number; volume: number; fadeInS?: number; fadeOutS?: number }>;
+    /**
+     * The user's trim on the base clip. Superseded by `clips`, still sent so that props written by
+     * this deploy render correctly on the PREVIOUS site bundle — which a git push does not update.
+     */
+    videoTrim?: { inS: number; outS: number | null };
+    /**
+     * The timeline: every clip in order, with its in/out points in seconds against the source.
+     * Advisory — the composition intersects each one with the file's real duration, because nothing
+     * on this side of the render can open a video to check. See src/lib/video-edit.ts.
+     */
+    clips?: Array<{ id: string; src: string; inS?: number; outS?: number; gain?: number }>;
+    /** 'w:h' of the output frame, when it cannot be inherited from a single source clip. */
+    targetRatio?: string;
+    /**
+     * Where the picture sits inside that frame when it has to be cropped to fit. -1..1 per axis,
+     * 0 being centred. Set only where a platform re-frames the master. See reframeRatioFor().
+     */
+    framePosition?: { offsetX: number; offsetY: number };
     overlays: Overlay[];
     width: number;
     height: number;

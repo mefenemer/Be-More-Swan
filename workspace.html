@@ -898,6 +898,17 @@ window.showComplianceModals = function showComplianceModals(force) {
               <div id="pce-layer-list" class="space-y-0.5"></div>
             </div>
 
+            <!-- The cut: every clip in order, with its in/out points. Sits ABOVE the timeline
+                 because it decides how long the piece is — the timeline's axis is the result of
+                 this list, not something alongside it. Filled by _pceRenderClips; hidden unless the
+                 post has video to assemble. -->
+            <div id="pce-clips-block" class="hidden px-2.5 pb-2"></div>
+
+            <!-- What this platform keeps. Only rendered where the master has to be re-framed
+                 (Facebook's feed and Threads today); the other four publish it unchanged. Filled by
+                 _pceRenderCropFrame, dragged via _pceBindCropFrame. -->
+            <div id="pce-crop-block" class="hidden px-2.5 pb-2"></div>
+
             <!-- One track per timed thing — text on video (pink), sound (indigo) — over a shared
                  0→duration axis with a playhead. Drag an end to re-time it, drag the body to move
                  it. Filled by _rqRenderTimeline; hidden when nothing on this post has timing. -->
@@ -6378,6 +6389,11 @@ function _rqRenderCanvasOverlays(post) {
     }
     // The timeline is no longer video-only: a still with a voice note has a length and a clip to
     // place on it. _rqRenderTimeline decides what rows there are (text is timed on video only).
+    //
+    // Clips first: the cut decides how long the piece is, so the timeline's axis is downstream of it.
+    _pceRenderClips();
+    _pceRenderCropFrame();
+    _pceBindCropFrame();
     _rqRenderTimeline(post);
     _rqBindTimeline();
     // One resize listener for the modal's lifetime; it always repaints the post on screen now.
@@ -6560,6 +6576,468 @@ function _rqRenderTimeline(post) {
     // Keep the playhead in step with the current frame the moment the timeline (re)renders.
     const v = document.querySelector('#post-review-body [data-media-video]');
     if (v) { const head = host.querySelector('[data-playhead]'); if (head && v.duration && isFinite(v.duration)) head.style.left = (Math.min(1, (v.currentTime || 0) / v.duration) * 100) + '%'; }
+}
+
+// ── The cut ─────────────────────────────────────────────────────────────────────────────────────
+// Every clip on the post, in order, with the seconds trimmed off each end. This is the ONE thing
+// that decides how long the finished video is, which is why it sits above the timeline rather than
+// as another track on it: text and audio answer "when does this happen" against a fixed axis, and a
+// clip answers "how long is the axis".
+//
+// Stored on the post as video_edit and rendered by Remotion at approval (src/lib/video-edit.ts).
+// Nothing is re-encoded here — this is a description of a cut, not the cut itself.
+const _PCE_MAX_CLIPS = 20;
+// Three minutes is where YouTube stops calling it a Short and wants a 16:9 video instead, which
+// would be a third render of the same material. The editor states the limit rather than enforcing
+// it, because the post may not be going to YouTube at all.
+const _PCE_SHORT_MAX_S = 180;
+
+// Measured clip lengths, by asset id. content_assets.duration_s is null for anything a user
+// uploaded, so the browser reads it off a <video> exactly as the audio track already does.
+const _pceClipDurations = {};
+// And its shape, by asset id — the crop preview needs the source's aspect to know which axis
+// overflows the platform's frame, and therefore which way the window can be dragged.
+const _pceClipAspect = {};
+
+/**
+ * The working cut for a post.
+ *
+ * A post that has never been edited has NO stored cut, and that is deliberately not the same as an
+ * empty one: it seeds from whatever video is attached, so uploading four clips in the composer and
+ * opening the editor shows four clips ready to trim rather than a blank panel and an instruction.
+ */
+function _pceClips(post) {
+    post = post || (_rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null);
+    if (!post) return [];
+    const stored = post.videoEdit && Array.isArray(post.videoEdit.clips) ? post.videoEdit.clips : null;
+    if (stored && stored.length) return stored;
+
+    // Seed. slides carries the resolved list for a multi-attachment post; a single attachment has no
+    // slides, so its one id is paired with the thumbnail the canvas is already showing.
+    const slides = Array.isArray(post.slides) ? post.slides.filter((x) => x && x.kind === 'video') : [];
+    if (slides.length) {
+        return slides.map((sl, i) => ({ id: 'c' + sl.assetId + '_' + i, assetId: sl.assetId, url: sl.url, name: 'Clip ' + (i + 1) }));
+    }
+    const ids = Array.isArray(post.mediaAssetIds) ? post.mediaAssetIds : [];
+    if (ids.length === 1 && post.mediaType === 'video' && post.thumbnailUrl) {
+        return [{ id: 'c' + ids[0] + '_0', assetId: ids[0], url: post.thumbnailUrl, name: 'Clip 1' }];
+    }
+    return [];
+}
+
+/** Seconds this clip contributes, or null while its length is still unknown. */
+function _pceClipLength(c) {
+    const full = _pceClipDurations[c.assetId] != null ? _pceClipDurations[c.assetId] : c.sourceDurationS;
+    const inS = c.inS || 0;
+    if (c.outS != null) return Math.max(0, c.outS - inS);
+    if (full == null) return null;
+    return Math.max(0, full - inS);
+}
+
+/** Read a clip's real length once, then redraw — the trim inputs mean nothing without it. */
+function _pceMeasureClips(clips) {
+    for (const c of clips) {
+        if (!c.url || _pceClipDurations[c.assetId] != null) continue;
+        _pceClipDurations[c.assetId] = null;   // in flight; do not ask twice
+        const v = document.createElement('video');
+        v.preload = 'metadata';
+        v.muted = true;
+        v.onloadedmetadata = () => {
+            if (isFinite(v.duration) && v.duration > 0) {
+                _pceClipDurations[c.assetId] = v.duration;
+                _pceRenderClips();
+            }
+            if (v.videoWidth > 0 && v.videoHeight > 0) {
+                _pceClipAspect[c.assetId] = v.videoWidth / v.videoHeight;
+                _pceRenderCropFrame();
+            }
+            v.src = '';
+        };
+        v.onerror = () => { v.src = ''; };
+        v.src = c.url;
+    }
+}
+
+/** Write the cut back to the post. Shared across the cross-post group — the cut is one decision. */
+async function _pcePersistVideoEdit(postId, clips, frames) {
+    const post = _rqPostCache[postId];
+    if (!post) return;
+    const edit = {
+        clips: clips.map((c) => {
+            const out = { id: c.id, assetId: c.assetId };
+            if (c.inS) out.inS = c.inS;
+            if (c.outS != null) out.outS = c.outS;
+            if (c.gain != null) out.gain = c.gain;
+            return out;
+        }),
+        targetRatio: (post.videoEdit && post.videoEdit.targetRatio) || '9:16',
+    };
+    // Carry the per-platform framing through EVERY save. save-post-video-edit replaces the whole
+    // object, so omitting frames here would silently discard every crop the reviewer had set the
+    // moment they nudged a trim — and nothing would report it until the post published mis-framed.
+    const carriedFrames = frames || (post.videoEdit && post.videoEdit.frames);
+    if (carriedFrames && Object.keys(carriedFrames).length) edit.frames = carriedFrames;
+    // Keep the cache carrying the resolved url/name the editor draws with — the server answers with
+    // ids only, and repainting from its reply would blank every thumbnail until the next refetch.
+    post.videoEdit = { targetRatio: edit.targetRatio, clips: clips.slice(), frames: edit.frames };
+    try {
+        await fetch('/.netlify/functions/save-post-video-edit', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId, edit }),
+        });
+    } catch { /* a dropped save is recoverable — the next edit re-sends the whole cut */ }
+}
+
+function _pceClipsChanged(clips) {
+    const id = _rqReviewPostId;
+    if (id == null) return;
+    _pceRenderClips(clips);
+    _pcePersistVideoEdit(id, clips);
+    // The timeline's axis is the length of this cut, so it has to be redrawn whenever the cut moves.
+    const post = _rqPostCache[id];
+    if (post) _rqRenderTimeline(post);
+}
+
+window._pceClipMove = function (index, dir) {
+    const clips = _pceClips().slice();
+    const to = index + dir;
+    if (to < 0 || to >= clips.length) return;
+    const [moved] = clips.splice(index, 1);
+    clips.splice(to, 0, moved);
+    _pceClipsChanged(clips);
+};
+
+window._pceClipRemove = function (index) {
+    const clips = _pceClips().slice();
+    clips.splice(index, 1);
+    _pceClipsChanged(clips);
+};
+
+window._pceClipTrim = function (index, field, raw) {
+    const clips = _pceClips().map((c) => Object.assign({}, c));
+    const c = clips[index];
+    if (!c) return;
+    const full = _pceClipDurations[c.assetId] != null ? _pceClipDurations[c.assetId] : c.sourceDurationS;
+    let v = parseFloat(raw);
+    if (!isFinite(v) || v < 0) v = 0;
+    if (full != null) v = Math.min(v, full);
+    if (field === 'in') {
+        // An in point at or past the out point would be a segment that renders nothing; the server
+        // degrades that to "play to the end" anyway, so say so here rather than store a window the
+        // renderer will quietly ignore.
+        c.inS = v || undefined;
+        if (c.outS != null && c.inS != null && c.outS <= c.inS) c.outS = undefined;
+    } else {
+        c.outS = v > (c.inS || 0) ? v : undefined;
+    }
+    _pceClipsChanged(clips);
+};
+
+/** The clip list. Reorder with the arrows, trim with the two number fields. */
+function _pceRenderClips(clipsOverride) {
+    const host = document.getElementById('pce-clips-block');
+    if (!host) return;
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const clips = clipsOverride || _pceClips(post);
+    // One untrimmed clip is not a cut — it is just the post's video, and a panel offering to reorder
+    // a list of one is noise. It appears the moment there is something to arrange or something has
+    // been trimmed.
+    const worthShowing = clips.length > 1 || clips.some((c) => c.inS || c.outS != null);
+    if (!clips.length || !worthShowing) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+
+    _pceMeasureClips(clips);
+
+    let total = 0;
+    let anyUnknown = false;
+    for (const c of clips) {
+        const len = _pceClipLength(c);
+        if (len == null) anyUnknown = true; else total += len;
+    }
+    const totalLabel = anyUnknown ? 'measuring…' : _pceFmtS(total);
+
+    const num = (index, field, value, placeholder) =>
+        '<input type="number" min="0" step="0.1" value="' + (value == null ? '' : _rqEsc(String(Math.round(value * 10) / 10))) + '"'
+        + ' placeholder="' + placeholder + '" aria-label="' + field + ' point, seconds"'
+        + ' class="w-14 text-[11px] rounded border border-gray-200 px-1 py-0.5 text-right"'
+        + ' onchange="window._pceClipTrim(' + index + ',\'' + field + '\',this.value)">';
+
+    const rows = clips.map((c, i) => {
+        const len = _pceClipLength(c);
+        const name = _rqEsc(String(c.name || ('Clip ' + (i + 1))).slice(0, 28));
+        return '<div class="flex items-center gap-1.5 py-1" data-clip-row="' + i + '">'
+            + '<span class="w-4 shrink-0 text-[10px] font-bold text-gray-400" style="font-variant-numeric:tabular-nums">' + (i + 1) + '</span>'
+            + '<span class="flex-1 min-w-0 truncate text-[11px] text-gray-700" title="' + name + '">' + name + '</span>'
+            + '<span class="w-10 shrink-0 text-right text-[10px] text-gray-400" style="font-variant-numeric:tabular-nums">' + (len == null ? '—' : _pceFmtS(len)) + '</span>'
+            + num(i, 'in', c.inS, 'in')
+            + num(i, 'out', c.outS, 'out')
+            + '<button type="button" title="Move earlier" aria-label="Move clip ' + (i + 1) + ' earlier"'
+            + ' class="px-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 cursor-pointer leading-none"'
+            + (i === 0 ? ' disabled' : '') + ' onclick="window._pceClipMove(' + i + ',-1)">&#9650;</button>'
+            + '<button type="button" title="Move later" aria-label="Move clip ' + (i + 1) + ' later"'
+            + ' class="px-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 cursor-pointer leading-none"'
+            + (i === clips.length - 1 ? ' disabled' : '') + ' onclick="window._pceClipMove(' + i + ',1)">&#9660;</button>'
+            + '<button type="button" title="Remove this clip" aria-label="Remove clip ' + (i + 1) + '"'
+            + ' class="px-1 text-gray-300 hover:text-red-600 cursor-pointer leading-none"'
+            + ' onclick="window._pceClipRemove(' + i + ')">&times;</button>'
+            + '</div>';
+    }).join('');
+
+    const overLong = !anyUnknown && total > _PCE_SHORT_MAX_S;
+    host.innerHTML = '<div class="pt-1">'
+        + '<div class="flex items-center justify-between mb-1">'
+        + '<span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Clips</span>'
+        + '<span class="text-[10px] text-gray-400" style="font-variant-numeric:tabular-nums">' + totalLabel + '</span>'
+        + '</div>'
+        + '<div class="divide-y divide-gray-100">' + rows + '</div>'
+        + (clips.length >= _PCE_MAX_CLIPS
+            ? '<p class="mt-1 text-[10px] text-amber-600">That is the most clips one post can hold.</p>' : '')
+        + (overLong
+            ? '<p class="mt-1 text-[10px] text-amber-600">Over three minutes — too long for a YouTube Short, so it would go out as a standard video there.</p>' : '')
+        + '<p class="mt-1 text-[10px] text-gray-400">Trimmed and joined when you approve the post.</p>'
+        + '</div>';
+    host.classList.remove('hidden');
+}
+
+// ── The crop frame ──────────────────────────────────────────────────────────────────────────────
+// What this platform actually keeps.
+//
+// Four of the six platforms take the 9:16 master unchanged. Facebook's feed and Threads do not, so
+// their copy is rendered again from the SAME clips into a squarer frame — and something has to be
+// cut off. The renderer centres that by default, which is right until it is not: a centred crop of a
+// vertical shot is how a post publishes with someone's head missing.
+//
+// So the crop is automatic but never invisible. This is the "visible" half of that promise, and the
+// reason it was worth overturning the format router's rule that nothing is ever silently re-cut.
+//
+// ⚠️ The derivative is NOT a crop of the master. Both are independent cover-fits of the SOURCE, so a
+// 4:5 copy of a 16:9 source keeps MORE width than the 9:16 master does. Drawing a 4:5 window inside
+// the 9:16 master would therefore show the reviewer a lie. The backdrop here is the source clip at
+// its own shape, with the platform's frame over it.
+const _pceCropDrag = { on: false, id: null };
+
+/** Fractions of the source that the platform's frame keeps, and where it currently sits. */
+function _pceCropWindow(sourceAspect, ratio, offsetX, offsetY) {
+    const parts = String(ratio || '').split(':');
+    const rt = (parseFloat(parts[0]) || 0) / (parseFloat(parts[1]) || 1);
+    if (!(rt > 0) || !(sourceAspect > 0)) return null;
+    // The axis that overflows is the one the frame is narrower in; the other one fits exactly, and
+    // no offset along it can change a single pixel.
+    const wFrac = sourceAspect > rt ? rt / sourceAspect : 1;
+    const hFrac = sourceAspect > rt ? 1 : sourceAspect / rt;
+    const clamp = (n) => Math.min(1, Math.max(-1, n || 0));
+    return {
+        wFrac, hFrac,
+        left: ((clamp(offsetX) + 1) / 2) * (1 - wFrac),
+        top: ((clamp(offsetY) + 1) / 2) * (1 - hFrac),
+        movableX: wFrac < 0.999,
+        movableY: hFrac < 0.999,
+    };
+}
+
+function _pceRenderCropFrame() {
+    const host = document.getElementById('pce-crop-block');
+    if (!host) return;
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const rf = post && post.reframe;
+    // Nothing to show on the platforms that publish the master as-is, which is most of them.
+    if (!rf) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+
+    const clips = _pceClips(post);
+    const first = clips[0];
+    const aspect = first ? _pceClipAspect[first.assetId] : null;
+    const label = (window.PlatformConstants && window.PlatformConstants.label
+        ? window.PlatformConstants.label(post.platform) : null) || post.platform || 'this platform';
+
+    if (!first || !first.url || !aspect) {
+        host.innerHTML = '<div class="pt-1">'
+            + '<div class="flex items-center justify-between mb-1">'
+            + '<span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Framing</span>'
+            + '<span class="text-[10px] text-gray-400">' + _rqEsc(rf.ratio) + '</span></div>'
+            + '<p class="text-[11px] text-gray-500">Reading the clip so the crop can be previewed…</p></div>';
+        host.classList.remove('hidden');
+        return;
+    }
+
+    const win = _pceCropWindow(aspect, rf.ratio, rf.offsetX, rf.offsetY);
+    if (!win) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+
+    const pct = (n) => (n * 100).toFixed(3) + '%';
+    const dragHint = win.movableX && win.movableY ? 'Drag to reframe'
+        : win.movableY ? 'Drag up or down to reframe'
+        : win.movableX ? 'Drag left or right to reframe'
+        : 'Nothing is cropped here';
+
+    // The backdrop is a muted, paused <video> rather than a poster image: the post may have no
+    // thumbnail for the clip, and seeking it to the in-point shows the frame the piece opens on
+    // rather than whatever frame zero happens to be.
+    host.innerHTML = '<div class="pt-1">'
+        + '<div class="flex items-center justify-between mb-1">'
+        + '<span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Framing</span>'
+        + '<span class="text-[10px] text-gray-400">' + _rqEsc(label) + ' &middot; ' + _rqEsc(rf.ratio) + '</span>'
+        + '</div>'
+        + '<div class="relative mx-auto overflow-hidden rounded bg-black select-none" style="max-width:220px;aspect-ratio:' + aspect.toFixed(4) + '" data-crop-stage>'
+        + '<video src="' + _rqEsc(first.url) + '" muted playsinline preload="metadata" class="absolute inset-0 w-full h-full object-cover pointer-events-none" data-crop-video></video>'
+        // Inline, not a utility class: the compiled stylesheet only carries utilities the markup
+        // already used, and an opacity-modified colour that was never compiled renders as NOTHING —
+        // which here would mean no dimming at all, i.e. a crop preview that shows no crop.
+        + '<div class="absolute inset-0 pointer-events-none" style="background:rgba(0,0,0,.55)" data-crop-shade></div>'
+        + '<div class="absolute border-2 border-white ' + (win.movableX || win.movableY ? 'cursor-grab' : '') + '"'
+        + ' style="left:' + pct(win.left) + ';top:' + pct(win.top) + ';width:' + pct(win.wFrac) + ';height:' + pct(win.hFrac) + ';box-shadow:0 0 0 2px rgba(0,0,0,.35) inset"'
+        + ' data-crop-window role="slider" tabindex="0" aria-label="Crop position for ' + _rqEsc(label) + '"></div>'
+        + '</div>'
+        + '<p class="mt-1 text-center text-[10px] text-gray-400">' + dragHint + ' &middot; everything outside publishes cropped</p>'
+        + '</div>';
+    host.classList.remove('hidden');
+
+    // Un-shade what is kept by punching the window out of the overlay: two elements, no canvas.
+    const shade = host.querySelector('[data-crop-shade]');
+    if (shade) {
+        shade.style.clipPath = 'polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, '
+            + pct(win.left) + ' ' + pct(win.top) + ', '
+            + pct(win.left) + ' ' + pct(win.top + win.hFrac) + ', '
+            + pct(win.left + win.wFrac) + ' ' + pct(win.top + win.hFrac) + ', '
+            + pct(win.left + win.wFrac) + ' ' + pct(win.top) + ', '
+            + pct(win.left) + ' ' + pct(win.top) + ')';
+    }
+    // Show the frame the piece actually opens on.
+    const vid = host.querySelector('[data-crop-video]');
+    if (vid && first.inS) { vid.addEventListener('loadedmetadata', () => { try { vid.currentTime = first.inS; } catch (e) { /* seek unsupported */ } }, { once: true }); }
+}
+
+/** Move the frame on screen ONLY — no re-render, no save. What a drag does 60 times a second. */
+function _pceCropPaint(win) {
+    const host = document.getElementById('pce-crop-block');
+    if (!host || !win) return;
+    const pct = (n) => (n * 100).toFixed(3) + '%';
+    const el = host.querySelector('[data-crop-window]');
+    if (el) { el.style.left = pct(win.left); el.style.top = pct(win.top); }
+    const shade = host.querySelector('[data-crop-shade]');
+    if (shade) {
+        shade.style.clipPath = 'polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, '
+            + pct(win.left) + ' ' + pct(win.top) + ', '
+            + pct(win.left) + ' ' + pct(win.top + win.hFrac) + ', '
+            + pct(win.left + win.wFrac) + ' ' + pct(win.top + win.hFrac) + ', '
+            + pct(win.left + win.wFrac) + ' ' + pct(win.top) + ', '
+            + pct(win.left) + ' ' + pct(win.top) + ')';
+    }
+}
+
+/**
+ * Write one platform's framing back. The cut is shared; the frame is this platform's alone.
+ *
+ * `live` is what a drag passes. Two things must NOT happen on every pointermove:
+ *   • a save — a single drag would fire a POST per frame of movement;
+ *   • a re-render — _pceRenderCropFrame replaces the block's innerHTML, which destroys and rebuilds
+ *     the <video>, so the backdrop would restart loading on every pixel of the drag and the preview
+ *     would flicker or go black. The existing timeline drag avoids the same trap the same way.
+ * So a live move paints, and only the release commits.
+ */
+function _pceCropSet(offsetX, offsetY, live) {
+    const id = _rqReviewPostId;
+    const post = id != null ? _rqPostCache[id] : null;
+    if (!post || !post.reframe || !post.platform) return;
+    post.reframe.offsetX = offsetX;
+    post.reframe.offsetY = offsetY;
+
+    const clips = _pceClips(post);
+    const aspect = clips[0] ? _pceClipAspect[clips[0].assetId] : null;
+    if (live) { _pceCropPaint(_pceCropWindow(aspect, post.reframe.ratio, offsetX, offsetY)); return; }
+
+    // frames is keyed BY platform inside the one shared object, so every sibling can hold the
+    // identical edit and read only its own key — which is why this still saves to the whole group.
+    const frames = Object.assign({}, (post.videoEdit && post.videoEdit.frames) || {});
+    frames[post.platform] = { offsetX, offsetY };
+    _pceRenderCropFrame();
+    _pcePersistVideoEdit(id, clips, frames);
+}
+
+// Bound ONCE to the stable block, not to the window element — _pceRenderCropFrame replaces its
+// innerHTML on every nudge, which would tear a listener off mid-drag.
+function _pceBindCropFrame() {
+    const host = document.getElementById('pce-crop-block');
+    if (!host || host.dataset.cropBound === '1') return;
+    host.dataset.cropBound = '1';
+
+    const from = (ev, stage, win) => {
+        const box = stage.getBoundingClientRect();
+        if (!box.width || !box.height) return null;
+        // Where the POINTER is, converted to where the window's top-left would have to be for the
+        // pointer to stay on the same part of the picture it grabbed.
+        const x = (ev.clientX - box.left) / box.width - win.wFrac / 2;
+        const y = (ev.clientY - box.top) / box.height - win.hFrac / 2;
+        const spanX = 1 - win.wFrac;
+        const spanY = 1 - win.hFrac;
+        const clamp01 = (n) => Math.min(1, Math.max(0, n));
+        return {
+            offsetX: spanX > 0.0001 ? clamp01(x / spanX) * 2 - 1 : 0,
+            offsetY: spanY > 0.0001 ? clamp01(y / spanY) * 2 - 1 : 0,
+        };
+    };
+
+    const current = () => {
+        const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+        const rf = post && post.reframe;
+        const clips = _pceClips(post);
+        const aspect = clips[0] ? _pceClipAspect[clips[0].assetId] : null;
+        if (!rf || !aspect) return null;
+        return _pceCropWindow(aspect, rf.ratio, rf.offsetX, rf.offsetY);
+    };
+
+    host.addEventListener('pointerdown', (ev) => {
+        const winEl = ev.target.closest && ev.target.closest('[data-crop-window]');
+        if (!winEl) return;
+        const win = current();
+        if (!win || (!win.movableX && !win.movableY)) return;
+        _pceCropDrag.on = true;
+        _pceCropDrag.id = ev.pointerId;
+        winEl.setPointerCapture && winEl.setPointerCapture(ev.pointerId);
+        ev.preventDefault();
+    });
+
+    host.addEventListener('pointermove', (ev) => {
+        if (!_pceCropDrag.on || ev.pointerId !== _pceCropDrag.id) return;
+        const stage = host.querySelector('[data-crop-stage]');
+        const win = current();
+        if (!stage || !win) return;
+        const next = from(ev, stage, win);
+        if (!next) return;
+        // Only the overflowing axis moves; the other is pinned at 0 so a stray sideways drag cannot
+        // store an offset that changes nothing but shows up in the fingerprint as a different file.
+        _pceCropSet(win.movableX ? next.offsetX : 0, win.movableY ? next.offsetY : 0, true);
+    });
+
+    const end = (ev) => {
+        if (!_pceCropDrag.on || (ev.pointerId != null && ev.pointerId !== _pceCropDrag.id)) return;
+        _pceCropDrag.on = false;
+        _pceCropDrag.id = null;
+        // Commit exactly once, on release — the moves above only painted.
+        const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+        if (post && post.reframe) _pceCropSet(post.reframe.offsetX || 0, post.reframe.offsetY || 0, false);
+    };
+    host.addEventListener('pointerup', end);
+    host.addEventListener('pointercancel', end);
+
+    // Keyboard: the drag is the only way to set this otherwise, and a 2px nudge with a mouse is not
+    // something everyone can do.
+    host.addEventListener('keydown', (ev) => {
+        if (!ev.target.closest || !ev.target.closest('[data-crop-window]')) return;
+        const win = current();
+        const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+        if (!win || !post || !post.reframe) return;
+        const step = ev.shiftKey ? 0.2 : 0.05;
+        let dx = 0, dy = 0;
+        if (ev.key === 'ArrowLeft') dx = -step;
+        else if (ev.key === 'ArrowRight') dx = step;
+        else if (ev.key === 'ArrowUp') dy = -step;
+        else if (ev.key === 'ArrowDown') dy = step;
+        else return;
+        ev.preventDefault();
+        const clamp = (n) => Math.min(1, Math.max(-1, n));
+        _pceCropSet(
+            win.movableX ? clamp((post.reframe.offsetX || 0) + dx) : 0,
+            win.movableY ? clamp((post.reframe.offsetY || 0) + dy) : 0,
+        );
+    });
 }
 
 // Persist the current cache overlays for a post (used by timeline drags + the Start/End inputs).

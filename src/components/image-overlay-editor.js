@@ -39,10 +39,33 @@
   const BORDER_RATIO = 0.07;  // border width   = fontSize * BORDER_RATIO (min 1px)
   const RADIUS_RATIO = 0.15;  // corner radius  = fontSize * RADIUS_RATIO
 
-  const FONTS = [
-    'Arial', 'Helvetica', 'Verdana', 'Trebuchet MS', 'Georgia',
-    'Times New Roman', 'Courier New', 'Impact', 'Comic Sans MS',
-  ];
+  // The picker, and — more importantly — what each choice actually RESOLVES to.
+  //
+  // These used to be bare OS font names passed straight through to the renderer. Lambda has none of
+  // them and Chrome substitutes silently, so the published video was set in a different face from
+  // the one the reviewer approved, with a differently sized box (the box is sized by the rendered
+  // text). window.OverlayFonts is generated from src/lib/overlay-fonts.ts — the same module the
+  // Remotion composition imports — so the two cannot drift. See scripts/gen-client-constants.ts.
+  //
+  // The literal list is the last-resort fallback for a page that somehow loaded this file without
+  // platform-constants.js: the ids are unchanged, so nothing breaks, it just loses the webfonts.
+  const OF = (typeof window !== 'undefined' && window.OverlayFonts) || null;
+  const FONTS = OF
+    ? OF.all.map((f) => ({ id: f.id, label: f.label, stack: f.stack }))
+    : ['Arial', 'Helvetica', 'Verdana', 'Trebuchet MS', 'Georgia', 'Times New Roman', 'Courier New', 'Impact', 'Comic Sans MS']
+        .map((id) => ({ id: id, label: id, stack: id }));
+
+  /** The CSS stack for a stored family name. One answer, shared with the render. */
+  function fontStack(id) {
+    if (OF) return OF.stack(id);
+    const hit = FONTS.find((f) => f.id.toLowerCase() === String(id || '').trim().toLowerCase());
+    return (hit || FONTS[0]).stack;
+  }
+
+  /** Resolves once the webfaces are usable. Canvas will NOT fetch them on its own. */
+  function fontsReady() {
+    return OF ? OF.ready() : Promise.resolve();
+  }
   const EMOJIS = ['😀','😍','🎉','🔥','✨','💯','👍','❤️','🙌','😎','🥳','💪','☕','🌟','📣','✅','👉','🎁','😂','🤩'];
 
   const DEFAULTS = {
@@ -99,7 +122,10 @@
     const lh     = fontSize * LINE_HEIGHT;
     const border = Math.max(1, fontSize * BORDER_RATIO);
     const radius = fontSize * RADIUS_RATIO;
-    const family = ov.fontFamily || DEFAULTS.fontFamily;
+    // The STACK, not the bare name: canvas honours a font list exactly as CSS does, and measureText
+    // is what sizes the box — so measuring with a different face is how the preview and the
+    // published file end up disagreeing about where the box edges are.
+    const family = fontStack(ov.fontFamily || DEFAULTS.fontFamily);
 
     ctx.font = `${fontSize}px ${family}`;
     ctx.textBaseline = 'top';
@@ -144,7 +170,7 @@
     const fontSize = clamp(ov.fontSizePct == null ? DEFAULTS.fontSizePct : ov.fontSizePct, 0.005, 0.5) * refHeightPx;
     node.style.left = (clamp(ov.x, 0, 1) * 100) + '%';
     node.style.top = (clamp(ov.y, 0, 1) * 100) + '%';
-    node.style.fontFamily = ov.fontFamily || DEFAULTS.fontFamily;
+    node.style.fontFamily = fontStack(ov.fontFamily || DEFAULTS.fontFamily);
     node.style.fontSize = fontSize + 'px';
     node.style.color = ov.color || DEFAULTS.color;
     node.style.padding = (fontSize * PAD_RATIO) + 'px';
@@ -187,6 +213,10 @@
 
   // ── Public: bake overlays into the image at native resolution ────────────────
   async function bake(imageUrl, overlays) {
+    // Before ANY measuring. An unloaded webfont makes measureText silently return the fallback's
+    // metrics, which bakes a box sized for a font the picture is not set in — the exact drift this
+    // whole change removes, reintroduced at the last step.
+    await fontsReady();
     const img = await loadImage(imageUrl);
     const W = img.naturalWidth || img.width;
     const H = img.naturalHeight || img.height;
@@ -374,7 +404,7 @@
         </div>
         <div class="ioe-row">
           <label>Font</label>
-          <select data-f="fontFamily">${FONTS.map((f) => `<option value="${f}"${f === ov.fontFamily ? ' selected' : ''} style="font-family:${f}">${f}</option>`).join('')}</select>
+          <select data-f="fontFamily">${FONTS.map((f) => `<option value="${f.id}"${f.id === ov.fontFamily ? ' selected' : ''} style="font-family:${f.stack}">${f.label}</option>`).join('')}</select>
         </div>
         <div class="ioe-row">
           <label>Font size — ${Math.round(ov.fontSizePct * 100)}%</label>

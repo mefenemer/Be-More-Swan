@@ -12,6 +12,9 @@ import { displayCaption } from '../../src/utils/model-json';
 import { diagnosePostFailure } from '../../src/utils/post-failure-diagnosis';
 import { PLATFORM_FORMATS } from '../../src/config/platform-formats';
 import { REVIEW_QUEUE_STATUS_FAMILIES } from '../../src/config/post-status';
+import { readVideoEdit, renderableClips } from '../../src/lib/video-edit';
+import { masterRatioFor } from '../../src/lib/post-render';
+import { reframeRatioFor } from '../../src/utils/format-router';
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -309,6 +312,51 @@ export default withLambda(async (event) => {
             }
         }
 
+        // ── The edit list, read defensively ─────────────────────────────────────────────────────
+        // One query for every draft on the page, and its failure is swallowed. video_edit reaches an
+        // environment behind whatever deploy carries the code, and naming it in the main select above
+        // would mean a missing column renders the ENTIRE review queue empty — the worst possible
+        // failure for a column that only matters to video posts. An environment without it simply
+        // reports no post as edited, which is how the queue behaved before the feature existed.
+        // Same reasoning, and the same shape, as the audio_overlays guard above.
+        const videoEdits = new Map<number, unknown>();
+        const clipAssets = new Map<number, { name: string; url: string | null; durationS: number | null }>();
+        if (drafts.length) {
+            try {
+                const rows = await db
+                    .select({ id: scheduledPosts.id, videoEdit: scheduledPosts.videoEdit })
+                    .from(scheduledPosts)
+                    .where(inArray(scheduledPosts.id, drafts.map(d => d.id)));
+                for (const r of rows) if (r.videoEdit) videoEdits.set(r.id, r.videoEdit);
+
+                // Resolve each referenced clip once, not once per post: a cross-post group shares one
+                // cut, so the same four assets are asked for by every sibling on the page.
+                const ids = [...new Set(
+                    [...videoEdits.values()].flatMap(e => renderableClips(e).map(c => c.assetId)),
+                )];
+                if (ids.length) {
+                    const assets = await db
+                        .select({
+                            id: contentAssets.id, name: contentAssets.name, assetType: contentAssets.assetType,
+                            storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl,
+                            durationS: contentAssets.durationS,
+                        })
+                        .from(contentAssets)
+                        .where(and(inArray(contentAssets.id, ids), eq(contentAssets.organisationId, organisationId)));
+                    for (const a of assets) {
+                        if ((a.assetType ?? '').toLowerCase() !== 'video') continue;
+                        let url: string | null = null;
+                        // An hour, matching the post's own media: the editor streams these while the
+                        // reviewer trims, and a ten-minute URL dies mid-session.
+                        if (a.storageKey) { try { url = await presignR2Get(a.storageKey, 3600); } catch { /* fall through */ } }
+                        clipAssets.set(a.id, { name: a.name, url: url ?? a.externalUrl ?? null, durationS: a.durationS ?? null });
+                    }
+                }
+            } catch (err) {
+                console.warn('[get-social-drafts] video edit lookup skipped:', err instanceof Error ? err.message : err);
+            }
+        }
+
         // Resolve a preview URL for the post's attachment — image OR VIDEO (presigned R2 or external).
         // Best-effort per draft — a resolution failure must never blank out the list.
         //
@@ -429,6 +477,11 @@ export default withLambda(async (event) => {
                 // The saved text-overlay design, so the Review canvas can paint it live on open without
                 // a per-post get-post-image round trip. Normalised to an array the client renders directly.
                 slides,
+                // The attached assets, in order. The clip editor seeds an unedited post's cut from
+                // these, so it needs the IDS and not just the resolved thumbnails — slides only
+                // resolves for multi-attachment posts, and a single video would otherwise have
+                // nothing to trim.
+                mediaAssetIds: slideIds,
                 overlays: Array.isArray(imageOverlays) ? imageOverlays : [],
                 // The saved audio arrangement, each clip carrying a playable url + name so the
                 // editor can draw its track and let the reviewer hear it without another round trip.
@@ -437,7 +490,46 @@ export default withLambda(async (event) => {
                         const asset = audioAssets.get(Number(a?.assetId));
                         return asset ? { ...a, url: asset.url, name: asset.name } : null;
                     })
-                    .filter(Boolean) };
+                    .filter(Boolean),
+                // The cut: clips in order, each with a playable url so the editor can scrub and trim
+                // without another round trip. Null when this post has never been edited — which the
+                // client treats as "seed one clip per attached video", NOT as "no clips".
+                videoEdit: (() => {
+                    const edit = readVideoEdit(videoEdits.get(d.id));
+                    if (!edit) return null;
+                    const clips = edit.clips
+                        .map(c => {
+                            const asset = clipAssets.get(c.assetId);
+                            return asset ? { ...c, url: asset.url, name: asset.name, sourceDurationS: asset.durationS } : null;
+                        })
+                        .filter(Boolean);
+                    // Every clip's asset has gone (deleted, purged, or another org's). Report no edit
+                    // rather than an empty cut, so the editor re-seeds from what is attached instead
+                    // of showing a timeline with nothing on it.
+                    return clips.length ? { ...edit, clips } : null;
+                })(),
+                // ── Does THIS platform re-frame the master, and how is it framed? ───────────────
+                // Answered here rather than in the browser so the preview the reviewer drags is
+                // computed by the same function the renderer uses (reframeRatioFor). A second
+                // implementation in workspace.html would drift, and the whole point of showing the
+                // crop is that it is honest about what will publish.
+                //
+                // Null on the four platforms that take the master as-is — there is nothing to frame
+                // when nothing overflows.
+                reframe: (() => {
+                    const stored = videoEdits.get(d.id);
+                    const master = masterRatioFor(stored);
+                    if (!master || !d.platform) return null;
+                    const ratio = reframeRatioFor(d.platform, d.formatKey, master);
+                    if (!ratio) return null;
+                    const frame = readVideoEdit(stored)?.frames?.[d.platform];
+                    return {
+                        ratio,
+                        master,
+                        offsetX: frame?.offsetX ?? 0,
+                        offsetY: frame?.offsetY ?? 0,
+                    };
+                })() };
         }));
 
         // Workspace-wide footer state — drives whether the per-post "include disclosure footer"

@@ -22,6 +22,8 @@ export const RADIUS_RATIO = 0.15;  // corner radius= fontSize * RADIUS_RATIO
 export const FONT_MIN = 0.005;
 export const FONT_MAX = 0.5;
 
+import { overlayFontStack } from './overlay-fonts';
+
 export interface Overlay {
     id: string;
     text: string;
@@ -70,7 +72,11 @@ export function overlayBoxStyle(ov: Partial<Overlay>, refHeightPx: number): Reco
         whiteSpace: 'pre',
         overflow: 'visible',
         lineHeight: LINE_HEIGHT,
-        fontFamily: ov.fontFamily || OVERLAY_DEFAULTS.fontFamily,
+        // A STACK, not the bare stored name. Lambda has none of the OS fonts the picker offers and
+        // substitutes silently, which moves the box as well as the letterforms — see
+        // src/lib/overlay-fonts.ts. Every surface that draws an overlay resolves the name here, so
+        // the preview and the published file cannot disagree about what 'Impact' means.
+        fontFamily: overlayFontStack(ov.fontFamily),
         fontSize: fontSize + 'px',
         color: ov.color || OVERLAY_DEFAULTS.color,
         padding: (fontSize * PAD_RATIO) + 'px',
