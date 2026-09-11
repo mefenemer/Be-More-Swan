@@ -176,10 +176,31 @@ check('the library lets you TICK several, and says what will happen to them', ()
     only(workspace, 'window._pceOwnReplace()', 'workspace.html');
 });
 
-check('Replace is offered only when exactly one is ticked', () => {
-    // With several ticked there is no single answer to "replace it with what".
-    const at = only(workspace, 'const rep = document.getElementById(\'gp-ai-own-replace\')', 'workspace.html');
-    assert.ok(workspace.slice(at, at + 500).includes("rep.classList.toggle('hidden', n !== 1)"));
+check('Replace is offered only when there is something to replace, with one ticked', () => {
+    // Two failures this closes. "Replace with this" on a post with NO video named something that
+    // was not there; and two ticked showed an EMPTY bar, because Add was gated on existing media
+    // and Replace on a single selection, so neither survived.
+    const at = only(workspace, 'const canReplace =', 'workspace.html');
+    const scope = workspace.slice(at, at + 500);
+    assert.ok(scope.includes('n === 1'), 'one ticked names a single replacement');
+    assert.ok(scope.includes('_pceHasClipToAddTo()'), 'and there must be something to replace');
+    assert.ok(scope.includes('!canAdd && !canReplace'), 'an empty bar must not be shown at all');
+});
+
+check('Add is offered on an EMPTY post — the first clip becomes the base', () => {
+    // _pceCanAddClip is a property of the FORMAT, not of what is attached. Requiring media is what
+    // left an empty Reel draft offering only "Replace with this".
+    const at = only(workspace, 'function _pceCanAddClip() {', 'workspace.html');
+    const scope = workspace.slice(at, at + 320);
+    assert.ok(!scope.includes('thumbnailUrl'), 'adding must not require existing media');
+    // ...while the question "add or replace" still does.
+    const has = only(workspace, 'function _pceHasClipToAddTo() {', 'workspace.html');
+    assert.ok(workspace.slice(has, has + 320).includes('thumbnailUrl'));
+});
+
+check('the add button never says "Replace" or names a count of one oddly', () => {
+    const at = only(workspace, "add.textContent = n === 1", 'workspace.html');
+    assert.ok(workspace.slice(at, at + 120).includes("'Add'"), 'one ticked reads simply Add');
 });
 
 check('Find and Generate ASK before they spend anything', () => {

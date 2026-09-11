@@ -512,14 +512,15 @@ window.showComplianceModals = function showComplianceModals(force) {
       </div>
       <div id="gp-ai-own" class="hidden mt-2 border border-gray-200 rounded-xl p-2 max-h-48 overflow-y-auto">
         <div id="gp-ai-own-grid" class="grid grid-cols-3 gap-2"></div>
-        <!-- Appears once something is ticked, and says exactly what will happen to it. -->
-        <div id="gp-ai-own-bar" class="hidden sticky bottom-0 mt-2 flex gap-2 bg-white pt-2">
-          <button type="button" id="gp-ai-own-add" onclick="window._pceOwnAdd()"
-            class="flex-1 rounded-lg bg-emerald-600 px-2 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 transition cursor-pointer">Add clips</button>
-          <button type="button" id="gp-ai-own-replace" onclick="window._pceOwnReplace()"
-            class="flex-1 rounded-lg border border-gray-300 px-2 py-1.5 text-xs font-bold text-gray-700 hover:bg-gray-50 transition cursor-pointer">Replace with this</button>
-        </div>
         <p id="gp-ai-own-empty" class="hidden text-xs text-gray-400 text-center py-4">No matching media in your library yet.</p>
+      </div>
+      <!-- OUTSIDE the scrolling grid. Inside it, a sticky bar sat on top of the tiles it was
+           describing, and scrolled away from the selection it belonged to. -->
+      <div id="gp-ai-own-bar" class="hidden mt-2 flex gap-2">
+        <button type="button" id="gp-ai-own-add" onclick="window._pceOwnAdd()"
+          class="flex-1 rounded-lg bg-emerald-600 px-2 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 transition cursor-pointer">Add</button>
+        <button type="button" id="gp-ai-own-replace" onclick="window._pceOwnReplace()"
+          class="flex-1 rounded-lg border border-gray-300 px-2 py-1.5 text-xs font-bold text-gray-700 hover:bg-gray-50 transition cursor-pointer">Replace with this</button>
       </div>
       <!-- Stock candidate grid (shown after "Find with AI") -->
       <div id="gp-ai-pexels" class="hidden mt-2 grid grid-cols-3 gap-2"></div>
@@ -9190,13 +9191,36 @@ async function _pceAttachClips(files) {
  */
 let _pceClipAddMode = false;
 
-/** Can this post take a clip at all? A video-only, single-item format that already has media. */
-function _pceCanAddClip() {
+/** The post the picker is currently acting on. */
+function _pcePickerPost() {
     const id = typeof _gpCurrentPostId !== 'undefined' && _gpCurrentPostId != null ? _gpCurrentPostId : _rqReviewPostId;
-    const post = id != null ? _rqPostCache[id] : null;
-    if (!post || !post.thumbnailUrl || !_pcePostIsVideo(post)) return false;
-    const fmt = typeof _pceActiveFormat === 'function' ? _pceActiveFormat(post) : null;
+    return id != null ? _rqPostCache[id] : null;
+}
+
+/**
+ * Can this post hold a CUT — several clips rendered into one video?
+ *
+ * A property of the FORMAT, not of what is currently attached. It used to require existing media,
+ * which is why an empty Reel draft offered only "Replace with this" — a button naming something
+ * that was not there. Adding works perfectly well on an empty post: the first clip becomes the base
+ * the render composites from, which is exactly what _pceAppendClipAssets already does.
+ */
+function _pceCanAddClip() {
+    const post = _pcePickerPost();
+    const fmt = post && typeof _pceActiveFormat === 'function' ? _pceActiveFormat(post) : null;
     return !!fmt && fmt.m === 'video' && fmt.max === 1;
+}
+
+/**
+ * Is there actually a video here to add ONTO, or to replace?
+ *
+ * The separate question, and the one that governs the word "replace" and the add-or-replace prompt.
+ * Asking "add to this video or replace it?" when there is no video is the same nonsense from the
+ * other direction.
+ */
+function _pceHasClipToAddTo() {
+    const post = _pcePickerPost();
+    return !!post && !!post.thumbnailUrl && _pcePostIsVideo(post) && _pceCanAddClip();
 }
 
 function _pceExitClipAddMode() { _pceClipAddMode = false; }
@@ -9206,7 +9230,9 @@ function _pceExitClipAddMode() { _pceClipAddMode = false; }
  * before anything is attachable — a search and a generation both answer too late to ask after.
  */
 function _pceAskAddOrReplace(label, run) {
-    if (!_pceCanAddClip()) { _pceClipAddMode = false; run(); return; }
+    // Nothing attached yet ⇒ there is no "replace" to offer, so do not ask; the result simply
+    // becomes the post's video.
+    if (!_pceHasClipToAddTo()) { _pceClipAddMode = false; run(); return; }
     const host = document.getElementById('gp-ai-intent');
     if (!host) { _pceClipAddMode = false; run(); return; }
     _pceIntentRun = run;
@@ -9251,15 +9277,18 @@ function _pceSyncOwnSelection() {
     const add = document.getElementById('gp-ai-own-add');
     const rep = document.getElementById('gp-ai-own-replace');
     const n = _pceOwnPicked.length;
-    bar?.classList.toggle('hidden', n === 0);
+    const canAdd = _pceCanAddClip();
+    // Replacing is one picture's job — with several ticked there is no single answer to "with
+    // what" — and it needs something to replace.
+    const canReplace = n === 1 && (!canAdd || _pceHasClipToAddTo());
+    // An empty bar is worse than no bar: two tiles ticked used to show a blank strip, because both
+    // buttons were hidden and nothing said why.
+    bar?.classList.toggle('hidden', n === 0 || (!canAdd && !canReplace));
     if (add) {
-        add.classList.toggle('hidden', !_pceCanAddClip());
-        add.textContent = n === 1 ? 'Add as a clip' : `Add ${n} clips`;
+        add.classList.toggle('hidden', !canAdd);
+        add.textContent = n === 1 ? 'Add' : `Add ${n} clips`;
     }
-    // Replacing is one picture's job. With several ticked there is no single answer to "with what".
-    if (rep) {
-        rep.classList.toggle('hidden', n !== 1);
-    }
+    if (rep) rep.classList.toggle('hidden', !canReplace);
 }
 
 window._pceOwnAdd = async function () {
@@ -14608,6 +14637,7 @@ async function gpLoadPreview(postId) {
         document.getElementById('gp-ai-pexels')?.classList.add('hidden');
     document.getElementById('gp-ai-find-box')?.classList.add('hidden');
         document.getElementById('gp-ai-own')?.classList.add('hidden');
+    document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
         document.getElementById('gp-ai-media-thumb')?.classList.add('hidden');
         gpAiSetMediaType('image');           // default the type toggle back to Image each open
         gpAiShowThumb(draft.thumbnailUrl);   // reveals the thumb only if a URL is present (type inferred)
@@ -15586,6 +15616,7 @@ function gpAiSetMediaType(type) {
     const findLabel = document.getElementById('gp-ai-find-label');
     if (findLabel) findLabel.textContent = _gpAiMediaType === 'video' ? 'Find a video' : 'Find a photo';
     document.getElementById('gp-ai-own')?.classList.add('hidden');
+    document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
     document.getElementById('gp-ai-find-box')?.classList.add('hidden');
     gpAiMediaStatus('');
@@ -15615,8 +15646,9 @@ function _pceSyncMediaModalClip(url, type) {
     const clipable = !!url && isVideo && !!fmt && fmt.m === 'video' && fmt.max === 1;
     // Says which of the two things the sources are about to offer, so the tick boxes and the
     // add-or-replace question are expected rather than surprising.
-    sub.textContent = !url ? ''
-        : clipable ? 'Pick one to replace this video, or tick several to join them on as clips.'
+    sub.textContent = clipable && url ? 'Pick one to replace this video, or tick several to join them on as clips.'
+        : _pceCanAddClip() ? 'Tick the clips you want — several will be joined into one video.'
+        : !url ? ''
         : 'Whatever you pick replaces what is on the post.';
 }
 
@@ -15642,6 +15674,7 @@ function gpAiShowThumb(url, type) {
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
     document.getElementById('gp-ai-find-box')?.classList.add('hidden');
     document.getElementById('gp-ai-own')?.classList.add('hidden');
+    document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
     gpAiMediaBusy(false);
 
     // If the panel is currently driving a Review-Queue draft, mirror the new media into that modal's
@@ -16094,6 +16127,7 @@ async function gpAiUseOwn() {
     if (!panel || !grid) return;
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
     document.getElementById('gp-ai-find-box')?.classList.add('hidden');
+    document.getElementById('gp-ai-intent')?.classList.add('hidden');
     panel.classList.remove('hidden');
     empty?.classList.add('hidden');
     grid.innerHTML = '<p class="col-span-3 text-xs text-gray-400 text-center py-4">Loading your media…</p>';
@@ -16187,6 +16221,7 @@ async function gpAiUploadSelected(e) {
     const uploadType = files[0].type.startsWith('video/') ? 'video' : 'image';
     if (uploadType !== _gpAiMediaType) gpAiSetMediaType(uploadType);
     document.getElementById('gp-ai-own')?.classList.add('hidden');
+    document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
     document.getElementById('gp-ai-find-box')?.classList.add('hidden');
     gpAiMediaBusy(true);
@@ -16219,6 +16254,7 @@ async function gpAiUploadSelected(e) {
 function gpAiBrowseCanva() {
     if (!_gpCurrentPostId || !window.CanvaBrowser) return;
     document.getElementById('gp-ai-own')?.classList.add('hidden');
+    document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
     document.getElementById('gp-ai-find-box')?.classList.add('hidden');
     window.CanvaBrowser.open({
@@ -16255,6 +16291,7 @@ function gpAiFind() {
 function _gpAiFindAfterIntent() {
     const isVideo = _gpAiMediaType === 'video';
     document.getElementById('gp-ai-own')?.classList.add('hidden');
+    document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
 
     const noun = document.getElementById('gp-ai-find-noun');
     if (noun) noun.textContent = isVideo ? 'video' : 'photo';
@@ -16381,6 +16418,7 @@ async function gpAiGenerate() {
 
 async function _gpAiGenerateAfterIntent() {
     document.getElementById('gp-ai-own')?.classList.add('hidden');
+    document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
     document.getElementById('gp-ai-find-box')?.classList.add('hidden');
     if (_gpAiMediaType === 'video') return gpAiGenerateVideo();
