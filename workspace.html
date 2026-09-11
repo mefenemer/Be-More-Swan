@@ -10918,6 +10918,22 @@ function _pceLayerSubtitle(key, post) {
     }
 }
 
+/**
+ * The panels that live INSIDE the stage strip and depend on the post's media: the cut, and the
+ * per-platform framing.
+ *
+ * Called from _pceRenderLayers on every exit path rather than from the post-open path alone. That
+ * was the bug: attaching a post's first video un-hid the strip but never re-rendered these, so the
+ * Clips panel — which is the only place "Add another clip" exists — stayed hidden until the post
+ * was closed and reopened. Each panel decides its own visibility, so calling them when there is
+ * nothing to show is correct and cheap.
+ */
+function _pceRenderStagePanels() {
+    if (typeof _pceRenderClips === 'function') _pceRenderClips();
+    if (typeof _pceRenderCropFrame === 'function') _pceRenderCropFrame();
+    if (typeof _pceBindCropFrame === 'function') _pceBindCropFrame();
+}
+
 function _pceRenderLayers() {
     const host = document.getElementById('pce-layer-list');
     if (!host) return;
@@ -10925,7 +10941,7 @@ function _pceRenderLayers() {
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
     // No post, or a post with nothing editable — hide the whole strip rather than show an empty
     // heading. _pceLayers is [] until _pceSyncForPost has run.
-    if (!post || !_pceLayers.length) { host.innerHTML = ''; strip?.classList.add('hidden'); return; }
+    if (!post || !_pceLayers.length) { host.innerHTML = ''; strip?.classList.add('hidden'); _pceRenderStagePanels(); return; }
 
     // Nothing on the post yet: the only two layers are the two the canvas itself now offers, so the
     // list would be a heading over "Nothing attached" and "Empty". It comes back the moment there is
@@ -10942,9 +10958,11 @@ function _pceRenderLayers() {
         // The strip also carries the slides adder, which a carousel shows before it has any slides.
         const slidesShown = !document.getElementById('pce-slides')?.classList.contains('hidden');
         strip?.classList.toggle('hidden', !slidesShown);
+        _pceRenderStagePanels();
         return;
     }
     strip?.classList.remove('hidden');
+    _pceRenderStagePanels();
     const rows = _PCE_LAYER_ORDER.filter(k => _pceLayers.includes(k));
     host.innerHTML = rows.map(key => {
         const on = key === _pceSelection;

@@ -173,6 +173,28 @@ check('step 4 stays shut until there is a video to put things ON', () => {
     );
 });
 
+check('the stage panels follow the STRIP, not the post-open path', () => {
+    // Attaching a post's first video un-hides the strip but does not reopen the post, so rendering
+    // the clips only on open left the panel hidden — and "Add another clip" lives in that panel.
+    // _pceRenderLayers is the one function that runs on every media change and owns the strip.
+    const at = only(workspace, 'function _pceRenderStagePanels()', 'workspace.html');
+    const body = workspace.slice(at, at + 500);
+    assert.ok(body.includes('_pceRenderClips()'), 'it must render the cut');
+    assert.ok(body.includes('_pceRenderCropFrame()'), 'and the framing');
+
+    // Every exit path of _pceRenderLayers, or the panel survives one state change and not another.
+    // The window is the FUNCTION, found by scanning to the next top-level declaration — a fixed
+    // character count silently measured only part of a heavily commented function and reported a
+    // failure that was purely the measurement's.
+    const layersAt = only(workspace, 'function _pceRenderLayers()', 'workspace.html');
+    const rest = workspace.slice(layersAt + 200);
+    const nextDecl = rest.search(/\n(function |const |window\.)/);
+    assert.ok(nextDecl > 0, 'could not find the end of _pceRenderLayers');
+    const layers = workspace.slice(layersAt, layersAt + 200 + nextDecl);
+    const calls = layers.split('_pceRenderStagePanels()').length - 1;
+    assert.strictEqual(calls, 3, `expected all 3 exit paths to render the panels, found ${calls}`);
+});
+
 console.log('\nthe crop frame');
 
 check('the crop panel exists and precedes the timeline', () => {
