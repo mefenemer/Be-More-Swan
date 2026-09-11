@@ -175,8 +175,9 @@ check('adding clips APPENDS — the media picker still replaces', () => {
 check('the panel is shown for a single clip, so there is a way to reach two', () => {
     // It used to hide until there were two clips — but "Add another clip" lives in the panel, so
     // hiding it left no route from one clip to two. A dead end exactly where the feature starts.
-    const at = only(workspace, 'function _pceRenderClips(clipsOverride)', 'workspace.html');
-    const scope = workspace.slice(at, at + 1200);
+    // ⚠️ Not a fixed character window — this asserted on 1200 chars and broke the moment a comment
+    // was added above the bail-out. Scan to a real boundary instead.
+    const scope = slice('function _pceRenderClips(clipsOverride)', '_pceMeasureClips(clips);');
     assert.ok(scope.includes('if (!clips.length && !tl.any) {'),
         'only an empty cut with nothing timed hides the panel');
     assert.ok(!scope.includes('worthShowing'), 'the two-clip threshold must be gone');
@@ -810,29 +811,46 @@ console.log('\na drag is never repainted out from under the pointer');
 check('the clip list refuses to repaint mid-drag, and defers instead', () => {
     const at = only(workspace, 'function _pceRenderClips(clipsOverride) {', 'workspace.html');
     const head = workspace.slice(at, at + 400);
-    assert.ok(head.includes('if (_pceDragHold > 0)'), 'the list repaints during a drag');
+    assert.ok(head.includes('if (_pceDragActive())'), 'the list repaints during a drag');
     assert.ok(head.includes('_pceClipsRepaintPending = true'),
         'a repaint refused during a drag must be deferred, not dropped');
 });
 
-check('both drags take the hold and both give it back', () => {
-    const trim = slice('function _pceBindClipTrim() {', '/** Move the lit section');
-    assert.ok(trim.includes('_pceDragHoldStart()'), 'the trim drag does not take the hold');
-    assert.ok(trim.includes('_pceDragHoldEnd()'), 'the trim drag never releases it');
-    const tl = slice('function _rqBindTimeline() {', '\nasync function openPostReview(');
-    assert.ok(tl.includes('_pceDragHoldStart()'), 'the timeline drag does not take the hold');
-    assert.ok(tl.includes('_pceDragHoldEnd()'), 'the timeline drag never releases it');
+check('the hold is DERIVED from the drags, never counted', () => {
+    // ⚠️ It was a counter. A counter is only as good as its releases: two pointerdowns without two
+    // releases leave it stuck above zero for the rest of the session, and _pceRenderClips then
+    // silently stops repainting — "Preview the whole cut" never becomes "Stop preview", so both
+    // buttons look dead while trimming still appears to work (_pceTrimPaint mutates styles rather
+    // than re-rendering). Reading the drag objects makes that state unreachable.
+    assert.strictEqual(workspace.indexOf('_pceDragHold'), -1, 'the drag counter is back');
+    const fn = slice('function _pceDragActive() {', '/** Run a repaint that a drag deferred.');
+    assert.ok(fn.includes('_pceTrimDrag.on'), 'the trim drag is not consulted');
+    assert.ok(fn.includes('_rqTlDrag'), 'the timeline drag is not consulted');
 });
 
-check('the timeline takes the hold BEFORE the selection repaint', () => {
-    // _pceSelect repaints the list. Taken after it, the drag is built out of a node that repaint
-    // has already detached — which is exactly the state that produced the bug.
+check('the timeline builds its drag BEFORE the selection repaint', () => {
+    // _pceSelect repaints the list. Selecting first means the drag is assembled out of a node that
+    // repaint has already detached — which is exactly the state that produced the bug — and it also
+    // happens before _pceDragActive() can see the drag at all, so the repaint is not even deferred.
     const tl = slice('function _rqBindTimeline() {', '\nasync function openPostReview(');
-    const hold = tl.indexOf('_pceDragHoldStart()');
+    const assign = tl.indexOf('_rqTlDrag = {');
     const select = tl.indexOf("_pceSelect('overlays')");
-    assert.notStrictEqual(hold, -1);
+    assert.notStrictEqual(assign, -1);
     assert.notStrictEqual(select, -1);
-    assert.ok(hold < select, 'the hold must be taken before anything that can repaint the list');
+    assert.ok(assign < select, 'the drag must exist before anything that can repaint the list');
+});
+
+check('a drag that never reaches the host still ends', () => {
+    // Both drags defer repaints, so one that never ends freezes the panel with no error anywhere.
+    // The window runs the SAME end handler, so a stray release still saves what the drag did.
+    for (const [from, to] of [
+        ['function _rqBindTimeline() {', '\nasync function openPostReview('],
+        ['function _pceBindClipTrim() {', '/** Move the lit section'],
+    ] as const) {
+        const fn = slice(from, to);
+        assert.ok(fn.includes("window.addEventListener('pointerup', end)"), `no window safety net in ${from}`);
+        assert.ok(fn.includes("window.addEventListener('pointercancel', end)"), `no cancel safety net in ${from}`);
+    }
 });
 
 check('a dead rect is never read as "dragged to the end"', () => {
@@ -846,9 +864,52 @@ check('a dead rect is never read as "dragged to the end"', () => {
 check('the release repaints rather than deferring the repaint it came to do', () => {
     const tl = slice('function _rqBindTimeline() {', '\nasync function openPostReview(');
     const at = tl.indexOf('const end = () => {');
-    const end = tl.slice(at, at + 500);
-    assert.ok(end.indexOf('_pceDragHoldEnd()') < end.indexOf('_rqRenderTimeline('),
-        'the hold must be released before the repaint, or that repaint is deferred to nothing');
+    const end = tl.slice(at, at + 600);
+    assert.ok(end.indexOf('_rqTlDrag = null') < end.indexOf('_rqRenderTimeline('),
+        'the drag must be cleared before the repaint, or that repaint is deferred to nothing');
+    assert.ok(end.includes('_pceClipsRepaintPending = false'),
+        'the deferred repaint should be consumed by this one, not run twice');
+});
+
+console.log('\nremoving a text box, and lining it up with the clip it is on');
+
+check('every text row can be deleted from the post editor', () => {
+    // It was only possible inside the text editor: open a modal, find the right box among several
+    // on several clips, delete it there. It is a layer in a list, and the list deletes.
+    const at = only(workspace, 'const del = kind === ', 'workspace.html');
+    const del = workspace.slice(at, at + 500);
+    assert.ok(del.includes("kind === 'text'"), 'sound rows must not offer a text delete');
+    assert.ok(del.includes('window._pceOverlayRemove('), 'the button is not wired');
+    const fn = slice('window._pceOverlayRemove = function (key) {', 'window._pceClipTrim = function');
+    assert.ok(fn.includes('window.confirm'), 'typed words deleted with no question asked');
+    assert.ok(fn.includes('_rqPersistOverlays('), 'the deletion is never saved');
+    assert.ok(fn.includes('_rqRenderCanvasOverlays('), 'the box stays on the picture');
+    // Older overlays have no id and are keyed by index — both must resolve, or a row deletes a
+    // different box from the one it draws.
+    assert.ok(fn.includes('o.id === key'), 'id rows are not resolved');
+    assert.ok(fn.includes('Number(key)'), 'index-keyed rows are not resolved');
+});
+
+check('a text bar is the same box as the clip slider above it', () => {
+    // The label used to sit in a 4rem column to the LEFT of the track, so a text bar started 4.5rem
+    // in while the clip's trim slider started at the edge — two bars over the same clip on two
+    // different margins, which is the one comparison a timeline exists to make.
+    const at = only(workspace, 'const within = sub ?', 'workspace.html');
+    const row = workspace.slice(at, at + 1600);
+    assert.ok(!row.includes('w-16 shrink-0 truncate'), 'the label is back in a left-hand column');
+    assert.ok(!row.includes('ml-[4.5rem]'), 'the seconds line is still indented past the bar');
+    assert.ok(row.includes('<div class="relative h-6 rounded bg-gray-100" data-tl-track>'),
+        'the track is no longer full width');
+    // The block supplies the same px-1 inset _pceTrimTrackHtml uses, so both boxes match.
+    const block = slice('function _pceTimedBlock(inner) {', '/**\n * Everything that used to repaint');
+    assert.ok(block.includes("'<div class=\"px-1 pb-1\" data-tl-group>'"), 'the inset no longer matches the clip slider');
+    assert.ok(only(workspace, 'function _pceTrimTrackHtml(clip) {', 'workspace.html') > 0);
+});
+
+check('the panel is called Timeline', () => {
+    const at = only(workspace, "const heading = ", 'workspace.html');
+    assert.ok(workspace.slice(at, at + 60).includes("'Timeline'"));
+    assert.strictEqual(workspace.indexOf('Clips &amp; timeline'), -1, 'the old heading is back');
 });
 
 console.log(`\n${passed} checks passed`);

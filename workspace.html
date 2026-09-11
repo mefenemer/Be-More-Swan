@@ -6630,12 +6630,27 @@ function _rqTimelineParts(post) {
         const esc = _rqEsc(label);
         // The seconds, under the row, exactly as each clip states its own. A bar without numbers is
         // a shape — you can see that one box is later than another, but not when either happens.
-        const within = sub ? `<span class="ml-[4.5rem] block text-[10px] text-gray-400" style="font-variant-numeric:tabular-nums">${sub}</span>` : '';
+        // ── Same shape as a clip's own row, deliberately ────────────────────────────────────────
+        // The label used to sit in a 4rem column to the LEFT of the track, so a text bar started
+        // 4.5rem in while the clip slider above it started at the edge. Two bars over the same clip,
+        // on two different left margins, and the eye cannot compare them — which is the one thing a
+        // timeline is for. Name above, bar below, one box wide: it now lines up with the slider that
+        // decides how long that clip lasts.
+        const within = sub ? `<p class="mt-0.5 text-[10px] text-gray-400" style="font-variant-numeric:tabular-nums">${sub}</p>` : '';
+        // Removing a box was only possible inside the text editor — you had to open a modal, find
+        // the right box among several and delete it there. It is a layer in a list; the list deletes.
+        const del = kind === 'text'
+            ? `<button type="button" title="Remove this text" aria-label="Remove ${esc}"
+                 class="px-1 text-gray-300 hover:text-red-600 cursor-pointer leading-none"
+                 onclick="window._pceOverlayRemove('${_rqEsc(key)}')">&times;</button>`
+            : '';
         return `
           <div data-tl-row="${_rqEsc(key)}">
-          <div class="flex items-center gap-2">
-            <span class="w-16 shrink-0 truncate text-[10px] font-semibold text-gray-500" title="${esc}">${esc}</span>
-            <div class="relative flex-1 h-6 rounded bg-gray-100" data-tl-track>
+            <div class="flex items-center gap-1.5">
+              <span class="flex-1 min-w-0 truncate text-[10px] font-semibold text-gray-500" title="${esc}">${esc}</span>
+              ${del}
+            </div>
+            <div class="relative h-6 rounded bg-gray-100" data-tl-track>
               <div class="absolute inset-y-0 rounded cursor-grab flex items-center justify-between"
                    style="left:${leftPct}%;width:${widthPct}%;background:${selected ? c.on : c.off}"
                    data-tl-seg="${_rqEsc(key)}" data-tl-kind="${kind}" title="${fmt(start)} – ${fmt(end)}">
@@ -6643,8 +6658,7 @@ function _rqTimelineParts(post) {
                 <span class="w-1.5 h-full rounded-r cursor-ew-resize" style="background:${c.edge}" data-tl-edge="end"></span>
               </div>
             </div>
-          </div>
-          ${within}
+            ${within}
           </div>`;
     };
 
@@ -6715,9 +6729,13 @@ function _rqTimelineParts(post) {
  */
 function _pceTimedBlock(inner) {
     if (!inner) return '';
-    return '<div class="relative pb-1" data-tl-group>' + inner
+    // px-1 on the OUTSIDE, matching _pceTrimTrackHtml's wrapper, so a text bar and the trim slider
+    // above it are the same box. The playhead sits in an inner unpadded relative box — positioned
+    // against the padding edge it would sit 4px off the tracks it is supposed to point at.
+    return '<div class="px-1 pb-1" data-tl-group>'
+        + '<div class="relative space-y-1">' + inner
         + '<div class="absolute top-0 bottom-0 w-px bg-gray-800 pointer-events-none" style="left:0" data-playhead></div>'
-        + '</div>';
+        + '</div></div>';
 }
 
 /**
@@ -7072,12 +7090,30 @@ const _pceTrimDrag = { on: false, id: null, edge: null, clips: null };
  * now enforced here rather than merely written down. A repaint asked for during a drag is not
  * dropped: it is deferred to the release, which is when the drag wanted to repaint anyway.
  */
-let _pceDragHold = 0;
 let _pceClipsRepaintPending = false;
-function _pceDragHoldStart() { _pceDragHold++; }
-function _pceDragHoldEnd() {
-    _pceDragHold = Math.max(0, _pceDragHold - 1);
-    if (_pceDragHold === 0 && _pceClipsRepaintPending) { _pceClipsRepaintPending = false; _pceRenderClips(); }
+
+/**
+ * ⚠️ DERIVED, never counted.
+ *
+ * This was a counter — incremented on pointerdown, decremented on release. A counter is only ever
+ * as good as its releases, and two pointerdowns without two releases (a stray second press, a
+ * pointerup swallowed anywhere) leave it stuck above zero FOREVER. At which point _pceRenderClips
+ * silently stops repainting for the rest of the session: trims still look right mid-drag, because
+ * _pceTrimPaint mutates styles rather than re-rendering, but nothing that needs a repaint works
+ * again — "Preview the whole cut" never becomes "Stop preview", so both buttons look dead.
+ *
+ * Reading the drag objects instead makes that impossible: the hold lasts exactly as long as a drag
+ * exists, because it IS the drag existing.
+ */
+function _pceDragActive() {
+    return _pceTrimDrag.on === true || _rqTlDrag != null;
+}
+
+/** Run a repaint that a drag deferred. Safe to call when there was none. */
+function _pceFlushClipsRepaint() {
+    if (!_pceClipsRepaintPending || _pceDragActive()) return;
+    _pceClipsRepaintPending = false;
+    _pceRenderClips();
 }
 
 /** Seconds of source under a pointer, clamped to the clip's own length. */
@@ -7101,7 +7137,6 @@ function _pceBindClipTrim() {
         const track = handle.closest('[data-trim-track]');
         if (!track) return;
         _pceTrimDrag.on = true;
-        _pceDragHoldStart();
         _pceTrimDrag.id = track.getAttribute('data-trim-track');
         _pceTrimDrag.edge = handle.getAttribute('data-trim-edge');
         _pceTrimDrag.clips = _pceClips().map(c => Object.assign({}, c));
@@ -7146,7 +7181,7 @@ function _pceBindClipTrim() {
         if (!_pceTrimDrag.on) return;
         const clips = _pceTrimDrag.clips;
         _pceTrimDrag.on = false;
-        _pceDragHoldEnd();
+        _pceFlushClipsRepaint();
         _pceTrimDrag.id = null;
         _pceTrimDrag.edge = null;
         _pceTrimDrag.clips = null;
@@ -7157,6 +7192,10 @@ function _pceBindClipTrim() {
     };
     host.addEventListener('pointerup', end);
     host.addEventListener('pointercancel', end);
+    // Same safety net as the timeline's, and for the same reason — see the note there. Running the
+    // same `end` means a release that never reached the host still saves the trim.
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
 }
 
 /** Move the lit section and its handles without rebuilding the row. */
@@ -7281,6 +7320,37 @@ window._pceClipRemove = function (index) {
     _pceClipsChanged(clips);
 };
 
+/**
+ * Delete a text box from the post editor.
+ *
+ * Until now the only way to remove one was to open the text editor, find the right box among
+ * several — on several clips, most of which are not even on screen at once — and delete it there.
+ * A box is a layer in a list, and every other layer in that list can be removed from it.
+ *
+ * `key` is what the row carries: the overlay's id, or its INDEX for the older rows that predate
+ * ids. Both are resolved the same way _rqTimelineItem resolves a drag, so a row can never delete a
+ * different box from the one it draws.
+ */
+window._pceOverlayRemove = function (key) {
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    if (!post || !Array.isArray(post.overlays)) return;
+    let i = post.overlays.findIndex((o) => o && o.id === key);
+    if (i < 0 && /^\d+$/.test(String(key))) i = Number(key);
+    const ov = post.overlays[i];
+    if (!ov) return;
+    const what = String(ov.text || '').split('\n')[0].trim();
+    // Typed words, and nothing here can bring them back — unlike a clip, which is re-addable from
+    // the library in two clicks. Worth one question.
+    if (!window.confirm(what ? `Remove the text "${what.slice(0, 40)}"?` : 'Remove this text box?')) return;
+    post.overlays.splice(i, 1);
+    if (_pceSelectedOverlayId && _pceSelectedOverlayId === (ov.id || String(i))) _pceSelectedOverlayId = null;
+    _rqPersistOverlays(postId);
+    _rqRenderCanvasOverlays(post);   // off the picture as well as out of the list
+    _rqRenderTimeline(post);
+    if (typeof _pceRefreshOverlayTiming === 'function') _pceRefreshOverlayTiming();
+};
+
 window._pceClipTrim = function (index, field, raw) {
     const clips = _pceClips().map((c) => Object.assign({}, c));
     const c = clips[index];
@@ -7305,8 +7375,8 @@ window._pceClipTrim = function (index, field, raw) {
 function _pceRenderClips(clipsOverride) {
     const host = document.getElementById('pce-clips-block');
     if (!host) return;
-    // See _pceDragHold: repainting now would tear the node out from under the pointer.
-    if (_pceDragHold > 0) { _pceClipsRepaintPending = true; return; }
+    // See _pceDragActive: repainting now would tear the node out from under the pointer.
+    if (_pceDragActive()) { _pceClipsRepaintPending = true; return; }
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
     const clips = clipsOverride || _pceClips(post);
     // The timed rows that used to be a Timeline panel of their own, now folded in under the clip
@@ -7356,7 +7426,7 @@ function _pceRenderClips(clipsOverride) {
             // "No text" is stated rather than left blank: an empty gap under clip 3 and an empty gap
             // under a clip whose text has drifted off the end look identical.
             + _pceTimedBlock(tl.byClip[i]
-                || '<p class="ml-[4.5rem] text-[10px] text-gray-300">No text on this clip</p>')
+                || '<p class="text-[10px] text-gray-300">No text on this clip</p>')
             + '</div>';
     }).join('');
 
@@ -7364,7 +7434,7 @@ function _pceRenderClips(clipsOverride) {
     // One heading over one list. It was "Clips" here and "Timeline" below, each enumerating the same
     // four clips — once as things to trim, once as headings over their text — leaving the reader to
     // join them up by name.
-    const heading = clips.length ? 'Clips &amp; timeline' : 'Timeline';
+    const heading = 'Timeline';
     const tail = tl.orphans || tl.audio
         // Sound is not per-clip: it plays across the cut, so it sits after the list rather than under
         // any one clip. Orphans join it — a box whose start no longer lands in any clip belongs to
@@ -7705,20 +7775,15 @@ function _rqBindTimeline() {
         const edge = ev.target.closest('[data-tl-edge]');
         const ov = _rqTimelineItem(kind, id);
         if (!ov) return;
-        // ⚠️ Before _pceSelect, not after. Selecting repaints the list this segment lives in, and
-        // the repaint would detach `seg` while we are still building the drag out of it — leaving
-        // the drag holding a node that is no longer on the page. Taken here, that repaint is
-        // deferred to the release instead.
-        _pceDragHoldStart();
         const dur = _rqTimelineDuration();
-        // Grabbing a track selects it, and selection drives which inspector you land in — grabbing a
-        // voice note must not open the text panel.
-        if (kind === 'audio') { _pceSelectedAudioId = ov.id || id; _pceSelect('audio'); }
-        else { _pceSelectedOverlayId = ov.id || id; _pceSelect('overlays'); }
         // Seed from what is DRAWN, not from what is stored. An unbounded audio clip is stored with no
         // end but occupies its own natural length on screen; seeding e0 from the axis would stretch a
         // six-second voice note to the length of the video the moment you nudged it.
         const seed = kind === 'audio' ? _pceAudioDrawRange(ov) : ov;
+        // ⚠️ The drag object FIRST, before _pceSelect below. _pceDragActive() reads this, and
+        // selecting repaints the list — so built the other way round, that repaint detaches `seg`
+        // while the drag is still being assembled out of it, and the drag ends up holding a node
+        // that is no longer on the page.
         _rqTlDrag = {
             seg, key: id, track: seg.closest('[data-tl-track]'), ov, dur, kind,
             mode: edge ? edge.getAttribute('data-tl-edge') : 'move',
@@ -7726,6 +7791,10 @@ function _rqBindTimeline() {
             s0: seed.startS == null ? 0 : seed.startS,
             e0: seed.endS == null ? dur : seed.endS,
         };
+        // Grabbing a track selects it, and selection drives which inspector you land in — grabbing a
+        // voice note must not open the text panel.
+        if (kind === 'audio') { _pceSelectedAudioId = ov.id || id; _pceSelect('audio'); }
+        else { _pceSelectedOverlayId = ov.id || id; _pceSelect('overlays'); }
         host.setPointerCapture(ev.pointerId);
         ev.preventDefault();
     });
@@ -7733,7 +7802,7 @@ function _rqBindTimeline() {
     host.addEventListener('pointermove', (ev) => {
         const d = _rqTlDrag;
         if (!d) return;
-        // Belt as well as braces. _pceDragHold stops the list repainting under us, but a zero-width
+        // Belt as well as braces. _pceDragActive stops the list repainting under us, but a zero-width
         // rect must never quietly become "dragged to the end of the axis" — that is the failure this
         // whole guard exists for, and it is silent. Re-find the node first; give up if it is gone.
         if (!d.track || !d.track.isConnected) {
@@ -7777,13 +7846,22 @@ function _rqBindTimeline() {
         _rqTlDrag = null;
         // Release the hold BEFORE repainting, or the repaint this drag came here to do is the one
         // that gets deferred — and deferred to nothing, because the drag is over.
-        _pceDragHoldEnd();
+        _pceClipsRepaintPending = false;   // the repaint below is the one that was deferred
         _rqRenderTimeline(_rqPostCache[_rqReviewPostId]);
         if (kind === 'audio') { _pceRenderAudioList(); _pcePersistAudio(_rqReviewPostId); }
         else _rqPersistOverlays(_rqReviewPostId);
     };
     host.addEventListener('pointerup', end);
     host.addEventListener('pointercancel', end);
+    // ── The safety net ──────────────────────────────────────────────────────────────────────────
+    // A drag defers the list's repaints while it runs, so a drag that never ends leaves the panel
+    // permanently frozen: buttons that never change label, text that never re-anchors, no error
+    // anywhere. The host's handlers cover every normal release, but only if the pointer sequence
+    // reaches the host. The window gets the last word — and it runs the SAME `end`, so a release
+    // that arrives this way still saves what the drag did. `end` no-ops when there is no drag, so
+    // firing twice on a normal release costs nothing.
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
 }
 
 async function openPostReview(postId, opts = {}) {
