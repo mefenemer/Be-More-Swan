@@ -393,6 +393,45 @@ check('every clip shows its slider — nothing is behind a tap', () => {
     assert.ok(!workspace.includes("window._pceSelectClip"), 'and no tap-to-reveal handler');
 });
 
+console.log('\ntext, per clip');
+
+check('overlays stay STORED in cut seconds — only the question changes', () => {
+    // The renderer times boxes against the finished video, and a box that spans a cut would have
+    // nowhere else to live. Storing per-clip would be a migration and a render change for a UI
+    // preference.
+    const at = only(workspace, 'function _pceClipSpans(post)', 'workspace.html');
+    const scope = workspace.slice(at, at + 900);
+    assert.ok(scope.includes('start: at, end: at + len'), 'spans are cut-relative');
+    assert.ok(scope.includes('spans.length > 1 ? spans : null'), 'one clip is not a cut');
+    assert.ok(scope.includes('return null'), 'and no honest span while a clip is still measuring');
+});
+
+check('moving text to another clip keeps how long it shows for', () => {
+    // "The same text, on the next clip" is what the move means — not "the same seconds".
+    const at = only(workspace, 'window._pceOverlayToClip = function', 'workspace.html');
+    const scope = workspace.slice(at, at + 1100);
+    assert.ok(scope.includes('const shown ='), 'its duration is measured before the move');
+    assert.ok(scope.includes('to.start +'), 'and re-based onto the new clip');
+    assert.ok(scope.includes('Math.min(to.end'), 'clamped inside that clip');
+});
+
+check('the text scrub saves once, on release, like every other drag here', () => {
+    const at = only(workspace, 'function _pceBindOverlayScrub()', 'workspace.html');
+    const rest = workspace.slice(at);
+    const move = rest.indexOf("addEventListener('pointermove'");
+    const endH = rest.indexOf('const end = () => {', move);
+    assert.ok(move > 0 && endH > move, 'both handlers should be present');
+    assert.ok(!rest.slice(move, endH).includes('_rqPersistOverlays('), 'no save on every move');
+    assert.ok(rest.slice(endH, endH + 500).includes('_rqPersistOverlays('), 'one save on release');
+});
+
+check('the clip chips are hidden on a post that is not a cut', () => {
+    // One clip has one answer to "which clip", and a row of one chip is noise.
+    const at = only(workspace, 'function _pceRenderOverlayClipUi(post, ov)', 'workspace.html');
+    const scope = workspace.slice(at, at + 700);
+    assert.ok(scope.includes("chipsWrap.classList.add('hidden')"), 'no spans, no chips');
+});
+
 console.log('\nthe crop frame');
 
 check('the crop panel exists and precedes the timeline', () => {

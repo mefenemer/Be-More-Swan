@@ -954,6 +954,24 @@ window.showComplianceModals = function showComplianceModals(force) {
               <!-- Text on video: when this box is on screen. -->
               <div id="insp-overlay-timing" class="hidden">
                 <p class="text-[11px] font-bold text-gray-600 mb-2 truncate">When: <span id="insp-overlay-timing-label" class="font-semibold text-gray-500"></span></p>
+                <!-- On a cut, "when" is two questions — which clip, and where in it. Seconds into a
+                     36-second finished video is not how anyone thinks about "over the bit where he
+                     turns round". Hidden on a single-clip post, where there is only one answer to
+                     the first question. -->
+                <div id="insp-overlay-clips" class="hidden mb-2">
+                  <span class="block text-[10px] font-bold text-gray-500 mb-1">On which clip</span>
+                  <div id="insp-overlay-clip-chips" class="flex flex-wrap gap-1"></div>
+                </div>
+                <div id="insp-overlay-scrub" class="hidden mb-2">
+                  <div class="relative h-7 rounded bg-gray-100 overflow-hidden select-none" data-ovt-track>
+                    <div class="absolute inset-y-0" data-ovt-shown style="background:rgba(236,72,153,.25)"></div>
+                    <span data-ovt-edge="start" role="slider" tabindex="0" aria-label="When the text appears"
+                      class="absolute top-0 bottom-0 w-2 -ml-1 rounded cursor-ew-resize" style="background:#ec4899"></span>
+                    <span data-ovt-edge="end" role="slider" tabindex="0" aria-label="When the text disappears"
+                      class="absolute top-0 bottom-0 w-2 -ml-1 rounded cursor-ew-resize" style="background:#ec4899"></span>
+                  </div>
+                  <p class="mt-0.5 text-[10px] text-gray-500" data-ovt-label style="font-variant-numeric:tabular-nums"></p>
+                </div>
                 <div class="grid grid-cols-2 gap-2">
                   <label class="block">
                     <span class="block text-[10px] font-bold text-gray-500 mb-0.5">Start (s)</span>
@@ -966,7 +984,7 @@ window.showComplianceModals = function showComplianceModals(force) {
                       class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-600">
                   </label>
                 </div>
-                <p class="text-[10px] text-gray-400 mt-1.5">Leave a field blank for the whole clip. Or drag the ends on the track above.</p>
+                <p class="text-[10px] text-gray-400 mt-1.5">Seconds into the finished video. Leave a field blank for the whole thing.</p>
               </div>
 
               <!-- Sound: when this clip plays, and how loud. -->
@@ -11745,6 +11763,164 @@ function _pceResetOverlayApplyAll() {
 // The per-box Start/End controls. Shown only for a video with a box selected; seeded from that box
 // and wired (once) to write straight to the cache, repaint the canvas + timeline, and persist.
 let _pceOverlayTimingBound = false;
+/**
+ * ── "Which clip, and where in it" ───────────────────────────────────────────────────────────────
+ *
+ * Overlays are STORED in seconds of the finished video, and they must be: that is what the renderer
+ * times them against, and a box that spans a cut would have nowhere else to live. But nobody thinks
+ * "22.4 seconds into the reel" — they think "over the bit in the third clip where he turns round".
+ *
+ * So the storage is untouched and only the question changes. The chips pick a clip, the track spans
+ * THAT clip, and the two are converted on the way in and out. Moving a box to another clip keeps
+ * its length and re-bases it, because "the same text, on the next clip" is what the move means.
+ */
+function _pceClipSpans(post) {
+    const clips = _pceClips(post);
+    const spans = [];
+    let at = 0;
+    for (let i = 0; i < clips.length; i++) {
+        const len = _pceClipLength(clips[i]);
+        if (len == null) return null;          // still measuring — no honest span to offer
+        spans.push({ i, clip: clips[i], start: at, end: at + len, len });
+        at += len;
+    }
+    return spans.length > 1 ? spans : null;    // one clip is not a cut; the plain fields are enough
+}
+
+/** The clip a moment of the finished video falls in. */
+function _pceSpanAt(spans, t) {
+    if (!spans) return null;
+    for (const sp of spans) if (t < sp.end - 0.001) return sp;
+    return spans[spans.length - 1];
+}
+
+const _pceOvtDrag = { on: false, edge: null };
+
+/** Paint the chips and the track for the selected overlay. */
+function _pceRenderOverlayClipUi(post, ov) {
+    const chipsWrap = document.getElementById('insp-overlay-clips');
+    const chipHost = document.getElementById('insp-overlay-clip-chips');
+    const scrub = document.getElementById('insp-overlay-scrub');
+    if (!chipsWrap || !chipHost || !scrub) return;
+
+    const spans = _pceClipSpans(post);
+    if (!spans) { chipsWrap.classList.add('hidden'); scrub.classList.add('hidden'); return; }
+    chipsWrap.classList.remove('hidden');
+    scrub.classList.remove('hidden');
+
+    const start = ov.startS == null ? 0 : ov.startS;
+    const sp = _pceSpanAt(spans, start);
+
+    chipHost.innerHTML = spans.map(x => '<button type="button" onclick="window._pceOverlayToClip(' + x.i + ')"'
+        + ' class="px-2 py-0.5 rounded-md text-[10px] font-bold border transition cursor-pointer '
+        + (x.i === sp.i ? 'border-pink-400 bg-pink-50 text-pink-700' : 'border-gray-200 text-gray-500 hover:border-gray-300')
+        + '">Clip ' + (x.i + 1) + '</button>').join('');
+
+    _pcePaintOverlayScrub(post, ov);
+}
+
+/** Move the two handles and the read-out, without rebuilding anything. */
+function _pcePaintOverlayScrub(post, ov) {
+    const spans = _pceClipSpans(post);
+    const track = document.querySelector('#insp-overlay-scrub [data-ovt-track]');
+    if (!spans || !track) return;
+    const start = ov.startS == null ? 0 : ov.startS;
+    const sp = _pceSpanAt(spans, start);
+    const end = ov.endS == null ? sp.end : Math.min(ov.endS, sp.end);
+    const a = Math.max(0, (start - sp.start) / sp.len);
+    const b = Math.min(1, (end - sp.start) / sp.len);
+    const shown = track.querySelector('[data-ovt-shown]');
+    if (shown) { shown.style.left = (a * 100) + '%'; shown.style.width = Math.max(0, (b - a) * 100) + '%'; }
+    const s1 = track.querySelector('[data-ovt-edge="start"]');
+    const s2 = track.querySelector('[data-ovt-edge="end"]');
+    if (s1) s1.style.left = (a * 100) + '%';
+    if (s2) s2.style.left = (b * 100) + '%';
+    const lbl = document.querySelector('#insp-overlay-scrub [data-ovt-label]');
+    if (lbl) {
+        lbl.textContent = `Clip ${sp.i + 1} · ${_pceFmtS((start - sp.start))} → ${_pceFmtS(end - sp.start)} of it`
+            + `  (${_pceFmtS(start)} → ${_pceFmtS(end)} of the whole cut)`;
+    }
+}
+
+/** Put this text on another clip, keeping how long it shows for. */
+window._pceOverlayToClip = function (index) {
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const ov = post && (post.overlays || []).find(o => o && o.id === _pceSelectedOverlayId);
+    const spans = _pceClipSpans(post);
+    if (!ov || !spans || !spans[index]) return;
+    const from = _pceSpanAt(spans, ov.startS == null ? 0 : ov.startS);
+    const to = spans[index];
+    const within = (ov.startS == null ? 0 : ov.startS) - from.start;
+    const shown = (ov.endS == null ? from.end : ov.endS) - (ov.startS == null ? 0 : ov.startS);
+    ov.startS = to.start + Math.min(within, Math.max(0, to.len - 0.2));
+    ov.endS = Math.min(to.end, ov.startS + Math.max(0.2, shown));
+    if (ov.startS <= 0.001) ov.startS = undefined;
+    _rqPersistOverlays(post.id);
+    _pceRefreshOverlayTiming();
+    _rqRenderTimeline(post);
+};
+
+function _pceBindOverlayScrub() {
+    const host = document.getElementById('insp-overlay-scrub');
+    if (!host || host.dataset.ovtBound === '1') return;
+    host.dataset.ovtBound = '1';
+
+    const current = () => {
+        const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+        const ov = post && (post.overlays || []).find(o => o && o.id === _pceSelectedOverlayId);
+        const spans = _pceClipSpans(post);
+        if (!ov || !spans) return null;
+        return { post, ov, spans, sp: _pceSpanAt(spans, ov.startS == null ? 0 : ov.startS) };
+    };
+
+    host.addEventListener('pointerdown', (ev) => {
+        const h = ev.target.closest && ev.target.closest('[data-ovt-edge]');
+        if (!h) return;
+        _pceOvtDrag.on = true;
+        _pceOvtDrag.edge = h.getAttribute('data-ovt-edge');
+        h.setPointerCapture && h.setPointerCapture(ev.pointerId);
+        ev.preventDefault();
+    });
+
+    host.addEventListener('pointermove', (ev) => {
+        if (!_pceOvtDrag.on) return;
+        const c = current();
+        const track = host.querySelector('[data-ovt-track]');
+        if (!c || !track) return;
+        const box = track.getBoundingClientRect();
+        if (!box.width) return;
+        const f = Math.min(1, Math.max(0, (ev.clientX - box.left) / box.width));
+        const t = c.sp.start + f * c.sp.len;
+        const MIN = 0.2;
+        if (_pceOvtDrag.edge === 'start') {
+            const end = c.ov.endS == null ? c.sp.end : c.ov.endS;
+            c.ov.startS = Math.min(t, end - MIN);
+            if (c.ov.startS <= c.sp.start + 0.001 && c.sp.i === 0) c.ov.startS = undefined;
+        } else {
+            c.ov.endS = Math.max(t, (c.ov.startS == null ? c.sp.start : c.ov.startS) + MIN);
+        }
+        // Paint only — a save per pointermove, and re-rendering the panel under the pointer, are the
+        // two traps the clip trim and the crop frame already avoid the same way. The canvas is not
+        // repainted here on purpose: the box's visibility follows the playhead, and during a drag
+        // the video is wherever it was left, so forcing a repaint would show the box appearing and
+        // disappearing for a moment that is not the one being set.
+        _pcePaintOverlayScrub(c.post, c.ov);
+    });
+
+    const end = () => {
+        if (!_pceOvtDrag.on) return;
+        _pceOvtDrag.on = false;
+        _pceOvtDrag.edge = null;
+        const c = current();
+        if (!c) return;
+        _rqPersistOverlays(c.post.id);          // one save, on release
+        _pceRefreshOverlayTiming();
+        _rqRenderTimeline(c.post);
+    };
+    host.addEventListener('pointerup', end);
+    host.addEventListener('pointercancel', end);
+}
+
 function _pceRefreshOverlayTiming() {
     const wrap = _pceEl('insp-overlay-timing');
     if (!wrap) return;
@@ -11759,6 +11935,8 @@ function _pceRefreshOverlayTiming() {
     _pceSyncStageTimingBox();
     const lbl = _pceEl('insp-overlay-timing-label');
     if (lbl) lbl.textContent = (ov.text || 'Text').split('\n')[0].slice(0, 30);
+    _pceRenderOverlayClipUi(post, ov);
+    _pceBindOverlayScrub();
     const startEl = _pceEl('insp-overlay-start');
     const endEl = _pceEl('insp-overlay-end');
     if (startEl) startEl.value = ov.startS == null ? '' : (Math.round(ov.startS * 10) / 10);
