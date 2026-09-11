@@ -702,4 +702,64 @@ check('the page still uses this exact formula', () => {
     only(workspace, 'const hFrac = sourceAspect > rt ? 1 : sourceAspect / rt;', 'workspace.html');
 });
 
+
+// ── The clip controls must be FINDABLE, not merely present ──────────────────────────────────────
+// "The Shows on clip section has disappeared" was reported three times. The section was rendered
+// correctly every time. It was at the BOTTOM of a 300px column, below seven styling rows, in a
+// panel that scrolled with the whole modal — so on a laptop it was off-screen, which on the user's
+// side is indistinguishable from not existing. These checks pin the two properties that fix cost
+// hours to establish: the section is unconditional, and it is above the styling.
+
+console.log('\nthe text editor puts the clip controls where they can be seen');
+
+check('"When it shows" renders for every post — a photo gets an explanation, not silence', () => {
+    // sect() drops a section whose body is empty, so timingRow must never return ''. Each of the
+    // three reasons the controls are absent has to say which one it is.
+    const i = only(ioe, 'function timingRow(ov) {', 'image-overlay-editor.js');
+    const body = ioe.slice(i, ioe.indexOf('\n    function ', i + 10));
+    assert.ok(!/return\s*''/.test(body), 'timingRow returns an empty string somewhere — that hides the whole section');
+    assert.ok(/photo post/i.test(body), 'no message for a still');
+    assert.ok(/One clip/i.test(body), 'no message for a single-clip video');
+    assert.ok(/Reading the clips/i.test(body), 'no message for clips that have not measured yet');
+});
+
+check('both video sections sit above the styling controls', () => {
+    const when = only(ioe, "sect('when', 'When it shows'", 'image-overlay-editor.js');
+    const anim = only(ioe, "sect('anim', 'How it appears'", 'image-overlay-editor.js');
+    const font = only(ioe, '<label>Font</label>', 'image-overlay-editor.js');
+    const del = only(ioe, 'class="ioe-btn danger block" data-act="delete"', 'image-overlay-editor.js');
+    assert.ok(when < font, '"When it shows" is below the font picker again');
+    assert.ok(anim < font, '"How it appears" is below the font picker again');
+    assert.ok(when < del && anim < del, 'the sections drifted back to the bottom of the panel');
+});
+
+check('the side panel scrolls on its own', () => {
+    // Without this the column is as tall as its content and only the modal body scrolls, which
+    // drags the picture you are positioning text against off the screen.
+    const css = ioe.slice(only(ioe, '.ioe-side{', 'image-overlay-editor.js'));
+    const rule = css.slice(0, css.indexOf('}'));
+    assert.ok(rule.includes('overflow-y:auto'), '.ioe-side no longer scrolls');
+    assert.ok(rule.includes('min-height:0'), 'a flex child needs min-height:0 before overflow does anything');
+});
+
+check('the panel rows cannot be squashed to a hairline', () => {
+    // THE bug behind three "the section has disappeared" reports. A column flex container shrinks
+    // its children rather than scrolling, and .ioe-sect is overflow:hidden — so it collapses to
+    // ~1px while the DOM, the text and every assertion about it stay perfectly correct.
+    only(ioe, '.ioe-side > *{flex-shrink:0}', 'image-overlay-editor.js');
+});
+
+check('every local component script is cache-busted at build time', () => {
+    // /src/components/*.js carried no version of any kind, so a tab could keep running an old
+    // component under current HTML — a feature "disappearing" with no trace in the deploy.
+    const stamper = readFileSync(join(root, 'scripts/stamp-view-version.mjs'), 'utf8');
+    only(stamper, 'function stampLocalScripts(', 'stamp-view-version.mjs');
+    assert.ok(/src=/.test(stamper), 'the stamper no longer looks at script src attributes');
+    assert.ok(stamper.includes("src.includes('?')"), 'manual ?v= pins must be left alone');
+    assert.ok(/https\?:/.test(stamper), 'CDN urls must be skipped');
+    // And it has to actually run on deploy.
+    const toml = readFileSync(join(root, 'netlify.toml'), 'utf8');
+    assert.ok(/command = "[^"]*build:version/.test(toml), 'build:version dropped out of the Netlify build command');
+});
+
 console.log(`\n${passed} checks passed`);

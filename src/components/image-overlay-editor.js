@@ -260,7 +260,18 @@
       .ioe-stage img,.ioe-stage video{display:block;max-width:100%;max-height:64vh;pointer-events:none}
       .ioe-ov{position:absolute;line-height:${LINE_HEIGHT};white-space:pre;cursor:move;box-sizing:border-box;transform:translate(-50%,-50%);overflow:visible}
       .ioe-ov.sel{outline:2px dashed #ec4899;outline-offset:3px}
-      .ioe-side{flex:0 0 300px;display:flex;flex-direction:column;gap:12px}
+      /* Scrolls on its own, so browsing the controls does not drag the picture off-screen —
+         and so the rows below the fold are reachable without scrolling the whole modal. */
+      .ioe-side{flex:0 0 300px;display:flex;flex-direction:column;gap:12px;min-height:0;overflow-y:auto;padding-right:4px}
+      /* ⚠️ flex-shrink:0, and it is load-bearing.
+         A column flex container whose content is taller than it is shrinks EVERY child to make it
+         fit — it does not scroll first. .ioe-sect is overflow:hidden, so it has no minimum and
+         collapses to a hairline, while a textarea or a <select> holds its intrinsic height and
+         looks untouched. The result is a section that is present in the DOM, correctly built, with
+         the right text inside it, and about one pixel tall: "the section has disappeared",
+         reported three times, every investigation finding the markup perfect. Without this line the
+         overflow-y above never engages, because there is never any overflow left to scroll. */
+      .ioe-side > *{flex-shrink:0}
       .ioe-side.empty{align-items:stretch}
       .ioe-row{display:flex;flex-direction:column;gap:5px}
       .ioe-row label{font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.03em}
@@ -649,6 +660,14 @@
           </div>
           <div class="ioe-emojis" data-emojis>${EMOJIS.map((em) => `<button type="button" data-em="${em}">${em}</button>`).join('')}</div>
         </div>
+        <!-- ── Above the styling, deliberately ──────────────────────────────────────────────
+             On a video the question "which clip, and when" is the one being answered; the colour
+             of the box is not. These sat at the BOTTOM of the panel, below seven styling rows, in
+             a column that scrolls with the whole modal body — so on a laptop they were off-screen
+             unless you knew to scroll for them, and "the section has disappeared" was reported
+             three times over. Being rendered is not the same as being findable. -->
+        ${sect('when', 'When it shows', timingRow(ov))}
+        ${sect('anim', 'How it appears', animRow(ov))}
         <div class="ioe-row">
           <label>Font</label>
           <select data-f="fontFamily">${FONTS.map((f) => `<option value="${f.id}"${f.id === ov.fontFamily ? ' selected' : ''} style="font-family:${f.stack}">${f.label}</option>`).join('')}</select>
@@ -679,8 +698,6 @@
           <label>Background transparency — ${transparencyPct}%</label>
           <input type="range" data-f="transparency" min="0" max="100" step="1" value="${transparencyPct}" ${ov.boxFill ? '' : 'disabled'}>
         </div>
-        ${sect('when', 'When it shows', timingRow(ov))}
-        ${sect('anim', 'How it appears', animRow(ov))}
         <button class="ioe-btn danger block" data-act="delete">Delete this overlay</button>
       `;
       wireSide(ov);
