@@ -6937,32 +6937,93 @@ function _pcePreviewTick(video) {
     const clip = clips[_pcePrev.i];
     if (!clip) return _pcePreviewStop();
     const out = clip.outS != null ? clip.outS
-        : (_pceClipDurations[clip.assetId] != null ? _pceClipDurations[clip.assetId] : video.duration);
+        : (_pceClipFullLength(clip) != null ? _pceClipFullLength(clip) : video.duration);
     if (!(out > 0) || video.currentTime < out - 0.03) return;
     if (_pcePrev.i + 1 < clips.length) _pcePreviewSeat(_pcePrev.i + 1);
     else _pcePreviewStop();
 }
 
 /** Seconds this clip contributes, or null while its length is still unknown. */
+/**
+ * The clip's SOURCE length — the whole file, before any trim. Null when nobody knows it yet.
+ *
+ * Two places can know: content_assets.durationS, stamped by whatever uploaded or rendered the
+ * asset, and a measurement this browser took off a <video> element. Neither is guaranteed —
+ * durationS is NULL on every asset that arrived without one (a Pexels clip, most notably), and the
+ * measurement needs the clip's url to still be fetchable.
+ */
+function _pceClipFullLength(c) {
+    const measured = _pceClipDurations[c.assetId];
+    if (measured != null) return measured;
+    return c.sourceDurationS != null ? c.sourceDurationS : null;
+}
+
+/**
+ * The axis a trim slider is drawn against, and whether it is the real one.
+ *
+ * ⚠️ This exists because the slider used to be drawn against the source length ALONE, so a clip
+ * whose length could not be read had no slider at all — just "Reading this clip…", forever. The
+ * rest of the panel carried on looking perfect, because every other number (the row's duration,
+ * the timeline, the cut total) comes from the stored `outS`, which needs no measurement. A user
+ * sees a full, correct, numbered timeline and no way to trim anything, and reports the sliders as
+ * missing — which is exactly what they are.
+ *
+ * So: fall back to what the clip itself already tells us. If it is trimmed to 6s, then it is at
+ * LEAST 6s long, and a slider over 0–6s is draggable, honest and useful. `provisional` says the far
+ * end is a floor rather than the end of the file, which the caller must respect — see the
+ * `outS = undefined` rule in _pceBindClipTrim.
+ */
+function _pceTrimAxis(c) {
+    const full = _pceClipFullLength(c);
+    if (full > 0) return { len: full, provisional: false };
+    if (c.outS > 0) return { len: c.outS, provisional: true };
+    return { len: null, provisional: false };
+}
+
 function _pceClipLength(c) {
-    const full = _pceClipDurations[c.assetId] != null ? _pceClipDurations[c.assetId] : c.sourceDurationS;
+    const full = _pceClipFullLength(c);
     const inS = c.inS || 0;
     if (c.outS != null) return Math.max(0, c.outS - inS);
     if (full == null) return null;
     return Math.max(0, full - inS);
 }
 
-/** Read a clip's real length once, then redraw — the trim inputs mean nothing without it. */
+/** In flight right now. ⚠️ A separate set, not a null in _pceClipDurations — see below. */
+const _pceClipMeasuring = new Set();
+/** Asked, and the browser could not answer. Drives the message instead of an endless "Reading…". */
+const _pceClipMeasureFailed = new Set();
+
+/**
+ * Read a clip's real length once, then redraw — the trim slider means nothing without it.
+ *
+ * ⚠️ The in-flight marker used to be `_pceClipDurations[id] = null`, guarded by `!= null`. `null
+ * != null` is FALSE, so the guard never fired: every repaint of the panel started a fresh <video>
+ * for every clip still being measured, and a clip whose url does not load was re-fetched on every
+ * render for as long as the post stayed open. It also swallowed the failure — onerror did nothing
+ * but clear the src — so the panel said "Reading this clip…" forever with no way to tell a slow
+ * clip from a dead one.
+ *
+ * What it learns is also worth keeping. content_assets.durationS is NULL on every asset that
+ * arrived without one (a Pexels clip has no duration stamped on it), so without this the length is
+ * re-measured from scratch every session and is only ever as reliable as the url still being
+ * fetchable. Reporting it makes the NEXT open need no measurement at all — the same write-once
+ * backfill _pceBackfillAssetMetrics uses for the canvas asset, which never saw clips.
+ */
 function _pceMeasureClips(clips) {
     for (const c of clips) {
-        if (!c.url || _pceClipDurations[c.assetId] != null) continue;
-        _pceClipDurations[c.assetId] = null;   // in flight; do not ask twice
+        if (!c.url) continue;
+        if (_pceClipDurations[c.assetId] != null) continue;
+        if (_pceClipMeasuring.has(c.assetId)) continue;
+        _pceClipMeasuring.add(c.assetId);
+        _pceClipMeasureFailed.delete(c.assetId);   // this attempt is allowed to succeed
         const v = document.createElement('video');
         v.preload = 'metadata';
         v.muted = true;
         v.onloadedmetadata = () => {
+            _pceClipMeasuring.delete(c.assetId);
             if (isFinite(v.duration) && v.duration > 0) {
                 _pceClipDurations[c.assetId] = v.duration;
+                _pceReportClipMetrics(c.assetId, v.videoWidth, v.videoHeight, v.duration);
                 _pceRenderClips();
                 // The axis IS the cut's total, so it grows as each clip reports its length. Without
                 // this the ruler stays at the first clip's duration until something else redraws it.
@@ -6975,7 +7036,14 @@ function _pceMeasureClips(clips) {
             }
             v.src = '';
         };
-        v.onerror = () => { v.src = ''; };
+        v.onerror = () => {
+            _pceClipMeasuring.delete(c.assetId);
+            _pceClipMeasureFailed.add(c.assetId);
+            v.src = '';
+            // Repaint, so the row can say so. Silence here is what made a dead clip and a slow one
+            // look identical.
+            _pceRenderClips();
+        };
         v.src = c.url;
     }
 }
@@ -7028,7 +7096,8 @@ function _pceBindClipTrim() {
         const clips = clipsNow();
         const clip = clips.find(c => c.id === _pceTrimDrag.id);
         if (!track || !clip) return;
-        const full = _pceClipDurations[clip.assetId] != null ? _pceClipDurations[clip.assetId] : clip.sourceDurationS;
+        const axis = _pceTrimAxis(clip);
+        const full = axis.len;
         const t = _pceTrimTimeAt(ev, track, full);
         if (t == null) return;
 
@@ -7041,7 +7110,10 @@ function _pceBindClipTrim() {
             if (clip.inS <= 0.001) clip.inS = undefined;
         } else {
             clip.outS = Math.max(t, (clip.inS || 0) + MIN);
-            if (full != null && clip.outS >= full - 0.001) clip.outS = undefined;
+            // "Dragged to the end" means "no out point" — but only when we know where the end IS.
+            // On a provisional axis `full` is the kept length itself, so clearing outS would
+            // discard the only length anything knows and take the slider away again.
+            if (!axis.provisional && full != null && clip.outS >= full - 0.001) clip.outS = undefined;
         }
         _pceTrimDrag.clips = clips;
         // Paint and scrub, but do NOT save or re-render the panel: replacing the markup mid-drag
@@ -7070,7 +7142,7 @@ function _pceBindClipTrim() {
 function _pceTrimPaint(clip) {
     const track = document.querySelector(`[data-trim-track="${clip.id}"]`);
     if (!track) return;
-    const full = _pceClipDurations[clip.assetId] != null ? _pceClipDurations[clip.assetId] : clip.sourceDurationS;
+    const full = _pceTrimAxis(clip).len;
     if (!(full > 0)) return;
     const a = (clip.inS || 0) / full;
     const b = (clip.outS != null ? clip.outS : full) / full;
@@ -7088,8 +7160,17 @@ function _pceTrimPaint(clip) {
 
 /** The trim track for the selected clip, drawn under its row. */
 function _pceTrimTrackHtml(clip) {
-    const full = _pceClipDurations[clip.assetId] != null ? _pceClipDurations[clip.assetId] : clip.sourceDurationS;
-    if (!(full > 0)) return '<p class="px-1 pb-1 text-[10px] text-gray-400">Reading this clip…</p>';
+    const axis = _pceTrimAxis(clip);
+    const full = axis.len;
+    if (!(full > 0)) {
+        // Nothing to draw an axis against at all: no stored length, no measurement, and no trim to
+        // infer one from. Say which of the two states it is in — "reading" resolves on its own,
+        // "could not read" does not, and telling them apart is the difference between waiting and
+        // re-adding the clip.
+        return _pceClipMeasureFailed.has(clip.assetId)
+            ? '<p class="px-1 pb-1 text-[10px] text-amber-600">Could not read this clip\u2019s length, so it cannot be trimmed here. Re-adding it usually fixes it.</p>'
+            : '<p class="px-1 pb-1 text-[10px] text-gray-400">Reading this clip\u2026</p>';
+    }
     const a = ((clip.inS || 0) / full) * 100;
     const b = ((clip.outS != null ? clip.outS : full) / full) * 100;
     const handle = (edge, pct) => '<span data-trim-edge="' + edge + '" role="slider" tabindex="0"'
@@ -7104,6 +7185,13 @@ function _pceTrimTrackHtml(clip) {
         + '<p class="mt-0.5 text-[10px] text-gray-500" data-trim-label style="font-variant-numeric:tabular-nums">'
         + _pceFmtS(clip.inS || 0) + ' → ' + _pceFmtS(clip.outS != null ? clip.outS : full) + '  ·  keeps '
         + _pceFmtS(Math.max(0, (clip.outS != null ? clip.outS : full) - (clip.inS || 0))) + '</p>'
+        + (axis.provisional
+            ? '<p class="mt-0.5 text-[10px] text-gray-400">'
+              + (_pceClipMeasureFailed.has(clip.assetId)
+                  ? 'Could not read the full clip, so this slider covers the ' + _pceFmtS(full) + ' already kept \u2014 you can trim within it, but not extend past it.'
+                  : 'Still reading the full clip \u2014 you can trim within the ' + _pceFmtS(full) + ' already kept.')
+              + '</p>'
+            : '')
         + '</div>';
 }
 
@@ -7176,7 +7264,7 @@ window._pceClipTrim = function (index, field, raw) {
     const clips = _pceClips().map((c) => Object.assign({}, c));
     const c = clips[index];
     if (!c) return;
-    const full = _pceClipDurations[c.assetId] != null ? _pceClipDurations[c.assetId] : c.sourceDurationS;
+    const full = _pceClipFullLength(c);
     let v = parseFloat(raw);
     if (!isFinite(v) || v < 0) v = 0;
     if (full != null) v = Math.min(v, full);
@@ -11718,6 +11806,26 @@ function _pceBackfillAssetMetrics() {
 // _pceFmtDuration is gone with the Duration row it existed for. Duration is still MEASURED — the
 // backfill above sends it to content_assets, which is what lets the server route video formats — it
 // is just no longer printed at the reader, since a clip's length is not a problem on its own.
+
+/**
+ * Persist what a clip measured, so the next open needs no measurement.
+ *
+ * The same write-once backfill _pceBackfillAssetMetrics uses, pointed at a CLIP rather than the
+ * canvas asset — it only ever fills a NULL column, so a value from the upload path always wins.
+ * Best-effort and never awaited: a failure here must not disturb the editor, and the next post that
+ * shows this clip will try again.
+ */
+function _pceReportClipMetrics(assetId, w, h, durationS) {
+    if (!assetId || _pceMetricsSent.has(assetId)) return;
+    if (!(durationS > 0)) return;
+    _pceMetricsSent.add(assetId);
+    const metrics = { durationS };
+    if (w > 0 && h > 0) { metrics.width = w; metrics.height = h; }
+    fetch(`/.netlify/functions/content-assets?id=${assetId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ metrics }),
+    }).catch(() => { /* best effort */ });
+}
 
 function _pceRenderMediaProps() {
     const dl = document.getElementById('insp-media-props');
