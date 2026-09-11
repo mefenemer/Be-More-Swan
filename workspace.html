@@ -16425,6 +16425,10 @@ async function _pceOpenOverlayEditor(postId) {
         // than a post id — bake() and the blog studio reuse it with no assistant at all, and the
         // buttons simply do not appear when this is absent.
         suggestText: (mode, currentText) => _pceSuggestOverlayText(postId, mode, currentText),
+        // The post's cut, when it has one. Same shape the When panel uses, and computed by the same
+        // function, so the two cannot disagree about which clip a box is on. Null on a still or a
+        // single clip, where the editor skips the controls entirely and behaves as it always did.
+        spans: typeof _pceClipSpans === 'function' ? _pceClipSpans(_rqPostCache[postId]) : null,
         onDone: async (overlays) => {
             if (overlays == null) return;   // cancelled — leave everything as it was
             _pceSetOverlayMsg('Saving your text…');

@@ -61,7 +61,11 @@ check('improve with nothing to improve is refused up front', () => {
 
 check('the editor stays DOM-agnostic — no post ids inside it', () => {
     assert.ok(!/postId/.test(editor), 'this component is reused by hosts with no post behind them');
-    assert.match(editor, /function open\(\{ imageUrl, overlays, onDone, suggestText \}\)/, 'the host injects the capability');
+    // Tolerates further INJECTED parameters (the post's cut arrived as `spans`) while keeping the
+    // guard that matters: everything the editor needs is handed to it, and nothing about a post
+    // leaks in. The literal form failed on a change that did not weaken that at all.
+    assert.match(editor, /function open\(\{ imageUrl, overlays, onDone, suggestText(?:, \w+)* \}\)/,
+        'the host injects the capability');
     assert.match(editor, /if \(aiRow && typeof suggestText !== 'function'\) \{\s*\n\s*aiRow\.remove\(\)/,
         'a button that cannot work is worse than no button');
 });

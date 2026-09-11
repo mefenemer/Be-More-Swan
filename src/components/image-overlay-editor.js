@@ -255,6 +255,13 @@
       .ioe-row{display:flex;flex-direction:column;gap:5px}
       .ioe-row label{font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.03em}
       .ioe-inline{display:flex;align-items:center;gap:8px}
+      .ioe-chips{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
+      .ioe-chip{font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;cursor:pointer}
+      .ioe-chip:hover{border-color:#d1d5db}
+      .ioe-chip.on{border-color:#f472b6;background:#fdf2f8;color:#be185d}
+      .ioe-when{position:relative;height:26px;border-radius:6px;background:#f1f5f9;overflow:hidden;user-select:none}
+      .ioe-when-lit{position:absolute;top:0;bottom:0;background:rgba(236,72,153,.25)}
+      .ioe-when-h{position:absolute;top:0;bottom:0;width:8px;margin-left:-4px;border-radius:4px;background:#ec4899;cursor:ew-resize}
       .ioe-modal textarea,.ioe-modal select,.ioe-modal input[type=text]{width:100%;font-size:13px;border:1px solid #cbd5e1;border-radius:9px;padding:8px 10px;box-sizing:border-box;font-family:inherit}
       .ioe-modal textarea{resize:vertical;min-height:56px}
       .ioe-modal input[type=color]{width:38px;height:32px;padding:0;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer}
@@ -282,11 +289,80 @@
     document.head.appendChild(el);
   }
 
+  /** The clip a moment of the finished video falls in. Mirrors _pceSpanAt in workspace.html. */
+  function spanAt(spans, t) {
+    if (!spans || !spans.length) return null;
+    for (const sp of spans) if (t < sp.end - 0.001) return sp;
+    return spans[spans.length - 1];
+  }
+
+  const fmtS = (n) => `${Math.round(n * 10) / 10}s`;
+
   // ── The interactive editor ───────────────────────────────────────────────────
-  function open({ imageUrl, overlays, onDone, suggestText }) {
+  /**
+   * `spans` is the post's CUT, when it has one: [{ i, start, end, len }] in seconds of the finished
+   * video. The editor has never managed timing — it passed startS/endS through untouched — which was
+   * right while "when" was one number in a panel elsewhere. On a multi-clip post it is two questions
+   * ("which clip, where in it") and they belong beside the text they describe: deciding what a box
+   * says and deciding when it shows are the same act of writing.
+   *
+   * Absent or single-clip, everything below is skipped and the editor behaves exactly as before.
+   */
+  function open({ imageUrl, overlays, onDone, suggestText, spans }) {
     ensureStyles();
     const state = (overlays || []).map((o) => ({ ...DEFAULTS, ...o, id: o.id || uid() }));
     let selectedId = state.length ? state[state.length - 1].id : null;
+
+    // ── When this box shows ────────────────────────────────────────────────────
+    // Rendered only for a real cut. On a still, or a single clip, "when" has one answer and a
+    // control offering to choose it is noise.
+    const cut = Array.isArray(spans) && spans.length > 1 ? spans : null;
+
+    function ovSpan(ov) {
+      return spanAt(cut, ov.startS == null ? 0 : ov.startS);
+    }
+
+    function timingRow(ov) {
+      if (!cut) return '';
+      const sp = ovSpan(ov);
+      const start = ov.startS == null ? 0 : ov.startS;
+      const end = ov.endS == null ? sp.end : Math.min(ov.endS, sp.end);
+      const a = Math.max(0, (start - sp.start) / sp.len) * 100;
+      const b = Math.min(1, (end - sp.start) / sp.len) * 100;
+      const chips = cut.map((x) => `<button type="button" data-clip="${x.i}"
+        class="ioe-chip${x.i === sp.i ? ' on' : ''}">Clip ${x.i + 1}</button>`).join('');
+      return `
+        <div class="ioe-row">
+          <label>Shows on</label>
+          <div class="ioe-chips">${chips}</div>
+          <div class="ioe-when" data-when-track>
+            <div class="ioe-when-lit" data-when-lit style="left:${a}%;width:${Math.max(0, b - a)}%"></div>
+            <span class="ioe-when-h" data-when="start" style="left:${a}%" role="slider" tabindex="0" aria-label="When the text appears"></span>
+            <span class="ioe-when-h" data-when="end" style="left:${b}%" role="slider" tabindex="0" aria-label="When the text disappears"></span>
+          </div>
+          <span class="ioe-count" data-when-label>Clip ${sp.i + 1} · ${fmtS(start - sp.start)} → ${fmtS(end - sp.start)} of it</span>
+        </div>`;
+    }
+
+    /** Move the handles without rebuilding the panel — a rebuild mid-drag drops the pointer. */
+    function paintWhen(ov) {
+      if (!cut) return;
+      const track = backdrop.querySelector('[data-when-track]');
+      if (!track) return;
+      const sp = ovSpan(ov);
+      const start = ov.startS == null ? 0 : ov.startS;
+      const end = ov.endS == null ? sp.end : Math.min(ov.endS, sp.end);
+      const a = Math.max(0, (start - sp.start) / sp.len) * 100;
+      const b = Math.min(1, (end - sp.start) / sp.len) * 100;
+      const lit = track.querySelector('[data-when-lit]');
+      if (lit) { lit.style.left = a + '%'; lit.style.width = Math.max(0, b - a) + '%'; }
+      const h1 = track.querySelector('[data-when="start"]');
+      const h2 = track.querySelector('[data-when="end"]');
+      if (h1) h1.style.left = a + '%';
+      if (h2) h2.style.left = b + '%';
+      const lbl = backdrop.querySelector('[data-when-label]');
+      if (lbl) lbl.textContent = `Clip ${sp.i + 1} · ${fmtS(start - sp.start)} → ${fmtS(end - sp.start)} of it`;
+    }
 
     const backdrop = document.createElement('div');
     backdrop.className = 'ioe-backdrop';
@@ -432,6 +508,7 @@
           <label>Background transparency — ${transparencyPct}%</label>
           <input type="range" data-f="transparency" min="0" max="100" step="1" value="${transparencyPct}" ${ov.boxFill ? '' : 'disabled'}>
         </div>
+        ${timingRow(ov)}
         <button class="ioe-btn danger block" data-act="delete">Delete this overlay</button>
       `;
       wireSide(ov);
@@ -523,6 +600,57 @@
           rerender();
         });
       });
+      // ── When: the clip, and where in it ──────────────────────────────────────
+      if (cut) {
+        for (const b of backdrop.querySelectorAll('[data-clip]')) {
+          b.addEventListener('click', () => {
+            // Keep how long it shows for and re-base onto the new clip — "the same text, on the
+            // next clip" is the move, not "the same seconds".
+            const from = ovSpan(ov);
+            const to = cut[Number(b.getAttribute('data-clip'))];
+            if (!to) return;
+            const within = (ov.startS == null ? 0 : ov.startS) - from.start;
+            const shown = (ov.endS == null ? from.end : ov.endS) - (ov.startS == null ? 0 : ov.startS);
+            ov.startS = to.start + Math.min(within, Math.max(0, to.len - 0.2));
+            ov.endS = Math.min(to.end, ov.startS + Math.max(0.2, shown));
+            if (ov.startS <= 0.001) ov.startS = undefined;
+            renderSide();
+          });
+        }
+        const track = backdrop.querySelector('[data-when-track]');
+        if (track) {
+          let edge = null;
+          track.addEventListener('pointerdown', (e) => {
+            const h = e.target.closest && e.target.closest('[data-when]');
+            if (!h) return;
+            edge = h.getAttribute('data-when');
+            h.setPointerCapture && h.setPointerCapture(e.pointerId);
+            e.preventDefault();
+          });
+          track.addEventListener('pointermove', (e) => {
+            if (!edge) return;
+            const box = track.getBoundingClientRect();
+            if (!box.width) return;
+            const sp = ovSpan(ov);
+            const f = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
+            const t = sp.start + f * sp.len;
+            const MIN = 0.2;
+            if (edge === 'start') {
+              const end = ov.endS == null ? sp.end : ov.endS;
+              ov.startS = Math.min(t, end - MIN);
+              if (ov.startS <= sp.start + 0.001 && sp.i === 0) ov.startS = undefined;
+            } else {
+              ov.endS = Math.max(t, (ov.startS == null ? sp.start : ov.startS) + MIN);
+            }
+            // Paint only. Rebuilding the panel mid-drag tears the handle out from under the pointer.
+            paintWhen(ov);
+          });
+          const stop = () => { edge = null; };
+          track.addEventListener('pointerup', stop);
+          track.addEventListener('pointercancel', stop);
+        }
+      }
+
       q('[data-act="delete"]').addEventListener('click', () => {
         const i = state.findIndex((o) => o.id === ov.id);
         if (i >= 0) state.splice(i, 1);
@@ -534,7 +662,13 @@
     // ── Footer actions ─────────────────────────────────────────────────────────
     backdrop.querySelector('[data-act="cancel"]').addEventListener('click', () => close(null));
     backdrop.querySelector('[data-act="add"]').addEventListener('click', () => {
-      const ov = { ...DEFAULTS, id: uid(), text: 'Your text', x: 0.5, y: 0.5 };
+      // A second box starts on the SAME clip as the one that was selected — adding text while
+      // looking at clip three and having it appear over clip one is the thing that makes the
+      // feature look like it only works once.
+      const sel = state.find((o) => o.id === selectedId);
+      const onSpan = cut && sel ? ovSpan(sel) : null;
+      const ov = { ...DEFAULTS, id: uid(), text: 'Your text', x: 0.5, y: 0.5,
+        ...(onSpan ? { startS: onSpan.start || undefined, endS: onSpan.end } : {}) };
       state.push(ov);
       selectedId = ov.id;
       renderOverlays(); renderSide();

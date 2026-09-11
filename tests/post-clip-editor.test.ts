@@ -27,6 +27,7 @@ const workspace = readFileSync(join(root, 'workspace.html'), 'utf8');
 const drafts = readFileSync(join(root, 'netlify/functions/get-social-drafts.ts'), 'utf8');
 const saveFn = readFileSync(join(root, 'netlify/functions/save-post-video-edit.ts'), 'utf8');
 const pexels = readFileSync(join(root, 'netlify/functions/pexels-search.ts'), 'utf8');
+const ioe = readFileSync(join(root, 'src/components/image-overlay-editor.js'), 'utf8');
 
 /** Index of a marker that must appear exactly once. Throws rather than returning -1. */
 function only(hay: string, needle: string, where: string): number {
@@ -430,6 +431,41 @@ check('the clip chips are hidden on a post that is not a cut', () => {
     const at = only(workspace, 'function _pceRenderOverlayClipUi(post, ov)', 'workspace.html');
     const scope = workspace.slice(at, at + 700);
     assert.ok(scope.includes("chipsWrap.classList.add('hidden')"), 'no spans, no chips');
+});
+
+check('the text editor itself can choose the clip and the moment', () => {
+    // Deciding what a box says and deciding when it shows are the same act of writing, so the
+    // controls belong beside the text — not only in a panel behind the modal.
+    assert.ok(ioe.includes('function timingRow(ov)'), 'the editor builds a timing row');
+    assert.ok(ioe.includes('data-when-track'), 'with a scrub track');
+    assert.ok(ioe.includes('data-clip='), 'and clip chips');
+    // Fed the SAME spans the When panel uses, or the two disagree about which clip a box is on.
+    assert.ok(workspace.includes('spans: typeof _pceClipSpans'), 'the page hands the editor its cut');
+});
+
+check('the editor skips all of it when there is no cut', () => {
+    // A still, or one clip, has one answer to "when" — a control offering to choose is noise.
+    const at = only(ioe, 'const cut = Array.isArray(spans)', 'image-overlay-editor.js');
+    assert.ok(ioe.slice(at, at + 160).includes('spans.length > 1 ? spans : null'));
+    const tr = only(ioe, 'function timingRow(ov)', 'image-overlay-editor.js');
+    assert.ok(ioe.slice(tr, tr + 120).includes("if (!cut) return ''"), 'and renders nothing');
+});
+
+check('a second box lands on the clip you were looking at', () => {
+    // Adding text while on clip three and having it appear over clip one is what makes the feature
+    // look like it only works once.
+    const at = only(ioe, "const ov = { ...DEFAULTS, id: uid(), text: 'Your text'", 'image-overlay-editor.js');
+    const before = ioe.slice(Math.max(0, at - 600), at);
+    assert.ok(before.includes('const onSpan = cut && sel ? ovSpan(sel) : null'), 'it inherits the selected box\'s clip');
+    assert.ok(ioe.slice(at, at + 260).includes('startS: onSpan.start'), 'and starts there');
+});
+
+check('the editor still passes timing through untouched when it does not manage it', () => {
+    // It always did, deliberately. Adding controls must not turn that into "only what the controls
+    // wrote", or a box timed elsewhere would lose its timing on a text edit.
+    const at = only(ioe, 'Pass through video timing', 'image-overlay-editor.js');
+    const scope = ioe.slice(at, at + 400);
+    assert.ok(scope.includes('o.startS != null') && scope.includes('o.endS != null'));
 });
 
 console.log('\nthe crop frame');
