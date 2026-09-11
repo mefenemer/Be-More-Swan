@@ -26,6 +26,7 @@ const root = join(import.meta.dirname, '..');
 const workspace = readFileSync(join(root, 'workspace.html'), 'utf8');
 const drafts = readFileSync(join(root, 'netlify/functions/get-social-drafts.ts'), 'utf8');
 const saveFn = readFileSync(join(root, 'netlify/functions/save-post-video-edit.ts'), 'utf8');
+const pexels = readFileSync(join(root, 'netlify/functions/pexels-search.ts'), 'utf8');
 
 /** Index of a marker that must appear exactly once. Throws rather than returning -1. */
 function only(hay: string, needle: string, where: string): number {
@@ -178,15 +179,22 @@ check('the media picker offers adding a clip, where people actually ask for it',
     assert.ok(scope.includes('_pceClipAddMode = true'), 'and it must enter add mode');
 });
 
-check('add mode hides the sources that cannot append, rather than letting them replace', () => {
-    // Stock, Canva and AI attach SERVER-side in one call, so there is no asset id on this side to
-    // redirect. Leaving them on screen in add mode would silently replace the clip you were adding to.
+check('EVERY source appends in add mode — none is left to replace behind your back', () => {
+    // A source on screen in add mode that quietly replaced would destroy the clip being added to.
+    // Stock needed a server flag; Canva and AI video already hand back an asset id, so they only
+    // needed to decide differently about it.
+    const stock = only(workspace, "action: 'select', postId: _gpCurrentPostId", 'workspace.html');
+    assert.ok(workspace.slice(stock, stock + 300).includes('append: _pceClipAddMode'),
+        'stock must ask the server not to attach');
+
+    for (const marker of ['name: \'AI clip\'', 'name: \'Canva clip\'', "name: candidate.title || 'Stock clip'"]) {
+        assert.ok(workspace.includes(marker), `a source is not routed to the append: ${marker}`);
+    }
+
+    // And nothing is hidden any more, because nothing needs to be.
     const at = only(workspace, 'function _pceSyncClipAddMode()', 'workspace.html');
     const scope = workspace.slice(at, at + 900);
-    for (const id of ['gp-ai-src-pexels', 'gp-ai-src-canva', 'gp-ai-src-ai']) {
-        assert.ok(scope.includes(id), `${id} must be hidden in add mode`);
-        only(workspace, `id="${id}"`, 'workspace.html');
-    }
+    assert.ok(!scope.includes('gp-ai-src-pexels'), 'sources must no longer be hidden in add mode');
 });
 
 check('add mode ends when the modal closes', () => {
@@ -225,6 +233,25 @@ check('the affordance is re-synced on every media change, not computed once on o
     const open = only(workspace, 'function _pceOpenMediaPicker()', 'workspace.html');
     const openBody = workspace.slice(open, open + 2600);
     assert.ok(!openBody.includes('const clipable ='), 'open must not compute it a second time');
+});
+
+check('the stock endpoint creates the asset but does NOT attach it when appending', () => {
+    // attachPexelsImageToPost clears scheduled_post_assets before inserting, by design — so on an
+    // append it would delete the very clip being added to.
+    const at = only(pexels, 'const append = body.append === true;', 'pexels-search.ts');
+    const scope = pexels.slice(at, at + 400);
+    assert.ok(scope.includes('createPexelsAsset('), 'append creates the asset only');
+    assert.ok(scope.includes('attachPexelsImageToPost('), 'the normal path still attaches');
+});
+
+check('an appended stock clip still gets its credit line', () => {
+    // The footage publishes inside the rendered video either way, so the licence condition is the
+    // same one. Attribution must not be skipped just because the media took a different door.
+    const attrib = only(pexels, 'US3 AC3.3: append the credit line', 'pexels-search.ts');
+    const appendAt = only(pexels, 'const append = body.append === true;', 'pexels-search.ts');
+    assert.ok(appendAt < attrib, 'attribution runs after the asset is made');
+    const scope = pexels.slice(attrib, attrib + 600);
+    assert.ok(!scope.includes('if (append'), 'attribution must not be gated on the append flag');
 });
 
 console.log('\nthe video step');

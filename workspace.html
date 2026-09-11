@@ -9176,10 +9176,8 @@ function _pceSyncClipAddMode() {
     if (_pceClipAddMode && sub) sub.textContent = 'Pick a video to join onto the end of this one.';
     // The button that got us here has nothing left to offer while we are here.
     clip?.classList.toggle('hidden', _pceClipAddMode);
-    // Sources that cannot append are hidden rather than left to replace behind your back.
-    for (const id of ['gp-ai-src-pexels', 'gp-ai-src-canva', 'gp-ai-src-ai']) {
-        document.getElementById(id)?.classList.toggle('hidden', _pceClipAddMode);
-    }
+    // Every source appends now — stock through an `append` flag on pexels-search, Canva and AI
+    // video by keeping the asset id they already hand back — so none of them are hidden any more.
 }
 
 /** The device-file door, offered from the Clips panel. */
@@ -16110,8 +16108,14 @@ function gpAiBrowseCanva() {
     window.CanvaBrowser.open({
         assetType: _gpAiMediaType === 'video' ? 'any' : 'image',
         multiple: false,
-        onImported: (assetIds) => {
+        onImported: async (assetIds) => {
             if (!assetIds || !assetIds.length) return;
+            if (_pceClipAddMode) {
+                await _pceAppendClipAssets(assetIds.map(id => ({ id, name: 'Canva clip' })));
+                _pceExitClipAddMode();
+                _pceCloseMediaPicker();
+                return;
+            }
             gpAiSelectOwn(assetIds[0]);
         },
     });
@@ -16218,10 +16222,19 @@ async function gpAiSelectPexels(candidate) {
         const res = await fetch('/.netlify/functions/pexels-search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'select', postId: _gpCurrentPostId, candidate, mediaType: _gpAiMediaType, applyToGroup: gpApplyToGroup() }),
+            // append:true makes the server create the asset WITHOUT putting it on the post, so an
+            // added clip does not replace the clip it is being added to. The credit line is applied
+            // either way — the footage publishes inside the render just the same.
+            body: JSON.stringify({ action: 'select', postId: _gpCurrentPostId, candidate, mediaType: _gpAiMediaType, applyToGroup: gpApplyToGroup(), append: _pceClipAddMode }),
         });
         const d = await res.json().catch(() => ({}));
         if (!res.ok) { gpAiMediaStatus(d.error || `Could not attach the ${noun}.`, 'error'); return; }
+        if (_pceClipAddMode) {
+            await _pceAppendClipAssets([{ id: d.assetId, url: candidate.url, name: candidate.title || 'Stock clip' }]);
+            _pceExitClipAddMode();
+            _pceCloseMediaPicker();
+            return;
+        }
         gpAiMirrorToSiblings(d.postIds, candidate.url, _gpAiMediaType);
         gpAiShowThumb(candidate.url, _gpAiMediaType);
         // pexels-search appends the credit line server-side when the org opts in — mirror it in the preview.
@@ -16296,6 +16309,15 @@ function gpAiPollVideo(jobId) {
             const res = await fetch(`/.netlify/functions/generate-ai-video?jobId=${jobId}`);
             const d = await res.json().catch(() => ({}));
             if (d.status === 'completed' && d.assetId) {
+                // Nothing to change server-side: this path already receives an asset id and decides
+                // for itself what to do with it. Adding a clip simply decides differently.
+                if (_pceClipAddMode) {
+                    await _pceAppendClipAssets([{ id: d.assetId, url: d.videoUrl, name: 'AI clip' }]);
+                    _pceExitClipAddMode();
+                    _pceCloseMediaPicker();
+                    gpAiMediaBusy(false);
+                    return;
+                }
                 const aRes = await fetch('/.netlify/functions/attach-draft-media', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
