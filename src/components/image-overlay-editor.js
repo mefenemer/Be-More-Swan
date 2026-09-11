@@ -366,7 +366,9 @@
           vidEl.addEventListener('error', res, { once: true });
         });
         // The clip's shape decides how tall the stage is, and fontSizePct is measured against that.
-        renderOverlays();
+        // A frame later, so the swap has actually been laid out — measuring in the same tick reads
+        // the size the element had before it was shown.
+        requestAnimationFrame(renderOverlays);
       }
       vidEl.pause();
       const within = Math.max(0, (t == null ? sp.start : t) - sp.start);
@@ -438,8 +440,20 @@
     backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) close(null); });
 
     // ── Render the overlay DOM nodes over the image ────────────────────────────
+    /**
+     * Whichever backdrop is actually on screen.
+     *
+     * This measured the <img> unconditionally, which was fine while the <img> was the only backdrop
+     * there was. Once a clip could replace it, the hidden image measured 0×0 — so fontSizePct, which
+     * is a fraction of the backdrop's HEIGHT, resolved to zero and every box rendered as an empty
+     * two-pixel square. Dragging was equally broken, since it positions against the same rect.
+     */
+    function backdropEl() {
+      return vidEl && vidEl.style.display !== 'none' ? vidEl : imgEl;
+    }
+
     function stageMetrics() {
-      const r = imgEl.getBoundingClientRect();
+      const r = backdropEl().getBoundingClientRect();
       return { w: r.width, h: r.height, left: r.left, top: r.top };
     }
 
@@ -742,7 +756,7 @@
     if (imgEl.complete && imgEl.naturalWidth) { renderOverlays(); renderSide(); syncStageToSelection(); }
     else imgEl.addEventListener('load', () => { renderOverlays(); renderSide(); syncStageToSelection(); }, { once: true });
     // The clip that replaces it has its own dimensions, so overlays are re-sized when it arrives.
-    if (vidEl) vidEl.addEventListener('loadedmetadata', renderOverlays);
+    if (vidEl) vidEl.addEventListener('loadedmetadata', () => requestAnimationFrame(renderOverlays));
     // Keep overlay sizing correct if the modal/image resizes.
     window.addEventListener('resize', renderOverlays);
   }

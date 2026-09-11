@@ -492,10 +492,21 @@ check('every way of changing the selection moves the stage with it', () => {
     assert.ok(ioe.slice(clipBtn, clipBtn + 700).includes('showClipFrame(ov, ov.startS)'), 'chips too');
 });
 
-check('the clip backdrop re-sizes the overlays when it loads', () => {
-    // fontSizePct is measured against the backdrop's height, and a clip is not the shape of the
-    // still it replaced.
-    assert.ok(ioe.includes("vidEl.addEventListener('loadedmetadata', renderOverlays)"));
+check('overlays are measured against the VISIBLE backdrop', () => {
+    // This measured the <img> unconditionally, which was fine while the <img> was the only backdrop.
+    // Once a clip could replace it, the hidden image measured 0x0 — so fontSizePct, a fraction of
+    // the backdrop's HEIGHT, resolved to zero and every box rendered as an empty two-pixel square.
+    // Dragging broke with it, since it positions against the same rect.
+    const at = only(ioe, 'function stageMetrics()', 'image-overlay-editor.js');
+    assert.ok(ioe.slice(at, at + 200).includes('backdropEl().getBoundingClientRect()'),
+        'it must measure whichever backdrop is on screen');
+    const be = only(ioe, 'function backdropEl()', 'image-overlay-editor.js');
+    assert.ok(ioe.slice(be, be + 200).includes("vidEl.style.display !== 'none'"), 'chosen by what is shown');
+});
+
+check('the clip re-sizes the overlays once it is laid out, not in the same tick', () => {
+    // Measuring in the same tick as the swap reads the size the element had BEFORE it was shown.
+    assert.ok(ioe.includes('requestAnimationFrame(renderOverlays)'));
 });
 
 console.log('\nthe crop frame');
