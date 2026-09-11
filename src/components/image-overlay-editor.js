@@ -355,10 +355,19 @@
       const cut = readSpans();
       // A video whose clips have not finished measuring yet: say so. Rendering nothing is
       // indistinguishable from the feature not existing, which is how it was reported.
+      // ── Say WHY, always ─────────────────────────────────────────────────────
+      // There are three reasons these controls can be absent and they look identical on screen: the
+      // post is a photo, the post is one clip, or the clips have not finished measuring. Rendering
+      // nothing for all three sent two rounds of "the section has disappeared" — the section was
+      // correct every time and simply mute about it. Silence is the bug.
       if (!cut) {
-        return isVideo()
-          ? '<p class="ioe-count">Reading the clips… the per-clip controls appear once their lengths are known.</p>'
-          : '';
+        if (!isVideo()) {
+          return '<p class="ioe-count">This is a photo post — the text is part of the picture, so it has no timing.</p>';
+        }
+        const raw = typeof spans === 'function' ? spans() : spans;
+        return Array.isArray(raw)
+          ? '<p class="ioe-count">One clip, so there is nothing to choose between — this text shows for the whole video. Add another clip to place it on one of them.</p>'
+          : '<p class="ioe-count">Reading the clips… the per-clip controls appear once their lengths are known.</p>';
       }
       const sp = ovSpan(ov);
       const start = ov.startS == null ? 0 : ov.startS;

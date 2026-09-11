@@ -16553,7 +16553,11 @@ async function _pceOpenOverlayEditor(postId) {
         // GETTERS, not values. A clip's length is measured asynchronously off a <video> element, so
         // at the moment this modal opens the answer is frequently "not yet" — and a snapshot of
         // "not yet" is permanent. Passed as functions, the editor asks again each time it draws.
-        spans: () => (typeof _pceClipSpans === 'function' ? _pceClipSpans(_rqPostCache[postId]) : null),
+        // RAW spans: null means "not measured yet", an array means "this is what the cut is", and how
+        // many there are is the editor's business. _pceClipSpans folds a one-clip post into null for
+        // the page's own UI, and handing that over made "one clip" and "still loading" the same
+        // answer — so the editor could not say which, and said nothing for both.
+        spans: () => (typeof _pceSpansFor === 'function' ? _pceSpansFor(_pceClips(_rqPostCache[postId])) : null),
         // Separate from `spans`: a SINGLE-clip video has no cut to choose between, but its text can
         // still fade in. A still cannot — its words are flattened into the pixels.
         video: () => _pcePostIsVideo(_rqPostCache[postId]),

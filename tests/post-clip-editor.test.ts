@@ -444,19 +444,30 @@ check('the text editor itself can choose the clip and the moment', () => {
     assert.ok(ioe.includes('data-when-track'), 'with a scrub track');
     assert.ok(ioe.includes('data-clip='), 'and clip chips');
     // Fed the SAME spans the When panel uses, or the two disagree about which clip a box is on.
-    assert.ok(workspace.includes('spans: () => (typeof _pceClipSpans'), 'the page hands the editor its cut, as a getter');
+    assert.ok(workspace.includes('spans: () => (typeof _pceSpansFor'), 'the page hands the editor its cut, as a getter');
 });
 
 check('the editor skips all of it when there is no cut', () => {
     // A still, or one clip, has one answer to "when" — a control offering to choose is noise.
     const at = only(ioe, 'const readSpans = () =>', 'image-overlay-editor.js');
     assert.ok(ioe.slice(at, at + 220).includes('v.length > 1 ? v : null'));
+    // The page hands over RAW spans. Folding a one-clip post into null there made "one clip" and
+    // "still loading" the same answer, so the editor could not say which and said nothing for both.
+    assert.ok(workspace.includes('spans: () => (typeof _pceSpansFor'), 'the page must not pre-fold');
     // On a still it renders nothing; on a VIDEO whose clips are still being measured it says so,
     // because rendering nothing is indistinguishable from the feature not existing.
     const tr = only(ioe, 'function timingRow(ov)', 'image-overlay-editor.js');
-    const scope = ioe.slice(tr, tr + 600);
-    assert.ok(scope.includes("isVideo()"), 'a still renders nothing');
-    assert.ok(scope.includes('Reading the clips'), 'a video explains the wait');
+    // Bounded by the next function, not a character count — this suite has now reported four
+    // failures that were purely its own measurement.
+    const tEnd = ioe.indexOf('\n    /**', tr + 10);
+    assert.ok(tEnd > tr, 'could not find the end of timingRow');
+    const scope = ioe.slice(tr, tEnd);
+    // Three reasons these controls can be absent, identical on screen: a photo, one clip, or clips
+    // still measuring. Rendering nothing for all three is what produced two rounds of "the section
+    // has disappeared" — it was correct every time and simply mute about it.
+    assert.ok(scope.includes('This is a photo post'), 'a photo says so');
+    assert.ok(scope.includes('One clip, so there is nothing to choose between'), 'one clip says so');
+    assert.ok(scope.includes('Reading the clips'), 'and a video still measuring says so');
 });
 
 check('a second box lands on the clip you were looking at', () => {
