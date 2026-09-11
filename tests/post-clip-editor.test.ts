@@ -165,93 +165,55 @@ check('the add button is wired to the appending path', () => {
     assert.ok(workspace.includes('onclick="window._pceAddClipFiles()"'), 'the panel must offer it');
 });
 
-check('the media picker offers adding a clip, where people actually ask for it', () => {
-    // The modal replaces, by design, and says so. But "how do I add another video" is asked from
-    // INSIDE this dialog once a post has one — so answering it only in a panel behind the modal
-    // answers it somewhere the asker is not.
-    only(workspace, 'id="pce-media-modal-clip"', 'workspace.html');
-    assert.ok(workspace.includes('onclick="_pceAddClipFromPicker()"'), 'the button must be wired');
-    const at = only(workspace, 'window._pceAddClipFromPicker = function', 'workspace.html');
-    const scope = workspace.slice(at, at + 300);
-    // It opens the LIBRARY, not the OS file dialog — the same argument this file already makes for
-    // the empty canvas: a second clip is usually one you already have.
-    assert.ok(scope.includes('gpAiUseOwn()'), 'add mode must open the picker, not a file dialog');
-    assert.ok(scope.includes('_pceClipAddMode = true'), 'and it must enter add mode');
+check('the library lets you TICK several, and says what will happen to them', () => {
+    // Clicking a tile used to attach it immediately, which is why "add several" had nowhere to
+    // live: the decision was over before a second could be chosen.
+    const at = only(workspace, 'cell.setAttribute(\'data-own-tile\'', 'workspace.html');
+    const scope = workspace.slice(at, at + 400);
+    assert.ok(scope.includes('window._pceOwnToggle(a.id)'), 'a tile records a choice, it does not act');
+    only(workspace, 'id="gp-ai-own-bar"', 'workspace.html');
+    only(workspace, 'window._pceOwnAdd()', 'workspace.html');
+    only(workspace, 'window._pceOwnReplace()', 'workspace.html');
 });
 
-check('EVERY source appends in add mode — none is left to replace behind your back', () => {
-    // A source on screen in add mode that quietly replaced would destroy the clip being added to.
-    // Stock needed a server flag; Canva and AI video already hand back an asset id, so they only
-    // needed to decide differently about it.
-    const stock = only(workspace, "action: 'select', postId: _gpCurrentPostId", 'workspace.html');
-    assert.ok(workspace.slice(stock, stock + 300).includes('append: _pceClipAddMode'),
-        'stock must ask the server not to attach');
-
-    for (const marker of ['name: \'AI clip\'', 'name: \'Canva clip\'', "name: candidate.title || 'Stock clip'"]) {
-        assert.ok(workspace.includes(marker), `a source is not routed to the append: ${marker}`);
-    }
-
-    // And nothing is hidden any more, because nothing needs to be.
-    const at = only(workspace, 'function _pceSyncClipAddMode()', 'workspace.html');
-    const scope = workspace.slice(at, at + 900);
-    assert.ok(!scope.includes('gp-ai-src-pexels'), 'sources must no longer be hidden in add mode');
+check('Replace is offered only when exactly one is ticked', () => {
+    // With several ticked there is no single answer to "replace it with what".
+    const at = only(workspace, 'const rep = document.getElementById(\'gp-ai-own-replace\')', 'workspace.html');
+    assert.ok(workspace.slice(at, at + 500).includes("rep.classList.toggle('hidden', n !== 1)"));
 });
 
-check('add mode ends when the modal closes', () => {
-    // Left set, the NEXT open would be dressed as an add and hide three sources from a post that
-    // only wanted its picture changed.
+check('Find and Generate ASK before they spend anything', () => {
+    // Both end in something landing on the post, and neither can be undone or previewed — so the
+    // question has to be settled while the answer can still change what happens.
+    const find = only(workspace, 'function gpAiFind() {', 'workspace.html');
+    assert.ok(workspace.slice(find, find + 400).includes('_pceAskAddOrReplace('), 'search must ask first');
+    const gen = only(workspace, 'async function gpAiGenerate() {', 'workspace.html');
+    assert.ok(workspace.slice(gen, gen + 500).includes('_pceAskAddOrReplace('), 'generation must ask first');
+    only(workspace, 'id="gp-ai-intent"', 'workspace.html');
+});
+
+check('uploading several videos onto a clipable post adds them', () => {
+    // Four files is already an unambiguous statement that they are not each meant to replace the
+    // last. One file still replaces, which is what one file means.
+    const at = only(workspace, 'const allVideo = files.every(', 'workspace.html');
+    const scope = workspace.slice(at, at + 400);
+    assert.ok(scope.includes('_pceCanAddClip()'), 'only where a cut is possible');
+    assert.ok(scope.includes('files.length > 1'), 'several files mean clips');
+    assert.ok(scope.includes('_pceAttachClips(files)'), 'and they go through the append');
+});
+
+check('intent and selection never outlive the modal', () => {
+    // A stale intent would silently add when the next visit meant to replace; a stale selection
+    // would offer to act on tiles from a post you have left.
+    // The whole function, found by scanning to the next declaration — a fixed character window is
+    // how this suite has twice reported a failure that was purely its own measurement.
     const at = only(workspace, 'function _pceCloseMediaPicker()', 'workspace.html');
-    assert.ok(workspace.slice(at, at + 400).includes('_pceClipAddMode = false'));
-});
-
-check('Upload appends while in add mode', () => {
-    const at = only(workspace, 'async function gpAiUploadSelected(e)', 'workspace.html');
-    const scope = workspace.slice(at, at + 700);
-    assert.ok(scope.includes('if (_pceClipAddMode)'), 'upload must honour add mode');
-    assert.ok(scope.includes('_pceAttachClips(files)'), 'and route to the append');
-});
-
-check('it is offered ONLY where the next video is a clip, not a replacement', () => {
-    // On a carousel or a still, "add" would be a carousel by the back door.
-    const at = only(workspace, 'const clipable =', 'workspace.html');
-    const scope = workspace.slice(at, at + 300);
-    assert.ok(scope.includes('isVideo'), 'video media only');
-    assert.ok(scope.includes("fmt.m === 'video'") && scope.includes('fmt.max === 1'), 'single-item video formats only');
-    assert.ok(scope.includes('!!url'), 'and only once there is something to add TO');
-});
-
-check('the affordance is re-synced on every media change, not computed once on open', () => {
-    // The bug this replaces: the modal is usually opened on a post with NO media, so a value
-    // decided at open time says "nothing to add to" and never reconsiders when a video is attached
-    // inside the same session — which is exactly when the user asks how to add another.
-    const hook = only(workspace, 'function gpAiShowThumb(url, type) {', 'workspace.html');
-    const body = workspace.slice(hook, hook + 400);
-    assert.ok(body.includes('_pceSyncMediaModalClip(url, type)'),
-        'every attach path ends at gpAiShowThumb, so the sync belongs there');
-
-    // And it must NOT be recomputed at open time as well, or the two can disagree.
-    const open = only(workspace, 'function _pceOpenMediaPicker()', 'workspace.html');
-    const openBody = workspace.slice(open, open + 2600);
-    assert.ok(!openBody.includes('const clipable ='), 'open must not compute it a second time');
-});
-
-check('the stock endpoint creates the asset but does NOT attach it when appending', () => {
-    // attachPexelsImageToPost clears scheduled_post_assets before inserting, by design — so on an
-    // append it would delete the very clip being added to.
-    const at = only(pexels, 'const append = body.append === true;', 'pexels-search.ts');
-    const scope = pexels.slice(at, at + 400);
-    assert.ok(scope.includes('createPexelsAsset('), 'append creates the asset only');
-    assert.ok(scope.includes('attachPexelsImageToPost('), 'the normal path still attaches');
-});
-
-check('an appended stock clip still gets its credit line', () => {
-    // The footage publishes inside the rendered video either way, so the licence condition is the
-    // same one. Attribution must not be skipped just because the media took a different door.
-    const attrib = only(pexels, 'US3 AC3.3: append the credit line', 'pexels-search.ts');
-    const appendAt = only(pexels, 'const append = body.append === true;', 'pexels-search.ts');
-    assert.ok(appendAt < attrib, 'attribution runs after the asset is made');
-    const scope = pexels.slice(attrib, attrib + 600);
-    assert.ok(!scope.includes('if (append'), 'attribution must not be gated on the append flag');
+    const rest = workspace.slice(at + 100);
+    const end = rest.search(/\n(function |const |window\.|\/\*\*)/);
+    assert.ok(end > 0, 'could not find the end of _pceCloseMediaPicker');
+    const scope = workspace.slice(at, at + 100 + end);
+    assert.ok(scope.includes('_pceClipAddMode = false'), 'the intent must be cleared on close');
+    assert.ok(scope.includes('_pceOwnPicked = []'), 'and so must the selection');
 });
 
 console.log('\nthe video step');

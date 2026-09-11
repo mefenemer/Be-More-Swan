@@ -498,8 +498,27 @@ window.showComplianceModals = function showComplianceModals(force) {
         <p class="text-[11px] text-gray-400 mt-1">Leave blank to search on the post's own topic.</p>
       </div>
       <!-- Library picker (shown after "Use my own") — already-uploaded content-assets -->
+      <!-- Asked BEFORE a search or a generation: both cost time (and credits), and there is no undo
+           once the result has landed on the post. -->
+      <div id="gp-ai-intent" class="hidden mt-2 rounded-xl border border-gray-200 bg-gray-50 p-3">
+        <p class="text-xs font-bold text-gray-700">Add to this video, or replace it?</p>
+        <p class="text-[11px] text-gray-500 mt-0.5"><span id="gp-ai-intent-label">This</span> can join onto the end of your current video, or take its place.</p>
+        <div class="flex gap-2 mt-2">
+          <button type="button" onclick="window._pceIntentChoose('add')"
+            class="flex-1 rounded-lg border border-emerald-300 bg-white px-2 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Add as another clip</button>
+          <button type="button" onclick="window._pceIntentChoose('replace')"
+            class="flex-1 rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-xs font-bold text-gray-700 hover:bg-gray-50 transition cursor-pointer">Replace what's there</button>
+        </div>
+      </div>
       <div id="gp-ai-own" class="hidden mt-2 border border-gray-200 rounded-xl p-2 max-h-48 overflow-y-auto">
         <div id="gp-ai-own-grid" class="grid grid-cols-3 gap-2"></div>
+        <!-- Appears once something is ticked, and says exactly what will happen to it. -->
+        <div id="gp-ai-own-bar" class="hidden sticky bottom-0 mt-2 flex gap-2 bg-white pt-2">
+          <button type="button" id="gp-ai-own-add" onclick="window._pceOwnAdd()"
+            class="flex-1 rounded-lg bg-emerald-600 px-2 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 transition cursor-pointer">Add clips</button>
+          <button type="button" id="gp-ai-own-replace" onclick="window._pceOwnReplace()"
+            class="flex-1 rounded-lg border border-gray-300 px-2 py-1.5 text-xs font-bold text-gray-700 hover:bg-gray-50 transition cursor-pointer">Replace with this</button>
+        </div>
         <p id="gp-ai-own-empty" class="hidden text-xs text-gray-400 text-center py-4">No matching media in your library yet.</p>
       </div>
       <!-- Stock candidate grid (shown after "Find with AI") -->
@@ -687,13 +706,10 @@ window.showComplianceModals = function showComplianceModals(force) {
            somewhere the asker is not. Shown only where it means something: a video-only format
            that already has a clip, i.e. the case where the next video is a second CLIP of one
            piece rather than a different post's picture. -->
-      <div id="pce-media-modal-clip" class="hidden pt-3 border-t border-gray-100">
-        <button type="button" onclick="_pceAddClipFromPicker()"
-          class="w-full rounded-xl border border-dashed border-gray-300 py-2.5 text-sm font-bold text-gray-600 hover:border-emerald-400 hover:text-emerald-700 transition cursor-pointer">
-          + Add another clip instead
-        </button>
-        <p class="mt-1.5 text-[11px] text-gray-400 text-center">Joins onto the end of this video rather than replacing it.</p>
-      </div>
+      <!-- The "+ Add another clip instead" button lived here. It is gone: adding is now offered
+           inside each source — tick boxes in the library, several files at upload, and an explicit
+           question before a search or a generation — so a separate button that put the modal into a
+           mode was one indirection too many, and three attempts at it never became discoverable. -->
       <!-- ── The fourth source, and the reason this modal offers it ─────────────────────────────
            A branded card is a way of having no photo, so "I do not have a picture" has to be able to
            end here. It is the same _pceCreateBrandCard the Post Style chooser calls — one
@@ -8988,15 +9004,20 @@ function _pceOpenMediaPicker() {
 }
 
 function _pceCloseMediaPicker() {
-    // Add mode belongs to one visit. Leaving it set would dress the NEXT open as an add and hide
-    // three sources from a post that simply wanted its picture changed.
-    _pceClipAddMode = false;
     const modal = document.getElementById('pce-media-modal');
     if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
     window.ScrollLock?.release('pce-media-modal');
     // Hand the panel back. Without this the next thing to borrow it (the editor's own Media step, or
     // the generate-post sheet) would find it parented into a hidden modal.
     _rqRestoreMediaPanel();
+    // Both of these belong to ONE visit: a stale intent would silently add when the next visit
+    // meant to replace, and a stale selection would offer to act on tiles from a post you have
+    // left. Last, so the borrow-and-return above stays the first thing this function is seen to do
+    // — post-editor-single-surface.test.ts reads for it near the top.
+    _pceClipAddMode = false;
+    _pceOwnPicked = [];
+    _pceIntentRun = null;
+    document.getElementById('gp-ai-intent')?.classList.add('hidden');
 }
 
 /**
@@ -9152,33 +9173,116 @@ async function _pceAttachClips(files) {
  * appending from those needs an append flag on those endpoints. Until then add mode shows the two
  * sources that can honour it, rather than offering three that would silently replace.
  */
+/**
+ * ── Add or replace: asked, not inferred ────────────────────────────────────────────────────────
+ *
+ * Three attempts at a hidden "add mode" all failed the same way: whether the next pick would add or
+ * replace was decided somewhere the user could not see, and by the time they found out it had
+ * already happened. So the question is now asked at the point of acting, per source:
+ *
+ *   Use my own   — a tick box on each tile. Pick several, press Add; or Replace with exactly one.
+ *   Upload       — several files at once, and on a video post they are added.
+ *   Find / AI    — asked BEFORE the search or the generation, because those cost time and credits
+ *                  and there is no undo once the answer has landed on the post.
+ *
+ * `_pceClipAddMode` survives as the intent for ONE action. It is set immediately before the thing
+ * it governs and cleared the moment that thing finishes, so it can never be stale.
+ */
 let _pceClipAddMode = false;
 
-window._pceAddClipFromPicker = function () {
-    _pceClipAddMode = true;
-    _pceSyncClipAddMode();
-    if (typeof gpAiUseOwn === 'function') gpAiUseOwn();
+/** Can this post take a clip at all? A video-only, single-item format that already has media. */
+function _pceCanAddClip() {
+    const id = typeof _gpCurrentPostId !== 'undefined' && _gpCurrentPostId != null ? _gpCurrentPostId : _rqReviewPostId;
+    const post = id != null ? _rqPostCache[id] : null;
+    if (!post || !post.thumbnailUrl || !_pcePostIsVideo(post)) return false;
+    const fmt = typeof _pceActiveFormat === 'function' ? _pceActiveFormat(post) : null;
+    return !!fmt && fmt.m === 'video' && fmt.max === 1;
+}
+
+function _pceExitClipAddMode() { _pceClipAddMode = false; }
+
+/**
+ * Ask add-or-replace, and run the chosen one. Used by the sources that commit time or credits
+ * before anything is attachable — a search and a generation both answer too late to ask after.
+ */
+function _pceAskAddOrReplace(label, run) {
+    if (!_pceCanAddClip()) { _pceClipAddMode = false; run(); return; }
+    const host = document.getElementById('gp-ai-intent');
+    if (!host) { _pceClipAddMode = false; run(); return; }
+    _pceIntentRun = run;
+    document.getElementById('gp-ai-intent-label').textContent = label;
+    host.classList.remove('hidden');
+}
+let _pceIntentRun = null;
+
+window._pceIntentChoose = function (mode) {
+    document.getElementById('gp-ai-intent')?.classList.add('hidden');
+    _pceClipAddMode = mode === 'add';
+    const run = _pceIntentRun;
+    _pceIntentRun = null;
+    if (typeof run === 'function') run();
 };
 
-/** Leaving add mode — on close, and after a clip lands. */
-function _pceExitClipAddMode() {
-    if (!_pceClipAddMode) return;
-    _pceClipAddMode = false;
-    _pceSyncClipAddMode();
+/** The tiles ticked in "Use my own", by asset id. */
+let _pceOwnPicked = [];
+
+window._pceOwnToggle = function (assetId) {
+    assetId = Number(assetId);
+    _pceOwnPicked = _pceOwnPicked.includes(assetId)
+        ? _pceOwnPicked.filter(x => x !== assetId)
+        : _pceOwnPicked.concat(assetId);
+    _pceSyncOwnSelection();
+};
+
+/** Paint the ticks and the action bar from the current selection. */
+function _pceSyncOwnSelection() {
+    for (const el of document.querySelectorAll('[data-own-tile]')) {
+        const on = _pceOwnPicked.includes(Number(el.getAttribute('data-own-tile')));
+        el.classList.toggle('border-emerald-500', on);
+        el.classList.toggle('border-transparent', !on);
+        const tick = el.querySelector('[data-own-tick]');
+        if (tick) {
+            tick.style.background = on ? '#059669' : 'rgba(255,255,255,.9)';
+            tick.style.borderColor = on ? '#059669' : '#d1d5db';
+            tick.textContent = on ? '✓' : '';
+        }
+    }
+    const bar = document.getElementById('gp-ai-own-bar');
+    const add = document.getElementById('gp-ai-own-add');
+    const rep = document.getElementById('gp-ai-own-replace');
+    const n = _pceOwnPicked.length;
+    bar?.classList.toggle('hidden', n === 0);
+    if (add) {
+        add.classList.toggle('hidden', !_pceCanAddClip());
+        add.textContent = n === 1 ? 'Add as a clip' : `Add ${n} clips`;
+    }
+    // Replacing is one picture's job. With several ticked there is no single answer to "with what".
+    if (rep) {
+        rep.classList.toggle('hidden', n !== 1);
+    }
 }
 
-/** Dress the modal for whichever mode it is in. */
-function _pceSyncClipAddMode() {
-    const title = document.getElementById('pce-media-modal-title');
-    const sub = document.getElementById('pce-media-modal-sub');
-    const clip = document.getElementById('pce-media-modal-clip');
-    if (title) title.textContent = _pceClipAddMode ? 'Add another clip' : 'Choose media';
-    if (_pceClipAddMode && sub) sub.textContent = 'Pick a video to join onto the end of this one.';
-    // The button that got us here has nothing left to offer while we are here.
-    clip?.classList.toggle('hidden', _pceClipAddMode);
-    // Every source appends now — stock through an `append` flag on pexels-search, Canva and AI
-    // video by keeping the asset id they already hand back — so none of them are hidden any more.
-}
+window._pceOwnAdd = async function () {
+    const ids = _pceOwnPicked.slice();
+    if (!ids.length) return;
+    _pceOwnPicked = [];
+    _pceSyncOwnSelection();
+    await _pceAppendClipAssets(ids.map(id => ({ id, name: (_pceOwnAssets[id] || {}).name, url: (_pceOwnAssets[id] || {}).url })));
+    _pceExitClipAddMode();
+    _pceCloseMediaPicker();
+};
+
+window._pceOwnReplace = async function () {
+    const id = _pceOwnPicked[0];
+    if (id == null) return;
+    _pceOwnPicked = [];
+    _pceSyncOwnSelection();
+    _pceClipAddMode = false;
+    await gpAiSelectOwn(id);
+};
+
+/** What the grid last rendered, so the actions can name and preview what was ticked. */
+let _pceOwnAssets = {};
 
 /** The device-file door, offered from the Clips panel. */
 window._pceAddClipFiles = function () {
@@ -15499,9 +15603,8 @@ function gpAiSetMediaType(type) {
  * it, and the question "how do I add another" arriving one second later.
  */
 function _pceSyncMediaModalClip(url, type) {
-    const el = document.getElementById('pce-media-modal-clip');
     const sub = document.getElementById('pce-media-modal-sub');
-    if (!el && !sub) return;
+    if (!sub) return;
     const id = typeof _gpCurrentPostId !== 'undefined' && _gpCurrentPostId != null ? _gpCurrentPostId : _rqReviewPostId;
     const post = id != null ? _rqPostCache[id] : null;
     // Same rule gpAiShowThumb uses to decide what it is showing.
@@ -15510,12 +15613,11 @@ function _pceSyncMediaModalClip(url, type) {
     // Only where the next video would be a second CLIP of one piece. On a carousel or a still,
     // "add" would be a carousel by the back door.
     const clipable = !!url && isVideo && !!fmt && fmt.m === 'video' && fmt.max === 1;
-    el?.classList.toggle('hidden', !clipable);
-    if (sub) {
-        sub.textContent = !url ? ''
-            : clipable ? 'Picking replaces this video. To keep it and add another, use “Add another clip” below.'
-            : 'Whatever you pick replaces what is on the post.';
-    }
+    // Says which of the two things the sources are about to offer, so the tick boxes and the
+    // add-or-replace question are expected rather than surprising.
+    sub.textContent = !url ? ''
+        : clipable ? 'Pick one to replace this video, or tick several to join them on as clips.'
+        : 'Whatever you pick replaces what is on the post.';
 }
 
 function gpAiShowThumb(url, type) {
@@ -15995,6 +16097,9 @@ async function gpAiUseOwn() {
     panel.classList.remove('hidden');
     empty?.classList.add('hidden');
     grid.innerHTML = '<p class="col-span-3 text-xs text-gray-400 text-center py-4">Loading your media…</p>';
+    _pceOwnPicked = [];
+    _pceOwnAssets = {};
+    document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
     gpAiMediaStatus('');
     try {
         const res = await fetch('/.netlify/functions/content-assets');
@@ -16009,15 +16114,24 @@ async function gpAiUseOwn() {
             cell.type = 'button';
             cell.className = 'relative aspect-square rounded-lg overflow-hidden border-2 border-transparent hover:border-emerald-400 transition cursor-pointer bg-gray-100';
             cell.title = a.name || '';
-            // In add mode this joins the clip onto the cut; otherwise it replaces, as always.
-            cell.onclick = () => (_pceClipAddMode
-                ? _pceAppendClipAssets([a]).then(() => { _pceExitClipAddMode(); _pceCloseMediaPicker(); })
-                : gpAiSelectOwn(a.id));
+            cell.setAttribute('data-own-tile', String(a.id));
+            // Ticking, not acting. Clicking a tile used to attach it immediately, which is why
+            // "add several" had nowhere to live: the decision was over before a second could be
+            // chosen. Now the tile records a choice and the bar below performs it.
+            cell.onclick = () => window._pceOwnToggle(a.id);
             cell.innerHTML = (a.assetType === 'video')
                 ? `<video src="${thumb}" muted playsinline preload="metadata" class="w-full h-full object-cover"></video><span class="absolute inset-0 flex items-center justify-center text-white/90"><svg class="w-6 h-6 drop-shadow" fill="currentColor" viewBox="0 0 20 20"><path d="M6.3 2.8A1 1 0 005 3.7v12.6a1 1 0 001.5.9l9.5-6.3a1 1 0 000-1.8L6.3 2.8z"/></svg></span>`
                 : `<img src="${thumb}" alt="${(a.name || '').replace(/"/g, '&quot;')}" class="w-full h-full object-cover" loading="lazy">`;
+            const tick = document.createElement('span');
+            tick.setAttribute('data-own-tick', '');
+            tick.className = 'absolute top-1 left-1 w-4 h-4 rounded border text-[10px] font-bold text-white flex items-center justify-center';
+            tick.style.background = 'rgba(255,255,255,.9)';
+            tick.style.borderColor = '#d1d5db';
+            cell.appendChild(tick);
+            _pceOwnAssets[a.id] = { name: a.name, url: thumb };
             grid.appendChild(cell);
         });
+        _pceSyncOwnSelection();
     } catch {
         grid.innerHTML = '<p class="col-span-3 text-xs text-red-500 text-center py-4">Could not load your media.</p>';
     }
@@ -16058,9 +16172,11 @@ async function gpAiUploadSelected(e) {
     const files = Array.from(e.target.files || []);
     e.target.value = '';
     if (!files.length || !_gpCurrentPostId) return;
-    // In add mode the files JOIN the cut instead of replacing the post's media. Handled here rather
-    // than behind a separate uploader, so "Upload" means the same thing wherever it is pressed.
-    if (_pceClipAddMode) {
+    // Several videos onto a post that can hold a cut are CLIPS. No mode to be in and nothing to
+    // have chosen beforehand: picking four files is already an unambiguous statement that they are
+    // not each meant to replace the last. One file still replaces, which is what one file means.
+    const allVideo = files.every(f => (f.type || '').startsWith('video/'));
+    if (allVideo && _pceCanAddClip() && (files.length > 1 || _pceClipAddMode)) {
         await _pceAttachClips(files);
         _pceExitClipAddMode();
         _pceCloseMediaPicker();
@@ -16131,6 +16247,12 @@ function gpAiBrowseCanva() {
 // result left you with nothing to do but generate an AI image or give up.
 function gpAiFind() {
     if (!_gpCurrentPostId) return;
+    // Asked first: a search ends in a pick that lands on the post immediately, so "did you mean to
+    // add or to replace" has to be settled while the answer can still change what happens.
+    _pceAskAddOrReplace('The video you pick', _gpAiFindAfterIntent);
+}
+
+function _gpAiFindAfterIntent() {
     const isVideo = _gpAiMediaType === 'video';
     document.getElementById('gp-ai-own')?.classList.add('hidden');
 
@@ -16251,6 +16373,13 @@ async function gpAiSelectPexels(candidate) {
 // ── Source: Generate with AI (Fal — image now, video async) ─────────────────
 async function gpAiGenerate() {
     if (!_gpCurrentPostId) return;
+    // Before the credits are spent. A generation cannot be undone and cannot be previewed first, so
+    // finding out afterwards that it replaced the clip you were building on is the worst of the
+    // three sources to get wrong.
+    _pceAskAddOrReplace('The video we generate', _gpAiGenerateAfterIntent);
+}
+
+async function _gpAiGenerateAfterIntent() {
     document.getElementById('gp-ai-own')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
     document.getElementById('gp-ai-find-box')?.classList.add('hidden');
