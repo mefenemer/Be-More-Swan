@@ -271,6 +271,42 @@ check('the stage panels follow the STRIP, not the post-open path', () => {
     assert.strictEqual(calls, 3, `expected all 3 exit paths to render the panels, found ${calls}`);
 });
 
+console.log('\nthe timeline axis');
+
+check('the axis is the CUT, not the clip on the canvas', () => {
+    // The canvas shows clip one. Measuring it gave a ruler the length of the first clip, so text
+    // could only ever be timed onto that one — the rest were off the end of the ruler, not
+    // disabled and not explained.
+    const at = only(workspace, 'const cut = typeof _pceClipsTotalS', 'workspace.html');
+    const scope = workspace.slice(at, at + 260);
+    assert.ok(scope.includes('cut != null ? cut'), 'the cut wins when there is one');
+    assert.ok(scope.includes('_rqVideoDuration()'), 'and a single clip still measures itself');
+});
+
+check('the panel total and the axis are the SAME number', () => {
+    // A ruler that disagrees with the clip list puts every box somewhere other than it was dragged.
+    only(workspace, 'function _pceClipsTotalS(post)', 'workspace.html');
+    const at = only(workspace, 'function _pceClipsTotalS(post)', 'workspace.html');
+    const scope = workspace.slice(at, at + 600);
+    assert.ok(scope.includes('_pceClipLength(c)'), 'built from the same per-clip length the panel shows');
+    assert.ok(scope.includes('return null'), 'and null while any clip is still being measured');
+});
+
+check('the overlay clamp measures the cut too', () => {
+    // Called with the canvas clip's duration, it pulled every box timed onto clips two-to-four back
+    // into the first and told the reviewer they had overrun — destroying the work it exists to save.
+    assert.ok(workspace.includes('_pceClipsTotalS(_rqPostCache[_rqReviewPostId] || post) ?? media.duration'),
+        'the reconcile must be given the cut length');
+});
+
+check('clip boundaries are drawn, and are not draggable', () => {
+    // Otherwise the axis is 36 anonymous seconds and "put this on the third clip" is arithmetic.
+    const at = only(workspace, 'let clipMarks =', 'workspace.html');
+    const scope = workspace.slice(at, at + 900);
+    assert.ok(scope.includes('pointer-events-none'), 'a boundary is not a thing you can drag');
+    assert.ok(!scope.includes('data-tl-seg'), 'and must not look like a track segment');
+});
+
 console.log('\nthe crop frame');
 
 check('the crop panel exists and precedes the timeline', () => {
