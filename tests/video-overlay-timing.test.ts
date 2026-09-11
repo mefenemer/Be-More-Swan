@@ -92,7 +92,8 @@ check('an unreadable clip is never given an invented length', () => {
     // and the Start/End controls must both gate on the KNOWN one, or they hand back the guess.
     const known = extract('function _rqVideoDurationKnown() {');
     assert.match(known, /:\s*0;/, 'unknown must be 0, not a plausible default');
-    const timeline = extract('function _rqRenderTimeline(post) {');
+    // The timed rows moved into the clip list; _rqTimelineParts is what builds them now.
+    const timeline = extract('function _rqTimelineParts(post) {');
     assert.match(timeline, /isVideo && !_rqVideoDurationKnown\(\)/,
         'the timeline must refuse to draw a draggable axis it cannot measure');
     const timing = extract('function _pceRefreshOverlayTiming() {');

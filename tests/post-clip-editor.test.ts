@@ -43,25 +43,37 @@ check('the clips block is in the stage strip', () => {
     only(workspace, 'id="pce-clips-block"', 'workspace.html');
 });
 
-check('clips are drawn ABOVE the timeline, because the cut decides its axis', () => {
-    const clips = only(workspace, 'id="pce-clips-block"', 'workspace.html');
-    const timeline = only(workspace, 'id="post-review-timeline"', 'workspace.html');
-    assert.ok(clips < timeline, 'the clip list must precede the timeline in the DOM');
+check('there is ONE list, not a clip panel and a timeline panel', () => {
+    // They were two panels, each enumerating the same clips — once as things to trim, once as
+    // headings over their text — and joining them up was left to the reader. The timed rows now sit
+    // inside the clip list. The old host is gone; anything still reaching for it is dead code.
+    only(workspace, 'id="pce-clips-block"', 'workspace.html');
+    assert.strictEqual(
+        workspace.indexOf('getElementById(\'post-review-timeline\')'), -1,
+        'something still renders into the retired timeline host — it no longer exists',
+    );
+    assert.strictEqual(
+        workspace.indexOf('<div id="post-review-timeline"'), -1,
+        'the retired timeline element is back in the markup',
+    );
 });
 
-check('opening a post renders the clips before the timeline', () => {
-    // Order, not adjacency. This asserted the two calls were on consecutive lines and broke the
-    // moment the crop frame was added between them — a false failure about a true ordering. What
-    // matters is that the cut is computed before the axis that depends on it.
-    // Anchored on the comment, which is unique — _pceRenderClips() itself is also called from the
-    // measure callback, so the bare call is not a marker.
-    const at = only(workspace, "// Clips first: the cut decides how long the piece is", 'workspace.html');
-    const open = workspace.slice(at, at + 600);
-    const clips = open.indexOf('_pceRenderClips();');
-    const timeline = open.indexOf('_rqRenderTimeline(post);');
-    assert.notStrictEqual(clips, -1, 'the open path must render the clips');
-    assert.notStrictEqual(timeline, -1, 'the open path must render the timeline');
-    assert.ok(clips < timeline, 'clips must be rendered before the timeline that depends on them');
+check('a clip is followed by the text that shows on it', () => {
+    // The whole point of the merge: clip row, its trim slider, then its text — in that order,
+    // inside the same row container.
+    const at = only(workspace, "+ _pceTrimTrackHtml(c)", 'workspace.html');
+    const after = workspace.slice(at, workspace.indexOf("}).join('');", at));
+    assert.ok(after.includes('_pceTimedBlock(tl.byClip[i]'), "the clip's own text is not drawn under it");
+    assert.ok(after.includes('No text on this clip'), 'an empty clip says nothing at all');
+});
+
+check('sound and orphans come after the clips, not under one of them', () => {
+    // Sound plays across the cut, so it belongs to no single clip; an orphaned box belongs to none
+    // either, and dropping it would hide text from the person approving the post.
+    const at = only(workspace, "const tail = tl.orphans || tl.audio", 'workspace.html');
+    const tail = workspace.slice(at, at + 900);
+    assert.ok(tail.includes('Not on any clip'), 'orphaned text is not labelled');
+    assert.ok(tail.includes('_pceTimedBlock(tl.audio)'), 'sound is not drawn');
 });
 
 check('every mutation goes through one handler that saves AND redraws', () => {
@@ -157,7 +169,8 @@ check('the panel is shown for a single clip, so there is a way to reach two', ()
     // hiding it left no route from one clip to two. A dead end exactly where the feature starts.
     const at = only(workspace, 'function _pceRenderClips(clipsOverride)', 'workspace.html');
     const scope = workspace.slice(at, at + 1200);
-    assert.ok(scope.includes('if (!clips.length) {'), 'only an empty cut hides the panel');
+    assert.ok(scope.includes('if (!clips.length && !tl.any) {'),
+        'only an empty cut with nothing timed hides the panel');
     assert.ok(!scope.includes('worthShowing'), 'the two-clip threshold must be gone');
 });
 
@@ -300,11 +313,14 @@ check('the overlay clamp measures the cut too', () => {
         'the reconcile must be given the cut length');
 });
 
-check('clip boundaries are drawn, and are not draggable', () => {
-    // Otherwise the axis is 36 anonymous seconds and "put this on the third clip" is arithmetic.
-    const at = only(workspace, 'let clipMarks =', 'workspace.html');
-    const scope = workspace.slice(at, at + 900);
-    assert.ok(scope.includes('pointer-events-none'), 'a boundary is not a thing you can drag');
+check('clip boundaries need no marks now that each clip is its own group', () => {
+    // They existed because one continuous axis was 36 anonymous seconds and "put this on the third
+    // clip" was arithmetic. Each clip now has its own block, so the boundary IS the row break.
+    assert.strictEqual(workspace.indexOf('let clipMarks ='), -1, 'the boundary marks are back');
+    // What replaced them still must not look draggable.
+    const at = only(workspace, 'function _pceTimedBlock(inner)', 'workspace.html');
+    const scope = workspace.slice(at, at + 600);
+    assert.ok(scope.includes('pointer-events-none'), 'the playhead must not be grabbable');
     assert.ok(!scope.includes('data-tl-seg'), 'and must not look like a track segment');
 });
 
@@ -559,24 +575,30 @@ check('text rows sit under the clip they belong to', () => {
     // rows is on the clip I just trimmed?
     const at = only(workspace, 'const placed = new Set();', 'workspace.html');
     const scope = workspace.slice(at, at + 1200);
-    assert.ok(scope.includes('Clip ${sp.i + 1}'), 'a heading per clip');
     assert.ok(scope.includes('at.i === sp.i'), 'boxes grouped by the clip they start in');
-    assert.ok(scope.includes('No text on this clip'), 'and an empty clip says so');
+    assert.ok(scope.includes('byClip[sp.i]'), 'the grouping is not keyed by clip index');
+    // The clip heading is the clip's own row now, and the empty case is stated where it is placed.
+    assert.ok(workspace.includes('No text on this clip'), 'an empty clip says so');
 });
 
 check('a box that cannot be placed is listed, never dropped', () => {
     // After a trim, before re-anchoring catches up, a box can sit past the end. Losing it from the
     // view would look like losing it from the post.
-    const at = only(workspace, 'const orphans = overlays.filter', 'workspace.html');
-    assert.ok(workspace.slice(at, at + 200).includes('textRows +='), 'orphans are appended');
+    const at = only(workspace, 'orphans = overlays.filter((_, i) => !placed.has(i))', 'workspace.html');
+    assert.ok(workspace.slice(at, at + 200).includes('textRow('), 'orphans are not rendered');
+    assert.ok(workspace.includes('Not on any clip'), 'orphans are rendered but never labelled');
 });
 
 check('every row states its seconds', () => {
     // A bar without numbers is a shape: you can see one box is later than another, not when either
     // happens. Per clip AND overall, because both answer a different question.
-    const at = only(workspace, 'const sub = sp', 'workspace.html');
-    const scope = workspace.slice(at, at + 400);
+    const at = only(workspace, 'let sub;', 'workspace.html');
+    const scope = workspace.slice(at, at + 900);
     assert.ok(scope.includes('of clip ${sp.i + 1}') && scope.includes('overall'));
+    // ⚠️ A box with no end time runs to the end of the WHOLE video, not of the clip it starts on.
+    // "0s → 36.7s of clip 1" was on screen about a 10.7s clip, under a bar covering all four.
+    assert.ok(scope.includes('end > sp.end'), 'a box that runs past its clip is still described as inside it');
+    assert.ok(scope.includes('runs on'), 'nothing says the box carries on past that clip');
     // Audio too.
     assert.ok(workspace.includes('plays for ${fmt(Math.max(0, en - st))}'));
 });
@@ -623,10 +645,12 @@ check('the controls appear when the clips finish measuring, without being poked'
 
 console.log('\nthe crop frame');
 
-check('the crop panel exists and precedes the timeline', () => {
+check('the crop panel exists and follows the clip list', () => {
+    // The crop frame answers "what does this platform keep", which only means something once the
+    // cut it crops is decided above it.
+    const clips = only(workspace, 'id="pce-clips-block"', 'workspace.html');
     const crop = only(workspace, 'id="pce-crop-block"', 'workspace.html');
-    const timeline = only(workspace, 'id="post-review-timeline"', 'workspace.html');
-    assert.ok(crop < timeline);
+    assert.ok(clips < crop, 'the crop frame must come after the list that decides the cut');
 });
 
 check('opening a post renders AND binds it', () => {

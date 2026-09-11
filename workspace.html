@@ -940,10 +940,11 @@ window.showComplianceModals = function showComplianceModals(force) {
                  _pceRenderCropFrame, dragged via _pceBindCropFrame. -->
             <div id="pce-crop-block" class="hidden px-2.5 pb-2"></div>
 
-            <!-- One track per timed thing — text on video (pink), sound (indigo) — over a shared
-                 0→duration axis with a playhead. Drag an end to re-time it, drag the body to move
-                 it. Filled by _rqRenderTimeline; hidden when nothing on this post has timing. -->
-            <div id="post-review-timeline" class="hidden px-2.5 pb-2"></div>
+            <!-- The timed tracks — text on video (pink), sound (indigo) — used to be a panel of
+                 their own here, under the clips. They are now drawn INSIDE #pce-clips-block, each
+                 one under the clip it sits on, because two panels each enumerating the same four
+                 clips left the reader to join them up by name. Built by _rqTimelineParts, placed by
+                 _pceRenderClips, dragged via _rqBindTimeline — which binds to the clip block. -->
 
             <!-- Timing for whatever is selected, immediately under its own track. Exactly one of
                  these is ever visible — _pceRefreshStageTiming enforces that, since each panel only
@@ -6371,9 +6372,14 @@ function _rqApplyOverlayTimes(video, layer, post) {
         const ov = byId[n.dataset.id];
         n.style.display = ov && !_rqOverlayVisibleAt(ov, t) ? 'none' : '';
     }
-    const head = document.querySelector('#post-review-timeline [data-playhead]');
+    // One playhead per timed block now that the rows live inside the clip list — all on the cut's
+    // axis, so they take the same position and read as a single line.
+    const heads = document.querySelectorAll('#pce-clips-block [data-playhead]');
     const dur = _pceCutDuration(video, post);
-    if (head && dur && isFinite(dur)) head.style.left = (Math.min(1, t / dur) * 100) + '%';
+    if (heads.length && dur && isFinite(dur)) {
+        const at = (Math.min(1, t / dur) * 100) + '%';
+        heads.forEach((h) => { h.style.left = at; });
+    }
 }
 
 // Paint a post's saved text overlays as a live layer on the mock-up canvas, and (for video) drive the
@@ -6479,9 +6485,9 @@ function _rqRenderCanvasOverlays(post) {
     }
 }
 
+/** No overlay layer means nothing timed can be drawn — repaint the list so its rows go with it. */
 function _rqHideTimeline() {
-    const el = document.getElementById('post-review-timeline');
-    if (el) { el.classList.add('hidden'); el.innerHTML = ''; }
+    _pceRenderClips();
 }
 
 // The clip's REAL length, or 0 when the browser has not read it yet (metadata still loading, or the
@@ -6585,27 +6591,33 @@ const _RQ_TL_COLOURS = {
     text:  { on: '#ec4899', off: '#f9a8d4', edge: 'rgba(157,23,77,.6)' },
     audio: { on: '#6366f1', off: '#a5b4fc', edge: 'rgba(55,48,163,.6)' },
 };
-function _rqRenderTimeline(post) {
-    const host = document.getElementById('post-review-timeline');
-    if (!host) return;
+/**
+ * The timed rows — text and sound — built but NOT placed.
+ *
+ * ⚠️ This used to render a "Timeline" panel of its own, under the Clips panel. Both panels then
+ * listed the same four clips: once as things you can trim, once as headings over their text. The
+ * reader had to join the two by name. They are now ONE list — each clip, its trim slider, then the
+ * text that sits on it — so this returns the pieces and _pceRenderClips decides where they go.
+ *
+ * Every bar is still positioned against the WHOLE cut, not against its own clip. That is what makes
+ * it a timeline: one axis, one playhead, and a bar that runs past its clip's end LOOKS like it runs
+ * past it. Each row states both readings in words underneath.
+ */
+function _rqTimelineParts(post) {
+    const none = { any: false, note: '', dur: 0, byClip: [], orphans: '', audio: '' };
     const isVideo = !!document.querySelector('#post-review-body [data-media-video]');
     const overlays = isVideo ? ((post && post.overlays) || []) : [];
-    const clips = _pceAudioClips(post);
-    if (!overlays.length && !clips.length) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+    const audioClips = _pceAudioClips(post);
+    if (!overlays.length && !audioClips.length) return none;
     // A video whose length we cannot read gets NO draggable axis. Drawing one against the 15s
     // fallback is how boxes end up timed past the end of a six-second clip — invisible in the preview
     // and a single frame in the render. Say so instead: it is also the visible symptom of a media URL
     // that has stopped answering, which is worth the reviewer knowing before they approve.
     if (isVideo && !_rqVideoDurationKnown()) {
-        host.innerHTML = `<div class="pt-1">
-            <div class="flex items-center justify-between mb-1.5">
-              <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Timeline</span>
-            </div>
-            <p class="text-[11px] text-gray-500">Reading the clip's length… If this doesn't clear, the video isn't loading — reopen the post before timing your text.</p>
-          </div>`;
-        host.classList.remove('hidden');
-        return;
+        return Object.assign({}, none, { any: true,
+            note: `<p class="text-[11px] text-gray-500 px-1 py-1">Reading the clip's length… If this doesn't clear, the video isn't loading — reopen the post before timing your text.</p>` });
     }
+
     const dur = _rqTimelineDuration(post);
     const fmt = (s) => `${(Math.round(s * 10) / 10)}s`;
 
@@ -6636,72 +6648,52 @@ function _rqRenderTimeline(post) {
           </div>`;
     };
 
-    // ── Where one clip ends and the next begins ─────────────────────────────────────────────────
-    // Without these the axis is 36 anonymous seconds and "put this on the third clip" becomes
-    // arithmetic. They are drawn behind the tracks, not as a track: a boundary is not a thing you
-    // can drag, and making it look like one would invite exactly that.
-    let clipMarks = '';
-    const cutTotal = _pceClipsTotalS(post);
-    if (cutTotal != null && Math.abs(cutTotal - dur) < 0.05) {
-        let at = 0;
-        const marks = [];
-        for (const c of _pceClips(post).slice(0, -1)) {
-            const len = _pceClipLength(c);
-            if (len == null) { marks.length = 0; break; }
-            at += len;
-            marks.push((at / dur) * 100);
-        }
-        clipMarks = marks.map(pct => `<div class="absolute top-0 bottom-0 w-px pointer-events-none"
-            style="left:calc(4rem + 0.5rem + (100% - 4rem - 0.5rem) * ${pct / 100});background:rgba(15,23,42,.18)"></div>`).join('');
-    }
-
-    // ── Text, under the clip it belongs to ──────────────────────────────────────────────────────
-    // Two stacks — every clip, then every text box — made the reader do the join themselves: which
-    // of these five rows is on the clip I just trimmed? Grouping answers it by position, which is
-    // what a timeline is for. The seconds are stated per clip AND against the whole cut, because
-    // both are the answer to a different question.
     const spans = _pceSpansFor(_pceClips(post));
     const textRow = (ov, i) => {
         const start = ov.startS == null ? 0 : ov.startS;
         const end = ov.endS == null ? dur : ov.endS;
         const sp = spans ? _pceSpanAt(spans, start) : null;
-        const sub = sp
-            ? `${fmt(start - sp.start)} → ${fmt(end - sp.start)} of clip ${sp.i + 1} · ${fmt(start)} → ${fmt(end)} overall`
-            : `${fmt(start)} → ${fmt(end)} · shows for ${fmt(Math.max(0, end - start))}`;
+        // ⚠️ A box with no end time runs to the end of the WHOLE video, not to the end of the clip
+        // it starts on. Saying "0s → 36.7s of clip 1" about a 10.7s clip is a flat contradiction —
+        // and it was on screen, under a bar that visibly covered all four clips. Describe what it
+        // actually does: where it starts, and that it carries on past that clip.
+        let sub;
+        if (!sp) {
+            sub = `${fmt(start)} → ${fmt(end)} · shows for ${fmt(Math.max(0, end - start))}`;
+        } else if (end > sp.end + 0.05) {
+            sub = `starts ${fmt(start - sp.start)} into clip ${sp.i + 1} and runs on · ${fmt(start)} → ${fmt(end)} of the whole cut`;
+        } else {
+            sub = `${fmt(start - sp.start)} → ${fmt(end - sp.start)} of clip ${sp.i + 1} · ${fmt(start)} → ${fmt(end)} overall`;
+        }
         return row('text', ov.id || String(i), (ov.text || 'Text').split('\n')[0].slice(0, 22), ov,
             !!(ov.id && ov.id === _pceSelectedOverlayId), sub);
     };
 
-    let textRows;
-    if (spans && spans.length > 1) {
-        // A heading per clip, then the boxes that start inside it. Anything that cannot be placed —
-        // a box timed past the end after a trim, before re-anchoring catches up — is listed at the
-        // end rather than silently dropped.
+    // Each box belongs to the clip its START lands in. Anything that cannot be placed — a box timed
+    // past the end after a trim, before re-anchoring catches up — comes back as an orphan rather
+    // than being silently dropped.
+    const byClip = [];
+    let orphans = '';
+    if (spans && spans.length) {
         const placed = new Set();
-        textRows = spans.map((sp) => {
+        for (const sp of spans) {
             const mine = overlays.filter((ov, i) => {
                 const at = _pceSpanAt(spans, ov.startS == null ? 0 : ov.startS);
                 if (at && at.i === sp.i) { placed.add(i); return true; }
                 return false;
             });
-            const head = `<div class="flex items-center gap-2 pt-1">
-                <span class="w-16 shrink-0 truncate text-[10px] font-bold text-gray-400">Clip ${sp.i + 1}</span>
-                <span class="flex-1 text-[10px] text-gray-300" style="font-variant-numeric:tabular-nums">${fmt(sp.start)} – ${fmt(sp.end)}</span>
-              </div>`;
-            const body = mine.length
-                ? mine.map((ov) => textRow(ov, overlays.indexOf(ov))).join('')
-                : '<p class="ml-[4.5rem] text-[10px] text-gray-300">No text on this clip</p>';
-            return head + body;
-        }).join('');
-        const orphans = overlays.filter((_, i) => !placed.has(i));
-        if (orphans.length) textRows += orphans.map((ov) => textRow(ov, overlays.indexOf(ov))).join('');
+            byClip[sp.i] = mine.map((ov) => textRow(ov, overlays.indexOf(ov))).join('');
+        }
+        orphans = overlays.filter((_, i) => !placed.has(i))
+            .map((ov) => textRow(ov, overlays.indexOf(ov))).join('');
     } else {
-        textRows = overlays.map(textRow).join('');
+        orphans = overlays.map(textRow).join('');
     }
+
     // Drawn from the clip's EFFECTIVE range, not its stored one: an unbounded clip runs for its own
     // natural length, and drawing it across the whole axis would claim a six-second voice note covers
-    // a ten-second video.
-    const audioRows = clips.map((a, i) => {
+    // a ten-second video. Sound is not per-clip — it plays over the cut — so it sits after the list.
+    const audio = audioClips.map((a, i) => {
         const r = _pceAudioDrawRange(a);
         const st = r.startS == null ? 0 : r.startS;
         const en = r.endS == null ? dur : r.endS;
@@ -6710,26 +6702,31 @@ function _rqRenderTimeline(post) {
             `${fmt(st)} → ${fmt(en)} · plays for ${fmt(Math.max(0, en - st))}`);
     }).join('');
 
-    // No border or background of its own: it sits inside #pce-stage-strip, which already has both,
-    // and nesting one bordered card in another made the tracks look like a separate widget rather
-    // than part of the layer list directly above them.
-    host.innerHTML = `
-      <div class="pt-1">
-        <div class="flex items-center justify-between mb-1.5">
-          <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Timeline</span>
-          <span class="text-[10px] text-gray-400">${fmt(dur)}${cutTotal != null ? ' · whole cut' : ''}</span>
-        </div>
-        <div class="relative space-y-1.5" data-tl-body>
-          ${clipMarks}${textRows}${audioRows}
-          <div class="absolute top-0 bottom-0 w-px bg-gray-800 pointer-events-none" style="left:0" data-playhead></div>
-        </div>
-      </div>`;
-    host.classList.remove('hidden');
-    // Keep the playhead in step with the current frame the moment the timeline (re)renders.
-    const v = document.querySelector('#post-review-body [data-media-video]');
-    if (v) { const head = host.querySelector('[data-playhead]'); if (head && v.duration && isFinite(v.duration)) head.style.left = (Math.min(1, (v.currentTime || 0) / v.duration) * 100) + '%'; }
+    return { any: true, note: '', dur, byClip, orphans, audio };
 }
 
+/**
+ * A block of timed rows, with its own playhead.
+ *
+ * One playhead per block rather than one line down the whole list, because the list is not on one
+ * axis any more: a trim slider runs 0→the clip's own length, while these run 0→the whole cut. A
+ * single line crossing both would be pointing at two different moments at once. Every block shares
+ * the cut axis, so every playhead sits at the same x — it reads as one line, and is one truth.
+ */
+function _pceTimedBlock(inner) {
+    if (!inner) return '';
+    return '<div class="relative pb-1" data-tl-group>' + inner
+        + '<div class="absolute top-0 bottom-0 w-px bg-gray-800 pointer-events-none" style="left:0" data-playhead></div>'
+        + '</div>';
+}
+
+/**
+ * Everything that used to repaint the timeline repaints the clip list instead — the rows live
+ * inside it now. Kept under the old name so the ~15 callers do not all have to know that.
+ */
+function _rqRenderTimeline() {
+    _pceRenderClips();
+}
 // ── The cut ─────────────────────────────────────────────────────────────────────────────────────
 // Every clip on the post, in order, with the seconds trimmed off each end. This is the ONE thing
 // that decides how long the finished video is, which is why it sits above the timeline rather than
@@ -7024,11 +7021,9 @@ function _pceMeasureClips(clips) {
             if (isFinite(v.duration) && v.duration > 0) {
                 _pceClipDurations[c.assetId] = v.duration;
                 _pceReportClipMetrics(c.assetId, v.videoWidth, v.videoHeight, v.duration);
+                // One repaint: the axis IS the cut's total and the timed rows live in this same
+                // list, so they grow together as each clip reports its length.
                 _pceRenderClips();
-                // The axis IS the cut's total, so it grows as each clip reports its length. Without
-                // this the ruler stays at the first clip's duration until something else redraws it.
-                const p = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
-                if (p) _rqRenderTimeline(p);
             }
             if (v.videoWidth > 0 && v.videoHeight > 0) {
                 _pceClipAspect[c.assetId] = v.videoWidth / v.videoHeight;
@@ -7286,13 +7281,17 @@ function _pceRenderClips(clipsOverride) {
     if (!host) return;
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
     const clips = clipsOverride || _pceClips(post);
+    // The timed rows that used to be a Timeline panel of their own, now folded in under the clip
+    // each one sits on. Built before the bail-out below because a post can have sound and no clips
+    // at all — a voice note over a photo — and those rows still have to be drawn somewhere.
+    const tl = _rqTimelineParts(post);
     // Shown whenever the post has video at all — including a single untouched clip.
     //
     // It used to hide until there were two clips or a trim, on the grounds that reordering a list of
     // one is noise. That reasoning was right about the list and wrong about the panel: "Add another
     // clip" lives here, so hiding it left no way to GET to two clips. A dead end exactly where the
     // feature starts.
-    if (!clips.length) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+    if (!clips.length && !tl.any) { host.classList.add('hidden'); host.innerHTML = ''; return; }
     // Nothing here is selected any more, so there is no stale selection to reconcile. The canvas is
     // borrowed only for the duration of a drag and handed back on release.
 
@@ -7325,33 +7324,67 @@ function _pceRenderClips(clipsOverride) {
             + ' onclick="window._pceClipRemove(' + i + ')">&times;</button>'
             + '</div>'
             + _pceTrimTrackHtml(c)
+            // What shows ON this clip, directly under the slider that decides how long it lasts.
+            // "No text" is stated rather than left blank: an empty gap under clip 3 and an empty gap
+            // under a clip whose text has drifted off the end look identical.
+            + _pceTimedBlock(tl.byClip[i]
+                || '<p class="ml-[4.5rem] text-[10px] text-gray-300">No text on this clip</p>')
             + '</div>';
     }).join('');
 
     const overLong = !anyUnknown && total > _PCE_SHORT_MAX_S;
+    // One heading over one list. It was "Clips" here and "Timeline" below, each enumerating the same
+    // four clips — once as things to trim, once as headings over their text — leaving the reader to
+    // join them up by name.
+    const heading = clips.length ? 'Clips &amp; timeline' : 'Timeline';
+    const tail = tl.orphans || tl.audio
+        // Sound is not per-clip: it plays across the cut, so it sits after the list rather than under
+        // any one clip. Orphans join it — a box whose start no longer lands in any clip belongs to
+        // none of them, and hiding it would be how a reviewer approves text they cannot see.
+        ? '<div class="pt-1.5">'
+          + (tl.orphans ? '<p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Not on any clip</p>' : '')
+          + _pceTimedBlock(tl.orphans)
+          + (tl.audio ? '<p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1 mt-1">Sound</p>' : '')
+          + _pceTimedBlock(tl.audio)
+          + '</div>'
+        : '';
     host.innerHTML = '<div class="pt-1">'
         + '<div class="flex items-center justify-between mb-1">'
-        + '<span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Clips</span>'
+        + '<span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">' + heading + '</span>'
         + '<span class="text-[10px] text-gray-400" style="font-variant-numeric:tabular-nums">' + totalLabel + '</span>'
         + '</div>'
+        + tl.note
         + '<div class="divide-y divide-gray-100">' + rows + '</div>'
+        + tail
         + (clips.length > 1
             ? '<button type="button" onclick="' + (_pcePreviewing() ? 'window._pcePreviewStop()' : 'window._pcePreviewStart()') + '"'
               + ' class="mt-1.5 w-full rounded-lg border border-emerald-300 bg-emerald-50 py-1.5 text-[11px] font-bold text-emerald-800 hover:bg-emerald-100 transition cursor-pointer">'
               + (_pcePreviewing() ? '■ Stop preview' : '▶ Preview the whole cut') + '</button>'
             : '')
-        + (clips.length < _PCE_MAX_CLIPS
+        // Clip controls only where there are clips. This panel also draws the sound on a PHOTO post,
+        // and "Add another clip" there would offer to turn a picture into a video.
+        + (!clips.length ? ''
+            : clips.length < _PCE_MAX_CLIPS
             ? '<button type="button" onclick="window._pceAddClipFiles()"'
               + ' class="mt-1.5 w-full rounded-lg border border-dashed border-gray-300 py-1.5 text-[11px] font-semibold text-gray-500 hover:border-emerald-400 hover:text-emerald-700 transition cursor-pointer">'
               + '+ Add another clip</button>'
             : '<p class="mt-1 text-[10px] text-amber-600">That is the most clips one post can hold.</p>')
         + (overLong
             ? '<p class="mt-1 text-[10px] text-amber-600">Over three minutes — too long for a YouTube Short, so it would go out as a standard video there.</p>' : '')
-        + '<p class="mt-1 text-[10px] text-gray-400">Drag either end of a clip to trim it — the canvas shows that exact frame. ' + (clips.length > 1
-            ? 'Trimmed and joined when you approve the post. Preview plays the cut with your text and sound.'
-            : 'Trimmed when you approve the post. Add another clip to join them into one video.') + '</p>'
+        + (!clips.length ? ''
+            : '<p class="mt-1 text-[10px] text-gray-400">Drag either end of a clip to trim it — the canvas shows that exact frame. '
+              + (clips.length > 1
+                  ? 'Trimmed and joined when you approve the post. Drag a text bar to re-time it. Preview plays the cut with your text and sound.'
+                  : 'Trimmed when you approve the post. Add another clip to join them into one video.') + '</p>')
         + '</div>';
     host.classList.remove('hidden');
+    // Every timed block carries its own playhead, and they all sit on the cut's axis — so they take
+    // the same position. Seeded here so a repaint does not drop the line back to zero.
+    const v = document.querySelector('#post-review-body [data-media-video]');
+    if (v && v.duration && isFinite(v.duration)) {
+        const at = (Math.min(1, (v.currentTime || 0) / v.duration) * 100) + '%';
+        host.querySelectorAll('[data-playhead]').forEach((h) => { h.style.left = at; });
+    }
 }
 
 // ── The crop frame ──────────────────────────────────────────────────────────────────────────────
@@ -7618,7 +7651,7 @@ function _rqTimelineItem(kind, key) {
     return overlays.find((o) => o && o.id === key) || overlays[Number(key)] || null;
 }
 
-// Timeline drag: bound ONCE to the stable #post-review-timeline container (its innerHTML is replaced
+// Timeline drag: bound ONCE to the stable #pce-clips-block container (its innerHTML is replaced
 // each render, but the element persists). Pointer capture is on the container, and the move handler
 // mutates ONLY the dragged segment's inline style — it does NOT re-render the timeline mid-drag,
 // which would destroy the very node being held (the Phase 1 lesson). Full re-render + save happen on
@@ -7627,7 +7660,11 @@ let _rqTimelineBound = false;
 let _rqTlDrag = null;
 function _rqBindTimeline() {
     if (_rqTimelineBound) return;
-    const host = document.getElementById('post-review-timeline');
+    // ⚠️ #pce-clips-block, not #post-review-timeline. The timed rows moved into the clip list, and a
+    // handler bound to the element they LEFT never fires — the bars would draw perfectly and simply
+    // not respond to the pointer. Sharing the element with _pceBindClipTrim is safe: each handler
+    // opens with a closest() for its own target and neither uses stopImmediatePropagation.
+    const host = document.getElementById('pce-clips-block');
     if (!host) return;
     _rqTimelineBound = true;
     const fmt = (s) => `${(Math.round(s * 10) / 10)}s`;
