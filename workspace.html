@@ -8976,20 +8976,10 @@ function _pceOpenMediaPicker() {
     const msg = document.getElementById('pce-media-modal-msg');
     if (msg) msg.textContent = '';
     const sub = document.getElementById('pce-media-modal-sub');
-    // Adding a clip only means something on a video-only format that already has one. Everywhere
-    // else the next thing you pick genuinely is a replacement, and offering to "add" would be
-    // offering a carousel by the back door.
-    const fmt = typeof _pceActiveFormat === 'function' ? _pceActiveFormat(post) : null;
-    const clipable = !!post.thumbnailUrl && _pcePostIsVideo(post) && !!fmt && fmt.m === 'video' && fmt.max === 1;
-    document.getElementById('pce-media-modal-clip')?.classList.toggle('hidden', !clipable);
-
-    // "Choose a picture" was the title, but this offers video and a branded card too — so it named
-    // one of three answers.
-    if (sub) {
-        sub.textContent = !post.thumbnailUrl ? ''
-            : clipable ? 'Picking replaces this video. To keep it and add another, use “Add another clip” below.'
-            : 'Whatever you pick replaces what is on the post.';
-    }
+    // The clip affordance and the subtitle are BOTH derived in _pceSyncMediaModalClip, which
+    // gpAiShowThumb calls on every media change. Computing them here as well would be the bug this
+    // had: the modal is usually opened on a post with NO media, so a value decided at open time
+    // says "no video to add to" and never reconsiders once one is attached in the same session.
 
     modal.classList.remove('hidden');
     modal.classList.add('flex');
@@ -15454,7 +15444,40 @@ function gpAiSetMediaType(type) {
 }
 
 // Reveal the currently-attached media. type is 'image'|'video'; if omitted we infer from the URL.
+/**
+ * Whether this modal can offer "add another clip", and what its subtitle should say.
+ *
+ * Derived from the media gpAiShowThumb was HANDED, not from the post cache: the cache is updated by
+ * the same handlers, and reading it here would make the answer depend on which of them ran first.
+ *
+ * Called on open and after every attach, because the interesting transition is exactly the one a
+ * value computed at open time cannot see — a modal opened on an empty post, a video attached inside
+ * it, and the question "how do I add another" arriving one second later.
+ */
+function _pceSyncMediaModalClip(url, type) {
+    const el = document.getElementById('pce-media-modal-clip');
+    const sub = document.getElementById('pce-media-modal-sub');
+    if (!el && !sub) return;
+    const id = typeof _gpCurrentPostId !== 'undefined' && _gpCurrentPostId != null ? _gpCurrentPostId : _rqReviewPostId;
+    const post = id != null ? _rqPostCache[id] : null;
+    // Same rule gpAiShowThumb uses to decide what it is showing.
+    const isVideo = type ? type === 'video' : /\.mp4(\?|$)/i.test(url || '');
+    const fmt = post && typeof _pceActiveFormat === 'function' ? _pceActiveFormat(post) : null;
+    // Only where the next video would be a second CLIP of one piece. On a carousel or a still,
+    // "add" would be a carousel by the back door.
+    const clipable = !!url && isVideo && !!fmt && fmt.m === 'video' && fmt.max === 1;
+    el?.classList.toggle('hidden', !clipable);
+    if (sub) {
+        sub.textContent = !url ? ''
+            : clipable ? 'Picking replaces this video. To keep it and add another, use “Add another clip” below.'
+            : 'Whatever you pick replaces what is on the post.';
+    }
+}
+
 function gpAiShowThumb(url, type) {
+    // Every attach path already ends here, which is why the clip affordance is synced from this
+    // function rather than from each of them.
+    _pceSyncMediaModalClip(url, type);
     const wrap = document.getElementById('gp-ai-media-thumb');
     const img = document.getElementById('gp-ai-media-thumb-img');
     const vid = document.getElementById('gp-ai-media-thumb-video');

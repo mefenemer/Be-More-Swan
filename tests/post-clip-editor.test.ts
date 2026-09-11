@@ -176,10 +176,25 @@ check('the media picker offers adding a clip, where people actually ask for it',
 check('it is offered ONLY where the next video is a clip, not a replacement', () => {
     // On a carousel or a still, "add" would be a carousel by the back door.
     const at = only(workspace, 'const clipable =', 'workspace.html');
-    const scope = workspace.slice(at, at + 400);
-    assert.ok(scope.includes('_pcePostIsVideo(post)'), 'video posts only');
+    const scope = workspace.slice(at, at + 300);
+    assert.ok(scope.includes('isVideo'), 'video media only');
     assert.ok(scope.includes("fmt.m === 'video'") && scope.includes('fmt.max === 1'), 'single-item video formats only');
-    assert.ok(scope.includes('post.thumbnailUrl'), 'and only once there is something to add TO');
+    assert.ok(scope.includes('!!url'), 'and only once there is something to add TO');
+});
+
+check('the affordance is re-synced on every media change, not computed once on open', () => {
+    // The bug this replaces: the modal is usually opened on a post with NO media, so a value
+    // decided at open time says "nothing to add to" and never reconsiders when a video is attached
+    // inside the same session — which is exactly when the user asks how to add another.
+    const hook = only(workspace, 'function gpAiShowThumb(url, type) {', 'workspace.html');
+    const body = workspace.slice(hook, hook + 400);
+    assert.ok(body.includes('_pceSyncMediaModalClip(url, type)'),
+        'every attach path ends at gpAiShowThumb, so the sync belongs there');
+
+    // And it must NOT be recomputed at open time as well, or the two can disagree.
+    const open = only(workspace, 'function _pceOpenMediaPicker()', 'workspace.html');
+    const openBody = workspace.slice(open, open + 2600);
+    assert.ok(!openBody.includes('const clipable ='), 'open must not compute it a second time');
 });
 
 console.log('\nthe video step');
