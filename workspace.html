@@ -6828,6 +6828,17 @@ function _pceClipsTotalS(post) {
 const _pcePrev = { on: false, i: 0, offset: 0, starting: false };
 
 /**
+ * Why the preview could not start. Empty when there is nothing to say.
+ *
+ * ⚠️ Every one of these used to be a bare `return`. A button that does nothing, with no message, is
+ * indistinguishable from a broken button — and it was reported as exactly that, twice, while the
+ * code was doing precisely what it was told. Worse, the abort path runs through _pcePreviewStop,
+ * which flips the label back within the same tick, so even "it went to Stop and back" was invisible.
+ * Silence is the bug; it has been the bug in this panel three times now.
+ */
+let _pcePrevMsg = '';
+
+/**
  * The canvas holds ONE <video> and two features now drive it — previewing a cut, and scrubbing a
  * clip while its trim handles move. Both swap its src, so both go through here: two independent
  * bits of src bookkeeping would race, and whichever finished last would decide what the post
@@ -6901,7 +6912,10 @@ function _pcePreviewVideoEl() {
 async function _pcePreviewSeat(i) {
     const clips = _pceClips();
     const video = _pcePreviewVideoEl();
-    if (!video || !clips[i] || !clips[i].url) return _pcePreviewStop();
+    if (!video || !clips[i] || !clips[i].url) {
+        _pcePrevMsg = `Clip ${i + 1} could not be loaded, so the preview stopped there.`;
+        return _pcePreviewStop();
+    }
     _pcePrev.i = i;
     _pcePrev.offset = 0;
     for (let k = 0; k < i; k++) _pcePrev.offset += _pceClipLength(clips[k]) || 0;
@@ -6915,17 +6929,37 @@ async function _pcePreviewSeat(i) {
             video.addEventListener('error', res, { once: true });
         });
         video.currentTime = clips[i].inS || 0;
-        await video.play().catch(() => {});
+        await video.play().catch((err) => {
+            // The browser refusing to play is a real answer, not a no-op. It happens when the
+            // element is not muted and the click's user-activation has expired across the awaits
+            // above — and it looks, from the outside, exactly like a dead button.
+            _pcePrevMsg = 'The browser would not start playback here. Press play on the video above once, then try the preview again.';
+            if (err && err.name) _pcePrevMsg += ` (${err.name})`;
+            _pceRenderClips();
+        });
     } finally {
         _pcePrev.starting = false;
     }
 }
 
 window._pcePreviewStart = async function () {
+    _pcePrevMsg = '';
     const clips = _pceClips();
     if (clips.length < 2) return;                  // one clip already previews itself
     const video = _pcePreviewVideoEl();
-    if (!video) return;
+    if (!video) {
+        _pcePrevMsg = 'The picture above is not a video player, so there is nothing to play the cut in. Close the post and open it again.';
+        _pceRenderClips();
+        return;
+    }
+    // Checked BEFORE anything is set, rather than discovered inside _pcePreviewSeat — which aborts
+    // through _pcePreviewStop and takes the label back with it before it has finished changing.
+    const missing = clips.findIndex((c) => !c || !c.url);
+    if (missing >= 0) {
+        _pcePrevMsg = `Clip ${missing + 1} has no playable file, so the cut cannot be previewed. Removing and re-adding that clip usually fixes it.`;
+        _pceRenderClips();
+        return;
+    }
     if (_pcePrev.on) { video.play().catch(() => {}); return; }
     _pcePrev.on = true;
     _pceCanvasBorrow();                 // put the canvas back exactly as we found it
@@ -7467,6 +7501,8 @@ function _pceRenderClips(clipsOverride) {
               + ' class="mt-1.5 w-full rounded-lg border border-dashed border-gray-300 py-1.5 text-[11px] font-semibold text-gray-500 hover:border-emerald-400 hover:text-emerald-700 transition cursor-pointer">'
               + '+ Add another clip</button>'
             : '<p class="mt-1 text-[10px] text-amber-600">That is the most clips one post can hold.</p>')
+        + (_pcePrevMsg
+            ? '<p class="mt-1 text-[10px] text-amber-600">' + _rqEsc(_pcePrevMsg) + '</p>' : '')
         + (overLong
             ? '<p class="mt-1 text-[10px] text-amber-600">Over three minutes — too long for a YouTube Short, so it would go out as a standard video there.</p>' : '')
         + (!clips.length ? ''
@@ -12236,7 +12272,7 @@ function _pceSpanAt(spans, t) {
     return spans[spans.length - 1];
 }
 
-const _pceOvtDrag = { on: false, edge: null };
+const _pceOvtDrag = { on: false, edge: null, span: null };
 
 /** Paint the chips and the track for the selected overlay. */
 function _pceRenderOverlayClipUi(post, ov) {
@@ -12336,8 +12372,20 @@ function _pceBindOverlayScrub() {
     host.addEventListener('pointerdown', (ev) => {
         const h = ev.target.closest && ev.target.closest('[data-ovt-edge]');
         if (!h) return;
+        const c = current();
+        if (!c || !c.sp) return;
         _pceOvtDrag.on = true;
         _pceOvtDrag.edge = h.getAttribute('data-ovt-edge');
+        // ⚠️ PIN THE CLIP for the whole drag.
+        //
+        // `current()` works out which clip the box is on by asking which clip its START second falls
+        // in — recomputed on every pointermove. Drag the start handle to the left of the clip's own
+        // beginning and that answer changes: the panel silently switches to the PREVIOUS clip, the
+        // track is reinterpreted against that clip's span, and the reported symptom is a slider that
+        // "jumps to another clip" the moment you move it left. This track means "where in THIS clip",
+        // and which clip is not something it can decide. The chips above choose it, and dragging the
+        // bar onto another clip's row in the timeline moves it.
+        _pceOvtDrag.span = c.sp;
         h.setPointerCapture && h.setPointerCapture(ev.pointerId);
         ev.preventDefault();
     });
@@ -12346,18 +12394,22 @@ function _pceBindOverlayScrub() {
         if (!_pceOvtDrag.on) return;
         const c = current();
         const track = host.querySelector('[data-ovt-track]');
-        if (!c || !track) return;
+        const sp = _pceOvtDrag.span;
+        if (!c || !track || !sp) return;
         const box = track.getBoundingClientRect();
         if (!box.width) return;
         const f = Math.min(1, Math.max(0, (ev.clientX - box.left) / box.width));
-        const t = c.sp.start + f * c.sp.len;
+        const t = sp.start + f * sp.len;
         const MIN = 0.2;
+        // Clamped into the pinned clip at both ends, so neither handle can walk the box out of the
+        // clip it belongs to — which is the only way the span could have changed under the drag.
         if (_pceOvtDrag.edge === 'start') {
-            const end = c.ov.endS == null ? c.sp.end : c.ov.endS;
-            c.ov.startS = Math.min(t, end - MIN);
-            if (c.ov.startS <= c.sp.start + 0.001 && c.sp.i === 0) c.ov.startS = undefined;
+            const end = c.ov.endS == null ? sp.end : Math.min(c.ov.endS, sp.end);
+            c.ov.startS = Math.max(sp.start, Math.min(t, end - MIN));
+            if (c.ov.startS <= sp.start + 0.001 && sp.i === 0) c.ov.startS = undefined;
         } else {
-            c.ov.endS = Math.max(t, (c.ov.startS == null ? c.sp.start : c.ov.startS) + MIN);
+            const start = c.ov.startS == null ? sp.start : Math.max(c.ov.startS, sp.start);
+            c.ov.endS = Math.min(sp.end, Math.max(t, start + MIN));
         }
         // Paint only — a save per pointermove, and re-rendering the panel under the pointer, are the
         // two traps the clip trim and the crop frame already avoid the same way. The canvas is not
@@ -12371,9 +12423,12 @@ function _pceBindOverlayScrub() {
         if (!_pceOvtDrag.on) return;
         _pceOvtDrag.on = false;
         _pceOvtDrag.edge = null;
+        _pceOvtDrag.span = null;
         const c = current();
         if (!c) return;
-        _rqPersistOverlays(c.post.id);          // one save, on release
+        // ⚠️ _rqReviewPostId, not post.id — _rqPersistOverlays looks the post up BY this argument,
+        // so a cache row with no `id` field saved nothing at all, silently.
+        _rqPersistOverlays(_rqReviewPostId);    // one save, on release
         _pceRefreshOverlayTiming();
         _rqRenderTimeline(c.post);
     };

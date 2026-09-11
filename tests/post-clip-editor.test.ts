@@ -967,4 +967,62 @@ check('the move-to-clip save looks the post up the way persist does', () => {
     assert.ok(fn.includes('_rqRenderCanvasOverlays('), 'the picture is not updated');
 });
 
+
+// ── The "when" slider under the canvas ──────────────────────────────────────────────────────────
+// Reported as "if I move the slider to the left it jumps to another clip". It did. The panel works
+// out which clip the box is on by asking which clip its START second falls in, and that was
+// recomputed on every pointermove — so dragging the start handle past the clip's own beginning
+// silently re-resolved to the PREVIOUS clip and reinterpreted the whole track against it.
+
+console.log('\nthe per-clip when slider stays on its clip');
+
+check('the clip is pinned at pointerdown, not recomputed per move', () => {
+    const fn = slice('function _pceBindOverlayScrub()', '\n/**');
+    assert.ok(fn.includes('_pceOvtDrag.span = c.sp'), 'the clip is not pinned for the drag');
+    assert.ok(fn.includes('const sp = _pceOvtDrag.span'), 'the move handler still re-resolves the clip');
+});
+
+check('neither handle can walk the box out of its clip', () => {
+    const fn = slice('function _pceBindOverlayScrub()', '\n/**');
+    assert.ok(fn.includes('Math.max(sp.start, Math.min(t, end - MIN))'), 'the start handle is not clamped');
+    assert.ok(fn.includes('Math.min(sp.end, Math.max(t, start + MIN))'), 'the end handle is not clamped');
+});
+
+check('the scrub saves against the id persist looks posts up by', () => {
+    // ⚠️ Same latent bug as _pceOverlayToClip had: _rqPersistOverlays looks the post up BY its
+    // argument, so post.id saved nothing at all on a cache row without that field.
+    const fn = slice('function _pceBindOverlayScrub()', '\n/**');
+    assert.ok(fn.includes('_rqPersistOverlays(_rqReviewPostId)'), 'still persisting against post.id');
+    assert.ok(!fn.includes('_rqPersistOverlays(c.post.id)'), 'post.id is back');
+});
+
+console.log('\nthe preview says why it cannot start');
+
+check('every abort path states a reason instead of returning silently', () => {
+    // A button that does nothing, with no message, is indistinguishable from a broken button — and
+    // the abort runs through _pcePreviewStop, which takes the label back before it has finished
+    // changing, so even the flicker is invisible.
+    const fn = slice('window._pcePreviewStart = async function () {', '\nwindow._pcePreviewStop');
+    assert.ok(fn.includes('not a video player'), 'no message when the canvas has no video element');
+    assert.ok(fn.includes('has no playable file'), 'no message when a clip has no url');
+    assert.ok(fn.includes('clips.findIndex((c) => !c || !c.url)'),
+        'a missing url is still discovered inside the seat, which aborts through _pcePreviewStop');
+    const seat = slice('async function _pcePreviewSeat(i) {', '\nwindow._pcePreviewStart');
+    assert.ok(seat.includes('_pcePrevMsg ='), 'the seat still fails silently');
+    assert.ok(seat.includes("would not start playback"), 'a refused play() is swallowed');
+});
+
+check('the reason is rendered where the button is', () => {
+    const at = only(workspace, '+ (_pcePrevMsg', 'workspace.html');
+    assert.ok(workspace.slice(at, at + 200).includes('_rqEsc(_pcePrevMsg)'), 'the message is not escaped');
+});
+
+check('the message is declared before the functions that set it', () => {
+    // _pcePreviewSeat sets it and is defined above _pcePreviewStart; a `let` below both would be a
+    // ReferenceError the first time a preview failed, which is the worst possible moment.
+    assert.ok(only(workspace, "let _pcePrevMsg = '';", 'workspace.html')
+        < only(workspace, 'async function _pcePreviewSeat(i) {', 'workspace.html'),
+        '_pcePrevMsg is declared after a function that assigns it');
+});
+
 console.log(`\n${passed} checks passed`);
