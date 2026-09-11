@@ -6739,11 +6739,13 @@ function _pceRenderClips(clipsOverride) {
     if (!host) return;
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
     const clips = clipsOverride || _pceClips(post);
-    // One untrimmed clip is not a cut — it is just the post's video, and a panel offering to reorder
-    // a list of one is noise. It appears the moment there is something to arrange or something has
-    // been trimmed.
-    const worthShowing = clips.length > 1 || clips.some((c) => c.inS || c.outS != null);
-    if (!clips.length || !worthShowing) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+    // Shown whenever the post has video at all — including a single untouched clip.
+    //
+    // It used to hide until there were two clips or a trim, on the grounds that reordering a list of
+    // one is noise. That reasoning was right about the list and wrong about the panel: "Add another
+    // clip" lives here, so hiding it left no way to GET to two clips. A dead end exactly where the
+    // feature starts.
+    if (!clips.length) { host.classList.add('hidden'); host.innerHTML = ''; return; }
 
     _pceMeasureClips(clips);
 
@@ -6789,11 +6791,16 @@ function _pceRenderClips(clipsOverride) {
         + '<span class="text-[10px] text-gray-400" style="font-variant-numeric:tabular-nums">' + totalLabel + '</span>'
         + '</div>'
         + '<div class="divide-y divide-gray-100">' + rows + '</div>'
-        + (clips.length >= _PCE_MAX_CLIPS
-            ? '<p class="mt-1 text-[10px] text-amber-600">That is the most clips one post can hold.</p>' : '')
+        + (clips.length < _PCE_MAX_CLIPS
+            ? '<button type="button" onclick="window._pceAddClipFiles()"'
+              + ' class="mt-1.5 w-full rounded-lg border border-dashed border-gray-300 py-1.5 text-[11px] font-semibold text-gray-500 hover:border-emerald-400 hover:text-emerald-700 transition cursor-pointer">'
+              + '+ Add another clip</button>'
+            : '<p class="mt-1 text-[10px] text-amber-600">That is the most clips one post can hold.</p>')
         + (overLong
             ? '<p class="mt-1 text-[10px] text-amber-600">Over three minutes — too long for a YouTube Short, so it would go out as a standard video there.</p>' : '')
-        + '<p class="mt-1 text-[10px] text-gray-400">Trimmed and joined when you approve the post.</p>'
+        + '<p class="mt-1 text-[10px] text-gray-400">' + (clips.length > 1
+            ? 'Trimmed and joined when you approve the post.'
+            : 'Trimmed when you approve the post. Add another clip to join them into one video.') + '</p>'
         + '</div>';
     host.classList.remove('hidden');
 }
@@ -9015,6 +9022,21 @@ async function _pceCanvasAttachFiles(fileList) {
     if (files.length === 1) return _pceCanvasAttachOne(files[0]);
 
     const fmt = _pceActiveFormat(post);
+
+    // ── Several clips of ONE piece, or several slides? ──────────────────────────────────────────
+    // The composer's rule was "more media than the format takes ⇒ widen the format", which on
+    // Instagram means a Reel silently becomes a Carousel. That is right for photos and exactly
+    // wrong for video: four clips dropped on a Reel are the material for ONE video, not four
+    // slides, and switching format threw away the thing the user was trying to make.
+    //
+    // A single-item VIDEO format is the tell. There the extra files join the edit list
+    // (src/lib/video-edit.ts) as clips, the format is left alone, and the post keeps one attached
+    // asset — the base the render composites from. Everything else keeps the old behaviour.
+    const videoOnlyFormat = !!fmt && fmt.m === 'video' && fmt.max === 1;
+    if (videoOnlyFormat && files.every(f => (f.type || '').startsWith('video/'))) {
+        return _pceAttachClips(files);
+    }
+
     if (!fmt || fmt.max < files.length) {
         // The narrowest live format that fits: on Instagram that is the Carousel.
         const target = _pceFormatsFor(post.platform)
@@ -9038,6 +9060,66 @@ async function _pceCanvasAttachFiles(fileList) {
     // through set-post-slides — the same thing this needs.
     return _pceAddSlides(files);
 }
+
+/**
+ * Add video files to the post's cut, keeping the format it already has.
+ *
+ * The post keeps ONE attached asset — the first clip — because that is what the rest of the editor
+ * and the format router read: a Reel takes one item, and the rendered output will replace it at
+ * approval anyway. The other clips live only in the edit list until then.
+ *
+ * Appends. Picking media through the modal still REPLACES ("Whatever you pick replaces what is on
+ * the post"), which is the right answer for choosing a post's picture and the wrong one for adding
+ * a second clip — so adding clips has its own door rather than changing what that sentence means.
+ */
+async function _pceAttachClips(files) {
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    if (!post || !files.length) return;
+
+    const existing = _pceClips(post);
+    const room = _PCE_MAX_CLIPS - existing.length;
+    if (room <= 0) { window.showToast?.(`A post can hold ${_PCE_MAX_CLIPS} clips.`); return; }
+    const take = files.slice(0, room);
+    if (take.length < files.length) {
+        window.showToast?.(`Added ${take.length} — that is the ${_PCE_MAX_CLIPS}-clip ceiling.`);
+    }
+
+    const { assets, failures } = await gpUploadContentAssets(take, (i, n, name) => {
+        window.showToast?.(`Uploading ${i} of ${n}… ${name}`);
+    });
+    for (const f of failures) window.showToast?.(`${f.name}: ${f.message}`);
+    if (!assets.length) return;
+
+    // The FIRST clip has to become the post's attached media, or the post has no base asset, no
+    // thumbnail, and nothing downstream can tell it is a video at all. Only when there isn't one
+    // already — re-attaching would wipe the overlays designed against it.
+    if (!existing.length) {
+        _gpCurrentPostId = postId;
+        if (typeof gpAiSetMediaType === 'function') gpAiSetMediaType('video');
+        try { await gpAiSelectOwn(assets[0].id); }
+        catch (err) { window.showToast?.(err.message || 'Could not attach that file.'); return; }
+    }
+
+    const clips = existing.concat(assets.map((a, i) => ({
+        id: 'c' + a.id + '_' + (existing.length + i),
+        assetId: a.id,
+        url: a.url || null,
+        name: a.name || ('Clip ' + (existing.length + i + 1)),
+    })));
+    _pceClipsChanged(clips);
+    window.showToast?.(clips.length === 1 ? 'Clip added.' : `${clips.length} clips in this cut.`);
+}
+
+/** The Clips panel's own "Add another clip" — a plain file picker, appending. */
+window._pceAddClipFiles = function () {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'video/*';
+    input.multiple = true;
+    input.onchange = () => { const f = Array.from(input.files || []); if (f.length) _pceAttachClips(f); };
+    input.click();
+};
 
 /**
  * One file: the shared media panel's own attach path (upload → attach-draft-media → gpAiShowThumb).
@@ -9183,7 +9265,11 @@ const _RAIL = [
         if (_pceLayers.includes('overlays')) out.push('pce-insp-overlays');
         if (_pceLayers.includes('audio')) out.push('pce-insp-audio');
         return out;
-    }, enabled: (post) => _pcePostIsVideo(post) },
+    // Both halves matter, and they used to disagree. _pcePostIsVideo answers "is this a video POST",
+    // which a Reel-format draft satisfies before anything is attached — so the step opened onto
+    // overlay and sound controls for media that did not exist, while its own subtitle said "Add a
+    // video first". The subtitle was right; the predicate was the one lying.
+    }, enabled: (post) => _pcePostIsVideo(post) && !!post?.thumbnailUrl },
     { key: 'link',  title: 'Link & call to action', blocks: () => ['pce-link-block'] },
     // "Platforms" was here. It is gone: a post goes out on the accounts the workspace has actually
     // connected, which openGeneratePostSheet now seeds from live connections exactly as Autopilot

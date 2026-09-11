@@ -124,6 +124,55 @@ check('it defaults to the whole cross-post group', () => {
     assert.ok(saveFn.includes('applyToGroup: body.applyToGroup !== false'), 'the cut is shared by default');
 });
 
+console.log('\ngetting clips ONTO a post');
+
+check('several videos on a single-item video format are clips, not slides', () => {
+    // The composer's rule was "more media than the format takes ⇒ widen the format", which turned a
+    // Reel into a Carousel the moment a second clip arrived — throwing away the exact thing the user
+    // was assembling. A single-item VIDEO format is the case that must NOT widen.
+    const at = only(workspace, 'const videoOnlyFormat =', 'workspace.html');
+    const scope = workspace.slice(at, at + 400);
+    assert.ok(scope.includes("fmt.m === 'video'"), 'the tell is a video-only format');
+    assert.ok(scope.includes('fmt.max === 1'), 'and a single-item one');
+    assert.ok(scope.includes('_pceAttachClips('), 'which appends instead of switching format');
+    // ...and it must be decided BEFORE the widen branch, or the format switches first.
+    const widen = only(workspace, 'The narrowest live format that fits', 'workspace.html');
+    assert.ok(at < widen, 'the clip branch must come before the format-widening branch');
+});
+
+check('adding clips APPENDS — the media picker still replaces', () => {
+    const at = only(workspace, 'async function _pceAttachClips(', 'workspace.html');
+    const scope = workspace.slice(at, at + 2400);
+    assert.ok(scope.includes('existing.concat('), 'clips are appended to what is already there');
+    assert.ok(scope.includes('if (!existing.length)'), 'the base asset is attached once, not re-attached');
+});
+
+check('the panel is shown for a single clip, so there is a way to reach two', () => {
+    // It used to hide until there were two clips — but "Add another clip" lives in the panel, so
+    // hiding it left no route from one clip to two. A dead end exactly where the feature starts.
+    const at = only(workspace, 'function _pceRenderClips(clipsOverride)', 'workspace.html');
+    const scope = workspace.slice(at, at + 1200);
+    assert.ok(scope.includes('if (!clips.length) {'), 'only an empty cut hides the panel');
+    assert.ok(!scope.includes('worthShowing'), 'the two-clip threshold must be gone');
+});
+
+check('the add button is wired to the appending path', () => {
+    only(workspace, 'window._pceAddClipFiles = function', 'workspace.html');
+    assert.ok(workspace.includes('onclick="window._pceAddClipFiles()"'), 'the panel must offer it');
+});
+
+console.log('\nthe video step');
+
+check('step 4 stays shut until there is a video to put things ON', () => {
+    // _pcePostIsVideo alone is true for a Reel-format draft with nothing attached, so the step
+    // opened onto overlay and sound controls for media that did not exist — while its own subtitle
+    // said "Add a video first".
+    assert.ok(
+        workspace.includes('enabled: (post) => _pcePostIsVideo(post) && !!post?.thumbnailUrl }'),
+        'the video step must require attached media, not just a video FORMAT',
+    );
+});
+
 console.log('\nthe crop frame');
 
 check('the crop panel exists and precedes the timeline', () => {
