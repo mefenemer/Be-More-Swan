@@ -29,6 +29,14 @@ const saveFn = readFileSync(join(root, 'netlify/functions/save-post-video-edit.t
 const pexels = readFileSync(join(root, 'netlify/functions/pexels-search.ts'), 'utf8');
 const ioe = readFileSync(join(root, 'src/components/image-overlay-editor.js'), 'utf8');
 
+/** The source between two markers, the first of which must be unique. */
+function slice(from: string, to: string): string {
+    const a = only(workspace, from, 'workspace.html');
+    const b = workspace.indexOf(to, a + 1);
+    assert.ok(b > a, `end marker missing after ${from}: ${to}`);
+    return workspace.slice(a, b);
+}
+
 /** Index of a marker that must appear exactly once. Throws rather than returning -1. */
 function only(hay: string, needle: string, where: string): number {
     const first = hay.indexOf(needle);
@@ -784,6 +792,63 @@ check('every local component script is cache-busted at build time', () => {
     // And it has to actually run on deploy.
     const toml = readFileSync(join(root, 'netlify.toml'), 'utf8');
     assert.ok(/command = "[^"]*build:version/.test(toml), 'build:version dropped out of the Netlify build command');
+});
+
+
+// ── Nothing repaints the list while something in it is being dragged ────────────────────────────
+// Reported as "when I try to slide, it seems to extend the slider fully and if I click again it
+// disappears". Reproduced in a browser: a repaint during pointerdown detaches the node under the
+// pointer, a detached node's getBoundingClientRect() is all zeros, so (clientX - 0) / 0 is Infinity,
+// the clamp turns that into the end of the axis — and the mangled start time moves the row under a
+// different clip. Both halves of the report, from one missing guard.
+//
+// This was survivable while the timeline lived in its own element that only _rqRenderTimeline
+// touched. Folding the rows into the clip list put them in the path of every repaint of it.
+
+console.log('\na drag is never repainted out from under the pointer');
+
+check('the clip list refuses to repaint mid-drag, and defers instead', () => {
+    const at = only(workspace, 'function _pceRenderClips(clipsOverride) {', 'workspace.html');
+    const head = workspace.slice(at, at + 400);
+    assert.ok(head.includes('if (_pceDragHold > 0)'), 'the list repaints during a drag');
+    assert.ok(head.includes('_pceClipsRepaintPending = true'),
+        'a repaint refused during a drag must be deferred, not dropped');
+});
+
+check('both drags take the hold and both give it back', () => {
+    const trim = slice('function _pceBindClipTrim() {', '/** Move the lit section');
+    assert.ok(trim.includes('_pceDragHoldStart()'), 'the trim drag does not take the hold');
+    assert.ok(trim.includes('_pceDragHoldEnd()'), 'the trim drag never releases it');
+    const tl = slice('function _rqBindTimeline() {', '\nasync function openPostReview(');
+    assert.ok(tl.includes('_pceDragHoldStart()'), 'the timeline drag does not take the hold');
+    assert.ok(tl.includes('_pceDragHoldEnd()'), 'the timeline drag never releases it');
+});
+
+check('the timeline takes the hold BEFORE the selection repaint', () => {
+    // _pceSelect repaints the list. Taken after it, the drag is built out of a node that repaint
+    // has already detached — which is exactly the state that produced the bug.
+    const tl = slice('function _rqBindTimeline() {', '\nasync function openPostReview(');
+    const hold = tl.indexOf('_pceDragHoldStart()');
+    const select = tl.indexOf("_pceSelect('overlays')");
+    assert.notStrictEqual(hold, -1);
+    assert.notStrictEqual(select, -1);
+    assert.ok(hold < select, 'the hold must be taken before anything that can repaint the list');
+});
+
+check('a dead rect is never read as "dragged to the end"', () => {
+    // Belt as well as braces: the failure is silent, and Infinity clamps to a plausible number.
+    const tl = slice('function _rqBindTimeline() {', '\nasync function openPostReview(');
+    assert.ok(tl.includes('d.track.isConnected'), 'a detached track is not detected');
+    assert.ok(tl.includes('!(rect.width > 0)'), 'a zero-width rect still divides by zero');
+    assert.ok(tl.includes('d.key'), 'nothing lets the drag re-find its own segment');
+});
+
+check('the release repaints rather than deferring the repaint it came to do', () => {
+    const tl = slice('function _rqBindTimeline() {', '\nasync function openPostReview(');
+    const at = tl.indexOf('const end = () => {');
+    const end = tl.slice(at, at + 500);
+    assert.ok(end.indexOf('_pceDragHoldEnd()') < end.indexOf('_rqRenderTimeline('),
+        'the hold must be released before the repaint, or that repaint is deferred to nothing');
 });
 
 console.log(`\n${passed} checks passed`);

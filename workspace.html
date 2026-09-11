@@ -7056,6 +7056,30 @@ function _pceMeasureClips(clips) {
  */
 const _pceTrimDrag = { on: false, id: null, edge: null, clips: null };
 
+/**
+ * ⚠️ Nothing may repaint the clip list while something in it is being dragged.
+ *
+ * Replacing the list's innerHTML DETACHES the node under the pointer, and a detached node's
+ * getBoundingClientRect() is all zeros — so `(clientX - rect.left) / rect.width` is Infinity, the
+ * clamp turns that into the end of the axis, and the bar jumps to full width. The mangled start
+ * time then lands outside the clip it was on, so the row moves to another clip and reads, to the
+ * person holding the mouse, as "it extended fully and then disappeared". That is verbatim how it
+ * was reported, and it is one repaint anywhere in the pointerdown call graph away at all times.
+ *
+ * The timeline used to live in its own element that only _rqRenderTimeline touched, so "do not
+ * re-render mid-drag" held by luck. Folding the rows into the clip list put them in the path of
+ * every repaint of that list — _pceSelect's, the measure callback's, any of them — so the rule is
+ * now enforced here rather than merely written down. A repaint asked for during a drag is not
+ * dropped: it is deferred to the release, which is when the drag wanted to repaint anyway.
+ */
+let _pceDragHold = 0;
+let _pceClipsRepaintPending = false;
+function _pceDragHoldStart() { _pceDragHold++; }
+function _pceDragHoldEnd() {
+    _pceDragHold = Math.max(0, _pceDragHold - 1);
+    if (_pceDragHold === 0 && _pceClipsRepaintPending) { _pceClipsRepaintPending = false; _pceRenderClips(); }
+}
+
 /** Seconds of source under a pointer, clamped to the clip's own length. */
 function _pceTrimTimeAt(ev, track, full) {
     const box = track.getBoundingClientRect();
@@ -7077,6 +7101,7 @@ function _pceBindClipTrim() {
         const track = handle.closest('[data-trim-track]');
         if (!track) return;
         _pceTrimDrag.on = true;
+        _pceDragHoldStart();
         _pceTrimDrag.id = track.getAttribute('data-trim-track');
         _pceTrimDrag.edge = handle.getAttribute('data-trim-edge');
         _pceTrimDrag.clips = _pceClips().map(c => Object.assign({}, c));
@@ -7121,6 +7146,7 @@ function _pceBindClipTrim() {
         if (!_pceTrimDrag.on) return;
         const clips = _pceTrimDrag.clips;
         _pceTrimDrag.on = false;
+        _pceDragHoldEnd();
         _pceTrimDrag.id = null;
         _pceTrimDrag.edge = null;
         _pceTrimDrag.clips = null;
@@ -7279,6 +7305,8 @@ window._pceClipTrim = function (index, field, raw) {
 function _pceRenderClips(clipsOverride) {
     const host = document.getElementById('pce-clips-block');
     if (!host) return;
+    // See _pceDragHold: repainting now would tear the node out from under the pointer.
+    if (_pceDragHold > 0) { _pceClipsRepaintPending = true; return; }
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
     const clips = clipsOverride || _pceClips(post);
     // The timed rows that used to be a Timeline panel of their own, now folded in under the clip
@@ -7677,6 +7705,11 @@ function _rqBindTimeline() {
         const edge = ev.target.closest('[data-tl-edge]');
         const ov = _rqTimelineItem(kind, id);
         if (!ov) return;
+        // ⚠️ Before _pceSelect, not after. Selecting repaints the list this segment lives in, and
+        // the repaint would detach `seg` while we are still building the drag out of it — leaving
+        // the drag holding a node that is no longer on the page. Taken here, that repaint is
+        // deferred to the release instead.
+        _pceDragHoldStart();
         const dur = _rqTimelineDuration();
         // Grabbing a track selects it, and selection drives which inspector you land in — grabbing a
         // voice note must not open the text panel.
@@ -7687,7 +7720,7 @@ function _rqBindTimeline() {
         // six-second voice note to the length of the video the moment you nudged it.
         const seed = kind === 'audio' ? _pceAudioDrawRange(ov) : ov;
         _rqTlDrag = {
-            seg, track: seg.closest('[data-tl-track]'), ov, dur, kind,
+            seg, key: id, track: seg.closest('[data-tl-track]'), ov, dur, kind,
             mode: edge ? edge.getAttribute('data-tl-edge') : 'move',
             startX: ev.clientX,
             s0: seed.startS == null ? 0 : seed.startS,
@@ -7700,7 +7733,16 @@ function _rqBindTimeline() {
     host.addEventListener('pointermove', (ev) => {
         const d = _rqTlDrag;
         if (!d) return;
-        const rect = d.track.getBoundingClientRect();
+        // Belt as well as braces. _pceDragHold stops the list repainting under us, but a zero-width
+        // rect must never quietly become "dragged to the end of the axis" — that is the failure this
+        // whole guard exists for, and it is silent. Re-find the node first; give up if it is gone.
+        if (!d.track || !d.track.isConnected) {
+            const seg = host.querySelector(`[data-tl-seg="${CSS.escape(d.key)}"]`);
+            d.seg = seg || d.seg;
+            d.track = seg ? seg.closest('[data-tl-track]') : null;
+        }
+        const rect = d.track ? d.track.getBoundingClientRect() : null;
+        if (!rect || !(rect.width > 0)) return;
         const dur = d.dur;
         const at = Math.max(0, Math.min(dur, ((ev.clientX - rect.left) / rect.width) * dur));
         if (d.mode === 'start') {
@@ -7733,6 +7775,9 @@ function _rqBindTimeline() {
         if (!_rqTlDrag) return;
         const { kind } = _rqTlDrag;
         _rqTlDrag = null;
+        // Release the hold BEFORE repainting, or the repaint this drag came here to do is the one
+        // that gets deferred — and deferred to nothing, because the drag is over.
+        _pceDragHoldEnd();
         _rqRenderTimeline(_rqPostCache[_rqReviewPostId]);
         if (kind === 'audio') { _pceRenderAudioList(); _pcePersistAudio(_rqReviewPostId); }
         else _rqPersistOverlays(_rqReviewPostId);
