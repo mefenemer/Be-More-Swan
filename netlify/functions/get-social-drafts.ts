@@ -2,7 +2,7 @@
 // US-SMM-3.4.1: Returns scheduled_posts with status='pending_approval' for the authenticated org.
 
 import { Handler } from '@netlify/functions';
-import { eq, and, desc, inArray } from 'drizzle-orm';
+import { eq, and, or, sql, desc, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, aiAssistants, postIdeaSuggestions, organisations, scheduledPostAssets, contentAssets, postRenderJobs, orchestrationRuns } from '../../db/schema';
 import { resolvePostMedia, isVideoMedia, presignR2Get, resolvePostMediaList } from '../../src/utils/social-publish';
@@ -76,9 +76,35 @@ export default withLambda(async (event) => {
         //
         // Anything else is an exact status match, as before.
         const family = REVIEW_QUEUE_STATUS_FAMILIES[statusFilter];
+
+        // ── A draft someone actually built belongs in the Review queue ──────────────────────────
+        // The composer creates its row BLANK, so create-manual-post stamps it 'draft' — and 'draft'
+        // is in no family here, on no calendar and in no column. That is right for the empty shell a
+        // composer needs to exist before it can open, and catastrophic once someone has spent an hour
+        // in it: four clips, a cut, five text boxes, all saved to a row that nothing can show them
+        // again. Closing the composer looked like losing the work. It was reported exactly that way.
+        //
+        // A promotion on write would fix the next one and not the ones already stranded, so the
+        // read side is widened too: a 'draft' with a caption or media is shown as awaiting review,
+        // which is what it is. A blank one stays hidden, and archive-cleanup still sweeps it at
+        // seven days — that sweep already requires no media, so nothing with work in it is at risk.
+        const contentfulDraft = and(
+            eq(scheduledPosts.status, 'draft'),
+            or(
+                sql`btrim(coalesce(${scheduledPosts.caption}, '')) <> ''`,
+                sql`EXISTS (SELECT 1 FROM scheduled_post_assets spa WHERE spa.scheduled_post_id = ${scheduledPosts.id})`,
+                sql`jsonb_typeof(${scheduledPosts.contentAssetIds}) = 'array' AND jsonb_array_length(${scheduledPosts.contentAssetIds}) > 0`,
+            ),
+        );
+        const awaitingReview = statusFilter === 'pending_approval';
+
         const baseWhere = and(
             eq(scheduledPosts.organisationId, organisationId),
-            family ? inArray(scheduledPosts.status, family as unknown as string[]) : eq(scheduledPosts.status, statusFilter),
+            family
+                ? (awaitingReview
+                    ? or(inArray(scheduledPosts.status, family as unknown as string[]), contentfulDraft)
+                    : inArray(scheduledPosts.status, family as unknown as string[]))
+                : eq(scheduledPosts.status, statusFilter),
             ...(assistantIdFilter ? [eq(scheduledPosts.assistantId, assistantIdFilter)] : []),
         );
 
