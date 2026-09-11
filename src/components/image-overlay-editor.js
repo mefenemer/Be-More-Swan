@@ -464,11 +464,27 @@
       if (ov) showClipFrame(ov, ov.startS);
     }
 
+    /**
+     * The boxes that belong on the clip currently being shown.
+     *
+     * The stage drew ALL of them, which on a cut stacked every overlay in the post on top of
+     * whichever clip you were looking at — so four boxes on four different clips looked like four
+     * boxes on every clip, and there was no way to tell which was which. A box belongs to the clip
+     * its start time falls in; that is the same rule the chips and the renderer use.
+     */
+    function stageOverlays() {
+      if (!cut) return state;
+      const sel = state.find((o) => o.id === selectedId);
+      if (!sel) return state;
+      const here = ovSpan(sel).i;
+      return state.filter((o) => ovSpan(o).i === here);
+    }
+
     function renderOverlays() {
-      // Clear existing nodes (keep the <img>).
+      // Clear existing nodes (keep the backdrops).
       stage.querySelectorAll('.ioe-ov').forEach((n) => n.remove());
       const { h } = stageMetrics();
-      for (const ov of state) {
+      for (const ov of stageOverlays()) {
         const node = document.createElement('div');
         node.className = 'ioe-ov' + (ov.id === selectedId ? ' sel' : '');
         node.dataset.id = ov.id;
@@ -476,7 +492,11 @@
         stage.appendChild(node);
         attachDrag(node, ov);
       }
-      countEl.textContent = state.length ? `${state.length} text overlay${state.length > 1 ? 's' : ''}` : 'No overlays yet';
+      const shown = stageOverlays().length;
+      countEl.textContent = !state.length ? 'No overlays yet'
+        : cut && shown !== state.length
+          ? `${shown} of ${state.length} text overlays — showing this clip's`
+          : `${state.length} text overlay${state.length > 1 ? 's' : ''}`;
     }
 
     // ── Drag to reposition (pointer events) ────────────────────────────────────
@@ -520,7 +540,20 @@
       }
       side.classList.remove('empty');
       const transparencyPct = Math.round((1 - (ov.boxOpacity == null ? 1 : ov.boxOpacity)) * 100);
+      // Which box am I editing? With several on several clips, the canvas alone cannot answer it —
+      // the ones on other clips are not even on screen. Picking from here moves the stage to that
+      // box's clip, which is the only way to reach a box that is not in front of you.
+      const boxList = state.length < 2 ? '' : `
+        <div class="ioe-row">
+          <label>Text boxes</label>
+          <div class="ioe-chips">${state.map((o) => {
+            const label = String(o.text || 'Empty').split('\n')[0].slice(0, 18) || 'Empty';
+            const where = cut ? ` · C${ovSpan(o).i + 1}` : '';
+            return `<button type="button" data-pick="${esc(o.id)}" class="ioe-chip${o.id === selectedId ? ' on' : ''}">${esc(label)}${where}</button>`;
+          }).join('')}</div>
+        </div>`;
       side.innerHTML = `
+        ${boxList}
         <div class="ioe-row">
           <label>Text</label>
           <textarea data-f="text" maxlength="500" placeholder="Type your text…">${esc(ov.text || '')}</textarea>
@@ -657,6 +690,14 @@
           rerender();
         });
       });
+      // Pick a different box — including one on another clip, which the stage then moves to.
+      for (const b of backdrop.querySelectorAll('[data-pick]')) {
+        b.addEventListener('click', () => {
+          selectedId = b.getAttribute('data-pick');
+          renderOverlays(); renderSide(); syncStageToSelection();
+        });
+      }
+
       // ── When: the clip, and where in it ──────────────────────────────────────
       if (cut) {
         for (const b of backdrop.querySelectorAll('[data-clip]')) {
@@ -671,6 +712,8 @@
             ov.startS = to.start + Math.min(within, Math.max(0, to.len - 0.2));
             ov.endS = Math.min(to.end, ov.startS + Math.max(0.2, shown));
             if (ov.startS <= 0.001) ov.startS = undefined;
+            // The stage's contents change with the clip, so both are redrawn.
+            renderOverlays();
             renderSide();
             showClipFrame(ov, ov.startS);
           });
@@ -726,6 +769,8 @@
       // A second box starts on the SAME clip as the one that was selected — adding text while
       // looking at clip three and having it appear over clip one is the thing that makes the
       // feature look like it only works once.
+      // The clip ON SCREEN, which is the selected box's clip — a new box belongs where the user is
+      // looking, and now that the stage only shows one clip's boxes, that is unambiguous.
       const sel = state.find((o) => o.id === selectedId);
       const onSpan = cut && sel ? ovSpan(sel) : null;
       const ov = { ...DEFAULTS, id: uid(), text: 'Your text', x: 0.5, y: 0.5,

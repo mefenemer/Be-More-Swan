@@ -509,6 +509,30 @@ check('the clip re-sizes the overlays once it is laid out, not in the same tick'
     assert.ok(ioe.includes('requestAnimationFrame(renderOverlays)'));
 });
 
+check('the stage shows only the boxes that belong to the clip on screen', () => {
+    // It drew all of them, so four boxes on four different clips looked like four boxes on EVERY
+    // clip, stacked on whichever one you were looking at.
+    const at = only(ioe, 'function stageOverlays()', 'image-overlay-editor.js');
+    const scope = ioe.slice(at, at + 500);
+    assert.ok(scope.includes('ovSpan(o).i === here'), 'filtered by the clip a box starts in');
+    assert.ok(scope.includes('if (!cut) return state'), 'and unfiltered on a post that is not a cut');
+    const ro = only(ioe, 'function renderOverlays()', 'image-overlay-editor.js');
+    assert.ok(ioe.slice(ro, ro + 400).includes('of stageOverlays()'), 'the stage must use it');
+});
+
+check('a specific box can be picked, including one on another clip', () => {
+    // The canvas cannot answer "which am I editing" when the others are not even on screen.
+    assert.ok(ioe.includes('data-pick='), 'the side panel lists the boxes');
+    const at = only(ioe, "b.getAttribute('data-pick')", 'image-overlay-editor.js');
+    const scope = ioe.slice(at - 200, at + 300);
+    assert.ok(scope.includes('syncStageToSelection()'), 'picking moves the stage to that box\'s clip');
+});
+
+check('the counter says what is on screen when that differs from what exists', () => {
+    const at = only(ioe, 'const shown = stageOverlays().length', 'image-overlay-editor.js');
+    assert.ok(ioe.slice(at, at + 400).includes("showing this clip's"));
+});
+
 console.log('\nthe crop frame');
 
 check('the crop panel exists and precedes the timeline', () => {
