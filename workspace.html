@@ -6609,15 +6609,19 @@ function _rqRenderTimeline(post) {
     const dur = _rqTimelineDuration(post);
     const fmt = (s) => `${(Math.round(s * 10) / 10)}s`;
 
-    const row = (kind, key, label, item, selected) => {
+    const row = (kind, key, label, item, selected, sub) => {
         const start = item.startS == null ? 0 : Math.max(0, Math.min(dur, item.startS));
         const end = item.endS == null ? dur : Math.max(start, Math.min(dur, item.endS));
         const leftPct = (start / dur) * 100;
         const widthPct = Math.max(2, ((end - start) / dur) * 100);
         const c = _RQ_TL_COLOURS[kind];
         const esc = _rqEsc(label);
+        // The seconds, under the row, exactly as each clip states its own. A bar without numbers is
+        // a shape — you can see that one box is later than another, but not when either happens.
+        const within = sub ? `<span class="ml-[4.5rem] block text-[10px] text-gray-400" style="font-variant-numeric:tabular-nums">${sub}</span>` : '';
         return `
-          <div class="flex items-center gap-2" data-tl-row="${_rqEsc(key)}">
+          <div data-tl-row="${_rqEsc(key)}">
+          <div class="flex items-center gap-2">
             <span class="w-16 shrink-0 truncate text-[10px] font-semibold text-gray-500" title="${esc}">${esc}</span>
             <div class="relative flex-1 h-6 rounded bg-gray-100" data-tl-track>
               <div class="absolute inset-y-0 rounded cursor-grab flex items-center justify-between"
@@ -6627,6 +6631,8 @@ function _rqRenderTimeline(post) {
                 <span class="w-1.5 h-full rounded-r cursor-ew-resize" style="background:${c.edge}" data-tl-edge="end"></span>
               </div>
             </div>
+          </div>
+          ${within}
           </div>`;
     };
 
@@ -6649,17 +6655,60 @@ function _rqRenderTimeline(post) {
             style="left:calc(4rem + 0.5rem + (100% - 4rem - 0.5rem) * ${pct / 100});background:rgba(15,23,42,.18)"></div>`).join('');
     }
 
-    const textRows = overlays.map((ov, i) => row(
-        'text', ov.id || String(i), (ov.text || 'Text').split('\n')[0].slice(0, 22), ov,
-        !!(ov.id && ov.id === _pceSelectedOverlayId),
-    )).join('');
+    // ── Text, under the clip it belongs to ──────────────────────────────────────────────────────
+    // Two stacks — every clip, then every text box — made the reader do the join themselves: which
+    // of these five rows is on the clip I just trimmed? Grouping answers it by position, which is
+    // what a timeline is for. The seconds are stated per clip AND against the whole cut, because
+    // both are the answer to a different question.
+    const spans = _pceSpansFor(_pceClips(post));
+    const textRow = (ov, i) => {
+        const start = ov.startS == null ? 0 : ov.startS;
+        const end = ov.endS == null ? dur : ov.endS;
+        const sp = spans ? _pceSpanAt(spans, start) : null;
+        const sub = sp
+            ? `${fmt(start - sp.start)} → ${fmt(end - sp.start)} of clip ${sp.i + 1} · ${fmt(start)} → ${fmt(end)} overall`
+            : `${fmt(start)} → ${fmt(end)} · shows for ${fmt(Math.max(0, end - start))}`;
+        return row('text', ov.id || String(i), (ov.text || 'Text').split('\n')[0].slice(0, 22), ov,
+            !!(ov.id && ov.id === _pceSelectedOverlayId), sub);
+    };
+
+    let textRows;
+    if (spans && spans.length > 1) {
+        // A heading per clip, then the boxes that start inside it. Anything that cannot be placed —
+        // a box timed past the end after a trim, before re-anchoring catches up — is listed at the
+        // end rather than silently dropped.
+        const placed = new Set();
+        textRows = spans.map((sp) => {
+            const mine = overlays.filter((ov, i) => {
+                const at = _pceSpanAt(spans, ov.startS == null ? 0 : ov.startS);
+                if (at && at.i === sp.i) { placed.add(i); return true; }
+                return false;
+            });
+            const head = `<div class="flex items-center gap-2 pt-1">
+                <span class="w-16 shrink-0 truncate text-[10px] font-bold text-gray-400">Clip ${sp.i + 1}</span>
+                <span class="flex-1 text-[10px] text-gray-300" style="font-variant-numeric:tabular-nums">${fmt(sp.start)} – ${fmt(sp.end)}</span>
+              </div>`;
+            const body = mine.length
+                ? mine.map((ov) => textRow(ov, overlays.indexOf(ov))).join('')
+                : '<p class="ml-[4.5rem] text-[10px] text-gray-300">No text on this clip</p>';
+            return head + body;
+        }).join('');
+        const orphans = overlays.filter((_, i) => !placed.has(i));
+        if (orphans.length) textRows += orphans.map((ov) => textRow(ov, overlays.indexOf(ov))).join('');
+    } else {
+        textRows = overlays.map(textRow).join('');
+    }
     // Drawn from the clip's EFFECTIVE range, not its stored one: an unbounded clip runs for its own
     // natural length, and drawing it across the whole axis would claim a six-second voice note covers
     // a ten-second video.
-    const audioRows = clips.map((a, i) => row(
-        'audio', a.id || `a${i}`, _pceAudioLabel(a).slice(0, 22), _pceAudioDrawRange(a),
-        !!(a.id && a.id === _pceSelectedAudioId),
-    )).join('');
+    const audioRows = clips.map((a, i) => {
+        const r = _pceAudioDrawRange(a);
+        const st = r.startS == null ? 0 : r.startS;
+        const en = r.endS == null ? dur : r.endS;
+        return row('audio', a.id || `a${i}`, _pceAudioLabel(a).slice(0, 22), r,
+            !!(a.id && a.id === _pceSelectedAudioId),
+            `${fmt(st)} → ${fmt(en)} · plays for ${fmt(Math.max(0, en - st))}`);
+    }).join('');
 
     // No border or background of its own: it sits inside #pce-stage-strip, which already has both,
     // and nesting one bordered card in another made the tracks look like a separate widget rather
@@ -16502,6 +16551,9 @@ async function _pceOpenOverlayEditor(postId) {
         // function, so the two cannot disagree about which clip a box is on. Null on a still or a
         // single clip, where the editor skips the controls entirely and behaves as it always did.
         spans: typeof _pceClipSpans === 'function' ? _pceClipSpans(_rqPostCache[postId]) : null,
+        // Separate from `spans`: a SINGLE-clip video has no cut to choose between, but its text can
+        // still fade in. A still cannot — its words are flattened into the pixels.
+        video: _pcePostIsVideo(_rqPostCache[postId]),
         onDone: async (overlays) => {
             if (overlays == null) return;   // cancelled — leave everything as it was
             _pceSetOverlayMsg('Saving your text…');

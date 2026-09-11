@@ -79,6 +79,9 @@ export function overlaysFingerprint(raw: unknown): string {
         o.boxStroke ?? '', o.boxFill ?? '', o.boxOpacity ?? '',
         // Timing changes nothing on a still, but a photo+audio post renders as video where it does.
         o.startS ?? '', o.endS ?? '',
+        // How it arrives. Omitted, two siblings differing only in their animation would fingerprint
+        // as identical and share one render — so one of them would publish the other's motion.
+        o.anim ?? '',
     ].join('\u001f'));
     // Order matters — overlays paint in array order, so a reorder can change what covers what.
     const src = parts.join('\u001e');

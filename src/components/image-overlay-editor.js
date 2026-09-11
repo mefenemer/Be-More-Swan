@@ -66,6 +66,16 @@
   function fontsReady() {
     return OF ? OF.ready() : Promise.resolve();
   }
+  // Mirrors OVERLAY_ANIMS in src/lib/overlay-geometry.ts. This file is an unbundled IIFE and cannot
+  // import it; tests/overlay-anim.test.ts asserts the two lists agree, because a name that drifts
+  // here is silently stored and silently ignored by the renderer.
+  const ANIMS = [
+    { id: 'none', label: 'Cut' },
+    { id: 'fade', label: 'Fade' },
+    { id: 'rise', label: 'Rise' },
+    { id: 'pop', label: 'Pop' },
+  ];
+
   const EMOJIS = ['😀','😍','🎉','🔥','✨','💯','👍','❤️','🙌','😎','🥳','💪','☕','🌟','📣','✅','👉','🎁','😂','🤩'];
 
   const DEFAULTS = {
@@ -255,6 +265,11 @@
       .ioe-row{display:flex;flex-direction:column;gap:5px}
       .ioe-row label{font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.03em}
       .ioe-inline{display:flex;align-items:center;gap:8px}
+      .ioe-sect{border:1px solid #e5e7eb;border-radius:10px;overflow:hidden}
+      .ioe-sect-h{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:#f8fafc;border:0;font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.03em;cursor:pointer}
+      .ioe-sect-h:hover{background:#f1f5f9}
+      .ioe-sect-x{font-size:14px;color:#94a3b8}
+      .ioe-sect-b{padding:10px;display:flex;flex-direction:column;gap:10px}
       .ioe-chips{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
       .ioe-chip{font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;cursor:pointer}
       .ioe-chip:hover{border-color:#d1d5db}
@@ -308,7 +323,7 @@
    *
    * Absent or single-clip, everything below is skipped and the editor behaves exactly as before.
    */
-  function open({ imageUrl, overlays, onDone, suggestText, spans }) {
+  function open({ imageUrl, overlays, onDone, suggestText, spans, video }) {
     ensureStyles();
     const state = (overlays || []).map((o) => ({ ...DEFAULTS, ...o, id: o.id || uid() }));
     let selectedId = state.length ? state[state.length - 1].id : null;
@@ -373,6 +388,41 @@
       vidEl.pause();
       const within = Math.max(0, (t == null ? sp.start : t) - sp.start);
       try { vidEl.currentTime = (clip.inS || 0) + within; } catch (e) { /* not seekable yet */ }
+    }
+
+    // ── Collapsible sections ───────────────────────────────────────────────────
+    // The panel grew from "text, font, colour" to eight groups, which on a laptop means the thing
+    // you came to change is below the fold. Which sections are open is remembered for the life of
+    // the editor, so opening a box, closing it and opening another does not reset the view.
+    const openSections = { text: true, style: false, when: true, anim: false };
+
+    function sect(key, title, body) {
+      if (!body) return '';
+      const on = openSections[key] !== false;
+      return `
+        <div class="ioe-sect${on ? ' on' : ''}" data-sect="${key}">
+          <button type="button" class="ioe-sect-h" data-sect-toggle="${key}" aria-expanded="${on}">
+            <span>${title}</span><span class="ioe-sect-x">${on ? '−' : '+'}</span>
+          </button>
+          <div class="ioe-sect-b"${on ? '' : ' style="display:none"'}>${body}</div>
+        </div>`;
+    }
+
+    /**
+     * How the box arrives and leaves.
+     *
+     * Video only. A still's text is flattened into the pixels — there is no time for anything to
+     * happen in — so offering motion there would promise something the published image cannot do.
+     */
+    function animRow(ov) {
+      if (!video) return '';
+      const cur = ov.anim || 'none';
+      return `
+        <div class="ioe-row">
+          <div class="ioe-chips">${ANIMS.map((a) => `<button type="button" data-anim="${a.id}"
+            class="ioe-chip${a.id === cur ? ' on' : ''}">${a.label}</button>`).join('')}</div>
+          <span class="ioe-count">Applies to the rendered video, not to the still preview.</span>
+        </div>`;
     }
 
     /** Move the handles without rebuilding the panel — a rebuild mid-drag drops the pointer. */
@@ -598,7 +648,8 @@
           <label>Background transparency — ${transparencyPct}%</label>
           <input type="range" data-f="transparency" min="0" max="100" step="1" value="${transparencyPct}" ${ov.boxFill ? '' : 'disabled'}>
         </div>
-        ${timingRow(ov)}
+        ${sect('when', 'When it shows', timingRow(ov))}
+        ${sect('anim', 'How it appears', animRow(ov))}
         <button class="ioe-btn danger block" data-act="delete">Delete this overlay</button>
       `;
       wireSide(ov);
@@ -690,6 +741,21 @@
           rerender();
         });
       });
+      for (const b of backdrop.querySelectorAll('[data-sect-toggle]')) {
+        b.addEventListener('click', () => {
+          const key = b.getAttribute('data-sect-toggle');
+          openSections[key] = openSections[key] === false;
+          renderSide();
+        });
+      }
+      for (const b of backdrop.querySelectorAll('[data-anim]')) {
+        b.addEventListener('click', () => {
+          const next = b.getAttribute('data-anim');
+          ov.anim = next === 'none' ? undefined : next;
+          renderSide();
+        });
+      }
+
       // Pick a different box — including one on another clip, which the stage then moves to.
       for (const b of backdrop.querySelectorAll('[data-pick]')) {
         b.addEventListener('click', () => {
@@ -793,6 +859,7 @@
           // must not drop it, or editing a box's text/style would wipe when it appears on the video.
           ...(o.startS != null ? { startS: o.startS } : {}),
           ...(o.endS != null ? { endS: o.endS } : {}),
+          ...(o.anim && o.anim !== 'none' ? { anim: o.anim } : {}),
         }));
       close(clean);
     });

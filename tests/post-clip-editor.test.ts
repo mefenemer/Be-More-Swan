@@ -537,6 +537,64 @@ check('the counter says what is on screen when that differs from what exists', (
     assert.ok(ioe.slice(at, at + 400).includes("showing this clip's"));
 });
 
+console.log('\nthe timeline reads as one thing');
+
+check('text rows sit under the clip they belong to', () => {
+    // Two stacks — every clip, then every box — made the reader do the join: which of these five
+    // rows is on the clip I just trimmed?
+    const at = only(workspace, 'const placed = new Set();', 'workspace.html');
+    const scope = workspace.slice(at, at + 1200);
+    assert.ok(scope.includes('Clip ${sp.i + 1}'), 'a heading per clip');
+    assert.ok(scope.includes('at.i === sp.i'), 'boxes grouped by the clip they start in');
+    assert.ok(scope.includes('No text on this clip'), 'and an empty clip says so');
+});
+
+check('a box that cannot be placed is listed, never dropped', () => {
+    // After a trim, before re-anchoring catches up, a box can sit past the end. Losing it from the
+    // view would look like losing it from the post.
+    const at = only(workspace, 'const orphans = overlays.filter', 'workspace.html');
+    assert.ok(workspace.slice(at, at + 200).includes('textRows +='), 'orphans are appended');
+});
+
+check('every row states its seconds', () => {
+    // A bar without numbers is a shape: you can see one box is later than another, not when either
+    // happens. Per clip AND overall, because both answer a different question.
+    const at = only(workspace, 'const sub = sp', 'workspace.html');
+    const scope = workspace.slice(at, at + 400);
+    assert.ok(scope.includes('of clip ${sp.i + 1}') && scope.includes('overall'));
+    // Audio too.
+    assert.ok(workspace.includes('plays for ${fmt(Math.max(0, en - st))}'));
+});
+
+console.log('\nhow the text appears');
+
+check('the editor only offers motion on a video', () => {
+    // A still's text is flattened into the pixels — offering motion would promise something the
+    // published image cannot do.
+    const at = only(ioe, 'function animRow(ov)', 'image-overlay-editor.js');
+    assert.ok(ioe.slice(at, at + 200).includes("if (!video) return ''"));
+    assert.ok(workspace.includes('video: _pcePostIsVideo(_rqPostCache[postId])'), 'the page says which it is');
+});
+
+check('the panel is collapsible, and remembers what was open', () => {
+    // It grew from "text, font, colour" to eight groups; on a laptop the thing you came to change
+    // is below the fold.
+    const at = only(ioe, 'const openSections =', 'image-overlay-editor.js');
+    assert.ok(ioe.slice(at, at + 200).includes('when: true'), 'timing starts open');
+    assert.ok(ioe.includes('data-sect-toggle='), 'and the headings toggle');
+});
+
+check('the animation reaches the renderer and the fingerprint', () => {
+    // Stored but unrendered would be a control that does nothing; rendered but unfingerprinted
+    // would let two siblings differing only in motion share one render.
+    const po = readFileSync(join(root, 'remotion/PostOverlay.tsx'), 'utf8');
+    assert.ok(po.includes('overlayAnimAt(ov.anim'), 'the composition applies it');
+    assert.ok(po.includes('useCurrentFrame()'), 'against the box\'s own clock');
+    const pr = readFileSync(join(root, 'src/lib/post-render.ts'), 'utf8');
+    const fp = pr.indexOf('export function overlaysFingerprint');
+    assert.ok(pr.slice(fp, fp + 900).includes('o.anim'), 'and the fingerprint includes it');
+});
+
 console.log('\nthe crop frame');
 
 check('the crop panel exists and precedes the timeline', () => {

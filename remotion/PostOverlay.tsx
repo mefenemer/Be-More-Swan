@@ -14,8 +14,8 @@
 // a local Mac render cannot catch a regression here, so verify on Lambda.
 
 import React from 'react';
-import { AbsoluteFill, Audio, Img, OffthreadVideo, Sequence, Series, continueRender, delayRender, useVideoConfig } from 'remotion';
-import { overlayBoxStyle, overlayFrameRange, type Overlay } from '../src/lib/overlay-geometry';
+import { AbsoluteFill, Audio, Img, OffthreadVideo, Sequence, Series, continueRender, delayRender, useCurrentFrame, useVideoConfig } from 'remotion';
+import { overlayAnimAt, overlayBoxStyle, overlayFrameRange, type Overlay } from '../src/lib/overlay-geometry';
 import { audioGainAt } from '../src/lib/audio-overlays';
 import { googleFamiliesFor, googleFontsHref } from '../src/lib/overlay-fonts';
 
@@ -161,6 +161,27 @@ function useOverlayFonts(families: string[]): void {
     }, [handle]);
 }
 
+/**
+ * One text box, with however it arrives and leaves.
+ *
+ * A component of its own because useCurrentFrame() reports the frame relative to the nearest
+ * <Sequence>, which is exactly the clock an entrance is measured in — and a hook cannot be called
+ * from inside a .map() in the parent.
+ *
+ * The animation rides a WRAPPER rather than the box itself: overlayBoxStyle already owns the box's
+ * transform (the translate(-50%,-50%) that centres it on its point), and a second transform on the
+ * same element would silently replace it, throwing every box to the wrong place.
+ */
+const AnimatedBox: React.FC<{ ov: Overlay; frames: number; height: number; fps: number }> = ({ ov, frames, height, fps }) => {
+    const frame = useCurrentFrame();
+    const { opacity, transform } = overlayAnimAt(ov.anim, frame, frames, fps);
+    return (
+        <div style={{ position: 'absolute', inset: 0, opacity, transform }}>
+            <div style={overlayBoxStyle(ov, height) as React.CSSProperties}>{ov.text}</div>
+        </div>
+    );
+};
+
 export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, audio, videoTrim, clips, framePosition, overlays }) => {
     const { height, fps, durationInFrames } = useVideoConfig();
     const boxes = (overlays || []).filter((o) => o && String(o.text || '').trim());
@@ -257,7 +278,7 @@ export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, au
                 const { from, durationInFrames: frames } = overlayFrameRange(ov, fps, durationInFrames);
                 return (
                     <Sequence key={ov.id} from={from} durationInFrames={frames} layout="none">
-                        <div style={overlayBoxStyle(ov, height) as React.CSSProperties}>{ov.text}</div>
+                        <AnimatedBox ov={ov} frames={frames} height={height} fps={fps} />
                     </Sequence>
                 );
             })}
