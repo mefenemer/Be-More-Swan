@@ -444,15 +444,19 @@ check('the text editor itself can choose the clip and the moment', () => {
     assert.ok(ioe.includes('data-when-track'), 'with a scrub track');
     assert.ok(ioe.includes('data-clip='), 'and clip chips');
     // Fed the SAME spans the When panel uses, or the two disagree about which clip a box is on.
-    assert.ok(workspace.includes('spans: typeof _pceClipSpans'), 'the page hands the editor its cut');
+    assert.ok(workspace.includes('spans: () => (typeof _pceClipSpans'), 'the page hands the editor its cut, as a getter');
 });
 
 check('the editor skips all of it when there is no cut', () => {
     // A still, or one clip, has one answer to "when" — a control offering to choose is noise.
-    const at = only(ioe, 'const cut = Array.isArray(spans)', 'image-overlay-editor.js');
-    assert.ok(ioe.slice(at, at + 160).includes('spans.length > 1 ? spans : null'));
+    const at = only(ioe, 'const readSpans = () =>', 'image-overlay-editor.js');
+    assert.ok(ioe.slice(at, at + 220).includes('v.length > 1 ? v : null'));
+    // On a still it renders nothing; on a VIDEO whose clips are still being measured it says so,
+    // because rendering nothing is indistinguishable from the feature not existing.
     const tr = only(ioe, 'function timingRow(ov)', 'image-overlay-editor.js');
-    assert.ok(ioe.slice(tr, tr + 120).includes("if (!cut) return ''"), 'and renders nothing');
+    const scope = ioe.slice(tr, tr + 600);
+    assert.ok(scope.includes("isVideo()"), 'a still renders nothing');
+    assert.ok(scope.includes('Reading the clips'), 'a video explains the wait');
 });
 
 check('a second box lands on the clip you were looking at', () => {
@@ -460,7 +464,7 @@ check('a second box lands on the clip you were looking at', () => {
     // look like it only works once.
     const at = only(ioe, "const ov = { ...DEFAULTS, id: uid(), text: 'Your text'", 'image-overlay-editor.js');
     const before = ioe.slice(Math.max(0, at - 600), at);
-    assert.ok(before.includes('const onSpan = cut && sel ? ovSpan(sel) : null'), 'it inherits the selected box\'s clip');
+    assert.ok(before.includes('const onSpan = readSpans() && sel ? ovSpan(sel) : null'), 'it inherits the selected box\'s clip');
     assert.ok(ioe.slice(at, at + 260).includes('startS: onSpan.start'), 'and starts there');
 });
 
@@ -492,7 +496,7 @@ check('every way of changing the selection moves the stage with it', () => {
     // Chips, the box list, clicking a box on the stage, and opening the editor: a stage that
     // followed only some of them would be wrong in a way that looks random.
     assert.ok(ioe.split('syncStageToSelection()').length - 1 >= 4, 'all the selection paths sync');
-    const clipBtn = only(ioe, "const to = cut[Number(b.getAttribute('data-clip'))]", 'image-overlay-editor.js');
+    const clipBtn = only(ioe, "const to = cutNow[Number(b.getAttribute('data-clip'))]", 'image-overlay-editor.js');
     assert.ok(ioe.slice(clipBtn, clipBtn + 700).includes('showClipFrame(ov, ov.startS)'), 'chips too');
 });
 
@@ -519,7 +523,7 @@ check('the stage shows only the boxes that belong to the clip on screen', () => 
     const at = only(ioe, 'function stageOverlays()', 'image-overlay-editor.js');
     const scope = ioe.slice(at, at + 500);
     assert.ok(scope.includes('ovSpan(o).i === here'), 'filtered by the clip a box starts in');
-    assert.ok(scope.includes('if (!cut) return state'), 'and unfiltered on a post that is not a cut');
+    assert.ok(scope.includes('if (!readSpans()) return state'), 'and unfiltered on a post that is not a cut');
     const ro = only(ioe, 'function renderOverlays()', 'image-overlay-editor.js');
     assert.ok(ioe.slice(ro, ro + 400).includes('of stageOverlays()'), 'the stage must use it');
 });
@@ -572,8 +576,8 @@ check('the editor only offers motion on a video', () => {
     // A still's text is flattened into the pixels — offering motion would promise something the
     // published image cannot do.
     const at = only(ioe, 'function animRow(ov)', 'image-overlay-editor.js');
-    assert.ok(ioe.slice(at, at + 200).includes("if (!video) return ''"));
-    assert.ok(workspace.includes('video: _pcePostIsVideo(_rqPostCache[postId])'), 'the page says which it is');
+    assert.ok(ioe.slice(at, at + 200).includes("if (!isVideo()) return ''"));
+    assert.ok(workspace.includes('video: () => _pcePostIsVideo(_rqPostCache[postId])'), 'the page says which it is, as a getter');
 });
 
 check('the panel is collapsible, and remembers what was open', () => {
@@ -593,6 +597,17 @@ check('the animation reaches the renderer and the fingerprint', () => {
     const pr = readFileSync(join(root, 'src/lib/post-render.ts'), 'utf8');
     const fp = pr.indexOf('export function overlaysFingerprint');
     assert.ok(pr.slice(fp, fp + 900).includes('o.anim'), 'and the fingerprint includes it');
+});
+
+check('the controls appear when the clips finish measuring, without being poked', () => {
+    // Lengths are read off <video> elements, so "is this a cut" is often unanswerable when the modal
+    // opens. Waiting for a click would mean the controls appear only if the user happens to poke the
+    // panel — which is how this was reported: the section had simply "disappeared".
+    const at = only(ioe, 'const watchForSpans = () =>', 'image-overlay-editor.js');
+    const scope = ioe.slice(at, at + 500);
+    assert.ok(scope.includes('renderSide()'), 'it redraws once the answer exists');
+    assert.ok(scope.includes('backdrop.isConnected'), 'and stops when the modal is gone');
+    assert.ok(scope.includes('spanWatch > 25'), 'and stops when the answer plainly is not coming');
 });
 
 console.log('\nthe crop frame');

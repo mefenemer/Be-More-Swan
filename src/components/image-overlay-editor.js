@@ -331,14 +331,35 @@
     // ── When this box shows ────────────────────────────────────────────────────
     // Rendered only for a real cut. On a still, or a single clip, "when" has one answer and a
     // control offering to choose it is noise.
-    const cut = Array.isArray(spans) && spans.length > 1 ? spans : null;
+    /**
+     * ⚠️ Read fresh every time, never snapshotted.
+     *
+     * `spans` and `video` may be passed as VALUES or as GETTERS, and the getter form is the one the
+     * page uses — because a clip's length is measured asynchronously off a <video> element, so at
+     * the moment this modal opens the answer is quite often "not yet". Snapshotting it produced a
+     * modal that had decided, permanently, that the post was not a cut: no clip chips, no timing,
+     * and no explanation. Exactly the failure mode this feature has had three times already, in
+     * three different places.
+     */
+    const readSpans = () => {
+      const v = typeof spans === 'function' ? spans() : spans;
+      return Array.isArray(v) && v.length > 1 ? v : null;
+    };
+    const isVideo = () => (typeof video === 'function' ? !!video() : !!video);
 
     function ovSpan(ov) {
-      return spanAt(cut, ov.startS == null ? 0 : ov.startS);
+      return spanAt(readSpans(), ov.startS == null ? 0 : ov.startS);
     }
 
     function timingRow(ov) {
-      if (!cut) return '';
+      const cut = readSpans();
+      // A video whose clips have not finished measuring yet: say so. Rendering nothing is
+      // indistinguishable from the feature not existing, which is how it was reported.
+      if (!cut) {
+        return isVideo()
+          ? '<p class="ioe-count">Reading the clips… the per-clip controls appear once their lengths are known.</p>'
+          : '';
+      }
       const sp = ovSpan(ov);
       const start = ov.startS == null ? 0 : ov.startS;
       const end = ov.endS == null ? sp.end : Math.min(ov.endS, sp.end);
@@ -367,7 +388,7 @@
      * playback, and a clip that started playing under a drag would move the thing being aimed at.
      */
     async function showClipFrame(ov, t) {
-      if (!cut || !vidEl) return;
+      if (!readSpans() || !vidEl) return;
       const sp = ovSpan(ov);
       const clip = sp && sp.clip;
       if (!clip || !clip.url) return;
@@ -415,7 +436,7 @@
      * happen in — so offering motion there would promise something the published image cannot do.
      */
     function animRow(ov) {
-      if (!video) return '';
+      if (!isVideo()) return '';
       const cur = ov.anim || 'none';
       return `
         <div class="ioe-row">
@@ -427,6 +448,7 @@
 
     /** Move the handles without rebuilding the panel — a rebuild mid-drag drops the pointer. */
     function paintWhen(ov) {
+      const cut = readSpans();
       if (!cut) return;
       const track = backdrop.querySelector('[data-when-track]');
       if (!track) return;
@@ -509,7 +531,7 @@
 
     /** Whenever the selection changes, the stage follows it onto that box's clip. */
     function syncStageToSelection() {
-      if (!cut) return;
+      if (!readSpans()) return;
       const ov = state.find((o) => o.id === selectedId);
       if (ov) showClipFrame(ov, ov.startS);
     }
@@ -523,7 +545,7 @@
      * its start time falls in; that is the same rule the chips and the renderer use.
      */
     function stageOverlays() {
-      if (!cut) return state;
+      if (!readSpans()) return state;
       const sel = state.find((o) => o.id === selectedId);
       if (!sel) return state;
       const here = ovSpan(sel).i;
@@ -544,7 +566,7 @@
       }
       const shown = stageOverlays().length;
       countEl.textContent = !state.length ? 'No overlays yet'
-        : cut && shown !== state.length
+        : readSpans() && shown !== state.length
           ? `${shown} of ${state.length} text overlays — showing this clip's`
           : `${state.length} text overlay${state.length > 1 ? 's' : ''}`;
     }
@@ -598,7 +620,7 @@
           <label>Text boxes</label>
           <div class="ioe-chips">${state.map((o) => {
             const label = String(o.text || 'Empty').split('\n')[0].slice(0, 18) || 'Empty';
-            const where = cut ? ` · C${ovSpan(o).i + 1}` : '';
+            const where = readSpans() ? ` · C${ovSpan(o).i + 1}` : '';
             return `<button type="button" data-pick="${esc(o.id)}" class="ioe-chip${o.id === selectedId ? ' on' : ''}">${esc(label)}${where}</button>`;
           }).join('')}</div>
         </div>`;
@@ -765,13 +787,14 @@
       }
 
       // ── When: the clip, and where in it ──────────────────────────────────────
-      if (cut) {
+      const cutNow = readSpans();
+      if (cutNow) {
         for (const b of backdrop.querySelectorAll('[data-clip]')) {
           b.addEventListener('click', () => {
             // Keep how long it shows for and re-base onto the new clip — "the same text, on the
             // next clip" is the move, not "the same seconds".
             const from = ovSpan(ov);
-            const to = cut[Number(b.getAttribute('data-clip'))];
+            const to = cutNow[Number(b.getAttribute('data-clip'))];
             if (!to) return;
             const within = (ov.startS == null ? 0 : ov.startS) - from.start;
             const shown = (ov.endS == null ? from.end : ov.endS) - (ov.startS == null ? 0 : ov.startS);
@@ -838,7 +861,7 @@
       // The clip ON SCREEN, which is the selected box's clip — a new box belongs where the user is
       // looking, and now that the stage only shows one clip's boxes, that is unambiguous.
       const sel = state.find((o) => o.id === selectedId);
-      const onSpan = cut && sel ? ovSpan(sel) : null;
+      const onSpan = readSpans() && sel ? ovSpan(sel) : null;
       const ov = { ...DEFAULTS, id: uid(), text: 'Your text', x: 0.5, y: 0.5,
         ...(onSpan ? { startS: onSpan.start || undefined, endS: onSpan.end } : {}) };
       state.push(ov);
@@ -863,6 +886,20 @@
         }));
       close(clean);
     });
+
+    // ── The clips arrive late ──────────────────────────────────────────────────
+    // Their lengths are read off <video> elements on the page, so "is this a cut" is often still
+    // unanswerable when this modal opens. Waiting for the user to click something would mean the
+    // controls appear only if they happen to poke the panel; this brings them in as soon as the
+    // answer exists, and stops asking once it does or once it plainly never will.
+    let spanWatch = 0;
+    const watchForSpans = () => {
+      if (!backdrop.isConnected) return;
+      if (readSpans()) { renderSide(); syncStageToSelection(); return; }
+      if (++spanWatch > 25) return;            // ~10s, then it is not a cut and never was
+      setTimeout(watchForSpans, 400);
+    };
+    if (!readSpans()) setTimeout(watchForSpans, 400);
 
     // The backdrop must be laid out before we can size overlays against it.
     if (imgEl.complete && imgEl.naturalWidth) { renderOverlays(); renderSide(); syncStageToSelection(); }
