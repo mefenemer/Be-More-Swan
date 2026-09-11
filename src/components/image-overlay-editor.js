@@ -247,7 +247,7 @@
       .ioe-body{display:flex;gap:16px;padding:16px;overflow:auto}
       .ioe-stagewrap{flex:1 1 auto;min-width:0;display:flex;align-items:center;justify-content:center;background:#0f172a;border-radius:12px;overflow:hidden}
       .ioe-stage{position:relative;display:inline-block;max-width:100%;max-height:64vh;line-height:0;user-select:none;touch-action:none}
-      .ioe-stage img{display:block;max-width:100%;max-height:64vh;pointer-events:none}
+      .ioe-stage img,.ioe-stage video{display:block;max-width:100%;max-height:64vh;pointer-events:none}
       .ioe-ov{position:absolute;line-height:${LINE_HEIGHT};white-space:pre;cursor:move;box-sizing:border-box;transform:translate(-50%,-50%);overflow:visible}
       .ioe-ov.sel{outline:2px dashed #ec4899;outline-offset:3px}
       .ioe-side{flex:0 0 300px;display:flex;flex-direction:column;gap:12px}
@@ -344,6 +344,35 @@
         </div>`;
     }
 
+    /**
+     * Put the selected box's clip on the stage, at the moment the box appears.
+     *
+     * `t` is seconds of the FINISHED video; the element needs seconds into its own source, so the
+     * clip's own in point is added back. Paused throughout — this is a frame to judge against, not
+     * playback, and a clip that started playing under a drag would move the thing being aimed at.
+     */
+    async function showClipFrame(ov, t) {
+      if (!cut || !vidEl) return;
+      const sp = ovSpan(ov);
+      const clip = sp && sp.clip;
+      if (!clip || !clip.url) return;
+      imgEl.style.display = 'none';
+      vidEl.style.display = '';
+      if (vidEl.getAttribute('src') !== clip.url) {
+        vidEl.src = clip.url;
+        await new Promise((res) => {
+          if (vidEl.readyState >= 1) return res();
+          vidEl.addEventListener('loadedmetadata', res, { once: true });
+          vidEl.addEventListener('error', res, { once: true });
+        });
+        // The clip's shape decides how tall the stage is, and fontSizePct is measured against that.
+        renderOverlays();
+      }
+      vidEl.pause();
+      const within = Math.max(0, (t == null ? sp.start : t) - sp.start);
+      try { vidEl.currentTime = (clip.inS || 0) + within; } catch (e) { /* not seekable yet */ }
+    }
+
     /** Move the handles without rebuilding the panel — a rebuild mid-drag drops the pointer. */
     function paintWhen(ov) {
       if (!cut) return;
@@ -374,7 +403,10 @@
         </div>
         <div class="ioe-body">
           <div class="ioe-stagewrap">
-            <div class="ioe-stage" data-stage><img alt="Post image" data-img></div>
+            <!-- Two backdrops, one shown at a time. A still post keeps the <img> it always had; a
+                 cut shows the CLIP the selected text sits on, because "where does this go" cannot be
+                 answered against a frame of a different clip. -->
+            <div class="ioe-stage" data-stage><img alt="Post image" data-img><video data-vid muted playsinline preload="metadata" style="display:none"></video></div>
           </div>
           <div class="ioe-side" data-side></div>
         </div>
@@ -390,6 +422,7 @@
 
     const stage = backdrop.querySelector('[data-stage]');
     const imgEl = backdrop.querySelector('[data-img]');
+    const vidEl = backdrop.querySelector('[data-vid]');
     const side = backdrop.querySelector('[data-side]');
     const countEl = backdrop.querySelector('[data-count]');
     imgEl.src = imageUrl;
@@ -408,6 +441,13 @@
     function stageMetrics() {
       const r = imgEl.getBoundingClientRect();
       return { w: r.width, h: r.height, left: r.left, top: r.top };
+    }
+
+    /** Whenever the selection changes, the stage follows it onto that box's clip. */
+    function syncStageToSelection() {
+      if (!cut) return;
+      const ov = state.find((o) => o.id === selectedId);
+      if (ov) showClipFrame(ov, ov.startS);
     }
 
     function renderOverlays() {
@@ -429,7 +469,10 @@
     function attachDrag(node, ov) {
       node.addEventListener('pointerdown', (e) => {
         e.preventDefault();
+        const changed = selectedId !== ov.id;
         selectedId = ov.id;
+        // Clicking a box is a selection like any other, so the stage follows it onto that box's clip.
+        if (changed) setTimeout(() => syncStageToSelection(), 0);
         renderSide();
         markSelected();
         const m = stageMetrics();
@@ -615,6 +658,7 @@
             ov.endS = Math.min(to.end, ov.startS + Math.max(0.2, shown));
             if (ov.startS <= 0.001) ov.startS = undefined;
             renderSide();
+            showClipFrame(ov, ov.startS);
           });
         }
         const track = backdrop.querySelector('[data-when-track]');
@@ -644,6 +688,9 @@
             }
             // Paint only. Rebuilding the panel mid-drag tears the handle out from under the pointer.
             paintWhen(ov);
+            // ...and show the frame under the handle being moved, which is the whole point of a
+            // slider over a number: the start is chosen by seeing where it starts.
+            showClipFrame(ov, edge === 'start' ? ov.startS : ov.endS);
           });
           const stop = () => { edge = null; };
           track.addEventListener('pointerup', stop);
@@ -655,7 +702,7 @@
         const i = state.findIndex((o) => o.id === ov.id);
         if (i >= 0) state.splice(i, 1);
         selectedId = state.length ? state[state.length - 1].id : null;
-        renderOverlays(); renderSide();
+        renderOverlays(); renderSide(); syncStageToSelection();
       });
     }
 
@@ -691,9 +738,11 @@
       close(clean);
     });
 
-    // The image must be laid out before we can size overlays against it.
-    if (imgEl.complete && imgEl.naturalWidth) { renderOverlays(); renderSide(); }
-    else imgEl.addEventListener('load', () => { renderOverlays(); renderSide(); }, { once: true });
+    // The backdrop must be laid out before we can size overlays against it.
+    if (imgEl.complete && imgEl.naturalWidth) { renderOverlays(); renderSide(); syncStageToSelection(); }
+    else imgEl.addEventListener('load', () => { renderOverlays(); renderSide(); syncStageToSelection(); }, { once: true });
+    // The clip that replaces it has its own dimensions, so overlays are re-sized when it arrives.
+    if (vidEl) vidEl.addEventListener('loadedmetadata', renderOverlays);
     // Keep overlay sizing correct if the modal/image resizes.
     window.addEventListener('resize', renderOverlays);
   }

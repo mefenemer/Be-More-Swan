@@ -468,6 +468,36 @@ check('the editor still passes timing through untouched when it does not manage 
     assert.ok(scope.includes('o.startS != null') && scope.includes('o.endS != null'));
 });
 
+check('the stage shows the clip the selected text is on', () => {
+    // "Where does this go" cannot be answered against a frame of a different clip.
+    const at = only(ioe, 'async function showClipFrame(ov, t)', 'image-overlay-editor.js');
+    const scope = ioe.slice(at, at + 1100);
+    assert.ok(scope.includes("imgEl.style.display = 'none'"), 'the still backdrop steps aside');
+    assert.ok(scope.includes('vidEl.currentTime'), 'and the clip is seeked');
+    assert.ok(scope.includes('(clip.inS || 0) + within'), 'cut seconds converted to source seconds');
+    assert.ok(scope.includes('vidEl.pause()'), 'paused — a frame to judge against, not playback');
+});
+
+check('the slider scrubs that clip as it moves', () => {
+    // A slider over a number earns its place only if the start is chosen by SEEING where it starts.
+    const at = only(ioe, 'paintWhen(ov);', 'image-overlay-editor.js');
+    assert.ok(ioe.slice(at, at + 400).includes('showClipFrame(ov,'), 'the handle shows its frame');
+});
+
+check('every way of changing the selection moves the stage with it', () => {
+    // Chips, the box list, clicking a box on the stage, and opening the editor: a stage that
+    // followed only some of them would be wrong in a way that looks random.
+    assert.ok(ioe.split('syncStageToSelection()').length - 1 >= 4, 'all the selection paths sync');
+    const clipBtn = only(ioe, "const to = cut[Number(b.getAttribute('data-clip'))]", 'image-overlay-editor.js');
+    assert.ok(ioe.slice(clipBtn, clipBtn + 700).includes('showClipFrame(ov, ov.startS)'), 'chips too');
+});
+
+check('the clip backdrop re-sizes the overlays when it loads', () => {
+    // fontSizePct is measured against the backdrop's height, and a clip is not the shape of the
+    // still it replaced.
+    assert.ok(ioe.includes("vidEl.addEventListener('loadedmetadata', renderOverlays)"));
+});
+
 console.log('\nthe crop frame');
 
 check('the crop panel exists and precedes the timeline', () => {
