@@ -161,6 +161,27 @@ check('the add button is wired to the appending path', () => {
     assert.ok(workspace.includes('onclick="window._pceAddClipFiles()"'), 'the panel must offer it');
 });
 
+check('the media picker offers adding a clip, where people actually ask for it', () => {
+    // The modal replaces, by design, and says so. But "how do I add another video" is asked from
+    // INSIDE this dialog once a post has one — so answering it only in a panel behind the modal
+    // answers it somewhere the asker is not.
+    only(workspace, 'id="pce-media-modal-clip"', 'workspace.html');
+    assert.ok(workspace.includes('onclick="_pceAddClipFromPicker()"'), 'the button must be wired');
+    const at = only(workspace, 'window._pceAddClipFromPicker = function', 'workspace.html');
+    const scope = workspace.slice(at, at + 300);
+    assert.ok(scope.includes('_pceCloseMediaPicker()'), 'a replace-dialog must not linger behind an append');
+    assert.ok(scope.includes('_pceAddClipFiles()'), 'and it must go through the appending path');
+});
+
+check('it is offered ONLY where the next video is a clip, not a replacement', () => {
+    // On a carousel or a still, "add" would be a carousel by the back door.
+    const at = only(workspace, 'const clipable =', 'workspace.html');
+    const scope = workspace.slice(at, at + 400);
+    assert.ok(scope.includes('_pcePostIsVideo(post)'), 'video posts only');
+    assert.ok(scope.includes("fmt.m === 'video'") && scope.includes('fmt.max === 1'), 'single-item video formats only');
+    assert.ok(scope.includes('post.thumbnailUrl'), 'and only once there is something to add TO');
+});
+
 console.log('\nthe video step');
 
 check('step 4 stays shut until there is a video to put things ON', () => {

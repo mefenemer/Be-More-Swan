@@ -680,6 +680,20 @@ window.showComplianceModals = function showComplianceModals(force) {
     <div class="flex-1 overflow-y-auto px-5 py-4 space-y-3" style="overscroll-behavior:contain">
       <!-- The shared sourcing panel is mounted here. -->
       <div id="pce-media-modal-host"></div>
+      <!-- ── Adding a clip, rather than swapping the media ──────────────────────────────────────
+           This modal REPLACES, deliberately, and says so. But "add another video" is the question
+           people arrive here holding once a post already has one — twice in testing, from inside
+           this exact dialog — and answering it only in a panel behind the modal is answering it
+           somewhere the asker is not. Shown only where it means something: a video-only format
+           that already has a clip, i.e. the case where the next video is a second CLIP of one
+           piece rather than a different post's picture. -->
+      <div id="pce-media-modal-clip" class="hidden pt-3 border-t border-gray-100">
+        <button type="button" onclick="_pceAddClipFromPicker()"
+          class="w-full rounded-xl border border-dashed border-gray-300 py-2.5 text-sm font-bold text-gray-600 hover:border-emerald-400 hover:text-emerald-700 transition cursor-pointer">
+          + Add another clip instead
+        </button>
+        <p class="mt-1.5 text-[11px] text-gray-400 text-center">Joins onto the end of this video rather than replacing it.</p>
+      </div>
       <!-- ── The fourth source, and the reason this modal offers it ─────────────────────────────
            A branded card is a way of having no photo, so "I do not have a picture" has to be able to
            end here. It is the same _pceCreateBrandCard the Post Style chooser calls — one
@@ -8962,9 +8976,20 @@ function _pceOpenMediaPicker() {
     const msg = document.getElementById('pce-media-modal-msg');
     if (msg) msg.textContent = '';
     const sub = document.getElementById('pce-media-modal-sub');
+    // Adding a clip only means something on a video-only format that already has one. Everywhere
+    // else the next thing you pick genuinely is a replacement, and offering to "add" would be
+    // offering a carousel by the back door.
+    const fmt = typeof _pceActiveFormat === 'function' ? _pceActiveFormat(post) : null;
+    const clipable = !!post.thumbnailUrl && _pcePostIsVideo(post) && !!fmt && fmt.m === 'video' && fmt.max === 1;
+    document.getElementById('pce-media-modal-clip')?.classList.toggle('hidden', !clipable);
+
     // "Choose a picture" was the title, but this offers video and a branded card too — so it named
     // one of three answers.
-    if (sub) sub.textContent = post.thumbnailUrl ? 'Whatever you pick replaces what is on the post.' : '';
+    if (sub) {
+        sub.textContent = !post.thumbnailUrl ? ''
+            : clipable ? 'Picking replaces this video. To keep it and add another, use “Add another clip” below.'
+            : 'Whatever you pick replaces what is on the post.';
+    }
 
     modal.classList.remove('hidden');
     modal.classList.add('flex');
@@ -9110,6 +9135,16 @@ async function _pceAttachClips(files) {
     _pceClipsChanged(clips);
     window.showToast?.(clips.length === 1 ? 'Clip added.' : `${clips.length} clips in this cut.`);
 }
+
+/**
+ * The picker's own "Add another clip". Closes the modal first: the file dialog it opens belongs to
+ * the post, not to this modal, and leaving a replace-dialog open behind an append action is exactly
+ * the ambiguity this button exists to remove.
+ */
+window._pceAddClipFromPicker = function () {
+    if (typeof _pceCloseMediaPicker === 'function') _pceCloseMediaPicker();
+    window._pceAddClipFiles();
+};
 
 /** The Clips panel's own "Add another clip" — a plain file picker, appending. */
 window._pceAddClipFiles = function () {
