@@ -7749,6 +7749,41 @@ function _rqTimelineItem(kind, key) {
     return overlays.find((o) => o && o.id === key) || overlays[Number(key)] || null;
 }
 
+/** Which clip a moment of the finished cut falls in, or null when there is no cut to speak of. */
+function _rqClipIndexAt(t) {
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const spans = _pceClipSpans(post);
+    if (!spans) return null;
+    const sp = _pceSpanAt(spans, t);
+    return sp ? sp.i : null;
+}
+
+/** The clip row under a point, by index — the drop target while a text box is being dragged. */
+function _rqClipRowAt(x, y) {
+    const el = document.elementFromPoint(x, y);
+    const row = el && el.closest ? el.closest('#pce-clips-block [data-clip-row]') : null;
+    if (!row) return null;
+    const i = Number(row.getAttribute('data-clip-row'));
+    return Number.isFinite(i) ? i : null;
+}
+
+/**
+ * Light up the clip a box would land on, or clear it with null.
+ *
+ * Inline styles, not a class. The compiled stylesheet only carries utilities the markup already
+ * uses, and a ring- utility that appears nowhere else would be purged out of it — the highlight
+ * would simply not exist, which is exactly how the timeline's segment fills were once invisible.
+ */
+function _rqPaintDropTarget(index) {
+    for (const row of document.querySelectorAll('#pce-clips-block [data-clip-row]')) {
+        const on = index != null && Number(row.getAttribute('data-clip-row')) === index;
+        row.style.outline = on ? '2px dashed #ec4899' : '';
+        row.style.outlineOffset = on ? '-2px' : '';
+        row.style.borderRadius = on ? '8px' : '';
+        row.style.background = on ? 'rgba(236,72,153,.06)' : '';
+    }
+}
+
 // Timeline drag: bound ONCE to the stable #pce-clips-block container (its innerHTML is replaced
 // each render, but the element persists). Pointer capture is on the container, and the move handler
 // mutates ONLY the dragged segment's inline style — it does NOT re-render the timeline mid-drag,
@@ -7790,6 +7825,9 @@ function _rqBindTimeline() {
             startX: ev.clientX,
             s0: seed.startS == null ? 0 : seed.startS,
             e0: seed.endS == null ? dur : seed.endS,
+            // Which clip it started on, so a drop onto a different one can be told from a re-time.
+            home: kind === 'text' ? _rqClipIndexAt(seed.startS == null ? 0 : seed.startS) : null,
+            drop: null,
         };
         // Grabbing a track selects it, and selection drives which inspector you land in — grabbing a
         // voice note must not open the text panel.
@@ -7821,6 +7859,16 @@ function _rqBindTimeline() {
         } else if (d.mode === 'end') {
             d.ov.endS = Math.min(dur, Math.max(at, (d.ov.startS == null ? 0 : d.ov.startS) + 0.1));
         } else {
+            // ── Sideways re-times; downwards moves it to another clip ───────────────────────
+            // Dragging along the axis already crosses clip boundaries, but only by dragging the box
+            // to a completely different MOMENT. "Same place in clip 3 instead of clip 1" had no
+            // gesture at all — it meant opening the text editor and picking a chip. Over another
+            // clip's row the box stops following the pointer sideways and that row lights up: the
+            // drag has become a drop, and releasing keeps the offset rather than the second.
+            const over = d.home == null ? null : _rqClipRowAt(ev.clientX, ev.clientY);
+            const drop = over != null && over !== d.home ? over : null;
+            if (drop !== d.drop) { d.drop = drop; _rqPaintDropTarget(drop); }
+            if (drop != null) return;
             const delta = ((ev.clientX - d.startX) / rect.width) * dur;
             const len = d.e0 - d.s0;
             const ns = Math.max(0, Math.min(dur - len, d.s0 + delta));
@@ -7842,11 +7890,15 @@ function _rqBindTimeline() {
 
     const end = () => {
         if (!_rqTlDrag) return;
-        const { kind } = _rqTlDrag;
+        const { kind, drop, key } = _rqTlDrag;
         _rqTlDrag = null;
-        // Release the hold BEFORE repainting, or the repaint this drag came here to do is the one
+        _rqPaintDropTarget(null);
+        // Clear the drag BEFORE repainting, or the repaint this drag came here to do is the one
         // that gets deferred — and deferred to nothing, because the drag is over.
         _pceClipsRepaintPending = false;   // the repaint below is the one that was deferred
+        // A drop does its own save and repaint. It must not be followed by one that writes back the
+        // timing the box had while it was hovering over another clip.
+        if (kind === 'text' && drop != null) { window._pceOverlayToClip(drop, key); return; }
         _rqRenderTimeline(_rqPostCache[_rqReviewPostId]);
         if (kind === 'audio') { _pceRenderAudioList(); _pcePersistAudio(_rqReviewPostId); }
         else _rqPersistOverlays(_rqReviewPostId);
@@ -12232,20 +12284,38 @@ function _pcePaintOverlayScrub(post, ov) {
     }
 }
 
-/** Put this text on another clip, keeping how long it shows for. */
-window._pceOverlayToClip = function (index) {
-    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
-    const ov = post && (post.overlays || []).find(o => o && o.id === _pceSelectedOverlayId);
+/**
+ * Put a text box on another clip, keeping where it sits in that clip and how long it shows.
+ *
+ * The OFFSET is what is preserved, not the absolute second: "two seconds in, for three seconds" is
+ * what the reviewer decided, and it means the same thing on any clip. Clamped to the target's
+ * length, because the clip you are moving to may be shorter than the one you came from.
+ *
+ * `key` names the box; omitted, it acts on the selected one (how the text editor's clip chips call
+ * it). Shared with the timeline's drag-and-drop so the two cannot disagree about what "move this to
+ * clip 3" means.
+ */
+window._pceOverlayToClip = function (index, key) {
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    const overlays = (post && post.overlays) || [];
+    const want = key == null ? _pceSelectedOverlayId : key;
+    let ov = overlays.find(o => o && o.id === want);
+    if (!ov && /^\d+$/.test(String(want))) ov = overlays[Number(want)];
     const spans = _pceClipSpans(post);
     if (!ov || !spans || !spans[index]) return;
     const from = _pceSpanAt(spans, ov.startS == null ? 0 : ov.startS);
     const to = spans[index];
+    if (!from || from.i === to.i) return;
     const within = (ov.startS == null ? 0 : ov.startS) - from.start;
     const shown = (ov.endS == null ? from.end : ov.endS) - (ov.startS == null ? 0 : ov.startS);
     ov.startS = to.start + Math.min(within, Math.max(0, to.len - 0.2));
     ov.endS = Math.min(to.end, ov.startS + Math.max(0.2, shown));
     if (ov.startS <= 0.001) ov.startS = undefined;
-    _rqPersistOverlays(post.id);
+    // ⚠️ _rqReviewPostId, not post.id. _rqPersistOverlays looks the post up BY this argument, so a
+    // cache row without an `id` field silently saved nothing at all.
+    _rqPersistOverlays(postId);
+    _rqRenderCanvasOverlays(post);
     _pceRefreshOverlayTiming();
     _rqRenderTimeline(post);
 };

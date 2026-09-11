@@ -863,8 +863,10 @@ check('a dead rect is never read as "dragged to the end"', () => {
 
 check('the release repaints rather than deferring the repaint it came to do', () => {
     const tl = slice('function _rqBindTimeline() {', '\nasync function openPostReview(');
+    // ⚠️ Scan to the end of the handler, not a fixed window — this broke once already when the
+    // handler grew, which is a false failure about a true ordering.
     const at = tl.indexOf('const end = () => {');
-    const end = tl.slice(at, at + 600);
+    const end = tl.slice(at, tl.indexOf('\n    };', at));
     assert.ok(end.indexOf('_rqTlDrag = null') < end.indexOf('_rqRenderTimeline('),
         'the drag must be cleared before the repaint, or that repaint is deferred to nothing');
     assert.ok(end.includes('_pceClipsRepaintPending = false'),
@@ -910,6 +912,59 @@ check('the panel is called Timeline', () => {
     const at = only(workspace, "const heading = ", 'workspace.html');
     assert.ok(workspace.slice(at, at + 60).includes("'Timeline'"));
     assert.strictEqual(workspace.indexOf('Clips &amp; timeline'), -1, 'the old heading is back');
+});
+
+
+// ── Dragging a text box onto another clip ───────────────────────────────────────────────────────
+// Dragging along the axis already crossed clip boundaries, but only by moving the box to a
+// completely different MOMENT. "Same place in clip 3 instead of clip 1" had no gesture at all — it
+// meant opening the text editor and picking a chip.
+
+console.log('\nmoving a text box between clips');
+
+check('sideways re-times, downwards drops it on another clip', () => {
+    const tl = slice('function _rqBindTimeline() {', '\nasync function openPostReview(');
+    assert.ok(tl.includes('_rqClipRowAt(ev.clientX, ev.clientY)'), 'nothing looks for a drop target');
+    assert.ok(tl.includes('if (drop != null) return;'),
+        'the box keeps sliding sideways while it is being dropped somewhere else');
+    assert.ok(tl.includes('_rqPaintDropTarget(drop)'), 'the target clip is not shown');
+});
+
+check('the drop target is drawn with inline styles, not a utility class', () => {
+    // The compiled stylesheet only carries utilities the markup already uses, so a ring- class that
+    // appears nowhere else is purged and the highlight simply does not exist — the same way the
+    // timeline's segment fills once drew with no colour at all.
+    const fn = slice('function _rqPaintDropTarget(index) {', '// Timeline drag: bound ONCE');
+    assert.ok(fn.includes('row.style.outline'), 'the highlight is not inline');
+    assert.ok(!/class(List)?\.(add|toggle)/.test(fn), 'a purgeable class is being toggled');
+});
+
+check('a drop keeps the OFFSET in the clip, not the second in the cut', () => {
+    // "Two seconds in, for three seconds" is what the reviewer decided, and it means the same thing
+    // on any clip. The absolute second does not.
+    const fn = slice('window._pceOverlayToClip = function (index, key) {', 'function _pceBindOverlayScrub()');
+    assert.ok(fn.includes('const within ='), 'the offset is not preserved');
+    assert.ok(fn.includes('const shown ='), 'the duration is not preserved');
+    assert.ok(fn.includes('Math.min(to.end'), 'a box can outlast the clip it was dropped on');
+    assert.ok(fn.includes('from.i === to.i'), 'dropping a box on the clip it already lives on is not a no-op');
+});
+
+check('a drop saves instead of writing back the timing it had mid-hover', () => {
+    const tl = slice('function _rqBindTimeline() {', '\nasync function openPostReview(');
+    const at = tl.indexOf('const end = () => {');
+    const end = tl.slice(at, tl.indexOf('\n    };', at));
+    assert.ok(end.includes("kind === 'text' && drop != null"), 'a drop is not distinguished from a re-time');
+    assert.ok(end.indexOf('_pceOverlayToClip(drop, key)') < end.indexOf('_rqPersistOverlays('),
+        'the ordinary save must not also run after a drop');
+});
+
+check('the move-to-clip save looks the post up the way persist does', () => {
+    // ⚠️ It passed post.id, while _rqPersistOverlays looks the post up BY that argument — a cache
+    // row without an `id` field saved absolutely nothing, silently.
+    const fn = slice('window._pceOverlayToClip = function (index, key) {', 'function _pceBindOverlayScrub()');
+    assert.ok(fn.includes('_rqPersistOverlays(postId)'), 'still persisting against the wrong id');
+    assert.ok(!fn.includes('_rqPersistOverlays(post.id)'), 'post.id is back');
+    assert.ok(fn.includes('_rqRenderCanvasOverlays('), 'the picture is not updated');
 });
 
 console.log(`\n${passed} checks passed`);
