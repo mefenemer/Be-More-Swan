@@ -6743,7 +6743,54 @@ function _pceClipsTotalS(post) {
  *
  * Which also means a scrub, a pause and the playhead keep working with no changes of their own.
  */
-const _pcePrev = { on: false, i: 0, offset: 0, baseSrc: null, starting: false };
+const _pcePrev = { on: false, i: 0, offset: 0, starting: false };
+
+/**
+ * The canvas holds ONE <video> and two features now drive it — previewing a cut, and scrubbing a
+ * clip while its trim handles move. Both swap its src, so both go through here: two independent
+ * bits of src bookkeeping would race, and whichever finished last would decide what the post
+ * appeared to be attached to for the rest of the session.
+ */
+const _pceCanvasBorrowed = { src: null, on: false };
+
+function _pceCanvasBorrow() {
+    const video = _pcePreviewVideoEl();
+    if (!video || _pceCanvasBorrowed.on) return video;
+    _pceCanvasBorrowed.src = video.getAttribute('src');
+    _pceCanvasBorrowed.on = true;
+    return video;
+}
+
+function _pceCanvasRestore() {
+    const video = _pcePreviewVideoEl();
+    if (!_pceCanvasBorrowed.on) return;
+    if (video && _pceCanvasBorrowed.src) {
+        _pcePrev.starting = true;
+        video.pause();
+        video.src = _pceCanvasBorrowed.src;
+        _pcePrev.starting = false;
+    }
+    _pceCanvasBorrowed.on = false;
+    _pceCanvasBorrowed.src = null;
+}
+
+/** Show one clip, paused, at `t` seconds into its source. The frame under a trim handle. */
+async function _pceCanvasShowFrame(clip, t) {
+    const video = _pceCanvasBorrow();
+    if (!video || !clip || !clip.url) return;
+    if (video.getAttribute('src') !== clip.url) {
+        _pcePrev.starting = true;
+        video.src = clip.url;
+        await new Promise((res) => {
+            if (video.readyState >= 1) return res();
+            video.addEventListener('loadedmetadata', res, { once: true });
+            video.addEventListener('error', res, { once: true });
+        });
+        _pcePrev.starting = false;
+    }
+    video.pause();
+    try { video.currentTime = Math.max(0, t); } catch { /* not seekable yet */ }
+}
 
 /** True while the canvas element is being driven through a multi-clip cut. */
 function _pcePreviewing() { return _pcePrev.on; }
@@ -6799,24 +6846,17 @@ window._pcePreviewStart = async function () {
     if (!video) return;
     if (_pcePrev.on) { video.play().catch(() => {}); return; }
     _pcePrev.on = true;
-    _pcePrev.baseSrc = video.getAttribute('src');  // put the canvas back exactly as we found it
+    _pceCanvasBorrow();                 // put the canvas back exactly as we found it
     _pceRenderClips();
     await _pcePreviewSeat(0);
 };
 
 window._pcePreviewStop = function () {
     if (!_pcePrev.on) return;
-    const video = _pcePreviewVideoEl();
     _pcePrev.on = false;
     _pcePrev.i = 0;
     _pcePrev.offset = 0;
-    if (video && _pcePrev.baseSrc) {
-        _pcePrev.starting = true;
-        video.pause();
-        video.src = _pcePrev.baseSrc;
-        _pcePrev.starting = false;
-    }
-    _pcePrev.baseSrc = null;
+    _pceCanvasRestore();
     _pceRenderClips();
 };
 
@@ -6871,6 +6911,138 @@ function _pceMeasureClips(clips) {
         v.onerror = () => { v.src = ''; };
         v.src = c.url;
     }
+}
+
+/**
+ * ── Trimming by eye ─────────────────────────────────────────────────────────────────────────────
+ *
+ * Numbers in a box cannot answer "does it cut before he turns round", so the handles scrub: moving
+ * one seeks the canvas to that exact frame of that clip, paused. The kept section is the lit part
+ * of the bar, and the bar is the WHOLE source — the part being thrown away has to stay visible or
+ * there is no way to judge how much of it there is.
+ *
+ * The canvas is borrowed through _pceCanvasBorrow, the same door the cut preview uses, so the two
+ * can never leave the post pointing at a clip it does not have.
+ */
+let _pceSelectedClipId = null;
+const _pceTrimDrag = { on: false, id: null, edge: null, clips: null };
+
+window._pceSelectClip = function (clipId) {
+    _pceSelectedClipId = _pceSelectedClipId === clipId ? null : clipId;
+    if (_pceSelectedClipId == null) _pceCanvasRestore();
+    _pceRenderClips();
+};
+
+/** Seconds of source under a pointer, clamped to the clip's own length. */
+function _pceTrimTimeAt(ev, track, full) {
+    const box = track.getBoundingClientRect();
+    if (!box.width || !(full > 0)) return null;
+    const f = Math.min(1, Math.max(0, (ev.clientX - box.left) / box.width));
+    return f * full;
+}
+
+function _pceBindClipTrim() {
+    const host = document.getElementById('pce-clips-block');
+    if (!host || host.dataset.trimBound === '1') return;
+    host.dataset.trimBound = '1';
+
+    const clipsNow = () => (_pceTrimDrag.clips || _pceClips()).map(c => Object.assign({}, c));
+
+    host.addEventListener('pointerdown', (ev) => {
+        const handle = ev.target.closest && ev.target.closest('[data-trim-edge]');
+        if (!handle) return;
+        const track = handle.closest('[data-trim-track]');
+        if (!track) return;
+        _pceTrimDrag.on = true;
+        _pceTrimDrag.id = track.getAttribute('data-trim-track');
+        _pceTrimDrag.edge = handle.getAttribute('data-trim-edge');
+        _pceTrimDrag.clips = _pceClips().map(c => Object.assign({}, c));
+        handle.setPointerCapture && handle.setPointerCapture(ev.pointerId);
+        ev.preventDefault();
+        ev.stopPropagation();
+    });
+
+    host.addEventListener('pointermove', (ev) => {
+        if (!_pceTrimDrag.on) return;
+        const track = host.querySelector(`[data-trim-track="${_pceTrimDrag.id}"]`);
+        const clips = clipsNow();
+        const clip = clips.find(c => c.id === _pceTrimDrag.id);
+        if (!track || !clip) return;
+        const full = _pceClipDurations[clip.assetId] != null ? _pceClipDurations[clip.assetId] : clip.sourceDurationS;
+        const t = _pceTrimTimeAt(ev, track, full);
+        if (t == null) return;
+
+        // A quarter-second floor: a window narrower than that is a frame or two, which is never what
+        // a drag meant and renders as a stutter.
+        const MIN = 0.25;
+        if (_pceTrimDrag.edge === 'in') {
+            const out = clip.outS != null ? clip.outS : full;
+            clip.inS = Math.min(t, out - MIN);
+            if (clip.inS <= 0.001) clip.inS = undefined;
+        } else {
+            clip.outS = Math.max(t, (clip.inS || 0) + MIN);
+            if (full != null && clip.outS >= full - 0.001) clip.outS = undefined;
+        }
+        _pceTrimDrag.clips = clips;
+        // Paint and scrub, but do NOT save or re-render the panel: replacing the markup mid-drag
+        // would tear the handle out from under the pointer, the same trap the crop frame has.
+        _pceTrimPaint(clip);
+        _pceCanvasShowFrame(clip, _pceTrimDrag.edge === 'in' ? (clip.inS || 0) : (clip.outS != null ? clip.outS : full));
+    });
+
+    const end = () => {
+        if (!_pceTrimDrag.on) return;
+        const clips = _pceTrimDrag.clips;
+        _pceTrimDrag.on = false;
+        _pceTrimDrag.id = null;
+        _pceTrimDrag.edge = null;
+        _pceTrimDrag.clips = null;
+        if (clips) _pceClipsChanged(clips);   // one save, on release
+    };
+    host.addEventListener('pointerup', end);
+    host.addEventListener('pointercancel', end);
+}
+
+/** Move the lit section and its handles without rebuilding the row. */
+function _pceTrimPaint(clip) {
+    const track = document.querySelector(`[data-trim-track="${clip.id}"]`);
+    if (!track) return;
+    const full = _pceClipDurations[clip.assetId] != null ? _pceClipDurations[clip.assetId] : clip.sourceDurationS;
+    if (!(full > 0)) return;
+    const a = (clip.inS || 0) / full;
+    const b = (clip.outS != null ? clip.outS : full) / full;
+    const kept = track.querySelector('[data-trim-kept]');
+    if (kept) { kept.style.left = (a * 100) + '%'; kept.style.width = Math.max(0, (b - a) * 100) + '%'; }
+    const inH = track.querySelector('[data-trim-edge="in"]');
+    const outH = track.querySelector('[data-trim-edge="out"]');
+    if (inH) inH.style.left = (a * 100) + '%';
+    if (outH) outH.style.left = (b * 100) + '%';
+    const lbl = track.parentElement?.querySelector('[data-trim-label]');
+    if (lbl) {
+        lbl.textContent = `${_pceFmtS((clip.inS || 0))} → ${_pceFmtS(clip.outS != null ? clip.outS : full)}  ·  keeps ${_pceFmtS(Math.max(0, (clip.outS != null ? clip.outS : full) - (clip.inS || 0)))}`;
+    }
+}
+
+/** The trim track for the selected clip, drawn under its row. */
+function _pceTrimTrackHtml(clip) {
+    const full = _pceClipDurations[clip.assetId] != null ? _pceClipDurations[clip.assetId] : clip.sourceDurationS;
+    if (!(full > 0)) return '<p class="px-1 pb-1 text-[10px] text-gray-400">Reading this clip…</p>';
+    const a = ((clip.inS || 0) / full) * 100;
+    const b = ((clip.outS != null ? clip.outS : full) / full) * 100;
+    const handle = (edge, pct) => '<span data-trim-edge="' + edge + '" role="slider" tabindex="0"'
+        + ' aria-label="' + (edge === 'in' ? 'Start' : 'End') + ' of the kept section"'
+        + ' class="absolute top-0 bottom-0 w-2 -ml-1 rounded cursor-ew-resize"'
+        + ' style="left:' + pct + '%;background:#059669"></span>';
+    return '<div class="px-1 pb-1.5">'
+        + '<div class="relative h-7 rounded bg-gray-100 overflow-hidden select-none" data-trim-track="' + _rqEsc(clip.id) + '">'
+        + '<div class="absolute inset-y-0" data-trim-kept style="left:' + a + '%;width:' + Math.max(0, b - a) + '%;background:rgba(5,150,105,.22)"></div>'
+        + handle('in', a) + handle('out', b)
+        + '</div>'
+        + '<p class="mt-0.5 text-[10px] text-gray-500" data-trim-label style="font-variant-numeric:tabular-nums">'
+        + _pceFmtS(clip.inS || 0) + ' → ' + _pceFmtS(clip.outS != null ? clip.outS : full) + '  ·  keeps '
+        + _pceFmtS(Math.max(0, (clip.outS != null ? clip.outS : full) - (clip.inS || 0))) + '</p>'
+        + '<p class="text-[10px] text-gray-400">Drag either end — the canvas shows that exact frame. The dimmed parts are cut.</p>'
+        + '</div>';
 }
 
 /** Write the cut back to the post. Shared across the cross-post group — the cut is one decision. */
@@ -6961,6 +7133,12 @@ function _pceRenderClips(clipsOverride) {
     // clip" lives here, so hiding it left no way to GET to two clips. A dead end exactly where the
     // feature starts.
     if (!clips.length) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+    // A selection that no longer names a clip would leave the canvas borrowed for something that is
+    // not on the post any more.
+    if (_pceSelectedClipId != null && !clips.some(c => c.id === _pceSelectedClipId)) {
+        _pceSelectedClipId = null;
+        _pceCanvasRestore();
+    }
 
     _pceMeasureClips(clips);
 
@@ -6981,9 +7159,15 @@ function _pceRenderClips(clipsOverride) {
     const rows = clips.map((c, i) => {
         const len = _pceClipLength(c);
         const name = _rqEsc(String(c.name || ('Clip ' + (i + 1))).slice(0, 28));
-        return '<div class="flex items-center gap-1.5 py-1" data-clip-row="' + i + '">'
+        const picked = c.id === _pceSelectedClipId;
+        return '<div data-clip-row="' + i + '" class="' + (picked ? 'bg-emerald-50/60 rounded-lg' : '') + '">'
+            + '<div class="flex items-center gap-1.5 py-1">'
             + '<span class="w-4 shrink-0 text-[10px] font-bold text-gray-400" style="font-variant-numeric:tabular-nums">' + (i + 1) + '</span>'
-            + '<span class="flex-1 min-w-0 truncate text-[11px] text-gray-700" title="' + name + '">' + name + '</span>'
+            // The name is the handle for "I want to work on this one" — the row's controls each mean
+            // something else, so selecting cannot live on the row itself.
+            + '<button type="button" onclick="window._pceSelectClip(\'' + _rqEsc(c.id) + '\')"'
+            + ' class="flex-1 min-w-0 truncate text-left text-[11px] ' + (picked ? 'text-emerald-800 font-semibold' : 'text-gray-700') + ' hover:text-emerald-700 cursor-pointer"'
+            + ' title="' + name + '">' + name + '</button>'
             + '<span class="w-10 shrink-0 text-right text-[10px] text-gray-400" style="font-variant-numeric:tabular-nums">' + (len == null ? '—' : _pceFmtS(len)) + '</span>'
             + num(i, 'in', c.inS, 'in')
             + num(i, 'out', c.outS, 'out')
@@ -6996,6 +7180,8 @@ function _pceRenderClips(clipsOverride) {
             + '<button type="button" title="Remove this clip" aria-label="Remove clip ' + (i + 1) + '"'
             + ' class="px-1 text-gray-300 hover:text-red-600 cursor-pointer leading-none"'
             + ' onclick="window._pceClipRemove(' + i + ')">&times;</button>'
+            + '</div>'
+            + (picked ? _pceTrimTrackHtml(c) : '')
             + '</div>';
     }).join('');
 
@@ -7018,7 +7204,7 @@ function _pceRenderClips(clipsOverride) {
             : '<p class="mt-1 text-[10px] text-amber-600">That is the most clips one post can hold.</p>')
         + (overLong
             ? '<p class="mt-1 text-[10px] text-amber-600">Over three minutes — too long for a YouTube Short, so it would go out as a standard video there.</p>' : '')
-        + '<p class="mt-1 text-[10px] text-gray-400">' + (clips.length > 1
+        + '<p class="mt-1 text-[10px] text-gray-400">' + (_pceSelectedClipId == null ? 'Tap a clip\'s name to trim it by eye. ' : '') + (clips.length > 1
             ? 'Trimmed and joined when you approve the post. Preview plays the cut with your text and sound.'
             : 'Trimmed when you approve the post. Add another clip to join them into one video.') + '</p>'
         + '</div>';
@@ -11323,6 +11509,7 @@ function _pceRenderStagePanels() {
     if (typeof _pceRenderClips === 'function') _pceRenderClips();
     if (typeof _pceRenderCropFrame === 'function') _pceRenderCropFrame();
     if (typeof _pceBindCropFrame === 'function') _pceBindCropFrame();
+    if (typeof _pceBindClipTrim === 'function') _pceBindClipTrim();
 }
 
 function _pceRenderLayers() {

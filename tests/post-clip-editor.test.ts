@@ -337,12 +337,51 @@ check('pressing play on the canvas previews the whole cut', () => {
     assert.ok(scope.includes('_pcePrev.starting || _pcePrev.on'), 'and cannot re-enter itself');
 });
 
-check('the preview puts the canvas back exactly as it found it', () => {
-    // It swaps the element\'s src through the clips; leaving the last one there would show clip
-    // four as the post\'s media for the rest of the session.
-    const at = only(workspace, 'window._pcePreviewStop = function', 'workspace.html');
-    const scope = workspace.slice(at, at + 600);
-    assert.ok(scope.includes('_pcePrev.baseSrc'), 'the original src is restored');
+check('the canvas is borrowed and returned through ONE door', () => {
+    // Two features drive the same <video> — previewing a cut and scrubbing a trim handle. Two
+    // independent bits of src bookkeeping would race, and whichever finished last would decide what
+    // the post appeared to be attached to for the rest of the session.
+    only(workspace, 'function _pceCanvasBorrow()', 'workspace.html');
+    only(workspace, 'function _pceCanvasRestore()', 'workspace.html');
+    const stop = only(workspace, 'window._pcePreviewStop = function', 'workspace.html');
+    assert.ok(workspace.slice(stop, stop + 400).includes('_pceCanvasRestore()'), 'preview returns it');
+    const sel = only(workspace, 'window._pceSelectClip = function', 'workspace.html');
+    assert.ok(workspace.slice(sel, sel + 300).includes('_pceCanvasRestore()'), 'deselecting returns it');
+});
+
+console.log('\ntrimming by eye');
+
+check('dragging a handle scrubs the canvas to that frame', () => {
+    // Numbers in a box cannot answer "does it cut before he turns round".
+    // Bounded by the RELEASE handler, not by a character count: a fixed window ran past the end of
+    // the move handler into the release, which is the one place a save is correct.
+    const at = only(workspace, 'if (!_pceTrimDrag.on) return;\n        const track = host.querySelector', 'workspace.html');
+    // Searched FORWARD from the move handler — `const end = () => {` is not unique, the crop frame
+    // has one of its own.
+    const endAt = workspace.indexOf('const end = () => {', at);
+    assert.ok(endAt > at, 'the release handler should follow the move handler');
+    const scope = workspace.slice(at, endAt);
+    assert.ok(scope.includes('_pceCanvasShowFrame('), 'the handle shows its own frame');
+    assert.ok(scope.includes('_pceTrimPaint('), 'and moves without rebuilding the row');
+    assert.ok(!scope.includes('_pceClipsChanged('), 'a drag must not save on every move');
+});
+
+check('the trim saves once, on release', () => {
+    const at = only(workspace, 'const end = () => {\n        if (!_pceTrimDrag.on) return;', 'workspace.html');
+    assert.ok(workspace.slice(at, at + 500).includes('_pceClipsChanged(clips)'));
+});
+
+check('the kept window can never collapse to nothing', () => {
+    // A window of a frame or two is never what a drag meant, and renders as a stutter.
+    const at = only(workspace, 'const MIN = 0.25;', 'workspace.html');
+    const scope = workspace.slice(at, at + 500);
+    assert.ok(scope.includes('out - MIN') && scope.includes('+ MIN'), 'both edges respect the floor');
+});
+
+check('a clip that leaves the cut cannot stay selected', () => {
+    // It would leave the canvas borrowed for something no longer on the post.
+    const at = only(workspace, 'if (_pceSelectedClipId != null && !clips.some(', 'workspace.html');
+    assert.ok(workspace.slice(at, at + 250).includes('_pceCanvasRestore()'));
 });
 
 console.log('\nthe crop frame');
