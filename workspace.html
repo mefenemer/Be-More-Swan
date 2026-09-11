@@ -6344,7 +6344,9 @@ function _rqOverlayVisibleAt(ov, t) {
 // Show/hide the painted overlay nodes for the video's current time, without repainting (cheap enough
 // to run on every timeupdate). Also nudges the timeline playhead.
 function _rqApplyOverlayTimes(video, layer, post) {
-    const t = video.currentTime || 0;
+    // The cut's clock, not the element's: while previewing, the element is part-way through clip
+    // three and its currentTime says so, but a text box was timed against the finished video.
+    const t = _pceCutTime(video);
     const byId = {};
     for (const o of (post && post.overlays) || []) if (o && o.id) byId[o.id] = o;
     for (const n of layer.querySelectorAll('.ioe-ov')) {
@@ -6352,7 +6354,7 @@ function _rqApplyOverlayTimes(video, layer, post) {
         n.style.display = ov && !_rqOverlayVisibleAt(ov, t) ? 'none' : '';
     }
     const head = document.querySelector('#post-review-timeline [data-playhead]');
-    const dur = video.duration;
+    const dur = _pceCutDuration(video, post);
     if (head && dur && isFinite(dur)) head.style.left = (Math.min(1, t / dur) * 100) + '%';
 }
 
@@ -6424,6 +6426,14 @@ function _rqRenderCanvasOverlays(post) {
             media.addEventListener('timeupdate', () => {
                 _rqApplyOverlayTimes(media, layer, _rqPostCache[_rqReviewPostId] || post);
                 _pceSyncAudioPreview(media);
+                _pcePreviewTick(media);
+            });
+            // Pressing play on the canvas means "show me the post", and on a cut the post is all of
+            // the clips. Without this the native control played clip one and stopped, which is a
+            // perfectly reasonable thing for a <video> to do and the wrong answer to the question.
+            media.addEventListener('play', () => {
+                if (_pcePrev.starting || _pcePrev.on) return;
+                if (_pceClips(_rqPostCache[_rqReviewPostId] || post).length > 1) window._pcePreviewStart();
             });
             // Sound has to follow the transport, not just the clock: without these a paused video
             // keeps talking, and a scrub leaves the voice note where it was.
@@ -6719,6 +6729,113 @@ function _pceClipsTotalS(post) {
     return total > 0 ? total : null;
 }
 
+/**
+ * ── Previewing the cut ──────────────────────────────────────────────────────────────────────────
+ *
+ * The canvas holds ONE <video>, showing the post's base asset, so pressing play played clip one and
+ * stopped. Everything else was already right: the text layer and the sound tracks are both synced
+ * off that element's timeupdate, and the timeline playhead with them.
+ *
+ * So the preview is not a second player. It is a CLOCK. The element is walked through the clips in
+ * order — src swapped, seeked to each clip's in point, stopped at its out point — while everything
+ * that used to ask the element "what time is it" now asks the cut instead. One transport, one set
+ * of overlays, one audio arrangement; only the answer to the question changes.
+ *
+ * Which also means a scrub, a pause and the playhead keep working with no changes of their own.
+ */
+const _pcePrev = { on: false, i: 0, offset: 0, baseSrc: null, starting: false };
+
+/** True while the canvas element is being driven through a multi-clip cut. */
+function _pcePreviewing() { return _pcePrev.on; }
+
+/**
+ * The time the FINISHED video is at, given where the element is inside the clip it is showing.
+ * Falls back to the element's own clock, which is exactly right for a post that is not a cut.
+ */
+function _pceCutTime(video) {
+    const t = (video && video.currentTime) || 0;
+    if (!_pcePrev.on) return t;
+    const clip = _pceClips()[_pcePrev.i];
+    return _pcePrev.offset + Math.max(0, t - ((clip && clip.inS) || 0));
+}
+
+/** How long the finished video is — the cut when there is one, else the element's own duration. */
+function _pceCutDuration(video, post) {
+    return _pceClipsTotalS(post) ?? ((video && video.duration) || 0);
+}
+
+function _pcePreviewVideoEl() {
+    return document.querySelector('#post-review-body [data-media-video]');
+}
+
+/** Point the element at clip `i` and play from its in point. */
+async function _pcePreviewSeat(i) {
+    const clips = _pceClips();
+    const video = _pcePreviewVideoEl();
+    if (!video || !clips[i] || !clips[i].url) return _pcePreviewStop();
+    _pcePrev.i = i;
+    _pcePrev.offset = 0;
+    for (let k = 0; k < i; k++) _pcePrev.offset += _pceClipLength(clips[k]) || 0;
+
+    _pcePrev.starting = true;      // the src swap fires play/pause of its own; do not re-enter
+    video.src = clips[i].url;
+    try {
+        await new Promise((res) => {
+            if (video.readyState >= 1) return res();
+            video.addEventListener('loadedmetadata', res, { once: true });
+            video.addEventListener('error', res, { once: true });
+        });
+        video.currentTime = clips[i].inS || 0;
+        await video.play().catch(() => {});
+    } finally {
+        _pcePrev.starting = false;
+    }
+}
+
+window._pcePreviewStart = async function () {
+    const clips = _pceClips();
+    if (clips.length < 2) return;                  // one clip already previews itself
+    const video = _pcePreviewVideoEl();
+    if (!video) return;
+    if (_pcePrev.on) { video.play().catch(() => {}); return; }
+    _pcePrev.on = true;
+    _pcePrev.baseSrc = video.getAttribute('src');  // put the canvas back exactly as we found it
+    _pceRenderClips();
+    await _pcePreviewSeat(0);
+};
+
+window._pcePreviewStop = function () {
+    if (!_pcePrev.on) return;
+    const video = _pcePreviewVideoEl();
+    _pcePrev.on = false;
+    _pcePrev.i = 0;
+    _pcePrev.offset = 0;
+    if (video && _pcePrev.baseSrc) {
+        _pcePrev.starting = true;
+        video.pause();
+        video.src = _pcePrev.baseSrc;
+        _pcePrev.starting = false;
+    }
+    _pcePrev.baseSrc = null;
+    _pceRenderClips();
+};
+
+/**
+ * Advance at a clip's out point. Driven from the same timeupdate everything else uses, so the cut
+ * cannot run ahead of the overlays being drawn against it.
+ */
+function _pcePreviewTick(video) {
+    if (!_pcePrev.on || _pcePrev.starting || !video) return;
+    const clips = _pceClips();
+    const clip = clips[_pcePrev.i];
+    if (!clip) return _pcePreviewStop();
+    const out = clip.outS != null ? clip.outS
+        : (_pceClipDurations[clip.assetId] != null ? _pceClipDurations[clip.assetId] : video.duration);
+    if (!(out > 0) || video.currentTime < out - 0.03) return;
+    if (_pcePrev.i + 1 < clips.length) _pcePreviewSeat(_pcePrev.i + 1);
+    else _pcePreviewStop();
+}
+
 /** Seconds this clip contributes, or null while its length is still unknown. */
 function _pceClipLength(c) {
     const full = _pceClipDurations[c.assetId] != null ? _pceClipDurations[c.assetId] : c.sourceDurationS;
@@ -6889,6 +7006,11 @@ function _pceRenderClips(clipsOverride) {
         + '<span class="text-[10px] text-gray-400" style="font-variant-numeric:tabular-nums">' + totalLabel + '</span>'
         + '</div>'
         + '<div class="divide-y divide-gray-100">' + rows + '</div>'
+        + (clips.length > 1
+            ? '<button type="button" onclick="' + (_pcePreviewing() ? 'window._pcePreviewStop()' : 'window._pcePreviewStart()') + '"'
+              + ' class="mt-1.5 w-full rounded-lg border border-emerald-300 bg-emerald-50 py-1.5 text-[11px] font-bold text-emerald-800 hover:bg-emerald-100 transition cursor-pointer">'
+              + (_pcePreviewing() ? '■ Stop preview' : '▶ Preview the whole cut') + '</button>'
+            : '')
         + (clips.length < _PCE_MAX_CLIPS
             ? '<button type="button" onclick="window._pceAddClipFiles()"'
               + ' class="mt-1.5 w-full rounded-lg border border-dashed border-gray-300 py-1.5 text-[11px] font-semibold text-gray-500 hover:border-emerald-400 hover:text-emerald-700 transition cursor-pointer">'
@@ -6897,7 +7019,7 @@ function _pceRenderClips(clipsOverride) {
         + (overLong
             ? '<p class="mt-1 text-[10px] text-amber-600">Over three minutes — too long for a YouTube Short, so it would go out as a standard video there.</p>' : '')
         + '<p class="mt-1 text-[10px] text-gray-400">' + (clips.length > 1
-            ? 'Trimmed and joined when you approve the post.'
+            ? 'Trimmed and joined when you approve the post. Preview plays the cut with your text and sound.'
             : 'Trimmed when you approve the post. Add another clip to join them into one video.') + '</p>'
         + '</div>';
     host.classList.remove('hidden');
@@ -11992,7 +12114,7 @@ function _pceSyncAudioPreview(video) {
     if (!video) return;
     const clips = _pceAudioClips();
     if (!clips.length) return;
-    const t = video.currentTime || 0;
+    const t = _pceCutTime(video);
     for (const clip of clips) {
         const el = _pceAudioPreviewEl(clip);
         if (!el) continue;

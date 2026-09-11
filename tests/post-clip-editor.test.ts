@@ -307,6 +307,44 @@ check('clip boundaries are drawn, and are not draggable', () => {
     assert.ok(!scope.includes('data-tl-seg'), 'and must not look like a track segment');
 });
 
+console.log('\npreviewing the cut');
+
+check('the preview is a CLOCK, not a second player', () => {
+    // The canvas element already drives the text layer, the sound and the playhead off its own
+    // timeupdate. A second player would need its own copy of all three.
+    const at = only(workspace, 'function _pceCutTime(video)', 'workspace.html');
+    const scope = workspace.slice(at, at + 400);
+    assert.ok(scope.includes('_pcePrev.offset'), 'cut time is the clip offset plus the element clock');
+    assert.ok(scope.includes('if (!_pcePrev.on) return t'), 'a post that is not a cut is unaffected');
+});
+
+check('overlays, sound and the playhead all read the CUT clock', () => {
+    // Any one of them left on video.currentTime would fire clip three\'s text during clip one.
+    const ov = only(workspace, 'function _rqApplyOverlayTimes(video, layer, post)', 'workspace.html');
+    assert.ok(workspace.slice(ov, ov + 400).includes('_pceCutTime(video)'), 'overlays');
+    const au = only(workspace, 'function _pceSyncAudioPreview(video)', 'workspace.html');
+    assert.ok(workspace.slice(au, au + 400).includes('_pceCutTime(video)'), 'sound');
+    const head = only(workspace, "const dur = _pceCutDuration(video, post);", 'workspace.html');
+    assert.ok(head > 0, 'the playhead must scale to the cut, not the clip');
+});
+
+check('pressing play on the canvas previews the whole cut', () => {
+    // The native control played clip one and stopped — a reasonable thing for a <video> to do, and
+    // the wrong answer to "show me the post".
+    const at = only(workspace, "media.addEventListener('play', () => {", 'workspace.html');
+    const scope = workspace.slice(at, at + 400);
+    assert.ok(scope.includes('_pcePreviewStart()'), 'play starts the cut preview');
+    assert.ok(scope.includes('_pcePrev.starting || _pcePrev.on'), 'and cannot re-enter itself');
+});
+
+check('the preview puts the canvas back exactly as it found it', () => {
+    // It swaps the element\'s src through the clips; leaving the last one there would show clip
+    // four as the post\'s media for the rest of the session.
+    const at = only(workspace, 'window._pcePreviewStop = function', 'workspace.html');
+    const scope = workspace.slice(at, at + 600);
+    assert.ok(scope.includes('_pcePrev.baseSrc'), 'the original src is restored');
+});
+
 console.log('\nthe crop frame');
 
 check('the crop panel exists and precedes the timeline', () => {
