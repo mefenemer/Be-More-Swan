@@ -449,15 +449,15 @@ window.showComplianceModals = function showComplianceModals(force) {
           <span>Upload</span>
         </button>
         <input type="file" id="gp-ai-upload-input" multiple class="hidden" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm" onchange="gpAiUploadSelected(event)">
-        <button type="button" onclick="gpAiBrowseCanva()" class="px-2.5 py-1 text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer flex items-center gap-1">
+        <button type="button" id="gp-ai-src-canva" onclick="gpAiBrowseCanva()" class="px-2.5 py-1 text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer flex items-center gap-1">
           <span>🎨</span>
           <span>Canva</span>
         </button>
-        <button type="button" onclick="gpAiFind()" class="px-2.5 py-1 text-xs font-semibold border border-sky-300 text-sky-700 hover:bg-sky-50 rounded-lg transition cursor-pointer flex items-center gap-1">
+        <button type="button" id="gp-ai-src-pexels" onclick="gpAiFind()" class="px-2.5 py-1 text-xs font-semibold border border-sky-300 text-sky-700 hover:bg-sky-50 rounded-lg transition cursor-pointer flex items-center gap-1">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
           <span id="gp-ai-find-label">Find a photo</span>
         </button>
-        <button type="button" onclick="gpAiGenerate()" class="px-2.5 py-1 text-xs font-semibold border border-violet-300 text-violet-700 hover:bg-violet-50 rounded-lg transition cursor-pointer flex items-center gap-1">
+        <button type="button" id="gp-ai-src-ai" onclick="gpAiGenerate()" class="px-2.5 py-1 text-xs font-semibold border border-violet-300 text-violet-700 hover:bg-violet-50 rounded-lg transition cursor-pointer flex items-center gap-1">
           <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
           <span id="gp-ai-gen-label">Generate with AI</span>
         </button>
@@ -8988,6 +8988,9 @@ function _pceOpenMediaPicker() {
 }
 
 function _pceCloseMediaPicker() {
+    // Add mode belongs to one visit. Leaving it set would dress the NEXT open as an add and hide
+    // three sources from a post that simply wanted its picture changed.
+    _pceClipAddMode = false;
     const modal = document.getElementById('pce-media-modal');
     if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
     window.ScrollLock?.release('pce-media-modal');
@@ -9087,24 +9090,18 @@ async function _pceCanvasAttachFiles(fileList) {
  * the post"), which is the right answer for choosing a post's picture and the wrong one for adding
  * a second clip — so adding clips has its own door rather than changing what that sentence means.
  */
-async function _pceAttachClips(files) {
+async function _pceAppendClipAssets(assets) {
     const postId = _rqReviewPostId;
     const post = postId != null ? _rqPostCache[postId] : null;
-    if (!post || !files.length) return;
+    if (!post || !assets.length) return;
 
     const existing = _pceClips(post);
     const room = _PCE_MAX_CLIPS - existing.length;
     if (room <= 0) { window.showToast?.(`A post can hold ${_PCE_MAX_CLIPS} clips.`); return; }
-    const take = files.slice(0, room);
-    if (take.length < files.length) {
+    const take = assets.slice(0, room);
+    if (take.length < assets.length) {
         window.showToast?.(`Added ${take.length} — that is the ${_PCE_MAX_CLIPS}-clip ceiling.`);
     }
-
-    const { assets, failures } = await gpUploadContentAssets(take, (i, n, name) => {
-        window.showToast?.(`Uploading ${i} of ${n}… ${name}`);
-    });
-    for (const f of failures) window.showToast?.(`${f.name}: ${f.message}`);
-    if (!assets.length) return;
 
     // The FIRST clip has to become the post's attached media, or the post has no base asset, no
     // thumbnail, and nothing downstream can tell it is a video at all. Only when there isn't one
@@ -9112,18 +9109,28 @@ async function _pceAttachClips(files) {
     if (!existing.length) {
         _gpCurrentPostId = postId;
         if (typeof gpAiSetMediaType === 'function') gpAiSetMediaType('video');
-        try { await gpAiSelectOwn(assets[0].id); }
-        catch (err) { window.showToast?.(err.message || 'Could not attach that file.'); return; }
+        try { await gpAiSelectOwn(take[0].id); }
+        catch (err) { window.showToast?.(err.message || 'Could not attach that clip.'); return; }
     }
 
-    const clips = existing.concat(assets.map((a, i) => ({
+    const clips = existing.concat(take.map((a, i) => ({
         id: 'c' + a.id + '_' + (existing.length + i),
         assetId: a.id,
-        url: a.url || null,
+        url: a.url || a.storageUrl || a.externalUrl || null,
         name: a.name || ('Clip ' + (existing.length + i + 1)),
     })));
     _pceClipsChanged(clips);
     window.showToast?.(clips.length === 1 ? 'Clip added.' : `${clips.length} clips in this cut.`);
+}
+
+/** Upload files, then append them. The device-file door into the same append. */
+async function _pceAttachClips(files) {
+    if (!files.length) return;
+    const { assets, failures } = await gpUploadContentAssets(files, (i, n, name) => {
+        window.showToast?.(`Uploading ${i} of ${n}… ${name}`);
+    });
+    for (const f of failures) window.showToast?.(`${f.name}: ${f.message}`);
+    if (assets.length) await _pceAppendClipAssets(assets);
 }
 
 /**
@@ -9131,12 +9138,51 @@ async function _pceAttachClips(files) {
  * the post, not to this modal, and leaving a replace-dialog open behind an append action is exactly
  * the ambiguity this button exists to remove.
  */
+/**
+ * ADD MODE. While it is on, picking from "Use my own" joins the clip onto the cut instead of
+ * replacing the post's media.
+ *
+ * It opens the library rather than the OS file dialog, because this file already argues the point
+ * for the empty canvas: "Opens the picker, not the OS file dialog... going straight to the file
+ * dialog answered the question before it had been asked." A second clip is usually one you already
+ * have.
+ *
+ * ⚠️ Only "Use my own" and Upload append. Stock, Canva and AI attach SERVER-side in a single call
+ * (pexels-search action:'select' and friends), so there is no asset id on this side to redirect —
+ * appending from those needs an append flag on those endpoints. Until then add mode shows the two
+ * sources that can honour it, rather than offering three that would silently replace.
+ */
+let _pceClipAddMode = false;
+
 window._pceAddClipFromPicker = function () {
-    if (typeof _pceCloseMediaPicker === 'function') _pceCloseMediaPicker();
-    window._pceAddClipFiles();
+    _pceClipAddMode = true;
+    _pceSyncClipAddMode();
+    if (typeof gpAiUseOwn === 'function') gpAiUseOwn();
 };
 
-/** The Clips panel's own "Add another clip" — a plain file picker, appending. */
+/** Leaving add mode — on close, and after a clip lands. */
+function _pceExitClipAddMode() {
+    if (!_pceClipAddMode) return;
+    _pceClipAddMode = false;
+    _pceSyncClipAddMode();
+}
+
+/** Dress the modal for whichever mode it is in. */
+function _pceSyncClipAddMode() {
+    const title = document.getElementById('pce-media-modal-title');
+    const sub = document.getElementById('pce-media-modal-sub');
+    const clip = document.getElementById('pce-media-modal-clip');
+    if (title) title.textContent = _pceClipAddMode ? 'Add another clip' : 'Choose media';
+    if (_pceClipAddMode && sub) sub.textContent = 'Pick a video to join onto the end of this one.';
+    // The button that got us here has nothing left to offer while we are here.
+    clip?.classList.toggle('hidden', _pceClipAddMode);
+    // Sources that cannot append are hidden rather than left to replace behind your back.
+    for (const id of ['gp-ai-src-pexels', 'gp-ai-src-canva', 'gp-ai-src-ai']) {
+        document.getElementById(id)?.classList.toggle('hidden', _pceClipAddMode);
+    }
+}
+
+/** The device-file door, offered from the Clips panel. */
 window._pceAddClipFiles = function () {
     const input = document.createElement('input');
     input.type = 'file';
@@ -15965,7 +16011,10 @@ async function gpAiUseOwn() {
             cell.type = 'button';
             cell.className = 'relative aspect-square rounded-lg overflow-hidden border-2 border-transparent hover:border-emerald-400 transition cursor-pointer bg-gray-100';
             cell.title = a.name || '';
-            cell.onclick = () => gpAiSelectOwn(a.id);
+            // In add mode this joins the clip onto the cut; otherwise it replaces, as always.
+            cell.onclick = () => (_pceClipAddMode
+                ? _pceAppendClipAssets([a]).then(() => { _pceExitClipAddMode(); _pceCloseMediaPicker(); })
+                : gpAiSelectOwn(a.id));
             cell.innerHTML = (a.assetType === 'video')
                 ? `<video src="${thumb}" muted playsinline preload="metadata" class="w-full h-full object-cover"></video><span class="absolute inset-0 flex items-center justify-center text-white/90"><svg class="w-6 h-6 drop-shadow" fill="currentColor" viewBox="0 0 20 20"><path d="M6.3 2.8A1 1 0 005 3.7v12.6a1 1 0 001.5.9l9.5-6.3a1 1 0 000-1.8L6.3 2.8z"/></svg></span>`
                 : `<img src="${thumb}" alt="${(a.name || '').replace(/"/g, '&quot;')}" class="w-full h-full object-cover" loading="lazy">`;
@@ -16011,6 +16060,14 @@ async function gpAiUploadSelected(e) {
     const files = Array.from(e.target.files || []);
     e.target.value = '';
     if (!files.length || !_gpCurrentPostId) return;
+    // In add mode the files JOIN the cut instead of replacing the post's media. Handled here rather
+    // than behind a separate uploader, so "Upload" means the same thing wherever it is pressed.
+    if (_pceClipAddMode) {
+        await _pceAttachClips(files);
+        _pceExitClipAddMode();
+        _pceCloseMediaPicker();
+        return;
+    }
     // Auto-switch the Image/Video toggle to match the file being attached so the attach below
     // (which reads _gpAiMediaType) stays consistent with what the user just picked.
     const uploadType = files[0].type.startsWith('video/') ? 'video' : 'image';

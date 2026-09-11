@@ -141,10 +141,13 @@ check('several videos on a single-item video format are clips, not slides', () =
 });
 
 check('adding clips APPENDS — the media picker still replaces', () => {
-    const at = only(workspace, 'async function _pceAttachClips(', 'workspace.html');
-    const scope = workspace.slice(at, at + 2400);
+    const at = only(workspace, 'async function _pceAppendClipAssets(', 'workspace.html');
+    const scope = workspace.slice(at, at + 2000);
     assert.ok(scope.includes('existing.concat('), 'clips are appended to what is already there');
     assert.ok(scope.includes('if (!existing.length)'), 'the base asset is attached once, not re-attached');
+    // Uploading is one door into the append, not a second implementation of it.
+    const up = only(workspace, 'async function _pceAttachClips(files)', 'workspace.html');
+    assert.ok(workspace.slice(up, up + 500).includes('_pceAppendClipAssets('), 'upload reuses the append');
 });
 
 check('the panel is shown for a single clip, so there is a way to reach two', () => {
@@ -169,8 +172,35 @@ check('the media picker offers adding a clip, where people actually ask for it',
     assert.ok(workspace.includes('onclick="_pceAddClipFromPicker()"'), 'the button must be wired');
     const at = only(workspace, 'window._pceAddClipFromPicker = function', 'workspace.html');
     const scope = workspace.slice(at, at + 300);
-    assert.ok(scope.includes('_pceCloseMediaPicker()'), 'a replace-dialog must not linger behind an append');
-    assert.ok(scope.includes('_pceAddClipFiles()'), 'and it must go through the appending path');
+    // It opens the LIBRARY, not the OS file dialog — the same argument this file already makes for
+    // the empty canvas: a second clip is usually one you already have.
+    assert.ok(scope.includes('gpAiUseOwn()'), 'add mode must open the picker, not a file dialog');
+    assert.ok(scope.includes('_pceClipAddMode = true'), 'and it must enter add mode');
+});
+
+check('add mode hides the sources that cannot append, rather than letting them replace', () => {
+    // Stock, Canva and AI attach SERVER-side in one call, so there is no asset id on this side to
+    // redirect. Leaving them on screen in add mode would silently replace the clip you were adding to.
+    const at = only(workspace, 'function _pceSyncClipAddMode()', 'workspace.html');
+    const scope = workspace.slice(at, at + 900);
+    for (const id of ['gp-ai-src-pexels', 'gp-ai-src-canva', 'gp-ai-src-ai']) {
+        assert.ok(scope.includes(id), `${id} must be hidden in add mode`);
+        only(workspace, `id="${id}"`, 'workspace.html');
+    }
+});
+
+check('add mode ends when the modal closes', () => {
+    // Left set, the NEXT open would be dressed as an add and hide three sources from a post that
+    // only wanted its picture changed.
+    const at = only(workspace, 'function _pceCloseMediaPicker()', 'workspace.html');
+    assert.ok(workspace.slice(at, at + 400).includes('_pceClipAddMode = false'));
+});
+
+check('Upload appends while in add mode', () => {
+    const at = only(workspace, 'async function gpAiUploadSelected(e)', 'workspace.html');
+    const scope = workspace.slice(at, at + 700);
+    assert.ok(scope.includes('if (_pceClipAddMode)'), 'upload must honour add mode');
+    assert.ok(scope.includes('_pceAttachClips(files)'), 'and route to the append');
 });
 
 check('it is offered ONLY where the next video is a clip, not a replacement', () => {
