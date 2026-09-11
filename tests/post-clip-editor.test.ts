@@ -345,8 +345,14 @@ check('the canvas is borrowed and returned through ONE door', () => {
     only(workspace, 'function _pceCanvasRestore()', 'workspace.html');
     const stop = only(workspace, 'window._pcePreviewStop = function', 'workspace.html');
     assert.ok(workspace.slice(stop, stop + 400).includes('_pceCanvasRestore()'), 'preview returns it');
-    const sel = only(workspace, 'window._pceSelectClip = function', 'workspace.html');
-    assert.ok(workspace.slice(sel, sel + 300).includes('_pceCanvasRestore()'), 'deselecting returns it');
+    // The trim drag borrows it for the duration of the drag and hands it back on release; there is
+    // no selection to deselect any more.
+    // Bounded by the end of the handler, not by a character count. Three times now a fixed window
+    // in this suite has reported a failure that was purely its own measurement.
+    const endAt = only(workspace, 'if (clips) _pceClipsChanged(clips);   // one save, on release', 'workspace.html');
+    const close = workspace.indexOf('\n    };', endAt);
+    assert.ok(close > endAt, 'could not find the end of the release handler');
+    assert.ok(workspace.slice(endAt, close).includes('_pceCanvasRestore()'), 'the drag returns it');
 });
 
 console.log('\ntrimming by eye');
@@ -378,10 +384,13 @@ check('the kept window can never collapse to nothing', () => {
     assert.ok(scope.includes('out - MIN') && scope.includes('+ MIN'), 'both edges respect the floor');
 });
 
-check('a clip that leaves the cut cannot stay selected', () => {
-    // It would leave the canvas borrowed for something no longer on the post.
-    const at = only(workspace, 'if (_pceSelectedClipId != null && !clips.some(', 'workspace.html');
-    assert.ok(workspace.slice(at, at + 250).includes('_pceCanvasRestore()'));
+check('every clip shows its slider — nothing is behind a tap', () => {
+    // Hidden state has caused every failure in this feature. A control you have to discover is one
+    // more of it, and "sliders to pick the section" is not a thing you tap to reveal.
+    const at = only(workspace, '+ _pceTrimTrackHtml(c)', 'workspace.html');
+    assert.ok(at > 0, 'the track must be rendered unconditionally');
+    assert.ok(!workspace.includes('_pceSelectedClipId'), 'no per-clip selection state should remain');
+    assert.ok(!workspace.includes("window._pceSelectClip"), 'and no tap-to-reveal handler');
 });
 
 console.log('\nthe crop frame');
