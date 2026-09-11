@@ -400,11 +400,15 @@ check('overlays stay STORED in cut seconds — only the question changes', () =>
     // The renderer times boxes against the finished video, and a box that spans a cut would have
     // nowhere else to live. Storing per-clip would be a migration and a render change for a UI
     // preference.
-    const at = only(workspace, 'function _pceClipSpans(post)', 'workspace.html');
-    const scope = workspace.slice(at, at + 900);
+    // The builder moved into _pceSpansFor so the "before" and "after" of a trim can both be built
+    // from explicit clip lists; _pceClipSpans is now the UI wrapper that hides a one-clip post.
+    const build = only(workspace, 'function _pceSpansFor(clips)', 'workspace.html');
+    const scope = workspace.slice(build, build + 700);
     assert.ok(scope.includes('start: at, end: at + len'), 'spans are cut-relative');
-    assert.ok(scope.includes('spans.length > 1 ? spans : null'), 'one clip is not a cut');
     assert.ok(scope.includes('return null'), 'and no honest span while a clip is still measuring');
+    const ui = only(workspace, 'function _pceClipSpans(post)', 'workspace.html');
+    assert.ok(workspace.slice(ui, ui + 500).includes('spans.length > 1 ? spans : null'),
+        'one clip is not a cut, for the UI');
 });
 
 check('moving text to another clip keeps how long it shows for', () => {

@@ -7091,11 +7091,21 @@ async function _pcePersistVideoEdit(postId, clips, frames) {
 function _pceClipsChanged(clips) {
     const id = _rqReviewPostId;
     if (id == null) return;
+    const post = _rqPostCache[id];
+
+    // Read the OLD cut before anything overwrites it: every overlay's "which clip, how far in" is
+    // only answerable against the shape the cut had when the reviewer placed it. Trimming, moving or
+    // removing a clip changes where every later moment falls, so text is re-anchored to its own clip
+    // rather than left pointing at a second that now belongs to something else.
+    const oldSpans = post ? _pceSpansFor(_pceClips(post)) : null;
+    const reanchored = post ? _pceReanchorOverlays(post, oldSpans, clips) : false;
+
     _pceRenderClips(clips);
     _pcePersistVideoEdit(id, clips);
+    if (reanchored) _rqPersistOverlays(id);
     // The timeline's axis is the length of this cut, so it has to be redrawn whenever the cut moves.
-    const post = _rqPostCache[id];
     if (post) _rqRenderTimeline(post);
+    if (reanchored) _pceRefreshOverlayTiming();
 }
 
 window._pceClipMove = function (index, dir) {
@@ -11774,17 +11784,80 @@ let _pceOverlayTimingBound = false;
  * THAT clip, and the two are converted on the way in and out. Moving a box to another clip keeps
  * its length and re-bases it, because "the same text, on the next clip" is what the move means.
  */
-function _pceClipSpans(post) {
-    const clips = _pceClips(post);
+function _pceSpansFor(clips) {
     const spans = [];
     let at = 0;
-    for (let i = 0; i < clips.length; i++) {
+    for (let i = 0; i < (clips || []).length; i++) {
         const len = _pceClipLength(clips[i]);
         if (len == null) return null;          // still measuring — no honest span to offer
         spans.push({ i, clip: clips[i], start: at, end: at + len, len });
         at += len;
     }
-    return spans.length > 1 ? spans : null;    // one clip is not a cut; the plain fields are enough
+    return spans.length ? spans : null;
+}
+
+function _pceClipSpans(post) {
+    const spans = _pceSpansFor(_pceClips(post));
+    // One clip is not a cut: the chips and the per-clip track have one answer, so the UI asks with
+    // the plain fields instead. Re-anchoring uses _pceSpansFor directly, because trimming a single
+    // clip moves its text just as surely.
+    return spans && spans.length > 1 ? spans : null;
+}
+
+/**
+ * ── Keeping text with its clip when the cut changes ─────────────────────────────────────────────
+ *
+ * Overlays are stored in seconds of the FINISHED video, which is what the renderer needs — and what
+ * makes every one of them wrong the moment a clip's length changes. Trim two seconds off clip one
+ * and every box after it is pointing two seconds late; trim clip one from ten seconds to five and a
+ * box at 5s–7s of it is now past its end, so it never shows.
+ *
+ * What the reviewer actually decided was "this text, on THAT clip, this far in, for this long". So
+ * that is what survives: each box is read back into (clip, offset, duration) against the OLD cut and
+ * written out again against the new one.
+ *
+ * Anchored by clip ID rather than position, so a reorder carries the text with its footage instead
+ * of leaving it on whatever is now third. Offsets and durations are clamped into the clip's new
+ * length — a box cannot keep five seconds of a clip that is now three.
+ */
+function _pceReanchorOverlays(post, oldSpans, newClips) {
+    if (!post || !oldSpans || !Array.isArray(post.overlays) || !post.overlays.length) return false;
+    const newSpans = _pceSpansFor(newClips);
+    if (!newSpans) return false;
+    const MIN = 0.2;
+    let moved = 0;
+
+    for (const ov of post.overlays) {
+        if (!ov) continue;
+        const from = _pceSpanAt(oldSpans, ov.startS == null ? 0 : ov.startS);
+        if (!from) continue;
+        // Its own clip if it still exists; otherwise whatever now sits in that position, and failing
+        // that the last clip. Dropping the text would be the one unrecoverable answer.
+        const to = newSpans.find(sp => sp.clip && from.clip && sp.clip.id === from.clip.id)
+            || newSpans[Math.min(from.i, newSpans.length - 1)];
+        if (!to) continue;
+
+        const start = ov.startS == null ? 0 : ov.startS;
+        const within = Math.max(0, start - from.start);
+        const shown = Math.max(MIN, (ov.endS == null ? from.end : ov.endS) - start);
+
+        // Keep the DURATION and pull the start back, rather than clamping the start and squashing
+        // the text into whatever is left. Two seconds of text at 5s of a clip that is now five
+        // seconds long becomes two seconds at 3s — still two seconds, still on that clip. Clamping
+        // alone would have left it showing for a fifth of a second, which is "displays" in the same
+        // sense that a single frame does.
+        let nextWithin = within;
+        if (nextWithin + shown > to.len) nextWithin = Math.max(0, to.len - shown);
+        nextWithin = Math.min(nextWithin, Math.max(0, to.len - MIN));
+        const nextStart = to.start + nextWithin;
+        const nextEnd = Math.min(to.end, nextStart + shown);
+        const wasStart = ov.startS;
+        const wasEnd = ov.endS;
+        ov.startS = nextStart <= 0.001 ? undefined : nextStart;
+        ov.endS = nextEnd >= to.end - 0.001 && to.i === newSpans.length - 1 ? undefined : nextEnd;
+        if (ov.startS !== wasStart || ov.endS !== wasEnd) moved++;
+    }
+    return moved > 0;
 }
 
 /** The clip a moment of the finished video falls in. */
