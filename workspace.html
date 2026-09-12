@@ -869,8 +869,26 @@ window.showComplianceModals = function showComplianceModals(force) {
                previews and edits THAT platform's copy; the footer's Approve/Reject act on every
                platform at once. max-w-md so it sits directly over the post card it labels.
                Built by _rqReviewRenderTabs. -->
-          <div id="post-review-tabs" class="hidden max-w-md mx-auto mb-2"></div>
-          <div id="post-review-body"></div>
+          <!-- ── The picture stays on screen while you work the timeline ──────────────────────
+               The clips and their text sit BELOW the canvas, because the cut decides the axis they
+               are drawn on. That put the two things you must compare out of view of each other:
+               dragging a text bar meant scrolling down, and seeing what it did meant scrolling back
+               up. Sticking the canvas to the top of the scroller fixes that without moving anything
+               — the timeline scrolls under a picture that stays put.
+
+               ⚠️ max-height, not just `sticky`. A 9:16 video is taller than the viewport, and a
+               sticky element taller than its scrollport never sticks — it just scrolls away, which
+               is indistinguishable from not having done this at all. 46vh leaves room for two clip
+               rows underneath on a laptop. The video inside is already max-h-full elsewhere; the
+               cap here is on the sticky wrapper so the tabs travel with it. -->
+          <!-- ⚠️ Inline, not utility classes. The compiled stylesheet only carries utilities the
+               markup already used, so a class that appears nowhere else can be absent from it —
+               which for a LAYOUT rule means the picture silently stops sticking and nobody can see
+               why. Inline cannot be purged. -->
+          <div style="position:sticky;top:0;z-index:20;background:#f9fafb;padding:4px 0 8px;">
+            <div id="post-review-tabs" class="hidden max-w-md mx-auto mb-2"></div>
+            <div id="post-review-body" style="max-height:42vh;overflow:hidden"></div>
+          </div>
           <!-- The canvas's own picker — opened by the empty media frame and nothing else. Multiple
                and both kinds, because "add media" on a blank post means one image, several images,
                or a video, and which of those it is decides the post's format (_pceCanvasAttachFiles). -->
@@ -952,41 +970,16 @@ window.showComplianceModals = function showComplianceModals(force) {
                  on screen pointing at something you are no longer editing. -->
             <div id="pce-stage-timing" class="border-t border-gray-100 px-2.5 py-2 hidden">
 
-              <!-- Text on video: when this box is on screen. -->
-              <div id="insp-overlay-timing" class="hidden">
-                <p class="text-[11px] font-bold text-gray-600 mb-2 truncate">When: <span id="insp-overlay-timing-label" class="font-semibold text-gray-500"></span></p>
-                <!-- On a cut, "when" is two questions — which clip, and where in it. Seconds into a
-                     36-second finished video is not how anyone thinks about "over the bit where he
-                     turns round". Hidden on a single-clip post, where there is only one answer to
-                     the first question. -->
-                <div id="insp-overlay-clips" class="hidden mb-2">
-                  <span class="block text-[10px] font-bold text-gray-500 mb-1">On which clip</span>
-                  <div id="insp-overlay-clip-chips" class="flex flex-wrap gap-1"></div>
-                </div>
-                <div id="insp-overlay-scrub" class="hidden mb-2">
-                  <div class="relative h-7 rounded bg-gray-100 overflow-hidden select-none" data-ovt-track>
-                    <div class="absolute inset-y-0" data-ovt-shown style="background:rgba(236,72,153,.25)"></div>
-                    <span data-ovt-edge="start" role="slider" tabindex="0" aria-label="When the text appears"
-                      class="absolute top-0 bottom-0 w-2 -ml-1 rounded cursor-ew-resize" style="background:#ec4899"></span>
-                    <span data-ovt-edge="end" role="slider" tabindex="0" aria-label="When the text disappears"
-                      class="absolute top-0 bottom-0 w-2 -ml-1 rounded cursor-ew-resize" style="background:#ec4899"></span>
-                  </div>
-                  <p class="mt-0.5 text-[10px] text-gray-500" data-ovt-label style="font-variant-numeric:tabular-nums"></p>
-                </div>
-                <div class="grid grid-cols-2 gap-2">
-                  <label class="block">
-                    <span class="block text-[10px] font-bold text-gray-500 mb-0.5">Start (s)</span>
-                    <input id="insp-overlay-start" type="number" min="0" step="0.1"
-                      class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-600">
-                  </label>
-                  <label class="block">
-                    <span class="block text-[10px] font-bold text-gray-500 mb-0.5">End (s)</span>
-                    <input id="insp-overlay-end" type="number" min="0" step="0.1"
-                      class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-600">
-                  </label>
-                </div>
-                <p class="text-[10px] text-gray-400 mt-1.5">Seconds into the finished video. Leave a field blank for the whole thing.</p>
-              </div>
+              <!-- Text on video used to have a "When" panel here: which clip (chips), a
+                   clip-relative scrub, and Start/End boxes. All three are gone.
+                     · the chips are the drag-and-drop onto another clip's row
+                     · the scrub is the text bar itself, which now shares its clip's axis
+                     · Start/End sit on the row they belong to, beside the bar they describe
+                   Keeping a second copy of each control under the canvas meant two places to look,
+                   two places to disagree, and it was the copy that had the clip-jumping bug. Sound
+                   keeps its panel: it is not a per-clip thing and has no row of its own to live on.
+                   _pceRefreshOverlayTiming survives as the hook every caller already has; it now
+                   just keeps the container's visibility honest. -->
 
               <!-- Sound: when this clip plays, and how loud. -->
               <div id="insp-audio-timing" class="hidden">
@@ -6360,17 +6353,55 @@ function _rqOverlayVisibleAt(ov, t) {
     return t >= start && t < end;
 }
 
+/**
+ * Fade / Rise / Pop, on the canvas — the same maths the render uses.
+ *
+ * ⚠️ Picking one of these used to change nothing you could see until the video came back from
+ * Lambda. Three options that appear to do nothing are worse than not offering them at all.
+ *
+ * window.OverlayAnims is GENERATED from src/lib/overlay-geometry.ts, and
+ * tests/overlay-anim-client.test.ts compares the two across every animation, every frame of several
+ * windows and five frame rates. Two hand-written copies of one formula is the setup that gave us
+ * the font divergence — a preview that was approved and a video that was not the one approved.
+ *
+ * ⚠️ The centring transform is REPLACED, not added to, by an inline style: .ioe-ov is placed with
+ * transform:translate(-50%,-50%) from the stylesheet, so writing a bare scale() here would move
+ * every animated box half its own size up and to the left. It is composed back in every time.
+ */
+const _RQ_ANIM_FPS = 30;
+function _rqApplyOverlayAnim(node, ov, t, cutDur, visible) {
+    const anims = window.OverlayAnims;
+    const kind = anims && ov ? anims.read(ov.anim) : 'none';
+    if (!visible || kind === 'none') {
+        node.style.opacity = '';
+        node.style.transform = '';
+        return;
+    }
+    const start = ov.startS == null ? 0 : ov.startS;
+    const end = ov.endS == null ? (cutDur || start) : ov.endS;
+    const frames = Math.max(1, Math.round((end - start) * _RQ_ANIM_FPS));
+    const frame = Math.round((t - start) * _RQ_ANIM_FPS);
+    const a = anims.at(kind, frame, frames, _RQ_ANIM_FPS);
+    node.style.opacity = String(a.opacity);
+    node.style.transform = a.transform === 'none'
+        ? 'translate(-50%,-50%)'
+        : 'translate(-50%,-50%) ' + a.transform;
+}
+
 // Show/hide the painted overlay nodes for the video's current time, without repainting (cheap enough
 // to run on every timeupdate). Also nudges the timeline playhead.
 function _rqApplyOverlayTimes(video, layer, post) {
     // The cut's clock, not the element's: while previewing, the element is part-way through clip
     // three and its currentTime says so, but a text box was timed against the finished video.
     const t = _pceCutTime(video);
+    const cutDur = _pceCutDuration(video, post);
     const byId = {};
     for (const o of (post && post.overlays) || []) if (o && o.id) byId[o.id] = o;
     for (const n of layer.querySelectorAll('.ioe-ov')) {
         const ov = byId[n.dataset.id];
-        n.style.display = ov && !_rqOverlayVisibleAt(ov, t) ? 'none' : '';
+        const on = !ov || _rqOverlayVisibleAt(ov, t);
+        n.style.display = on ? '' : 'none';
+        _rqApplyOverlayAnim(n, ov, t, cutDur, on);
     }
     // One playhead per timed block, each placed in ITS OWN axis — a clip's rows run 0→that clip's
     // length, so a single percentage of the whole cut would point at the wrong moment everywhere
@@ -6663,24 +6694,56 @@ function _rqTimelineParts(post) {
                  class="px-1 text-gray-300 hover:text-red-600 cursor-pointer leading-none"
                  onclick="window._pceOverlayRemove('${_rqEsc(key)}')">&times;</button>`
             : '';
+        // ── The numbers sit BESIDE the bar they describe ────────────────────────────────────────
+        // They used to be one pair of boxes under the canvas, editing whichever box happened to be
+        // selected — so refining three overlays meant selecting, scrolling, typing, scrolling back,
+        // three times. On the row, each line is refined where it is read. Stated in the clip's own
+        // seconds, matching both the bar's axis and the trim slider above it; blank means "from the
+        // start" / "to the end", which is exactly how they are stored.
+        const src = (t) => Math.round((ax.inS + (t - ax.start)) * 10) / 10;
+        const num = (edge, val, hint) => `<input type="number" step="0.1" min="0"
+            class="w-12 shrink-0 text-[10px] text-gray-600 border border-gray-200 rounded px-1 py-0.5
+                   focus:outline-none focus:border-pink-400" style="font-variant-numeric:tabular-nums"
+            title="${hint}" aria-label="${hint}" value="${val}"
+            data-tl-num="${edge}" data-tl-for="${_rqEsc(key)}" data-tl-kind="${kind}">`;
+        // An unset start IS the beginning, and an unset end IS the end; showing them empty reads as
+        // "not set yet" rather than as the value they actually have.
+        const startVal = src(start);
+        const endVal = item.endS == null ? '' : src(end);
         return `
           <div data-tl-row="${_rqEsc(key)}">
             <div class="flex items-center gap-1.5">
-              <span class="flex-1 min-w-0 truncate text-[10px] font-semibold text-gray-500" title="${esc}">${esc}</span>
+              ${kind === 'text' ? nameInput(key, label) : `<span class="flex-1 min-w-0 truncate text-[10px] font-semibold text-gray-500" title="${esc}">${esc}</span>`}
               ${del}
             </div>
-            <div class="relative h-6 rounded bg-gray-100" data-tl-track
-                 data-ax-full="${ax.full}" data-ax-in="${ax.inS}" data-ax-out="${ax.outS}" data-ax-start="${ax.start}">
-              <div class="absolute inset-y-0 rounded cursor-grab flex items-center justify-between"
-                   style="left:${leftPct}%;width:${widthPct}%;background:${selected ? c.on : c.off}"
-                   data-tl-seg="${_rqEsc(key)}" data-tl-kind="${kind}" title="${fmt(start)} – ${fmt(end)}">
-                <span class="w-1.5 h-full rounded-l cursor-ew-resize" style="background:${c.edge}" data-tl-edge="start"></span>
-                <span class="w-1.5 h-full rounded-r cursor-ew-resize" style="background:${c.edge}" data-tl-edge="end"></span>
+            <div class="flex items-center gap-1">
+              <div class="relative flex-1 min-w-0 h-6 rounded bg-gray-100" data-tl-track
+                   data-ax-full="${ax.full}" data-ax-in="${ax.inS}" data-ax-out="${ax.outS}" data-ax-start="${ax.start}">
+                <div class="absolute inset-y-0 rounded cursor-grab flex items-center justify-between"
+                     style="left:${leftPct}%;width:${widthPct}%;background:${selected ? c.on : c.off}"
+                     data-tl-seg="${_rqEsc(key)}" data-tl-kind="${kind}" title="${fmt(start)} – ${fmt(end)}">
+                  <span class="w-1.5 h-full rounded-l cursor-ew-resize" style="background:${c.edge}" data-tl-edge="start"></span>
+                  <span class="w-1.5 h-full rounded-r cursor-ew-resize" style="background:${c.edge}" data-tl-edge="end"></span>
+                </div>
               </div>
+              ${num('start', startVal, 'Shows from, in seconds of this clip')}
+              ${num('end', endVal, 'Shows until, in seconds of this clip — blank runs to the end')}
             </div>
             ${within}
           </div>`;
     };
+
+    /**
+     * The wording, editable where it is read.
+     *
+     * Changing a word meant opening the text editor, finding the box among several on several clips
+     * and typing there — a modal round trip to fix a typo. The canvas repaints as you type, so the
+     * picture and the list never disagree about what it says.
+     */
+    const nameInput = (key, label) => `<input type="text" value="${_rqEsc(label)}" maxlength="500"
+        class="flex-1 min-w-0 bg-transparent text-[10px] font-semibold text-gray-600 border border-transparent
+               rounded px-1 py-0.5 hover:border-gray-200 focus:outline-none focus:border-pink-400 focus:bg-white"
+        title="Edit this text" aria-label="Text" data-tl-text="${_rqEsc(key)}">`;
 
     const clips = _pceClips(post);
     const spans = _pceSpansFor(clips);
@@ -6974,11 +7037,41 @@ function _pcePreviewing() { return _pcePrev.on; }
  * The time the FINISHED video is at, given where the element is inside the clip it is showing.
  * Falls back to the element's own clock, which is exactly right for a post that is not a cut.
  */
+/**
+ * The element's clock translated into the finished video's.
+ *
+ * ⚠️ This used to hand the raw element time straight back unless a PREVIEW was running, and that is
+ * the out-of-sync scrubbing: the canvas holds ONE clip, its currentTime is that clip's own source
+ * seconds, and every text box is timed against the finished cut. On an untrimmed first clip the two
+ * happen to agree, which is why it looked fine until someone scrubbed a cut with a trim in it — and
+ * why the timeline and the text editor, which work in cut seconds throughout, disagreed with the
+ * picture. Trimmed, they are offset by the in point; past clip one they are not the same scale at
+ * all.
+ *
+ * So: work out which clip the element is actually holding, and convert. While previewing that is
+ * whatever _pcePreviewSeat put there; otherwise it is whichever clip's url the element is playing,
+ * falling back to the first — the canvas shows the post's base asset, which is clip one.
+ */
 function _pceCutTime(video) {
     const t = (video && video.currentTime) || 0;
-    if (!_pcePrev.on) return t;
-    const clip = _pceClips()[_pcePrev.i];
-    return _pcePrev.offset + Math.max(0, t - ((clip && clip.inS) || 0));
+    const clips = _pceClips();
+    if (!clips.length) return t;
+
+    let i = -1;
+    if (_pcePrev.on) i = _pcePrev.i;
+    else if (video && video.currentSrc) i = clips.findIndex((c) => c && c.url && c.url === video.currentSrc);
+    if (!(i >= 0 && i < clips.length)) i = 0;
+
+    let offset = 0;
+    for (let k = 0; k < i; k++) offset += _pceClipLength(clips[k]) || 0;
+    const clip = clips[i];
+    const inS = (clip && clip.inS) || 0;
+    const len = _pceClipLength(clip);
+    // Clamped into the clip's own kept window: seeking into footage this clip trims away is not a
+    // moment of the finished video at all, and letting it run past the window would report a second
+    // that belongs to the NEXT clip.
+    const within = Math.max(0, t - inS);
+    return offset + (len == null ? within : Math.min(within, len));
 }
 
 /** How long the finished video is — the cut when there is one, else the element's own duration. */
@@ -7335,7 +7428,7 @@ function _pceTrimPaint(clip) {
 }
 
 /** The trim track for the selected clip, drawn under its row. */
-function _pceTrimTrackHtml(clip) {
+function _pceTrimTrackHtml(clip, index) {
     const axis = _pceTrimAxis(clip);
     const full = axis.len;
     if (!(full > 0)) {
@@ -7353,10 +7446,22 @@ function _pceTrimTrackHtml(clip) {
         + ' aria-label="' + (edge === 'in' ? 'Start' : 'End') + ' of the kept section"'
         + ' class="absolute top-0 bottom-0 w-2 -ml-1 rounded cursor-ew-resize"'
         + ' style="left:' + pct + '%;background:#059669"></span>';
+    // The in/out seconds beside the slider, for the same reason the text rows carry theirs: a
+    // slider is for finding the moment, a number is for landing on it exactly, and going to another
+    // panel to type one loses the row you were working on.
+    const num = (field, val, hint) => '<input type="number" step="0.1" min="0"'
+        + ' class="w-12 shrink-0 text-[10px] text-gray-600 border border-gray-200 rounded px-1 py-0.5'
+        + ' focus:outline-none focus:border-emerald-500" style="font-variant-numeric:tabular-nums"'
+        + ' title="' + hint + '" aria-label="' + hint + '" value="' + val + '"'
+        + ' onchange="window._pceClipTrim(' + index + ',\'' + field + '\',this.value)">';
     return '<div class="px-1 pb-1.5">'
-        + '<div class="relative h-7 rounded bg-gray-100 overflow-hidden select-none" data-trim-track="' + _rqEsc(clip.id) + '">'
+        + '<div class="flex items-center gap-1">'
+        + '<div class="relative flex-1 min-w-0 h-7 rounded bg-gray-100 overflow-hidden select-none" data-trim-track="' + _rqEsc(clip.id) + '">'
         + '<div class="absolute inset-y-0" data-trim-kept style="left:' + a + '%;width:' + Math.max(0, b - a) + '%;background:rgba(5,150,105,.22)"></div>'
         + handle('in', a) + handle('out', b)
+        + '</div>'
+        + num('in', Math.round((clip.inS || 0) * 10) / 10, 'Keep from, in seconds')
+        + num('out', clip.outS == null ? '' : Math.round(clip.outS * 10) / 10, 'Keep until, in seconds — blank keeps to the end')
         + '</div>'
         + '<p class="mt-0.5 text-[10px] text-gray-500" data-trim-label style="font-variant-numeric:tabular-nums">'
         + _pceFmtS(clip.inS || 0) + ' → ' + _pceFmtS(clip.outS != null ? clip.outS : full) + '  ·  keeps '
@@ -7537,7 +7642,7 @@ function _pceRenderClips(clipsOverride) {
             + ' class="px-1 text-gray-300 hover:text-red-600 cursor-pointer leading-none"'
             + ' onclick="window._pceClipRemove(' + i + ')">&times;</button>'
             + '</div>'
-            + _pceTrimTrackHtml(c)
+            + _pceTrimTrackHtml(c, i)
             // What shows ON this clip, directly under the slider that decides how long it lasts.
             // "No text" is stated rather than left blank: an empty gap under clip 3 and an empty gap
             // under a clip whose text has drifted off the end look identical.
@@ -8037,6 +8142,72 @@ function _rqBindTimeline() {
         if (kind === 'audio') { _pceRenderAudioList(); _pcePersistAudio(_rqReviewPostId); }
         else _rqPersistOverlays(_rqReviewPostId);
     };
+    // ── The inline fields on each row ───────────────────────────────────────────────────────────
+    // Delegated to the host, because the rows are replaced wholesale on every repaint — a listener
+    // bound to an input dies with the first redraw, and a control that works once is worse than one
+    // that never worked.
+    //
+    // `input` repaints and `change` saves. Repainting the LIST while a field has focus would take
+    // the caret with it, so the list is left alone until the field is committed; the canvas is
+    // repainted either way, which is the half you are watching while you type.
+    const numFor = (el) => {
+        const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+        if (!post) return null;
+        const key = el.getAttribute('data-tl-for');
+        const kind = el.getAttribute('data-tl-kind') || 'text';
+        const item = _rqTimelineItem(kind, key);
+        const track = el.parentElement && el.parentElement.querySelector('[data-tl-track]');
+        return item ? { post, item, edge: el.getAttribute('data-tl-num'), ax: _rqAxisOf(track, _rqTimelineDuration(post)) } : null;
+    };
+
+    host.addEventListener('change', (ev) => {
+        const el = ev.target;
+        if (el && el.hasAttribute && el.hasAttribute('data-tl-num')) {
+            const c = numFor(el);
+            if (!c) return;
+            const lo = c.ax.start;
+            const hi = c.ax.start + (c.ax.outS - c.ax.inS);
+            const raw = String(el.value).trim();
+            // Blank is a real answer on the end field — "to the end of it" — and the only way back
+            // to it once a number has been typed.
+            if (raw === '' && c.edge === 'end') { c.item.endS = undefined; }
+            else {
+                // Typed in the clip's own seconds, the same ones the row prints, then converted.
+                const t = Math.min(hi, Math.max(lo, c.ax.start + ((Number(raw) || 0) - c.ax.inS)));
+                if (c.edge === 'start') {
+                    c.item.startS = t <= lo + 0.001 ? undefined : t;
+                    if (c.item.endS != null && c.item.endS <= t + 0.1) c.item.endS = Math.min(hi, t + 0.2);
+                } else {
+                    c.item.endS = Math.max(t, (c.item.startS == null ? lo : c.item.startS) + 0.2);
+                }
+            }
+            _rqRenderTimeline(c.post);
+            _rqRenderCanvasOverlays(c.post);
+            if ((el.getAttribute('data-tl-kind') || 'text') === 'audio') _pcePersistAudio(_rqReviewPostId);
+            else _rqPersistOverlays(_rqReviewPostId);
+            return;
+        }
+        if (el && el.hasAttribute && el.hasAttribute('data-tl-text')) {
+            const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+            const ov = post && _rqTimelineItem('text', el.getAttribute('data-tl-text'));
+            if (!ov) return;
+            ov.text = el.value;
+            _rqRenderTimeline(post);
+            _rqRenderCanvasOverlays(post);
+            _rqPersistOverlays(_rqReviewPostId);
+        }
+    });
+
+    host.addEventListener('input', (ev) => {
+        const el = ev.target;
+        if (!el || !el.hasAttribute || !el.hasAttribute('data-tl-text')) return;
+        const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+        const ov = post && _rqTimelineItem('text', el.getAttribute('data-tl-text'));
+        if (!ov) return;
+        ov.text = el.value;
+        _rqRenderCanvasOverlays(post);   // the picture keeps up; the list waits for the caret
+    });
+
     host.addEventListener('pointerup', end);
     host.addEventListener('pointercancel', end);
     // ── The safety net ──────────────────────────────────────────────────────────────────────────
@@ -12275,7 +12446,6 @@ function _pceResetOverlayApplyAll() {
 
 // The per-box Start/End controls. Shown only for a video with a box selected; seeded from that box
 // and wired (once) to write straight to the cache, repaint the canvas + timeline, and persist.
-let _pceOverlayTimingBound = false;
 /**
  * ── "Which clip, and where in it" ───────────────────────────────────────────────────────────────
  *
@@ -12370,54 +12540,6 @@ function _pceSpanAt(spans, t) {
     return spans[spans.length - 1];
 }
 
-const _pceOvtDrag = { on: false, edge: null, span: null };
-
-/** Paint the chips and the track for the selected overlay. */
-function _pceRenderOverlayClipUi(post, ov) {
-    const chipsWrap = document.getElementById('insp-overlay-clips');
-    const chipHost = document.getElementById('insp-overlay-clip-chips');
-    const scrub = document.getElementById('insp-overlay-scrub');
-    if (!chipsWrap || !chipHost || !scrub) return;
-
-    const spans = _pceClipSpans(post);
-    if (!spans) { chipsWrap.classList.add('hidden'); scrub.classList.add('hidden'); return; }
-    chipsWrap.classList.remove('hidden');
-    scrub.classList.remove('hidden');
-
-    const start = ov.startS == null ? 0 : ov.startS;
-    const sp = _pceSpanAt(spans, start);
-
-    chipHost.innerHTML = spans.map(x => '<button type="button" onclick="window._pceOverlayToClip(' + x.i + ')"'
-        + ' class="px-2 py-0.5 rounded-md text-[10px] font-bold border transition cursor-pointer '
-        + (x.i === sp.i ? 'border-pink-400 bg-pink-50 text-pink-700' : 'border-gray-200 text-gray-500 hover:border-gray-300')
-        + '">Clip ' + (x.i + 1) + '</button>').join('');
-
-    _pcePaintOverlayScrub(post, ov);
-}
-
-/** Move the two handles and the read-out, without rebuilding anything. */
-function _pcePaintOverlayScrub(post, ov) {
-    const spans = _pceClipSpans(post);
-    const track = document.querySelector('#insp-overlay-scrub [data-ovt-track]');
-    if (!spans || !track) return;
-    const start = ov.startS == null ? 0 : ov.startS;
-    const sp = _pceSpanAt(spans, start);
-    const end = ov.endS == null ? sp.end : Math.min(ov.endS, sp.end);
-    const a = Math.max(0, (start - sp.start) / sp.len);
-    const b = Math.min(1, (end - sp.start) / sp.len);
-    const shown = track.querySelector('[data-ovt-shown]');
-    if (shown) { shown.style.left = (a * 100) + '%'; shown.style.width = Math.max(0, (b - a) * 100) + '%'; }
-    const s1 = track.querySelector('[data-ovt-edge="start"]');
-    const s2 = track.querySelector('[data-ovt-edge="end"]');
-    if (s1) s1.style.left = (a * 100) + '%';
-    if (s2) s2.style.left = (b * 100) + '%';
-    const lbl = document.querySelector('#insp-overlay-scrub [data-ovt-label]');
-    if (lbl) {
-        lbl.textContent = `Clip ${sp.i + 1} · ${_pceFmtS((start - sp.start))} → ${_pceFmtS(end - sp.start)} of it`
-            + `  (${_pceFmtS(start)} → ${_pceFmtS(end)} of the whole cut)`;
-    }
-}
-
 /**
  * Put a text box on another clip, keeping where it sits in that clip and how long it shows.
  *
@@ -12454,127 +12576,20 @@ window._pceOverlayToClip = function (index, key) {
     _rqRenderTimeline(post);
 };
 
-function _pceBindOverlayScrub() {
-    const host = document.getElementById('insp-overlay-scrub');
-    if (!host || host.dataset.ovtBound === '1') return;
-    host.dataset.ovtBound = '1';
+/* The chips, the clip-relative scrub and their drag state lived here. They served the "When" panel
+   under the canvas, which is gone: choosing a clip is the drag-and-drop onto its row, and the scrub
+   is the text bar itself now that a row shares its clip's axis. Two copies of one control is two
+   places to disagree, and this was the copy with the clip-jumping bug. */
 
-    const current = () => {
-        const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
-        const ov = post && (post.overlays || []).find(o => o && o.id === _pceSelectedOverlayId);
-        const spans = _pceClipSpans(post);
-        if (!ov || !spans) return null;
-        return { post, ov, spans, sp: _pceSpanAt(spans, ov.startS == null ? 0 : ov.startS) };
-    };
-
-    host.addEventListener('pointerdown', (ev) => {
-        const h = ev.target.closest && ev.target.closest('[data-ovt-edge]');
-        if (!h) return;
-        const c = current();
-        if (!c || !c.sp) return;
-        _pceOvtDrag.on = true;
-        _pceOvtDrag.edge = h.getAttribute('data-ovt-edge');
-        // ⚠️ PIN THE CLIP for the whole drag.
-        //
-        // `current()` works out which clip the box is on by asking which clip its START second falls
-        // in — recomputed on every pointermove. Drag the start handle to the left of the clip's own
-        // beginning and that answer changes: the panel silently switches to the PREVIOUS clip, the
-        // track is reinterpreted against that clip's span, and the reported symptom is a slider that
-        // "jumps to another clip" the moment you move it left. This track means "where in THIS clip",
-        // and which clip is not something it can decide. The chips above choose it, and dragging the
-        // bar onto another clip's row in the timeline moves it.
-        _pceOvtDrag.span = c.sp;
-        h.setPointerCapture && h.setPointerCapture(ev.pointerId);
-        ev.preventDefault();
-    });
-
-    host.addEventListener('pointermove', (ev) => {
-        if (!_pceOvtDrag.on) return;
-        const c = current();
-        const track = host.querySelector('[data-ovt-track]');
-        const sp = _pceOvtDrag.span;
-        if (!c || !track || !sp) return;
-        const box = track.getBoundingClientRect();
-        if (!box.width) return;
-        const f = Math.min(1, Math.max(0, (ev.clientX - box.left) / box.width));
-        const t = sp.start + f * sp.len;
-        const MIN = 0.2;
-        // Clamped into the pinned clip at both ends, so neither handle can walk the box out of the
-        // clip it belongs to — which is the only way the span could have changed under the drag.
-        if (_pceOvtDrag.edge === 'start') {
-            const end = c.ov.endS == null ? sp.end : Math.min(c.ov.endS, sp.end);
-            c.ov.startS = Math.max(sp.start, Math.min(t, end - MIN));
-            if (c.ov.startS <= sp.start + 0.001 && sp.i === 0) c.ov.startS = undefined;
-        } else {
-            const start = c.ov.startS == null ? sp.start : Math.max(c.ov.startS, sp.start);
-            c.ov.endS = Math.min(sp.end, Math.max(t, start + MIN));
-        }
-        // Paint only — a save per pointermove, and re-rendering the panel under the pointer, are the
-        // two traps the clip trim and the crop frame already avoid the same way. The canvas is not
-        // repainted here on purpose: the box's visibility follows the playhead, and during a drag
-        // the video is wherever it was left, so forcing a repaint would show the box appearing and
-        // disappearing for a moment that is not the one being set.
-        _pcePaintOverlayScrub(c.post, c.ov);
-    });
-
-    const end = () => {
-        if (!_pceOvtDrag.on) return;
-        _pceOvtDrag.on = false;
-        _pceOvtDrag.edge = null;
-        _pceOvtDrag.span = null;
-        const c = current();
-        if (!c) return;
-        // ⚠️ _rqReviewPostId, not post.id — _rqPersistOverlays looks the post up BY this argument,
-        // so a cache row with no `id` field saved nothing at all, silently.
-        _rqPersistOverlays(_rqReviewPostId);    // one save, on release
-        _pceRefreshOverlayTiming();
-        _rqRenderTimeline(c.post);
-    };
-    host.addEventListener('pointerup', end);
-    host.addEventListener('pointercancel', end);
-}
-
+/**
+ * The text box's timing panel is gone — its controls live on the row they describe now.
+ *
+ * Kept under the old name because ~10 callers reach for it after changing an overlay, and what they
+ * actually want is "the timing UI now reflects this". That is the clip list, plus keeping the
+ * container that used to hold this panel honest about whether anything is left inside it.
+ */
 function _pceRefreshOverlayTiming() {
-    const wrap = _pceEl('insp-overlay-timing');
-    if (!wrap) return;
-    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
-    const isVideo = _pcePostIsVideo(post);
-    const overlays = (post && post.overlays) || [];
-    const ov = _pceSelectedOverlayId ? overlays.find((o) => o && o.id === _pceSelectedOverlayId) : null;
-    // Same rule as the timeline: with no readable clip length there is nothing to time against, and
-    // seconds typed against the 15s fallback are what strand a box past the end of a shorter clip.
-    if (!isVideo || !ov || !_rqVideoDurationKnown()) { wrap.classList.add('hidden'); _pceSyncStageTimingBox(); return; }
-    wrap.classList.remove('hidden');
     _pceSyncStageTimingBox();
-    const lbl = _pceEl('insp-overlay-timing-label');
-    if (lbl) lbl.textContent = (ov.text || 'Text').split('\n')[0].slice(0, 30);
-    _pceRenderOverlayClipUi(post, ov);
-    _pceBindOverlayScrub();
-    const startEl = _pceEl('insp-overlay-start');
-    const endEl = _pceEl('insp-overlay-end');
-    if (startEl) startEl.value = ov.startS == null ? '' : (Math.round(ov.startS * 10) / 10);
-    if (endEl) endEl.value = ov.endS == null ? '' : (Math.round(ov.endS * 10) / 10);
-    if (!_pceOverlayTimingBound) {
-        _pceOverlayTimingBound = true;
-        const commit = (persist) => {
-            const p = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
-            const cur = p && (p.overlays || []).find((o) => o && o.id === _pceSelectedOverlayId);
-            if (!cur) return;
-            const dur = _rqVideoDuration();
-            const s = _pceEl('insp-overlay-start').value;
-            const e = _pceEl('insp-overlay-end').value;
-            cur.startS = s === '' ? undefined : Math.max(0, Math.min(dur, Number(s) || 0));
-            cur.endS = e === '' ? undefined : Math.max(0, Math.min(dur, Number(e) || 0));
-            if (cur.startS != null && cur.endS != null && cur.endS <= cur.startS) cur.endS = undefined;
-            _rqRenderTimeline(p);
-            _rqRenderCanvasOverlays(p);
-            if (persist) _rqPersistOverlays(_rqReviewPostId);
-        };
-        _pceEl('insp-overlay-start').addEventListener('input', () => commit(false));
-        _pceEl('insp-overlay-end').addEventListener('input', () => commit(false));
-        _pceEl('insp-overlay-start').addEventListener('change', () => commit(true));
-        _pceEl('insp-overlay-end').addEventListener('change', () => commit(true));
-    }
 }
 
 // Make a branded text card for this post — the media source that had no way in.
@@ -12691,12 +12706,8 @@ function _pceRefreshStageTiming() {
     const wrap = document.getElementById('pce-stage-timing');
     if (!wrap) return;
     // Refresh the panel that matches the selection; hide the other outright.
-    if (_pceSelection === 'overlays') { _pceEl('insp-audio-timing')?.classList.add('hidden'); _pceRefreshOverlayTiming(); }
-    else if (_pceSelection === 'audio') { _pceEl('insp-overlay-timing')?.classList.add('hidden'); _pceRefreshAudioTiming(); }
-    else {
-        _pceEl('insp-overlay-timing')?.classList.add('hidden');
-        _pceEl('insp-audio-timing')?.classList.add('hidden');
-    }
+    if (_pceSelection === 'audio') _pceRefreshAudioTiming();
+    else _pceEl('insp-audio-timing')?.classList.add('hidden');
     _pceSyncStageTimingBox();
 }
 
@@ -12706,7 +12717,7 @@ function _pceRefreshStageTiming() {
 function _pceSyncStageTimingBox() {
     const wrap = document.getElementById('pce-stage-timing');
     if (!wrap) return;
-    const anyVisible = ['insp-overlay-timing', 'insp-audio-timing']
+    const anyVisible = ['insp-audio-timing']
         .some(id => _pceEl(id) && !_pceEl(id).classList.contains('hidden'));
     wrap.classList.toggle('hidden', !anyVisible);
 }

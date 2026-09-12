@@ -69,7 +69,7 @@ check('there is ONE list, not a clip panel and a timeline panel', () => {
 check('a clip is followed by the text that shows on it', () => {
     // The whole point of the merge: clip row, its trim slider, then its text — in that order,
     // inside the same row container.
-    const at = only(workspace, "+ _pceTrimTrackHtml(c)", 'workspace.html');
+    const at = only(workspace, "+ _pceTrimTrackHtml(c, i)", 'workspace.html');
     const after = workspace.slice(at, workspace.indexOf("}).join('');", at));
     assert.ok(after.includes('tl.byClip[i] && tl.byClip[i].html'), "the clip's own text is not drawn under it");
     assert.ok(after.includes('tl.byClip[i] && tl.byClip[i].axis'), "the clip's axis is not handed to its block");
@@ -339,10 +339,18 @@ console.log('\npreviewing the cut');
 check('the preview is a CLOCK, not a second player', () => {
     // The canvas element already drives the text layer, the sound and the playhead off its own
     // timeupdate. A second player would need its own copy of all three.
-    const at = only(workspace, 'function _pceCutTime(video)', 'workspace.html');
-    const scope = workspace.slice(at, at + 400);
-    assert.ok(scope.includes('_pcePrev.offset'), 'cut time is the clip offset plus the element clock');
-    assert.ok(scope.includes('if (!_pcePrev.on) return t'), 'a post that is not a cut is unaffected');
+    const scope = slice('function _pceCutTime(video) {', '\n/** How long the finished video is');
+    // ⚠️ It used to hand the raw element clock back whenever a preview was NOT running — which is
+    // the out-of-sync scrubbing: the canvas holds one clip, its currentTime is that clip's own
+    // source seconds, and every box is timed against the finished cut. They only agree on an
+    // untrimmed first clip, which is why it looked fine until someone scrubbed a cut with a trim.
+    assert.ok(!scope.includes('if (!_pcePrev.on) return t'),
+        'the element clock is handed back untranslated again while not previewing');
+    assert.ok(scope.includes('_pcePrev.on') && scope.includes('video.currentSrc'),
+        'the clip the element is holding is not identified');
+    assert.ok(scope.includes('_pceClipLength(clips[k])'), 'the earlier clips are not summed');
+    assert.ok(scope.includes('Math.min(within, len)'),
+        'seeking into trimmed-away footage still reports a second of the finished video');
 });
 
 check('overlays, sound and the playhead all read the CUT clock', () => {
@@ -414,7 +422,7 @@ check('the kept window can never collapse to nothing', () => {
 check('every clip shows its slider — nothing is behind a tap', () => {
     // Hidden state has caused every failure in this feature. A control you have to discover is one
     // more of it, and "sliders to pick the section" is not a thing you tap to reveal.
-    const at = only(workspace, '+ _pceTrimTrackHtml(c)', 'workspace.html');
+    const at = only(workspace, '+ _pceTrimTrackHtml(c, i)', 'workspace.html');
     assert.ok(at > 0, 'the track must be rendered unconditionally');
     assert.ok(!workspace.includes('_pceSelectedClipId'), 'no per-clip selection state should remain');
     assert.ok(!workspace.includes("window._pceSelectClip"), 'and no tap-to-reveal handler');
@@ -444,23 +452,6 @@ check('moving text to another clip keeps how long it shows for', () => {
     assert.ok(scope.includes('const shown ='), 'its duration is measured before the move');
     assert.ok(scope.includes('to.start +'), 'and re-based onto the new clip');
     assert.ok(scope.includes('Math.min(to.end'), 'clamped inside that clip');
-});
-
-check('the text scrub saves once, on release, like every other drag here', () => {
-    const at = only(workspace, 'function _pceBindOverlayScrub()', 'workspace.html');
-    const rest = workspace.slice(at);
-    const move = rest.indexOf("addEventListener('pointermove'");
-    const endH = rest.indexOf('const end = () => {', move);
-    assert.ok(move > 0 && endH > move, 'both handlers should be present');
-    assert.ok(!rest.slice(move, endH).includes('_rqPersistOverlays('), 'no save on every move');
-    assert.ok(rest.slice(endH, endH + 500).includes('_rqPersistOverlays('), 'one save on release');
-});
-
-check('the clip chips are hidden on a post that is not a cut', () => {
-    // One clip has one answer to "which clip", and a row of one chip is noise.
-    const at = only(workspace, 'function _pceRenderOverlayClipUi(post, ov)', 'workspace.html');
-    const scope = workspace.slice(at, at + 700);
-    assert.ok(scope.includes("chipsWrap.classList.add('hidden')"), 'no spans, no chips');
 });
 
 check('the text editor itself can choose the clip and the moment', () => {
@@ -899,16 +890,17 @@ check('a text bar is the same box as the clip slider above it', () => {
     // The label used to sit in a 4rem column to the LEFT of the track, so a text bar started 4.5rem
     // in while the clip's trim slider started at the edge — two bars over the same clip on two
     // different margins, which is the one comparison a timeline exists to make.
-    const at = only(workspace, 'const within = sub ?', 'workspace.html');
-    const row = workspace.slice(at, at + 1600);
+    // ⚠️ A boundary, not a 1600-char window — the row markup grew and the window stopped reaching
+    // the track, which is a false failure about a true property. Third time this file has done it.
+    const row = slice('const within = sub ?', 'const nameInput = (key, label)');
     assert.ok(!row.includes('w-16 shrink-0 truncate'), 'the label is back in a left-hand column');
     assert.ok(!row.includes('ml-[4.5rem]'), 'the seconds line is still indented past the bar');
-    assert.ok(row.includes('<div class="relative h-6 rounded bg-gray-100" data-tl-track'),
-        'the track is no longer full width');
+    assert.ok(row.includes('class="relative flex-1 min-w-0 h-6 rounded bg-gray-100" data-tl-track'),
+        'the track no longer fills the row beside its numbers');
     // The block supplies the same px-1 inset _pceTrimTrackHtml uses, so both boxes match.
     const block = slice('function _pceTimedBlock(inner, axis) {', '/** Read the axis a track or block');
     assert.ok(block.includes("'<div class=\"px-1 pb-1\" data-tl-group'"), 'the inset no longer matches the clip slider');
-    assert.ok(only(workspace, 'function _pceTrimTrackHtml(clip) {', 'workspace.html') > 0);
+    assert.ok(only(workspace, 'function _pceTrimTrackHtml(clip, index) {', 'workspace.html') > 0);
 });
 
 check('the panel is called Timeline', () => {
@@ -945,7 +937,7 @@ check('the drop target is drawn with inline styles, not a utility class', () => 
 check('a drop keeps the OFFSET in the clip, not the second in the cut', () => {
     // "Two seconds in, for three seconds" is what the reviewer decided, and it means the same thing
     // on any clip. The absolute second does not.
-    const fn = slice('window._pceOverlayToClip = function (index, key) {', 'function _pceBindOverlayScrub()');
+    const fn = slice('window._pceOverlayToClip = function (index, key) {', '/* The chips, the clip-relative scrub');
     assert.ok(fn.includes('const within ='), 'the offset is not preserved');
     assert.ok(fn.includes('const shown ='), 'the duration is not preserved');
     assert.ok(fn.includes('Math.min(to.end'), 'a box can outlast the clip it was dropped on');
@@ -964,7 +956,7 @@ check('a drop saves instead of writing back the timing it had mid-hover', () => 
 check('the move-to-clip save looks the post up the way persist does', () => {
     // ⚠️ It passed post.id, while _rqPersistOverlays looks the post up BY that argument — a cache
     // row without an `id` field saved absolutely nothing, silently.
-    const fn = slice('window._pceOverlayToClip = function (index, key) {', 'function _pceBindOverlayScrub()');
+    const fn = slice('window._pceOverlayToClip = function (index, key) {', '/* The chips, the clip-relative scrub');
     assert.ok(fn.includes('_rqPersistOverlays(postId)'), 'still persisting against the wrong id');
     assert.ok(!fn.includes('_rqPersistOverlays(post.id)'), 'post.id is back');
     assert.ok(fn.includes('_rqRenderCanvasOverlays('), 'the picture is not updated');
@@ -977,26 +969,44 @@ check('the move-to-clip save looks the post up the way persist does', () => {
 // recomputed on every pointermove — so dragging the start handle past the clip's own beginning
 // silently re-resolved to the PREVIOUS clip and reinterpreted the whole track against it.
 
-console.log('\nthe per-clip when slider stays on its clip');
+console.log('\nthe per-clip when slider is gone, and its job moved onto the row');
 
-check('the clip is pinned at pointerdown, not recomputed per move', () => {
-    const fn = slice('function _pceBindOverlayScrub()', '\n/**');
-    assert.ok(fn.includes('_pceOvtDrag.span = c.sp'), 'the clip is not pinned for the drag');
-    assert.ok(fn.includes('const sp = _pceOvtDrag.span'), 'the move handler still re-resolves the clip');
+check('the When panel under the canvas no longer exists', () => {
+    // Its three parts each had a home already: the chips are the drag onto another clip's row, the
+    // scrub is the text bar now that a row shares its clip's axis, and Start/End sit on the row.
+    // A second copy of a control is a second place to disagree — and this copy was the one with the
+    // clip-jumping bug.
+    for (const gone of ['insp-overlay-timing', 'insp-overlay-clips', 'insp-overlay-scrub',
+                        'insp-overlay-start', 'insp-overlay-end', '_pceBindOverlayScrub',
+                        '_pceRenderOverlayClipUi', '_pceOvtDrag']) {
+        assert.strictEqual(workspace.indexOf(gone), -1, `${gone} is back`);
+    }
+    // But the thing the drag-and-drop calls must survive the cull.
+    only(workspace, 'window._pceOverlayToClip = function (index, key) {', 'workspace.html');
 });
 
-check('neither handle can walk the box out of its clip', () => {
-    const fn = slice('function _pceBindOverlayScrub()', '\n/**');
-    assert.ok(fn.includes('Math.max(sp.start, Math.min(t, end - MIN))'), 'the start handle is not clamped');
-    assert.ok(fn.includes('Math.min(sp.end, Math.max(t, start + MIN))'), 'the end handle is not clamped');
+check('start and end are typed on the row, in the clip\'s own seconds', () => {
+    const parts = slice('function _rqTimelineParts(post) {', 'function _pceTimedBlock(inner, axis)');
+    assert.ok(parts.includes("data-tl-num=\"${edge}\""), 'the row has no number fields');
+    assert.ok(parts.includes('const src = (t) => Math.round((ax.inS + (t - ax.start)) * 10) / 10;'),
+        'the fields are not shown in the clip\'s own seconds');
+    assert.ok(parts.includes("item.endS == null ? '' : src(end)"),
+        'an unset end must read blank, not as the value it happens to have');
+    // The clip's own in/out too, beside its slider.
+    const trim = slice('function _pceTrimTrackHtml(clip, index) {', '\n/** Write the cut back to the post.');
+    assert.ok(trim.includes('window._pceClipTrim('), 'the clip row has no typed in/out');
 });
 
-check('the scrub saves against the id persist looks posts up by', () => {
-    // ⚠️ Same latent bug as _pceOverlayToClip had: _rqPersistOverlays looks the post up BY its
-    // argument, so post.id saved nothing at all on a cache row without that field.
-    const fn = slice('function _pceBindOverlayScrub()', '\n/**');
-    assert.ok(fn.includes('_rqPersistOverlays(_rqReviewPostId)'), 'still persisting against post.id');
-    assert.ok(!fn.includes('_rqPersistOverlays(c.post.id)'), 'post.id is back');
+check('the wording is editable on the row', () => {
+    const parts = slice('function _rqTimelineParts(post) {', 'function _pceTimedBlock(inner, axis)');
+    assert.ok(parts.includes('data-tl-text='), 'no inline text field');
+    const tl = slice('function _rqBindTimeline() {', '\nasync function openPostReview(');
+    assert.ok(tl.includes("hasAttribute('data-tl-text')"), 'nothing listens to it');
+    // ⚠️ Delegated, because the rows are replaced wholesale on every repaint — a listener bound to
+    // the input dies with the first redraw, and a control that works once is worse than one that
+    // never worked.
+    assert.ok(tl.includes("host.addEventListener('input'"), 'the canvas does not keep up as you type');
+    assert.ok(tl.includes('_rqRenderCanvasOverlays(post)'), 'the picture is never repainted');
 });
 
 console.log('\nthe preview says why it cannot start');

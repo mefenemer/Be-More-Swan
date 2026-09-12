@@ -667,6 +667,51 @@
     {"id":"Comic Sans MS","label":"Comic Sans","stack":"'Comic Neue', 'Comic Sans MS', cursive","metricClone":false},
   ];
 
+  /**
+   * How a text box arrives and leaves — the browser's copy of overlayAnimAt.
+   *
+   * ⚠️ The canvas preview used to only toggle boxes on and off, so picking Fade, Rise or Pop
+   * changed nothing you could see until the video had been rendered on Lambda. Three options that
+   * appear to do nothing are worse than not offering them.
+   *
+   * This is the ONE place the maths is mirrored, and tests/overlay-anim-client.test.ts runs it
+   * against overlayAnimAt over a grid of inputs — if either side changes, that fails. Do not edit
+   * this by hand: it is generated, and a hand edit is exactly the drift the generator exists to
+   * stop. Frame-based, same as the renderer, so the preview cannot be a second off by rounding.
+   */
+  window.OverlayAnims = {
+    RAMP_S: 0.35,
+    OPTIONS: [{"id":"none","label":"Cut","hint":"Appears and disappears instantly"},{"id":"fade","label":"Fade","hint":"Fades in and out"},{"id":"rise","label":"Rise","hint":"Slides up as it fades in"},{"id":"pop","label":"Pop","hint":"Springs up to size"}],
+
+    read: function (v) {
+      var ids = window.OverlayAnims.OPTIONS.map(function (a) { return a.id; });
+      return typeof v === 'string' && ids.indexOf(v) !== -1 ? v : 'none';
+    },
+
+    /** { opacity, transform } at frame N of a box that is on screen for a total of M frames. */
+    at: function (anim, frame, frames, fps) {
+      var kind = window.OverlayAnims.read(anim);
+      if (kind === 'none') return { opacity: 1, transform: 'none' };
+      var clamp01 = function (n) { return Math.min(1, Math.max(0, n)); };
+      var total = Math.max(1, Math.floor(frames) || 1);
+      var ramp = Math.max(1, Math.min(Math.round(window.OverlayAnims.RAMP_S * fps), Math.floor(total / 2)));
+      var f = Math.min(Math.max(Math.floor(frame) || 0, 0), total);
+      var inP = clamp01(f / ramp);
+      var outP = clamp01((total - f) / ramp);
+      var p = Math.min(inP, outP);
+      if (kind === 'fade') return { opacity: p, transform: 'none' };
+      if (kind === 'rise') {
+        var y = (1 - inP) * 4;
+        return { opacity: p, transform: y > 0.01 ? 'translateY(' + y + '%)' : 'none' };
+      }
+      var c = 1.70158;
+      var u = inP - 1;
+      var ease = 1 + (c + 1) * u * u * u + c * u * u;
+      var scale = inP >= 1 ? 1 : 0.82 + 0.18 * ease;
+      return { opacity: p, transform: Math.abs(scale - 1) > 0.001 ? 'scale(' + scale + ')' : 'none' };
+    },
+  };
+
   window.OverlayFonts = {
     /** [{ id, label, stack, metricClone }] in picker order. */
     all: OVERLAY_FONTS,

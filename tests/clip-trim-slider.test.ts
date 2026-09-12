@@ -49,7 +49,7 @@ const _pceFmtS = (s) => (Math.round(s * 10) / 10) + 's';
 `;
 const src = prelude
     + slice('function _pceClipFullLength(c) {', 'function _pceClipLength(c) {')
-    + slice('function _pceTrimTrackHtml(clip) {', '\n/** Write the cut back to the post.');
+    + slice('function _pceTrimTrackHtml(clip, index) {', '\n/** Write the cut back to the post.');
 const mod = new Function(src
     + '; return { _pceClipFullLength, _pceTrimAxis, _pceTrimTrackHtml, _pceClipDurations, _pceClipMeasureFailed };')() as any;
 const { _pceTrimAxis: axis, _pceTrimTrackHtml: track, _pceClipDurations: durations,

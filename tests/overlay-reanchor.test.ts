@@ -43,7 +43,7 @@ function _pceClipLength(c) {
 }
 function _pceClips() { return []; }
 `;
-const src = prelude + slice('function _pceSpansFor(clips)', 'const _pceOvtDrag =');
+const src = prelude + slice('function _pceSpansFor(clips)', 'window._pceOverlayToClip = function');
 const mod = new Function(src + '; return { _pceSpansFor, _pceSpanAt, _pceReanchorOverlays };')() as any;
 const { _pceSpansFor: spansFor, _pceReanchorOverlays: reanchor } = mod;
 
