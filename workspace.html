@@ -26,6 +26,11 @@
        Installing this is what unlocks Web Push on iOS. -->
   <link rel="manifest" href="/manifest.webmanifest">
   <meta name="theme-color" content="#0f172a">
+  <!-- Both, deliberately. Chrome deprecated the apple- prefixed one and logs a console warning,
+       but iOS Safari has never read the unprefixed name — dropping the old one would quietly stop
+       the app opening full-screen when someone adds it to their home screen on an iPhone, which is
+       the only platform the tag was ever for. Two lines silences the warning and keeps iOS working. -->
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Be More Swan">
   <!-- Registers /sw.js and keeps this browser's push subscription in sync. Not deferred behind
@@ -869,26 +874,16 @@ window.showComplianceModals = function showComplianceModals(force) {
                previews and edits THAT platform's copy; the footer's Approve/Reject act on every
                platform at once. max-w-md so it sits directly over the post card it labels.
                Built by _rqReviewRenderTabs. -->
-          <!-- ── The picture stays on screen while you work the timeline ──────────────────────
-               The clips and their text sit BELOW the canvas, because the cut decides the axis they
-               are drawn on. That put the two things you must compare out of view of each other:
-               dragging a text bar meant scrolling down, and seeing what it did meant scrolling back
-               up. Sticking the canvas to the top of the scroller fixes that without moving anything
-               — the timeline scrolls under a picture that stays put.
-
-               ⚠️ max-height, not just `sticky`. A 9:16 video is taller than the viewport, and a
-               sticky element taller than its scrollport never sticks — it just scrolls away, which
-               is indistinguishable from not having done this at all. 46vh leaves room for two clip
-               rows underneath on a laptop. The video inside is already max-h-full elsewhere; the
-               cap here is on the sticky wrapper so the tabs travel with it. -->
-          <!-- ⚠️ Inline, not utility classes. The compiled stylesheet only carries utilities the
-               markup already used, so a class that appears nowhere else can be absent from it —
-               which for a LAYOUT rule means the picture silently stops sticking and nobody can see
-               why. Inline cannot be purged. -->
-          <div style="position:sticky;top:0;z-index:20;background:#f9fafb;padding:4px 0 8px;">
-            <div id="post-review-tabs" class="hidden max-w-md mx-auto mb-2"></div>
-            <div id="post-review-body" style="max-height:42vh;overflow:hidden"></div>
-          </div>
+          <!-- ⚠️ NOT sticky. The canvas was stuck to the top of the scroller so the timeline could
+               scroll under it, and that was wrong in two ways at once: the pane is taller than the
+               space it was given, so the content did not scroll UNDER it so much as BEHIND it; and
+               a sticky box with a background and a z-index covers whatever passes below, which ate
+               the clicks on the buttons at the top of the clip list. "Perhaps there is a hidden
+               overlay stopping the click" — there was, and I had put it there.
+               Seeing the picture and the timeline at once is a LAYOUT problem, not a scroll trick:
+               they need to be side by side, which needs a wider modal than 4xl. -->
+          <div id="post-review-tabs" class="hidden max-w-md mx-auto mb-2"></div>
+          <div id="post-review-body"></div>
           <!-- The canvas's own picker — opened by the empty media frame and nothing else. Multiple
                and both kinds, because "add media" on a blank post means one image, several images,
                or a video, and which of those it is decides the post's format (_pceCanvasAttachFiles). -->

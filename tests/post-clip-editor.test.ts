@@ -1105,4 +1105,36 @@ check('the seconds under a text bar are the clip\'s own, matching the slider abo
         'a box with no end time must say it runs past this clip');
 });
 
+
+// ── Nothing may sit on top of the clip list ─────────────────────────────────────────────────────
+// The canvas was made position:sticky so the timeline could scroll under it. Two things went wrong
+// at once: the pane is taller than the room it was given, so content scrolled BEHIND it rather than
+// under it; and a sticky box with a background and a z-index covers whatever passes below — which
+// ate the clicks on Preview, Stop and the clip reorder arrows. Reported as "perhaps there is a
+// hidden overlay stopping the click". There was.
+
+console.log('\nthe canvas does not cover the controls');
+
+check('the preview pane is not stuck over the panel below it', () => {
+    assert.strictEqual(workspace.indexOf('position:sticky'), -1,
+        'a sticky canvas is back — it covers the clip list and eats its clicks');
+    const at = only(workspace, 'id="post-review-body"', 'workspace.html');
+    const el = workspace.slice(workspace.lastIndexOf('<', at), workspace.indexOf('>', at) + 1);
+    assert.ok(!/max-height|z-index/.test(el),
+        'the canvas is capped or layered again; seeing both at once is a layout problem, not a scroll trick');
+});
+
+check('the clip reorder arrows are still wired', () => {
+    only(workspace, 'window._pceClipMove = function (index, dir) {', 'workspace.html');
+    const at = only(workspace, "title=\"Move earlier\" aria-label=\"Move clip '", 'workspace.html');
+    assert.ok(workspace.slice(at, at + 400).includes('window._pceClipMove('), 'the up arrow lost its handler');
+});
+
+check('the home-screen meta tag is not the deprecated one alone', () => {
+    // Chrome warns on the apple- prefix; iOS Safari has never read the unprefixed name. Both, or
+    // the app stops opening full screen from an iPhone home screen and nothing says why.
+    only(workspace, '<meta name="mobile-web-app-capable" content="yes">', 'workspace.html');
+    only(workspace, '<meta name="apple-mobile-web-app-capable" content="yes">', 'workspace.html');
+});
+
 console.log(`\n${passed} checks passed`);
