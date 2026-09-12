@@ -1137,4 +1137,51 @@ check('the home-screen meta tag is not the deprecated one alone', () => {
     only(workspace, '<meta name="apple-mobile-web-app-capable" content="yes">', 'workspace.html');
 });
 
+
+// ── The picture and the clip list, side by side ─────────────────────────────────────────────────
+// Every control in the clip list changes something you can only judge by looking at the canvas, so
+// on a cut the two have to be on screen together. Sticking the canvas to the top of the scroller was
+// the wrong answer — it covered the list and ate its clicks. Side by side is the right one, and it
+// needs the room: at max-w-4xl, once the rail has taken its 288px, splitting what is left leaves the
+// video about 200px wide.
+
+console.log('\nthe stage splits into two columns on a cut');
+
+check('the two columns exist and wrap the right things', () => {
+    const row = only(workspace, 'id="pce-stage-row"', 'workspace.html');
+    const media = only(workspace, 'id="pce-stage-media"', 'workspace.html');
+    const side = only(workspace, 'id="pce-stage-side"', 'workspace.html');
+    const canvas = only(workspace, 'id="post-review-body"', 'workspace.html');
+    const strip = only(workspace, 'id="pce-stage-strip"', 'workspace.html');
+    assert.ok(row < media && media < canvas, 'the canvas is not inside the media column');
+    assert.ok(canvas < side && side < strip, 'the clip list is not inside the side column');
+});
+
+check('only a video post gets the wide, split stage', () => {
+    // A photo has a caption and a picture and nothing with a duration; the extra 256px would be
+    // margin, and a dialog that changes size for no gain is just unsettling.
+    assert.ok(workspace.includes('_pceSetStageWide(true, _pcePostIsVideo(post));'),
+        'the split is not gated on the post being a video');
+    const fn = slice('function _pceSetStageWide(wide, sideBySide) {', '/**\n * Put the clip list beside');
+    assert.ok(fn.includes("'max-w-6xl'"), 'the wider width is not applied');
+    assert.ok(fn.includes("toggle('max-w-4xl', wide && !sideBySide)"),
+        'a photo post must keep the narrower stage');
+});
+
+check('it stacks again on a narrow window, and never splits below 1024px', () => {
+    const fn = slice('function _pceApplyStageSplit() {', "window.addEventListener('resize'");
+    assert.ok(fn.includes('window.innerWidth >= _PCE_SPLIT_MIN_PX'), 'no width floor');
+    assert.ok(fn.includes("row.style.display = split ? 'flex' : 'block'"), 'the row never goes back to one column');
+    assert.ok(workspace.includes("window.addEventListener('resize', () => _pceApplyStageSplit());"),
+        'resizing the window does not re-decide the layout');
+});
+
+check('the columns are laid out inline, not with utility classes', () => {
+    // ⚠️ A layout class that appears nowhere else can be purged out of the compiled stylesheet, and
+    // then the columns silently stack with nothing to say why.
+    const fn = slice('function _pceApplyStageSplit() {', "window.addEventListener('resize'");
+    assert.ok(fn.includes('media.style.flex') && fn.includes('side.style.flex'),
+        'the columns are sized by classes that may not exist in the compiled CSS');
+});
+
 console.log(`\n${passed} checks passed`);

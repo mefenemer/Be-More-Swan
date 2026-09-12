@@ -882,8 +882,17 @@ window.showComplianceModals = function showComplianceModals(force) {
                overlay stopping the click" — there was, and I had put it there.
                Seeing the picture and the timeline at once is a LAYOUT problem, not a scroll trick:
                they need to be side by side, which needs a wider modal than 4xl. -->
-          <div id="post-review-tabs" class="hidden max-w-md mx-auto mb-2"></div>
-          <div id="post-review-body"></div>
+          <!-- ── Two columns on a video post, one on everything else ──────────────────────────
+               Every control in the clip list changes something you can only judge by looking at the
+               canvas, so on a cut the two have to be on screen together. _pceApplyStageSplit turns
+               this row into a flex pair (canvas | clip list) and back, and it only ever splits when
+               the post is a video AND the window is at least 1024px wide. -->
+          <div id="pce-stage-row">
+            <div id="pce-stage-media">
+              <div id="post-review-tabs" class="hidden max-w-md mx-auto mb-2"></div>
+              <div id="post-review-body"></div>
+            </div>
+            <div id="pce-stage-side">
           <!-- The canvas's own picker — opened by the empty media frame and nothing else. Multiple
                and both kinds, because "add media" on a blank post means one image, several images,
                or a video, and which of those it is decides the post's format (_pceCanvasAttachFiles). -->
@@ -998,6 +1007,8 @@ window.showComplianceModals = function showComplianceModals(force) {
                 <p class="text-[10px] text-gray-400 mt-1.5">Leave both times blank to play across the whole post. Or drag the clip on the track above.</p>
               </div>
 
+            </div>
+          </div>
             </div>
           </div>
             <!-- Quality review (The Quality Reviewer, plan-gated). This panel existed ONLY in the
@@ -13569,7 +13580,7 @@ function _pceSyncForPost(post) {
     // it finishes.
     if (!_pceAiPoll) _pceSetAiMsg('');
     _pceRenderFormats();
-    _pceSetStageWide(true);
+    _pceSetStageWide(true, _pcePostIsVideo(post));
 
     const card = post.brandCard;
     // Only a card is mounted as an editable canvas. A photo has nothing to drag yet (that is
@@ -13675,12 +13686,69 @@ function _pceSyncForPost(post) {
 }
 
 // The two-column stage only earns the extra width when there is an inspector beside the canvas.
-function _pceSetStageWide(wide) {
+/**
+ * How wide the editor is, and whether the timeline sits BESIDE the picture or under it.
+ *
+ * A video post is the only one where the two must be on screen together: every control in the clip
+ * list changes something you can only judge by looking at the canvas, and with the list underneath
+ * you had to scroll away from the picture to touch it. Sticking the canvas to the top was the wrong
+ * answer — it covered the list and ate its clicks. Side by side is the right one, and it needs the
+ * room: at max-w-4xl, once the step rail has taken its 288px, splitting what is left leaves the
+ * video about 200px wide.
+ *
+ * ⚠️ Video only. A photo post has a caption and a picture and nothing with a duration, so the extra
+ * 256px would be margin — and a dialog that changes size depending on what is inside it is
+ * unsettling enough without doing it for no gain.
+ */
+function _pceSetStageWide(wide, sideBySide) {
     const panel = _pceEl('post-review-panel');
     if (!panel) return;
     panel.classList.toggle('max-w-lg', !wide);
-    panel.classList.toggle('max-w-4xl', wide);
+    panel.classList.toggle('max-w-4xl', wide && !sideBySide);
+    panel.classList.toggle('max-w-6xl', !!(wide && sideBySide));
+    _pceSetStageSplit(!!sideBySide);
 }
+
+/**
+ * Put the clip list beside the canvas, or back under it.
+ *
+ * Inline styles on the two columns, not utility classes: this is layout, and a layout class that
+ * appears nowhere else in the markup can be purged out of the compiled stylesheet — at which point
+ * the columns silently stack again and nothing says why. Below 1024px it always stacks; there is no
+ * width at which two columns of this beat one.
+ */
+const _PCE_SPLIT_MIN_PX = 1024;
+let _pceSplitOn = false;
+function _pceSetStageSplit(on) {
+    _pceSplitOn = !!on;
+    _pceApplyStageSplit();
+}
+function _pceApplyStageSplit() {
+    const row = document.getElementById('pce-stage-row');
+    const media = document.getElementById('pce-stage-media');
+    const side = document.getElementById('pce-stage-side');
+    if (!row || !media || !side) return;
+    const split = _pceSplitOn && window.innerWidth >= _PCE_SPLIT_MIN_PX;
+    row.style.display = split ? 'flex' : 'block';
+    row.style.alignItems = split ? 'flex-start' : '';
+    row.style.gap = split ? '16px' : '';
+    media.style.flex = split ? '1 1 0%' : '';
+    media.style.minWidth = split ? '0' : '';
+    // Wide enough for the clip list's own controls — a bar, two number boxes and the buttons — and
+    // no wider, because every pixel here comes off the picture.
+    side.style.flex = split ? '0 0 22rem' : '';
+    side.style.width = split ? '22rem' : '';
+    side.style.marginTop = split ? '0' : '';
+    const strip = document.getElementById('pce-stage-strip');
+    if (strip) {
+        // The strip centres itself under the canvas when stacked; in a column of its own that
+        // centring is what stops it filling the column.
+        strip.classList.toggle('max-w-md', !split);
+        strip.classList.toggle('mx-auto', !split);
+        strip.classList.toggle('mt-3', !split);
+    }
+}
+window.addEventListener('resize', () => _pceApplyStageSplit());
 
 (function _pceBind() {
     const onReady = () => {
