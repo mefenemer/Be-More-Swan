@@ -34,7 +34,14 @@ interface Overlay {
     // that they are non-negative and that endS is after startS.
     startS?: number;
     endS?: number;
+    /** How the box arrives and leaves. Video only; an unknown value degrades to 'none'. */
+    anim?: string;
 }
+
+// Kept in step with OverlayAnim in src/lib/overlay-geometry.ts. An unrecognised value is not an
+// error — it is an older or newer client — so it degrades to the motionless default rather than
+// rejecting a save that is otherwise perfectly good.
+const ANIMS = new Set(['none', 'fade', 'rise', 'pop']);
 
 function sanitise(raw: unknown): Overlay[] | null {
     if (!Array.isArray(raw)) return null;
@@ -65,6 +72,7 @@ function sanitise(raw: unknown): Overlay[] | null {
             boxOpacity: Math.min(1, Math.max(0, Number(ov.boxOpacity ?? 1))),
             ...(startS != null ? { startS } : {}),
             ...(endS != null ? { endS } : {}),
+            ...(typeof ov.anim === 'string' && ANIMS.has(ov.anim) && ov.anim !== 'none' ? { anim: ov.anim } : {}),
         });
     }
     return out;

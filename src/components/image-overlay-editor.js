@@ -39,10 +39,43 @@
   const BORDER_RATIO = 0.07;  // border width   = fontSize * BORDER_RATIO (min 1px)
   const RADIUS_RATIO = 0.15;  // corner radius  = fontSize * RADIUS_RATIO
 
-  const FONTS = [
-    'Arial', 'Helvetica', 'Verdana', 'Trebuchet MS', 'Georgia',
-    'Times New Roman', 'Courier New', 'Impact', 'Comic Sans MS',
+  // The picker, and — more importantly — what each choice actually RESOLVES to.
+  //
+  // These used to be bare OS font names passed straight through to the renderer. Lambda has none of
+  // them and Chrome substitutes silently, so the published video was set in a different face from
+  // the one the reviewer approved, with a differently sized box (the box is sized by the rendered
+  // text). window.OverlayFonts is generated from src/lib/overlay-fonts.ts — the same module the
+  // Remotion composition imports — so the two cannot drift. See scripts/gen-client-constants.ts.
+  //
+  // The literal list is the last-resort fallback for a page that somehow loaded this file without
+  // platform-constants.js: the ids are unchanged, so nothing breaks, it just loses the webfonts.
+  const OF = (typeof window !== 'undefined' && window.OverlayFonts) || null;
+  const FONTS = OF
+    ? OF.all.map((f) => ({ id: f.id, label: f.label, stack: f.stack }))
+    : ['Arial', 'Helvetica', 'Verdana', 'Trebuchet MS', 'Georgia', 'Times New Roman', 'Courier New', 'Impact', 'Comic Sans MS']
+        .map((id) => ({ id: id, label: id, stack: id }));
+
+  /** The CSS stack for a stored family name. One answer, shared with the render. */
+  function fontStack(id) {
+    if (OF) return OF.stack(id);
+    const hit = FONTS.find((f) => f.id.toLowerCase() === String(id || '').trim().toLowerCase());
+    return (hit || FONTS[0]).stack;
+  }
+
+  /** Resolves once the webfaces are usable. Canvas will NOT fetch them on its own. */
+  function fontsReady() {
+    return OF ? OF.ready() : Promise.resolve();
+  }
+  // Mirrors OVERLAY_ANIMS in src/lib/overlay-geometry.ts. This file is an unbundled IIFE and cannot
+  // import it; tests/overlay-anim.test.ts asserts the two lists agree, because a name that drifts
+  // here is silently stored and silently ignored by the renderer.
+  const ANIMS = [
+    { id: 'none', label: 'Cut' },
+    { id: 'fade', label: 'Fade' },
+    { id: 'rise', label: 'Rise' },
+    { id: 'pop', label: 'Pop' },
   ];
+
   const EMOJIS = ['😀','😍','🎉','🔥','✨','💯','👍','❤️','🙌','😎','🥳','💪','☕','🌟','📣','✅','👉','🎁','😂','🤩'];
 
   const DEFAULTS = {
@@ -99,7 +132,10 @@
     const lh     = fontSize * LINE_HEIGHT;
     const border = Math.max(1, fontSize * BORDER_RATIO);
     const radius = fontSize * RADIUS_RATIO;
-    const family = ov.fontFamily || DEFAULTS.fontFamily;
+    // The STACK, not the bare name: canvas honours a font list exactly as CSS does, and measureText
+    // is what sizes the box — so measuring with a different face is how the preview and the
+    // published file end up disagreeing about where the box edges are.
+    const family = fontStack(ov.fontFamily || DEFAULTS.fontFamily);
 
     ctx.font = `${fontSize}px ${family}`;
     ctx.textBaseline = 'top';
@@ -144,7 +180,7 @@
     const fontSize = clamp(ov.fontSizePct == null ? DEFAULTS.fontSizePct : ov.fontSizePct, 0.005, 0.5) * refHeightPx;
     node.style.left = (clamp(ov.x, 0, 1) * 100) + '%';
     node.style.top = (clamp(ov.y, 0, 1) * 100) + '%';
-    node.style.fontFamily = ov.fontFamily || DEFAULTS.fontFamily;
+    node.style.fontFamily = fontStack(ov.fontFamily || DEFAULTS.fontFamily);
     node.style.fontSize = fontSize + 'px';
     node.style.color = ov.color || DEFAULTS.color;
     node.style.padding = (fontSize * PAD_RATIO) + 'px';
@@ -187,6 +223,10 @@
 
   // ── Public: bake overlays into the image at native resolution ────────────────
   async function bake(imageUrl, overlays) {
+    // Before ANY measuring. An unloaded webfont makes measureText silently return the fallback's
+    // metrics, which bakes a box sized for a font the picture is not set in — the exact drift this
+    // whole change removes, reintroduced at the last step.
+    await fontsReady();
     const img = await loadImage(imageUrl);
     const W = img.naturalWidth || img.width;
     const H = img.naturalHeight || img.height;
@@ -217,14 +257,37 @@
       .ioe-body{display:flex;gap:16px;padding:16px;overflow:auto}
       .ioe-stagewrap{flex:1 1 auto;min-width:0;display:flex;align-items:center;justify-content:center;background:#0f172a;border-radius:12px;overflow:hidden}
       .ioe-stage{position:relative;display:inline-block;max-width:100%;max-height:64vh;line-height:0;user-select:none;touch-action:none}
-      .ioe-stage img{display:block;max-width:100%;max-height:64vh;pointer-events:none}
+      .ioe-stage img,.ioe-stage video{display:block;max-width:100%;max-height:64vh;pointer-events:none}
       .ioe-ov{position:absolute;line-height:${LINE_HEIGHT};white-space:pre;cursor:move;box-sizing:border-box;transform:translate(-50%,-50%);overflow:visible}
       .ioe-ov.sel{outline:2px dashed #ec4899;outline-offset:3px}
-      .ioe-side{flex:0 0 300px;display:flex;flex-direction:column;gap:12px}
+      /* Scrolls on its own, so browsing the controls does not drag the picture off-screen —
+         and so the rows below the fold are reachable without scrolling the whole modal. */
+      .ioe-side{flex:0 0 300px;display:flex;flex-direction:column;gap:12px;min-height:0;overflow-y:auto;padding-right:4px}
+      /* ⚠️ flex-shrink:0, and it is load-bearing.
+         A column flex container whose content is taller than it is shrinks EVERY child to make it
+         fit — it does not scroll first. .ioe-sect is overflow:hidden, so it has no minimum and
+         collapses to a hairline, while a textarea or a <select> holds its intrinsic height and
+         looks untouched. The result is a section that is present in the DOM, correctly built, with
+         the right text inside it, and about one pixel tall: "the section has disappeared",
+         reported three times, every investigation finding the markup perfect. Without this line the
+         overflow-y above never engages, because there is never any overflow left to scroll. */
+      .ioe-side > *{flex-shrink:0}
       .ioe-side.empty{align-items:stretch}
       .ioe-row{display:flex;flex-direction:column;gap:5px}
       .ioe-row label{font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.03em}
       .ioe-inline{display:flex;align-items:center;gap:8px}
+      .ioe-sect{border:1px solid #e5e7eb;border-radius:10px;overflow:hidden}
+      .ioe-sect-h{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:#f8fafc;border:0;font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.03em;cursor:pointer}
+      .ioe-sect-h:hover{background:#f1f5f9}
+      .ioe-sect-x{font-size:14px;color:#94a3b8}
+      .ioe-sect-b{padding:10px;display:flex;flex-direction:column;gap:10px}
+      .ioe-chips{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
+      .ioe-chip{font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;cursor:pointer}
+      .ioe-chip:hover{border-color:#d1d5db}
+      .ioe-chip.on{border-color:#f472b6;background:#fdf2f8;color:#be185d}
+      .ioe-when{position:relative;height:26px;border-radius:6px;background:#f1f5f9;overflow:hidden;user-select:none}
+      .ioe-when-lit{position:absolute;top:0;bottom:0;background:rgba(236,72,153,.25)}
+      .ioe-when-h{position:absolute;top:0;bottom:0;width:8px;margin-left:-4px;border-radius:4px;background:#ec4899;cursor:ew-resize}
       .ioe-modal textarea,.ioe-modal select,.ioe-modal input[type=text]{width:100%;font-size:13px;border:1px solid #cbd5e1;border-radius:9px;padding:8px 10px;box-sizing:border-box;font-family:inherit}
       .ioe-modal textarea{resize:vertical;min-height:56px}
       .ioe-modal input[type=color]{width:38px;height:32px;padding:0;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer}
@@ -252,11 +315,177 @@
     document.head.appendChild(el);
   }
 
+  /** The clip a moment of the finished video falls in. Mirrors _pceSpanAt in workspace.html. */
+  function spanAt(spans, t) {
+    if (!spans || !spans.length) return null;
+    for (const sp of spans) if (t < sp.end - 0.001) return sp;
+    return spans[spans.length - 1];
+  }
+
+  const fmtS = (n) => `${Math.round(n * 10) / 10}s`;
+
   // ── The interactive editor ───────────────────────────────────────────────────
-  function open({ imageUrl, overlays, onDone, suggestText }) {
+  /**
+   * `spans` is the post's CUT, when it has one: [{ i, start, end, len }] in seconds of the finished
+   * video. The editor has never managed timing — it passed startS/endS through untouched — which was
+   * right while "when" was one number in a panel elsewhere. On a multi-clip post it is two questions
+   * ("which clip, where in it") and they belong beside the text they describe: deciding what a box
+   * says and deciding when it shows are the same act of writing.
+   *
+   * Absent or single-clip, everything below is skipped and the editor behaves exactly as before.
+   */
+  function open({ imageUrl, overlays, onDone, suggestText, spans, video }) {
     ensureStyles();
     const state = (overlays || []).map((o) => ({ ...DEFAULTS, ...o, id: o.id || uid() }));
     let selectedId = state.length ? state[state.length - 1].id : null;
+
+    // ── When this box shows ────────────────────────────────────────────────────
+    // Rendered only for a real cut. On a still, or a single clip, "when" has one answer and a
+    // control offering to choose it is noise.
+    /**
+     * ⚠️ Read fresh every time, never snapshotted.
+     *
+     * `spans` and `video` may be passed as VALUES or as GETTERS, and the getter form is the one the
+     * page uses — because a clip's length is measured asynchronously off a <video> element, so at
+     * the moment this modal opens the answer is quite often "not yet". Snapshotting it produced a
+     * modal that had decided, permanently, that the post was not a cut: no clip chips, no timing,
+     * and no explanation. Exactly the failure mode this feature has had three times already, in
+     * three different places.
+     */
+    const readSpans = () => {
+      const v = typeof spans === 'function' ? spans() : spans;
+      return Array.isArray(v) && v.length > 1 ? v : null;
+    };
+    const isVideo = () => (typeof video === 'function' ? !!video() : !!video);
+
+    function ovSpan(ov) {
+      return spanAt(readSpans(), ov.startS == null ? 0 : ov.startS);
+    }
+
+    function timingRow(ov) {
+      const cut = readSpans();
+      // A video whose clips have not finished measuring yet: say so. Rendering nothing is
+      // indistinguishable from the feature not existing, which is how it was reported.
+      // ── Say WHY, always ─────────────────────────────────────────────────────
+      // There are three reasons these controls can be absent and they look identical on screen: the
+      // post is a photo, the post is one clip, or the clips have not finished measuring. Rendering
+      // nothing for all three sent two rounds of "the section has disappeared" — the section was
+      // correct every time and simply mute about it. Silence is the bug.
+      if (!cut) {
+        if (!isVideo()) {
+          return '<p class="ioe-count">This is a photo post — the text is part of the picture, so it has no timing.</p>';
+        }
+        const raw = typeof spans === 'function' ? spans() : spans;
+        return Array.isArray(raw)
+          ? '<p class="ioe-count">One clip, so there is nothing to choose between — this text shows for the whole video. Add another clip to place it on one of them.</p>'
+          : '<p class="ioe-count">Reading the clips… the per-clip controls appear once their lengths are known.</p>';
+      }
+      const sp = ovSpan(ov);
+      const start = ov.startS == null ? 0 : ov.startS;
+      const end = ov.endS == null ? sp.end : Math.min(ov.endS, sp.end);
+      const a = Math.max(0, (start - sp.start) / sp.len) * 100;
+      const b = Math.min(1, (end - sp.start) / sp.len) * 100;
+      const chips = cut.map((x) => `<button type="button" data-clip="${x.i}"
+        class="ioe-chip${x.i === sp.i ? ' on' : ''}">Clip ${x.i + 1}</button>`).join('');
+      return `
+        <div class="ioe-row">
+          <label>Shows on</label>
+          <div class="ioe-chips">${chips}</div>
+          <div class="ioe-when" data-when-track>
+            <div class="ioe-when-lit" data-when-lit style="left:${a}%;width:${Math.max(0, b - a)}%"></div>
+            <span class="ioe-when-h" data-when="start" style="left:${a}%" role="slider" tabindex="0" aria-label="When the text appears"></span>
+            <span class="ioe-when-h" data-when="end" style="left:${b}%" role="slider" tabindex="0" aria-label="When the text disappears"></span>
+          </div>
+          <span class="ioe-count" data-when-label>Clip ${sp.i + 1} · ${fmtS(start - sp.start)} → ${fmtS(end - sp.start)} of it</span>
+        </div>`;
+    }
+
+    /**
+     * Put the selected box's clip on the stage, at the moment the box appears.
+     *
+     * `t` is seconds of the FINISHED video; the element needs seconds into its own source, so the
+     * clip's own in point is added back. Paused throughout — this is a frame to judge against, not
+     * playback, and a clip that started playing under a drag would move the thing being aimed at.
+     */
+    async function showClipFrame(ov, t) {
+      if (!readSpans() || !vidEl) return;
+      const sp = ovSpan(ov);
+      const clip = sp && sp.clip;
+      if (!clip || !clip.url) return;
+      imgEl.style.display = 'none';
+      vidEl.style.display = '';
+      if (vidEl.getAttribute('src') !== clip.url) {
+        vidEl.src = clip.url;
+        await new Promise((res) => {
+          if (vidEl.readyState >= 1) return res();
+          vidEl.addEventListener('loadedmetadata', res, { once: true });
+          vidEl.addEventListener('error', res, { once: true });
+        });
+        // The clip's shape decides how tall the stage is, and fontSizePct is measured against that.
+        // A frame later, so the swap has actually been laid out — measuring in the same tick reads
+        // the size the element had before it was shown.
+        requestAnimationFrame(renderOverlays);
+      }
+      vidEl.pause();
+      const within = Math.max(0, (t == null ? sp.start : t) - sp.start);
+      try { vidEl.currentTime = (clip.inS || 0) + within; } catch (e) { /* not seekable yet */ }
+    }
+
+    // ── Collapsible sections ───────────────────────────────────────────────────
+    // The panel grew from "text, font, colour" to eight groups, which on a laptop means the thing
+    // you came to change is below the fold. Which sections are open is remembered for the life of
+    // the editor, so opening a box, closing it and opening another does not reset the view.
+    const openSections = { text: true, style: false, when: true, anim: false };
+
+    function sect(key, title, body) {
+      if (!body) return '';
+      const on = openSections[key] !== false;
+      return `
+        <div class="ioe-sect${on ? ' on' : ''}" data-sect="${key}">
+          <button type="button" class="ioe-sect-h" data-sect-toggle="${key}" aria-expanded="${on}">
+            <span>${title}</span><span class="ioe-sect-x">${on ? '−' : '+'}</span>
+          </button>
+          <div class="ioe-sect-b"${on ? '' : ' style="display:none"'}>${body}</div>
+        </div>`;
+    }
+
+    /**
+     * How the box arrives and leaves.
+     *
+     * Video only. A still's text is flattened into the pixels — there is no time for anything to
+     * happen in — so offering motion there would promise something the published image cannot do.
+     */
+    function animRow(ov) {
+      if (!isVideo()) return '';
+      const cur = ov.anim || 'none';
+      return `
+        <div class="ioe-row">
+          <div class="ioe-chips">${ANIMS.map((a) => `<button type="button" data-anim="${a.id}"
+            class="ioe-chip${a.id === cur ? ' on' : ''}">${a.label}</button>`).join('')}</div>
+          <span class="ioe-count">Applies to the rendered video, not to the still preview.</span>
+        </div>`;
+    }
+
+    /** Move the handles without rebuilding the panel — a rebuild mid-drag drops the pointer. */
+    function paintWhen(ov) {
+      const cut = readSpans();
+      if (!cut) return;
+      const track = backdrop.querySelector('[data-when-track]');
+      if (!track) return;
+      const sp = ovSpan(ov);
+      const start = ov.startS == null ? 0 : ov.startS;
+      const end = ov.endS == null ? sp.end : Math.min(ov.endS, sp.end);
+      const a = Math.max(0, (start - sp.start) / sp.len) * 100;
+      const b = Math.min(1, (end - sp.start) / sp.len) * 100;
+      const lit = track.querySelector('[data-when-lit]');
+      if (lit) { lit.style.left = a + '%'; lit.style.width = Math.max(0, b - a) + '%'; }
+      const h1 = track.querySelector('[data-when="start"]');
+      const h2 = track.querySelector('[data-when="end"]');
+      if (h1) h1.style.left = a + '%';
+      if (h2) h2.style.left = b + '%';
+      const lbl = backdrop.querySelector('[data-when-label]');
+      if (lbl) lbl.textContent = `Clip ${sp.i + 1} · ${fmtS(start - sp.start)} → ${fmtS(end - sp.start)} of it`;
+    }
 
     const backdrop = document.createElement('div');
     backdrop.className = 'ioe-backdrop';
@@ -268,7 +497,10 @@
         </div>
         <div class="ioe-body">
           <div class="ioe-stagewrap">
-            <div class="ioe-stage" data-stage><img alt="Post image" data-img></div>
+            <!-- Two backdrops, one shown at a time. A still post keeps the <img> it always had; a
+                 cut shows the CLIP the selected text sits on, because "where does this go" cannot be
+                 answered against a frame of a different clip. -->
+            <div class="ioe-stage" data-stage><img alt="Post image" data-img><video data-vid muted playsinline preload="metadata" style="display:none"></video></div>
           </div>
           <div class="ioe-side" data-side></div>
         </div>
@@ -284,6 +516,7 @@
 
     const stage = backdrop.querySelector('[data-stage]');
     const imgEl = backdrop.querySelector('[data-img]');
+    const vidEl = backdrop.querySelector('[data-vid]');
     const side = backdrop.querySelector('[data-side]');
     const countEl = backdrop.querySelector('[data-count]');
     imgEl.src = imageUrl;
@@ -299,16 +532,51 @@
     backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) close(null); });
 
     // ── Render the overlay DOM nodes over the image ────────────────────────────
+    /**
+     * Whichever backdrop is actually on screen.
+     *
+     * This measured the <img> unconditionally, which was fine while the <img> was the only backdrop
+     * there was. Once a clip could replace it, the hidden image measured 0×0 — so fontSizePct, which
+     * is a fraction of the backdrop's HEIGHT, resolved to zero and every box rendered as an empty
+     * two-pixel square. Dragging was equally broken, since it positions against the same rect.
+     */
+    function backdropEl() {
+      return vidEl && vidEl.style.display !== 'none' ? vidEl : imgEl;
+    }
+
     function stageMetrics() {
-      const r = imgEl.getBoundingClientRect();
+      const r = backdropEl().getBoundingClientRect();
       return { w: r.width, h: r.height, left: r.left, top: r.top };
     }
 
+    /** Whenever the selection changes, the stage follows it onto that box's clip. */
+    function syncStageToSelection() {
+      if (!readSpans()) return;
+      const ov = state.find((o) => o.id === selectedId);
+      if (ov) showClipFrame(ov, ov.startS);
+    }
+
+    /**
+     * The boxes that belong on the clip currently being shown.
+     *
+     * The stage drew ALL of them, which on a cut stacked every overlay in the post on top of
+     * whichever clip you were looking at — so four boxes on four different clips looked like four
+     * boxes on every clip, and there was no way to tell which was which. A box belongs to the clip
+     * its start time falls in; that is the same rule the chips and the renderer use.
+     */
+    function stageOverlays() {
+      if (!readSpans()) return state;
+      const sel = state.find((o) => o.id === selectedId);
+      if (!sel) return state;
+      const here = ovSpan(sel).i;
+      return state.filter((o) => ovSpan(o).i === here);
+    }
+
     function renderOverlays() {
-      // Clear existing nodes (keep the <img>).
+      // Clear existing nodes (keep the backdrops).
       stage.querySelectorAll('.ioe-ov').forEach((n) => n.remove());
       const { h } = stageMetrics();
-      for (const ov of state) {
+      for (const ov of stageOverlays()) {
         const node = document.createElement('div');
         node.className = 'ioe-ov' + (ov.id === selectedId ? ' sel' : '');
         node.dataset.id = ov.id;
@@ -316,14 +584,21 @@
         stage.appendChild(node);
         attachDrag(node, ov);
       }
-      countEl.textContent = state.length ? `${state.length} text overlay${state.length > 1 ? 's' : ''}` : 'No overlays yet';
+      const shown = stageOverlays().length;
+      countEl.textContent = !state.length ? 'No overlays yet'
+        : readSpans() && shown !== state.length
+          ? `${shown} of ${state.length} text overlays — showing this clip's`
+          : `${state.length} text overlay${state.length > 1 ? 's' : ''}`;
     }
 
     // ── Drag to reposition (pointer events) ────────────────────────────────────
     function attachDrag(node, ov) {
       node.addEventListener('pointerdown', (e) => {
         e.preventDefault();
+        const changed = selectedId !== ov.id;
         selectedId = ov.id;
+        // Clicking a box is a selection like any other, so the stage follows it onto that box's clip.
+        if (changed) setTimeout(() => syncStageToSelection(), 0);
         renderSide();
         markSelected();
         const m = stageMetrics();
@@ -357,7 +632,20 @@
       }
       side.classList.remove('empty');
       const transparencyPct = Math.round((1 - (ov.boxOpacity == null ? 1 : ov.boxOpacity)) * 100);
+      // Which box am I editing? With several on several clips, the canvas alone cannot answer it —
+      // the ones on other clips are not even on screen. Picking from here moves the stage to that
+      // box's clip, which is the only way to reach a box that is not in front of you.
+      const boxList = state.length < 2 ? '' : `
+        <div class="ioe-row">
+          <label>Text boxes</label>
+          <div class="ioe-chips">${state.map((o) => {
+            const label = String(o.text || 'Empty').split('\n')[0].slice(0, 18) || 'Empty';
+            const where = readSpans() ? ` · C${ovSpan(o).i + 1}` : '';
+            return `<button type="button" data-pick="${esc(o.id)}" class="ioe-chip${o.id === selectedId ? ' on' : ''}">${esc(label)}${where}</button>`;
+          }).join('')}</div>
+        </div>`;
       side.innerHTML = `
+        ${boxList}
         <div class="ioe-row">
           <label>Text</label>
           <textarea data-f="text" maxlength="500" placeholder="Type your text…">${esc(ov.text || '')}</textarea>
@@ -372,9 +660,17 @@
           </div>
           <div class="ioe-emojis" data-emojis>${EMOJIS.map((em) => `<button type="button" data-em="${em}">${em}</button>`).join('')}</div>
         </div>
+        <!-- ── Above the styling, deliberately ──────────────────────────────────────────────
+             On a video the question "which clip, and when" is the one being answered; the colour
+             of the box is not. These sat at the BOTTOM of the panel, below seven styling rows, in
+             a column that scrolls with the whole modal body — so on a laptop they were off-screen
+             unless you knew to scroll for them, and "the section has disappeared" was reported
+             three times over. Being rendered is not the same as being findable. -->
+        ${sect('when', 'When it shows', timingRow(ov))}
+        ${sect('anim', 'How it appears', animRow(ov))}
         <div class="ioe-row">
           <label>Font</label>
-          <select data-f="fontFamily">${FONTS.map((f) => `<option value="${f}"${f === ov.fontFamily ? ' selected' : ''} style="font-family:${f}">${f}</option>`).join('')}</select>
+          <select data-f="fontFamily">${FONTS.map((f) => `<option value="${f.id}"${f.id === ov.fontFamily ? ' selected' : ''} style="font-family:${f.stack}">${f.label}</option>`).join('')}</select>
         </div>
         <div class="ioe-row">
           <label>Font size — ${Math.round(ov.fontSizePct * 100)}%</label>
@@ -493,18 +789,107 @@
           rerender();
         });
       });
+      for (const b of backdrop.querySelectorAll('[data-sect-toggle]')) {
+        b.addEventListener('click', () => {
+          const key = b.getAttribute('data-sect-toggle');
+          openSections[key] = openSections[key] === false;
+          renderSide();
+        });
+      }
+      for (const b of backdrop.querySelectorAll('[data-anim]')) {
+        b.addEventListener('click', () => {
+          const next = b.getAttribute('data-anim');
+          ov.anim = next === 'none' ? undefined : next;
+          renderSide();
+        });
+      }
+
+      // Pick a different box — including one on another clip, which the stage then moves to.
+      for (const b of backdrop.querySelectorAll('[data-pick]')) {
+        b.addEventListener('click', () => {
+          selectedId = b.getAttribute('data-pick');
+          renderOverlays(); renderSide(); syncStageToSelection();
+        });
+      }
+
+      // ── When: the clip, and where in it ──────────────────────────────────────
+      const cutNow = readSpans();
+      if (cutNow) {
+        for (const b of backdrop.querySelectorAll('[data-clip]')) {
+          b.addEventListener('click', () => {
+            // Keep how long it shows for and re-base onto the new clip — "the same text, on the
+            // next clip" is the move, not "the same seconds".
+            const from = ovSpan(ov);
+            const to = cutNow[Number(b.getAttribute('data-clip'))];
+            if (!to) return;
+            const within = (ov.startS == null ? 0 : ov.startS) - from.start;
+            const shown = (ov.endS == null ? from.end : ov.endS) - (ov.startS == null ? 0 : ov.startS);
+            ov.startS = to.start + Math.min(within, Math.max(0, to.len - 0.2));
+            ov.endS = Math.min(to.end, ov.startS + Math.max(0.2, shown));
+            if (ov.startS <= 0.001) ov.startS = undefined;
+            // The stage's contents change with the clip, so both are redrawn.
+            renderOverlays();
+            renderSide();
+            showClipFrame(ov, ov.startS);
+          });
+        }
+        const track = backdrop.querySelector('[data-when-track]');
+        if (track) {
+          let edge = null;
+          track.addEventListener('pointerdown', (e) => {
+            const h = e.target.closest && e.target.closest('[data-when]');
+            if (!h) return;
+            edge = h.getAttribute('data-when');
+            h.setPointerCapture && h.setPointerCapture(e.pointerId);
+            e.preventDefault();
+          });
+          track.addEventListener('pointermove', (e) => {
+            if (!edge) return;
+            const box = track.getBoundingClientRect();
+            if (!box.width) return;
+            const sp = ovSpan(ov);
+            const f = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
+            const t = sp.start + f * sp.len;
+            const MIN = 0.2;
+            if (edge === 'start') {
+              const end = ov.endS == null ? sp.end : ov.endS;
+              ov.startS = Math.min(t, end - MIN);
+              if (ov.startS <= sp.start + 0.001 && sp.i === 0) ov.startS = undefined;
+            } else {
+              ov.endS = Math.max(t, (ov.startS == null ? sp.start : ov.startS) + MIN);
+            }
+            // Paint only. Rebuilding the panel mid-drag tears the handle out from under the pointer.
+            paintWhen(ov);
+            // ...and show the frame under the handle being moved, which is the whole point of a
+            // slider over a number: the start is chosen by seeing where it starts.
+            showClipFrame(ov, edge === 'start' ? ov.startS : ov.endS);
+          });
+          const stop = () => { edge = null; };
+          track.addEventListener('pointerup', stop);
+          track.addEventListener('pointercancel', stop);
+        }
+      }
+
       q('[data-act="delete"]').addEventListener('click', () => {
         const i = state.findIndex((o) => o.id === ov.id);
         if (i >= 0) state.splice(i, 1);
         selectedId = state.length ? state[state.length - 1].id : null;
-        renderOverlays(); renderSide();
+        renderOverlays(); renderSide(); syncStageToSelection();
       });
     }
 
     // ── Footer actions ─────────────────────────────────────────────────────────
     backdrop.querySelector('[data-act="cancel"]').addEventListener('click', () => close(null));
     backdrop.querySelector('[data-act="add"]').addEventListener('click', () => {
-      const ov = { ...DEFAULTS, id: uid(), text: 'Your text', x: 0.5, y: 0.5 };
+      // A second box starts on the SAME clip as the one that was selected — adding text while
+      // looking at clip three and having it appear over clip one is the thing that makes the
+      // feature look like it only works once.
+      // The clip ON SCREEN, which is the selected box's clip — a new box belongs where the user is
+      // looking, and now that the stage only shows one clip's boxes, that is unambiguous.
+      const sel = state.find((o) => o.id === selectedId);
+      const onSpan = readSpans() && sel ? ovSpan(sel) : null;
+      const ov = { ...DEFAULTS, id: uid(), text: 'Your text', x: 0.5, y: 0.5,
+        ...(onSpan ? { startS: onSpan.start || undefined, endS: onSpan.end } : {}) };
       state.push(ov);
       selectedId = ov.id;
       renderOverlays(); renderSide();
@@ -523,13 +908,30 @@
           // must not drop it, or editing a box's text/style would wipe when it appears on the video.
           ...(o.startS != null ? { startS: o.startS } : {}),
           ...(o.endS != null ? { endS: o.endS } : {}),
+          ...(o.anim && o.anim !== 'none' ? { anim: o.anim } : {}),
         }));
       close(clean);
     });
 
-    // The image must be laid out before we can size overlays against it.
-    if (imgEl.complete && imgEl.naturalWidth) { renderOverlays(); renderSide(); }
-    else imgEl.addEventListener('load', () => { renderOverlays(); renderSide(); }, { once: true });
+    // ── The clips arrive late ──────────────────────────────────────────────────
+    // Their lengths are read off <video> elements on the page, so "is this a cut" is often still
+    // unanswerable when this modal opens. Waiting for the user to click something would mean the
+    // controls appear only if they happen to poke the panel; this brings them in as soon as the
+    // answer exists, and stops asking once it does or once it plainly never will.
+    let spanWatch = 0;
+    const watchForSpans = () => {
+      if (!backdrop.isConnected) return;
+      if (readSpans()) { renderSide(); syncStageToSelection(); return; }
+      if (++spanWatch > 25) return;            // ~10s, then it is not a cut and never was
+      setTimeout(watchForSpans, 400);
+    };
+    if (!readSpans()) setTimeout(watchForSpans, 400);
+
+    // The backdrop must be laid out before we can size overlays against it.
+    if (imgEl.complete && imgEl.naturalWidth) { renderOverlays(); renderSide(); syncStageToSelection(); }
+    else imgEl.addEventListener('load', () => { renderOverlays(); renderSide(); syncStageToSelection(); }, { once: true });
+    // The clip that replaces it has its own dimensions, so overlays are re-sized when it arrives.
+    if (vidEl) vidEl.addEventListener('loadedmetadata', () => requestAnimationFrame(renderOverlays));
     // Keep overlay sizing correct if the modal/image resizes.
     window.addEventListener('resize', renderOverlays);
   }

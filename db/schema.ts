@@ -1904,6 +1904,13 @@ export const scheduledPosts = pgTable("scheduled_posts", {
   // platform accepts, so an image + audio has to become an mp4). See src/lib/audio-overlays.ts and
   // db/post-audio-overlays.sql.
   audioOverlays: jsonb("audio_overlays"),
+  // The edit list — what the user did to their footage before any platform was involved:
+  // { clips: [{ id, assetId, inS?, outS?, gain? }], targetRatio?, frames? }. Deliberately NOT
+  // scheduled_post_assets: attachRenderedVideo() deletes every junction row for the post, so the
+  // junction table means "what publishes" and this means "what the user assembled". Phase 1 honours
+  // clips[0] and its trim; the rest is stored and ignored until later phases. See
+  // src/lib/video-edit.ts, db/post-video-edit.sql and docs/video-editing-plan.md.
+  videoEdit: jsonb("video_edit"),
   // Phase 4 video overlays: gates publishing while a video's timed text is being rendered by Remotion
   // Lambda. null = nothing to render (photo, or video with no overlays); 'pending'|'rendering' = a
   // render is in flight (publish must wait); 'done' = the overlaid video is attached; 'failed' = the

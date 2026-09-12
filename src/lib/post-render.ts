@@ -16,6 +16,8 @@ import { getDb } from '../../db/client';
 import { contentAssets, postRenderJobs, scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import type { Overlay } from './overlay-geometry';
 import { renderableAudio } from './audio-overlays';
+import { DEFAULT_TARGET_RATIO, readVideoEdit, renderableClips, resolveClipGain, resolveTrim } from './video-edit';
+import { reframeRatioFor } from '../utils/format-router';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -77,6 +79,9 @@ export function overlaysFingerprint(raw: unknown): string {
         o.boxStroke ?? '', o.boxFill ?? '', o.boxOpacity ?? '',
         // Timing changes nothing on a still, but a photo+audio post renders as video where it does.
         o.startS ?? '', o.endS ?? '',
+        // How it arrives. Omitted, two siblings differing only in their animation would fingerprint
+        // as identical and share one render — so one of them would publish the other's motion.
+        o.anim ?? '',
     ].join('\u001f'));
     // Order matters — overlays paint in array order, so a reorder can change what covers what.
     const src = parts.join('\u001e');
@@ -231,6 +236,267 @@ export async function resolveAudioTracks(
 
 const AUDIO_URL_TTL_SEC = 3600;
 
+/** One clip of the timeline, resolved to something Lambda can fetch. */
+export interface ResolvedClip {
+    id: string;
+    /** The content_assets row this clip came from. Stable, unlike the presigned src. */
+    assetId: number;
+    src: string;
+    /** Seconds into the source. Absent = the clip's own edge; the composition clamps both to the file. */
+    inS?: number;
+    outS?: number;
+    /** 0..1 on the clip's own camera audio. Absent = leave it alone (the composition plays it at 1). */
+    gain?: number;
+}
+
+/**
+ * The post's timeline, in order, as fetchable clips.
+ *
+ * ── Why this replaces "the base clip" ───────────────────────────────────────────────────────────
+ * resolveOverlayVideoBase answers "which single asset is this post's video", which was the only
+ * question worth asking while a post had one. It still answers it — the overlay base PIN depends on
+ * it, and a photo+audio render has no timeline at all — but it is no longer what gets rendered.
+ * The edit list is, when there is one.
+ *
+ * Falling back to `[base]` when the post has no edit is what keeps every existing post rendering
+ * exactly as before: one clip, no trim, same output. A post that has never been edited must not
+ * notice that this pipeline grew a timeline.
+ *
+ * ── The org scope is not redundant ──────────────────────────────────────────────────────────────
+ * save-post-video-edit already checked ownership, but the renderer runs with full R2 credentials and
+ * no tenant context, so this is the last place a cross-tenant asset id can be stopped before its
+ * bytes are fetched and published on someone else's account. Same reasoning as resolveAudioTracks.
+ *
+ * A clip whose asset has vanished is DROPPED, not fatal — losing one segment of a reel beats losing
+ * the post. If every clip is gone the caller falls back to the base, and if that is gone too the
+ * render fails loudly, which is correct: there is nothing to render.
+ */
+export async function resolveEditClips(
+    db: Db,
+    args: { videoEdit: unknown; orgId: number; base: VideoBase; hasTimelineAudio: boolean },
+    presign: (key: string, ttl: number) => Promise<string>,
+): Promise<ResolvedClip[]> {
+    const { videoEdit, orgId, base, hasTimelineAudio } = args;
+
+    const srcFor = async (storageKey: string | null, externalUrl: string | null): Promise<string | null> => {
+        if (storageKey) { try { return await presign(storageKey, SOURCE_URL_TTL_SEC); } catch { /* fall through */ } }
+        return externalUrl ?? null;
+    };
+
+    const clips = base.kind === 'video' ? renderableClips(videoEdit) : [];
+    if (clips.length) {
+        const ids = [...new Set(clips.map(c => c.assetId))];
+        const rows = await db
+            .select({ id: contentAssets.id, assetType: contentAssets.assetType, storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl })
+            .from(contentAssets)
+            .where(and(inArray(contentAssets.id, ids), eq(contentAssets.organisationId, orgId)));
+        const byId = new Map(rows.filter(r => (r.assetType ?? '').toLowerCase() === 'video').map(r => [r.id, r]));
+
+        const out: ResolvedClip[] = [];
+        for (const clip of clips) {
+            const asset = byId.get(clip.assetId);
+            if (!asset) continue;
+            const src = await srcFor(asset.storageKey, asset.externalUrl);
+            if (!src) continue;
+            // The trim is resolved with no known duration on purpose: content_assets stores none, so
+            // the real length is measured inside the render and the bounds clamped there.
+            const trim = resolveTrim(clip, null);
+            const gain = resolveClipGain(clip, hasTimelineAudio);
+            out.push({
+                id: clip.id,
+                assetId: clip.assetId,
+                src,
+                ...(trim?.inS ? { inS: trim.inS } : {}),
+                ...(trim?.outS != null ? { outS: trim.outS } : {}),
+                ...(gain != null ? { gain } : {}),
+            });
+        }
+        if (out.length) return out;
+    }
+
+    // No edit, or nothing in it survived: render the post's own media, whole — and at its own
+    // volume. The mute-under-audio default deliberately does NOT reach here: an ordinary video with
+    // a voice note over it has played both since the day sound shipped, and re-mixing it on the next
+    // render would be a silent change to a post nobody edited.
+    const src = await srcFor(base.storageKey, base.externalUrl);
+    return src ? [{ id: `base-${base.assetId}`, assetId: base.assetId, src }] : [];
+}
+
+const SOURCE_URL_TTL_SEC = 3600;
+
+/**
+ * Read a post's edit list WITHOUT naming the column in the caller's main select.
+ *
+ * `db.select({...})` lists every column it wants, so one missing column takes the whole query down —
+ * and `video_edit` reaches production behind whatever deploy carries the code. Selecting it inline
+ * would mean the code and the migration have to land in a fixed order, and getting that order wrong
+ * does not degrade gracefully: every video post throws on both the trigger and the worker, and (once
+ * the review queue reads it too) the queue renders empty.
+ *
+ * So it is read on its own and the failure is swallowed, exactly as get-social-drafts already does
+ * for audio_overlays: an environment without the column behaves as though no post has been edited,
+ * which is precisely how it behaved before the feature existed. The warning is there so a genuinely
+ * broken environment is still findable in the logs rather than merely quiet.
+ */
+export async function readPostVideoEdit(db: Db, postId: number, orgId: number): Promise<unknown> {
+    try {
+        const [row] = await db
+            .select({ videoEdit: scheduledPosts.videoEdit })
+            .from(scheduledPosts)
+            .where(and(eq(scheduledPosts.id, postId), eq(scheduledPosts.organisationId, orgId)))
+            .limit(1);
+        return row?.videoEdit ?? null;
+    } catch (err) {
+        console.warn('[post-render] video_edit unavailable — treating post as unedited:', err instanceof Error ? err.message : err);
+        return null;
+    }
+}
+
+/** The post fields the render plan is derived from. Select exactly these at both ends. */
+export interface RenderPlanRow {
+    id: number;
+    platform: string | null;
+    formatKey: string | null;
+    imageOverlays: unknown;
+    audioOverlays: unknown;
+    videoEdit: unknown;
+}
+
+export interface RenderPlan {
+    /** The ratio this post renders at. Null = inherit the source clip's own frame, as before. */
+    targetRatio: string | null;
+    /** Where the picture sits when the re-frame crops it. Null = centred / nothing overflows. */
+    framePosition: { offsetX: number; offsetY: number } | null;
+    /** True when this row is a re-frame of the master rather than the master itself. */
+    reframed: boolean;
+    fingerprint: string;
+}
+
+/**
+ * The ratio the MASTER is cut to, or null when this post has no cut of its own.
+ *
+ * Null is the important case and it is not the same as "9:16": a post nobody has edited renders from
+ * its single clip at that clip's own size, exactly as it did before any of this. Only an edit gives
+ * the piece a frame of its own — and only a piece with a frame can be re-framed for a platform.
+ *
+ * Exported because the review queue asks the same question to draw the crop preview, and two answers
+ * to "what shape is this post" would put the preview and the render out of step.
+ */
+export function masterRatioFor(videoEdit: unknown): string | null {
+    const clips = renderableClips(videoEdit);
+    if (!clips.length) return null;
+    return readVideoEdit(videoEdit)?.targetRatio ?? (clips.length > 1 ? DEFAULT_TARGET_RATIO : null);
+}
+
+/**
+ * What THIS post row should render, and what its output will look like.
+ *
+ * Called by the trigger (to decide whether a sibling is already rendering the same thing) and by the
+ * worker (to build the render, and to decide who else may have its output). One function, because
+ * two paths deriving render input independently is exactly what produced the silently un-gated Short
+ * — see the comment block in trigger-post-render.ts.
+ *
+ * The master ratio only exists where there IS an edit. A post nobody has edited renders from its own
+ * single clip at that clip's own size, exactly as it did before any of this — which is also why an
+ * unedited post never re-frames: there is no master to re-frame, only someone's original video.
+ */
+export function renderPlanFor(post: RenderPlanRow, base: VideoBase, hasTimelineAudio: boolean): RenderPlan {
+    const edit = readVideoEdit(post.videoEdit);
+    const master = masterRatioFor(post.videoEdit);
+
+    const reframe = master && post.platform
+        ? reframeRatioFor(post.platform, post.formatKey, master)
+        : null;
+
+    const targetRatio = reframe ?? master;
+    // Framing only means something where the picture actually overflows the frame, which is only on
+    // a re-framed row. Carrying the offset onto the master too would put it in the fingerprint and
+    // split siblings that render identical files.
+    const framePosition = reframe && post.platform ? (edit?.frames?.[post.platform] ?? null) : null;
+
+    return {
+        targetRatio,
+        framePosition,
+        reframed: reframe != null,
+        fingerprint: renderFingerprint({
+            videoEdit: post.videoEdit,
+            baseAssetId: base.assetId,
+            hasTimelineAudio,
+            imageOverlays: post.imageOverlays,
+            audioOverlays: post.audioOverlays,
+            targetRatio,
+            framePosition,
+        }),
+    };
+}
+
+/** Everything about a post that decides what its rendered file looks like. Ids, never URLs. */
+export interface RenderIdentity {
+    videoEdit: unknown;
+    baseAssetId: number;
+    hasTimelineAudio: boolean;
+    imageOverlays: unknown;
+    audioOverlays: unknown;
+    /** The ratio THIS post renders at — the master, or its platform's re-frame of it. */
+    targetRatio?: string | null;
+    framePosition?: { offsetX: number; offsetY: number } | null;
+}
+
+/**
+ * A fingerprint of the file a render would produce.
+ *
+ * ── What it is for ──────────────────────────────────────────────────────────────────────────────
+ * A cross-post is one edit across up to six platform rows, and four of them want the identical 9:16
+ * file. Rendering it four times would ask for four times the Lambda budget we have — the account
+ * cap is 10 concurrent and one render already spends up to 8 — so identical siblings must share one
+ * render. This is how "identical" is decided.
+ *
+ * ── Why it hashes the whole input rather than a chosen subset ───────────────────────────────────
+ * The dangerous version of this feature is one that shares a render between two posts that are NOT
+ * identical: sibling B publishes with sibling A's text burned into it, and nothing anywhere reports
+ * a problem. Text overlays are per-post by design (save-post-overlays defaults applyToGroup false),
+ * so that divergence is normal, not exotic. Hashing everything that reaches the composition — and
+ * only things that reach it — makes "same fingerprint" mean "same output" by construction, instead
+ * of by a judgement about which fields matter that would be wrong the moment a field is added.
+ *
+ * Asset IDS, never the presigned URLs: those carry a signature and an expiry, so two renders of the
+ * same file would never agree.
+ */
+export function renderFingerprint(identity: RenderIdentity): string {
+    const clips = renderableClips(identity.videoEdit);
+    const clipKey = clips.length
+        ? clips.map(c => {
+            const trim = resolveTrim(c, null);
+            const gain = resolveClipGain(c, identity.hasTimelineAudio);
+            return [c.assetId, trim?.inS ?? '', trim?.outS ?? '', gain ?? ''].join(',');
+        }).join('|')
+        // No edit: the post renders its own single asset, whole and at its own volume.
+        : `base:${identity.baseAssetId}`;
+
+    const audioKey = renderableAudio(identity.audioOverlays)
+        .map(a => [a.assetId, a.startS ?? '', a.endS ?? '', a.volume, a.fadeInS ?? '', a.fadeOutS ?? ''].join(','))
+        .join('|');
+
+    const frame = identity.framePosition
+        ? `${identity.framePosition.offsetX},${identity.framePosition.offsetY}`
+        : '';
+
+    const src = [
+        clipKey,
+        identity.targetRatio ?? '',
+        frame,
+        overlaysFingerprint(identity.imageOverlays),
+        audioKey,
+    ].join('\u001e');
+
+    // Same cheap stable hash as overlaysFingerprint — this only has to detect DIFFERENCE, and it is
+    // only ever compared against a value this function produced.
+    let h = 0;
+    for (let i = 0; i < src.length; i++) { h = (Math.imul(31, h) + src.charCodeAt(i)) | 0; }
+    return `v1:${(h >>> 0).toString(36)}`;
+}
+
+
 // Frame metadata for the composition. Defaults exist because none of it is guaranteed: content_assets
 // stores width/height only for some providers and never a duration, and the client's numbers come off
 // a <video> element that may not have finished loading metadata. A wrong-but-sane frame gives a
@@ -251,11 +517,35 @@ export interface FrameMeta { width: number; height: number; fps: number; duratio
  * worker's "no overlays, nothing to do" bail-out is correct for every other caller and fatal for
  * this one, so the reason has to travel with the job rather than be re-derived from the post.
  */
-export interface RenderJobInput extends FrameMeta { forceVideo?: boolean }
+export interface RenderJobInput extends FrameMeta {
+    forceVideo?: boolean;
+    /** The ratio this job renders at — the master, or this platform's re-frame of it. */
+    targetRatio?: string;
+    /**
+     * What this job's output will look like (renderFingerprint). Recorded so a sibling that wants
+     * the identical file can wait for this job instead of starting a second, and so the worker can
+     * re-check before handing its output to anyone else.
+     */
+    fingerprint?: string;
+}
 
 /** True when this job must produce a video even with nothing to burn in. Defensive: old rows have no flag. */
 export function readForceVideo(raw: unknown): boolean {
     return !!(raw && typeof raw === 'object' && (raw as Record<string, unknown>).forceVideo === true);
+}
+
+/** A job's stored fingerprint, or null on a row written before this field existed. */
+export function readFingerprint(raw: unknown): string | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const v = (raw as Record<string, unknown>).fingerprint;
+    return typeof v === 'string' && v ? v : null;
+}
+
+/** A job's stored target ratio, or null. */
+export function readTargetRatio(raw: unknown): string | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const v = (raw as Record<string, unknown>).targetRatio;
+    return typeof v === 'string' && v ? v : null;
 }
 
 // Even dimensions only: h264 chroma subsampling requires them, and an odd width fails the encode at

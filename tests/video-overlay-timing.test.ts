@@ -92,12 +92,15 @@ check('an unreadable clip is never given an invented length', () => {
     // and the Start/End controls must both gate on the KNOWN one, or they hand back the guess.
     const known = extract('function _rqVideoDurationKnown() {');
     assert.match(known, /:\s*0;/, 'unknown must be 0, not a plausible default');
-    const timeline = extract('function _rqRenderTimeline(post) {');
+    // The timed rows moved into the clip list; _rqTimelineParts is what builds them now.
+    const timeline = extract('function _rqTimelineParts(post) {');
     assert.match(timeline, /isVideo && !_rqVideoDurationKnown\(\)/,
         'the timeline must refuse to draw a draggable axis it cannot measure');
-    const timing = extract('function _pceRefreshOverlayTiming() {');
-    assert.match(timing, /!_rqVideoDurationKnown\(\)/,
-        'the Start/End inputs are the other way to write seconds against a phantom axis');
+    // The Start/End inputs moved onto the rows, and a row only exists inside a block _rqTimelineParts
+    // built — which is the check above. There is no second place left to type a phantom second.
+    const ws = readFileSync(path.join(import.meta.dirname, '..', 'workspace.html'), 'utf8');
+    assert.strictEqual(ws.indexOf('insp-overlay-start'), -1,
+        'a second way to type seconds is back, and it needs the same guard');
 });
 
 check('reconciling runs on both metadata paths', () => {

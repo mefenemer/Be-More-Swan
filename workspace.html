@@ -26,6 +26,11 @@
        Installing this is what unlocks Web Push on iOS. -->
   <link rel="manifest" href="/manifest.webmanifest">
   <meta name="theme-color" content="#0f172a">
+  <!-- Both, deliberately. Chrome deprecated the apple- prefixed one and logs a console warning,
+       but iOS Safari has never read the unprefixed name — dropping the old one would quietly stop
+       the app opening full-screen when someone adds it to their home screen on an iPhone, which is
+       the only platform the tag was ever for. Two lines silences the warning and keeps iOS working. -->
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Be More Swan">
   <!-- Registers /sw.js and keeps this browser's push subscription in sync. Not deferred behind
@@ -449,15 +454,15 @@ window.showComplianceModals = function showComplianceModals(force) {
           <span>Upload</span>
         </button>
         <input type="file" id="gp-ai-upload-input" multiple class="hidden" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm" onchange="gpAiUploadSelected(event)">
-        <button type="button" onclick="gpAiBrowseCanva()" class="px-2.5 py-1 text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer flex items-center gap-1">
+        <button type="button" id="gp-ai-src-canva" onclick="gpAiBrowseCanva()" class="px-2.5 py-1 text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer flex items-center gap-1">
           <span>🎨</span>
           <span>Canva</span>
         </button>
-        <button type="button" onclick="gpAiFind()" class="px-2.5 py-1 text-xs font-semibold border border-sky-300 text-sky-700 hover:bg-sky-50 rounded-lg transition cursor-pointer flex items-center gap-1">
+        <button type="button" id="gp-ai-src-pexels" onclick="gpAiFind()" class="px-2.5 py-1 text-xs font-semibold border border-sky-300 text-sky-700 hover:bg-sky-50 rounded-lg transition cursor-pointer flex items-center gap-1">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
           <span id="gp-ai-find-label">Find a photo</span>
         </button>
-        <button type="button" onclick="gpAiGenerate()" class="px-2.5 py-1 text-xs font-semibold border border-violet-300 text-violet-700 hover:bg-violet-50 rounded-lg transition cursor-pointer flex items-center gap-1">
+        <button type="button" id="gp-ai-src-ai" onclick="gpAiGenerate()" class="px-2.5 py-1 text-xs font-semibold border border-violet-300 text-violet-700 hover:bg-violet-50 rounded-lg transition cursor-pointer flex items-center gap-1">
           <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
           <span id="gp-ai-gen-label">Generate with AI</span>
         </button>
@@ -498,9 +503,29 @@ window.showComplianceModals = function showComplianceModals(force) {
         <p class="text-[11px] text-gray-400 mt-1">Leave blank to search on the post's own topic.</p>
       </div>
       <!-- Library picker (shown after "Use my own") — already-uploaded content-assets -->
+      <!-- Asked BEFORE a search or a generation: both cost time (and credits), and there is no undo
+           once the result has landed on the post. -->
+      <div id="gp-ai-intent" class="hidden mt-2 rounded-xl border border-gray-200 bg-gray-50 p-3">
+        <p class="text-xs font-bold text-gray-700">Add to this video, or replace it?</p>
+        <p class="text-[11px] text-gray-500 mt-0.5"><span id="gp-ai-intent-label">This</span> can join onto the end of your current video, or take its place.</p>
+        <div class="flex gap-2 mt-2">
+          <button type="button" onclick="window._pceIntentChoose('add')"
+            class="flex-1 rounded-lg border border-emerald-300 bg-white px-2 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Add as another clip</button>
+          <button type="button" onclick="window._pceIntentChoose('replace')"
+            class="flex-1 rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-xs font-bold text-gray-700 hover:bg-gray-50 transition cursor-pointer">Replace what's there</button>
+        </div>
+      </div>
       <div id="gp-ai-own" class="hidden mt-2 border border-gray-200 rounded-xl p-2 max-h-48 overflow-y-auto">
         <div id="gp-ai-own-grid" class="grid grid-cols-3 gap-2"></div>
         <p id="gp-ai-own-empty" class="hidden text-xs text-gray-400 text-center py-4">No matching media in your library yet.</p>
+      </div>
+      <!-- OUTSIDE the scrolling grid. Inside it, a sticky bar sat on top of the tiles it was
+           describing, and scrolled away from the selection it belonged to. -->
+      <div id="gp-ai-own-bar" class="hidden mt-2 flex gap-2">
+        <button type="button" id="gp-ai-own-add" onclick="window._pceOwnAdd()"
+          class="flex-1 rounded-lg bg-emerald-600 px-2 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 transition cursor-pointer">Add</button>
+        <button type="button" id="gp-ai-own-replace" onclick="window._pceOwnReplace()"
+          class="flex-1 rounded-lg border border-gray-300 px-2 py-1.5 text-xs font-bold text-gray-700 hover:bg-gray-50 transition cursor-pointer">Replace with this</button>
       </div>
       <!-- Stock candidate grid (shown after "Find with AI") -->
       <div id="gp-ai-pexels" class="hidden mt-2 grid grid-cols-3 gap-2"></div>
@@ -680,6 +705,17 @@ window.showComplianceModals = function showComplianceModals(force) {
     <div class="flex-1 overflow-y-auto px-5 py-4 space-y-3" style="overscroll-behavior:contain">
       <!-- The shared sourcing panel is mounted here. -->
       <div id="pce-media-modal-host"></div>
+      <!-- ── Adding a clip, rather than swapping the media ──────────────────────────────────────
+           This modal REPLACES, deliberately, and says so. But "add another video" is the question
+           people arrive here holding once a post already has one — twice in testing, from inside
+           this exact dialog — and answering it only in a panel behind the modal is answering it
+           somewhere the asker is not. Shown only where it means something: a video-only format
+           that already has a clip, i.e. the case where the next video is a second CLIP of one
+           piece rather than a different post's picture. -->
+      <!-- The "+ Add another clip instead" button lived here. It is gone: adding is now offered
+           inside each source — tick boxes in the library, several files at upload, and an explicit
+           question before a search or a generation — so a separate button that put the modal into a
+           mode was one indirection too many, and three attempts at it never became discoverable. -->
       <!-- ── The fourth source, and the reason this modal offers it ─────────────────────────────
            A branded card is a way of having no photo, so "I do not have a picture" has to be able to
            end here. It is the same _pceCreateBrandCard the Post Style chooser calls — one
@@ -838,8 +874,25 @@ window.showComplianceModals = function showComplianceModals(force) {
                previews and edits THAT platform's copy; the footer's Approve/Reject act on every
                platform at once. max-w-md so it sits directly over the post card it labels.
                Built by _rqReviewRenderTabs. -->
-          <div id="post-review-tabs" class="hidden max-w-md mx-auto mb-2"></div>
-          <div id="post-review-body"></div>
+          <!-- ⚠️ NOT sticky. The canvas was stuck to the top of the scroller so the timeline could
+               scroll under it, and that was wrong in two ways at once: the pane is taller than the
+               space it was given, so the content did not scroll UNDER it so much as BEHIND it; and
+               a sticky box with a background and a z-index covers whatever passes below, which ate
+               the clicks on the buttons at the top of the clip list. "Perhaps there is a hidden
+               overlay stopping the click" — there was, and I had put it there.
+               Seeing the picture and the timeline at once is a LAYOUT problem, not a scroll trick:
+               they need to be side by side, which needs a wider modal than 4xl. -->
+          <!-- ── Two columns on a video post, one on everything else ──────────────────────────
+               Every control in the clip list changes something you can only judge by looking at the
+               canvas, so on a cut the two have to be on screen together. _pceApplyStageSplit turns
+               this row into a flex pair (canvas | clip list) and back, and it only ever splits when
+               the post is a video AND the window is at least 1024px wide. -->
+          <div id="pce-stage-row">
+            <div id="pce-stage-media">
+              <div id="post-review-tabs" class="hidden max-w-md mx-auto mb-2"></div>
+              <div id="post-review-body"></div>
+            </div>
+            <div id="pce-stage-side">
           <!-- The canvas's own picker — opened by the empty media frame and nothing else. Multiple
                and both kinds, because "add media" on a blank post means one image, several images,
                or a video, and which of those it is decides the post's format (_pceCanvasAttachFiles). -->
@@ -898,10 +951,22 @@ window.showComplianceModals = function showComplianceModals(force) {
               <div id="pce-layer-list" class="space-y-0.5"></div>
             </div>
 
-            <!-- One track per timed thing — text on video (pink), sound (indigo) — over a shared
-                 0→duration axis with a playhead. Drag an end to re-time it, drag the body to move
-                 it. Filled by _rqRenderTimeline; hidden when nothing on this post has timing. -->
-            <div id="post-review-timeline" class="hidden px-2.5 pb-2"></div>
+            <!-- The cut: every clip in order, with its in/out points. Sits ABOVE the timeline
+                 because it decides how long the piece is — the timeline's axis is the result of
+                 this list, not something alongside it. Filled by _pceRenderClips; hidden unless the
+                 post has video to assemble. -->
+            <div id="pce-clips-block" class="hidden px-2.5 pb-2"></div>
+
+            <!-- What this platform keeps. Only rendered where the master has to be re-framed
+                 (Facebook's feed and Threads today); the other four publish it unchanged. Filled by
+                 _pceRenderCropFrame, dragged via _pceBindCropFrame. -->
+            <div id="pce-crop-block" class="hidden px-2.5 pb-2"></div>
+
+            <!-- The timed tracks — text on video (pink), sound (indigo) — used to be a panel of
+                 their own here, under the clips. They are now drawn INSIDE #pce-clips-block, each
+                 one under the clip it sits on, because two panels each enumerating the same four
+                 clips left the reader to join them up by name. Built by _rqTimelineParts, placed by
+                 _pceRenderClips, dragged via _rqBindTimeline — which binds to the clip block. -->
 
             <!-- Timing for whatever is selected, immediately under its own track. Exactly one of
                  these is ever visible — _pceRefreshStageTiming enforces that, since each panel only
@@ -909,23 +974,16 @@ window.showComplianceModals = function showComplianceModals(force) {
                  on screen pointing at something you are no longer editing. -->
             <div id="pce-stage-timing" class="border-t border-gray-100 px-2.5 py-2 hidden">
 
-              <!-- Text on video: when this box is on screen. -->
-              <div id="insp-overlay-timing" class="hidden">
-                <p class="text-[11px] font-bold text-gray-600 mb-2 truncate">When: <span id="insp-overlay-timing-label" class="font-semibold text-gray-500"></span></p>
-                <div class="grid grid-cols-2 gap-2">
-                  <label class="block">
-                    <span class="block text-[10px] font-bold text-gray-500 mb-0.5">Start (s)</span>
-                    <input id="insp-overlay-start" type="number" min="0" step="0.1"
-                      class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-600">
-                  </label>
-                  <label class="block">
-                    <span class="block text-[10px] font-bold text-gray-500 mb-0.5">End (s)</span>
-                    <input id="insp-overlay-end" type="number" min="0" step="0.1"
-                      class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-600">
-                  </label>
-                </div>
-                <p class="text-[10px] text-gray-400 mt-1.5">Leave a field blank for the whole clip. Or drag the ends on the track above.</p>
-              </div>
+              <!-- Text on video used to have a "When" panel here: which clip (chips), a
+                   clip-relative scrub, and Start/End boxes. All three are gone.
+                     · the chips are the drag-and-drop onto another clip's row
+                     · the scrub is the text bar itself, which now shares its clip's axis
+                     · Start/End sit on the row they belong to, beside the bar they describe
+                   Keeping a second copy of each control under the canvas meant two places to look,
+                   two places to disagree, and it was the copy that had the clip-jumping bug. Sound
+                   keeps its panel: it is not a per-clip thing and has no row of its own to live on.
+                   _pceRefreshOverlayTiming survives as the hook every caller already has; it now
+                   just keeps the container's visibility honest. -->
 
               <!-- Sound: when this clip plays, and how loud. -->
               <div id="insp-audio-timing" class="hidden">
@@ -949,6 +1007,8 @@ window.showComplianceModals = function showComplianceModals(force) {
                 <p class="text-[10px] text-gray-400 mt-1.5">Leave both times blank to play across the whole post. Or drag the clip on the track above.</p>
               </div>
 
+            </div>
+          </div>
             </div>
           </div>
             <!-- Quality review (The Quality Reviewer, plan-gated). This panel existed ONLY in the
@@ -6299,19 +6359,61 @@ function _rqOverlayVisibleAt(ov, t) {
     return t >= start && t < end;
 }
 
+/**
+ * Fade / Rise / Pop, on the canvas — the same maths the render uses.
+ *
+ * ⚠️ Picking one of these used to change nothing you could see until the video came back from
+ * Lambda. Three options that appear to do nothing are worse than not offering them at all.
+ *
+ * window.OverlayAnims is GENERATED from src/lib/overlay-geometry.ts, and
+ * tests/overlay-anim-client.test.ts compares the two across every animation, every frame of several
+ * windows and five frame rates. Two hand-written copies of one formula is the setup that gave us
+ * the font divergence — a preview that was approved and a video that was not the one approved.
+ *
+ * ⚠️ The centring transform is REPLACED, not added to, by an inline style: .ioe-ov is placed with
+ * transform:translate(-50%,-50%) from the stylesheet, so writing a bare scale() here would move
+ * every animated box half its own size up and to the left. It is composed back in every time.
+ */
+const _RQ_ANIM_FPS = 30;
+function _rqApplyOverlayAnim(node, ov, t, cutDur, visible) {
+    const anims = window.OverlayAnims;
+    const kind = anims && ov ? anims.read(ov.anim) : 'none';
+    if (!visible || kind === 'none') {
+        node.style.opacity = '';
+        node.style.transform = '';
+        return;
+    }
+    const start = ov.startS == null ? 0 : ov.startS;
+    const end = ov.endS == null ? (cutDur || start) : ov.endS;
+    const frames = Math.max(1, Math.round((end - start) * _RQ_ANIM_FPS));
+    const frame = Math.round((t - start) * _RQ_ANIM_FPS);
+    const a = anims.at(kind, frame, frames, _RQ_ANIM_FPS);
+    node.style.opacity = String(a.opacity);
+    node.style.transform = a.transform === 'none'
+        ? 'translate(-50%,-50%)'
+        : 'translate(-50%,-50%) ' + a.transform;
+}
+
 // Show/hide the painted overlay nodes for the video's current time, without repainting (cheap enough
 // to run on every timeupdate). Also nudges the timeline playhead.
 function _rqApplyOverlayTimes(video, layer, post) {
-    const t = video.currentTime || 0;
+    // The cut's clock, not the element's: while previewing, the element is part-way through clip
+    // three and its currentTime says so, but a text box was timed against the finished video.
+    const t = _pceCutTime(video);
+    const cutDur = _pceCutDuration(video, post);
     const byId = {};
     for (const o of (post && post.overlays) || []) if (o && o.id) byId[o.id] = o;
     for (const n of layer.querySelectorAll('.ioe-ov')) {
         const ov = byId[n.dataset.id];
-        n.style.display = ov && !_rqOverlayVisibleAt(ov, t) ? 'none' : '';
+        const on = !ov || _rqOverlayVisibleAt(ov, t);
+        n.style.display = on ? '' : 'none';
+        _rqApplyOverlayAnim(n, ov, t, cutDur, on);
     }
-    const head = document.querySelector('#post-review-timeline [data-playhead]');
-    const dur = video.duration;
-    if (head && dur && isFinite(dur)) head.style.left = (Math.min(1, t / dur) * 100) + '%';
+    // One playhead per timed block, each placed in ITS OWN axis — a clip's rows run 0→that clip's
+    // length, so a single percentage of the whole cut would point at the wrong moment everywhere
+    // but the first block.
+    const dur = _pceCutDuration(video, post);
+    if (dur && isFinite(dur)) _rqPaintPlayheads(t, dur);
 }
 
 // Paint a post's saved text overlays as a live layer on the mock-up canvas, and (for video) drive the
@@ -6351,7 +6453,14 @@ function _rqRenderCanvasOverlays(post) {
         // on BOTH paths, before the timeline is drawn against it.
         if (!media.videoHeight) {
             media.addEventListener('loadedmetadata', () => {
-                _rqReconcileOverlayTimes(_rqPostCache[_rqReviewPostId] || post, media.duration);
+                // The CUT's length, not the canvas clip's. On a four-clip post the canvas shows clip one, so
+                // passing media.duration here pulled every box timed onto clips two-to-four back into
+                // the first and told the reviewer they had overrun — destroying exactly the work this
+                // guard exists to protect.
+                _rqReconcileOverlayTimes(
+                    _rqPostCache[_rqReviewPostId] || post,
+                    _pceClipsTotalS(_rqPostCache[_rqReviewPostId] || post) ?? media.duration,
+                );
                 paint();
                 _rqRenderTimeline(post);
                 // The Start/End controls hide themselves while the length is unknown, so they have to
@@ -6360,7 +6469,14 @@ function _rqRenderCanvasOverlays(post) {
                 _pceRefreshOverlayTiming();
             }, { once: true });
         } else {
-            _rqReconcileOverlayTimes(_rqPostCache[_rqReviewPostId] || post, media.duration);
+            // The CUT's length, not the canvas clip's. On a four-clip post the canvas shows clip one, so
+                // passing media.duration here pulled every box timed onto clips two-to-four back into
+                // the first and told the reviewer they had overrun — destroying exactly the work this
+                // guard exists to protect.
+                _rqReconcileOverlayTimes(
+                    _rqPostCache[_rqReviewPostId] || post,
+                    _pceClipsTotalS(_rqPostCache[_rqReviewPostId] || post) ?? media.duration,
+                );
         }
         // Bind the time toggle once per media element (elements are fresh on each mock-up render).
         if (!media._rqTimed) {
@@ -6368,6 +6484,14 @@ function _rqRenderCanvasOverlays(post) {
             media.addEventListener('timeupdate', () => {
                 _rqApplyOverlayTimes(media, layer, _rqPostCache[_rqReviewPostId] || post);
                 _pceSyncAudioPreview(media);
+                _pcePreviewTick(media);
+            });
+            // Pressing play on the canvas means "show me the post", and on a cut the post is all of
+            // the clips. Without this the native control played clip one and stopped, which is a
+            // perfectly reasonable thing for a <video> to do and the wrong answer to the question.
+            media.addEventListener('play', () => {
+                if (_pcePrev.starting || _pcePrev.on) return;
+                if (_pceClips(_rqPostCache[_rqReviewPostId] || post).length > 1) window._pcePreviewStart();
             });
             // Sound has to follow the transport, not just the clock: without these a paused video
             // keeps talking, and a scrub leaves the voice note where it was.
@@ -6378,6 +6502,11 @@ function _rqRenderCanvasOverlays(post) {
     }
     // The timeline is no longer video-only: a still with a voice note has a length and a clip to
     // place on it. _rqRenderTimeline decides what rows there are (text is timed on video only).
+    //
+    // Clips first: the cut decides how long the piece is, so the timeline's axis is downstream of it.
+    _pceRenderClips();
+    _pceRenderCropFrame();
+    _pceBindCropFrame();
     _rqRenderTimeline(post);
     _rqBindTimeline();
     // One resize listener for the modal's lifetime; it always repaints the post on screen now.
@@ -6390,9 +6519,9 @@ function _rqRenderCanvasOverlays(post) {
     }
 }
 
+/** No overlay layer means nothing timed can be drawn — repaint the list so its rows go with it. */
 function _rqHideTimeline() {
-    const el = document.getElementById('post-review-timeline');
-    if (el) { el.classList.add('hidden'); el.innerHTML = ''; }
+    _pceRenderClips();
 }
 
 // The clip's REAL length, or 0 when the browser has not read it yet (metadata still loading, or the
@@ -6442,7 +6571,10 @@ function _rqReconcileOverlayTimes(post, dur) {
     if (!moved) return;
     _rqPersistOverlays(post.id);
     _pceSetOverlayMsg(
-        `This clip is ${Math.round(dur * 10) / 10}s long — ${moved} text box${moved > 1 ? 'es were' : ' was'} timed past the end and has been pulled back into it. Check the timeline.`,
+        // Read off the post itself, not via _pceClips: this function is exercised in isolation by
+        // tests/video-overlay-timing.test.ts, and reaching for a page-wide helper here made a pure
+        // piece of logic depend on the whole editor being present.
+        `${(post.videoEdit?.clips?.length || 0) > 1 ? 'This cut is' : 'This clip is'} ${Math.round(dur * 10) / 10}s long — ${moved} text box${moved > 1 ? 'es were' : ' was'} timed past the end and has been pulled back into it. Check the timeline.`,
         'error',
     );
 }
@@ -6456,8 +6588,16 @@ function _rqReconcileOverlayTimes(post, dur) {
 function _rqTimelineDuration(post) {
     post = post || (_rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null);
     const hasVideo = !!document.querySelector('#post-review-body [data-media-video]');
-    // A still contributes no length of its own — start from zero and let the audio set it.
-    let dur = hasVideo ? _rqVideoDuration() : 0;
+    // ── The CUT decides the axis, not the clip on the canvas ────────────────────────────────────
+    // The canvas shows the post's base asset — clip one. Once a post is a cut of four clips the
+    // published video is their trimmed total, so measuring the <video> element gave an axis the
+    // length of the FIRST clip and text could only ever be timed onto that one. The other three
+    // were unreachable: not disabled, not explained, simply off the end of the ruler.
+    //
+    // _pceClipsTotalS is null while the clips are still being measured, and while it is, the old
+    // behaviour is exactly right — one clip, its own length.
+    const cut = typeof _pceClipsTotalS === 'function' ? _pceClipsTotalS(post) : null;
+    let dur = cut != null ? cut : (hasVideo ? _rqVideoDuration() : 0);
     for (const a of _pceAudioClips(post)) {
         const start = a.startS == null ? 0 : a.startS;
         // A bounded clip states its own end; an unbounded one runs for its natural length, which we
@@ -6485,81 +6625,1333 @@ const _RQ_TL_COLOURS = {
     text:  { on: '#ec4899', off: '#f9a8d4', edge: 'rgba(157,23,77,.6)' },
     audio: { on: '#6366f1', off: '#a5b4fc', edge: 'rgba(55,48,163,.6)' },
 };
-function _rqRenderTimeline(post) {
-    const host = document.getElementById('post-review-timeline');
-    if (!host) return;
+/**
+ * The timed rows — text and sound — built but NOT placed.
+ *
+ * ⚠️ This used to render a "Timeline" panel of its own, under the Clips panel. Both panels then
+ * listed the same four clips: once as things you can trim, once as headings over their text. The
+ * reader had to join the two by name. They are now ONE list — each clip, its trim slider, then the
+ * text that sits on it — so this returns the pieces and _pceRenderClips decides where they go.
+ *
+ * Every bar is still positioned against the WHOLE cut, not against its own clip. That is what makes
+ * it a timeline: one axis, one playhead, and a bar that runs past its clip's end LOOKS like it runs
+ * past it. Each row states both readings in words underneath.
+ */
+function _rqTimelineParts(post) {
+    const none = { any: false, note: '', dur: 0, byClip: [], orphans: '', audio: '' };
     const isVideo = !!document.querySelector('#post-review-body [data-media-video]');
     const overlays = isVideo ? ((post && post.overlays) || []) : [];
-    const clips = _pceAudioClips(post);
-    if (!overlays.length && !clips.length) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+    const audioClips = _pceAudioClips(post);
+    if (!overlays.length && !audioClips.length) return none;
     // A video whose length we cannot read gets NO draggable axis. Drawing one against the 15s
     // fallback is how boxes end up timed past the end of a six-second clip — invisible in the preview
     // and a single frame in the render. Say so instead: it is also the visible symptom of a media URL
     // that has stopped answering, which is worth the reviewer knowing before they approve.
     if (isVideo && !_rqVideoDurationKnown()) {
-        host.innerHTML = `<div class="pt-1">
-            <div class="flex items-center justify-between mb-1.5">
-              <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Timeline</span>
-            </div>
-            <p class="text-[11px] text-gray-500">Reading the clip's length… If this doesn't clear, the video isn't loading — reopen the post before timing your text.</p>
-          </div>`;
-        host.classList.remove('hidden');
-        return;
+        return Object.assign({}, none, { any: true,
+            note: `<p class="text-[11px] text-gray-500 px-1 py-1">Reading the clip's length… If this doesn't clear, the video isn't loading — reopen the post before timing your text.</p>` });
     }
+
     const dur = _rqTimelineDuration(post);
     const fmt = (s) => `${(Math.round(s * 10) / 10)}s`;
 
-    const row = (kind, key, label, item, selected) => {
-        const start = item.startS == null ? 0 : Math.max(0, Math.min(dur, item.startS));
-        const end = item.endS == null ? dur : Math.max(start, Math.min(dur, item.endS));
-        const leftPct = (start / dur) * 100;
-        const widthPct = Math.max(2, ((end - start) / dur) * 100);
+    // ── The axis a row is drawn against ─────────────────────────────────────────────────────────
+    // ⚠️ THIS is what "the times don't match" meant, and it was the whole bug.
+    //
+    // A text bar used to be drawn against the WHOLE CUT while the trim slider directly above it was
+    // drawn against that clip's own length. Same box on screen, same width, two completely
+    // different scales: in a four-clip cut, clip one's slider spanned 10.7 seconds and the text bar
+    // under it spanned 36.8. So a nudge of a third of the row — which looks like a third of the
+    // clip — was actually a whole clip's worth of time, and the box left the clip it was on. Making
+    // the two boxes the same WIDTH, earlier, made it worse: they then looked like one axis.
+    //
+    // Every row now carries the axis it is measured in, and a text row's is its clip's:
+    //   full   the clip's source length — exactly what the trim slider above it spans
+    //   inS/outS  the kept window inside that, which is where text can actually exist
+    //   start  the cut second that kept window begins at, for converting to and from stored times
+    // Sound keeps the whole cut (it plays across all of it), expressed in the same four numbers, so
+    // one conversion serves both and there is no second code path to drift.
+    const cutAxis = { full: dur, inS: 0, outS: dur, start: 0 };
+    const pctIn = (axis, t) => ((axis.inS + (t - axis.start)) / axis.full) * 100;
+
+    const row = (kind, key, label, item, selected, sub, axis) => {
+        const ax = axis || cutAxis;
+        const lo = ax.start;
+        const hi = ax.start + (ax.outS - ax.inS);
+        const start = item.startS == null ? lo : Math.max(lo, Math.min(hi, item.startS));
+        const end = item.endS == null ? hi : Math.max(start, Math.min(hi, item.endS));
+        const leftPct = pctIn(ax, start);
+        const widthPct = Math.max(2, pctIn(ax, end) - leftPct);
         const c = _RQ_TL_COLOURS[kind];
         const esc = _rqEsc(label);
+        // The seconds, under the row, exactly as each clip states its own. A bar without numbers is
+        // a shape — you can see that one box is later than another, but not when either happens.
+        // ── Same shape as a clip's own row, deliberately ────────────────────────────────────────
+        // The label used to sit in a 4rem column to the LEFT of the track, so a text bar started
+        // 4.5rem in while the clip slider above it started at the edge. Two bars over the same clip,
+        // on two different left margins, and the eye cannot compare them — which is the one thing a
+        // timeline is for. Name above, bar below, one box wide: it now lines up with the slider that
+        // decides how long that clip lasts.
+        const within = sub ? `<p class="mt-0.5 text-[10px] text-gray-400" style="font-variant-numeric:tabular-nums">${sub}</p>` : '';
+        // Removing a box was only possible inside the text editor — you had to open a modal, find
+        // the right box among several and delete it there. It is a layer in a list; the list deletes.
+        const del = kind === 'text'
+            ? `<button type="button" title="Remove this text" aria-label="Remove ${esc}"
+                 class="px-1 text-gray-300 hover:text-red-600 cursor-pointer leading-none"
+                 onclick="window._pceOverlayRemove('${_rqEsc(key)}')">&times;</button>`
+            : '';
+        // ── The numbers sit BESIDE the bar they describe ────────────────────────────────────────
+        // They used to be one pair of boxes under the canvas, editing whichever box happened to be
+        // selected — so refining three overlays meant selecting, scrolling, typing, scrolling back,
+        // three times. On the row, each line is refined where it is read. Stated in the clip's own
+        // seconds, matching both the bar's axis and the trim slider above it; blank means "from the
+        // start" / "to the end", which is exactly how they are stored.
+        const src = (t) => Math.round((ax.inS + (t - ax.start)) * 10) / 10;
+        const num = (edge, val, hint) => `<input type="number" step="0.1" min="0"
+            class="w-12 shrink-0 text-[10px] text-gray-600 border border-gray-200 rounded px-1 py-0.5
+                   focus:outline-none focus:border-pink-400" style="font-variant-numeric:tabular-nums"
+            title="${hint}" aria-label="${hint}" value="${val}"
+            data-tl-num="${edge}" data-tl-for="${_rqEsc(key)}" data-tl-kind="${kind}">`;
+        // An unset start IS the beginning, and an unset end IS the end; showing them empty reads as
+        // "not set yet" rather than as the value they actually have.
+        const startVal = src(start);
+        const endVal = item.endS == null ? '' : src(end);
         return `
-          <div class="flex items-center gap-2" data-tl-row="${_rqEsc(key)}">
-            <span class="w-16 shrink-0 truncate text-[10px] font-semibold text-gray-500" title="${esc}">${esc}</span>
-            <div class="relative flex-1 h-6 rounded bg-gray-100" data-tl-track>
-              <div class="absolute inset-y-0 rounded cursor-grab flex items-center justify-between"
-                   style="left:${leftPct}%;width:${widthPct}%;background:${selected ? c.on : c.off}"
-                   data-tl-seg="${_rqEsc(key)}" data-tl-kind="${kind}" title="${fmt(start)} – ${fmt(end)}">
-                <span class="w-1.5 h-full rounded-l cursor-ew-resize" style="background:${c.edge}" data-tl-edge="start"></span>
-                <span class="w-1.5 h-full rounded-r cursor-ew-resize" style="background:${c.edge}" data-tl-edge="end"></span>
-              </div>
+          <div data-tl-row="${_rqEsc(key)}">
+            <div class="flex items-center gap-1.5">
+              ${kind === 'text' ? nameInput(key, label) : `<span class="flex-1 min-w-0 truncate text-[10px] font-semibold text-gray-500" title="${esc}">${esc}</span>`}
+              ${del}
             </div>
+            <div class="flex items-center gap-1">
+              <div class="relative flex-1 min-w-0 h-6 rounded bg-gray-100" data-tl-track
+                   data-ax-full="${ax.full}" data-ax-in="${ax.inS}" data-ax-out="${ax.outS}" data-ax-start="${ax.start}">
+                <div class="absolute inset-y-0 rounded cursor-grab flex items-center justify-between"
+                     style="left:${leftPct}%;width:${widthPct}%;background:${selected ? c.on : c.off}"
+                     data-tl-seg="${_rqEsc(key)}" data-tl-kind="${kind}" title="${fmt(start)} – ${fmt(end)}">
+                  <span class="w-1.5 h-full rounded-l cursor-ew-resize" style="background:${c.edge}" data-tl-edge="start"></span>
+                  <span class="w-1.5 h-full rounded-r cursor-ew-resize" style="background:${c.edge}" data-tl-edge="end"></span>
+                </div>
+              </div>
+              ${num('start', startVal, 'Shows from, in seconds of this clip')}
+              ${num('end', endVal, 'Shows until, in seconds of this clip — blank runs to the end')}
+            </div>
+            ${within}
           </div>`;
     };
 
-    const textRows = overlays.map((ov, i) => row(
-        'text', ov.id || String(i), (ov.text || 'Text').split('\n')[0].slice(0, 22), ov,
-        !!(ov.id && ov.id === _pceSelectedOverlayId),
-    )).join('');
+    /**
+     * The wording, editable where it is read.
+     *
+     * Changing a word meant opening the text editor, finding the box among several on several clips
+     * and typing there — a modal round trip to fix a typo. The canvas repaints as you type, so the
+     * picture and the list never disagree about what it says.
+     */
+    const nameInput = (key, label) => `<input type="text" value="${_rqEsc(label)}" maxlength="500"
+        class="flex-1 min-w-0 bg-transparent text-[10px] font-semibold text-gray-600 border border-transparent
+               rounded px-1 py-0.5 hover:border-gray-200 focus:outline-none focus:border-pink-400 focus:bg-white"
+        title="Edit this text" aria-label="Text" data-tl-text="${_rqEsc(key)}">`;
+
+    const clips = _pceClips(post);
+    const spans = _pceSpansFor(clips);
+
+    /**
+     * The axis for clip `i` — the same one _pceTrimTrackHtml draws its slider against, so the two
+     * bars in a clip's block measure the same seconds and line up end to end.
+     */
+    const clipAxis = (i) => {
+        const clip = clips[i];
+        const sp = spans && spans[i];
+        if (!clip || !sp) return cutAxis;
+        const t = _pceTrimAxis(clip);
+        if (!(t.len > 0)) return cutAxis;
+        const inS = clip.inS || 0;
+        const outS = clip.outS != null ? Math.min(clip.outS, t.len) : t.len;
+        return { full: t.len, inS, outS, start: sp.start };
+    };
+
+    const textRow = (ov, i, axis) => {
+        const ax = axis || cutAxis;
+        const lo = ax.start;
+        const hi = ax.start + (ax.outS - ax.inS);
+        const start = ov.startS == null ? lo : ov.startS;
+        const end = ov.endS == null ? hi : ov.endS;
+        const sp = spans ? _pceSpanAt(spans, start) : null;
+        // Stated in the clip's OWN seconds — the same numbers the trim slider above prints — and
+        // then in the cut's, because the two answer different questions. ⚠️ A box with no end time
+        // runs to the end of the WHOLE video, not of the clip it starts on; the bar fills its clip
+        // and the words say it carries on, rather than the bar quietly claiming the whole timeline.
+        const src = (t) => ax.inS + (t - ax.start);
+        let sub;
+        if (!sp) {
+            sub = `${fmt(start)} → ${fmt(end)} · shows for ${fmt(Math.max(0, end - start))}`;
+        } else if (ov.endS == null || ov.endS > sp.end + 0.05) {
+            sub = `from ${fmt(src(start))} of clip ${sp.i + 1} and on to the end of the video`;
+        } else {
+            sub = `${fmt(src(start))} → ${fmt(src(end))} of clip ${sp.i + 1} · ${fmt(start)} → ${fmt(end)} of the whole cut`;
+        }
+        return row('text', ov.id || String(i), (ov.text || 'Text').split('\n')[0].slice(0, 22), ov,
+            !!(ov.id && ov.id === _pceSelectedOverlayId), sub, ax);
+    };
+
+    // Each box belongs to the clip its START lands in. Anything that cannot be placed — a box timed
+    // past the end after a trim, before re-anchoring catches up — comes back as an orphan rather
+    // than being silently dropped.
+    const byClip = [];
+    let orphans = '';
+    if (spans && spans.length) {
+        const placed = new Set();
+        for (const sp of spans) {
+            const ax = clipAxis(sp.i);
+            const mine = overlays.filter((ov, i) => {
+                const at = _pceSpanAt(spans, ov.startS == null ? 0 : ov.startS);
+                if (at && at.i === sp.i) { placed.add(i); return true; }
+                return false;
+            });
+            byClip[sp.i] = { html: mine.map((ov) => textRow(ov, overlays.indexOf(ov), ax)).join(''), axis: ax };
+        }
+        orphans = overlays.filter((_, i) => !placed.has(i))
+            .map((ov) => textRow(ov, overlays.indexOf(ov), cutAxis)).join('');
+    } else {
+        orphans = overlays.map((ov, i) => textRow(ov, i, cutAxis)).join('');
+    }
+
     // Drawn from the clip's EFFECTIVE range, not its stored one: an unbounded clip runs for its own
     // natural length, and drawing it across the whole axis would claim a six-second voice note covers
-    // a ten-second video.
-    const audioRows = clips.map((a, i) => row(
-        'audio', a.id || `a${i}`, _pceAudioLabel(a).slice(0, 22), _pceAudioDrawRange(a),
-        !!(a.id && a.id === _pceSelectedAudioId),
-    )).join('');
+    // a ten-second video. Sound is not per-clip — it plays over the cut — so it sits after the list.
+    const audio = audioClips.map((a, i) => {
+        const r = _pceAudioDrawRange(a);
+        const st = r.startS == null ? 0 : r.startS;
+        const en = r.endS == null ? dur : r.endS;
+        return row('audio', a.id || `a${i}`, _pceAudioLabel(a).slice(0, 22), r,
+            !!(a.id && a.id === _pceSelectedAudioId),
+            `${fmt(st)} → ${fmt(en)} of the whole cut · plays for ${fmt(Math.max(0, en - st))}`, cutAxis);
+    }).join('');
 
-    // No border or background of its own: it sits inside #pce-stage-strip, which already has both,
-    // and nesting one bordered card in another made the tracks look like a separate widget rather
-    // than part of the layer list directly above them.
-    host.innerHTML = `
-      <div class="pt-1">
-        <div class="flex items-center justify-between mb-1.5">
-          <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Timeline</span>
-          <span class="text-[10px] text-gray-400">${fmt(dur)}</span>
-        </div>
-        <div class="relative space-y-1.5" data-tl-body>
-          ${textRows}${audioRows}
-          <div class="absolute top-0 bottom-0 w-px bg-gray-800 pointer-events-none" style="left:0" data-playhead></div>
-        </div>
-      </div>`;
+    return { any: true, note: '', dur, byClip, orphans, audio, cutAxis };
+}
+
+/**
+ * A block of timed rows, with its own playhead.
+ *
+ * One playhead per block rather than one line down the whole list, because the list is not on one
+ * axis any more: a trim slider runs 0→the clip's own length, while these run 0→the whole cut. A
+ * single line crossing both would be pointing at two different moments at once. Every block shares
+ * the cut axis, so every playhead sits at the same x — it reads as one line, and is one truth.
+ */
+function _pceTimedBlock(inner, axis) {
+    if (!inner) return '';
+    // px-1 on the OUTSIDE, matching _pceTrimTrackHtml's wrapper, so a text bar and the trim slider
+    // above it are the same box. The playhead sits in an inner unpadded relative box — positioned
+    // against the padding edge it would sit 4px off the tracks it is supposed to point at.
+    //
+    // The block carries the axis its rows are drawn in, because the playhead has to be placed in
+    // that axis too: a clip's rows run 0→that clip's length, so a line placed at a fraction of the
+    // WHOLE cut would point at the wrong moment in every block but the first. It is hidden outright
+    // while the playhead is not inside this block's clip, which is the honest answer.
+    const ax = axis || null;
+    const data = ax
+        ? ` data-ax-full="${ax.full}" data-ax-in="${ax.inS}" data-ax-out="${ax.outS}" data-ax-start="${ax.start}"`
+        : '';
+    return '<div class="px-1 pb-1" data-tl-group' + data + '>'
+        + '<div class="relative space-y-1">' + inner
+        + '<div class="absolute top-0 bottom-0 w-px bg-gray-800 pointer-events-none" style="left:0;display:none" data-playhead></div>'
+        + '</div></div>';
+}
+
+/** Read the axis a track or block was drawn in. Falls back to the whole cut. */
+function _rqAxisOf(el, dur) {
+    const full = el && Number(el.getAttribute('data-ax-full'));
+    if (!(full > 0)) return { full: dur || 1, inS: 0, outS: dur || 1, start: 0 };
+    return {
+        full,
+        inS: Number(el.getAttribute('data-ax-in')) || 0,
+        outS: Number(el.getAttribute('data-ax-out')) || full,
+        start: Number(el.getAttribute('data-ax-start')) || 0,
+    };
+}
+
+/**
+ * Put every block's playhead where the given moment of the finished cut falls IN THAT BLOCK.
+ *
+ * Hidden where the moment is not inside the block's clip at all — a line drawn anyway would be
+ * claiming the video is at a point in a clip it has not reached.
+ */
+function _rqPaintPlayheads(t, dur) {
+    for (const g of document.querySelectorAll('#pce-clips-block [data-tl-group]')) {
+        const head = g.querySelector('[data-playhead]');
+        if (!head) continue;
+        const ax = _rqAxisOf(g, dur);
+        const lo = ax.start;
+        const hi = ax.start + (ax.outS - ax.inS);
+        if (!(t >= lo - 0.001 && t <= hi + 0.001)) { head.style.display = 'none'; continue; }
+        head.style.display = '';
+        head.style.left = (((ax.inS + (t - ax.start)) / ax.full) * 100) + '%';
+    }
+}
+
+/**
+ * Everything that used to repaint the timeline repaints the clip list instead — the rows live
+ * inside it now. Kept under the old name so the ~15 callers do not all have to know that.
+ */
+function _rqRenderTimeline() {
+    _pceRenderClips();
+}
+// ── The cut ─────────────────────────────────────────────────────────────────────────────────────
+// Every clip on the post, in order, with the seconds trimmed off each end. This is the ONE thing
+// that decides how long the finished video is, which is why it sits above the timeline rather than
+// as another track on it: text and audio answer "when does this happen" against a fixed axis, and a
+// clip answers "how long is the axis".
+//
+// Stored on the post as video_edit and rendered by Remotion at approval (src/lib/video-edit.ts).
+// Nothing is re-encoded here — this is a description of a cut, not the cut itself.
+const _PCE_MAX_CLIPS = 20;
+// Three minutes is where YouTube stops calling it a Short and wants a 16:9 video instead, which
+// would be a third render of the same material. The editor states the limit rather than enforcing
+// it, because the post may not be going to YouTube at all.
+const _PCE_SHORT_MAX_S = 180;
+
+// Measured clip lengths, by asset id. content_assets.duration_s is null for anything a user
+// uploaded, so the browser reads it off a <video> exactly as the audio track already does.
+const _pceClipDurations = {};
+// And its shape, by asset id — the crop preview needs the source's aspect to know which axis
+// overflows the platform's frame, and therefore which way the window can be dragged.
+const _pceClipAspect = {};
+
+/**
+ * The working cut for a post.
+ *
+ * A post that has never been edited has NO stored cut, and that is deliberately not the same as an
+ * empty one: it seeds from whatever video is attached, so uploading four clips in the composer and
+ * opening the editor shows four clips ready to trim rather than a blank panel and an instruction.
+ */
+function _pceClips(post) {
+    post = post || (_rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null);
+    if (!post) return [];
+    const stored = post.videoEdit && Array.isArray(post.videoEdit.clips) ? post.videoEdit.clips : null;
+    if (stored && stored.length) return stored;
+
+    // Seed. slides carries the resolved list for a multi-attachment post; a single attachment has no
+    // slides, so its one id is paired with the thumbnail the canvas is already showing.
+    const slides = Array.isArray(post.slides) ? post.slides.filter((x) => x && x.kind === 'video') : [];
+    if (slides.length) {
+        return slides.map((sl, i) => ({ id: 'c' + sl.assetId + '_' + i, assetId: sl.assetId, url: sl.url, name: 'Clip ' + (i + 1) }));
+    }
+    const ids = Array.isArray(post.mediaAssetIds) ? post.mediaAssetIds : [];
+    if (ids.length === 1 && post.mediaType === 'video' && post.thumbnailUrl) {
+        return [{ id: 'c' + ids[0] + '_0', assetId: ids[0], url: post.thumbnailUrl, name: 'Clip 1' }];
+    }
+    return [];
+}
+
+/**
+ * The finished length of the cut, or null when it is not a cut or cannot be measured yet.
+ *
+ * Shared by the Clips panel's total and the timeline's axis deliberately: they are the same number,
+ * and a post whose ruler disagrees with its own clip list is one where every text box lands
+ * somewhere other than where it was dragged.
+ */
+function _pceClipsTotalS(post) {
+    const clips = _pceClips(post);
+    if (clips.length < 2) return null;   // one clip measures itself, as it always did
+    let total = 0;
+    for (const c of clips) {
+        const len = _pceClipLength(c);
+        if (len == null) return null;    // still measuring — do not publish half a ruler
+        total += len;
+    }
+    return total > 0 ? total : null;
+}
+
+/**
+ * ── Previewing the cut ──────────────────────────────────────────────────────────────────────────
+ *
+ * The canvas holds ONE <video>, showing the post's base asset, so pressing play played clip one and
+ * stopped. Everything else was already right: the text layer and the sound tracks are both synced
+ * off that element's timeupdate, and the timeline playhead with them.
+ *
+ * So the preview is not a second player. It is a CLOCK. The element is walked through the clips in
+ * order — src swapped, seeked to each clip's in point, stopped at its out point — while everything
+ * that used to ask the element "what time is it" now asks the cut instead. One transport, one set
+ * of overlays, one audio arrangement; only the answer to the question changes.
+ *
+ * Which also means a scrub, a pause and the playhead keep working with no changes of their own.
+ */
+const _pcePrev = { on: false, i: 0, offset: 0, starting: false };
+
+/**
+ * Why the preview could not start. Empty when there is nothing to say.
+ *
+ * ⚠️ Every one of these used to be a bare `return`. A button that does nothing, with no message, is
+ * indistinguishable from a broken button — and it was reported as exactly that, twice, while the
+ * code was doing precisely what it was told. Worse, the abort path runs through _pcePreviewStop,
+ * which flips the label back within the same tick, so even "it went to Stop and back" was invisible.
+ * Silence is the bug; it has been the bug in this panel three times now.
+ */
+let _pcePrevMsg = '';
+
+/**
+ * The canvas holds ONE <video> and two features now drive it — previewing a cut, and scrubbing a
+ * clip while its trim handles move. Both swap its src, so both go through here: two independent
+ * bits of src bookkeeping would race, and whichever finished last would decide what the post
+ * appeared to be attached to for the rest of the session.
+ */
+const _pceCanvasBorrowed = { src: null, on: false };
+
+function _pceCanvasBorrow() {
+    const video = _pcePreviewVideoEl();
+    if (!video || _pceCanvasBorrowed.on) return video;
+    _pceCanvasBorrowed.src = video.getAttribute('src');
+    _pceCanvasBorrowed.on = true;
+    return video;
+}
+
+function _pceCanvasRestore() {
+    const video = _pcePreviewVideoEl();
+    if (!_pceCanvasBorrowed.on) return;
+    if (video && _pceCanvasBorrowed.src) {
+        _pcePrev.starting = true;
+        video.pause();
+        video.src = _pceCanvasBorrowed.src;
+        _pcePrev.starting = false;
+    }
+    _pceCanvasBorrowed.on = false;
+    _pceCanvasBorrowed.src = null;
+}
+
+/** Show one clip, paused, at `t` seconds into its source. The frame under a trim handle. */
+async function _pceCanvasShowFrame(clip, t) {
+    const video = _pceCanvasBorrow();
+    if (!video || !clip || !clip.url) return;
+    if (video.getAttribute('src') !== clip.url) {
+        _pcePrev.starting = true;
+        video.src = clip.url;
+        await new Promise((res) => {
+            if (video.readyState >= 1) return res();
+            video.addEventListener('loadedmetadata', res, { once: true });
+            video.addEventListener('error', res, { once: true });
+        });
+        _pcePrev.starting = false;
+    }
+    video.pause();
+    try { video.currentTime = Math.max(0, t); } catch { /* not seekable yet */ }
+}
+
+/** True while the canvas element is being driven through a multi-clip cut. */
+function _pcePreviewing() { return _pcePrev.on; }
+
+/**
+ * The time the FINISHED video is at, given where the element is inside the clip it is showing.
+ * Falls back to the element's own clock, which is exactly right for a post that is not a cut.
+ */
+/**
+ * The element's clock translated into the finished video's.
+ *
+ * ⚠️ This used to hand the raw element time straight back unless a PREVIEW was running, and that is
+ * the out-of-sync scrubbing: the canvas holds ONE clip, its currentTime is that clip's own source
+ * seconds, and every text box is timed against the finished cut. On an untrimmed first clip the two
+ * happen to agree, which is why it looked fine until someone scrubbed a cut with a trim in it — and
+ * why the timeline and the text editor, which work in cut seconds throughout, disagreed with the
+ * picture. Trimmed, they are offset by the in point; past clip one they are not the same scale at
+ * all.
+ *
+ * So: work out which clip the element is actually holding, and convert. While previewing that is
+ * whatever _pcePreviewSeat put there; otherwise it is whichever clip's url the element is playing,
+ * falling back to the first — the canvas shows the post's base asset, which is clip one.
+ */
+function _pceCutTime(video) {
+    const t = (video && video.currentTime) || 0;
+    const clips = _pceClips();
+    if (!clips.length) return t;
+
+    let i = -1;
+    if (_pcePrev.on) i = _pcePrev.i;
+    else if (video && video.currentSrc) i = clips.findIndex((c) => c && c.url && c.url === video.currentSrc);
+    if (!(i >= 0 && i < clips.length)) i = 0;
+
+    let offset = 0;
+    for (let k = 0; k < i; k++) offset += _pceClipLength(clips[k]) || 0;
+    const clip = clips[i];
+    const inS = (clip && clip.inS) || 0;
+    const len = _pceClipLength(clip);
+    // Clamped into the clip's own kept window: seeking into footage this clip trims away is not a
+    // moment of the finished video at all, and letting it run past the window would report a second
+    // that belongs to the NEXT clip.
+    const within = Math.max(0, t - inS);
+    return offset + (len == null ? within : Math.min(within, len));
+}
+
+/** How long the finished video is — the cut when there is one, else the element's own duration. */
+function _pceCutDuration(video, post) {
+    return _pceClipsTotalS(post) ?? ((video && video.duration) || 0);
+}
+
+function _pcePreviewVideoEl() {
+    return document.querySelector('#post-review-body [data-media-video]');
+}
+
+/** Point the element at clip `i` and play from its in point. */
+async function _pcePreviewSeat(i) {
+    const clips = _pceClips();
+    const video = _pcePreviewVideoEl();
+    if (!video || !clips[i] || !clips[i].url) {
+        _pcePrevMsg = `Clip ${i + 1} could not be loaded, so the preview stopped there.`;
+        return _pcePreviewStop();
+    }
+    _pcePrev.i = i;
+    _pcePrev.offset = 0;
+    for (let k = 0; k < i; k++) _pcePrev.offset += _pceClipLength(clips[k]) || 0;
+
+    _pcePrev.starting = true;      // the src swap fires play/pause of its own; do not re-enter
+    video.src = clips[i].url;
+    try {
+        await new Promise((res) => {
+            if (video.readyState >= 1) return res();
+            video.addEventListener('loadedmetadata', res, { once: true });
+            video.addEventListener('error', res, { once: true });
+        });
+        video.currentTime = clips[i].inS || 0;
+        await video.play().catch((err) => {
+            // The browser refusing to play is a real answer, not a no-op. It happens when the
+            // element is not muted and the click's user-activation has expired across the awaits
+            // above — and it looks, from the outside, exactly like a dead button.
+            _pcePrevMsg = 'The browser would not start playback here. Press play on the video above once, then try the preview again.';
+            if (err && err.name) _pcePrevMsg += ` (${err.name})`;
+            _pceRenderClips();
+        });
+    } finally {
+        _pcePrev.starting = false;
+    }
+}
+
+window._pcePreviewStart = async function () {
+    _pcePrevMsg = '';
+    const clips = _pceClips();
+    if (clips.length < 2) return;                  // one clip already previews itself
+    const video = _pcePreviewVideoEl();
+    if (!video) {
+        _pcePrevMsg = 'The picture above is not a video player, so there is nothing to play the cut in. Close the post and open it again.';
+        _pceRenderClips();
+        return;
+    }
+    // Checked BEFORE anything is set, rather than discovered inside _pcePreviewSeat — which aborts
+    // through _pcePreviewStop and takes the label back with it before it has finished changing.
+    const missing = clips.findIndex((c) => !c || !c.url);
+    if (missing >= 0) {
+        _pcePrevMsg = `Clip ${missing + 1} has no playable file, so the cut cannot be previewed. Removing and re-adding that clip usually fixes it.`;
+        _pceRenderClips();
+        return;
+    }
+    if (_pcePrev.on) { video.play().catch(() => {}); return; }
+    _pcePrev.on = true;
+    _pceCanvasBorrow();                 // put the canvas back exactly as we found it
+    _pceRenderClips();
+    await _pcePreviewSeat(0);
+};
+
+window._pcePreviewStop = function () {
+    if (!_pcePrev.on) return;
+    _pcePrev.on = false;
+    _pcePrev.i = 0;
+    _pcePrev.offset = 0;
+    _pceCanvasRestore();
+    _pceRenderClips();
+};
+
+/**
+ * Advance at a clip's out point. Driven from the same timeupdate everything else uses, so the cut
+ * cannot run ahead of the overlays being drawn against it.
+ */
+function _pcePreviewTick(video) {
+    if (!_pcePrev.on || _pcePrev.starting || !video) return;
+    const clips = _pceClips();
+    const clip = clips[_pcePrev.i];
+    if (!clip) return _pcePreviewStop();
+    const out = clip.outS != null ? clip.outS
+        : (_pceClipFullLength(clip) != null ? _pceClipFullLength(clip) : video.duration);
+    if (!(out > 0) || video.currentTime < out - 0.03) return;
+    if (_pcePrev.i + 1 < clips.length) _pcePreviewSeat(_pcePrev.i + 1);
+    else _pcePreviewStop();
+}
+
+/** Seconds this clip contributes, or null while its length is still unknown. */
+/**
+ * The clip's SOURCE length — the whole file, before any trim. Null when nobody knows it yet.
+ *
+ * Two places can know: content_assets.durationS, stamped by whatever uploaded or rendered the
+ * asset, and a measurement this browser took off a <video> element. Neither is guaranteed —
+ * durationS is NULL on every asset that arrived without one (a Pexels clip, most notably), and the
+ * measurement needs the clip's url to still be fetchable.
+ */
+function _pceClipFullLength(c) {
+    const measured = _pceClipDurations[c.assetId];
+    if (measured != null) return measured;
+    return c.sourceDurationS != null ? c.sourceDurationS : null;
+}
+
+/**
+ * The axis a trim slider is drawn against, and whether it is the real one.
+ *
+ * ⚠️ This exists because the slider used to be drawn against the source length ALONE, so a clip
+ * whose length could not be read had no slider at all — just "Reading this clip…", forever. The
+ * rest of the panel carried on looking perfect, because every other number (the row's duration,
+ * the timeline, the cut total) comes from the stored `outS`, which needs no measurement. A user
+ * sees a full, correct, numbered timeline and no way to trim anything, and reports the sliders as
+ * missing — which is exactly what they are.
+ *
+ * So: fall back to what the clip itself already tells us. If it is trimmed to 6s, then it is at
+ * LEAST 6s long, and a slider over 0–6s is draggable, honest and useful. `provisional` says the far
+ * end is a floor rather than the end of the file, which the caller must respect — see the
+ * `outS = undefined` rule in _pceBindClipTrim.
+ */
+function _pceTrimAxis(c) {
+    const full = _pceClipFullLength(c);
+    if (full > 0) return { len: full, provisional: false };
+    if (c.outS > 0) return { len: c.outS, provisional: true };
+    return { len: null, provisional: false };
+}
+
+function _pceClipLength(c) {
+    const full = _pceClipFullLength(c);
+    const inS = c.inS || 0;
+    if (c.outS != null) return Math.max(0, c.outS - inS);
+    if (full == null) return null;
+    return Math.max(0, full - inS);
+}
+
+/** In flight right now. ⚠️ A separate set, not a null in _pceClipDurations — see below. */
+const _pceClipMeasuring = new Set();
+/** Asked, and the browser could not answer. Drives the message instead of an endless "Reading…". */
+const _pceClipMeasureFailed = new Set();
+
+/**
+ * Read a clip's real length once, then redraw — the trim slider means nothing without it.
+ *
+ * ⚠️ The in-flight marker used to be `_pceClipDurations[id] = null`, guarded by `!= null`. `null
+ * != null` is FALSE, so the guard never fired: every repaint of the panel started a fresh <video>
+ * for every clip still being measured, and a clip whose url does not load was re-fetched on every
+ * render for as long as the post stayed open. It also swallowed the failure — onerror did nothing
+ * but clear the src — so the panel said "Reading this clip…" forever with no way to tell a slow
+ * clip from a dead one.
+ *
+ * What it learns is also worth keeping. content_assets.durationS is NULL on every asset that
+ * arrived without one (a Pexels clip has no duration stamped on it), so without this the length is
+ * re-measured from scratch every session and is only ever as reliable as the url still being
+ * fetchable. Reporting it makes the NEXT open need no measurement at all — the same write-once
+ * backfill _pceBackfillAssetMetrics uses for the canvas asset, which never saw clips.
+ */
+function _pceMeasureClips(clips) {
+    for (const c of clips) {
+        if (!c.url) continue;
+        if (_pceClipDurations[c.assetId] != null) continue;
+        if (_pceClipMeasuring.has(c.assetId)) continue;
+        _pceClipMeasuring.add(c.assetId);
+        _pceClipMeasureFailed.delete(c.assetId);   // this attempt is allowed to succeed
+        const v = document.createElement('video');
+        v.preload = 'metadata';
+        v.muted = true;
+        v.onloadedmetadata = () => {
+            _pceClipMeasuring.delete(c.assetId);
+            if (isFinite(v.duration) && v.duration > 0) {
+                _pceClipDurations[c.assetId] = v.duration;
+                _pceReportClipMetrics(c.assetId, v.videoWidth, v.videoHeight, v.duration);
+                // One repaint: the axis IS the cut's total and the timed rows live in this same
+                // list, so they grow together as each clip reports its length.
+                _pceRenderClips();
+            }
+            if (v.videoWidth > 0 && v.videoHeight > 0) {
+                _pceClipAspect[c.assetId] = v.videoWidth / v.videoHeight;
+                _pceRenderCropFrame();
+            }
+            v.src = '';
+        };
+        v.onerror = () => {
+            _pceClipMeasuring.delete(c.assetId);
+            _pceClipMeasureFailed.add(c.assetId);
+            v.src = '';
+            // Repaint, so the row can say so. Silence here is what made a dead clip and a slow one
+            // look identical.
+            _pceRenderClips();
+        };
+        v.src = c.url;
+    }
+}
+
+/**
+ * ── Trimming by eye ─────────────────────────────────────────────────────────────────────────────
+ *
+ * Numbers in a box cannot answer "does it cut before he turns round", so the handles scrub: moving
+ * one seeks the canvas to that exact frame of that clip, paused. The kept section is the lit part
+ * of the bar, and the bar is the WHOLE source — the part being thrown away has to stay visible or
+ * there is no way to judge how much of it there is.
+ *
+ * The canvas is borrowed through _pceCanvasBorrow, the same door the cut preview uses, so the two
+ * can never leave the post pointing at a clip it does not have.
+ */
+const _pceTrimDrag = { on: false, id: null, edge: null, clips: null };
+
+/**
+ * ⚠️ Nothing may repaint the clip list while something in it is being dragged.
+ *
+ * Replacing the list's innerHTML DETACHES the node under the pointer, and a detached node's
+ * getBoundingClientRect() is all zeros — so `(clientX - rect.left) / rect.width` is Infinity, the
+ * clamp turns that into the end of the axis, and the bar jumps to full width. The mangled start
+ * time then lands outside the clip it was on, so the row moves to another clip and reads, to the
+ * person holding the mouse, as "it extended fully and then disappeared". That is verbatim how it
+ * was reported, and it is one repaint anywhere in the pointerdown call graph away at all times.
+ *
+ * The timeline used to live in its own element that only _rqRenderTimeline touched, so "do not
+ * re-render mid-drag" held by luck. Folding the rows into the clip list put them in the path of
+ * every repaint of that list — _pceSelect's, the measure callback's, any of them — so the rule is
+ * now enforced here rather than merely written down. A repaint asked for during a drag is not
+ * dropped: it is deferred to the release, which is when the drag wanted to repaint anyway.
+ */
+let _pceClipsRepaintPending = false;
+
+/**
+ * ⚠️ DERIVED, never counted.
+ *
+ * This was a counter — incremented on pointerdown, decremented on release. A counter is only ever
+ * as good as its releases, and two pointerdowns without two releases (a stray second press, a
+ * pointerup swallowed anywhere) leave it stuck above zero FOREVER. At which point _pceRenderClips
+ * silently stops repainting for the rest of the session: trims still look right mid-drag, because
+ * _pceTrimPaint mutates styles rather than re-rendering, but nothing that needs a repaint works
+ * again — "Preview the whole cut" never becomes "Stop preview", so both buttons look dead.
+ *
+ * Reading the drag objects instead makes that impossible: the hold lasts exactly as long as a drag
+ * exists, because it IS the drag existing.
+ */
+function _pceDragActive() {
+    return _pceTrimDrag.on === true || _rqTlDrag != null;
+}
+
+/** Run a repaint that a drag deferred. Safe to call when there was none. */
+function _pceFlushClipsRepaint() {
+    if (!_pceClipsRepaintPending || _pceDragActive()) return;
+    _pceClipsRepaintPending = false;
+    _pceRenderClips();
+}
+
+/** Seconds of source under a pointer, clamped to the clip's own length. */
+function _pceTrimTimeAt(ev, track, full) {
+    const box = track.getBoundingClientRect();
+    if (!box.width || !(full > 0)) return null;
+    const f = Math.min(1, Math.max(0, (ev.clientX - box.left) / box.width));
+    return f * full;
+}
+
+function _pceBindClipTrim() {
+    const host = document.getElementById('pce-clips-block');
+    if (!host || host.dataset.trimBound === '1') return;
+    host.dataset.trimBound = '1';
+
+    const clipsNow = () => (_pceTrimDrag.clips || _pceClips()).map(c => Object.assign({}, c));
+
+    host.addEventListener('pointerdown', (ev) => {
+        const handle = ev.target.closest && ev.target.closest('[data-trim-edge]');
+        if (!handle) return;
+        const track = handle.closest('[data-trim-track]');
+        if (!track) return;
+        _pceTrimDrag.on = true;
+        _pceTrimDrag.id = track.getAttribute('data-trim-track');
+        _pceTrimDrag.edge = handle.getAttribute('data-trim-edge');
+        _pceTrimDrag.clips = _pceClips().map(c => Object.assign({}, c));
+        handle.setPointerCapture && handle.setPointerCapture(ev.pointerId);
+        ev.preventDefault();
+        ev.stopPropagation();
+    });
+
+    host.addEventListener('pointermove', (ev) => {
+        if (!_pceTrimDrag.on) return;
+        const track = host.querySelector(`[data-trim-track="${_pceTrimDrag.id}"]`);
+        const clips = clipsNow();
+        const clip = clips.find(c => c.id === _pceTrimDrag.id);
+        if (!track || !clip) return;
+        const axis = _pceTrimAxis(clip);
+        const full = axis.len;
+        const t = _pceTrimTimeAt(ev, track, full);
+        if (t == null) return;
+
+        // A quarter-second floor: a window narrower than that is a frame or two, which is never what
+        // a drag meant and renders as a stutter.
+        const MIN = 0.25;
+        if (_pceTrimDrag.edge === 'in') {
+            const out = clip.outS != null ? clip.outS : full;
+            clip.inS = Math.min(t, out - MIN);
+            if (clip.inS <= 0.001) clip.inS = undefined;
+        } else {
+            clip.outS = Math.max(t, (clip.inS || 0) + MIN);
+            // "Dragged to the end" means "no out point" — but only when we know where the end IS.
+            // On a provisional axis `full` is the kept length itself, so clearing outS would
+            // discard the only length anything knows and take the slider away again.
+            if (!axis.provisional && full != null && clip.outS >= full - 0.001) clip.outS = undefined;
+        }
+        _pceTrimDrag.clips = clips;
+        // Paint and scrub, but do NOT save or re-render the panel: replacing the markup mid-drag
+        // would tear the handle out from under the pointer, the same trap the crop frame has.
+        _pceTrimPaint(clip);
+        _pceCanvasShowFrame(clip, _pceTrimDrag.edge === 'in' ? (clip.inS || 0) : (clip.outS != null ? clip.outS : full));
+    });
+
+    const end = () => {
+        if (!_pceTrimDrag.on) return;
+        const clips = _pceTrimDrag.clips;
+        _pceTrimDrag.on = false;
+        _pceFlushClipsRepaint();
+        _pceTrimDrag.id = null;
+        _pceTrimDrag.edge = null;
+        _pceTrimDrag.clips = null;
+        if (clips) _pceClipsChanged(clips);   // one save, on release
+        // And give the canvas back. Nothing holds it between drags now that clips are not selected,
+        // so leaving it pointing at the clip just trimmed would show that clip as the post's media.
+        _pceCanvasRestore();
+    };
+    host.addEventListener('pointerup', end);
+    host.addEventListener('pointercancel', end);
+    // Same safety net as the timeline's, and for the same reason — see the note there. Running the
+    // same `end` means a release that never reached the host still saves the trim.
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+}
+
+/** Move the lit section and its handles without rebuilding the row. */
+function _pceTrimPaint(clip) {
+    const track = document.querySelector(`[data-trim-track="${clip.id}"]`);
+    if (!track) return;
+    const full = _pceTrimAxis(clip).len;
+    if (!(full > 0)) return;
+    const a = (clip.inS || 0) / full;
+    const b = (clip.outS != null ? clip.outS : full) / full;
+    const kept = track.querySelector('[data-trim-kept]');
+    if (kept) { kept.style.left = (a * 100) + '%'; kept.style.width = Math.max(0, (b - a) * 100) + '%'; }
+    const inH = track.querySelector('[data-trim-edge="in"]');
+    const outH = track.querySelector('[data-trim-edge="out"]');
+    if (inH) inH.style.left = (a * 100) + '%';
+    if (outH) outH.style.left = (b * 100) + '%';
+    const lbl = track.parentElement?.querySelector('[data-trim-label]');
+    if (lbl) {
+        lbl.textContent = `${_pceFmtS((clip.inS || 0))} → ${_pceFmtS(clip.outS != null ? clip.outS : full)}  ·  keeps ${_pceFmtS(Math.max(0, (clip.outS != null ? clip.outS : full) - (clip.inS || 0)))}`;
+    }
+}
+
+/** The trim track for the selected clip, drawn under its row. */
+function _pceTrimTrackHtml(clip, index) {
+    const axis = _pceTrimAxis(clip);
+    const full = axis.len;
+    if (!(full > 0)) {
+        // Nothing to draw an axis against at all: no stored length, no measurement, and no trim to
+        // infer one from. Say which of the two states it is in — "reading" resolves on its own,
+        // "could not read" does not, and telling them apart is the difference between waiting and
+        // re-adding the clip.
+        return _pceClipMeasureFailed.has(clip.assetId)
+            ? '<p class="px-1 pb-1 text-[10px] text-amber-600">Could not read this clip\u2019s length, so it cannot be trimmed here. Re-adding it usually fixes it.</p>'
+            : '<p class="px-1 pb-1 text-[10px] text-gray-400">Reading this clip\u2026</p>';
+    }
+    const a = ((clip.inS || 0) / full) * 100;
+    const b = ((clip.outS != null ? clip.outS : full) / full) * 100;
+    const handle = (edge, pct) => '<span data-trim-edge="' + edge + '" role="slider" tabindex="0"'
+        + ' aria-label="' + (edge === 'in' ? 'Start' : 'End') + ' of the kept section"'
+        + ' class="absolute top-0 bottom-0 w-2 -ml-1 rounded cursor-ew-resize"'
+        + ' style="left:' + pct + '%;background:#059669"></span>';
+    // The in/out seconds beside the slider, for the same reason the text rows carry theirs: a
+    // slider is for finding the moment, a number is for landing on it exactly, and going to another
+    // panel to type one loses the row you were working on.
+    const num = (field, val, hint) => '<input type="number" step="0.1" min="0"'
+        + ' class="w-12 shrink-0 text-[10px] text-gray-600 border border-gray-200 rounded px-1 py-0.5'
+        + ' focus:outline-none focus:border-emerald-500" style="font-variant-numeric:tabular-nums"'
+        + ' title="' + hint + '" aria-label="' + hint + '" value="' + val + '"'
+        + ' onchange="window._pceClipTrim(' + index + ',\'' + field + '\',this.value)">';
+    return '<div class="px-1 pb-1.5">'
+        + '<div class="flex items-center gap-1">'
+        + '<div class="relative flex-1 min-w-0 h-7 rounded bg-gray-100 overflow-hidden select-none" data-trim-track="' + _rqEsc(clip.id) + '">'
+        + '<div class="absolute inset-y-0" data-trim-kept style="left:' + a + '%;width:' + Math.max(0, b - a) + '%;background:rgba(5,150,105,.22)"></div>'
+        + handle('in', a) + handle('out', b)
+        + '</div>'
+        + num('in', Math.round((clip.inS || 0) * 10) / 10, 'Keep from, in seconds')
+        + num('out', clip.outS == null ? '' : Math.round(clip.outS * 10) / 10, 'Keep until, in seconds — blank keeps to the end')
+        + '</div>'
+        + '<p class="mt-0.5 text-[10px] text-gray-500" data-trim-label style="font-variant-numeric:tabular-nums">'
+        + _pceFmtS(clip.inS || 0) + ' → ' + _pceFmtS(clip.outS != null ? clip.outS : full) + '  ·  keeps '
+        + _pceFmtS(Math.max(0, (clip.outS != null ? clip.outS : full) - (clip.inS || 0))) + '</p>'
+        + (axis.provisional
+            ? '<p class="mt-0.5 text-[10px] text-gray-400">'
+              + (_pceClipMeasureFailed.has(clip.assetId)
+                  ? 'Could not read the full clip, so this slider covers the ' + _pceFmtS(full) + ' already kept \u2014 you can trim within it, but not extend past it.'
+                  : 'Still reading the full clip \u2014 you can trim within the ' + _pceFmtS(full) + ' already kept.')
+              + '</p>'
+            : '')
+        + '</div>';
+}
+
+/** Write the cut back to the post. Shared across the cross-post group — the cut is one decision. */
+async function _pcePersistVideoEdit(postId, clips, frames) {
+    const post = _rqPostCache[postId];
+    if (!post) return;
+    const edit = {
+        clips: clips.map((c) => {
+            const out = { id: c.id, assetId: c.assetId };
+            if (c.inS) out.inS = c.inS;
+            if (c.outS != null) out.outS = c.outS;
+            if (c.gain != null) out.gain = c.gain;
+            return out;
+        }),
+        targetRatio: (post.videoEdit && post.videoEdit.targetRatio) || '9:16',
+    };
+    // Carry the per-platform framing through EVERY save. save-post-video-edit replaces the whole
+    // object, so omitting frames here would silently discard every crop the reviewer had set the
+    // moment they nudged a trim — and nothing would report it until the post published mis-framed.
+    const carriedFrames = frames || (post.videoEdit && post.videoEdit.frames);
+    if (carriedFrames && Object.keys(carriedFrames).length) edit.frames = carriedFrames;
+    // Keep the cache carrying the resolved url/name the editor draws with — the server answers with
+    // ids only, and repainting from its reply would blank every thumbnail until the next refetch.
+    post.videoEdit = { targetRatio: edit.targetRatio, clips: clips.slice(), frames: edit.frames };
+    try {
+        await fetch('/.netlify/functions/save-post-video-edit', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId, edit }),
+        });
+    } catch { /* a dropped save is recoverable — the next edit re-sends the whole cut */ }
+}
+
+function _pceClipsChanged(clips) {
+    const id = _rqReviewPostId;
+    if (id == null) return;
+    const post = _rqPostCache[id];
+
+    // Read the OLD cut before anything overwrites it: every overlay's "which clip, how far in" is
+    // only answerable against the shape the cut had when the reviewer placed it. Trimming, moving or
+    // removing a clip changes where every later moment falls, so text is re-anchored to its own clip
+    // rather than left pointing at a second that now belongs to something else.
+    const oldSpans = post ? _pceSpansFor(_pceClips(post)) : null;
+    const reanchored = post ? _pceReanchorOverlays(post, oldSpans, clips) : false;
+
+    _pceRenderClips(clips);
+    _pcePersistVideoEdit(id, clips);
+    if (reanchored) _rqPersistOverlays(id);
+    // The timeline's axis is the length of this cut, so it has to be redrawn whenever the cut moves.
+    if (post) _rqRenderTimeline(post);
+    if (reanchored) _pceRefreshOverlayTiming();
+}
+
+window._pceClipMove = function (index, dir) {
+    const clips = _pceClips().slice();
+    const to = index + dir;
+    if (to < 0 || to >= clips.length) return;
+    const [moved] = clips.splice(index, 1);
+    clips.splice(to, 0, moved);
+    _pceClipsChanged(clips);
+};
+
+window._pceClipRemove = function (index) {
+    const clips = _pceClips().slice();
+    clips.splice(index, 1);
+    _pceClipsChanged(clips);
+};
+
+/**
+ * Delete a text box from the post editor.
+ *
+ * Until now the only way to remove one was to open the text editor, find the right box among
+ * several — on several clips, most of which are not even on screen at once — and delete it there.
+ * A box is a layer in a list, and every other layer in that list can be removed from it.
+ *
+ * `key` is what the row carries: the overlay's id, or its INDEX for the older rows that predate
+ * ids. Both are resolved the same way _rqTimelineItem resolves a drag, so a row can never delete a
+ * different box from the one it draws.
+ */
+window._pceOverlayRemove = function (key) {
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    if (!post || !Array.isArray(post.overlays)) return;
+    let i = post.overlays.findIndex((o) => o && o.id === key);
+    if (i < 0 && /^\d+$/.test(String(key))) i = Number(key);
+    const ov = post.overlays[i];
+    if (!ov) return;
+    const what = String(ov.text || '').split('\n')[0].trim();
+    // Typed words, and nothing here can bring them back — unlike a clip, which is re-addable from
+    // the library in two clicks. Worth one question.
+    if (!window.confirm(what ? `Remove the text "${what.slice(0, 40)}"?` : 'Remove this text box?')) return;
+    post.overlays.splice(i, 1);
+    if (_pceSelectedOverlayId && _pceSelectedOverlayId === (ov.id || String(i))) _pceSelectedOverlayId = null;
+    _rqPersistOverlays(postId);
+    _rqRenderCanvasOverlays(post);   // off the picture as well as out of the list
+    _rqRenderTimeline(post);
+    if (typeof _pceRefreshOverlayTiming === 'function') _pceRefreshOverlayTiming();
+};
+
+window._pceClipTrim = function (index, field, raw) {
+    const clips = _pceClips().map((c) => Object.assign({}, c));
+    const c = clips[index];
+    if (!c) return;
+    const full = _pceClipFullLength(c);
+    let v = parseFloat(raw);
+    if (!isFinite(v) || v < 0) v = 0;
+    if (full != null) v = Math.min(v, full);
+    if (field === 'in') {
+        // An in point at or past the out point would be a segment that renders nothing; the server
+        // degrades that to "play to the end" anyway, so say so here rather than store a window the
+        // renderer will quietly ignore.
+        c.inS = v || undefined;
+        if (c.outS != null && c.inS != null && c.outS <= c.inS) c.outS = undefined;
+    } else {
+        c.outS = v > (c.inS || 0) ? v : undefined;
+    }
+    _pceClipsChanged(clips);
+};
+
+/** The clip list. Reorder with the arrows, trim with the two number fields. */
+function _pceRenderClips(clipsOverride) {
+    const host = document.getElementById('pce-clips-block');
+    if (!host) return;
+    // See _pceDragActive: repainting now would tear the node out from under the pointer.
+    if (_pceDragActive()) { _pceClipsRepaintPending = true; return; }
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const clips = clipsOverride || _pceClips(post);
+    // The timed rows that used to be a Timeline panel of their own, now folded in under the clip
+    // each one sits on. Built before the bail-out below because a post can have sound and no clips
+    // at all — a voice note over a photo — and those rows still have to be drawn somewhere.
+    const tl = _rqTimelineParts(post);
+    // Shown whenever the post has video at all — including a single untouched clip.
+    //
+    // It used to hide until there were two clips or a trim, on the grounds that reordering a list of
+    // one is noise. That reasoning was right about the list and wrong about the panel: "Add another
+    // clip" lives here, so hiding it left no way to GET to two clips. A dead end exactly where the
+    // feature starts.
+    if (!clips.length && !tl.any) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+    // Nothing here is selected any more, so there is no stale selection to reconcile. The canvas is
+    // borrowed only for the duration of a drag and handed back on release.
+
+    _pceMeasureClips(clips);
+
+    let total = 0;
+    let anyUnknown = false;
+    for (const c of clips) {
+        const len = _pceClipLength(c);
+        if (len == null) anyUnknown = true; else total += len;
+    }
+    const totalLabel = anyUnknown ? 'measuring…' : _pceFmtS(total);
+
+    const rows = clips.map((c, i) => {
+        const len = _pceClipLength(c);
+        const name = _rqEsc(String(c.name || ('Clip ' + (i + 1))).slice(0, 28));
+        return '<div data-clip-row="' + i + '">'
+            + '<div class="flex items-center gap-1.5 py-1">'
+            + '<span class="w-4 shrink-0 text-[10px] font-bold text-gray-400" style="font-variant-numeric:tabular-nums">' + (i + 1) + '</span>'
+            + '<span class="flex-1 min-w-0 truncate text-[11px] text-gray-700" title="' + name + '">' + name + '</span>'
+            + '<span class="w-10 shrink-0 text-right text-[10px] text-gray-400" style="font-variant-numeric:tabular-nums">' + (len == null ? '—' : _pceFmtS(len)) + '</span>'
+            + '<button type="button" title="Move earlier" aria-label="Move clip ' + (i + 1) + ' earlier"'
+            + ' class="px-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 cursor-pointer leading-none"'
+            + (i === 0 ? ' disabled' : '') + ' onclick="window._pceClipMove(' + i + ',-1)">&#9650;</button>'
+            + '<button type="button" title="Move later" aria-label="Move clip ' + (i + 1) + ' later"'
+            + ' class="px-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 cursor-pointer leading-none"'
+            + (i === clips.length - 1 ? ' disabled' : '') + ' onclick="window._pceClipMove(' + i + ',1)">&#9660;</button>'
+            + '<button type="button" title="Remove this clip" aria-label="Remove clip ' + (i + 1) + '"'
+            + ' class="px-1 text-gray-300 hover:text-red-600 cursor-pointer leading-none"'
+            + ' onclick="window._pceClipRemove(' + i + ')">&times;</button>'
+            + '</div>'
+            + _pceTrimTrackHtml(c, i)
+            // What shows ON this clip, directly under the slider that decides how long it lasts.
+            // "No text" is stated rather than left blank: an empty gap under clip 3 and an empty gap
+            // under a clip whose text has drifted off the end look identical.
+            + _pceTimedBlock(
+                (tl.byClip[i] && tl.byClip[i].html) || '<p class="text-[10px] text-gray-300">No text on this clip</p>',
+                tl.byClip[i] && tl.byClip[i].axis)
+            + '</div>';
+    }).join('');
+
+    const overLong = !anyUnknown && total > _PCE_SHORT_MAX_S;
+    // One heading over one list. It was "Clips" here and "Timeline" below, each enumerating the same
+    // four clips — once as things to trim, once as headings over their text — leaving the reader to
+    // join them up by name.
+    const heading = 'Timeline';
+    const tail = tl.orphans || tl.audio
+        // Sound is not per-clip: it plays across the cut, so it sits after the list rather than under
+        // any one clip. Orphans join it — a box whose start no longer lands in any clip belongs to
+        // none of them, and hiding it would be how a reviewer approves text they cannot see.
+        ? '<div class="pt-1.5">'
+          + (tl.orphans ? '<p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Not on any clip</p>' : '')
+          + _pceTimedBlock(tl.orphans, tl.cutAxis)
+          + (tl.audio ? '<p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1 mt-1">Sound</p>' : '')
+          + _pceTimedBlock(tl.audio, tl.cutAxis)
+          + '</div>'
+        : '';
+    host.innerHTML = '<div class="pt-1">'
+        + '<div class="flex items-center justify-between mb-1">'
+        + '<span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">' + heading + '</span>'
+        + '<span class="text-[10px] text-gray-400" style="font-variant-numeric:tabular-nums">' + totalLabel + '</span>'
+        + '</div>'
+        + tl.note
+        + '<div class="divide-y divide-gray-100">' + rows + '</div>'
+        + tail
+        + (clips.length > 1
+            ? '<button type="button" onclick="' + (_pcePreviewing() ? 'window._pcePreviewStop()' : 'window._pcePreviewStart()') + '"'
+              + ' class="mt-1.5 w-full rounded-lg border border-emerald-300 bg-emerald-50 py-1.5 text-[11px] font-bold text-emerald-800 hover:bg-emerald-100 transition cursor-pointer">'
+              + (_pcePreviewing() ? '■ Stop preview' : '▶ Preview the whole cut') + '</button>'
+            : '')
+        // Clip controls only where there are clips. This panel also draws the sound on a PHOTO post,
+        // and "Add another clip" there would offer to turn a picture into a video.
+        + (!clips.length ? ''
+            : clips.length < _PCE_MAX_CLIPS
+            ? '<button type="button" onclick="window._pceAddClipFiles()"'
+              + ' class="mt-1.5 w-full rounded-lg border border-dashed border-gray-300 py-1.5 text-[11px] font-semibold text-gray-500 hover:border-emerald-400 hover:text-emerald-700 transition cursor-pointer">'
+              + '+ Add another clip</button>'
+            : '<p class="mt-1 text-[10px] text-amber-600">That is the most clips one post can hold.</p>')
+        + (_pcePrevMsg
+            ? '<p class="mt-1 text-[10px] text-amber-600">' + _rqEsc(_pcePrevMsg) + '</p>' : '')
+        + (overLong
+            ? '<p class="mt-1 text-[10px] text-amber-600">Over three minutes — too long for a YouTube Short, so it would go out as a standard video there.</p>' : '')
+        + (!clips.length ? ''
+            : '<p class="mt-1 text-[10px] text-gray-400">Drag either end of a clip to trim it — the canvas shows that exact frame. '
+              + (clips.length > 1
+                  ? 'Trimmed and joined when you approve the post. Drag a text bar to re-time it. Preview plays the cut with your text and sound.'
+                  : 'Trimmed when you approve the post. Add another clip to join them into one video.') + '</p>')
+        + '</div>';
     host.classList.remove('hidden');
-    // Keep the playhead in step with the current frame the moment the timeline (re)renders.
+    // Every timed block carries its own playhead, and they all sit on the cut's axis — so they take
+    // the same position. Seeded here so a repaint does not drop the line back to zero.
     const v = document.querySelector('#post-review-body [data-media-video]');
-    if (v) { const head = host.querySelector('[data-playhead]'); if (head && v.duration && isFinite(v.duration)) head.style.left = (Math.min(1, (v.currentTime || 0) / v.duration) * 100) + '%'; }
+    if (v) _rqPaintPlayheads(_pceCutTime(v, post), _rqTimelineDuration(post));
+}
+
+// ── The crop frame ──────────────────────────────────────────────────────────────────────────────
+// What this platform actually keeps.
+//
+// Four of the six platforms take the 9:16 master unchanged. Facebook's feed and Threads do not, so
+// their copy is rendered again from the SAME clips into a squarer frame — and something has to be
+// cut off. The renderer centres that by default, which is right until it is not: a centred crop of a
+// vertical shot is how a post publishes with someone's head missing.
+//
+// So the crop is automatic but never invisible. This is the "visible" half of that promise, and the
+// reason it was worth overturning the format router's rule that nothing is ever silently re-cut.
+//
+// ⚠️ The derivative is NOT a crop of the master. Both are independent cover-fits of the SOURCE, so a
+// 4:5 copy of a 16:9 source keeps MORE width than the 9:16 master does. Drawing a 4:5 window inside
+// the 9:16 master would therefore show the reviewer a lie. The backdrop here is the source clip at
+// its own shape, with the platform's frame over it.
+const _pceCropDrag = { on: false, id: null };
+
+/** Fractions of the source that the platform's frame keeps, and where it currently sits. */
+function _pceCropWindow(sourceAspect, ratio, offsetX, offsetY) {
+    const parts = String(ratio || '').split(':');
+    const rt = (parseFloat(parts[0]) || 0) / (parseFloat(parts[1]) || 1);
+    if (!(rt > 0) || !(sourceAspect > 0)) return null;
+    // The axis that overflows is the one the frame is narrower in; the other one fits exactly, and
+    // no offset along it can change a single pixel.
+    const wFrac = sourceAspect > rt ? rt / sourceAspect : 1;
+    const hFrac = sourceAspect > rt ? 1 : sourceAspect / rt;
+    const clamp = (n) => Math.min(1, Math.max(-1, n || 0));
+    return {
+        wFrac, hFrac,
+        left: ((clamp(offsetX) + 1) / 2) * (1 - wFrac),
+        top: ((clamp(offsetY) + 1) / 2) * (1 - hFrac),
+        movableX: wFrac < 0.999,
+        movableY: hFrac < 0.999,
+    };
+}
+
+function _pceRenderCropFrame() {
+    const host = document.getElementById('pce-crop-block');
+    if (!host) return;
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const rf = post && post.reframe;
+    // Nothing to show on the platforms that publish the master as-is, which is most of them.
+    if (!rf) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+
+    const clips = _pceClips(post);
+    const first = clips[0];
+    const aspect = first ? _pceClipAspect[first.assetId] : null;
+    const label = (window.PlatformConstants && window.PlatformConstants.label
+        ? window.PlatformConstants.label(post.platform) : null) || post.platform || 'this platform';
+
+    if (!first || !first.url || !aspect) {
+        host.innerHTML = '<div class="pt-1">'
+            + '<div class="flex items-center justify-between mb-1">'
+            + '<span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Framing</span>'
+            + '<span class="text-[10px] text-gray-400">' + _rqEsc(rf.ratio) + '</span></div>'
+            + '<p class="text-[11px] text-gray-500">Reading the clip so the crop can be previewed…</p></div>';
+        host.classList.remove('hidden');
+        return;
+    }
+
+    const win = _pceCropWindow(aspect, rf.ratio, rf.offsetX, rf.offsetY);
+    if (!win) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+
+    const pct = (n) => (n * 100).toFixed(3) + '%';
+    const dragHint = win.movableX && win.movableY ? 'Drag to reframe'
+        : win.movableY ? 'Drag up or down to reframe'
+        : win.movableX ? 'Drag left or right to reframe'
+        : 'Nothing is cropped here';
+
+    // The backdrop is a muted, paused <video> rather than a poster image: the post may have no
+    // thumbnail for the clip, and seeking it to the in-point shows the frame the piece opens on
+    // rather than whatever frame zero happens to be.
+    host.innerHTML = '<div class="pt-1">'
+        + '<div class="flex items-center justify-between mb-1">'
+        + '<span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Framing</span>'
+        + '<span class="text-[10px] text-gray-400">' + _rqEsc(label) + ' &middot; ' + _rqEsc(rf.ratio) + '</span>'
+        + '</div>'
+        + '<div class="relative mx-auto overflow-hidden rounded bg-black select-none" style="max-width:220px;aspect-ratio:' + aspect.toFixed(4) + '" data-crop-stage>'
+        + '<video src="' + _rqEsc(first.url) + '" muted playsinline preload="metadata" class="absolute inset-0 w-full h-full object-cover pointer-events-none" data-crop-video></video>'
+        // Inline, not a utility class: the compiled stylesheet only carries utilities the markup
+        // already used, and an opacity-modified colour that was never compiled renders as NOTHING —
+        // which here would mean no dimming at all, i.e. a crop preview that shows no crop.
+        + '<div class="absolute inset-0 pointer-events-none" style="background:rgba(0,0,0,.55)" data-crop-shade></div>'
+        + '<div class="absolute border-2 border-white ' + (win.movableX || win.movableY ? 'cursor-grab' : '') + '"'
+        + ' style="left:' + pct(win.left) + ';top:' + pct(win.top) + ';width:' + pct(win.wFrac) + ';height:' + pct(win.hFrac) + ';box-shadow:0 0 0 2px rgba(0,0,0,.35) inset"'
+        + ' data-crop-window role="slider" tabindex="0" aria-label="Crop position for ' + _rqEsc(label) + '"></div>'
+        + '</div>'
+        + '<p class="mt-1 text-center text-[10px] text-gray-400">' + dragHint + ' &middot; everything outside publishes cropped</p>'
+        + '</div>';
+    host.classList.remove('hidden');
+
+    // Un-shade what is kept by punching the window out of the overlay: two elements, no canvas.
+    const shade = host.querySelector('[data-crop-shade]');
+    if (shade) {
+        shade.style.clipPath = 'polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, '
+            + pct(win.left) + ' ' + pct(win.top) + ', '
+            + pct(win.left) + ' ' + pct(win.top + win.hFrac) + ', '
+            + pct(win.left + win.wFrac) + ' ' + pct(win.top + win.hFrac) + ', '
+            + pct(win.left + win.wFrac) + ' ' + pct(win.top) + ', '
+            + pct(win.left) + ' ' + pct(win.top) + ')';
+    }
+    // Show the frame the piece actually opens on.
+    const vid = host.querySelector('[data-crop-video]');
+    if (vid && first.inS) { vid.addEventListener('loadedmetadata', () => { try { vid.currentTime = first.inS; } catch (e) { /* seek unsupported */ } }, { once: true }); }
+}
+
+/** Move the frame on screen ONLY — no re-render, no save. What a drag does 60 times a second. */
+function _pceCropPaint(win) {
+    const host = document.getElementById('pce-crop-block');
+    if (!host || !win) return;
+    const pct = (n) => (n * 100).toFixed(3) + '%';
+    const el = host.querySelector('[data-crop-window]');
+    if (el) { el.style.left = pct(win.left); el.style.top = pct(win.top); }
+    const shade = host.querySelector('[data-crop-shade]');
+    if (shade) {
+        shade.style.clipPath = 'polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, '
+            + pct(win.left) + ' ' + pct(win.top) + ', '
+            + pct(win.left) + ' ' + pct(win.top + win.hFrac) + ', '
+            + pct(win.left + win.wFrac) + ' ' + pct(win.top + win.hFrac) + ', '
+            + pct(win.left + win.wFrac) + ' ' + pct(win.top) + ', '
+            + pct(win.left) + ' ' + pct(win.top) + ')';
+    }
+}
+
+/**
+ * Write one platform's framing back. The cut is shared; the frame is this platform's alone.
+ *
+ * `live` is what a drag passes. Two things must NOT happen on every pointermove:
+ *   • a save — a single drag would fire a POST per frame of movement;
+ *   • a re-render — _pceRenderCropFrame replaces the block's innerHTML, which destroys and rebuilds
+ *     the <video>, so the backdrop would restart loading on every pixel of the drag and the preview
+ *     would flicker or go black. The existing timeline drag avoids the same trap the same way.
+ * So a live move paints, and only the release commits.
+ */
+function _pceCropSet(offsetX, offsetY, live) {
+    const id = _rqReviewPostId;
+    const post = id != null ? _rqPostCache[id] : null;
+    if (!post || !post.reframe || !post.platform) return;
+    post.reframe.offsetX = offsetX;
+    post.reframe.offsetY = offsetY;
+
+    const clips = _pceClips(post);
+    const aspect = clips[0] ? _pceClipAspect[clips[0].assetId] : null;
+    if (live) { _pceCropPaint(_pceCropWindow(aspect, post.reframe.ratio, offsetX, offsetY)); return; }
+
+    // frames is keyed BY platform inside the one shared object, so every sibling can hold the
+    // identical edit and read only its own key — which is why this still saves to the whole group.
+    const frames = Object.assign({}, (post.videoEdit && post.videoEdit.frames) || {});
+    frames[post.platform] = { offsetX, offsetY };
+    _pceRenderCropFrame();
+    _pcePersistVideoEdit(id, clips, frames);
+}
+
+// Bound ONCE to the stable block, not to the window element — _pceRenderCropFrame replaces its
+// innerHTML on every nudge, which would tear a listener off mid-drag.
+function _pceBindCropFrame() {
+    const host = document.getElementById('pce-crop-block');
+    if (!host || host.dataset.cropBound === '1') return;
+    host.dataset.cropBound = '1';
+
+    const from = (ev, stage, win) => {
+        const box = stage.getBoundingClientRect();
+        if (!box.width || !box.height) return null;
+        // Where the POINTER is, converted to where the window's top-left would have to be for the
+        // pointer to stay on the same part of the picture it grabbed.
+        const x = (ev.clientX - box.left) / box.width - win.wFrac / 2;
+        const y = (ev.clientY - box.top) / box.height - win.hFrac / 2;
+        const spanX = 1 - win.wFrac;
+        const spanY = 1 - win.hFrac;
+        const clamp01 = (n) => Math.min(1, Math.max(0, n));
+        return {
+            offsetX: spanX > 0.0001 ? clamp01(x / spanX) * 2 - 1 : 0,
+            offsetY: spanY > 0.0001 ? clamp01(y / spanY) * 2 - 1 : 0,
+        };
+    };
+
+    const current = () => {
+        const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+        const rf = post && post.reframe;
+        const clips = _pceClips(post);
+        const aspect = clips[0] ? _pceClipAspect[clips[0].assetId] : null;
+        if (!rf || !aspect) return null;
+        return _pceCropWindow(aspect, rf.ratio, rf.offsetX, rf.offsetY);
+    };
+
+    host.addEventListener('pointerdown', (ev) => {
+        const winEl = ev.target.closest && ev.target.closest('[data-crop-window]');
+        if (!winEl) return;
+        const win = current();
+        if (!win || (!win.movableX && !win.movableY)) return;
+        _pceCropDrag.on = true;
+        _pceCropDrag.id = ev.pointerId;
+        winEl.setPointerCapture && winEl.setPointerCapture(ev.pointerId);
+        ev.preventDefault();
+    });
+
+    host.addEventListener('pointermove', (ev) => {
+        if (!_pceCropDrag.on || ev.pointerId !== _pceCropDrag.id) return;
+        const stage = host.querySelector('[data-crop-stage]');
+        const win = current();
+        if (!stage || !win) return;
+        const next = from(ev, stage, win);
+        if (!next) return;
+        // Only the overflowing axis moves; the other is pinned at 0 so a stray sideways drag cannot
+        // store an offset that changes nothing but shows up in the fingerprint as a different file.
+        _pceCropSet(win.movableX ? next.offsetX : 0, win.movableY ? next.offsetY : 0, true);
+    });
+
+    const end = (ev) => {
+        if (!_pceCropDrag.on || (ev.pointerId != null && ev.pointerId !== _pceCropDrag.id)) return;
+        _pceCropDrag.on = false;
+        _pceCropDrag.id = null;
+        // Commit exactly once, on release — the moves above only painted.
+        const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+        if (post && post.reframe) _pceCropSet(post.reframe.offsetX || 0, post.reframe.offsetY || 0, false);
+    };
+    host.addEventListener('pointerup', end);
+    host.addEventListener('pointercancel', end);
+
+    // Keyboard: the drag is the only way to set this otherwise, and a 2px nudge with a mouse is not
+    // something everyone can do.
+    host.addEventListener('keydown', (ev) => {
+        if (!ev.target.closest || !ev.target.closest('[data-crop-window]')) return;
+        const win = current();
+        const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+        if (!win || !post || !post.reframe) return;
+        const step = ev.shiftKey ? 0.2 : 0.05;
+        let dx = 0, dy = 0;
+        if (ev.key === 'ArrowLeft') dx = -step;
+        else if (ev.key === 'ArrowRight') dx = step;
+        else if (ev.key === 'ArrowUp') dy = -step;
+        else if (ev.key === 'ArrowDown') dy = step;
+        else return;
+        ev.preventDefault();
+        const clamp = (n) => Math.min(1, Math.max(-1, n));
+        _pceCropSet(
+            win.movableX ? clamp((post.reframe.offsetX || 0) + dx) : 0,
+            win.movableY ? clamp((post.reframe.offsetY || 0) + dy) : 0,
+        );
+    });
 }
 
 // Persist the current cache overlays for a post (used by timeline drags + the Start/End inputs).
@@ -6584,7 +7976,42 @@ function _rqTimelineItem(kind, key) {
     return overlays.find((o) => o && o.id === key) || overlays[Number(key)] || null;
 }
 
-// Timeline drag: bound ONCE to the stable #post-review-timeline container (its innerHTML is replaced
+/** Which clip a moment of the finished cut falls in, or null when there is no cut to speak of. */
+function _rqClipIndexAt(t) {
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const spans = _pceClipSpans(post);
+    if (!spans) return null;
+    const sp = _pceSpanAt(spans, t);
+    return sp ? sp.i : null;
+}
+
+/** The clip row under a point, by index — the drop target while a text box is being dragged. */
+function _rqClipRowAt(x, y) {
+    const el = document.elementFromPoint(x, y);
+    const row = el && el.closest ? el.closest('#pce-clips-block [data-clip-row]') : null;
+    if (!row) return null;
+    const i = Number(row.getAttribute('data-clip-row'));
+    return Number.isFinite(i) ? i : null;
+}
+
+/**
+ * Light up the clip a box would land on, or clear it with null.
+ *
+ * Inline styles, not a class. The compiled stylesheet only carries utilities the markup already
+ * uses, and a ring- utility that appears nowhere else would be purged out of it — the highlight
+ * would simply not exist, which is exactly how the timeline's segment fills were once invisible.
+ */
+function _rqPaintDropTarget(index) {
+    for (const row of document.querySelectorAll('#pce-clips-block [data-clip-row]')) {
+        const on = index != null && Number(row.getAttribute('data-clip-row')) === index;
+        row.style.outline = on ? '2px dashed #ec4899' : '';
+        row.style.outlineOffset = on ? '-2px' : '';
+        row.style.borderRadius = on ? '8px' : '';
+        row.style.background = on ? 'rgba(236,72,153,.06)' : '';
+    }
+}
+
+// Timeline drag: bound ONCE to the stable #pce-clips-block container (its innerHTML is replaced
 // each render, but the element persists). Pointer capture is on the container, and the move handler
 // mutates ONLY the dragged segment's inline style — it does NOT re-render the timeline mid-drag,
 // which would destroy the very node being held (the Phase 1 lesson). Full re-render + save happen on
@@ -6593,7 +8020,11 @@ let _rqTimelineBound = false;
 let _rqTlDrag = null;
 function _rqBindTimeline() {
     if (_rqTimelineBound) return;
-    const host = document.getElementById('post-review-timeline');
+    // ⚠️ #pce-clips-block, not #post-review-timeline. The timed rows moved into the clip list, and a
+    // handler bound to the element they LEFT never fires — the bars would draw perfectly and simply
+    // not respond to the pointer. Sharing the element with _pceBindClipTrim is safe: each handler
+    // opens with a closest() for its own target and neither uses stopImmediatePropagation.
+    const host = document.getElementById('pce-clips-block');
     if (!host) return;
     _rqTimelineBound = true;
     const fmt = (s) => `${(Math.round(s * 10) / 10)}s`;
@@ -6607,21 +8038,34 @@ function _rqBindTimeline() {
         const ov = _rqTimelineItem(kind, id);
         if (!ov) return;
         const dur = _rqTimelineDuration();
-        // Grabbing a track selects it, and selection drives which inspector you land in — grabbing a
-        // voice note must not open the text panel.
-        if (kind === 'audio') { _pceSelectedAudioId = ov.id || id; _pceSelect('audio'); }
-        else { _pceSelectedOverlayId = ov.id || id; _pceSelect('overlays'); }
         // Seed from what is DRAWN, not from what is stored. An unbounded audio clip is stored with no
         // end but occupies its own natural length on screen; seeding e0 from the axis would stretch a
         // six-second voice note to the length of the video the moment you nudged it.
         const seed = kind === 'audio' ? _pceAudioDrawRange(ov) : ov;
+        // ⚠️ The drag object FIRST, before _pceSelect below. _pceDragActive() reads this, and
+        // selecting repaints the list — so built the other way round, that repaint detaches `seg`
+        // while the drag is still being assembled out of it, and the drag ends up holding a node
+        // that is no longer on the page.
+        const track0 = seg.closest('[data-tl-track]');
         _rqTlDrag = {
-            seg, track: seg.closest('[data-tl-track]'), ov, dur, kind,
+            seg, key: id, track: track0, axis: _rqAxisOf(track0, dur), ov, dur, kind,
             mode: edge ? edge.getAttribute('data-tl-edge') : 'move',
             startX: ev.clientX,
-            s0: seed.startS == null ? 0 : seed.startS,
-            e0: seed.endS == null ? dur : seed.endS,
+            s0: seed.startS == null ? _rqAxisOf(track0, dur).start : seed.startS,
+            // An unbounded box is DRAWN to the end of its own block, so that is what a drag must
+            // seed from. Seeding from the cut would stretch it to the whole video the instant it
+            // was nudged — which is the trap the audio rows were already carrying a note about.
+            e0: seed.endS == null
+                ? (() => { const a = _rqAxisOf(track0, dur); return a.start + (a.outS - a.inS); })()
+                : seed.endS,
+            // Which clip it started on, so a drop onto a different one can be told from a re-time.
+            home: kind === 'text' ? _rqClipIndexAt(seed.startS == null ? 0 : seed.startS) : null,
+            drop: null,
         };
+        // Grabbing a track selects it, and selection drives which inspector you land in — grabbing a
+        // voice note must not open the text panel.
+        if (kind === 'audio') { _pceSelectedAudioId = ov.id || id; _pceSelect('audio'); }
+        else { _pceSelectedOverlayId = ov.id || id; _pceSelect('overlays'); }
         host.setPointerCapture(ev.pointerId);
         ev.preventDefault();
     });
@@ -6629,25 +8073,56 @@ function _rqBindTimeline() {
     host.addEventListener('pointermove', (ev) => {
         const d = _rqTlDrag;
         if (!d) return;
-        const rect = d.track.getBoundingClientRect();
+        // Belt as well as braces. _pceDragActive stops the list repainting under us, but a zero-width
+        // rect must never quietly become "dragged to the end of the axis" — that is the failure this
+        // whole guard exists for, and it is silent. Re-find the node first; give up if it is gone.
+        if (!d.track || !d.track.isConnected) {
+            const seg = host.querySelector(`[data-tl-seg="${CSS.escape(d.key)}"]`);
+            d.seg = seg || d.seg;
+            d.track = seg ? seg.closest('[data-tl-track]') : null;
+            if (d.track) d.axis = _rqAxisOf(d.track, d.dur);
+        }
+        const rect = d.track ? d.track.getBoundingClientRect() : null;
+        if (!rect || !(rect.width > 0)) return;
         const dur = d.dur;
-        const at = Math.max(0, Math.min(dur, ((ev.clientX - rect.left) / rect.width) * dur));
+        // ── Everything below is in the ROW's axis, not the cut's ────────────────────────────────
+        // A text row is drawn against its own clip, so `lo`/`hi` are that clip's first and last
+        // second of the finished video. Clamping to them is what makes a sideways drag physically
+        // unable to leave the clip — which is the whole reported bug, and it is a property of the
+        // maths now rather than a rule someone has to remember. Sound's axis IS the cut, so the same
+        // two lines leave it free to run the whole length.
+        const ax = d.axis;
+        const lo = ax.start;
+        const hi = ax.start + (ax.outS - ax.inS);
+        const src = Math.min(ax.outS, Math.max(ax.inS, ((ev.clientX - rect.left) / rect.width) * ax.full));
+        const at = ax.start + (src - ax.inS);
         if (d.mode === 'start') {
-            // Clamp against the end as DRAWN (d.e0), not the axis — an unbounded clip has a real end
+            // Clamp against the end as DRAWN (d.e0), not the axis — an unbounded box has a real end
             // on screen even though it has none in the store.
-            d.ov.startS = Math.max(0, Math.min(at, (d.ov.endS == null ? d.e0 : d.ov.endS) - 0.1));
+            d.ov.startS = Math.max(lo, Math.min(at, (d.ov.endS == null ? d.e0 : d.ov.endS) - 0.1));
         } else if (d.mode === 'end') {
-            d.ov.endS = Math.min(dur, Math.max(at, (d.ov.startS == null ? 0 : d.ov.startS) + 0.1));
+            d.ov.endS = Math.min(hi, Math.max(at, (d.ov.startS == null ? lo : d.ov.startS) + 0.1));
         } else {
-            const delta = ((ev.clientX - d.startX) / rect.width) * dur;
+            // ── Sideways re-times; downwards moves it to another clip ───────────────────────
+            // Dragging along the axis already crosses clip boundaries, but only by dragging the box
+            // to a completely different MOMENT. "Same place in clip 3 instead of clip 1" had no
+            // gesture at all — it meant opening the text editor and picking a chip. Over another
+            // clip's row the box stops following the pointer sideways and that row lights up: the
+            // drag has become a drop, and releasing keeps the offset rather than the second.
+            const over = d.home == null ? null : _rqClipRowAt(ev.clientX, ev.clientY);
+            const drop = over != null && over !== d.home ? over : null;
+            if (drop !== d.drop) { d.drop = drop; _rqPaintDropTarget(drop); }
+            if (drop != null) return;
+            const delta = ((ev.clientX - d.startX) / rect.width) * ax.full;
             const len = d.e0 - d.s0;
-            const ns = Math.max(0, Math.min(dur - len, d.s0 + delta));
+            const ns = Math.max(lo, Math.min(hi - len, d.s0 + delta));
             d.ov.startS = ns; d.ov.endS = ns + len;
         }
-        const start = d.ov.startS == null ? 0 : d.ov.startS;
-        const end = d.ov.endS == null ? dur : d.ov.endS;
-        d.seg.style.left = (start / dur * 100) + '%';
-        d.seg.style.width = Math.max(2, (end - start) / dur * 100) + '%';
+        const start = d.ov.startS == null ? lo : d.ov.startS;
+        const end = d.ov.endS == null ? hi : d.ov.endS;
+        const pct = (t) => ((ax.inS + (t - ax.start)) / ax.full) * 100;
+        d.seg.style.left = pct(start) + '%';
+        d.seg.style.width = Math.max(2, pct(end) - pct(start)) + '%';
         d.seg.title = `${fmt(start)} – ${fmt(end)}`;
         if (d.kind === 'audio') { _pceRefreshAudioTiming(); return; }
         // Positions don't change with timing — only which boxes are visible now — so re-toggle rather
@@ -6660,14 +8135,96 @@ function _rqBindTimeline() {
 
     const end = () => {
         if (!_rqTlDrag) return;
-        const { kind } = _rqTlDrag;
+        const { kind, drop, key } = _rqTlDrag;
         _rqTlDrag = null;
+        _rqPaintDropTarget(null);
+        // Clear the drag BEFORE repainting, or the repaint this drag came here to do is the one
+        // that gets deferred — and deferred to nothing, because the drag is over.
+        _pceClipsRepaintPending = false;   // the repaint below is the one that was deferred
+        // A drop does its own save and repaint. It must not be followed by one that writes back the
+        // timing the box had while it was hovering over another clip.
+        if (kind === 'text' && drop != null) { window._pceOverlayToClip(drop, key); return; }
         _rqRenderTimeline(_rqPostCache[_rqReviewPostId]);
         if (kind === 'audio') { _pceRenderAudioList(); _pcePersistAudio(_rqReviewPostId); }
         else _rqPersistOverlays(_rqReviewPostId);
     };
+    // ── The inline fields on each row ───────────────────────────────────────────────────────────
+    // Delegated to the host, because the rows are replaced wholesale on every repaint — a listener
+    // bound to an input dies with the first redraw, and a control that works once is worse than one
+    // that never worked.
+    //
+    // `input` repaints and `change` saves. Repainting the LIST while a field has focus would take
+    // the caret with it, so the list is left alone until the field is committed; the canvas is
+    // repainted either way, which is the half you are watching while you type.
+    const numFor = (el) => {
+        const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+        if (!post) return null;
+        const key = el.getAttribute('data-tl-for');
+        const kind = el.getAttribute('data-tl-kind') || 'text';
+        const item = _rqTimelineItem(kind, key);
+        const track = el.parentElement && el.parentElement.querySelector('[data-tl-track]');
+        return item ? { post, item, edge: el.getAttribute('data-tl-num'), ax: _rqAxisOf(track, _rqTimelineDuration(post)) } : null;
+    };
+
+    host.addEventListener('change', (ev) => {
+        const el = ev.target;
+        if (el && el.hasAttribute && el.hasAttribute('data-tl-num')) {
+            const c = numFor(el);
+            if (!c) return;
+            const lo = c.ax.start;
+            const hi = c.ax.start + (c.ax.outS - c.ax.inS);
+            const raw = String(el.value).trim();
+            // Blank is a real answer on the end field — "to the end of it" — and the only way back
+            // to it once a number has been typed.
+            if (raw === '' && c.edge === 'end') { c.item.endS = undefined; }
+            else {
+                // Typed in the clip's own seconds, the same ones the row prints, then converted.
+                const t = Math.min(hi, Math.max(lo, c.ax.start + ((Number(raw) || 0) - c.ax.inS)));
+                if (c.edge === 'start') {
+                    c.item.startS = t <= lo + 0.001 ? undefined : t;
+                    if (c.item.endS != null && c.item.endS <= t + 0.1) c.item.endS = Math.min(hi, t + 0.2);
+                } else {
+                    c.item.endS = Math.max(t, (c.item.startS == null ? lo : c.item.startS) + 0.2);
+                }
+            }
+            _rqRenderTimeline(c.post);
+            _rqRenderCanvasOverlays(c.post);
+            if ((el.getAttribute('data-tl-kind') || 'text') === 'audio') _pcePersistAudio(_rqReviewPostId);
+            else _rqPersistOverlays(_rqReviewPostId);
+            return;
+        }
+        if (el && el.hasAttribute && el.hasAttribute('data-tl-text')) {
+            const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+            const ov = post && _rqTimelineItem('text', el.getAttribute('data-tl-text'));
+            if (!ov) return;
+            ov.text = el.value;
+            _rqRenderTimeline(post);
+            _rqRenderCanvasOverlays(post);
+            _rqPersistOverlays(_rqReviewPostId);
+        }
+    });
+
+    host.addEventListener('input', (ev) => {
+        const el = ev.target;
+        if (!el || !el.hasAttribute || !el.hasAttribute('data-tl-text')) return;
+        const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+        const ov = post && _rqTimelineItem('text', el.getAttribute('data-tl-text'));
+        if (!ov) return;
+        ov.text = el.value;
+        _rqRenderCanvasOverlays(post);   // the picture keeps up; the list waits for the caret
+    });
+
     host.addEventListener('pointerup', end);
     host.addEventListener('pointercancel', end);
+    // ── The safety net ──────────────────────────────────────────────────────────────────────────
+    // A drag defers the list's repaints while it runs, so a drag that never ends leaves the panel
+    // permanently frozen: buttons that never change label, text that never re-anchors, no error
+    // anywhere. The host's handlers cover every normal release, but only if the pointer sequence
+    // reaches the host. The window gets the last word — and it runs the SAME `end`, so a release
+    // that arrives this way still saves what the drag did. `end` no-ops when there is no drag, so
+    // firing twice on a normal release costs nothing.
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
 }
 
 async function openPostReview(postId, opts = {}) {
@@ -8477,9 +10034,10 @@ function _pceOpenMediaPicker() {
     const msg = document.getElementById('pce-media-modal-msg');
     if (msg) msg.textContent = '';
     const sub = document.getElementById('pce-media-modal-sub');
-    // "Choose a picture" was the title, but this offers video and a branded card too — so it named
-    // one of three answers.
-    if (sub) sub.textContent = post.thumbnailUrl ? 'Whatever you pick replaces what is on the post.' : '';
+    // The clip affordance and the subtitle are BOTH derived in _pceSyncMediaModalClip, which
+    // gpAiShowThumb calls on every media change. Computing them here as well would be the bug this
+    // had: the modal is usually opened on a post with NO media, so a value decided at open time
+    // says "no video to add to" and never reconsiders once one is attached in the same session.
 
     modal.classList.remove('hidden');
     modal.classList.add('flex');
@@ -8494,6 +10052,14 @@ function _pceCloseMediaPicker() {
     // Hand the panel back. Without this the next thing to borrow it (the editor's own Media step, or
     // the generate-post sheet) would find it parented into a hidden modal.
     _rqRestoreMediaPanel();
+    // Both of these belong to ONE visit: a stale intent would silently add when the next visit
+    // meant to replace, and a stale selection would offer to act on tiles from a post you have
+    // left. Last, so the borrow-and-return above stays the first thing this function is seen to do
+    // — post-editor-single-surface.test.ts reads for it near the top.
+    _pceClipAddMode = false;
+    _pceOwnPicked = [];
+    _pceIntentRun = null;
+    document.getElementById('gp-ai-intent')?.classList.add('hidden');
 }
 
 /**
@@ -8537,6 +10103,21 @@ async function _pceCanvasAttachFiles(fileList) {
     if (files.length === 1) return _pceCanvasAttachOne(files[0]);
 
     const fmt = _pceActiveFormat(post);
+
+    // ── Several clips of ONE piece, or several slides? ──────────────────────────────────────────
+    // The composer's rule was "more media than the format takes ⇒ widen the format", which on
+    // Instagram means a Reel silently becomes a Carousel. That is right for photos and exactly
+    // wrong for video: four clips dropped on a Reel are the material for ONE video, not four
+    // slides, and switching format threw away the thing the user was trying to make.
+    //
+    // A single-item VIDEO format is the tell. There the extra files join the edit list
+    // (src/lib/video-edit.ts) as clips, the format is left alone, and the post keeps one attached
+    // asset — the base the render composites from. Everything else keeps the old behaviour.
+    const videoOnlyFormat = !!fmt && fmt.m === 'video' && fmt.max === 1;
+    if (videoOnlyFormat && files.every(f => (f.type || '').startsWith('video/'))) {
+        return _pceAttachClips(files);
+    }
+
     if (!fmt || fmt.max < files.length) {
         // The narrowest live format that fits: on Instagram that is the Carousel.
         const target = _pceFormatsFor(post.platform)
@@ -8560,6 +10141,228 @@ async function _pceCanvasAttachFiles(fileList) {
     // through set-post-slides — the same thing this needs.
     return _pceAddSlides(files);
 }
+
+/**
+ * Add video files to the post's cut, keeping the format it already has.
+ *
+ * The post keeps ONE attached asset — the first clip — because that is what the rest of the editor
+ * and the format router read: a Reel takes one item, and the rendered output will replace it at
+ * approval anyway. The other clips live only in the edit list until then.
+ *
+ * Appends. Picking media through the modal still REPLACES ("Whatever you pick replaces what is on
+ * the post"), which is the right answer for choosing a post's picture and the wrong one for adding
+ * a second clip — so adding clips has its own door rather than changing what that sentence means.
+ */
+async function _pceAppendClipAssets(assets) {
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    if (!post || !assets.length) return;
+
+    const existing = _pceClips(post);
+    const room = _PCE_MAX_CLIPS - existing.length;
+    if (room <= 0) { window.showToast?.(`A post can hold ${_PCE_MAX_CLIPS} clips.`); return; }
+    const take = assets.slice(0, room);
+    if (take.length < assets.length) {
+        window.showToast?.(`Added ${take.length} — that is the ${_PCE_MAX_CLIPS}-clip ceiling.`);
+    }
+
+    // The FIRST clip has to become the post's attached media, or the post has no base asset, no
+    // thumbnail, and nothing downstream can tell it is a video at all. Only when there isn't one
+    // already — re-attaching would wipe the overlays designed against it.
+    if (!existing.length) {
+        _gpCurrentPostId = postId;
+        if (typeof gpAiSetMediaType === 'function') gpAiSetMediaType('video');
+        try { await gpAiSelectOwn(take[0].id); }
+        catch (err) { window.showToast?.(err.message || 'Could not attach that clip.'); return; }
+    }
+
+    const clips = existing.concat(take.map((a, i) => ({
+        id: 'c' + a.id + '_' + (existing.length + i),
+        assetId: a.id,
+        url: a.url || a.storageUrl || a.externalUrl || null,
+        name: a.name || ('Clip ' + (existing.length + i + 1)),
+    })));
+    _pceClipsChanged(clips);
+    window.showToast?.(clips.length === 1 ? 'Clip added.' : `${clips.length} clips in this cut.`);
+}
+
+/** Upload files, then append them. The device-file door into the same append. */
+async function _pceAttachClips(files) {
+    if (!files.length) return;
+    const { assets, failures } = await gpUploadContentAssets(files, (i, n, name) => {
+        window.showToast?.(`Uploading ${i} of ${n}… ${name}`);
+    });
+    for (const f of failures) window.showToast?.(`${f.name}: ${f.message}`);
+    if (assets.length) await _pceAppendClipAssets(assets);
+}
+
+/**
+ * The picker's own "Add another clip". Closes the modal first: the file dialog it opens belongs to
+ * the post, not to this modal, and leaving a replace-dialog open behind an append action is exactly
+ * the ambiguity this button exists to remove.
+ */
+/**
+ * ADD MODE. While it is on, picking from "Use my own" joins the clip onto the cut instead of
+ * replacing the post's media.
+ *
+ * It opens the library rather than the OS file dialog, because this file already argues the point
+ * for the empty canvas: "Opens the picker, not the OS file dialog... going straight to the file
+ * dialog answered the question before it had been asked." A second clip is usually one you already
+ * have.
+ *
+ * ⚠️ Only "Use my own" and Upload append. Stock, Canva and AI attach SERVER-side in a single call
+ * (pexels-search action:'select' and friends), so there is no asset id on this side to redirect —
+ * appending from those needs an append flag on those endpoints. Until then add mode shows the two
+ * sources that can honour it, rather than offering three that would silently replace.
+ */
+/**
+ * ── Add or replace: asked, not inferred ────────────────────────────────────────────────────────
+ *
+ * Three attempts at a hidden "add mode" all failed the same way: whether the next pick would add or
+ * replace was decided somewhere the user could not see, and by the time they found out it had
+ * already happened. So the question is now asked at the point of acting, per source:
+ *
+ *   Use my own   — a tick box on each tile. Pick several, press Add; or Replace with exactly one.
+ *   Upload       — several files at once, and on a video post they are added.
+ *   Find / AI    — asked BEFORE the search or the generation, because those cost time and credits
+ *                  and there is no undo once the answer has landed on the post.
+ *
+ * `_pceClipAddMode` survives as the intent for ONE action. It is set immediately before the thing
+ * it governs and cleared the moment that thing finishes, so it can never be stale.
+ */
+let _pceClipAddMode = false;
+
+/** The post the picker is currently acting on. */
+function _pcePickerPost() {
+    const id = typeof _gpCurrentPostId !== 'undefined' && _gpCurrentPostId != null ? _gpCurrentPostId : _rqReviewPostId;
+    return id != null ? _rqPostCache[id] : null;
+}
+
+/**
+ * Can this post hold a CUT — several clips rendered into one video?
+ *
+ * A property of the FORMAT, not of what is currently attached. It used to require existing media,
+ * which is why an empty Reel draft offered only "Replace with this" — a button naming something
+ * that was not there. Adding works perfectly well on an empty post: the first clip becomes the base
+ * the render composites from, which is exactly what _pceAppendClipAssets already does.
+ */
+function _pceCanAddClip() {
+    const post = _pcePickerPost();
+    const fmt = post && typeof _pceActiveFormat === 'function' ? _pceActiveFormat(post) : null;
+    return !!fmt && fmt.m === 'video' && fmt.max === 1;
+}
+
+/**
+ * Is there actually a video here to add ONTO, or to replace?
+ *
+ * The separate question, and the one that governs the word "replace" and the add-or-replace prompt.
+ * Asking "add to this video or replace it?" when there is no video is the same nonsense from the
+ * other direction.
+ */
+function _pceHasClipToAddTo() {
+    const post = _pcePickerPost();
+    return !!post && !!post.thumbnailUrl && _pcePostIsVideo(post) && _pceCanAddClip();
+}
+
+function _pceExitClipAddMode() { _pceClipAddMode = false; }
+
+/**
+ * Ask add-or-replace, and run the chosen one. Used by the sources that commit time or credits
+ * before anything is attachable — a search and a generation both answer too late to ask after.
+ */
+function _pceAskAddOrReplace(label, run) {
+    // Nothing attached yet ⇒ there is no "replace" to offer, so do not ask; the result simply
+    // becomes the post's video.
+    if (!_pceHasClipToAddTo()) { _pceClipAddMode = false; run(); return; }
+    const host = document.getElementById('gp-ai-intent');
+    if (!host) { _pceClipAddMode = false; run(); return; }
+    _pceIntentRun = run;
+    document.getElementById('gp-ai-intent-label').textContent = label;
+    host.classList.remove('hidden');
+}
+let _pceIntentRun = null;
+
+window._pceIntentChoose = function (mode) {
+    document.getElementById('gp-ai-intent')?.classList.add('hidden');
+    _pceClipAddMode = mode === 'add';
+    const run = _pceIntentRun;
+    _pceIntentRun = null;
+    if (typeof run === 'function') run();
+};
+
+/** The tiles ticked in "Use my own", by asset id. */
+let _pceOwnPicked = [];
+
+window._pceOwnToggle = function (assetId) {
+    assetId = Number(assetId);
+    _pceOwnPicked = _pceOwnPicked.includes(assetId)
+        ? _pceOwnPicked.filter(x => x !== assetId)
+        : _pceOwnPicked.concat(assetId);
+    _pceSyncOwnSelection();
+};
+
+/** Paint the ticks and the action bar from the current selection. */
+function _pceSyncOwnSelection() {
+    for (const el of document.querySelectorAll('[data-own-tile]')) {
+        const on = _pceOwnPicked.includes(Number(el.getAttribute('data-own-tile')));
+        el.classList.toggle('border-emerald-500', on);
+        el.classList.toggle('border-transparent', !on);
+        const tick = el.querySelector('[data-own-tick]');
+        if (tick) {
+            tick.style.background = on ? '#059669' : 'rgba(255,255,255,.9)';
+            tick.style.borderColor = on ? '#059669' : '#d1d5db';
+            tick.textContent = on ? '✓' : '';
+        }
+    }
+    const bar = document.getElementById('gp-ai-own-bar');
+    const add = document.getElementById('gp-ai-own-add');
+    const rep = document.getElementById('gp-ai-own-replace');
+    const n = _pceOwnPicked.length;
+    const canAdd = _pceCanAddClip();
+    // Replacing is one picture's job — with several ticked there is no single answer to "with
+    // what" — and it needs something to replace.
+    const canReplace = n === 1 && (!canAdd || _pceHasClipToAddTo());
+    // An empty bar is worse than no bar: two tiles ticked used to show a blank strip, because both
+    // buttons were hidden and nothing said why.
+    bar?.classList.toggle('hidden', n === 0 || (!canAdd && !canReplace));
+    if (add) {
+        add.classList.toggle('hidden', !canAdd);
+        add.textContent = n === 1 ? 'Add' : `Add ${n} clips`;
+    }
+    if (rep) rep.classList.toggle('hidden', !canReplace);
+}
+
+window._pceOwnAdd = async function () {
+    const ids = _pceOwnPicked.slice();
+    if (!ids.length) return;
+    _pceOwnPicked = [];
+    _pceSyncOwnSelection();
+    await _pceAppendClipAssets(ids.map(id => ({ id, name: (_pceOwnAssets[id] || {}).name, url: (_pceOwnAssets[id] || {}).url })));
+    _pceExitClipAddMode();
+    _pceCloseMediaPicker();
+};
+
+window._pceOwnReplace = async function () {
+    const id = _pceOwnPicked[0];
+    if (id == null) return;
+    _pceOwnPicked = [];
+    _pceSyncOwnSelection();
+    _pceClipAddMode = false;
+    await gpAiSelectOwn(id);
+};
+
+/** What the grid last rendered, so the actions can name and preview what was ticked. */
+let _pceOwnAssets = {};
+
+/** The device-file door, offered from the Clips panel. */
+window._pceAddClipFiles = function () {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'video/*';
+    input.multiple = true;
+    input.onchange = () => { const f = Array.from(input.files || []); if (f.length) _pceAttachClips(f); };
+    input.click();
+};
 
 /**
  * One file: the shared media panel's own attach path (upload → attach-draft-media → gpAiShowThumb).
@@ -8705,7 +10508,11 @@ const _RAIL = [
         if (_pceLayers.includes('overlays')) out.push('pce-insp-overlays');
         if (_pceLayers.includes('audio')) out.push('pce-insp-audio');
         return out;
-    }, enabled: (post) => _pcePostIsVideo(post) },
+    // Both halves matter, and they used to disagree. _pcePostIsVideo answers "is this a video POST",
+    // which a Reel-format draft satisfies before anything is attached — so the step opened onto
+    // overlay and sound controls for media that did not exist, while its own subtitle said "Add a
+    // video first". The subtitle was right; the predicate was the one lying.
+    }, enabled: (post) => _pcePostIsVideo(post) && !!post?.thumbnailUrl },
     { key: 'link',  title: 'Link & call to action', blocks: () => ['pce-link-block'] },
     // "Platforms" was here. It is gone: a post goes out on the accounts the workspace has actually
     // connected, which openGeneratePostSheet now seeds from live connections exactly as Autopilot
@@ -10354,6 +12161,23 @@ function _pceLayerSubtitle(key, post) {
     }
 }
 
+/**
+ * The panels that live INSIDE the stage strip and depend on the post's media: the cut, and the
+ * per-platform framing.
+ *
+ * Called from _pceRenderLayers on every exit path rather than from the post-open path alone. That
+ * was the bug: attaching a post's first video un-hid the strip but never re-rendered these, so the
+ * Clips panel — which is the only place "Add another clip" exists — stayed hidden until the post
+ * was closed and reopened. Each panel decides its own visibility, so calling them when there is
+ * nothing to show is correct and cheap.
+ */
+function _pceRenderStagePanels() {
+    if (typeof _pceRenderClips === 'function') _pceRenderClips();
+    if (typeof _pceRenderCropFrame === 'function') _pceRenderCropFrame();
+    if (typeof _pceBindCropFrame === 'function') _pceBindCropFrame();
+    if (typeof _pceBindClipTrim === 'function') _pceBindClipTrim();
+}
+
 function _pceRenderLayers() {
     const host = document.getElementById('pce-layer-list');
     if (!host) return;
@@ -10361,7 +12185,7 @@ function _pceRenderLayers() {
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
     // No post, or a post with nothing editable — hide the whole strip rather than show an empty
     // heading. _pceLayers is [] until _pceSyncForPost has run.
-    if (!post || !_pceLayers.length) { host.innerHTML = ''; strip?.classList.add('hidden'); return; }
+    if (!post || !_pceLayers.length) { host.innerHTML = ''; strip?.classList.add('hidden'); _pceRenderStagePanels(); return; }
 
     // Nothing on the post yet: the only two layers are the two the canvas itself now offers, so the
     // list would be a heading over "Nothing attached" and "Empty". It comes back the moment there is
@@ -10378,9 +12202,11 @@ function _pceRenderLayers() {
         // The strip also carries the slides adder, which a carousel shows before it has any slides.
         const slidesShown = !document.getElementById('pce-slides')?.classList.contains('hidden');
         strip?.classList.toggle('hidden', !slidesShown);
+        _pceRenderStagePanels();
         return;
     }
     strip?.classList.remove('hidden');
+    _pceRenderStagePanels();
     const rows = _PCE_LAYER_ORDER.filter(k => _pceLayers.includes(k));
     host.innerHTML = rows.map(key => {
         const on = key === _pceSelection;
@@ -10504,6 +12330,26 @@ function _pceBackfillAssetMetrics() {
 // backfill above sends it to content_assets, which is what lets the server route video formats — it
 // is just no longer printed at the reader, since a clip's length is not a problem on its own.
 
+/**
+ * Persist what a clip measured, so the next open needs no measurement.
+ *
+ * The same write-once backfill _pceBackfillAssetMetrics uses, pointed at a CLIP rather than the
+ * canvas asset — it only ever fills a NULL column, so a value from the upload path always wins.
+ * Best-effort and never awaited: a failure here must not disturb the editor, and the next post that
+ * shows this clip will try again.
+ */
+function _pceReportClipMetrics(assetId, w, h, durationS) {
+    if (!assetId || _pceMetricsSent.has(assetId)) return;
+    if (!(durationS > 0)) return;
+    _pceMetricsSent.add(assetId);
+    const metrics = { durationS };
+    if (w > 0 && h > 0) { metrics.width = w; metrics.height = h; }
+    fetch(`/.netlify/functions/content-assets?id=${assetId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ metrics }),
+    }).catch(() => { /* best effort */ });
+}
+
 function _pceRenderMediaProps() {
     const dl = document.getElementById('insp-media-props');
     if (!dl) return;
@@ -10606,46 +12452,150 @@ function _pceResetOverlayApplyAll() {
 
 // The per-box Start/End controls. Shown only for a video with a box selected; seeded from that box
 // and wired (once) to write straight to the cache, repaint the canvas + timeline, and persist.
-let _pceOverlayTimingBound = false;
-function _pceRefreshOverlayTiming() {
-    const wrap = _pceEl('insp-overlay-timing');
-    if (!wrap) return;
-    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
-    const isVideo = _pcePostIsVideo(post);
-    const overlays = (post && post.overlays) || [];
-    const ov = _pceSelectedOverlayId ? overlays.find((o) => o && o.id === _pceSelectedOverlayId) : null;
-    // Same rule as the timeline: with no readable clip length there is nothing to time against, and
-    // seconds typed against the 15s fallback are what strand a box past the end of a shorter clip.
-    if (!isVideo || !ov || !_rqVideoDurationKnown()) { wrap.classList.add('hidden'); _pceSyncStageTimingBox(); return; }
-    wrap.classList.remove('hidden');
-    _pceSyncStageTimingBox();
-    const lbl = _pceEl('insp-overlay-timing-label');
-    if (lbl) lbl.textContent = (ov.text || 'Text').split('\n')[0].slice(0, 30);
-    const startEl = _pceEl('insp-overlay-start');
-    const endEl = _pceEl('insp-overlay-end');
-    if (startEl) startEl.value = ov.startS == null ? '' : (Math.round(ov.startS * 10) / 10);
-    if (endEl) endEl.value = ov.endS == null ? '' : (Math.round(ov.endS * 10) / 10);
-    if (!_pceOverlayTimingBound) {
-        _pceOverlayTimingBound = true;
-        const commit = (persist) => {
-            const p = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
-            const cur = p && (p.overlays || []).find((o) => o && o.id === _pceSelectedOverlayId);
-            if (!cur) return;
-            const dur = _rqVideoDuration();
-            const s = _pceEl('insp-overlay-start').value;
-            const e = _pceEl('insp-overlay-end').value;
-            cur.startS = s === '' ? undefined : Math.max(0, Math.min(dur, Number(s) || 0));
-            cur.endS = e === '' ? undefined : Math.max(0, Math.min(dur, Number(e) || 0));
-            if (cur.startS != null && cur.endS != null && cur.endS <= cur.startS) cur.endS = undefined;
-            _rqRenderTimeline(p);
-            _rqRenderCanvasOverlays(p);
-            if (persist) _rqPersistOverlays(_rqReviewPostId);
-        };
-        _pceEl('insp-overlay-start').addEventListener('input', () => commit(false));
-        _pceEl('insp-overlay-end').addEventListener('input', () => commit(false));
-        _pceEl('insp-overlay-start').addEventListener('change', () => commit(true));
-        _pceEl('insp-overlay-end').addEventListener('change', () => commit(true));
+/**
+ * ── "Which clip, and where in it" ───────────────────────────────────────────────────────────────
+ *
+ * Overlays are STORED in seconds of the finished video, and they must be: that is what the renderer
+ * times them against, and a box that spans a cut would have nowhere else to live. But nobody thinks
+ * "22.4 seconds into the reel" — they think "over the bit in the third clip where he turns round".
+ *
+ * So the storage is untouched and only the question changes. The chips pick a clip, the track spans
+ * THAT clip, and the two are converted on the way in and out. Moving a box to another clip keeps
+ * its length and re-bases it, because "the same text, on the next clip" is what the move means.
+ */
+function _pceSpansFor(clips) {
+    const spans = [];
+    let at = 0;
+    for (let i = 0; i < (clips || []).length; i++) {
+        const len = _pceClipLength(clips[i]);
+        if (len == null) return null;          // still measuring — no honest span to offer
+        spans.push({ i, clip: clips[i], start: at, end: at + len, len });
+        at += len;
     }
+    return spans.length ? spans : null;
+}
+
+function _pceClipSpans(post) {
+    const spans = _pceSpansFor(_pceClips(post));
+    // One clip is not a cut: the chips and the per-clip track have one answer, so the UI asks with
+    // the plain fields instead. Re-anchoring uses _pceSpansFor directly, because trimming a single
+    // clip moves its text just as surely.
+    return spans && spans.length > 1 ? spans : null;
+}
+
+/**
+ * ── Keeping text with its clip when the cut changes ─────────────────────────────────────────────
+ *
+ * Overlays are stored in seconds of the FINISHED video, which is what the renderer needs — and what
+ * makes every one of them wrong the moment a clip's length changes. Trim two seconds off clip one
+ * and every box after it is pointing two seconds late; trim clip one from ten seconds to five and a
+ * box at 5s–7s of it is now past its end, so it never shows.
+ *
+ * What the reviewer actually decided was "this text, on THAT clip, this far in, for this long". So
+ * that is what survives: each box is read back into (clip, offset, duration) against the OLD cut and
+ * written out again against the new one.
+ *
+ * Anchored by clip ID rather than position, so a reorder carries the text with its footage instead
+ * of leaving it on whatever is now third. Offsets and durations are clamped into the clip's new
+ * length — a box cannot keep five seconds of a clip that is now three.
+ */
+function _pceReanchorOverlays(post, oldSpans, newClips) {
+    if (!post || !oldSpans || !Array.isArray(post.overlays) || !post.overlays.length) return false;
+    const newSpans = _pceSpansFor(newClips);
+    if (!newSpans) return false;
+    const MIN = 0.2;
+    let moved = 0;
+
+    for (const ov of post.overlays) {
+        if (!ov) continue;
+        const from = _pceSpanAt(oldSpans, ov.startS == null ? 0 : ov.startS);
+        if (!from) continue;
+        // Its own clip if it still exists; otherwise whatever now sits in that position, and failing
+        // that the last clip. Dropping the text would be the one unrecoverable answer.
+        const to = newSpans.find(sp => sp.clip && from.clip && sp.clip.id === from.clip.id)
+            || newSpans[Math.min(from.i, newSpans.length - 1)];
+        if (!to) continue;
+
+        const start = ov.startS == null ? 0 : ov.startS;
+        const within = Math.max(0, start - from.start);
+        const shown = Math.max(MIN, (ov.endS == null ? from.end : ov.endS) - start);
+
+        // Keep the DURATION and pull the start back, rather than clamping the start and squashing
+        // the text into whatever is left. Two seconds of text at 5s of a clip that is now five
+        // seconds long becomes two seconds at 3s — still two seconds, still on that clip. Clamping
+        // alone would have left it showing for a fifth of a second, which is "displays" in the same
+        // sense that a single frame does.
+        let nextWithin = within;
+        if (nextWithin + shown > to.len) nextWithin = Math.max(0, to.len - shown);
+        nextWithin = Math.min(nextWithin, Math.max(0, to.len - MIN));
+        const nextStart = to.start + nextWithin;
+        const nextEnd = Math.min(to.end, nextStart + shown);
+        const wasStart = ov.startS;
+        const wasEnd = ov.endS;
+        ov.startS = nextStart <= 0.001 ? undefined : nextStart;
+        ov.endS = nextEnd >= to.end - 0.001 && to.i === newSpans.length - 1 ? undefined : nextEnd;
+        if (ov.startS !== wasStart || ov.endS !== wasEnd) moved++;
+    }
+    return moved > 0;
+}
+
+/** The clip a moment of the finished video falls in. */
+function _pceSpanAt(spans, t) {
+    if (!spans) return null;
+    for (const sp of spans) if (t < sp.end - 0.001) return sp;
+    return spans[spans.length - 1];
+}
+
+/**
+ * Put a text box on another clip, keeping where it sits in that clip and how long it shows.
+ *
+ * The OFFSET is what is preserved, not the absolute second: "two seconds in, for three seconds" is
+ * what the reviewer decided, and it means the same thing on any clip. Clamped to the target's
+ * length, because the clip you are moving to may be shorter than the one you came from.
+ *
+ * `key` names the box; omitted, it acts on the selected one (how the text editor's clip chips call
+ * it). Shared with the timeline's drag-and-drop so the two cannot disagree about what "move this to
+ * clip 3" means.
+ */
+window._pceOverlayToClip = function (index, key) {
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    const overlays = (post && post.overlays) || [];
+    const want = key == null ? _pceSelectedOverlayId : key;
+    let ov = overlays.find(o => o && o.id === want);
+    if (!ov && /^\d+$/.test(String(want))) ov = overlays[Number(want)];
+    const spans = _pceClipSpans(post);
+    if (!ov || !spans || !spans[index]) return;
+    const from = _pceSpanAt(spans, ov.startS == null ? 0 : ov.startS);
+    const to = spans[index];
+    if (!from || from.i === to.i) return;
+    const within = (ov.startS == null ? 0 : ov.startS) - from.start;
+    const shown = (ov.endS == null ? from.end : ov.endS) - (ov.startS == null ? 0 : ov.startS);
+    ov.startS = to.start + Math.min(within, Math.max(0, to.len - 0.2));
+    ov.endS = Math.min(to.end, ov.startS + Math.max(0.2, shown));
+    if (ov.startS <= 0.001) ov.startS = undefined;
+    // ⚠️ _rqReviewPostId, not post.id. _rqPersistOverlays looks the post up BY this argument, so a
+    // cache row without an `id` field silently saved nothing at all.
+    _rqPersistOverlays(postId);
+    _rqRenderCanvasOverlays(post);
+    _pceRefreshOverlayTiming();
+    _rqRenderTimeline(post);
+};
+
+/* The chips, the clip-relative scrub and their drag state lived here. They served the "When" panel
+   under the canvas, which is gone: choosing a clip is the drag-and-drop onto its row, and the scrub
+   is the text bar itself now that a row shares its clip's axis. Two copies of one control is two
+   places to disagree, and this was the copy with the clip-jumping bug. */
+
+/**
+ * The text box's timing panel is gone — its controls live on the row they describe now.
+ *
+ * Kept under the old name because ~10 callers reach for it after changing an overlay, and what they
+ * actually want is "the timing UI now reflects this". That is the clip list, plus keeping the
+ * container that used to hold this panel honest about whether anything is left inside it.
+ */
+function _pceRefreshOverlayTiming() {
+    _pceSyncStageTimingBox();
 }
 
 // Make a branded text card for this post — the media source that had no way in.
@@ -10762,12 +12712,8 @@ function _pceRefreshStageTiming() {
     const wrap = document.getElementById('pce-stage-timing');
     if (!wrap) return;
     // Refresh the panel that matches the selection; hide the other outright.
-    if (_pceSelection === 'overlays') { _pceEl('insp-audio-timing')?.classList.add('hidden'); _pceRefreshOverlayTiming(); }
-    else if (_pceSelection === 'audio') { _pceEl('insp-overlay-timing')?.classList.add('hidden'); _pceRefreshAudioTiming(); }
-    else {
-        _pceEl('insp-overlay-timing')?.classList.add('hidden');
-        _pceEl('insp-audio-timing')?.classList.add('hidden');
-    }
+    if (_pceSelection === 'audio') _pceRefreshAudioTiming();
+    else _pceEl('insp-audio-timing')?.classList.add('hidden');
     _pceSyncStageTimingBox();
 }
 
@@ -10777,7 +12723,7 @@ function _pceRefreshStageTiming() {
 function _pceSyncStageTimingBox() {
     const wrap = document.getElementById('pce-stage-timing');
     if (!wrap) return;
-    const anyVisible = ['insp-overlay-timing', 'insp-audio-timing']
+    const anyVisible = ['insp-audio-timing']
         .some(id => _pceEl(id) && !_pceEl(id).classList.contains('hidden'));
     wrap.classList.toggle('hidden', !anyVisible);
 }
@@ -11141,7 +13087,7 @@ function _pceSyncAudioPreview(video) {
     if (!video) return;
     const clips = _pceAudioClips();
     if (!clips.length) return;
-    const t = video.currentTime || 0;
+    const t = _pceCutTime(video);
     for (const clip of clips) {
         const el = _pceAudioPreviewEl(clip);
         if (!el) continue;
@@ -11634,7 +13580,7 @@ function _pceSyncForPost(post) {
     // it finishes.
     if (!_pceAiPoll) _pceSetAiMsg('');
     _pceRenderFormats();
-    _pceSetStageWide(true);
+    _pceSetStageWide(true, _pcePostIsVideo(post));
 
     const card = post.brandCard;
     // Only a card is mounted as an editable canvas. A photo has nothing to drag yet (that is
@@ -11740,12 +13686,69 @@ function _pceSyncForPost(post) {
 }
 
 // The two-column stage only earns the extra width when there is an inspector beside the canvas.
-function _pceSetStageWide(wide) {
+/**
+ * How wide the editor is, and whether the timeline sits BESIDE the picture or under it.
+ *
+ * A video post is the only one where the two must be on screen together: every control in the clip
+ * list changes something you can only judge by looking at the canvas, and with the list underneath
+ * you had to scroll away from the picture to touch it. Sticking the canvas to the top was the wrong
+ * answer — it covered the list and ate its clicks. Side by side is the right one, and it needs the
+ * room: at max-w-4xl, once the step rail has taken its 288px, splitting what is left leaves the
+ * video about 200px wide.
+ *
+ * ⚠️ Video only. A photo post has a caption and a picture and nothing with a duration, so the extra
+ * 256px would be margin — and a dialog that changes size depending on what is inside it is
+ * unsettling enough without doing it for no gain.
+ */
+function _pceSetStageWide(wide, sideBySide) {
     const panel = _pceEl('post-review-panel');
     if (!panel) return;
     panel.classList.toggle('max-w-lg', !wide);
-    panel.classList.toggle('max-w-4xl', wide);
+    panel.classList.toggle('max-w-4xl', wide && !sideBySide);
+    panel.classList.toggle('max-w-6xl', !!(wide && sideBySide));
+    _pceSetStageSplit(!!sideBySide);
 }
+
+/**
+ * Put the clip list beside the canvas, or back under it.
+ *
+ * Inline styles on the two columns, not utility classes: this is layout, and a layout class that
+ * appears nowhere else in the markup can be purged out of the compiled stylesheet — at which point
+ * the columns silently stack again and nothing says why. Below 1024px it always stacks; there is no
+ * width at which two columns of this beat one.
+ */
+const _PCE_SPLIT_MIN_PX = 1024;
+let _pceSplitOn = false;
+function _pceSetStageSplit(on) {
+    _pceSplitOn = !!on;
+    _pceApplyStageSplit();
+}
+function _pceApplyStageSplit() {
+    const row = document.getElementById('pce-stage-row');
+    const media = document.getElementById('pce-stage-media');
+    const side = document.getElementById('pce-stage-side');
+    if (!row || !media || !side) return;
+    const split = _pceSplitOn && window.innerWidth >= _PCE_SPLIT_MIN_PX;
+    row.style.display = split ? 'flex' : 'block';
+    row.style.alignItems = split ? 'flex-start' : '';
+    row.style.gap = split ? '16px' : '';
+    media.style.flex = split ? '1 1 0%' : '';
+    media.style.minWidth = split ? '0' : '';
+    // Wide enough for the clip list's own controls — a bar, two number boxes and the buttons — and
+    // no wider, because every pixel here comes off the picture.
+    side.style.flex = split ? '0 0 22rem' : '';
+    side.style.width = split ? '22rem' : '';
+    side.style.marginTop = split ? '0' : '';
+    const strip = document.getElementById('pce-stage-strip');
+    if (strip) {
+        // The strip centres itself under the canvas when stacked; in a column of its own that
+        // centring is what stops it filling the column.
+        strip.classList.toggle('max-w-md', !split);
+        strip.classList.toggle('mx-auto', !split);
+        strip.classList.toggle('mt-3', !split);
+    }
+}
+window.addEventListener('resize', () => _pceApplyStageSplit());
 
 (function _pceBind() {
     const onReady = () => {
@@ -13853,6 +15856,7 @@ async function gpLoadPreview(postId) {
         document.getElementById('gp-ai-pexels')?.classList.add('hidden');
     document.getElementById('gp-ai-find-box')?.classList.add('hidden');
         document.getElementById('gp-ai-own')?.classList.add('hidden');
+    document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
         document.getElementById('gp-ai-media-thumb')?.classList.add('hidden');
         gpAiSetMediaType('image');           // default the type toggle back to Image each open
         gpAiShowThumb(draft.thumbnailUrl);   // reveals the thumb only if a URL is present (type inferred)
@@ -14831,13 +16835,46 @@ function gpAiSetMediaType(type) {
     const findLabel = document.getElementById('gp-ai-find-label');
     if (findLabel) findLabel.textContent = _gpAiMediaType === 'video' ? 'Find a video' : 'Find a photo';
     document.getElementById('gp-ai-own')?.classList.add('hidden');
+    document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
     document.getElementById('gp-ai-find-box')?.classList.add('hidden');
     gpAiMediaStatus('');
 }
 
 // Reveal the currently-attached media. type is 'image'|'video'; if omitted we infer from the URL.
+/**
+ * Whether this modal can offer "add another clip", and what its subtitle should say.
+ *
+ * Derived from the media gpAiShowThumb was HANDED, not from the post cache: the cache is updated by
+ * the same handlers, and reading it here would make the answer depend on which of them ran first.
+ *
+ * Called on open and after every attach, because the interesting transition is exactly the one a
+ * value computed at open time cannot see — a modal opened on an empty post, a video attached inside
+ * it, and the question "how do I add another" arriving one second later.
+ */
+function _pceSyncMediaModalClip(url, type) {
+    const sub = document.getElementById('pce-media-modal-sub');
+    if (!sub) return;
+    const id = typeof _gpCurrentPostId !== 'undefined' && _gpCurrentPostId != null ? _gpCurrentPostId : _rqReviewPostId;
+    const post = id != null ? _rqPostCache[id] : null;
+    // Same rule gpAiShowThumb uses to decide what it is showing.
+    const isVideo = type ? type === 'video' : /\.mp4(\?|$)/i.test(url || '');
+    const fmt = post && typeof _pceActiveFormat === 'function' ? _pceActiveFormat(post) : null;
+    // Only where the next video would be a second CLIP of one piece. On a carousel or a still,
+    // "add" would be a carousel by the back door.
+    const clipable = !!url && isVideo && !!fmt && fmt.m === 'video' && fmt.max === 1;
+    // Says which of the two things the sources are about to offer, so the tick boxes and the
+    // add-or-replace question are expected rather than surprising.
+    sub.textContent = clipable && url ? 'Pick one to replace this video, or tick several to join them on as clips.'
+        : _pceCanAddClip() ? 'Tick the clips you want — several will be joined into one video.'
+        : !url ? ''
+        : 'Whatever you pick replaces what is on the post.';
+}
+
 function gpAiShowThumb(url, type) {
+    // Every attach path already ends here, which is why the clip affordance is synced from this
+    // function rather than from each of them.
+    _pceSyncMediaModalClip(url, type);
     const wrap = document.getElementById('gp-ai-media-thumb');
     const img = document.getElementById('gp-ai-media-thumb-img');
     const vid = document.getElementById('gp-ai-media-thumb-video');
@@ -14856,6 +16893,7 @@ function gpAiShowThumb(url, type) {
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
     document.getElementById('gp-ai-find-box')?.classList.add('hidden');
     document.getElementById('gp-ai-own')?.classList.add('hidden');
+    document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
     gpAiMediaBusy(false);
 
     // If the panel is currently driving a Review-Queue draft, mirror the new media into that modal's
@@ -15074,6 +17112,20 @@ async function _pceOpenOverlayEditor(postId) {
         // than a post id — bake() and the blog studio reuse it with no assistant at all, and the
         // buttons simply do not appear when this is absent.
         suggestText: (mode, currentText) => _pceSuggestOverlayText(postId, mode, currentText),
+        // The post's cut, when it has one. Same shape the When panel uses, and computed by the same
+        // function, so the two cannot disagree about which clip a box is on. Null on a still or a
+        // single clip, where the editor skips the controls entirely and behaves as it always did.
+        // GETTERS, not values. A clip's length is measured asynchronously off a <video> element, so
+        // at the moment this modal opens the answer is frequently "not yet" — and a snapshot of
+        // "not yet" is permanent. Passed as functions, the editor asks again each time it draws.
+        // RAW spans: null means "not measured yet", an array means "this is what the cut is", and how
+        // many there are is the editor's business. _pceClipSpans folds a one-clip post into null for
+        // the page's own UI, and handing that over made "one clip" and "still loading" the same
+        // answer — so the editor could not say which, and said nothing for both.
+        spans: () => (typeof _pceSpansFor === 'function' ? _pceSpansFor(_pceClips(_rqPostCache[postId])) : null),
+        // Separate from `spans`: a SINGLE-clip video has no cut to choose between, but its text can
+        // still fade in. A still cannot — its words are flattened into the pixels.
+        video: () => _pcePostIsVideo(_rqPostCache[postId]),
         onDone: async (overlays) => {
             if (overlays == null) return;   // cancelled — leave everything as it was
             _pceSetOverlayMsg('Saving your text…');
@@ -15308,9 +17360,13 @@ async function gpAiUseOwn() {
     if (!panel || !grid) return;
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
     document.getElementById('gp-ai-find-box')?.classList.add('hidden');
+    document.getElementById('gp-ai-intent')?.classList.add('hidden');
     panel.classList.remove('hidden');
     empty?.classList.add('hidden');
     grid.innerHTML = '<p class="col-span-3 text-xs text-gray-400 text-center py-4">Loading your media…</p>';
+    _pceOwnPicked = [];
+    _pceOwnAssets = {};
+    document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
     gpAiMediaStatus('');
     try {
         const res = await fetch('/.netlify/functions/content-assets');
@@ -15325,12 +17381,24 @@ async function gpAiUseOwn() {
             cell.type = 'button';
             cell.className = 'relative aspect-square rounded-lg overflow-hidden border-2 border-transparent hover:border-emerald-400 transition cursor-pointer bg-gray-100';
             cell.title = a.name || '';
-            cell.onclick = () => gpAiSelectOwn(a.id);
+            cell.setAttribute('data-own-tile', String(a.id));
+            // Ticking, not acting. Clicking a tile used to attach it immediately, which is why
+            // "add several" had nowhere to live: the decision was over before a second could be
+            // chosen. Now the tile records a choice and the bar below performs it.
+            cell.onclick = () => window._pceOwnToggle(a.id);
             cell.innerHTML = (a.assetType === 'video')
                 ? `<video src="${thumb}" muted playsinline preload="metadata" class="w-full h-full object-cover"></video><span class="absolute inset-0 flex items-center justify-center text-white/90"><svg class="w-6 h-6 drop-shadow" fill="currentColor" viewBox="0 0 20 20"><path d="M6.3 2.8A1 1 0 005 3.7v12.6a1 1 0 001.5.9l9.5-6.3a1 1 0 000-1.8L6.3 2.8z"/></svg></span>`
                 : `<img src="${thumb}" alt="${(a.name || '').replace(/"/g, '&quot;')}" class="w-full h-full object-cover" loading="lazy">`;
+            const tick = document.createElement('span');
+            tick.setAttribute('data-own-tick', '');
+            tick.className = 'absolute top-1 left-1 w-4 h-4 rounded border text-[10px] font-bold text-white flex items-center justify-center';
+            tick.style.background = 'rgba(255,255,255,.9)';
+            tick.style.borderColor = '#d1d5db';
+            cell.appendChild(tick);
+            _pceOwnAssets[a.id] = { name: a.name, url: thumb };
             grid.appendChild(cell);
         });
+        _pceSyncOwnSelection();
     } catch {
         grid.innerHTML = '<p class="col-span-3 text-xs text-red-500 text-center py-4">Could not load your media.</p>';
     }
@@ -15371,11 +17439,22 @@ async function gpAiUploadSelected(e) {
     const files = Array.from(e.target.files || []);
     e.target.value = '';
     if (!files.length || !_gpCurrentPostId) return;
+    // Several videos onto a post that can hold a cut are CLIPS. No mode to be in and nothing to
+    // have chosen beforehand: picking four files is already an unambiguous statement that they are
+    // not each meant to replace the last. One file still replaces, which is what one file means.
+    const allVideo = files.every(f => (f.type || '').startsWith('video/'));
+    if (allVideo && _pceCanAddClip() && (files.length > 1 || _pceClipAddMode)) {
+        await _pceAttachClips(files);
+        _pceExitClipAddMode();
+        _pceCloseMediaPicker();
+        return;
+    }
     // Auto-switch the Image/Video toggle to match the file being attached so the attach below
     // (which reads _gpAiMediaType) stays consistent with what the user just picked.
     const uploadType = files[0].type.startsWith('video/') ? 'video' : 'image';
     if (uploadType !== _gpAiMediaType) gpAiSetMediaType(uploadType);
     document.getElementById('gp-ai-own')?.classList.add('hidden');
+    document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
     document.getElementById('gp-ai-find-box')?.classList.add('hidden');
     gpAiMediaBusy(true);
@@ -15408,13 +17487,20 @@ async function gpAiUploadSelected(e) {
 function gpAiBrowseCanva() {
     if (!_gpCurrentPostId || !window.CanvaBrowser) return;
     document.getElementById('gp-ai-own')?.classList.add('hidden');
+    document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
     document.getElementById('gp-ai-find-box')?.classList.add('hidden');
     window.CanvaBrowser.open({
         assetType: _gpAiMediaType === 'video' ? 'any' : 'image',
         multiple: false,
-        onImported: (assetIds) => {
+        onImported: async (assetIds) => {
             if (!assetIds || !assetIds.length) return;
+            if (_pceClipAddMode) {
+                await _pceAppendClipAssets(assetIds.map(id => ({ id, name: 'Canva clip' })));
+                _pceExitClipAddMode();
+                _pceCloseMediaPicker();
+                return;
+            }
             gpAiSelectOwn(assetIds[0]);
         },
     });
@@ -15430,8 +17516,15 @@ function gpAiBrowseCanva() {
 // result left you with nothing to do but generate an AI image or give up.
 function gpAiFind() {
     if (!_gpCurrentPostId) return;
+    // Asked first: a search ends in a pick that lands on the post immediately, so "did you mean to
+    // add or to replace" has to be settled while the answer can still change what happens.
+    _pceAskAddOrReplace('The video you pick', _gpAiFindAfterIntent);
+}
+
+function _gpAiFindAfterIntent() {
     const isVideo = _gpAiMediaType === 'video';
     document.getElementById('gp-ai-own')?.classList.add('hidden');
+    document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
 
     const noun = document.getElementById('gp-ai-find-noun');
     if (noun) noun.textContent = isVideo ? 'video' : 'photo';
@@ -15521,10 +17614,19 @@ async function gpAiSelectPexels(candidate) {
         const res = await fetch('/.netlify/functions/pexels-search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'select', postId: _gpCurrentPostId, candidate, mediaType: _gpAiMediaType, applyToGroup: gpApplyToGroup() }),
+            // append:true makes the server create the asset WITHOUT putting it on the post, so an
+            // added clip does not replace the clip it is being added to. The credit line is applied
+            // either way — the footage publishes inside the render just the same.
+            body: JSON.stringify({ action: 'select', postId: _gpCurrentPostId, candidate, mediaType: _gpAiMediaType, applyToGroup: gpApplyToGroup(), append: _pceClipAddMode }),
         });
         const d = await res.json().catch(() => ({}));
         if (!res.ok) { gpAiMediaStatus(d.error || `Could not attach the ${noun}.`, 'error'); return; }
+        if (_pceClipAddMode) {
+            await _pceAppendClipAssets([{ id: d.assetId, url: candidate.url, name: candidate.title || 'Stock clip' }]);
+            _pceExitClipAddMode();
+            _pceCloseMediaPicker();
+            return;
+        }
         gpAiMirrorToSiblings(d.postIds, candidate.url, _gpAiMediaType);
         gpAiShowThumb(candidate.url, _gpAiMediaType);
         // pexels-search appends the credit line server-side when the org opts in — mirror it in the preview.
@@ -15541,7 +17643,15 @@ async function gpAiSelectPexels(candidate) {
 // ── Source: Generate with AI (Fal — image now, video async) ─────────────────
 async function gpAiGenerate() {
     if (!_gpCurrentPostId) return;
+    // Before the credits are spent. A generation cannot be undone and cannot be previewed first, so
+    // finding out afterwards that it replaced the clip you were building on is the worst of the
+    // three sources to get wrong.
+    _pceAskAddOrReplace('The video we generate', _gpAiGenerateAfterIntent);
+}
+
+async function _gpAiGenerateAfterIntent() {
     document.getElementById('gp-ai-own')?.classList.add('hidden');
+    document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
     document.getElementById('gp-ai-find-box')?.classList.add('hidden');
     if (_gpAiMediaType === 'video') return gpAiGenerateVideo();
@@ -15599,6 +17709,15 @@ function gpAiPollVideo(jobId) {
             const res = await fetch(`/.netlify/functions/generate-ai-video?jobId=${jobId}`);
             const d = await res.json().catch(() => ({}));
             if (d.status === 'completed' && d.assetId) {
+                // Nothing to change server-side: this path already receives an asset id and decides
+                // for itself what to do with it. Adding a clip simply decides differently.
+                if (_pceClipAddMode) {
+                    await _pceAppendClipAssets([{ id: d.assetId, url: d.videoUrl, name: 'AI clip' }]);
+                    _pceExitClipAddMode();
+                    _pceCloseMediaPicker();
+                    gpAiMediaBusy(false);
+                    return;
+                }
                 const aRes = await fetch('/.netlify/functions/attach-draft-media', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
