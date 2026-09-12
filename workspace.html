@@ -6372,14 +6372,11 @@ function _rqApplyOverlayTimes(video, layer, post) {
         const ov = byId[n.dataset.id];
         n.style.display = ov && !_rqOverlayVisibleAt(ov, t) ? 'none' : '';
     }
-    // One playhead per timed block now that the rows live inside the clip list — all on the cut's
-    // axis, so they take the same position and read as a single line.
-    const heads = document.querySelectorAll('#pce-clips-block [data-playhead]');
+    // One playhead per timed block, each placed in ITS OWN axis — a clip's rows run 0→that clip's
+    // length, so a single percentage of the whole cut would point at the wrong moment everywhere
+    // but the first block.
     const dur = _pceCutDuration(video, post);
-    if (heads.length && dur && isFinite(dur)) {
-        const at = (Math.min(1, t / dur) * 100) + '%';
-        heads.forEach((h) => { h.style.left = at; });
-    }
+    if (dur && isFinite(dur)) _rqPaintPlayheads(t, dur);
 }
 
 // Paint a post's saved text overlays as a live layer on the mock-up canvas, and (for video) drive the
@@ -6621,11 +6618,33 @@ function _rqTimelineParts(post) {
     const dur = _rqTimelineDuration(post);
     const fmt = (s) => `${(Math.round(s * 10) / 10)}s`;
 
-    const row = (kind, key, label, item, selected, sub) => {
-        const start = item.startS == null ? 0 : Math.max(0, Math.min(dur, item.startS));
-        const end = item.endS == null ? dur : Math.max(start, Math.min(dur, item.endS));
-        const leftPct = (start / dur) * 100;
-        const widthPct = Math.max(2, ((end - start) / dur) * 100);
+    // ── The axis a row is drawn against ─────────────────────────────────────────────────────────
+    // ⚠️ THIS is what "the times don't match" meant, and it was the whole bug.
+    //
+    // A text bar used to be drawn against the WHOLE CUT while the trim slider directly above it was
+    // drawn against that clip's own length. Same box on screen, same width, two completely
+    // different scales: in a four-clip cut, clip one's slider spanned 10.7 seconds and the text bar
+    // under it spanned 36.8. So a nudge of a third of the row — which looks like a third of the
+    // clip — was actually a whole clip's worth of time, and the box left the clip it was on. Making
+    // the two boxes the same WIDTH, earlier, made it worse: they then looked like one axis.
+    //
+    // Every row now carries the axis it is measured in, and a text row's is its clip's:
+    //   full   the clip's source length — exactly what the trim slider above it spans
+    //   inS/outS  the kept window inside that, which is where text can actually exist
+    //   start  the cut second that kept window begins at, for converting to and from stored times
+    // Sound keeps the whole cut (it plays across all of it), expressed in the same four numbers, so
+    // one conversion serves both and there is no second code path to drift.
+    const cutAxis = { full: dur, inS: 0, outS: dur, start: 0 };
+    const pctIn = (axis, t) => ((axis.inS + (t - axis.start)) / axis.full) * 100;
+
+    const row = (kind, key, label, item, selected, sub, axis) => {
+        const ax = axis || cutAxis;
+        const lo = ax.start;
+        const hi = ax.start + (ax.outS - ax.inS);
+        const start = item.startS == null ? lo : Math.max(lo, Math.min(hi, item.startS));
+        const end = item.endS == null ? hi : Math.max(start, Math.min(hi, item.endS));
+        const leftPct = pctIn(ax, start);
+        const widthPct = Math.max(2, pctIn(ax, end) - leftPct);
         const c = _RQ_TL_COLOURS[kind];
         const esc = _rqEsc(label);
         // The seconds, under the row, exactly as each clip states its own. A bar without numbers is
@@ -6650,7 +6669,8 @@ function _rqTimelineParts(post) {
               <span class="flex-1 min-w-0 truncate text-[10px] font-semibold text-gray-500" title="${esc}">${esc}</span>
               ${del}
             </div>
-            <div class="relative h-6 rounded bg-gray-100" data-tl-track>
+            <div class="relative h-6 rounded bg-gray-100" data-tl-track
+                 data-ax-full="${ax.full}" data-ax-in="${ax.inS}" data-ax-out="${ax.outS}" data-ax-start="${ax.start}">
               <div class="absolute inset-y-0 rounded cursor-grab flex items-center justify-between"
                    style="left:${leftPct}%;width:${widthPct}%;background:${selected ? c.on : c.off}"
                    data-tl-seg="${_rqEsc(key)}" data-tl-kind="${kind}" title="${fmt(start)} – ${fmt(end)}">
@@ -6662,25 +6682,46 @@ function _rqTimelineParts(post) {
           </div>`;
     };
 
-    const spans = _pceSpansFor(_pceClips(post));
-    const textRow = (ov, i) => {
-        const start = ov.startS == null ? 0 : ov.startS;
-        const end = ov.endS == null ? dur : ov.endS;
+    const clips = _pceClips(post);
+    const spans = _pceSpansFor(clips);
+
+    /**
+     * The axis for clip `i` — the same one _pceTrimTrackHtml draws its slider against, so the two
+     * bars in a clip's block measure the same seconds and line up end to end.
+     */
+    const clipAxis = (i) => {
+        const clip = clips[i];
+        const sp = spans && spans[i];
+        if (!clip || !sp) return cutAxis;
+        const t = _pceTrimAxis(clip);
+        if (!(t.len > 0)) return cutAxis;
+        const inS = clip.inS || 0;
+        const outS = clip.outS != null ? Math.min(clip.outS, t.len) : t.len;
+        return { full: t.len, inS, outS, start: sp.start };
+    };
+
+    const textRow = (ov, i, axis) => {
+        const ax = axis || cutAxis;
+        const lo = ax.start;
+        const hi = ax.start + (ax.outS - ax.inS);
+        const start = ov.startS == null ? lo : ov.startS;
+        const end = ov.endS == null ? hi : ov.endS;
         const sp = spans ? _pceSpanAt(spans, start) : null;
-        // ⚠️ A box with no end time runs to the end of the WHOLE video, not to the end of the clip
-        // it starts on. Saying "0s → 36.7s of clip 1" about a 10.7s clip is a flat contradiction —
-        // and it was on screen, under a bar that visibly covered all four clips. Describe what it
-        // actually does: where it starts, and that it carries on past that clip.
+        // Stated in the clip's OWN seconds — the same numbers the trim slider above prints — and
+        // then in the cut's, because the two answer different questions. ⚠️ A box with no end time
+        // runs to the end of the WHOLE video, not of the clip it starts on; the bar fills its clip
+        // and the words say it carries on, rather than the bar quietly claiming the whole timeline.
+        const src = (t) => ax.inS + (t - ax.start);
         let sub;
         if (!sp) {
             sub = `${fmt(start)} → ${fmt(end)} · shows for ${fmt(Math.max(0, end - start))}`;
-        } else if (end > sp.end + 0.05) {
-            sub = `starts ${fmt(start - sp.start)} into clip ${sp.i + 1} and runs on · ${fmt(start)} → ${fmt(end)} of the whole cut`;
+        } else if (ov.endS == null || ov.endS > sp.end + 0.05) {
+            sub = `from ${fmt(src(start))} of clip ${sp.i + 1} and on to the end of the video`;
         } else {
-            sub = `${fmt(start - sp.start)} → ${fmt(end - sp.start)} of clip ${sp.i + 1} · ${fmt(start)} → ${fmt(end)} overall`;
+            sub = `${fmt(src(start))} → ${fmt(src(end))} of clip ${sp.i + 1} · ${fmt(start)} → ${fmt(end)} of the whole cut`;
         }
         return row('text', ov.id || String(i), (ov.text || 'Text').split('\n')[0].slice(0, 22), ov,
-            !!(ov.id && ov.id === _pceSelectedOverlayId), sub);
+            !!(ov.id && ov.id === _pceSelectedOverlayId), sub, ax);
     };
 
     // Each box belongs to the clip its START lands in. Anything that cannot be placed — a box timed
@@ -6691,17 +6732,18 @@ function _rqTimelineParts(post) {
     if (spans && spans.length) {
         const placed = new Set();
         for (const sp of spans) {
+            const ax = clipAxis(sp.i);
             const mine = overlays.filter((ov, i) => {
                 const at = _pceSpanAt(spans, ov.startS == null ? 0 : ov.startS);
                 if (at && at.i === sp.i) { placed.add(i); return true; }
                 return false;
             });
-            byClip[sp.i] = mine.map((ov) => textRow(ov, overlays.indexOf(ov))).join('');
+            byClip[sp.i] = { html: mine.map((ov) => textRow(ov, overlays.indexOf(ov), ax)).join(''), axis: ax };
         }
         orphans = overlays.filter((_, i) => !placed.has(i))
-            .map((ov) => textRow(ov, overlays.indexOf(ov))).join('');
+            .map((ov) => textRow(ov, overlays.indexOf(ov), cutAxis)).join('');
     } else {
-        orphans = overlays.map(textRow).join('');
+        orphans = overlays.map((ov, i) => textRow(ov, i, cutAxis)).join('');
     }
 
     // Drawn from the clip's EFFECTIVE range, not its stored one: an unbounded clip runs for its own
@@ -6713,10 +6755,10 @@ function _rqTimelineParts(post) {
         const en = r.endS == null ? dur : r.endS;
         return row('audio', a.id || `a${i}`, _pceAudioLabel(a).slice(0, 22), r,
             !!(a.id && a.id === _pceSelectedAudioId),
-            `${fmt(st)} → ${fmt(en)} · plays for ${fmt(Math.max(0, en - st))}`);
+            `${fmt(st)} → ${fmt(en)} of the whole cut · plays for ${fmt(Math.max(0, en - st))}`, cutAxis);
     }).join('');
 
-    return { any: true, note: '', dur, byClip, orphans, audio };
+    return { any: true, note: '', dur, byClip, orphans, audio, cutAxis };
 }
 
 /**
@@ -6727,15 +6769,55 @@ function _rqTimelineParts(post) {
  * single line crossing both would be pointing at two different moments at once. Every block shares
  * the cut axis, so every playhead sits at the same x — it reads as one line, and is one truth.
  */
-function _pceTimedBlock(inner) {
+function _pceTimedBlock(inner, axis) {
     if (!inner) return '';
     // px-1 on the OUTSIDE, matching _pceTrimTrackHtml's wrapper, so a text bar and the trim slider
     // above it are the same box. The playhead sits in an inner unpadded relative box — positioned
     // against the padding edge it would sit 4px off the tracks it is supposed to point at.
-    return '<div class="px-1 pb-1" data-tl-group>'
+    //
+    // The block carries the axis its rows are drawn in, because the playhead has to be placed in
+    // that axis too: a clip's rows run 0→that clip's length, so a line placed at a fraction of the
+    // WHOLE cut would point at the wrong moment in every block but the first. It is hidden outright
+    // while the playhead is not inside this block's clip, which is the honest answer.
+    const ax = axis || null;
+    const data = ax
+        ? ` data-ax-full="${ax.full}" data-ax-in="${ax.inS}" data-ax-out="${ax.outS}" data-ax-start="${ax.start}"`
+        : '';
+    return '<div class="px-1 pb-1" data-tl-group' + data + '>'
         + '<div class="relative space-y-1">' + inner
-        + '<div class="absolute top-0 bottom-0 w-px bg-gray-800 pointer-events-none" style="left:0" data-playhead></div>'
+        + '<div class="absolute top-0 bottom-0 w-px bg-gray-800 pointer-events-none" style="left:0;display:none" data-playhead></div>'
         + '</div></div>';
+}
+
+/** Read the axis a track or block was drawn in. Falls back to the whole cut. */
+function _rqAxisOf(el, dur) {
+    const full = el && Number(el.getAttribute('data-ax-full'));
+    if (!(full > 0)) return { full: dur || 1, inS: 0, outS: dur || 1, start: 0 };
+    return {
+        full,
+        inS: Number(el.getAttribute('data-ax-in')) || 0,
+        outS: Number(el.getAttribute('data-ax-out')) || full,
+        start: Number(el.getAttribute('data-ax-start')) || 0,
+    };
+}
+
+/**
+ * Put every block's playhead where the given moment of the finished cut falls IN THAT BLOCK.
+ *
+ * Hidden where the moment is not inside the block's clip at all — a line drawn anyway would be
+ * claiming the video is at a point in a clip it has not reached.
+ */
+function _rqPaintPlayheads(t, dur) {
+    for (const g of document.querySelectorAll('#pce-clips-block [data-tl-group]')) {
+        const head = g.querySelector('[data-playhead]');
+        if (!head) continue;
+        const ax = _rqAxisOf(g, dur);
+        const lo = ax.start;
+        const hi = ax.start + (ax.outS - ax.inS);
+        if (!(t >= lo - 0.001 && t <= hi + 0.001)) { head.style.display = 'none'; continue; }
+        head.style.display = '';
+        head.style.left = (((ax.inS + (t - ax.start)) / ax.full) * 100) + '%';
+    }
 }
 
 /**
@@ -7459,8 +7541,9 @@ function _pceRenderClips(clipsOverride) {
             // What shows ON this clip, directly under the slider that decides how long it lasts.
             // "No text" is stated rather than left blank: an empty gap under clip 3 and an empty gap
             // under a clip whose text has drifted off the end look identical.
-            + _pceTimedBlock(tl.byClip[i]
-                || '<p class="text-[10px] text-gray-300">No text on this clip</p>')
+            + _pceTimedBlock(
+                (tl.byClip[i] && tl.byClip[i].html) || '<p class="text-[10px] text-gray-300">No text on this clip</p>',
+                tl.byClip[i] && tl.byClip[i].axis)
             + '</div>';
     }).join('');
 
@@ -7475,9 +7558,9 @@ function _pceRenderClips(clipsOverride) {
         // none of them, and hiding it would be how a reviewer approves text they cannot see.
         ? '<div class="pt-1.5">'
           + (tl.orphans ? '<p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Not on any clip</p>' : '')
-          + _pceTimedBlock(tl.orphans)
+          + _pceTimedBlock(tl.orphans, tl.cutAxis)
           + (tl.audio ? '<p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1 mt-1">Sound</p>' : '')
-          + _pceTimedBlock(tl.audio)
+          + _pceTimedBlock(tl.audio, tl.cutAxis)
           + '</div>'
         : '';
     host.innerHTML = '<div class="pt-1">'
@@ -7515,10 +7598,7 @@ function _pceRenderClips(clipsOverride) {
     // Every timed block carries its own playhead, and they all sit on the cut's axis — so they take
     // the same position. Seeded here so a repaint does not drop the line back to zero.
     const v = document.querySelector('#post-review-body [data-media-video]');
-    if (v && v.duration && isFinite(v.duration)) {
-        const at = (Math.min(1, (v.currentTime || 0) / v.duration) * 100) + '%';
-        host.querySelectorAll('[data-playhead]').forEach((h) => { h.style.left = at; });
-    }
+    if (v) _rqPaintPlayheads(_pceCutTime(v, post), _rqTimelineDuration(post));
 }
 
 // ── The crop frame ──────────────────────────────────────────────────────────────────────────────
@@ -7855,12 +7935,18 @@ function _rqBindTimeline() {
         // selecting repaints the list — so built the other way round, that repaint detaches `seg`
         // while the drag is still being assembled out of it, and the drag ends up holding a node
         // that is no longer on the page.
+        const track0 = seg.closest('[data-tl-track]');
         _rqTlDrag = {
-            seg, key: id, track: seg.closest('[data-tl-track]'), ov, dur, kind,
+            seg, key: id, track: track0, axis: _rqAxisOf(track0, dur), ov, dur, kind,
             mode: edge ? edge.getAttribute('data-tl-edge') : 'move',
             startX: ev.clientX,
-            s0: seed.startS == null ? 0 : seed.startS,
-            e0: seed.endS == null ? dur : seed.endS,
+            s0: seed.startS == null ? _rqAxisOf(track0, dur).start : seed.startS,
+            // An unbounded box is DRAWN to the end of its own block, so that is what a drag must
+            // seed from. Seeding from the cut would stretch it to the whole video the instant it
+            // was nudged — which is the trap the audio rows were already carrying a note about.
+            e0: seed.endS == null
+                ? (() => { const a = _rqAxisOf(track0, dur); return a.start + (a.outS - a.inS); })()
+                : seed.endS,
             // Which clip it started on, so a drop onto a different one can be told from a re-time.
             home: kind === 'text' ? _rqClipIndexAt(seed.startS == null ? 0 : seed.startS) : null,
             drop: null,
@@ -7883,17 +7969,28 @@ function _rqBindTimeline() {
             const seg = host.querySelector(`[data-tl-seg="${CSS.escape(d.key)}"]`);
             d.seg = seg || d.seg;
             d.track = seg ? seg.closest('[data-tl-track]') : null;
+            if (d.track) d.axis = _rqAxisOf(d.track, d.dur);
         }
         const rect = d.track ? d.track.getBoundingClientRect() : null;
         if (!rect || !(rect.width > 0)) return;
         const dur = d.dur;
-        const at = Math.max(0, Math.min(dur, ((ev.clientX - rect.left) / rect.width) * dur));
+        // ── Everything below is in the ROW's axis, not the cut's ────────────────────────────────
+        // A text row is drawn against its own clip, so `lo`/`hi` are that clip's first and last
+        // second of the finished video. Clamping to them is what makes a sideways drag physically
+        // unable to leave the clip — which is the whole reported bug, and it is a property of the
+        // maths now rather than a rule someone has to remember. Sound's axis IS the cut, so the same
+        // two lines leave it free to run the whole length.
+        const ax = d.axis;
+        const lo = ax.start;
+        const hi = ax.start + (ax.outS - ax.inS);
+        const src = Math.min(ax.outS, Math.max(ax.inS, ((ev.clientX - rect.left) / rect.width) * ax.full));
+        const at = ax.start + (src - ax.inS);
         if (d.mode === 'start') {
-            // Clamp against the end as DRAWN (d.e0), not the axis — an unbounded clip has a real end
+            // Clamp against the end as DRAWN (d.e0), not the axis — an unbounded box has a real end
             // on screen even though it has none in the store.
-            d.ov.startS = Math.max(0, Math.min(at, (d.ov.endS == null ? d.e0 : d.ov.endS) - 0.1));
+            d.ov.startS = Math.max(lo, Math.min(at, (d.ov.endS == null ? d.e0 : d.ov.endS) - 0.1));
         } else if (d.mode === 'end') {
-            d.ov.endS = Math.min(dur, Math.max(at, (d.ov.startS == null ? 0 : d.ov.startS) + 0.1));
+            d.ov.endS = Math.min(hi, Math.max(at, (d.ov.startS == null ? lo : d.ov.startS) + 0.1));
         } else {
             // ── Sideways re-times; downwards moves it to another clip ───────────────────────
             // Dragging along the axis already crosses clip boundaries, but only by dragging the box
@@ -7905,15 +8002,16 @@ function _rqBindTimeline() {
             const drop = over != null && over !== d.home ? over : null;
             if (drop !== d.drop) { d.drop = drop; _rqPaintDropTarget(drop); }
             if (drop != null) return;
-            const delta = ((ev.clientX - d.startX) / rect.width) * dur;
+            const delta = ((ev.clientX - d.startX) / rect.width) * ax.full;
             const len = d.e0 - d.s0;
-            const ns = Math.max(0, Math.min(dur - len, d.s0 + delta));
+            const ns = Math.max(lo, Math.min(hi - len, d.s0 + delta));
             d.ov.startS = ns; d.ov.endS = ns + len;
         }
-        const start = d.ov.startS == null ? 0 : d.ov.startS;
-        const end = d.ov.endS == null ? dur : d.ov.endS;
-        d.seg.style.left = (start / dur * 100) + '%';
-        d.seg.style.width = Math.max(2, (end - start) / dur * 100) + '%';
+        const start = d.ov.startS == null ? lo : d.ov.startS;
+        const end = d.ov.endS == null ? hi : d.ov.endS;
+        const pct = (t) => ((ax.inS + (t - ax.start)) / ax.full) * 100;
+        d.seg.style.left = pct(start) + '%';
+        d.seg.style.width = Math.max(2, pct(end) - pct(start)) + '%';
         d.seg.title = `${fmt(start)} – ${fmt(end)}`;
         if (d.kind === 'audio') { _pceRefreshAudioTiming(); return; }
         // Positions don't change with timing — only which boxes are visible now — so re-toggle rather

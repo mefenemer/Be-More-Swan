@@ -71,7 +71,8 @@ check('a clip is followed by the text that shows on it', () => {
     // inside the same row container.
     const at = only(workspace, "+ _pceTrimTrackHtml(c)", 'workspace.html');
     const after = workspace.slice(at, workspace.indexOf("}).join('');", at));
-    assert.ok(after.includes('_pceTimedBlock(tl.byClip[i]'), "the clip's own text is not drawn under it");
+    assert.ok(after.includes('tl.byClip[i] && tl.byClip[i].html'), "the clip's own text is not drawn under it");
+    assert.ok(after.includes('tl.byClip[i] && tl.byClip[i].axis'), "the clip's axis is not handed to its block");
     assert.ok(after.includes('No text on this clip'), 'an empty clip says nothing at all');
 });
 
@@ -81,7 +82,8 @@ check('sound and orphans come after the clips, not under one of them', () => {
     const at = only(workspace, "const tail = tl.orphans || tl.audio", 'workspace.html');
     const tail = workspace.slice(at, at + 900);
     assert.ok(tail.includes('Not on any clip'), 'orphaned text is not labelled');
-    assert.ok(tail.includes('_pceTimedBlock(tl.audio)'), 'sound is not drawn');
+    assert.ok(tail.includes('_pceTimedBlock(tl.audio, tl.cutAxis)'),
+        'sound is not drawn, or is drawn without the cut axis it plays across');
 });
 
 check('every mutation goes through one handler that saves AND redraws', () => {
@@ -327,8 +329,7 @@ check('clip boundaries need no marks now that each clip is its own group', () =>
     // clip" was arithmetic. Each clip now has its own block, so the boundary IS the row break.
     assert.strictEqual(workspace.indexOf('let clipMarks ='), -1, 'the boundary marks are back');
     // What replaced them still must not look draggable.
-    const at = only(workspace, 'function _pceTimedBlock(inner)', 'workspace.html');
-    const scope = workspace.slice(at, at + 600);
+    const scope = slice('function _pceTimedBlock(inner, axis) {', '/** Read the axis a track or block');
     assert.ok(scope.includes('pointer-events-none'), 'the playhead must not be grabbable');
     assert.ok(!scope.includes('data-tl-seg'), 'and must not look like a track segment');
 });
@@ -602,12 +603,14 @@ check('every row states its seconds', () => {
     // A bar without numbers is a shape: you can see one box is later than another, not when either
     // happens. Per clip AND overall, because both answer a different question.
     const at = only(workspace, 'let sub;', 'workspace.html');
-    const scope = workspace.slice(at, at + 900);
-    assert.ok(scope.includes('of clip ${sp.i + 1}') && scope.includes('overall'));
+    const scope = workspace.slice(at, workspace.indexOf('return row(', at));
+    assert.ok(scope.includes('of clip ${sp.i + 1}'), 'the clip reading is gone');
+    assert.ok(scope.includes('of the whole cut'), 'the cut reading is gone');
     // ⚠️ A box with no end time runs to the end of the WHOLE video, not of the clip it starts on.
     // "0s → 36.7s of clip 1" was on screen about a 10.7s clip, under a bar covering all four.
-    assert.ok(scope.includes('end > sp.end'), 'a box that runs past its clip is still described as inside it');
-    assert.ok(scope.includes('runs on'), 'nothing says the box carries on past that clip');
+    assert.ok(scope.includes('ov.endS == null || ov.endS > sp.end'),
+        'a box that runs past its clip is still described as inside it');
+    assert.ok(scope.includes('on to the end of the video'), 'nothing says the box carries on past that clip');
     // Audio too.
     assert.ok(workspace.includes('plays for ${fmt(Math.max(0, en - st))}'));
 });
@@ -900,11 +903,11 @@ check('a text bar is the same box as the clip slider above it', () => {
     const row = workspace.slice(at, at + 1600);
     assert.ok(!row.includes('w-16 shrink-0 truncate'), 'the label is back in a left-hand column');
     assert.ok(!row.includes('ml-[4.5rem]'), 'the seconds line is still indented past the bar');
-    assert.ok(row.includes('<div class="relative h-6 rounded bg-gray-100" data-tl-track>'),
+    assert.ok(row.includes('<div class="relative h-6 rounded bg-gray-100" data-tl-track'),
         'the track is no longer full width');
     // The block supplies the same px-1 inset _pceTrimTrackHtml uses, so both boxes match.
-    const block = slice('function _pceTimedBlock(inner) {', '/**\n * Everything that used to repaint');
-    assert.ok(block.includes("'<div class=\"px-1 pb-1\" data-tl-group>'"), 'the inset no longer matches the clip slider');
+    const block = slice('function _pceTimedBlock(inner, axis) {', '/** Read the axis a track or block');
+    assert.ok(block.includes("'<div class=\"px-1 pb-1\" data-tl-group'"), 'the inset no longer matches the clip slider');
     assert.ok(only(workspace, 'function _pceTrimTrackHtml(clip) {', 'workspace.html') > 0);
 });
 
@@ -1023,6 +1026,73 @@ check('the message is declared before the functions that set it', () => {
     assert.ok(only(workspace, "let _pcePrevMsg = '';", 'workspace.html')
         < only(workspace, 'async function _pcePreviewSeat(i) {', 'workspace.html'),
         '_pcePrevMsg is declared after a function that assigns it');
+});
+
+
+// ── One clip, one axis ──────────────────────────────────────────────────────────────────────────
+// ⚠️ THE bug behind "the text keeps jumping to another clip", diagnosed by the user: a text bar was
+// drawn against the WHOLE CUT while the trim slider directly above it was drawn against that clip's
+// own length. Same box, same width, two different scales — in a four-clip cut, clip one's slider
+// spanned 10.7s and the text bar under it spanned 36.8s. A nudge that looked like a third of the
+// clip was a whole clip's worth of time. Making the two boxes the same WIDTH first made it worse:
+// they then looked like one axis while still being two.
+
+console.log('\na text bar is measured in the same seconds as the clip above it');
+
+check('every row carries the axis it is drawn in', () => {
+    const parts = slice('function _rqTimelineParts(post) {', 'function _pceTimedBlock(inner, axis)');
+    assert.ok(parts.includes('const cutAxis = { full: dur, inS: 0, outS: dur, start: 0 };'),
+        'sound has no axis of its own, so one conversion cannot serve both');
+    assert.ok(parts.includes('data-ax-full="${ax.full}"'), 'the track does not publish its axis');
+    assert.ok(parts.includes('const clipAxis = (i) =>'), 'text rows have no per-clip axis');
+});
+
+check("a clip's text axis IS its trim slider's axis", () => {
+    // Both must come from _pceTrimAxis, or they can drift apart again without anything failing.
+    const parts = slice('function _rqTimelineParts(post) {', 'function _pceTimedBlock(inner, axis)');
+    const at = parts.indexOf('const clipAxis = (i) =>');
+    const fn = parts.slice(at, parts.indexOf('\n    const textRow', at));
+    assert.ok(fn.includes('_pceTrimAxis(clip)'), 'the text axis is derived some other way');
+    assert.ok(fn.includes('full: t.len'), 'the text axis does not span the clip source');
+    assert.ok(fn.includes('inS') && fn.includes('outS'), 'the kept window is not carried');
+    assert.ok(only(workspace, 'function _pceTrimAxis(c) {', 'workspace.html') > 0);
+});
+
+check('a sideways drag cannot leave the clip — by arithmetic, not by rule', () => {
+    const tl = slice('function _rqBindTimeline() {', '\nasync function openPostReview(');
+    assert.ok(tl.includes('const ax = d.axis;'), 'the drag still works in the cut axis');
+    assert.ok(tl.includes('const lo = ax.start;'), 'no lower bound from the row axis');
+    assert.ok(tl.includes('const hi = ax.start + (ax.outS - ax.inS);'), 'no upper bound from the row axis');
+    assert.ok(tl.includes('Math.min(ax.outS, Math.max(ax.inS,'), 'the pointer is not clamped into the kept window');
+    assert.ok(tl.includes('Math.min(hi - len, d.s0 + delta)'), 'a body drag can still overrun the clip');
+    assert.ok(tl.includes('* ax.full'), 'the drag delta is still scaled by the whole cut');
+});
+
+check('an unbounded box seeds from its own block, not the whole video', () => {
+    // Drawn to the end of its clip; seeded from the cut it would stretch to the whole video the
+    // instant it was nudged.
+    const tl = slice('function _rqBindTimeline() {', '\nasync function openPostReview(');
+    assert.ok(tl.includes('a.start + (a.outS - a.inS)'), 'e0 still falls back to the cut duration');
+});
+
+check('the playhead is placed in each block\'s own axis, and hidden outside it', () => {
+    const fn = slice('function _rqPaintPlayheads(t, dur) {', '\n/**');
+    assert.ok(fn.includes("head.style.display = 'none'"), 'the line is drawn even outside the clip');
+    assert.ok(fn.includes('(ax.inS + (t - ax.start)) / ax.full'), 'still positioned by a cut percentage');
+    // And nothing sets them all to one value any more.
+    assert.strictEqual(workspace.indexOf("heads.forEach((h) => { h.style.left = at; })"), -1,
+        'a single percentage is being applied to every playhead again');
+});
+
+check('the seconds under a text bar are the clip\'s own, matching the slider above', () => {
+    const parts = slice('function _rqTimelineParts(post) {', 'function _pceTimedBlock(inner, axis)');
+    const at = parts.indexOf('const textRow = (ov, i, axis)');
+    const fn = parts.slice(at, parts.indexOf('\n    // Each box belongs', at));
+    assert.ok(fn.includes('const src = (t) => ax.inS + (t - ax.start);'),
+        'the label is not converted into the clip\'s own seconds');
+    assert.ok(fn.includes('of the whole cut'), 'the cut reading is gone — both answers are wanted');
+    assert.ok(fn.includes('on to the end of the video'),
+        'a box with no end time must say it runs past this clip');
 });
 
 console.log(`\n${passed} checks passed`);
