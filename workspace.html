@@ -902,7 +902,10 @@ window.showComplianceModals = function showComplianceModals(force) {
             <div id="pce-stage-side">
               <!-- Fold the clip list away when you just want to watch the thing. Shown only where
                    there is something in the column to fold. -->
-              <div id="pce-side-bar" class="hidden items-center justify-end pb-1">
+              <!-- Left-aligned on purpose: the rail's handle sits on ITS inner edge too, so the two
+                   end up either side of the picture rather than one beside it and one out at the
+                   far edge of the window. -->
+              <div id="pce-side-bar" class="hidden items-center justify-start pb-1">
                 <button type="button" onclick="window._pceFoldColumn('side')"
                   class="px-1 text-[10px] font-bold text-gray-400 hover:text-gray-700 cursor-pointer leading-none"
                   aria-controls="pce-stage-strip" title="Hide the timeline">&#9658;</button>
@@ -6370,7 +6373,7 @@ function renderPlatformMockup(post) {
         ? `${header}${media}${captionBlock('px-3.5 py-3')}${footer}`
         : `${header}${captionBlock('px-3.5 pb-3')}${media}${footer}`;
 
-    return `<div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden max-w-md mx-auto" style="border-top:3px solid ${meta.accent}">${body}</div>`;
+    return `<div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden max-w-md mx-auto" data-mockup-card style="border-top:3px solid ${meta.accent}">${body}</div>`;
 }
 
 // Which overlay's timing the inspector + timeline are editing (video only). Null = none selected.
@@ -6458,6 +6461,38 @@ let _rqOverlayResizeBound = false;
  */
 let _rqOvDragId = null;
 
+/**
+ * Keep the whole post card on screen, by narrowing it rather than cropping the media.
+ *
+ * ⚠️ A 9:16 video in a 448px card is 796px tall, which is taller than the editor — so making an
+ * edit meant scrolling away from the thing being edited. The obvious fixes are both wrong here:
+ * capping the media's height letterboxes it inside the host, and cropping it changes the frame.
+ * Either way the overlay layer is inset-0 over the HOST and every box is positioned as a FRACTION
+ * of that box, so the moment the media stops filling the host exactly, every piece of text drifts
+ * away from where it was dragged — and away from where Remotion bakes it.
+ *
+ * Narrowing the card scales media, host and layer together, so the fractions still mean the same
+ * thing. Nothing is cropped and nothing moves; there is simply less of it.
+ */
+const _PCE_CANVAS_MAX_VH = 0.52;
+function _pceFitCanvasToView() {
+    const body = document.getElementById('post-review-body');
+    const card = body && body.querySelector('[data-mockup-card]');
+    const media = body && body.querySelector('[data-media-img], [data-media-video]');
+    if (!card || !media) return;
+    const natW = media.naturalWidth || media.videoWidth || 0;
+    const natH = media.naturalHeight || media.videoHeight || 0;
+    // Nothing to reason about until the media reports its shape; the load/metadata handlers that
+    // already repaint the overlays call back in here once it does.
+    if (!(natW > 0) || !(natH > 0)) return;
+    const cap = Math.max(240, Math.round(window.innerHeight * _PCE_CANVAS_MAX_VH));
+    const widthForCap = Math.round(cap * (natW / natH));
+    // Only ever NARROWER than the card's own maximum — a landscape clip is already short enough,
+    // and widening the card would stretch a post mock-up past the width a post actually has.
+    card.style.maxWidth = widthForCap < 448 ? widthForCap + 'px' : '';
+}
+window.addEventListener('resize', () => _pceFitCanvasToView());
+
 function _rqRenderCanvasOverlays(post) {
     const body = document.getElementById('post-review-body');
     const layer = body && body.querySelector('[data-overlay-layer]');
@@ -6469,6 +6504,10 @@ function _rqRenderCanvasOverlays(post) {
     const overlays = (post && post.overlays) || [];
     const paint = () => {
         if (!document.body.contains(layer)) return;   // the mock-up was replaced out from under us
+        // Before measuring anything: the boxes are sized against the media's rendered height, so
+        // the card has to be its final width first or every box is sized for a frame that is about
+        // to change.
+        _pceFitCanvasToView();
         // Draggable here, not only inside the modal. Positioning a box was the one thing the
         // modal still had to itself, and reaching it meant leaving the post, placing the box
         // against a single frame, and coming back.
@@ -6918,9 +6957,17 @@ function _pceTimedBlock(inner, axis) {
     const data = ax
         ? ` data-ax-full="${ax.full}" data-ax-in="${ax.inS}" data-ax-out="${ax.outS}" data-ax-start="${ax.start}"`
         : '';
+    // ⚠️ Only where there is something for it to point AT. A block whose only content is "No text on
+    // this clip" still got a 1px black line down it, which on one line of grey text reads as a
+    // stray text caret sitting in the sentence — and it moved whenever a clip was reordered,
+    // because each block is drawn in its own clip's axis. Reported as "the cursor for each text
+    // section seems to move after I drag and drop a clip". It was the playhead.
+    const timed = inner.indexOf('data-tl-row=') !== -1;
     return '<div class="px-1 pb-1" data-tl-group' + data + '>'
         + '<div class="relative space-y-1">' + inner
-        + '<div class="absolute top-0 bottom-0 w-px bg-gray-800 pointer-events-none" style="left:0;display:none" data-playhead></div>'
+        + (timed
+            ? '<div class="absolute top-0 bottom-0 w-px bg-gray-800 pointer-events-none" style="left:0;display:none" data-playhead></div>'
+            : '')
         + '</div></div>';
 }
 
@@ -7457,7 +7504,35 @@ let _pceClipsRepaintPending = false;
 /** Which clip is being dragged to a new position, and where it would land. */
 const _pceClipDrag = { from: null, to: null };
 
+/**
+ * ⚠️ A pointer must actually be DOWN for anything to be being dragged.
+ *
+ * Three separate drags defer this panel's repaints — a trim, a text bar, a clip being reordered —
+ * and any one of them left set wedges the list for the rest of the session. Nothing then repaints:
+ * "+ Add text" adds and saves a box that never appears, which is indistinguishable from a dead
+ * button. That is the third time a variant of this has bitten, and patching each leak as it turns
+ * up has not worked, so the question is asked the other way round: with nothing held, nothing is
+ * being dragged, and anything still set is a release that never arrived. Clear it and carry on.
+ */
+let _pcePointerHeld = false;
+document.addEventListener('pointerdown', () => { _pcePointerHeld = true; }, true);
+for (const ev of ['pointerup', 'pointercancel']) {
+    document.addEventListener(ev, () => { _pcePointerHeld = false; }, true);
+}
+// A pointer released over another window never reports up here, so the tab regaining focus is the
+// other moment we can be sure nothing is held.
+window.addEventListener('blur', () => { _pcePointerHeld = false; });
+
 function _pceDragActive() {
+    if (!_pcePointerHeld) {
+        if (_pceTrimDrag.on || _rqTlDrag != null || _pceClipDrag.from != null) {
+            _pceTrimDrag.on = false;
+            _rqTlDrag = null;
+            _pceClipDrag.from = null;
+            _pceClipDrag.to = null;
+        }
+        return false;
+    }
     return _pceTrimDrag.on === true || _rqTlDrag != null || _pceClipDrag.from != null;
 }
 
@@ -7779,6 +7854,13 @@ function _pceClipBriefFor(index) {
  * the call failed is worse than the button appearing to do nothing, because now there is rubbish to
  * tidy up. A failure says so under the clip it belongs to.
  */
+/** Put a message under one clip — or under the panel, for a still. */
+function _pceClipSay(index, msg) {
+    _pceClipAi.msg = msg;
+    _pceClipAi.at = index;
+    _pceRenderClips();
+}
+
 const _pceClipAi = { busy: null, msg: '', at: null };
 window._pceSuggestTextForClip = async function (index) {
     const postId = _rqReviewPostId;
@@ -7809,7 +7891,12 @@ const _PCE_NEW_TEXT_S = 3;
 window._pceAddTextToClip = function (index, text) {
     const postId = _rqReviewPostId;
     const post = postId != null ? _rqPostCache[postId] : null;
-    if (!post || !window.ImageOverlayEditor || !window.ImageOverlayEditor.newOverlay) return;
+    // ⚠️ Every bail-out here used to be a bare `return`, and a button that does nothing with no
+    // message is indistinguishable from a broken one — which is exactly how this was reported.
+    if (!post) return _pceClipSay(index, 'This post is not open for editing yet. Reopen it and try again.');
+    if (!window.ImageOverlayEditor || !window.ImageOverlayEditor.newOverlay) {
+        return _pceClipSay(index, 'The text editor did not load. Refresh the page and try again.');
+    }
     // index null ⇒ a still, which has no clips and so no timing: the box is simply always on.
     const spans = index == null ? null : _pceSpansFor(_pceClips(post));
     const sp = spans && spans[index];
@@ -7829,6 +7916,9 @@ window._pceAddTextToClip = function (index, text) {
     // just appeared.
     const field = document.querySelector(`#pce-clips-block [data-tl-text="${CSS.escape(ov.id)}"]`);
     if (field) { field.focus(); field.select(); }
+    // The row it just made must be on screen. If it is not, something swallowed the repaint and the
+    // reviewer is looking at a button that did nothing — say so rather than leave them guessing.
+    else _pceClipSay(index, 'The text was added but the list did not refresh. Reopen the post to see it.');
 };
 
 window._pceClipMove = function (index, dir) {

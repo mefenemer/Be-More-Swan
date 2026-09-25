@@ -1625,4 +1625,71 @@ check('it does not revive the old two-pane layout', () => {
     only(workspace, 'window._pceFoldColumn = function (which) {', 'workspace.html');
 });
 
+
+// ── Five things found by using it ───────────────────────────────────────────────────────────────
+
+console.log('\nthe panel cannot be wedged by a drag that never ended');
+
+check('a drag is only a drag while a pointer is held', () => {
+    // ⚠️ Three separate drags defer this panel's repaints, and any one left set wedges the list for
+    // the rest of the session — at which point "+ Add text" adds and saves a box that never
+    // appears, which is indistinguishable from a dead button. Reported exactly that way. Patching
+    // each leak as it turned up had already failed twice; the question is asked the other way round
+    // now, so a leak cannot wedge anything.
+    const fn = slice('function _pceDragActive() {', '/** Run a repaint that a drag deferred.');
+    assert.ok(fn.includes('if (!_pcePointerHeld)'), 'the guard still trusts the drag state alone');
+    assert.ok(fn.includes('_pceTrimDrag.on = false') && fn.includes('_rqTlDrag = null')
+        && fn.includes('_pceClipDrag.from = null'), 'a stale drag is detected but not cleared');
+    // And the flag itself must be set from events nothing can swallow.
+    assert.ok(workspace.includes("document.addEventListener('pointerdown', () => { _pcePointerHeld = true; }, true)"),
+        'the held flag is not set in the capture phase, so a stopPropagation hides it');
+    assert.ok(workspace.includes("window.addEventListener('blur', () => { _pcePointerHeld = false; })"),
+        'a pointer released over another window would leave it held forever');
+});
+
+check('adding text says when it cannot', () => {
+    const fn = slice('window._pceAddTextToClip = function (index, text) {', '\nwindow._pceClipMove');
+    assert.ok(fn.includes('_pceClipSay(index,'), 'a bail-out is still a bare return');
+    assert.ok(fn.includes('did not refresh'),
+        'a box added into a list that never repainted still looks like a dead button');
+});
+
+console.log('\nthe phantom caret, the handles, and the height');
+
+check('an empty timed block has no playhead', () => {
+    // A 1px black line down a block whose only content is "No text on this clip" reads as a stray
+    // text caret sitting in the sentence — and it MOVED on reorder, because each block is drawn in
+    // its own clip's axis. Reported as "the cursor for each text section seems to move after I drag
+    // and drop a clip".
+    const fn = slice('function _pceTimedBlock(inner, axis) {', '/** Read the axis a track or block');
+    assert.ok(fn.includes("const timed = inner.indexOf('data-tl-row=') !== -1"),
+        'the playhead is drawn whether or not there is anything to point at');
+    assert.ok(fn.includes('timed\n            ?'), 'the playhead is not gated on there being rows');
+});
+
+check('both fold handles sit on the edge nearest the picture', () => {
+    // One beside the canvas and one out at the far edge of the window reads as two different
+    // controls rather than a matched pair.
+    const bar = only(workspace, 'id="pce-side-bar"', 'workspace.html');
+    assert.ok(workspace.slice(bar, bar + 120).includes('justify-start'),
+        'the timeline handle is back on the far edge');
+});
+
+check('the card narrows so the video fits, rather than being cropped', () => {
+    // ⚠️ Capping the media letterboxes it inside the host; cropping changes the frame. Either way
+    // the overlay layer is inset-0 over the HOST and every box is a FRACTION of that box, so the
+    // moment the media stops filling the host exactly, every piece of text drifts away from where
+    // it was dragged AND from where Remotion bakes it. Narrowing scales all three together.
+    const fn = slice('function _pceFitCanvasToView() {', "\nwindow.addEventListener('resize', () => _pceFitCanvasToView());");
+    assert.ok(fn.includes('card.style.maxWidth'), 'something other than the card is being resized');
+    assert.ok(!/object-cover|object-contain|clip-path/.test(fn), 'the media is being cropped or letterboxed');
+    assert.ok(fn.includes('widthForCap < 448'), 'a landscape clip would be stretched past a post\'s width');
+    assert.ok(fn.includes('if (!(natW > 0) || !(natH > 0)) return;'),
+        'a media element that has not reported its shape would divide by zero');
+    // It has to run before the boxes are measured against the media's height.
+    const paint = slice('const paint = () => {', 'const nodes = window.ImageOverlayEditor.render');
+    assert.ok(paint.includes('_pceFitCanvasToView()'),
+        'the boxes are sized for a frame that is about to change width');
+});
+
 console.log(`\n${passed} checks passed`);
