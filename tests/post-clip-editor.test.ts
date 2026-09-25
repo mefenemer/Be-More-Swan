@@ -1692,4 +1692,32 @@ check('the card narrows so the video fits, rather than being cropped', () => {
         'the boxes are sized for a frame that is about to change width');
 });
 
+
+// ── The page admits when it breaks ──────────────────────────────────────────────────────────────
+
+console.log('\na script error is not allowed to be invisible');
+
+check('uncaught errors and rejections reach the screen', () => {
+    // ⚠️ This editor fails SILENTLY: an exception in a click handler stops that handler and nothing
+    // else, so the button looks dead and the only record is a console nobody has open. Three rounds
+    // of "this does nothing" have now been spent on code that worked everywhere it could be run.
+    only(workspace, 'id="post-review-script-alert"', 'workspace.html');
+    const fn = slice('(function _rqReportScriptErrors() {', '\n// ── Post formats');
+    assert.ok(fn.includes("window.addEventListener('error'"), 'uncaught errors are still silent');
+    assert.ok(fn.includes("window.addEventListener('unhandledrejection'"), 'rejected promises are still silent');
+    assert.ok(fn.includes('if (!ev || !ev.message) return;'),
+        'a 404 on an image would be reported as a script error');
+    assert.ok(fn.includes('seen >= MAX'), 'one error in a repaint loop would fill the page');
+});
+
+check('the rail can still add text', () => {
+    // ⚠️ Removing "Add or edit text" with the modal left the step called "Text on the video" with
+    // nothing to press. Adding lives in the timeline per clip now, but a step that offers no way to
+    // do the thing it is named after is a dead end.
+    only(workspace, 'window._pceAddTextHere()', 'workspace.html');
+    const fn = slice('window._pceAddTextHere = function () {', 'window._pceAddTextToClip = function (index, text) {');
+    assert.ok(fn.includes('clips.length ? 0 : null'),
+        'a still would be handed a clip index it does not have');
+});
+
 console.log(`\n${passed} checks passed`);

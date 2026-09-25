@@ -770,6 +770,12 @@ window.showComplianceModals = function showComplianceModals(force) {
          overscroll utility, and rebuilding Tailwind to add one churns unrelated selectors. -->
     <div class="flex-1 overflow-y-auto bg-gray-50 px-4 py-5" style="overscroll-behavior:contain">
       <div id="post-review-media-alert" class="hidden mb-4 text-xs rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-red-700"></div>
+      <!-- ── When the page itself breaks ─────────────────────────────────────────────────────────
+           A script error in this editor is invisible: the button you pressed does nothing, and the
+           only record is a console nobody has open. That has now cost several rounds of "X does
+           nothing" against code that works everywhere I can run it, so the page says so itself.
+           Filled by the handler at the end of this file. -->
+      <div id="post-review-script-alert" class="hidden mb-4 text-xs rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-amber-800"></div>
       <!-- "This format can't carry your video" — moved out of the old Platforms step when that step
            was deleted. It has to be somewhere always visible: it is the only warning that a post
            cannot publish as it stands, and burying it inside a collapsed step meant the first news
@@ -1447,11 +1453,20 @@ window.showComplianceModals = function showComplianceModals(force) {
                    the post was always the long way round, and on a cut it could only ever show one
                    clip at a time. -->
               <div class="flex flex-wrap items-center gap-2">
+                <!-- ⚠️ Removing "Add or edit text" with the modal left this step with nothing to
+                     press. Adding text lives in the timeline now, per clip — but a step called
+                     "Text on the video" that offers no way to put text on the video is a dead end,
+                     and the reviewer who is already looking at this panel should not have to go
+                     and find out where it moved to. This adds one to the first clip (or to the
+                     picture on a still) and puts the caret in it, which is the same thing the
+                     timeline's own button does. -->
+                <button type="button" onclick="window._pceAddTextHere()"
+                  class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer">Add text</button>
                 <button type="button" id="insp-overlay-clear" onclick="_pceClearOverlays()"
                   class="hidden text-xs font-semibold text-gray-500 hover:text-red-600 transition cursor-pointer">Remove all text</button>
               </div>
               <span id="insp-overlay-msg" class="block mt-2 text-xs font-semibold text-gray-500"></span>
-              <p id="insp-overlay-hint" class="text-[11px] text-gray-400 mt-3">Add and edit text under the picture. Drag a box on the picture to place it; it's baked in when you approve.</p>
+              <p id="insp-overlay-hint" class="text-[11px] text-gray-400 mt-3">Each clip has its own <b>+ Add text</b> in the timeline. Drag a box on the picture to place it; it's baked in when you approve.</p>
             </div>
 
             <!-- ── Sound. Voice notes and audio clips, placed exactly like text: a clip with no
@@ -7888,6 +7903,18 @@ function _pcePostHasPicture() {
 }
 
 const _PCE_NEW_TEXT_S = 3;
+/**
+ * Add a box wherever this post can take one — the first clip on a cut, the picture on a still.
+ *
+ * The step rail asks the question without knowing about clips, so this is the answer that works for
+ * either kind of post.
+ */
+window._pceAddTextHere = function () {
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const clips = post ? _pceClips(post) : [];
+    window._pceAddTextToClip(clips.length ? 0 : null);
+};
+
 window._pceAddTextToClip = function (index, text) {
     const postId = _rqReviewPostId;
     const post = postId != null ? _rqPostCache[postId] : null;
@@ -11440,6 +11467,45 @@ function _railRender() {
 // deliberately different names — tests/post-editor-single-surface.test.ts still keeps the names
 // above deleted, and a rename that collided with them would quietly turn that check into a
 // tautology.
+
+/**
+ * Surface a script error where the person who hit it can see it.
+ *
+ * ⚠️ This editor fails SILENTLY. An exception in a click handler stops that handler and nothing
+ * else — the button appears dead, the page looks fine, and the only record is a console the person
+ * testing has no reason to have open. Three separate rounds of "this does nothing" have now been
+ * spent on code that worked everywhere it could be run, and each time the answer was in an error
+ * message nobody saw.
+ *
+ * So: uncaught errors and rejected promises put a line at the top of the post editor, with the
+ * message and where it came from. It is deliberately plain and deliberately ugly — it is not a
+ * feature, it is the page admitting something went wrong, and it should be reported rather than
+ * lived with.
+ */
+(function _rqReportScriptErrors() {
+    const MAX = 3;
+    let seen = 0;
+    const show = (what, where) => {
+        const el = document.getElementById('post-review-script-alert');
+        if (!el || seen >= MAX) return;
+        seen++;
+        const line = document.createElement('p');
+        line.className = seen > 1 ? 'mt-1' : '';
+        line.textContent = `Something went wrong on this page: ${what}${where ? ` (${where})` : ''}`;
+        el.appendChild(line);
+        el.classList.remove('hidden');
+    };
+    window.addEventListener('error', (ev) => {
+        // Resource loads (a 404 on an image) also arrive here and are not what this is for.
+        if (!ev || !ev.message) return;
+        const at = ev.filename ? `${String(ev.filename).split('/').pop()}:${ev.lineno}` : '';
+        show(ev.message, at);
+    });
+    window.addEventListener('unhandledrejection', (ev) => {
+        const r = ev && ev.reason;
+        show((r && r.message) || String(r || 'a request failed'), '');
+    });
+})();
 
 // ── Post formats ────────────────────────────────────────────────────────────────────────────────
 // Mirrors src/config/post-formats.ts, which this static page cannot import. The SERVER is
