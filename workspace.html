@@ -7952,6 +7952,12 @@ function _pceClipBriefFor(index) {
 function _pceClipSay(index, msg) {
     _pceClipAi.msg = msg;
     _pceClipAi.at = index;
+    // ⚠️ A TOAST, first and foremost. The banner below sits at the top of the modal's SCROLLER, and
+    // the clip list is what you scroll down to reach — so every explanation I have added over the
+    // last several rounds has been rendering faithfully, above the top of the viewport, where it
+    // could never be read. "No banner appears" was true and was my fault twice: once for putting it
+    // there, once for not noticing when it was reported.
+    window.showToast?.(msg, { icon: '⚠️' });
     const el = document.getElementById('post-review-script-alert');
     if (el) {
         el.textContent = msg;
@@ -9041,11 +9047,10 @@ async function _rqLoadQualityReview(postId) {
             if (res.status >= 500) {
                 const why = await res.json().then(d => d && d.error).catch(() => null);
                 console.error('[quality review]', res.status, why || '(no reason given)');
+                const text = `The quality review could not run: ${why || 'the server did not say why'}`;
+                window.showToast?.(text, { icon: '⚠️' });
                 const el = document.getElementById('post-review-script-alert');
-                if (el) {
-                    el.textContent = `The quality review could not run: ${why || 'the server did not say why'}`;
-                    el.classList.remove('hidden');
-                }
+                if (el) { el.textContent = text; el.classList.remove('hidden'); }
             }
             return;
         }
@@ -11618,9 +11623,13 @@ function _railRender() {
         const el = document.getElementById('post-review-script-alert');
         if (!el || seen >= MAX) return;
         seen++;
+        const text = `Something went wrong on this page: ${what}${where ? ` (${where})` : ''}`;
+        // Toast as well as banner — see _pceClipSay. A message at the top of a scroller nobody is
+        // looking at is not a message.
+        window.showToast?.(text, { icon: '⚠️' });
         const line = document.createElement('p');
         line.className = seen > 1 ? 'mt-1' : '';
-        line.textContent = `Something went wrong on this page: ${what}${where ? ` (${where})` : ''}`;
+        line.textContent = text;
         el.appendChild(line);
         el.classList.remove('hidden');
     };
@@ -11665,6 +11674,7 @@ function _railRender() {
         const el = document.getElementById('post-review-script-alert');
         if (!el || n >= MAX) return;
         n++;
+        window.showToast?.(text, { icon: '🔎' });
         const p = document.createElement('p');
         p.className = 'font-mono';
         p.textContent = text;
@@ -13001,11 +13011,10 @@ function _pceRenderStagePanels() {
         if (typeof fn !== 'function') return;
         try { fn(); }
         catch (err) {
+            const text = `The editor hit a problem in ${name}: ${(err && err.message) || err}`;
+            window.showToast?.(text, { icon: '⚠️' });
             const el = document.getElementById('post-review-script-alert');
-            if (el) {
-                el.textContent = `The editor hit a problem in ${name}: ${(err && err.message) || err}`;
-                el.classList.remove('hidden');
-            }
+            if (el) { el.textContent = text; el.classList.remove('hidden'); }
             // Re-thrown nowhere: one panel failing must not stop the others being usable.
             console.error(`[stage] ${name}`, err);
         }

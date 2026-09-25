@@ -174,6 +174,16 @@ export default withLambda(async (event: HandlerEvent) => {
         return json(200, { text });
     } catch (error) {
         console.error('[suggest-overlay-text] error:', error);
-        return json(500, { error: 'Could not write that wording. Please try again.' });
+        // ⚠️ "Please try again" is wrong advice for a failure that will never clear on its own. An
+        // exhausted API balance, a revoked key or a rate limit are OUR problems, not the writer's,
+        // and telling them to retry sends them round a loop that cannot end. Say which it is —
+        // vaguely enough not to leak our billing state, plainly enough that they stop retrying.
+        const msg = String((error as { message?: string })?.message || '');
+        const upstreamBlocked = /credit balance|quota|billing|insufficient|rate limit|429|401|403/i.test(msg);
+        return json(503, {
+            error: upstreamBlocked
+                ? 'The writing assistant is unavailable right now — this is at our end, not yours. Please write the wording yourself for now; we are on it.'
+                : 'Could not write that wording. Please try again.',
+        });
     }
 });

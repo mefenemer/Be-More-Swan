@@ -1851,4 +1851,29 @@ check('a canvas drag cannot wedge the layer, or the binders behind it', () => {
     assert.ok(canvas.includes('if (_rqOvDragId) _rqOvDragId = null;'), 'the stale drag is never cleared');
 });
 
+
+console.log('\na failure message has to be somewhere it can be read');
+
+check('failures toast, they do not only fill a banner', () => {
+    // ⚠️ The banner sits at the TOP of the modal's scroller, and the clip list is what you scroll
+    // DOWN to reach. Every explanation added over several rounds rendered faithfully, above the top
+    // of the viewport, where it could never be read — and "no banner appears" was reported three
+    // times before I worked out it was true and mine.
+    const say = slice('function _pceClipSay(index, msg) {', '\nconst _pceClipAi =');
+    assert.ok(say.includes('window.showToast?.('), 'a reason still only goes where nobody is looking');
+    const step = slice('function _pceRenderStagePanels() {', '\nfunction _pceRenderLayers()');
+    assert.ok(step.includes('window.showToast?.('), 'a failed panel step is still silent on screen');
+    const err = slice('(function _pceClickDiagnostics() {', '\n// ── Post formats');
+    assert.ok(err.includes('window.showToast?.('), 'the diagnostic cannot be read without scrolling');
+});
+
+check('an upstream AI failure is not dressed up as "try again"', () => {
+    const fn = readFileSync(join(root, 'netlify/functions/suggest-overlay-text.ts'), 'utf8');
+    const tail = fn.slice(fn.indexOf("console.error('[suggest-overlay-text] error:'"));
+    assert.ok(/credit balance\|quota\|billing/.test(tail), 'an exhausted balance is not recognised');
+    assert.ok(tail.includes('this is at our end, not yours'),
+        'the writer is still told to retry a failure that will never clear');
+    assert.ok(tail.includes('json(503'), 'an upstream outage is still reported as a generic failure');
+});
+
 console.log(`\n${passed} checks passed`);
