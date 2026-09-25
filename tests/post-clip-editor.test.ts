@@ -490,10 +490,12 @@ check('the editor skips all of it when there is no cut', () => {
 check('a second box lands on the clip you were looking at', () => {
     // Adding text while on clip three and having it appear over clip one is what makes the feature
     // look like it only works once.
-    const at = only(ioe, "const ov = { ...DEFAULTS, id: uid(), text: 'Your text'", 'image-overlay-editor.js');
+    // The defaults moved into the shared newOverlay factory; what stays here is the modal's own
+    // rule about WHICH clip a new box belongs to.
+    const at = only(ioe, 'const ov = newOverlay(onSpan', 'image-overlay-editor.js');
     const before = ioe.slice(Math.max(0, at - 600), at);
     assert.ok(before.includes('const onSpan = readSpans() && sel ? ovSpan(sel) : null'), 'it inherits the selected box\'s clip');
-    assert.ok(ioe.slice(at, at + 260).includes('startS: onSpan.start'), 'and starts there');
+    assert.ok(ioe.slice(at, at + 200).includes('startS: onSpan.start'), 'and starts there');
 });
 
 check('the editor still passes timing through untouched when it does not manage it', () => {
@@ -1198,7 +1200,7 @@ check('one builder, rendered by both surfaces', () => {
                       'function wireStyleControls(', 'function styleControls(']) {
         assert.notStrictEqual(ioe.indexOf(fn), -1, `${fn} is missing`);
     }
-    assert.ok(ioe.includes('window.ImageOverlayEditor = { open, bake, render, styleControls };'),
+    assert.ok(/window\.ImageOverlayEditor = \{[^}]*\bstyleControls\b[^}]*\};/.test(ioe),
         'the shared controls are not exported');
     // The modal must RENDER FROM them rather than carry its own copy — two control sets is how the
     // font list and the animation list each drifted, silently, in this same file.
@@ -1312,6 +1314,59 @@ check('wireSide does not reach for a helper it no longer declares', () => {
     const usesQ = /[^.\w]q\(/.test(body);
     const declaresQ = /const q = /.test(body);
     assert.ok(!usesQ || declaresQ, 'wireSide calls q() without declaring it');
+});
+
+
+// ── Adding text to one clip ─────────────────────────────────────────────────────────────────────
+// Adding a box meant opening the text editor, where a new one landed on whichever clip happened to
+// be selected — "put a line on clip three" was two steps and a guess.
+
+console.log('\nevery clip can be given a line of its own');
+
+check('each clip carries its own add button', () => {
+    const at = only(workspace, "window._pceAddTextToClip(' + i + ')", 'workspace.html');
+    assert.ok(at > 0);
+    const row = workspace.slice(at - 600, at + 200);
+    assert.ok(row.includes('tl.isVideo'), 'a photo post would be offered timed text it cannot have');
+});
+
+check("⚠️ the button exists on a post with NO text yet", () => {
+    // The parts builder returns early when nothing is timed, and the button is drawn from what it
+    // returns — so a bare early return meant the FIRST box could never be added. Same dead end
+    // "Add another clip" had when it hid itself until there were two clips.
+    const parts = slice('function _rqTimelineParts(post) {', 'function _pceTimedBlock(inner, axis)');
+    assert.ok(parts.includes('return Object.assign({}, none, { isVideo });'),
+        'isVideo does not survive the empty case, so the first line of text is unreachable');
+});
+
+check('the defaults come from one factory, shared with the modal', () => {
+    const ioe = readFileSync(join(root, 'src/components/image-overlay-editor.js'), 'utf8');
+    only(ioe, 'function newOverlay(opts) {', 'image-overlay-editor.js');
+    assert.ok(ioe.includes('newOverlay };'), 'the factory is not exported');
+    // The modal's own + Add text must go through it, or a box added one way looks different from a
+    // box added the other.
+    const addAt = only(ioe, 'const ov = newOverlay(onSpan', 'image-overlay-editor.js');
+    assert.ok(addAt > 0, 'the modal still builds its own overlay');
+    assert.strictEqual(ioe.indexOf('{ ...DEFAULTS, id: uid()'), -1, 'a second copy of the defaults');
+});
+
+check('a new box is visible immediately, and never longer than its clip', () => {
+    const fn = slice('window._pceAddTextToClip = function (index) {', '\nwindow._pceClipMove');
+    assert.ok(fn.includes('Math.min(_PCE_NEW_TEXT_S, sp.len)'),
+        'a three-second default would outlast a two-second clip');
+    assert.ok(fn.includes('_pceSelectedOverlayId = ov.id'), 'the new box is not selected');
+    assert.ok(fn.includes('_pceStyleMountedFor = null'), 'the style panel stays on the previous box');
+    assert.ok(fn.includes('_rqPersistOverlays('), 'the new box is never saved');
+    assert.ok(fn.includes('.select()'), 'the placeholder is not selected, so typing appends to it');
+});
+
+check('startS of zero is stored as absent', () => {
+    // The first second of the video is what "no start" MEANS; writing the default onto the row is
+    // noise the renderer then has to ignore.
+    const ioe = readFileSync(join(root, 'src/components/image-overlay-editor.js'), 'utf8');
+    const fn = ioe.slice(ioe.indexOf('function newOverlay(opts) {'), ioe.indexOf('/**\n   * Drag a box'));
+    assert.ok(fn.includes('if (opts.startS) ov.startS = opts.startS;'), 'a zero start is written out');
+    assert.ok(fn.includes('if (opts.endS != null)'), 'a zero end would be dropped');
 });
 
 console.log(`\n${passed} checks passed`);

@@ -773,8 +773,7 @@
       // looking, and now that the stage only shows one clip's boxes, that is unambiguous.
       const sel = state.find((o) => o.id === selectedId);
       const onSpan = readSpans() && sel ? ovSpan(sel) : null;
-      const ov = { ...DEFAULTS, id: uid(), text: 'Your text', x: 0.5, y: 0.5,
-        ...(onSpan ? { startS: onSpan.start || undefined, endS: onSpan.end } : {}) };
+      const ov = newOverlay(onSpan ? { startS: onSpan.start, endS: onSpan.end } : {});
       state.push(ov);
       selectedId = ov.id;
       renderOverlays(); renderSide();
@@ -819,6 +818,29 @@
     if (vidEl) vidEl.addEventListener('loadedmetadata', () => requestAnimationFrame(renderOverlays));
     // Keep overlay sizing correct if the modal/image resizes.
     window.addEventListener('resize', renderOverlays);
+  }
+
+  /**
+   * What a new text box is, before anyone has typed in it.
+   *
+   * Shared so the modal's "+ Add text" and the post editor's per-clip "+" cannot disagree about the
+   * defaults — a box added one way looking different from a box added the other way is the kind of
+   * thing that gets reported as "it changed my font".
+   *
+   * `startS` of zero is stored as absent: the first second of the video is what "no start" MEANS,
+   * and writing the default onto the row is noise the renderer then has to ignore.
+   */
+  function newOverlay(opts) {
+    opts = opts || {};
+    const ov = Object.assign({}, DEFAULTS, {
+      id: uid(),
+      text: opts.text == null ? 'Your text' : opts.text,
+      x: 0.5,
+      y: 0.5,
+    });
+    if (opts.startS) ov.startS = opts.startS;
+    if (opts.endS != null) ov.endS = opts.endS;
+    return ov;
   }
 
   /**
@@ -1136,5 +1158,5 @@
     draw();
   }
 
-  window.ImageOverlayEditor = { open, bake, render, styleControls };
+  window.ImageOverlayEditor = { open, bake, render, styleControls, newOverlay };
 })();

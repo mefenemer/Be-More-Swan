@@ -6670,11 +6670,15 @@ const _RQ_TL_COLOURS = {
  * past it. Each row states both readings in words underneath.
  */
 function _rqTimelineParts(post) {
-    const none = { any: false, note: '', dur: 0, byClip: [], orphans: '', audio: '' };
+    const none = { any: false, note: '', dur: 0, byClip: [], orphans: '', audio: '', isVideo: false };
     const isVideo = !!document.querySelector('#post-review-body [data-media-video]');
     const overlays = isVideo ? ((post && post.overlays) || []) : [];
     const audioClips = _pceAudioClips(post);
-    if (!overlays.length && !audioClips.length) return none;
+    // ⚠️ isVideo travels even when there is nothing timed yet. The per-clip "+ Add text" is drawn
+    // from it, and a post with no text is exactly the post that needs the button most — returning a
+    // bare `none` here meant the first box could never be added, which is the same dead end "Add
+    // another clip" had when it hid itself until there were two clips.
+    if (!overlays.length && !audioClips.length) return Object.assign({}, none, { isVideo });
     // A video whose length we cannot read gets NO draggable axis. Drawing one against the 15s
     // fallback is how boxes end up timed past the end of a six-second clip — invisible in the preview
     // and a single frame in the render. Say so instead: it is also the visible symptom of a media URL
@@ -6859,7 +6863,7 @@ function _rqTimelineParts(post) {
             `${fmt(st)} → ${fmt(en)} of the whole cut · plays for ${fmt(Math.max(0, en - st))}`, cutAxis);
     }).join('');
 
-    return { any: true, note: '', dur, byClip, orphans, audio, cutAxis };
+    return { any: true, note: '', dur, byClip, orphans, audio, cutAxis, isVideo };
 }
 
 /**
@@ -7564,6 +7568,40 @@ function _pceClipsChanged(clips) {
     if (reanchored) _pceRefreshOverlayTiming();
 }
 
+/**
+ * Put a new text box on one clip, and leave the caret in it.
+ *
+ * The box starts at the clip's first second and runs for three, or the clip's length if that is
+ * shorter — a default that is visible in the preview straight away, rather than a zero-length box
+ * that looks like nothing happened. Defaults for everything else come from
+ * ImageOverlayEditor.newOverlay, shared with the modal's own "+ Add text", so a box added here and
+ * a box added there cannot look different.
+ */
+const _PCE_NEW_TEXT_S = 3;
+window._pceAddTextToClip = function (index) {
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    if (!post || !window.ImageOverlayEditor || !window.ImageOverlayEditor.newOverlay) return;
+    const spans = _pceSpansFor(_pceClips(post));
+    const sp = spans && spans[index];
+    const ov = window.ImageOverlayEditor.newOverlay(sp
+        ? { startS: sp.start, endS: sp.start + Math.min(_PCE_NEW_TEXT_S, sp.len) }
+        : {});
+    post.overlays = Array.isArray(post.overlays) ? post.overlays : [];
+    post.overlays.push(ov);
+    _pceSelectedOverlayId = ov.id;
+    _pceStyleMountedFor = null;          // the panel must mount against the new box
+    _rqPersistOverlays(postId);
+    _rqRenderCanvasOverlays(post);
+    _rqRenderTimeline(post);
+    _pceSelect('overlays');
+    // Land in the row's own field with "Your text" selected, so typing replaces it. The panel's
+    // textarea would do as well, but the row is where the eye already is — it is the thing that
+    // just appeared.
+    const field = document.querySelector(`#pce-clips-block [data-tl-text="${CSS.escape(ov.id)}"]`);
+    if (field) { field.focus(); field.select(); }
+};
+
 window._pceClipMove = function (index, dir) {
     const clips = _pceClips().slice();
     const to = index + dir;
@@ -7687,6 +7725,16 @@ function _pceRenderClips(clipsOverride) {
             + _pceTimedBlock(
                 (tl.byClip[i] && tl.byClip[i].html) || '<p class="text-[10px] text-gray-300">No text on this clip</p>',
                 tl.byClip[i] && tl.byClip[i].axis)
+            // ── Add text to THIS clip ───────────────────────────────────────────────────────────
+            // Adding a box meant opening the text editor, where a new one landed on whichever clip
+            // happened to be selected — so "put a line on clip three" was two steps and a guess.
+            // Here the clip is the button you pressed.
+            + (tl.isVideo
+                ? '<div class="px-1 pb-1.5"><button type="button" onclick="window._pceAddTextToClip(' + i + ')"'
+                  + ' class="w-full rounded-lg border border-dashed border-gray-300 py-1 text-[10px] font-semibold'
+                  + ' text-gray-500 hover:border-pink-400 hover:text-pink-700 transition cursor-pointer">'
+                  + '+ Add text to this clip</button></div>'
+                : '')
             + '</div>';
     }).join('');
 
