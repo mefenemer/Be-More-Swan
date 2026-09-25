@@ -197,6 +197,13 @@
   // the created nodes, each tagged data-id, so the caller can wire click/drag — this only paints.
   // Safe to call repeatedly; it removes the nodes it made. Returns [] if the image is not laid out
   // yet, so the caller should re-run on the image's load event and on resize.
+  /**
+   * Paint overlay nodes over a picture, optionally draggable.
+   *
+   * `opts.onMove` / `opts.onDrop` turn the read-only preview into an editable one — which is what
+   * lets the post editor's own canvas position a box without opening the modal. `opts.refEl` is the
+   * MEDIA element, and is what positions are measured against.
+   */
   function render(container, overlays, opts) {
     opts = opts || {};
     ensureStyles();
@@ -216,6 +223,13 @@
       node.style.pointerEvents = 'auto';
       styleOverlayNode(node, ov, h);
       container.appendChild(node);
+      if (opts.onMove || opts.onDrop || opts.onGrab) {
+        node.style.cursor = opts.cursor || 'move';
+        attachPositionDrag(node, ov, () => {
+          const r = refEl.getBoundingClientRect();
+          return { w: r.width, h: r.height, left: r.left, top: r.top };
+        }, { onGrab: opts.onGrab, onMove: opts.onMove, onDrop: opts.onDrop });
+      }
       nodes.push(node);
     }
     return nodes;
@@ -595,30 +609,18 @@
           : `${state.length} text overlay${state.length > 1 ? 's' : ''}`;
     }
 
-    // ── Drag to reposition (pointer events) ────────────────────────────────────
+    // ── Drag to reposition ─────────────────────────────────────────────────────
+    // The gesture itself is attachPositionDrag, shared with the post editor's canvas. What is left
+    // here is what the MODAL does about it: selecting a box moves the stage onto that box's clip.
     function attachDrag(node, ov) {
-      node.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        const changed = selectedId !== ov.id;
-        selectedId = ov.id;
-        // Clicking a box is a selection like any other, so the stage follows it onto that box's clip.
-        if (changed) setTimeout(() => syncStageToSelection(), 0);
-        renderSide();
-        markSelected();
-        const m = stageMetrics();
-        node.setPointerCapture(e.pointerId);
-        const move = (ev) => {
-          ov.x = clamp((ev.clientX - m.left) / m.w, 0, 1);
-          ov.y = clamp((ev.clientY - m.top) / m.h, 0, 1);
-          node.style.left = (ov.x * 100) + '%';
-          node.style.top = (ov.y * 100) + '%';
-        };
-        const up = () => {
-          node.removeEventListener('pointermove', move);
-          node.removeEventListener('pointerup', up);
-        };
-        node.addEventListener('pointermove', move);
-        node.addEventListener('pointerup', up);
+      attachPositionDrag(node, ov, stageMetrics, {
+        onGrab: () => {
+          const changed = selectedId !== ov.id;
+          selectedId = ov.id;
+          if (changed) setTimeout(() => syncStageToSelection(), 0);
+          renderSide();
+          markSelected();
+        },
       });
     }
 
@@ -753,7 +755,7 @@
         }
       }
 
-      q('[data-act="delete"]').addEventListener('click', () => {
+      side.querySelector('[data-act="delete"]').addEventListener('click', () => {
         const i = state.findIndex((o) => o.id === ov.id);
         if (i >= 0) state.splice(i, 1);
         selectedId = state.length ? state[state.length - 1].id : null;
@@ -817,6 +819,51 @@
     if (vidEl) vidEl.addEventListener('loadedmetadata', () => requestAnimationFrame(renderOverlays));
     // Keep overlay sizing correct if the modal/image resizes.
     window.addEventListener('resize', renderOverlays);
+  }
+
+  /**
+   * Drag a box around whatever it is drawn over.
+   *
+   * Shared, like the controls above: the modal positions a box this way and so does the post
+   * editor's canvas, and one of them having a subtly different idea of where the pointer is would
+   * be a bug nobody could describe. Positions are stored as fractions of the MEDIA's box, not the
+   * layer's — a letterboxed video and its layer are not the same rectangle, and using the wrong one
+   * puts every box out by the size of the bars.
+   *
+   * `getRect` is read once, at pointerdown: re-reading it per move would let a reflow move the
+   * reference frame under the pointer. `onDrop` is told whether anything actually moved, so a plain
+   * click can select without writing a position that has not changed.
+   */
+  function attachPositionDrag(node, ov, getRect, hooks) {
+    hooks = hooks || {};
+    node.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      if (hooks.onGrab) hooks.onGrab(ov);
+      const m = getRect();
+      if (!m || !(m.w > 0) || !(m.h > 0)) return;
+      let moved = false;
+      try { node.setPointerCapture(e.pointerId); } catch (err) { /* not capturable */ }
+      const move = (ev) => {
+        moved = true;
+        ov.x = clamp((ev.clientX - m.left) / m.w, 0, 1);
+        ov.y = clamp((ev.clientY - m.top) / m.h, 0, 1);
+        node.style.left = (ov.x * 100) + '%';
+        node.style.top = (ov.y * 100) + '%';
+        if (hooks.onMove) hooks.onMove(ov);
+      };
+      const up = () => {
+        node.removeEventListener('pointermove', move);
+        node.removeEventListener('pointerup', up);
+        // ⚠️ pointercancel too. Without it a drag the browser cancels — a touch turning into a
+        // scroll, the element being removed — leaves the move listener attached to the node for as
+        // long as it lives, still writing positions.
+        node.removeEventListener('pointercancel', up);
+        if (hooks.onDrop) hooks.onDrop(ov, moved);
+      };
+      node.addEventListener('pointermove', move);
+      node.addEventListener('pointerup', up);
+      node.addEventListener('pointercancel', up);
+    });
   }
 
   // ══ Shared controls ═══════════════════════════════════════════════════════════════════════════

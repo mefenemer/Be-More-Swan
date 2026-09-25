@@ -1260,4 +1260,58 @@ check('a slider repaints the picture; a commit saves and repaints the list', () 
     assert.ok(commit.includes('_rqPersistOverlays('), 'nothing is ever saved');
 });
 
+
+// ── Positioning a box, without the modal ────────────────────────────────────────────────────────
+
+console.log('\na box can be dragged on the post editor\'s own canvas');
+
+check('the drag gesture is shared, not written twice', () => {
+    const ioe = readFileSync(join(root, 'src/components/image-overlay-editor.js'), 'utf8');
+    only(ioe, 'function attachPositionDrag(node, ov, getRect, hooks) {', 'image-overlay-editor.js');
+    // The modal keeps only what the MODAL does about a grab — moving its stage to that box's clip.
+    const modal = ioe.slice(ioe.indexOf('function attachDrag(node, ov) {'),
+                            ioe.indexOf('function markSelected('));
+    assert.ok(modal.includes('attachPositionDrag(node, ov, stageMetrics'), 'the modal drags its own way');
+    assert.ok(!modal.includes('ov.x = clamp('), 'a second copy of the positioning maths');
+});
+
+check('a cancelled drag detaches its listeners', () => {
+    // ⚠️ The original removed pointermove on pointerup only. A drag the browser cancels — a touch
+    // becoming a scroll, the node being removed — left the move listener attached for the life of
+    // the node, still writing positions.
+    const ioe = readFileSync(join(root, 'src/components/image-overlay-editor.js'), 'utf8');
+    const fn = ioe.slice(ioe.indexOf('function attachPositionDrag('), ioe.indexOf('// ══ Shared controls'));
+    assert.ok(fn.includes("removeEventListener('pointercancel', up)"), 'pointercancel leaks the move listener');
+    assert.ok(fn.includes("addEventListener('pointercancel', up)"), 'a cancelled drag never ends');
+});
+
+check('a click selects without writing a position', () => {
+    const ioe = readFileSync(join(root, 'src/components/image-overlay-editor.js'), 'utf8');
+    const fn = ioe.slice(ioe.indexOf('function attachPositionDrag('), ioe.indexOf('// ══ Shared controls'));
+    assert.ok(fn.includes('hooks.onDrop(ov, moved)'), 'the drop is not told whether anything moved');
+    const canvas = slice('function _rqRenderCanvasOverlays(post) {', '\n/**');
+    assert.ok(canvas.includes('if (!moved) return;'), 'a plain click saves a position that did not change');
+});
+
+check('the canvas does not repaint under a drag', () => {
+    // Third surface, same rule as the clip list and the timeline: repainting replaces the node the
+    // pointer is holding, and the drag then writes positions nothing can see.
+    const canvas = slice('function _rqRenderCanvasOverlays(post) {', '\n/**');
+    assert.ok(canvas.includes('if (_rqOvDragId) return;'), 'the layer repaints mid-drag');
+    assert.ok(canvas.includes('_rqOvDragId = null;'), 'the guard is never released');
+});
+
+check('wireSide does not reach for a helper it no longer declares', () => {
+    // ⚠️ Slimming wireSide removed its `const q`, and one caller below it was left behind. The
+    // function threw on every render — so the delete button, the box chips and the when-slider were
+    // never wired — while the panel still LOOKED complete, because innerHTML was already set.
+    // Inspecting the DOM for presence proves nothing about whether the wiring ran.
+    const ioe = readFileSync(join(root, 'src/components/image-overlay-editor.js'), 'utf8');
+    const start = ioe.indexOf('function wireSide(');
+    const body = ioe.slice(start, ioe.indexOf('\n    function ', start + 10));
+    const usesQ = /[^.\w]q\(/.test(body);
+    const declaresQ = /const q = /.test(body);
+    assert.ok(!usesQ || declaresQ, 'wireSide calls q() without declaring it');
+});
+
 console.log(`\n${passed} checks passed`);

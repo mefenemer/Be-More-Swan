@@ -6431,23 +6431,46 @@ function _rqApplyOverlayTimes(video, layer, post) {
 // selects it + the "Text on image/video" inspector layer. A no-op for posts with no overlay layer
 // (cards, text-only) or before the editor script loads.
 let _rqOverlayResizeBound = false;
+/**
+ * ⚠️ True while a box is being dragged around the picture.
+ *
+ * Repainting the layer replaces the node under the pointer, and a drag holding a detached node
+ * writes positions nothing can see. Exactly the trap the clip list already carries a guard for —
+ * third surface, same rule. Derived from the drag being in progress rather than counted, because a
+ * counter that misses a release freezes the canvas for the rest of the session.
+ */
+let _rqOvDragId = null;
+
 function _rqRenderCanvasOverlays(post) {
     const body = document.getElementById('post-review-body');
     const layer = body && body.querySelector('[data-overlay-layer]');
     if (!layer || !window.ImageOverlayEditor) { _rqHideTimeline(); return; }
+    // A drag owns the nodes until it lets go.
+    if (_rqOvDragId) return;
     const media = body.querySelector('[data-media-img], [data-media-video]');
     const isVideo = !!media && media.tagName === 'VIDEO';
     const overlays = (post && post.overlays) || [];
     const paint = () => {
         if (!document.body.contains(layer)) return;   // the mock-up was replaced out from under us
-        const nodes = window.ImageOverlayEditor.render(layer, overlays, { refEl: media || undefined });
-        for (const n of nodes) {
-            n.addEventListener('click', (ev) => {
-                ev.stopPropagation();
-                _pceSelectedOverlayId = n.dataset.id || null;
+        // Draggable here, not only inside the modal. Positioning a box was the one thing the
+        // modal still had to itself, and reaching it meant leaving the post, placing the box
+        // against a single frame, and coming back.
+        const nodes = window.ImageOverlayEditor.render(layer, overlays, {
+            refEl: media || undefined,
+            onGrab: (ov) => {
+                _rqOvDragId = ov.id || null;
+                _pceSelectedOverlayId = ov.id || null;
                 _pceSelect('overlays');
                 if (isVideo) _rqRenderTimeline(post);
-            });
+            },
+            onDrop: (ov, moved) => {
+                _rqOvDragId = null;
+                if (!moved) return;             // a click is a selection, not a move
+                _rqPersistOverlays(_rqReviewPostId);
+                _rqRenderCanvasOverlays(post);  // repaint now that the drag has let go
+            },
+        });
+        for (const n of nodes) {
             if (n.dataset.id && n.dataset.id === _pceSelectedOverlayId) n.style.outline = '2px dashed #ec4899';
         }
         if (isVideo) _rqApplyOverlayTimes(media, layer, post);
