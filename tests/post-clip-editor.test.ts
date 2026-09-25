@@ -187,7 +187,7 @@ check('the panel is shown for a single clip, so there is a way to reach two', ()
 
 check('the add button is wired to the appending path', () => {
     only(workspace, 'window._pceAddClipFiles = function', 'workspace.html');
-    assert.ok(workspace.includes('onclick="window._pceAddClipFiles()"'), 'the panel must offer it');
+    assert.ok(workspace.includes('data-pce-act="add-clip"'), 'the panel must offer it');
 });
 
 check('the library lets you TICK several, and says what will happen to them', () => {
@@ -888,7 +888,7 @@ check('every text row can be deleted from the post editor', () => {
     const at = only(workspace, 'const del = kind === ', 'workspace.html');
     const del = workspace.slice(at, at + 500);
     assert.ok(del.includes("kind === 'text'"), 'sound rows must not offer a text delete');
-    assert.ok(del.includes('window._pceOverlayRemove('), 'the button is not wired');
+    assert.ok(del.includes('data-pce-act="remove-text"'), 'the button is not wired');
     const fn = slice('window._pceOverlayRemove = function (key) {', 'window._pceClipTrim = function');
     assert.ok(fn.includes('window.confirm'), 'typed words deleted with no question asked');
     assert.ok(fn.includes('_rqPersistOverlays('), 'the deletion is never saved');
@@ -1007,7 +1007,7 @@ check('start and end are typed on the row, in the clip\'s own seconds', () => {
         'an unset end must read blank, not as the value it happens to have');
     // The clip's own in/out too, beside its slider.
     const trim = slice('function _pceTrimTrackHtml(clip, index) {', '\n/** Write the cut back to the post.');
-    assert.ok(trim.includes('window._pceClipTrim('), 'the clip row has no typed in/out');
+    assert.ok(trim.includes('data-pce-act="clip-trim"'), 'the clip row has no typed in/out');
 });
 
 check('the wording is editable on the row', () => {
@@ -1140,7 +1140,7 @@ check('the preview pane is not stuck over the panel below it', () => {
 check('the clip reorder arrows are still wired', () => {
     only(workspace, 'window._pceClipMove = function (index, dir) {', 'workspace.html');
     const at = only(workspace, "title=\"Move earlier\" aria-label=\"Move clip '", 'workspace.html');
-    assert.ok(workspace.slice(at, at + 400).includes('window._pceClipMove('), 'the up arrow lost its handler');
+    assert.ok(workspace.slice(at, at + 400).includes('data-pce-act="clip-up"'), 'the up arrow lost its handler');
 });
 
 check('the home-screen meta tag is not the deprecated one alone', () => {
@@ -1335,7 +1335,7 @@ check('wireSide does not reach for a helper it no longer declares', () => {
 console.log('\nevery clip can be given a line of its own');
 
 check('each clip carries its own add button', () => {
-    const at = only(workspace, "window._pceAddTextToClip(' + i + ')", 'workspace.html');
+    const at = only(workspace, 'data-pce-act="add-text" data-pce-i=', 'workspace.html');
     assert.ok(at > 0);
     const row = workspace.slice(at - 600, at + 200);
     assert.ok(row.includes('tl.isVideo'), 'a photo post would be offered timed text it cannot have');
@@ -1389,11 +1389,11 @@ check('a still gets a Text list and an add button', () => {
     const scope = slice('function _pceRenderClips(clipsOverride)', '_pceMeasureClips(clips);');
     assert.ok(scope.includes('const photoText ='), 'a photo post has no text list');
     assert.ok(scope.includes('_pcePostHasPicture()'), 'the list is not gated on there being a picture');
-    assert.ok(scope.includes('window._pceAddTextToClip(null)'), 'no way to add the first box');
+    assert.ok(scope.includes('data-pce-act="add-text-still"'), 'no way to add the first box');
     // ⚠️ Rendered into THIS host on purpose: every field in the panel is wired by delegation from
     // #pce-clips-block, so a list built anywhere else looks identical and responds to nothing.
     assert.ok(scope.includes('data-tl-text='), 'the wording is not editable on the row');
-    assert.ok(scope.includes('window._pceOverlayRemove('), 'no way to remove a box');
+    assert.ok(scope.includes('data-pce-act="remove-text"'), 'no way to remove a box');
 });
 
 check('a still is offered no timing at all', () => {
@@ -1427,7 +1427,7 @@ check('the bake still has its backdrop', () => {
 console.log('\nthe assistant can write a line per clip');
 
 check('every clip offers it, and only one runs at a time', () => {
-    const at = only(workspace, 'window._pceSuggestTextForClip(' + "' + i + '" + ')', 'workspace.html');
+    const at = only(workspace, 'data-pce-act="suggest-text" data-pce-i=', 'workspace.html');
     assert.ok(at > 0, 'no per-clip suggest button');
     const scope = workspace.slice(at - 200, at + 700);
     assert.ok(scope.includes("_pceClipAi.busy === i ? 'Thinking"), 'the pressed button does not say it is working');
@@ -1748,6 +1748,56 @@ check('opening a post shows a busy pointer', () => {
     const dest = slice('async function pceConfirmDestinations() {', '\n// Scheduling choice');
     assert.ok(dest.includes('_rqSetBusyCursor(true)'), 'starting a post shows nothing while it works');
     assert.ok(dest.includes('_rqSetBusyCursor(false)'), 'the busy pointer is never cleared');
+});
+
+
+// ── Every button in the panel goes through one listener ─────────────────────────────────────────
+// ⚠️ "+ Add text does nothing, and no error appears" survived THREE rounds of fixes to what the
+// handlers do — because the handlers were never being reached. The pattern only became visible
+// once enough of the panel existed to compare: everything driven by pointer events (trimming,
+// dragging a text bar, reordering a clip) worked throughout, and everything driven by an inline
+// onclick attribute did not. Delegation is how this panel's text fields and number boxes were
+// already bound, on this same element.
+
+console.log('\nthe panel has no inline handlers left');
+
+check('the clip panel builds no onclick attributes', () => {
+    const render = slice('function _pceRenderClips(clipsOverride)', '\n/**\n * The style controls for whichever');
+    assert.ok(!/onclick=/.test(render), 'the clip list still writes inline handlers');
+    const row = slice('const within = sub ?', 'const nameInput = (key, label)');
+    assert.ok(!/onclick=/.test(row), 'a text row still writes inline handlers');
+    const trimFn = slice('function _pceTrimTrackHtml(clip, index) {', '\n/** Write the cut back to the post.');
+    assert.ok(!/onchange=/.test(trimFn), 'the trim numbers still write an inline handler');
+});
+
+check('one dispatcher covers every action the panel offers', () => {
+    const tl = slice('const PCE_ACTS = {', '    // ── The inline fields on each row');
+    for (const act of ['add-text', 'add-text-still', 'suggest-text', 'clip-up', 'clip-down',
+                       'clip-remove', 'hide-clip', 'hide-text', 'remove-text', 'add-clip',
+                       'preview-start', 'preview-stop']) {
+        assert.ok(tl.includes(`'${act}'`), `no handler for ${act}`);
+    }
+    assert.ok(tl.includes("ev.target.closest('[data-pce-act]')"), 'the dispatcher is not delegated');
+    assert.ok(tl.includes('el.disabled'), 'a disabled button would still fire');
+    // ⚠️ And an exception inside an action must not become another dead button.
+    assert.ok(tl.includes('catch (err)') && tl.includes('_pceClipSay('),
+        'a throwing action fails silently, which is the same bug by another route');
+});
+
+check('every action the markup emits has a handler, and vice versa', () => {
+    // A typo in either direction is a button that renders and does nothing — the exact failure
+    // this change exists to end.
+    const emitted = new Set(Array.from(workspace.matchAll(/data-pce-act="([a-z-]+)"/g), m => m[1]));
+    // clip-trim is a change handler, not a click action.
+    emitted.delete('clip-trim');
+    const tl = slice('const PCE_ACTS = {', '    // ── The inline fields on each row');
+    const handled = new Set(Array.from(tl.matchAll(/^\s*'([a-z-]+)':/gm), m => m[1]));
+    for (const a of emitted) assert.ok(handled.has(a), `${a} is emitted but has no handler`);
+    for (const a of handled) {
+        // preview-start/stop are emitted through a ternary rather than literal attributes.
+        if (a === 'preview-stop' || a === 'preview-start') continue;
+        assert.ok(emitted.has(a), `${a} is handled but never emitted`);
+    }
 });
 
 console.log(`\n${passed} checks passed`);

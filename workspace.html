@@ -6812,12 +6812,12 @@ function _rqTimelineParts(post) {
             ? `<button type="button" title="${hidden ? 'Show this text again' : 'Hide this text while you edit'}"
                  aria-label="${hidden ? 'Show' : 'Hide'} ${esc}" aria-pressed="${hidden}"
                  class="px-1 cursor-pointer leading-none ${hidden ? 'text-pink-600' : 'text-gray-300 hover:text-gray-600'}"
-                 onclick="window._pceToggleHidden('text','${_rqEsc(key)}')">${hidden ? '\u25CC' : '\u25C9'}</button>`
+                 data-pce-act="hide-text" data-pce-key="${_rqEsc(key)}">${hidden ? '\u25CC' : '\u25C9'}</button>`
             : '';
         const del = kind === 'text'
             ? `<button type="button" title="Remove this text" aria-label="Remove ${esc}"
                  class="px-1 text-gray-300 hover:text-red-600 cursor-pointer leading-none"
-                 onclick="window._pceOverlayRemove('${_rqEsc(key)}')">&times;</button>`
+                 data-pce-act="remove-text" data-pce-key="${_rqEsc(key)}">&times;</button>`
             : '';
         // ── The numbers sit BESIDE the bar they describe ────────────────────────────────────────
         // They used to be one pair of boxes under the canvas, editing whichever box happened to be
@@ -7761,7 +7761,7 @@ function _pceTrimTrackHtml(clip, index) {
         + ' class="w-12 shrink-0 text-[10px] text-gray-600 border border-gray-200 rounded px-1 py-0.5'
         + ' focus:outline-none focus:border-emerald-500" style="font-variant-numeric:tabular-nums"'
         + ' title="' + hint + '" aria-label="' + hint + '" value="' + val + '"'
-        + ' onchange="window._pceClipTrim(' + index + ',\'' + field + '\',this.value)">';
+        + ' data-pce-act="clip-trim" data-pce-i="' + index + '" data-pce-field="' + field + '">';
     return '<div class="px-1 pb-1.5">'
         + '<div class="flex items-center gap-1">'
         + '<div class="relative flex-1 min-w-0 h-7 rounded bg-gray-100 overflow-hidden select-none" data-trim-track="' + _rqEsc(clip.id) + '">'
@@ -8071,11 +8071,11 @@ function _pceRenderClips(clipsOverride) {
                         + ' title="Edit this text" aria-label="Text" data-tl-text="' + _rqEsc(key) + '">'
                         + '<button type="button" title="Remove this text" aria-label="Remove this text"'
                         + ' class="px-1 text-gray-300 hover:text-red-600 cursor-pointer leading-none"'
-                        + ' onclick="window._pceOverlayRemove(\'' + _rqEsc(key) + '\')">&times;</button>'
+                        + ' data-pce-act="remove-text" data-pce-key="' + _rqEsc(key) + '">&times;</button>'
                         + '</div></div>';
                 }).join('') + '</div>'
                 : '<p class="text-[10px] text-gray-300 pb-1">No text on this picture yet</p>')
-            + '<button type="button" onclick="window._pceAddTextToClip(null)"'
+            + '<button type="button" data-pce-act="add-text-still"'
             + ' class="mt-1.5 w-full rounded-lg border border-dashed border-gray-300 py-1.5 text-[11px] font-semibold'
             + ' text-gray-500 hover:border-pink-400 hover:text-pink-700 transition cursor-pointer">+ Add text</button>'
             + '<p class="mt-1 text-[10px] text-gray-400">Drag a box on the picture to place it. It is baked in when you approve the post.</p>'
@@ -8114,20 +8114,20 @@ function _pceRenderClips(clipsOverride) {
             + ' style="cursor:grab;touch-action:none">\u283F</span>'
             + '<button type="button" title="Move earlier" aria-label="Move clip ' + (i + 1) + ' earlier"'
             + ' class="px-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 cursor-pointer leading-none"'
-            + (i === 0 ? ' disabled' : '') + ' onclick="window._pceClipMove(' + i + ',-1)">&#9650;</button>'
+            + (i === 0 ? ' disabled' : '') + ' data-pce-act="clip-up" data-pce-i="' + i + '">&#9650;</button>'
             + '<button type="button" title="Move later" aria-label="Move clip ' + (i + 1) + ' later"'
             + ' class="px-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 cursor-pointer leading-none"'
-            + (i === clips.length - 1 ? ' disabled' : '') + ' onclick="window._pceClipMove(' + i + ',1)">&#9660;</button>'
+            + (i === clips.length - 1 ? ' disabled' : '') + ' data-pce-act="clip-down" data-pce-i="' + i + '">&#9660;</button>'
             + '<button type="button" aria-pressed="' + _pceClipHidden(c.id) + '"'
             + ' title="' + (_pceClipHidden(c.id) ? 'Show this clip again' : 'Skip this clip while you edit') + '"'
             + ' aria-label="' + (_pceClipHidden(c.id) ? 'Show' : 'Hide') + ' clip ' + (i + 1) + '"'
             + ' class="px-1 cursor-pointer leading-none '
             + (_pceClipHidden(c.id) ? 'text-pink-600' : 'text-gray-300 hover:text-gray-600') + '"'
-            + ' onclick="window._pceToggleHidden(\'clip\',\'' + _rqEsc(c.id) + '\')">'
+            + ' data-pce-act="hide-clip" data-pce-key="' + _rqEsc(c.id) + '">'
             + (_pceClipHidden(c.id) ? '\u25CC' : '\u25C9') + '</button>'
             + '<button type="button" title="Remove this clip" aria-label="Remove clip ' + (i + 1) + '"'
             + ' class="px-1 text-gray-300 hover:text-red-600 cursor-pointer leading-none"'
-            + ' onclick="window._pceClipRemove(' + i + ')">&times;</button>'
+            + ' data-pce-act="clip-remove" data-pce-i="' + i + '">&times;</button>'
             + '</div>'
             + _pceTrimTrackHtml(c, i)
             // What shows ON this clip, directly under the slider that decides how long it lasts.
@@ -8142,14 +8142,14 @@ function _pceRenderClips(clipsOverride) {
             // Here the clip is the button you pressed.
             + (tl.isVideo
                 ? '<div class="px-1 pb-1.5 flex items-center gap-1">'
-                  + '<button type="button" onclick="window._pceAddTextToClip(' + i + ')"'
+                  + '<button type="button" data-pce-act="add-text" data-pce-i="' + i + '"'
                   + ' class="flex-1 rounded-lg border border-dashed border-gray-300 py-1 text-[10px] font-semibold'
                   + ' text-gray-500 hover:border-pink-400 hover:text-pink-700 transition cursor-pointer">'
                   + '+ Add text</button>'
                   // The assistant writes the overlay, per clip. A cut is one piece with several
                   // beats, and the wording for beat three is a different question from "write a
                   // hook for this post" — so the clip is part of what gets asked.
-                  + '<button type="button" onclick="window._pceSuggestTextForClip(' + i + ')"'
+                  + '<button type="button" data-pce-act="suggest-text" data-pce-i="' + i + '"'
                   + (_pceClipAi.busy != null ? ' disabled' : '')
                   + ' title="Ask the assistant for a line on this clip"'
                   + ' class="flex-1 rounded-lg border border-dashed border-gray-300 py-1 text-[10px] font-semibold'
@@ -8189,7 +8189,7 @@ function _pceRenderClips(clipsOverride) {
         + '<div class="divide-y divide-gray-100">' + rows + '</div>'
         + tail
         + (clips.length > 1
-            ? '<button type="button" onclick="' + (_pcePreviewing() ? 'window._pcePreviewStop()' : 'window._pcePreviewStart()') + '"'
+            ? '<button type="button" data-pce-act="' + (_pcePreviewing() ? 'preview-stop' : 'preview-start') + '"'
               + ' class="mt-1.5 w-full rounded-lg border border-emerald-300 bg-emerald-50 py-1.5 text-[11px] font-bold text-emerald-800 hover:bg-emerald-100 transition cursor-pointer">'
               + (_pcePreviewing() ? '■ Stop preview' : '▶ Preview the whole cut') + '</button>'
             : '')
@@ -8197,7 +8197,7 @@ function _pceRenderClips(clipsOverride) {
         // and "Add another clip" there would offer to turn a picture into a video.
         + (!clips.length ? ''
             : clips.length < _PCE_MAX_CLIPS
-            ? '<button type="button" onclick="window._pceAddClipFiles()"'
+            ? '<button type="button" data-pce-act="add-clip"'
               + ' class="mt-1.5 w-full rounded-lg border border-dashed border-gray-300 py-1.5 text-[11px] font-semibold text-gray-500 hover:border-emerald-400 hover:text-emerald-700 transition cursor-pointer">'
               + '+ Add another clip</button>'
             : '<p class="mt-1 text-[10px] text-amber-600">That is the most clips one post can hold.</p>')
@@ -8720,6 +8720,54 @@ function _rqBindTimeline() {
         if (kind === 'audio') { _pceRenderAudioList(); _pcePersistAudio(_rqReviewPostId); }
         else _rqPersistOverlays(_rqReviewPostId);
     };
+    // ── Every button in this panel, through ONE listener ────────────────────────────────────────
+    // ⚠️ These were inline onclick attributes, and "+ Add text does nothing, and no error appears"
+    // survived three rounds of fixes to what the handlers DO — because the handlers were never
+    // being reached. Everything in this panel driven by pointer events (trimming, dragging a text
+    // bar, reordering a clip) worked throughout; everything driven by an inline attribute did not.
+    //
+    // Delegation is how the rest of the panel already works — the text fields and the number boxes
+    // are bound exactly this way, on this same element — so this makes the buttons consistent with
+    // their neighbours and removes a whole class of "the markup rendered but nothing responds".
+    // It also survives the repaints: a listener bound to a button dies with the first redraw.
+    const PCE_ACTS = {
+        'add-text': (el) => window._pceAddTextToClip(Number(el.getAttribute('data-pce-i'))),
+        'add-text-still': () => window._pceAddTextToClip(null),
+        'suggest-text': (el) => window._pceSuggestTextForClip(Number(el.getAttribute('data-pce-i'))),
+        'clip-up': (el) => window._pceClipMove(Number(el.getAttribute('data-pce-i')), -1),
+        'clip-down': (el) => window._pceClipMove(Number(el.getAttribute('data-pce-i')), 1),
+        'clip-remove': (el) => window._pceClipRemove(Number(el.getAttribute('data-pce-i'))),
+        'hide-clip': (el) => window._pceToggleHidden('clip', el.getAttribute('data-pce-key')),
+        'hide-text': (el) => window._pceToggleHidden('text', el.getAttribute('data-pce-key')),
+        'remove-text': (el) => window._pceOverlayRemove(el.getAttribute('data-pce-key')),
+        'add-clip': () => window._pceAddClipFiles(),
+        'preview-start': () => window._pcePreviewStart(),
+        'preview-stop': () => window._pcePreviewStop(),
+    };
+
+    host.addEventListener('click', (ev) => {
+        const el = ev.target.closest && ev.target.closest('[data-pce-act]');
+        if (!el || el.disabled) return;
+        const act = PCE_ACTS[el.getAttribute('data-pce-act')];
+        if (!act) return;
+        ev.preventDefault();
+        // ⚠️ Caught and SHOWN. An exception here used to stop the handler and nothing else, which
+        // is the same dead button by another route.
+        try { act(el); }
+        catch (err) {
+            const at = el.getAttribute('data-pce-i');
+            _pceClipSay(at == null ? null : Number(at),
+                (err && err.message) || 'That did not work. Please try again.');
+        }
+    });
+
+    // The typed in/out on a clip row, same delegation as the text rows' own fields.
+    host.addEventListener('change', (ev) => {
+        const el = ev.target;
+        if (!el || !el.getAttribute || el.getAttribute('data-pce-act') !== 'clip-trim') return;
+        window._pceClipTrim(Number(el.getAttribute('data-pce-i')), el.getAttribute('data-pce-field'), el.value);
+    });
+
     // ── The inline fields on each row ───────────────────────────────────────────────────────────
     // Delegated to the host, because the rows are replaced wholesale on every repaint — a listener
     // bound to an input dies with the first redraw, and a control that works once is worse than one
