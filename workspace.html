@@ -6512,8 +6512,12 @@ function _rqRenderCanvasOverlays(post) {
     const body = document.getElementById('post-review-body');
     const layer = body && body.querySelector('[data-overlay-layer]');
     if (!layer || !window.ImageOverlayEditor) { _rqHideTimeline(); return; }
-    // A drag owns the nodes until it lets go.
-    if (_rqOvDragId) return;
+    // A drag owns the nodes until it lets go — but only while a pointer is actually held. Left set
+    // by a release that never arrived, this guard stops the layer repainting for the rest of the
+    // session AND takes _rqBindTimeline below with it. Same rule, and the same reasoning, as
+    // _pceDragActive.
+    if (_rqOvDragId && _pcePointerHeld) return;
+    if (_rqOvDragId) _rqOvDragId = null;
     const media = body.querySelector('[data-media-img], [data-media-video]');
     const isVideo = !!media && media.tagName === 'VIDEO';
     const overlays = (post && post.overlays) || [];
@@ -7566,10 +7570,78 @@ function _pceTrimTimeAt(ev, track, full) {
     return f * full;
 }
 
+/**
+ * Every button in the clip panel, through one delegated listener.
+ *
+ * ⚠️ Bound HERE, from _pceRenderStagePanels, and not from _rqBindTimeline — which is where this
+ * lived and is why none of it worked. _rqBindTimeline is called from exactly one place, inside
+ * _rqRenderCanvasOverlays, AFTER two early returns: one when the mock-up has no overlay layer, one
+ * while a box is being dragged on the canvas. Take either and the clip panel still renders and its
+ * POINTER handlers still bind — trimming works, dragging a clip works — while its CLICK handler
+ * never attaches at all. Buttons that render and do nothing, no error, nothing in the console.
+ *
+ * The panel's controls must not depend on the canvas path. _pceBindClipTrim is called by
+ * _pceRenderStagePanels on every render, which is the same binder whose handlers were working
+ * throughout, so the buttons now bind wherever the sliders do.
+ *
+ * Delegated rather than per-button because the rows are replaced wholesale on every repaint: a
+ * listener bound to a button dies with the first redraw.
+ */
+function _pceBindPanelActions(host) {
+    // ⚠️ These were inline onclick attributes, and "+ Add text does nothing, and no error appears"
+// survived three rounds of fixes to what the handlers DO — because the handlers were never
+// being reached. Everything in this panel driven by pointer events (trimming, dragging a text
+// bar, reordering a clip) worked throughout; everything driven by an inline attribute did not.
+//
+// Delegation is how the rest of the panel already works — the text fields and the number boxes
+// are bound exactly this way, on this same element — so this makes the buttons consistent with
+// their neighbours and removes a whole class of "the markup rendered but nothing responds".
+// It also survives the repaints: a listener bound to a button dies with the first redraw.
+const PCE_ACTS = {
+    'add-text': (el) => window._pceAddTextToClip(Number(el.getAttribute('data-pce-i'))),
+    'add-text-still': () => window._pceAddTextToClip(null),
+    'suggest-text': (el) => window._pceSuggestTextForClip(Number(el.getAttribute('data-pce-i'))),
+    'clip-up': (el) => window._pceClipMove(Number(el.getAttribute('data-pce-i')), -1),
+    'clip-down': (el) => window._pceClipMove(Number(el.getAttribute('data-pce-i')), 1),
+    'clip-remove': (el) => window._pceClipRemove(Number(el.getAttribute('data-pce-i'))),
+    'hide-clip': (el) => window._pceToggleHidden('clip', el.getAttribute('data-pce-key')),
+    'hide-text': (el) => window._pceToggleHidden('text', el.getAttribute('data-pce-key')),
+    'remove-text': (el) => window._pceOverlayRemove(el.getAttribute('data-pce-key')),
+    'add-clip': () => window._pceAddClipFiles(),
+    'preview-start': () => window._pcePreviewStart(),
+    'preview-stop': () => window._pcePreviewStop(),
+};
+
+host.addEventListener('click', (ev) => {
+    const el = ev.target.closest && ev.target.closest('[data-pce-act]');
+    if (!el || el.disabled) return;
+    const act = PCE_ACTS[el.getAttribute('data-pce-act')];
+    if (!act) return;
+    ev.preventDefault();
+    // ⚠️ Caught and SHOWN. An exception here used to stop the handler and nothing else, which
+    // is the same dead button by another route.
+    try { act(el); }
+    catch (err) {
+        const at = el.getAttribute('data-pce-i');
+        _pceClipSay(at == null ? null : Number(at),
+            (err && err.message) || 'That did not work. Please try again.');
+    }
+});
+
+// The typed in/out on a clip row, same delegation as the text rows' own fields.
+host.addEventListener('change', (ev) => {
+    const el = ev.target;
+    if (!el || !el.getAttribute || el.getAttribute('data-pce-act') !== 'clip-trim') return;
+    window._pceClipTrim(Number(el.getAttribute('data-pce-i')), el.getAttribute('data-pce-field'), el.value);
+});
+
+}
+
 function _pceBindClipTrim() {
     const host = document.getElementById('pce-clips-block');
     if (!host || host.dataset.trimBound === '1') return;
     host.dataset.trimBound = '1';
+    _pceBindPanelActions(host);
 
     const clipsNow = () => (_pceTrimDrag.clips || _pceClips()).map(c => Object.assign({}, c));
 
@@ -8720,54 +8792,6 @@ function _rqBindTimeline() {
         if (kind === 'audio') { _pceRenderAudioList(); _pcePersistAudio(_rqReviewPostId); }
         else _rqPersistOverlays(_rqReviewPostId);
     };
-    // ── Every button in this panel, through ONE listener ────────────────────────────────────────
-    // ⚠️ These were inline onclick attributes, and "+ Add text does nothing, and no error appears"
-    // survived three rounds of fixes to what the handlers DO — because the handlers were never
-    // being reached. Everything in this panel driven by pointer events (trimming, dragging a text
-    // bar, reordering a clip) worked throughout; everything driven by an inline attribute did not.
-    //
-    // Delegation is how the rest of the panel already works — the text fields and the number boxes
-    // are bound exactly this way, on this same element — so this makes the buttons consistent with
-    // their neighbours and removes a whole class of "the markup rendered but nothing responds".
-    // It also survives the repaints: a listener bound to a button dies with the first redraw.
-    const PCE_ACTS = {
-        'add-text': (el) => window._pceAddTextToClip(Number(el.getAttribute('data-pce-i'))),
-        'add-text-still': () => window._pceAddTextToClip(null),
-        'suggest-text': (el) => window._pceSuggestTextForClip(Number(el.getAttribute('data-pce-i'))),
-        'clip-up': (el) => window._pceClipMove(Number(el.getAttribute('data-pce-i')), -1),
-        'clip-down': (el) => window._pceClipMove(Number(el.getAttribute('data-pce-i')), 1),
-        'clip-remove': (el) => window._pceClipRemove(Number(el.getAttribute('data-pce-i'))),
-        'hide-clip': (el) => window._pceToggleHidden('clip', el.getAttribute('data-pce-key')),
-        'hide-text': (el) => window._pceToggleHidden('text', el.getAttribute('data-pce-key')),
-        'remove-text': (el) => window._pceOverlayRemove(el.getAttribute('data-pce-key')),
-        'add-clip': () => window._pceAddClipFiles(),
-        'preview-start': () => window._pcePreviewStart(),
-        'preview-stop': () => window._pcePreviewStop(),
-    };
-
-    host.addEventListener('click', (ev) => {
-        const el = ev.target.closest && ev.target.closest('[data-pce-act]');
-        if (!el || el.disabled) return;
-        const act = PCE_ACTS[el.getAttribute('data-pce-act')];
-        if (!act) return;
-        ev.preventDefault();
-        // ⚠️ Caught and SHOWN. An exception here used to stop the handler and nothing else, which
-        // is the same dead button by another route.
-        try { act(el); }
-        catch (err) {
-            const at = el.getAttribute('data-pce-i');
-            _pceClipSay(at == null ? null : Number(at),
-                (err && err.message) || 'That did not work. Please try again.');
-        }
-    });
-
-    // The typed in/out on a clip row, same delegation as the text rows' own fields.
-    host.addEventListener('change', (ev) => {
-        const el = ev.target;
-        if (!el || !el.getAttribute || el.getAttribute('data-pce-act') !== 'clip-trim') return;
-        window._pceClipTrim(Number(el.getAttribute('data-pce-i')), el.getAttribute('data-pce-field'), el.value);
-    });
-
     // ── The inline fields on each row ───────────────────────────────────────────────────────────
     // Delegated to the host, because the rows are replaced wholesale on every repaint — a listener
     // bound to an input dies with the first redraw, and a control that works once is worse than one
@@ -12944,6 +12968,10 @@ function _pceRenderStagePanels() {
     if (typeof _pceRenderCropFrame === 'function') _pceRenderCropFrame();
     if (typeof _pceBindCropFrame === 'function') _pceBindCropFrame();
     if (typeof _pceBindClipTrim === 'function') _pceBindClipTrim();
+    // ⚠️ Here too, not only from _rqRenderCanvasOverlays. That path returns early when the mock-up
+    // has no overlay layer, and dragging a text bar is a property of the panel being on screen, not
+    // of the canvas having painted. Both binders guard themselves, so calling twice costs nothing.
+    if (typeof _rqBindTimeline === 'function') _rqBindTimeline();
     // Whether there is a column worth folding is decided by what these just rendered.
     if (typeof _pceApplyColumnFold === 'function') _pceApplyColumnFold();
 }

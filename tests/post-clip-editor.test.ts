@@ -1310,7 +1310,7 @@ check('the canvas does not repaint under a drag', () => {
     // Third surface, same rule as the clip list and the timeline: repainting replaces the node the
     // pointer is holding, and the drag then writes positions nothing can see.
     const canvas = slice('function _rqRenderCanvasOverlays(post) {', '\n/**');
-    assert.ok(canvas.includes('if (_rqOvDragId) return;'), 'the layer repaints mid-drag');
+    assert.ok(canvas.includes('if (_rqOvDragId && _pcePointerHeld) return;'), 'the layer repaints mid-drag');
     assert.ok(canvas.includes('_rqOvDragId = null;'), 'the guard is never released');
 });
 
@@ -1771,7 +1771,7 @@ check('the clip panel builds no onclick attributes', () => {
 });
 
 check('one dispatcher covers every action the panel offers', () => {
-    const tl = slice('const PCE_ACTS = {', '    // ── The inline fields on each row');
+    const tl = slice('const PCE_ACTS = {', '\nfunction _pceBindClipTrim() {');
     for (const act of ['add-text', 'add-text-still', 'suggest-text', 'clip-up', 'clip-down',
                        'clip-remove', 'hide-clip', 'hide-text', 'remove-text', 'add-clip',
                        'preview-start', 'preview-stop']) {
@@ -1790,7 +1790,7 @@ check('every action the markup emits has a handler, and vice versa', () => {
     const emitted = new Set(Array.from(workspace.matchAll(/data-pce-act="([a-z-]+)"/g), m => m[1]));
     // clip-trim is a change handler, not a click action.
     emitted.delete('clip-trim');
-    const tl = slice('const PCE_ACTS = {', '    // ── The inline fields on each row');
+    const tl = slice('const PCE_ACTS = {', '\nfunction _pceBindClipTrim() {');
     const handled = new Set(Array.from(tl.matchAll(/^\s*'([a-z-]+)':/gm), m => m[1]));
     for (const a of emitted) assert.ok(handled.has(a), `${a} is emitted but has no handler`);
     for (const a of handled) {
@@ -1815,6 +1815,33 @@ check('?pcedebug does nothing unless it is asked for', () => {
     // Bound directly when the document is already parsed: this script runs at the end of the body.
     assert.ok(fn.includes("document.readyState === 'loading'"),
         'waiting for DOMContentLoaded here would wait forever');
+});
+
+
+console.log('\nthe panel binds from the path that renders it');
+
+check("the buttons do not depend on the canvas having painted", () => {
+    // ⚠️ THE BUG. The dispatcher was bound by _rqBindTimeline, which is called from exactly one
+    // place — inside _rqRenderCanvasOverlays, AFTER two early returns: no overlay layer on the
+    // mock-up, or a box mid-drag on the canvas. Take either and the panel still renders and its
+    // POINTER handlers still bind (trimming works, dragging a clip works) while its CLICK handler
+    // never attaches. Buttons that render and do nothing, with no error anywhere.
+    const trim = slice('function _pceBindClipTrim() {', '\n/** Move the lit section');
+    assert.ok(trim.includes('_pceBindPanelActions(host)'),
+        'the buttons are bound somewhere other than the binder that renders with the panel');
+    const panels = slice('function _pceRenderStagePanels() {', '\nfunction _pceRenderLayers()');
+    assert.ok(panels.includes('_pceBindClipTrim()'), 'the panel binder is not called on render');
+    assert.ok(panels.includes('_rqBindTimeline()'),
+        'dragging a text bar still depends on the canvas path having painted');
+});
+
+check('a canvas drag cannot wedge the layer, or the binders behind it', () => {
+    // Same leak class as _pceDragActive, on the surface I had not applied it to — and this one
+    // takes _rqBindTimeline down with it, because that call sits below the guard.
+    const canvas = slice('function _rqRenderCanvasOverlays(post) {', '\n/**');
+    assert.ok(canvas.includes('if (_rqOvDragId && _pcePointerHeld) return;'),
+        'a leaked canvas drag still stops the layer repainting for good');
+    assert.ok(canvas.includes('if (_rqOvDragId) _rqOvDragId = null;'), 'the stale drag is never cleared');
 });
 
 console.log(`\n${passed} checks passed`);
