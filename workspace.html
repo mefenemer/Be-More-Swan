@@ -8295,7 +8295,11 @@ function _pceRenderClips(clipsOverride) {
     // the same position. Seeded here so a repaint does not drop the line back to zero.
     const v = document.querySelector('#post-review-body [data-media-video]');
     if (v) _rqPaintPlayheads(_pceCutTime(v, post), _rqTimelineDuration(post));
-    _pceRenderTextStyle();
+    // ⚠️ Isolated. This mounts the selected box's controls through the overlay component, and a
+    // throw in there would abort THIS function after its innerHTML had already been written —
+    // leaving a panel that looks finished and whose callers below never ran.
+    try { _pceRenderTextStyle(); }
+    catch (err) { console.error('[clips] style panel', err); }
 }
 
 /**
@@ -9027,7 +9031,24 @@ async function _rqLoadQualityReview(postId) {
         });
         // Plan doesn't include The Quality Reviewer → hide the panel rather than advertise a
         // feature this workspace can't use.
-        if (!res.ok) { wrap.classList.add('hidden'); return; }
+        //
+        // ⚠️ But a 502 here is the REVIEW failing, not the plan refusing it, and the function puts
+        // its own reason in the body — which this was discarding, so the only trace was a red line
+        // in a console. Keep it: a feature quietly missing because the server broke is not the same
+        // as a feature this workspace does not have, and only one of them is worth reporting.
+        if (!res.ok) {
+            wrap.classList.add('hidden');
+            if (res.status >= 500) {
+                const why = await res.json().then(d => d && d.error).catch(() => null);
+                console.error('[quality review]', res.status, why || '(no reason given)');
+                const el = document.getElementById('post-review-script-alert');
+                if (el) {
+                    el.textContent = `The quality review could not run: ${why || 'the server did not say why'}`;
+                    el.classList.remove('hidden');
+                }
+            }
+            return;
+        }
         data = await res.json();
     } catch { wrap.classList.add('hidden'); return; }
 
@@ -12964,16 +12985,38 @@ function _pceLayerSubtitle(key, post) {
  * nothing to show is correct and cheap.
  */
 function _pceRenderStagePanels() {
-    if (typeof _pceRenderClips === 'function') _pceRenderClips();
-    if (typeof _pceRenderCropFrame === 'function') _pceRenderCropFrame();
-    if (typeof _pceBindCropFrame === 'function') _pceBindCropFrame();
-    if (typeof _pceBindClipTrim === 'function') _pceBindClipTrim();
-    // ⚠️ Here too, not only from _rqRenderCanvasOverlays. That path returns early when the mock-up
-    // has no overlay layer, and dragging a text bar is a property of the panel being on screen, not
-    // of the canvas having painted. Both binders guard themselves, so calling twice costs nothing.
-    if (typeof _rqBindTimeline === 'function') _rqBindTimeline();
-    // Whether there is a column worth folding is decided by what these just rendered.
-    if (typeof _pceApplyColumnFold === 'function') _pceApplyColumnFold();
+    // ⚠️ BIND FIRST, RENDER SECOND, and never let one step take another down with it.
+    //
+    // These ran in the other order, and rendering came first. _pceRenderClips writes the panel's
+    // innerHTML and then does more work — measuring clips, mounting the selected box's style
+    // controls. Anything that throws after that write leaves the buttons ON SCREEN and every
+    // binder below it unreached: a panel that looks complete and responds to nothing, with the
+    // pointer-driven controls beside it working, because those were bound by an earlier call.
+    //
+    // Binding is idempotent, cheap, and does not depend on what is currently rendered — it is
+    // delegated from containers that never move. So it goes first, and each step is isolated:
+    // whatever else fails, the panel stays alive, and the failure is reported rather than becoming
+    // a silently dead button.
+    const step = (name, fn) => {
+        if (typeof fn !== 'function') return;
+        try { fn(); }
+        catch (err) {
+            const el = document.getElementById('post-review-script-alert');
+            if (el) {
+                el.textContent = `The editor hit a problem in ${name}: ${(err && err.message) || err}`;
+                el.classList.remove('hidden');
+            }
+            // Re-thrown nowhere: one panel failing must not stop the others being usable.
+            console.error(`[stage] ${name}`, err);
+        }
+    };
+
+    step('bindClipTrim', typeof _pceBindClipTrim === 'function' ? _pceBindClipTrim : null);
+    step('bindTimeline', typeof _rqBindTimeline === 'function' ? _rqBindTimeline : null);
+    step('bindCropFrame', typeof _pceBindCropFrame === 'function' ? _pceBindCropFrame : null);
+    step('renderClips', typeof _pceRenderClips === 'function' ? _pceRenderClips : null);
+    step('renderCropFrame', typeof _pceRenderCropFrame === 'function' ? _pceRenderCropFrame : null);
+    step('columnFold', typeof _pceApplyColumnFold === 'function' ? _pceApplyColumnFold : null);
 }
 
 function _pceRenderLayers() {

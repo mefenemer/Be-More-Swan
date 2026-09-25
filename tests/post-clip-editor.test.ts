@@ -278,10 +278,11 @@ check('the stage panels follow the STRIP, not the post-open path', () => {
     // Attaching a post's first video un-hides the strip but does not reopen the post, so rendering
     // the clips only on open left the panel hidden — and "Add another clip" lives in that panel.
     // _pceRenderLayers is the one function that runs on every media change and owns the strip.
-    const at = only(workspace, 'function _pceRenderStagePanels()', 'workspace.html');
-    const body = workspace.slice(at, at + 500);
-    assert.ok(body.includes('_pceRenderClips()'), 'it must render the cut');
-    assert.ok(body.includes('_pceRenderCropFrame()'), 'and the framing');
+    // ⚠️ Scan the whole function, not 500 characters — it grew when binding moved ahead of
+    // rendering, and a window that stops short is a false failure about a true property.
+    const body = slice('function _pceRenderStagePanels() {', '\nfunction _pceRenderLayers()');
+    assert.ok(body.includes('_pceRenderClips'), 'it must render the cut');
+    assert.ok(body.includes('_pceRenderCropFrame'), 'and the framing');
 
     // Every exit path of _pceRenderLayers, or the panel survives one state change and not another.
     // The window is the FUNCTION, found by scanning to the next top-level declaration — a fixed
@@ -1830,9 +1831,15 @@ check("the buttons do not depend on the canvas having painted", () => {
     assert.ok(trim.includes('_pceBindPanelActions(host)'),
         'the buttons are bound somewhere other than the binder that renders with the panel');
     const panels = slice('function _pceRenderStagePanels() {', '\nfunction _pceRenderLayers()');
-    assert.ok(panels.includes('_pceBindClipTrim()'), 'the panel binder is not called on render');
-    assert.ok(panels.includes('_rqBindTimeline()'),
+    assert.ok(panels.includes('_pceBindClipTrim'), 'the panel binder is not called on render');
+    assert.ok(panels.includes('_rqBindTimeline'),
         'dragging a text bar still depends on the canvas path having painted');
+    // ⚠️ And binding must come BEFORE rendering. _pceRenderClips writes the panel's innerHTML and
+    // then keeps working; anything that throws after that write leaves the buttons on screen with
+    // every binder below it unreached — a panel that looks complete and responds to nothing.
+    assert.ok(panels.indexOf("step('bindClipTrim'") < panels.indexOf("step('renderClips'"),
+        'rendering runs before binding again, so a throw mid-render disables the panel');
+    assert.ok(panels.includes('catch (err)'), 'one panel failing can still take the others down');
 });
 
 check('a canvas drag cannot wedge the layer, or the binders behind it', () => {
