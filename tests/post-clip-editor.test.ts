@@ -1575,4 +1575,54 @@ check('a release that never reaches the panel still ends the drag', () => {
     assert.ok(fn.includes("window.addEventListener('pointercancel', endClipDrag)"), 'no cancel safety net');
 });
 
+
+// ── Folding a column away ───────────────────────────────────────────────────────────────────────
+
+console.log('\neither column folds down to its handle');
+
+check('both columns have a handle, and it is the thing that stays', () => {
+    // ⚠️ A pane that collapses to NOTHING cannot be brought back, and "where did the timeline go"
+    // is a worse problem than the space it was taking. Same rule the clips panel learned when
+    // hiding itself left no way to add a second clip.
+    const fn = slice('function _pceApplyColumnFold() {', '\nwindow.addEventListener(\'resize\'');
+    assert.ok(fn.includes("steps.style.display = shut ? 'none' : ''"), 'the rail folds its handle away too');
+    assert.ok(fn.includes("strip.style.display = shut ? 'none' : ''"), 'the side folds its handle away too');
+    assert.ok(fn.includes("rail.style.width = shut ? '2rem' : ''"), 'a folded rail takes no less room');
+    assert.ok(fn.includes("side.style.width = shut ? '2rem' : '22rem'"), 'a folded side takes no less room');
+    // The handle has to say which way it goes.
+    assert.ok(fn.includes("btn.title = shut ? 'Show the setup steps'"), 'the rail handle does not change its label');
+    assert.ok(fn.includes("btn.title = shut ? 'Show the timeline'"), 'the side handle does not change its label');
+});
+
+check('the fold is offered only where there is a column to fold', () => {
+    const fn = slice('function _pceApplyColumnFold() {', '\nwindow.addEventListener(\'resize\'');
+    assert.ok(fn.includes("const offer = split && !strip.classList.contains('hidden')"),
+        'the side handle shows on a stacked layout, where it folds nothing useful');
+    // ⚠️ And a column folded while split must not stay folded once the layout stacks — that would
+    // hide the timeline with no handle left to bring it back.
+    assert.ok(fn.includes('const shut = offer && _pceColumnShut.side'),
+        'a folded side survives the layout stacking, stranding the timeline');
+});
+
+check('the fold is remembered for the session, and not beyond it', () => {
+    // It is a preference about how someone wants to work, so re-folding on every post would be the
+    // editor forgetting what it was just told. Stored beyond the tab it would have them open the
+    // editor tomorrow with a column missing and no memory of hiding it.
+    const decl = slice('const _pceColumnShut = { rail: false, side: false };', 'function _pceSetStageSplit(on) {');
+    assert.ok(!/localStorage|sessionStorage/.test(decl), 'the fold is persisted beyond the tab');
+    assert.ok(!workspace.includes('_pceColumnShut.rail = false;'), 'opening a post re-folds the rail');
+});
+
+check('it does not revive the old two-pane layout', () => {
+    // tests/post-editor-single-surface.test.ts keeps that deleted. These names avoid its vocabulary
+    // on purpose so that check keeps meaning what it meant.
+    // Comments may name them — that is the record of what went and why. Only live code counts.
+    for (const gone of ['_pceTogglePane', '_pceApplyPanes', 'pce-left-reopen', 'pce-right-reopen']) {
+        const live = workspace.split('\n')
+            .filter(l => l.includes(gone) && !l.trimStart().startsWith('//') && !l.trimStart().startsWith('*'));
+        assert.deepStrictEqual(live, [], `${gone} is back as live code`);
+    }
+    only(workspace, 'window._pceFoldColumn = function (which) {', 'workspace.html');
+});
+
 console.log(`\n${passed} checks passed`);

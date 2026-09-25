@@ -857,7 +857,14 @@ window.showComplianceModals = function showComplianceModals(force) {
              and audio inspectors and the reschedule panel all keep working untouched, because
              they are the same nodes, just re-parented. See _railMount / _railRestoreAll. -->
         <aside id="pce-rail" class="hidden w-full lg:w-72 shrink-0 space-y-1.5">
-          <p class="text-[9px] font-bold uppercase tracking-wider text-gray-400 px-0.5 pb-0.5">Post setup</p>
+          <div class="flex items-center justify-between px-0.5 pb-0.5">
+            <p id="pce-rail-title" class="text-[9px] font-bold uppercase tracking-wider text-gray-400">Post setup</p>
+            <!-- Fold it away. Everything in here is a decision you make once; the picture is the
+                 thing you keep coming back to, and on a laptop the rail is 288px of it. -->
+            <button type="button" onclick="window._pceFoldColumn('rail')"
+              class="px-1 text-[10px] font-bold text-gray-400 hover:text-gray-700 cursor-pointer leading-none"
+              aria-controls="pce-rail-steps" title="Hide the setup steps">&#9668;</button>
+          </div>
           <div id="pce-rail-steps" class="space-y-1.5"></div>
         </aside>
 
@@ -893,6 +900,13 @@ window.showComplianceModals = function showComplianceModals(force) {
               <div id="post-review-body"></div>
             </div>
             <div id="pce-stage-side">
+              <!-- Fold the clip list away when you just want to watch the thing. Shown only where
+                   there is something in the column to fold. -->
+              <div id="pce-side-bar" class="hidden items-center justify-end pb-1">
+                <button type="button" onclick="window._pceFoldColumn('side')"
+                  class="px-1 text-[10px] font-bold text-gray-400 hover:text-gray-700 cursor-pointer leading-none"
+                  aria-controls="pce-stage-strip" title="Hide the timeline">&#9658;</button>
+              </div>
           <!-- The canvas's own picker — opened by the empty media frame and nothing else. Multiple
                and both kinds, because "add media" on a blank post means one image, several images,
                or a video, and which of those it is decides the post's format (_pceCanvasAttachFiles). -->
@@ -11327,9 +11341,15 @@ function _railRender() {
     if (quality && !quality.closest('#pce-rail')) quality.classList.add('hidden');
 }
 
-// The collapsible-pane machinery (_pceCollapsed, _pceShowLeftPane, _pceApplyPanes, _pceTogglePane)
-// lived here. It went with the panes: there is nothing left to collapse, and the canvas already has
-// the full width the collapse toggles existed to give it.
+// The collapsible-PANE machinery (_pceCollapsed, _pceShowLeftPane, _pceApplyPanes, _pceTogglePane)
+// lived here. It went with the panes themselves — a left pane and a right pane of controls either
+// side of the canvas, replaced by the step rail.
+//
+// ⚠️ Not to be confused with _pceFoldColumn, which came later and folds today's two COLUMNS: the
+// rail of steps, and the clip list beside the video on a cut. Different layout, different problem,
+// deliberately different names — tests/post-editor-single-surface.test.ts still keeps the names
+// above deleted, and a rename that collided with them would quietly turn that check into a
+// tautology.
 
 // ── Post formats ────────────────────────────────────────────────────────────────────────────────
 // Mirrors src/config/post-formats.ts, which this static page cannot import. The SERVER is
@@ -12608,6 +12628,8 @@ function _pceRenderStagePanels() {
     if (typeof _pceRenderCropFrame === 'function') _pceRenderCropFrame();
     if (typeof _pceBindCropFrame === 'function') _pceBindCropFrame();
     if (typeof _pceBindClipTrim === 'function') _pceBindClipTrim();
+    // Whether there is a column worth folding is decided by what these just rendered.
+    if (typeof _pceApplyColumnFold === 'function') _pceApplyColumnFold();
 }
 
 function _pceRenderLayers() {
@@ -14157,6 +14179,28 @@ function _pceSetStageWide(wide, sideBySide) {
  */
 const _PCE_SPLIT_MIN_PX = 1024;
 let _pceSplitOn = false;
+
+/**
+ * Which COLUMNS the reviewer has folded away.
+ *
+ * ⚠️ Not the old two-pane layout. That was a left pane and a right pane of controls either side of
+ * the canvas, and it was deleted in favour of the step rail — tests/post-editor-single-surface.test.ts
+ * keeps it deleted, and the names here deliberately avoid its vocabulary. This is one rail of steps
+ * and one column of clips, each of which can be folded down to its handle.
+ *
+ * Kept for the session rather than per post: it is a preference about how they want to work, and
+ * re-folding the rail on every post would be the editor forgetting something it was just told. Not
+ * persisted beyond the tab — a stored one would have someone open the editor tomorrow with a pane
+ * missing and no memory of hiding it.
+ */
+const _pceColumnShut = { rail: false, side: false };
+
+window._pceFoldColumn = function (which) {
+    if (!(which in _pceColumnShut)) return;
+    _pceColumnShut[which] = !_pceColumnShut[which];
+    _pceApplyStageSplit();
+};
+
 function _pceSetStageSplit(on) {
     _pceSplitOn = !!on;
     _pceApplyStageSplit();
@@ -14184,6 +14228,63 @@ function _pceApplyStageSplit() {
         strip.classList.toggle('max-w-md', !split);
         strip.classList.toggle('mx-auto', !split);
         strip.classList.toggle('mt-3', !split);
+    }
+    _pceApplyColumnFold();
+}
+
+/**
+ * Fold a pane down to its handle.
+ *
+ * ⚠️ The handle STAYS. A pane that collapses to nothing cannot be brought back, and "where did the
+ * timeline go" is a worse problem than the space it was taking — this is the same rule the clips
+ * panel already learned when hiding itself left no way to add a second clip.
+ *
+ * Inline widths, not classes: layout, and a class that appears nowhere else can be purged out of
+ * the compiled stylesheet, at which point the pane silently refuses to fold.
+ */
+function _pceApplyColumnFold() {
+    // Reads the split itself rather than being told: the strip's visibility is decided by
+    // _pceRenderLayers, which runs at times that know nothing about the columns.
+    const split = _pceSplitOn && window.innerWidth >= _PCE_SPLIT_MIN_PX;
+    const rail = document.getElementById('pce-rail');
+    const steps = document.getElementById('pce-rail-steps');
+    const title = document.getElementById('pce-rail-title');
+    if (rail && steps) {
+        const shut = _pceColumnShut.rail;
+        steps.style.display = shut ? 'none' : '';
+        if (title) title.style.display = shut ? 'none' : '';
+        rail.style.width = shut ? '2rem' : '';
+        rail.style.minWidth = shut ? '2rem' : '';
+        rail.style.flex = shut ? '0 0 2rem' : '';
+        const btn = rail.querySelector('[onclick*="_pceFoldColumn"]');
+        if (btn) {
+            btn.innerHTML = shut ? '&#9658;' : '&#9668;';
+            btn.title = shut ? 'Show the setup steps' : 'Hide the setup steps';
+            btn.setAttribute('aria-expanded', String(!shut));
+        }
+    }
+
+    const side = document.getElementById('pce-stage-side');
+    const bar = document.getElementById('pce-side-bar');
+    const strip = document.getElementById('pce-stage-strip');
+    if (side && bar && strip) {
+        // Only offered where there is a column to fold: on a photo post the strip carries the text
+        // list and little else, and on a narrow window it is already under the picture.
+        const offer = split && !strip.classList.contains('hidden');
+        bar.classList.toggle('hidden', !offer);
+        bar.classList.toggle('flex', offer);
+        const shut = offer && _pceColumnShut.side;
+        strip.style.display = shut ? 'none' : '';
+        if (offer) {
+            side.style.flex = shut ? '0 0 2rem' : '0 0 22rem';
+            side.style.width = shut ? '2rem' : '22rem';
+        }
+        const btn = bar.querySelector('[onclick*="_pceFoldColumn"]');
+        if (btn) {
+            btn.innerHTML = shut ? '&#9668;' : '&#9658;';
+            btn.title = shut ? 'Show the timeline' : 'Hide the timeline';
+            btn.setAttribute('aria-expanded', String(!shut));
+        }
     }
 }
 window.addEventListener('resize', () => _pceApplyStageSplit());
