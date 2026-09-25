@@ -7440,8 +7440,11 @@ let _pceClipsRepaintPending = false;
  * Reading the drag objects instead makes that impossible: the hold lasts exactly as long as a drag
  * exists, because it IS the drag existing.
  */
+/** Which clip is being dragged to a new position, and where it would land. */
+const _pceClipDrag = { from: null, to: null };
+
 function _pceDragActive() {
-    return _pceTrimDrag.on === true || _rqTlDrag != null;
+    return _pceTrimDrag.on === true || _rqTlDrag != null || _pceClipDrag.from != null;
 }
 
 /** Run a repaint that a drag deferred. Safe to call when there was none. */
@@ -7525,6 +7528,81 @@ function _pceBindClipTrim() {
         // so leaving it pointing at the clip just trimmed would show that clip as the post's media.
         _pceCanvasRestore();
     };
+    // ── Drag a clip into a new position ─────────────────────────────────────────────────────────
+    // The reorder itself is _pceClipsChanged, the same path the arrows use — which means the text
+    // comes with the clip for free: _pceReanchorOverlays matches a box to its clip BY ID, so a
+    // clip that moves takes its wording with it and keeps how long it shows for.
+    //
+    // A grip rather than the whole row: the row also holds a trim slider, two number fields, an
+    // editable line of text and five buttons, and a drag that starts anywhere would fight all of
+    // them.
+    const clipRowEl = (i) => host.querySelector('[data-clip-row="' + i + '"]');
+    const paintClipDrop = () => {
+        for (const row of host.querySelectorAll('[data-clip-row]')) {
+            const i = Number(row.getAttribute('data-clip-row'));
+            const on = _pceClipDrag.to === i && _pceClipDrag.from !== i;
+            row.style.outline = on ? '2px dashed #059669' : '';
+            row.style.outlineOffset = on ? '-2px' : '';
+            row.style.borderRadius = on ? '8px' : '';
+        }
+        const src = _pceClipDrag.from == null ? null : clipRowEl(_pceClipDrag.from);
+        if (src) src.style.opacity = '.4';
+    };
+    const clearClipDrop = () => {
+        for (const row of host.querySelectorAll('[data-clip-row]')) {
+            row.style.outline = '';
+            row.style.outlineOffset = '';
+            row.style.borderRadius = '';
+            // ⚠️ Put back what the ROW's own state says, not blank. A hidden clip is dimmed too,
+            // and a cancelled drag that cleared the opacity outright would leave it looking shown
+            // while it is still hidden — until something happened to repaint the list.
+            const i = Number(row.getAttribute('data-clip-row'));
+            if (_pceClipDrag.from != null && i === _pceClipDrag.from) {
+                const clip = _pceClips()[i];
+                row.style.opacity = clip && _pceClipHidden(clip.id) ? '.5' : '';
+            }
+        }
+    };
+
+    host.addEventListener('pointerdown', (ev) => {
+        const grip = ev.target.closest && ev.target.closest('[data-clip-drag]');
+        if (!grip) return;
+        const from = Number(grip.getAttribute('data-clip-drag'));
+        if (!Number.isFinite(from)) return;
+        _pceClipDrag.from = from;
+        _pceClipDrag.to = from;
+        try { grip.setPointerCapture(ev.pointerId); } catch (e) { /* not capturable */ }
+        grip.style.cursor = 'grabbing';
+        paintClipDrop();
+        ev.preventDefault();
+        ev.stopPropagation();
+    });
+
+    host.addEventListener('pointermove', (ev) => {
+        if (_pceClipDrag.from == null) return;
+        const over = _rqClipRowAt(ev.clientX, ev.clientY);
+        if (over != null && over !== _pceClipDrag.to) { _pceClipDrag.to = over; paintClipDrop(); }
+    });
+
+    const endClipDrag = () => {
+        if (_pceClipDrag.from == null) return;
+        const { from, to } = _pceClipDrag;
+        clearClipDrop();
+        for (const g of host.querySelectorAll('[data-clip-drag]')) g.style.cursor = 'grab';
+        _pceClipDrag.from = null;
+        _pceClipDrag.to = null;
+        if (to == null || to === from) { _pceFlushClipsRepaint(); return; }
+        const clips = _pceClips().slice();
+        if (!clips[from] || !clips[to]) { _pceFlushClipsRepaint(); return; }
+        const [moved] = clips.splice(from, 1);
+        clips.splice(to, 0, moved);
+        _pceClipsChanged(clips);   // saves the cut AND re-anchors every box onto its own clip
+    };
+    host.addEventListener('pointerup', endClipDrag);
+    host.addEventListener('pointercancel', endClipDrag);
+    window.addEventListener('pointerup', endClipDrag);
+    window.addEventListener('pointercancel', endClipDrag);
+
     host.addEventListener('pointerup', end);
     host.addEventListener('pointercancel', end);
     // Same safety net as the timeline's, and for the same reason — see the note there. Running the
@@ -7884,6 +7962,13 @@ function _pceRenderClips(clipsOverride) {
             + '<span class="w-4 shrink-0 text-[10px] font-bold text-gray-400" style="font-variant-numeric:tabular-nums">' + (i + 1) + '</span>'
             + '<span class="flex-1 min-w-0 truncate text-[11px] text-gray-700" title="' + name + '">' + name + '</span>'
             + '<span class="w-10 shrink-0 text-right text-[10px] text-gray-400" style="font-variant-numeric:tabular-nums">' + (len == null ? '—' : _pceFmtS(len)) + '</span>'
+            // Drag to reorder. The arrows stay: they are the keyboard-reachable way to do the same
+            // thing, and a list that can ONLY be reordered by dragging cannot be reordered at all
+            // by someone not using a mouse.
+            + '<span data-clip-drag="' + i + '" role="button" tabindex="-1"'
+            + ' title="Drag to reorder this clip" aria-hidden="true"'
+            + ' class="px-1 text-gray-300 hover:text-gray-600 leading-none select-none"'
+            + ' style="cursor:grab;touch-action:none">\u283F</span>'
             + '<button type="button" title="Move earlier" aria-label="Move clip ' + (i + 1) + ' earlier"'
             + ' class="px-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 cursor-pointer leading-none"'
             + (i === 0 ? ' disabled' : '') + ' onclick="window._pceClipMove(' + i + ',-1)">&#9650;</button>'

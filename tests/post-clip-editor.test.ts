@@ -1519,4 +1519,60 @@ check('hiding the clip that is playing moves on rather than stopping on it', () 
         'hiding the clip on screen leaves it on screen');
 });
 
+
+// ── Dragging a clip into a new position ─────────────────────────────────────────────────────────
+
+console.log('\nclips can be dragged, and bring their text with them');
+
+check('the drag goes through the same path the arrows do', () => {
+    // Which is what makes the text come along for free: _pceClipsChanged re-anchors every box onto
+    // its own clip BY ID, so a clip that moves takes its wording and keeps how long it shows.
+    const fn = slice('const clipRowEl = (i) =>', '\n    host.addEventListener(\'pointerup\', end);');
+    assert.ok(fn.includes('_pceClipsChanged(clips)'), 'the reorder writes the cut some other way');
+    assert.ok(fn.includes('clips.splice(from, 1)') && fn.includes('clips.splice(to, 0, moved)'),
+        'the reorder is not a move');
+    // And the re-anchor it depends on must still match by id rather than position.
+    const re = slice('function _pceReanchorOverlays(post, oldSpans, newClips) {', '/** The clip a moment');
+    assert.ok(re.includes('sp.clip.id === from.clip.id'),
+        'text would follow the POSITION rather than the clip, so a reorder would strand it');
+});
+
+check('a grip, not the whole row', () => {
+    // The row also holds a trim slider, two number fields, an editable line of text and five
+    // buttons. A drag that started anywhere would fight all of them.
+    const at = only(workspace, "data-clip-drag=\"' + i + '\"", 'workspace.html');
+    assert.ok(at > 0, 'no drag handle');
+    const fn = slice('const clipRowEl = (i) =>', '\n    host.addEventListener(\'pointerup\', end);');
+    assert.ok(fn.includes("closest('[data-clip-drag]')"), 'the drag starts anywhere in the row');
+    // The arrows stay: a list that can ONLY be reordered by dragging cannot be reordered at all
+    // without a mouse.
+    only(workspace, 'window._pceClipMove = function (index, dir) {', 'workspace.html');
+});
+
+check('the list does not repaint under a reorder', () => {
+    // Fourth surface with this rule. A repaint replaces the row being dragged, and the drag then
+    // reads a rect of zeros.
+    const fn = slice('function _pceDragActive() {', '/** Run a repaint that a drag deferred.');
+    assert.ok(fn.includes('_pceClipDrag.from != null'), 'a clip drag does not hold off repaints');
+});
+
+check('a cancelled drag changes nothing', () => {
+    const fn = slice('const endClipDrag = () => {', '    host.addEventListener(\'pointerup\', endClipDrag);');
+    assert.ok(fn.includes('if (to == null || to === from)'), 'dropping a clip on itself reorders it');
+    assert.ok(fn.includes('_pceFlushClipsRepaint()'), 'a cancelled drag leaves the deferred repaint pending');
+});
+
+check('the drag puts back the row\'s own dim, not a blank one', () => {
+    // ⚠️ A hidden clip is dimmed too. Clearing the opacity outright after a cancelled drag would
+    // leave it looking shown while it is still hidden, until something else repainted the list.
+    const fn = slice('const clearClipDrop = () => {', '    host.addEventListener(\'pointerdown\', (ev) => {');
+    assert.ok(fn.includes('_pceClipHidden(clip.id)'), 'the hidden dim is cleared by a drag');
+});
+
+check('a release that never reaches the panel still ends the drag', () => {
+    const fn = slice('const endClipDrag = () => {', '    host.addEventListener(\'pointerup\', end);');
+    assert.ok(fn.includes("window.addEventListener('pointerup', endClipDrag)"), 'no window safety net');
+    assert.ok(fn.includes("window.addEventListener('pointercancel', endClipDrag)"), 'no cancel safety net');
+});
+
 console.log(`\n${passed} checks passed`);
