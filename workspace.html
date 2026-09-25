@@ -11591,6 +11591,78 @@ function _railRender() {
     });
 })();
 
+/**
+ * ?pcedebug=1 — say what happens to a click in the post editor.
+ *
+ * Off unless asked for, and it changes nothing: it only watches. It exists because a button in the
+ * clip panel does nothing on one machine and works on every machine I can reach, through two
+ * completely different wiring mechanisms — inline attributes and delegation — which means the
+ * fault is not in either. The remaining questions are all things only that machine can answer:
+ * does a click event happen at all; what element does it land on; does it reach the panel; is the
+ * panel's listener bound.
+ *
+ * Reports into the banner at the top of the editor, so it can be read and screenshotted without a
+ * console. Capped, because a running commentary is not the point — the first few clicks are.
+ */
+(function _pceClickDiagnostics() {
+    // Query string OR hash: this page rewrites its own URL as you move between views, and a query
+    // parameter does not always survive that. The hash does.
+    let on = false;
+    try {
+        on = new URLSearchParams(location.search).get('pcedebug') === '1'
+            || location.hash.indexOf('pcedebug') !== -1;
+    } catch (e) { /* no URL */ }
+    if (!on) return;
+
+    const MAX = 6;
+    let n = 0;
+    const say = (text) => {
+        const el = document.getElementById('post-review-script-alert');
+        if (!el || n >= MAX) return;
+        n++;
+        const p = document.createElement('p');
+        p.className = 'font-mono';
+        p.textContent = text;
+        el.appendChild(p);
+        el.classList.remove('hidden');
+    };
+
+    const describe = (el) => {
+        if (!el || !el.tagName) return '(nothing)';
+        const id = el.id ? '#' + el.id : '';
+        const act = el.getAttribute && el.getAttribute('data-pce-act');
+        return el.tagName.toLowerCase() + id + (act ? `[${act}]` : '') + (el.disabled ? '(disabled)' : '');
+    };
+
+    // Capture phase on the document: this sees the click BEFORE anything can stop it, so a silent
+    // click and a cancelled one are told apart.
+    document.addEventListener('click', (ev) => {
+        const t = ev.target;
+        const panel = document.getElementById('pce-clips-block');
+        const inPanel = !!(panel && panel.contains(t));
+        if (!inPanel) return;
+        const btn = t.closest && t.closest('[data-pce-act]');
+        say(`click → ${describe(t)}`
+            + ` | action: ${btn ? btn.getAttribute('data-pce-act') : 'none found'}`
+            + ` | bound: tl=${typeof _rqTimelineBound !== 'undefined' && _rqTimelineBound ? 'y' : 'N'}`
+            + `/trim=${panel && panel.dataset.trimBound === '1' ? 'y' : 'N'}`
+            + ` | dragActive: ${typeof _pceDragActive === 'function' ? _pceDragActive() : '?'}`
+            + ` | defaultPrevented: ${ev.defaultPrevented}`);
+    }, true);
+
+    // And whether it survived to the panel's own listener. Bound directly when the document is
+    // already parsed — this script runs at the end of the body, so DOMContentLoaded has usually
+    // been and gone by now and waiting for it would mean waiting forever.
+    const watchPanel = () => {
+        const panel = document.getElementById('pce-clips-block');
+        if (panel) panel.addEventListener('click', () => say('\u2026reached the panel listener'), false);
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watchPanel);
+    else watchPanel();
+
+    say('pcedebug on — click a button in the clip list.');
+})();
+
 // ── Post formats ────────────────────────────────────────────────────────────────────────────────
 // Mirrors src/config/post-formats.ts, which this static page cannot import. The SERVER is
 // authoritative — approve-post refuses an unschedulable format and save-post-format validates the

@@ -1800,4 +1800,21 @@ check('every action the markup emits has a handler, and vice versa', () => {
     }
 });
 
+
+console.log('\nthe click diagnostic is opt-in and only watches');
+
+check('?pcedebug does nothing unless it is asked for', () => {
+    const fn = slice('(function _pceClickDiagnostics() {', '\n// ── Post formats');
+    assert.ok(fn.includes("get('pcedebug') === '1'"), 'the flag is not read');
+    assert.ok(fn.includes("location.hash.indexOf('pcedebug')"),
+        'a query parameter alone does not survive this page rewriting its own URL');
+    assert.ok(fn.includes('if (!on) return;'), 'the diagnostic runs for everyone');
+    // It must not change behaviour — capture phase, no preventDefault, no stopPropagation.
+    assert.ok(!/preventDefault|stopPropagation/.test(fn), 'the diagnostic interferes with the click');
+    assert.ok(fn.includes('n >= MAX'), 'a running commentary would fill the banner');
+    // Bound directly when the document is already parsed: this script runs at the end of the body.
+    assert.ok(fn.includes("document.readyState === 'loading'"),
+        'waiting for DOMContentLoaded here would wait forever');
+});
+
 console.log(`\n${passed} checks passed`);
