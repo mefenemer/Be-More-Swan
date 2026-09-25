@@ -66,15 +66,15 @@
   function fontsReady() {
     return OF ? OF.ready() : Promise.resolve();
   }
-  // Mirrors OVERLAY_ANIMS in src/lib/overlay-geometry.ts. This file is an unbundled IIFE and cannot
-  // import it; tests/overlay-anim.test.ts asserts the two lists agree, because a name that drifts
-  // here is silently stored and silently ignored by the renderer.
-  const ANIMS = [
-    { id: 'none', label: 'Cut' },
-    { id: 'fade', label: 'Fade' },
-    { id: 'rise', label: 'Rise' },
-    { id: 'pop', label: 'Pop' },
-  ];
+  // GENERATED from OVERLAY_ANIMS in src/lib/overlay-geometry.ts, same as the fonts above. This was
+  // a hand copy with a comment asking a test to keep it honest; now the list has one source and the
+  // test has nothing left to catch. A name that drifts here is stored and then silently ignored by
+  // the renderer, which is the quietest possible way for a chosen effect to do nothing.
+  const OA = (typeof window !== 'undefined' && window.OverlayAnims) || null;
+  const ANIMS = OA
+    ? OA.OPTIONS.map((a) => ({ id: a.id, label: a.label }))
+    : [{ id: 'none', label: 'Cut' }, { id: 'fade', label: 'Fade' },
+       { id: 'rise', label: 'Rise' }, { id: 'pop', label: 'Pop' }];
 
   const EMOJIS = ['😀','😍','🎉','🔥','✨','💯','👍','❤️','🙌','😎','🥳','💪','☕','🌟','📣','✅','👉','🎁','😂','🤩'];
 
@@ -273,6 +273,10 @@
          overflow-y above never engages, because there is never any overflow left to scroll. */
       .ioe-side > *{flex-shrink:0}
       .ioe-side.empty{align-items:stretch}
+      /* The shared controls mounted OUTSIDE the modal. In the modal the spacing between rows comes
+         from .ioe-side's own gap; a bare container has none, so the sections butt together. */
+      .ioe-stack{display:flex;flex-direction:column;gap:10px}
+      .ioe-stack > *{flex-shrink:0}
       .ioe-row{display:flex;flex-direction:column;gap:5px}
       .ioe-row label{font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.03em}
       .ioe-inline{display:flex;align-items:center;gap:8px}
@@ -646,20 +650,8 @@
         </div>`;
       side.innerHTML = `
         ${boxList}
-        <div class="ioe-row">
-          <label>Text</label>
-          <textarea data-f="text" maxlength="500" placeholder="Type your text…">${esc(ov.text || '')}</textarea>
-          <!-- The assistant writes the overlay, not just the caption. Overlay wording is the one
-               piece of copy on a post that is read on mute in about a second, and it is the piece
-               people stare at a blank box over. Improve is disabled until there is something to
-               improve — asking a model to improve an empty string returns an apology, not wording. -->
-          <div class="ioe-ai" data-ai-row>
-            <button type="button" data-ai="suggest" class="ioe-btn">✨ Suggest wording</button>
-            <button type="button" data-ai="improve" class="ioe-btn"${String(ov.text || '').trim() ? '' : ' disabled'}>Improve this</button>
-            <span data-ai-msg class="ioe-ai-msg"></span>
-          </div>
-          <div class="ioe-emojis" data-emojis>${EMOJIS.map((em) => `<button type="button" data-em="${em}">${em}</button>`).join('')}</div>
-        </div>
+        <div class="ioe-row"><label>Text</label></div>
+        ${textRowHtml(ov, typeof suggestText === 'function')}
         <!-- ── Above the styling, deliberately ──────────────────────────────────────────────
              On a video the question "which clip, and when" is the one being answered; the colour
              of the box is not. These sat at the BOTTOM of the panel, below seven styling rows, in
@@ -668,127 +660,26 @@
              three times over. Being rendered is not the same as being findable. -->
         ${sect('when', 'When it shows', timingRow(ov))}
         ${sect('anim', 'How it appears', animRow(ov))}
-        <div class="ioe-row">
-          <label>Font</label>
-          <select data-f="fontFamily">${FONTS.map((f) => `<option value="${f.id}"${f.id === ov.fontFamily ? ' selected' : ''} style="font-family:${f.stack}">${f.label}</option>`).join('')}</select>
-        </div>
-        <div class="ioe-row">
-          <label>Font size — ${Math.round(ov.fontSizePct * 100)}%</label>
-          <input type="range" data-f="fontSizePct" min="2" max="25" step="1" value="${Math.round(ov.fontSizePct * 100)}">
-        </div>
-        <div class="ioe-row">
-          <label>Font colour</label>
-          <div class="ioe-inline"><input type="color" data-f="color" value="${ov.color || '#ffffff'}"><span class="ioe-count">${ov.color}</span></div>
-        </div>
-        <div class="ioe-row">
-          <label>Box outline</label>
-          <div class="ioe-inline">
-            <label class="ioe-none"><input type="checkbox" data-f="strokeOn" ${ov.boxStroke ? 'checked' : ''}> Show</label>
-            <input type="color" data-f="boxStroke" value="${ov.boxStroke || '#ec4899'}" class="${ov.boxStroke ? '' : 'ioe-swatchoff'}">
-          </div>
-        </div>
-        <div class="ioe-row">
-          <label>Box background</label>
-          <div class="ioe-inline">
-            <label class="ioe-none"><input type="checkbox" data-f="fillOn" ${ov.boxFill ? 'checked' : ''}> Show</label>
-            <input type="color" data-f="boxFill" value="${ov.boxFill || '#000000'}" class="${ov.boxFill ? '' : 'ioe-swatchoff'}">
-          </div>
-        </div>
-        <div class="ioe-row">
-          <label>Background transparency — ${transparencyPct}%</label>
-          <input type="range" data-f="transparency" min="0" max="100" step="1" value="${transparencyPct}" ${ov.boxFill ? '' : 'disabled'}>
-        </div>
+        ${lookRowsHtml(ov)}
         <button class="ioe-btn danger block" data-act="delete">Delete this overlay</button>
       `;
       wireSide(ov);
     }
 
     function wireSide(ov) {
-      const q = (sel) => side.querySelector(sel);
       const rerender = () => { renderOverlays(); markSelected(); };
-
-      q('[data-f="text"]').addEventListener('input', (e) => {
-        ov.text = e.target.value;
-        // "Improve this" only means something once there is something to improve.
-        const imp = q('[data-ai="improve"]');
-        if (imp) imp.disabled = !String(ov.text || '').trim();
-        rerender();
+      // ⚠️ ONE wiring, shared with the post editor's panel — see wireStyleControls. This was ~70
+      // lines of listeners written out here, and the same listeners written out again would be the
+      // third copy of a control set in this file's history. The two that already happened (the font
+      // list, the animation list) both drifted, and both drifts were silent.
+      wireStyleControls(side, ov, {
+        onChange: rerender,
+        suggestText: typeof suggestText === 'function' ? suggestText : null,
+        // The modal repaints its own panel for the controls that change what OTHER controls look
+        // like — turning a box fill off disables the transparency slider.
+        rerender: renderSide,
       });
 
-      // ── Assistant wording ────────────────────────────────────────────────────────────────────
-      // Only wired when the host passed a suggestText function. The editor is reused by surfaces
-      // that have no assistant behind them, and a button that cannot work is worse than no button.
-      const aiRow = q('[data-ai-row]');
-      if (aiRow && typeof suggestText !== 'function') {
-        aiRow.remove();
-      } else if (aiRow) {
-        const msg = q('[data-ai-msg]');
-        const buttons = Array.prototype.slice.call(aiRow.querySelectorAll('[data-ai]'));
-        aiRow.addEventListener('click', async (e) => {
-          const btn = e.target.closest('[data-ai]');
-          if (!btn || btn.disabled) return;
-          const mode = btn.dataset.ai;
-          const before = btn.textContent;
-          buttons.forEach((b) => { b.disabled = true; });
-          btn.textContent = 'Thinking…';
-          if (msg) { msg.textContent = ''; msg.classList.remove('err'); }
-          try {
-            const text = await suggestText(mode, ov.text || '');
-            ov.text = text;
-            // The textarea is the model the rest of this panel reads from, so write it there and
-            // repaint the canvas — not one or the other, or the box and the picture disagree.
-            const ta = q('[data-f="text"]');
-            if (ta) ta.value = text;
-            rerender();
-          } catch (err) {
-            if (msg) { msg.textContent = (err && err.message) || 'Could not write that wording.'; msg.classList.add('err'); }
-          } finally {
-            btn.textContent = before;
-            buttons.forEach((b) => { b.disabled = false; });
-            const imp = q('[data-ai="improve"]');
-            if (imp) imp.disabled = !String(ov.text || '').trim();
-          }
-        });
-      }
-      q('[data-f="fontFamily"]').addEventListener('change', (e) => { ov.fontFamily = e.target.value; rerender(); });
-      q('[data-f="fontSizePct"]').addEventListener('input', (e) => {
-        ov.fontSizePct = clamp(Number(e.target.value) / 100, 0.02, 0.25);
-        side.querySelector('[data-f="fontSizePct"]').previousElementSibling.textContent = `Font size — ${Math.round(ov.fontSizePct * 100)}%`;
-        rerender();
-      });
-      q('[data-f="color"]').addEventListener('input', (e) => {
-        ov.color = e.target.value;
-        e.target.nextElementSibling.textContent = ov.color;
-        rerender();
-      });
-      q('[data-f="strokeOn"]').addEventListener('change', (e) => {
-        ov.boxStroke = e.target.checked ? (side.querySelector('[data-f="boxStroke"]').value || '#ec4899') : null;
-        renderSide(); rerender();
-      });
-      q('[data-f="boxStroke"]').addEventListener('input', (e) => { if (ov.boxStroke) { ov.boxStroke = e.target.value; rerender(); } });
-      q('[data-f="fillOn"]').addEventListener('change', (e) => {
-        ov.boxFill = e.target.checked ? (side.querySelector('[data-f="boxFill"]').value || '#000000') : null;
-        renderSide(); rerender();
-      });
-      q('[data-f="boxFill"]').addEventListener('input', (e) => { if (ov.boxFill) { ov.boxFill = e.target.value; rerender(); } });
-      q('[data-f="transparency"]').addEventListener('input', (e) => {
-        ov.boxOpacity = clamp(1 - Number(e.target.value) / 100, 0, 1);
-        side.querySelector('[data-f="transparency"]').previousElementSibling.textContent = `Background transparency — ${e.target.value}%`;
-        rerender();
-      });
-      // Emoji insert at cursor.
-      side.querySelectorAll('[data-emojis] button').forEach((b) => {
-        b.addEventListener('click', () => {
-          const ta = q('[data-f="text"]');
-          const s = ta.selectionStart || ta.value.length;
-          const em = b.dataset.em;
-          ta.value = ta.value.slice(0, s) + em + ta.value.slice(ta.selectionEnd || s);
-          ov.text = ta.value;
-          ta.focus();
-          ta.selectionStart = ta.selectionEnd = s + em.length;
-          rerender();
-        });
-      });
       for (const b of backdrop.querySelectorAll('[data-sect-toggle]')) {
         b.addEventListener('click', () => {
           const key = b.getAttribute('data-sect-toggle');
@@ -796,14 +687,6 @@
           renderSide();
         });
       }
-      for (const b of backdrop.querySelectorAll('[data-anim]')) {
-        b.addEventListener('click', () => {
-          const next = b.getAttribute('data-anim');
-          ov.anim = next === 'none' ? undefined : next;
-          renderSide();
-        });
-      }
-
       // Pick a different box — including one on another clip, which the stage then moves to.
       for (const b of backdrop.querySelectorAll('[data-pick]')) {
         b.addEventListener('click', () => {
@@ -936,5 +819,275 @@
     window.addEventListener('resize', renderOverlays);
   }
 
-  window.ImageOverlayEditor = { open, bake, render };
+  // ══ Shared controls ═══════════════════════════════════════════════════════════════════════════
+  //
+  // What a text box LOOKS like — its wording, face, size, colour, box and motion — asked for in one
+  // place and rendered wherever it is needed. The modal uses these, and so does the post editor's
+  // clip list, which is what lets the modal eventually go away without the controls being written
+  // out a second time. Two copies of a control set is how the font list and the animation list both
+  // drifted before; the fix each time was one source, and this is that source.
+  //
+  // Deliberately NOT here: which clip a box is on and when it shows. Those are properties of the
+  // CUT, they are answered by the timeline's own rows, and an overlay on a still has neither.
+
+  /** Open/closed per section, remembered for the life of the page rather than per panel. */
+  const SHARED_OPEN = { text: true, look: false, anim: false };
+
+  function sharedSect(key, title, body) {
+    if (!body) return '';
+    const on = SHARED_OPEN[key] !== false;
+    return `
+      <div class="ioe-sect${on ? ' on' : ''}" data-sect="${key}">
+        <button type="button" class="ioe-sect-h" data-sect-toggle="${key}" aria-expanded="${on}">
+          <span>${title}</span><span class="ioe-sect-x">${on ? '\u2212' : '+'}</span>
+        </button>
+        <div class="ioe-sect-b"${on ? '' : ' style="display:none"'}>${body}</div>
+      </div>`;
+  }
+
+  /**
+   * The wording, and the assistant that can write it.
+   *
+   * Overlay copy is the one piece of a post that is read on mute in about a second, and it is the
+   * piece people stare at a blank box over. Improve is disabled until there is something to
+   * improve — asking a model to improve an empty string returns an apology, not wording.
+   */
+  function textRowHtml(ov, withAi) {
+    return `
+      <div class="ioe-row">
+        <textarea data-f="text" maxlength="500" placeholder="Type your text\u2026">${esc(ov.text || '')}</textarea>
+        ${withAi ? `<div class="ioe-ai" data-ai-row>
+          <button type="button" data-ai="suggest" class="ioe-btn">\u2728 Suggest wording</button>
+          <button type="button" data-ai="improve" class="ioe-btn"${String(ov.text || '').trim() ? '' : ' disabled'}>Improve this</button>
+          <span data-ai-msg class="ioe-ai-msg"></span>
+        </div>` : ''}
+        <div class="ioe-emojis" data-emojis>${EMOJIS.map((em) => `<button type="button" data-em="${em}">${em}</button>`).join('')}</div>
+      </div>`;
+  }
+
+  /** Face, size, colour, outline, background. */
+  function lookRowsHtml(ov) {
+    const transparencyPct = Math.round((1 - (ov.boxOpacity == null ? 1 : ov.boxOpacity)) * 100);
+    return `
+      <div class="ioe-row">
+        <label>Font</label>
+        <select data-f="fontFamily">${FONTS.map((f) => `<option value="${f.id}"${f.id === ov.fontFamily ? ' selected' : ''} style="font-family:${f.stack}">${f.label}</option>`).join('')}</select>
+      </div>
+      <div class="ioe-row">
+        <label>Font size \u2014 ${Math.round(ov.fontSizePct * 100)}%</label>
+        <input type="range" data-f="fontSizePct" min="2" max="25" step="1" value="${Math.round(ov.fontSizePct * 100)}">
+      </div>
+      <div class="ioe-row">
+        <label>Font colour</label>
+        <div class="ioe-inline"><input type="color" data-f="color" value="${ov.color || '#ffffff'}"><span class="ioe-count">${ov.color}</span></div>
+      </div>
+      <div class="ioe-row">
+        <label>Box outline</label>
+        <div class="ioe-inline">
+          <label class="ioe-none"><input type="checkbox" data-f="strokeOn" ${ov.boxStroke ? 'checked' : ''}> Show</label>
+          <input type="color" data-f="boxStroke" value="${ov.boxStroke || '#ec4899'}" class="${ov.boxStroke ? '' : 'ioe-swatchoff'}">
+        </div>
+      </div>
+      <div class="ioe-row">
+        <label>Box background</label>
+        <div class="ioe-inline">
+          <label class="ioe-none"><input type="checkbox" data-f="fillOn" ${ov.boxFill ? 'checked' : ''}> Show</label>
+          <input type="color" data-f="boxFill" value="${ov.boxFill || '#000000'}" class="${ov.boxFill ? '' : 'ioe-swatchoff'}">
+        </div>
+      </div>
+      <div class="ioe-row">
+        <label>Background transparency \u2014 ${transparencyPct}%</label>
+        <input type="range" data-f="transparency" min="0" max="100" step="1" value="${transparencyPct}" ${ov.boxFill ? '' : 'disabled'}>
+      </div>`;
+  }
+
+  /**
+   * How the box arrives and leaves. Video only — a still's text is flattened into the pixels, so
+   * there is no time for anything to happen in, and offering motion would promise something the
+   * published image cannot do.
+   */
+  function animRowsHtml(ov, isVideo) {
+    if (!isVideo) return '';
+    const cur = ov.anim || 'none';
+    return `
+      <div class="ioe-row">
+        <div class="ioe-chips">${ANIMS.map((a) => `<button type="button" data-anim="${a.id}"
+          class="ioe-chip${a.id === cur ? ' on' : ''}">${a.label}</button>`).join('')}</div>
+      </div>`;
+  }
+
+  /**
+   * Wire whichever of the above are present inside `root`.
+   *
+   * `onChange` is called after every edit — repaint whatever is showing the box. `onCommit` is
+   * called when a change is finished (a committed colour, a chosen font) and is where a host saves.
+   * Anything absent from `root` is simply skipped, so the same wiring serves a panel with the AI row
+   * and one without.
+   */
+  function wireStyleControls(root, ov, opts) {
+    opts = opts || {};
+    const q = (sel) => root.querySelector(sel);
+    const changed = () => { if (opts.onChange) opts.onChange(ov); };
+    const committed = () => { if (opts.onCommit) opts.onCommit(ov); };
+    const redraw = () => { if (opts.rerender) opts.rerender(); };
+
+    const ta = q('[data-f="text"]');
+    if (ta) ta.addEventListener('input', (e) => {
+      ov.text = e.target.value;
+      const imp = q('[data-ai="improve"]');
+      if (imp) imp.disabled = !String(ov.text || '').trim();
+      changed();
+    });
+    if (ta) ta.addEventListener('change', committed);
+
+    const aiRow = q('[data-ai-row]');
+    if (aiRow && typeof opts.suggestText === 'function') {
+      const msg = q('[data-ai-msg]');
+      const buttons = Array.prototype.slice.call(aiRow.querySelectorAll('[data-ai]'));
+      aiRow.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-ai]');
+        if (!btn || btn.disabled) return;
+        const before = btn.textContent;
+        buttons.forEach((b) => { b.disabled = true; });
+        btn.textContent = 'Thinking\u2026';
+        if (msg) { msg.textContent = ''; msg.classList.remove('err'); }
+        try {
+          const text = await opts.suggestText(btn.dataset.ai, ov.text || '');
+          ov.text = text;
+          // The textarea is the model the rest of the panel reads from, so write it there AND
+          // repaint — not one or the other, or the box and the picture disagree.
+          if (ta) ta.value = text;
+          changed();
+          committed();
+        } catch (err) {
+          if (msg) { msg.textContent = (err && err.message) || 'Could not write that wording.'; msg.classList.add('err'); }
+        } finally {
+          btn.textContent = before;
+          buttons.forEach((b) => { b.disabled = false; });
+          const imp = q('[data-ai="improve"]');
+          if (imp) imp.disabled = !String(ov.text || '').trim();
+        }
+      });
+    } else if (aiRow) {
+      // A button that cannot work is worse than no button: the editor is reused by surfaces with no
+      // assistant behind them.
+      aiRow.remove();
+    }
+
+    const fam = q('[data-f="fontFamily"]');
+    if (fam) fam.addEventListener('change', (e) => { ov.fontFamily = e.target.value; changed(); committed(); });
+
+    const size = q('[data-f="fontSizePct"]');
+    if (size) {
+      size.addEventListener('input', (e) => {
+        ov.fontSizePct = clamp(Number(e.target.value) / 100, 0.02, 0.25);
+        const lbl = e.target.previousElementSibling;
+        if (lbl) lbl.textContent = `Font size \u2014 ${Math.round(ov.fontSizePct * 100)}%`;
+        changed();
+      });
+      size.addEventListener('change', committed);
+    }
+
+    const col = q('[data-f="color"]');
+    if (col) {
+      col.addEventListener('input', (e) => {
+        ov.color = e.target.value;
+        if (e.target.nextElementSibling) e.target.nextElementSibling.textContent = ov.color;
+        changed();
+      });
+      col.addEventListener('change', committed);
+    }
+
+    const strokeOn = q('[data-f="strokeOn"]');
+    if (strokeOn) strokeOn.addEventListener('change', (e) => {
+      const sw = q('[data-f="boxStroke"]');
+      ov.boxStroke = e.target.checked ? ((sw && sw.value) || '#ec4899') : null;
+      changed(); committed(); redraw();
+    });
+    const stroke = q('[data-f="boxStroke"]');
+    if (stroke) {
+      stroke.addEventListener('input', (e) => { if (ov.boxStroke) { ov.boxStroke = e.target.value; changed(); } });
+      stroke.addEventListener('change', committed);
+    }
+
+    const fillOn = q('[data-f="fillOn"]');
+    if (fillOn) fillOn.addEventListener('change', (e) => {
+      const sw = q('[data-f="boxFill"]');
+      ov.boxFill = e.target.checked ? ((sw && sw.value) || '#000000') : null;
+      changed(); committed(); redraw();
+    });
+    const fill = q('[data-f="boxFill"]');
+    if (fill) {
+      fill.addEventListener('input', (e) => { if (ov.boxFill) { ov.boxFill = e.target.value; changed(); } });
+      fill.addEventListener('change', committed);
+    }
+
+    const trans = q('[data-f="transparency"]');
+    if (trans) {
+      trans.addEventListener('input', (e) => {
+        ov.boxOpacity = clamp(1 - Number(e.target.value) / 100, 0, 1);
+        const lbl = e.target.previousElementSibling;
+        if (lbl) lbl.textContent = `Background transparency \u2014 ${e.target.value}%`;
+        changed();
+      });
+      trans.addEventListener('change', committed);
+    }
+
+    root.querySelectorAll('[data-emojis] button').forEach((b) => {
+      b.addEventListener('click', () => {
+        if (!ta) return;
+        const at = ta.selectionStart || ta.value.length;
+        const em = b.dataset.em;
+        ta.value = ta.value.slice(0, at) + em + ta.value.slice(ta.selectionEnd || at);
+        ov.text = ta.value;
+        ta.focus();
+        ta.selectionStart = ta.selectionEnd = at + em.length;
+        changed(); committed();
+      });
+    });
+
+    root.querySelectorAll('[data-anim]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const next = b.getAttribute('data-anim');
+        // 'none' is the default, and storing the default writes a field onto every overlay row for
+        // no reason. undefined and 'none' read the same through readOverlayAnim.
+        ov.anim = next === 'none' ? undefined : next;
+        changed(); committed(); redraw();
+      });
+    });
+  }
+
+  /**
+   * Mount the shared controls into any container — the post editor's clip list, in practice.
+   *
+   * Collapsible, because this is eight controls in a 22rem column beside a video and all of them at
+   * once is a wall. Which sections are open is remembered across selections, so working through
+   * four boxes does not mean opening "Look" four times.
+   */
+  function styleControls(container, opts) {
+    opts = opts || {};
+    const ov = opts.overlay;
+    if (!container) return;
+    ensureStyles();
+    if (!ov) { container.innerHTML = ''; return; }
+    container.classList.add('ioe-stack');
+    const draw = () => {
+      container.innerHTML = sharedSect('text', 'Wording', textRowHtml(ov, typeof opts.suggestText === 'function'))
+        + sharedSect('look', 'How it looks', lookRowsHtml(ov))
+        + sharedSect('anim', 'How it appears', animRowsHtml(ov, !!opts.video));
+      wireStyleControls(container, ov, {
+        onChange: opts.onChange, onCommit: opts.onCommit, suggestText: opts.suggestText, rerender: draw,
+      });
+      container.querySelectorAll('[data-sect-toggle]').forEach((b) => {
+        b.addEventListener('click', () => {
+          const key = b.getAttribute('data-sect-toggle');
+          SHARED_OPEN[key] = SHARED_OPEN[key] === false;
+          draw();
+        });
+      });
+    };
+    draw();
+  }
+
+  window.ImageOverlayEditor = { open, bake, render, styleControls };
 })();

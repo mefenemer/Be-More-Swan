@@ -66,7 +66,11 @@ check('the editor stays DOM-agnostic — no post ids inside it', () => {
     // leaks in. The literal form failed on a change that did not weaken that at all.
     assert.match(editor, /function open\(\{ imageUrl, overlays, onDone, suggestText(?:, \w+)* \}\)/,
         'the host injects the capability');
-    assert.match(editor, /if \(aiRow && typeof suggestText !== 'function'\) \{\s*\n\s*aiRow\.remove\(\)/,
+    // The wiring moved into the shared wireStyleControls, which the modal and the post editor's
+    // panel both call — one control set, so the assistant row cannot exist in one and not the other.
+    assert.match(editor, /aiRow && typeof opts\.suggestText === 'function'/,
+        'the row is no longer gated on the capability being present');
+    assert.match(editor, /\} else if \(aiRow\) \{[\s\S]{0,240}aiRow\.remove\(\)/,
         'a button that cannot work is worse than no button');
 });
 
@@ -81,10 +85,13 @@ check('a failure shows the server\'s own message', () => {
 check('an accepted suggestion updates the textarea AND the canvas', () => {
     // The textarea is the model the rest of the panel reads from; the canvas is what the user is
     // looking at. Writing one and not the other leaves them disagreeing.
-    const block = editor.slice(landmark(editor, "const text = await suggestText("));
-    assert.match(block.slice(0, 400), /ov\.text = text/);
-    assert.match(block.slice(0, 400), /if \(ta\) ta\.value = text/);
-    assert.match(block.slice(0, 400), /rerender\(\)/);
+    const block = editor.slice(landmark(editor, "const text = await opts.suggestText("));
+    assert.match(block.slice(0, 500), /ov\.text = text/);
+    assert.match(block.slice(0, 500), /if \(ta\) ta\.value = text/);
+    // changed() repaints whatever is showing the box; committed() is where the host saves it. The
+    // modal passes a repaint for the first and nothing for the second; the post editor passes both.
+    assert.match(block.slice(0, 500), /changed\(\)/);
+    assert.match(block.slice(0, 500), /committed\(\)/);
 });
 
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);

@@ -972,6 +972,15 @@ window.showComplianceModals = function showComplianceModals(force) {
                  these is ever visible — _pceRefreshStageTiming enforces that, since each panel only
                  knows how to hide ITSELF and the previous selection's controls would otherwise stay
                  on screen pointing at something you are no longer editing. -->
+            <!-- ── The selected text box's own controls ──────────────────────────────────────
+                 Wording, face, size, colour, box and motion — the things that used to mean opening
+                 a modal, finding the box among several on several clips, changing it there and
+                 coming back. They belong beside the row that selected them.
+                 Built by ImageOverlayEditor.styleControls, which is the SAME builder the modal
+                 renders from: one control set, so the two surfaces cannot drift the way the font
+                 list and the animation list each did. Filled by _pceRenderTextStyle. -->
+            <div id="pce-text-style" class="hidden border-t border-gray-100 px-2.5 py-2"></div>
+
             <div id="pce-stage-timing" class="border-t border-gray-100 px-2.5 py-2 hidden">
 
               <!-- Text on video used to have a "When" panel here: which clip (chips), a
@@ -7710,6 +7719,50 @@ function _pceRenderClips(clipsOverride) {
     // the same position. Seeded here so a repaint does not drop the line back to zero.
     const v = document.querySelector('#post-review-body [data-media-video]');
     if (v) _rqPaintPlayheads(_pceCutTime(v, post), _rqTimelineDuration(post));
+    _pceRenderTextStyle();
+}
+
+/**
+ * The style controls for whichever text box is selected, under the clip list.
+ *
+ * Mounted rather than written out: ImageOverlayEditor.styleControls owns the markup and the wiring,
+ * and the modal renders from the same builders. A second copy here would be the third control set
+ * in this feature's history — the font list and the animation list were the first two, and both
+ * drifted silently.
+ *
+ * ⚠️ Remounted only when the SELECTION changes, not on every repaint. The panel contains a textarea
+ * and a colour picker; rebuilding it under the caret loses what is being typed, and rebuilding it
+ * while a colour input is open closes the picker.
+ */
+let _pceStyleMountedFor = null;
+function _pceRenderTextStyle() {
+    const host = document.getElementById('pce-text-style');
+    if (!host) return;
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const overlays = (post && post.overlays) || [];
+    const ov = _pceSelectedOverlayId ? overlays.find((o) => o && o.id === _pceSelectedOverlayId) : null;
+    if (!ov || !window.ImageOverlayEditor || !window.ImageOverlayEditor.styleControls) {
+        host.classList.add('hidden');
+        host.innerHTML = '';
+        _pceStyleMountedFor = null;
+        return;
+    }
+    host.classList.remove('hidden');
+    if (_pceStyleMountedFor === ov.id) return;
+    _pceStyleMountedFor = ov.id;
+    window.ImageOverlayEditor.styleControls(host, {
+        overlay: ov,
+        video: _pcePostIsVideo(post),
+        // The assistant writes the overlay, not just the caption. Same call the modal makes.
+        suggestText: (mode, current) => _pceSuggestOverlayText(_rqReviewPostId, mode, current),
+        // As you drag a slider: repaint the picture only. The clip list carries the wording, so it
+        // is repainted on commit rather than per keystroke — a repaint would take the caret with it.
+        onChange: () => _rqRenderCanvasOverlays(post),
+        onCommit: () => {
+            _rqRenderTimeline(post);
+            _rqPersistOverlays(_rqReviewPostId);
+        },
+    });
 }
 
 // ── The crop frame ──────────────────────────────────────────────────────────────────────────────
@@ -8198,6 +8251,9 @@ function _rqBindTimeline() {
             const ov = post && _rqTimelineItem('text', el.getAttribute('data-tl-text'));
             if (!ov) return;
             ov.text = el.value;
+            // The panel is mounted once per selection and holds its own textarea; without this it
+            // would keep showing the wording as it was before the row was edited.
+            _pceStyleMountedFor = null;
             _rqRenderTimeline(post);
             _rqRenderCanvasOverlays(post);
             _rqPersistOverlays(_rqReviewPostId);
@@ -12595,6 +12651,9 @@ window._pceOverlayToClip = function (index, key) {
  * container that used to hold this panel honest about whether anything is left inside it.
  */
 function _pceRefreshOverlayTiming() {
+    // Every caller that changes an overlay already reaches for this, so it is where the selected
+    // box's controls are kept in step with the selection.
+    _pceRenderTextStyle();
     _pceSyncStageTimingBox();
 }
 

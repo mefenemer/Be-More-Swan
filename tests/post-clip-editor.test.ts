@@ -1184,4 +1184,80 @@ check('the columns are laid out inline, not with utility classes', () => {
         'the columns are sized by classes that may not exist in the compiled CSS');
 });
 
+
+// ── The text editor's controls, in the post editor ──────────────────────────────────────────────
+// Changing a word, a font or a colour meant opening a modal, finding the box among several on
+// several clips, changing it there and coming back. The controls now sit under the clip list, beside
+// the row that selected them — and they are the SAME controls, not a second set.
+
+console.log('\nthe style controls are shared, not copied');
+
+check('one builder, rendered by both surfaces', () => {
+    const ioe = readFileSync(join(root, 'src/components/image-overlay-editor.js'), 'utf8');
+    for (const fn of ['function textRowHtml(', 'function lookRowsHtml(', 'function animRowsHtml(',
+                      'function wireStyleControls(', 'function styleControls(']) {
+        assert.notStrictEqual(ioe.indexOf(fn), -1, `${fn} is missing`);
+    }
+    assert.ok(ioe.includes('window.ImageOverlayEditor = { open, bake, render, styleControls };'),
+        'the shared controls are not exported');
+    // The modal must RENDER FROM them rather than carry its own copy — two control sets is how the
+    // font list and the animation list each drifted, silently, in this same file.
+    const side = ioe.slice(ioe.indexOf('function renderSide()'), ioe.indexOf('function wireSide('));
+    assert.ok(side.includes('${textRowHtml(ov,'), 'the modal writes its own text row');
+    assert.ok(side.includes('${lookRowsHtml(ov)}'), 'the modal writes its own style rows');
+    assert.ok(!side.includes('<label>Font</label>'), 'a second copy of the font row is back');
+    // ⚠️ renderOverlays is ABOVE wireSide in the file, so slicing to it gives an empty string —
+    // which passes every content assertion in it. Scan to the end of the function instead.
+    const wStart = ioe.indexOf('function wireSide(');
+    const wire = ioe.slice(wStart, ioe.indexOf('\n    function ', wStart + 10));
+    assert.ok(wire.includes('wireStyleControls(side, ov,'), 'the modal wires its own listeners again');
+});
+
+check('the animation list is generated, not hand-copied', () => {
+    const ioe = readFileSync(join(root, 'src/components/image-overlay-editor.js'), 'utf8');
+    assert.ok(ioe.includes('window.OverlayAnims'), 'the editor no longer reads the generated list');
+    assert.ok(ioe.includes('OA.OPTIONS.map'), 'it is not built from the generated options');
+});
+
+check('exactly one thing handles an animation click', () => {
+    // Both the modal and the shared wiring bound [data-anim] for a moment; the two wrote different
+    // values ('none' vs undefined) and both repainted.
+    const ioe = readFileSync(join(root, 'src/components/image-overlay-editor.js'), 'utf8');
+    const handlers = ioe.split("querySelectorAll('[data-anim]')").length - 1;
+    assert.strictEqual(handlers, 1, `${handlers} handlers bind [data-anim]`);
+});
+
+console.log('\nand they are mounted under the clip list');
+
+check('the panel exists, and is mounted rather than written out', () => {
+    only(workspace, 'id="pce-text-style"', 'workspace.html');
+    const fn = slice('function _pceRenderTextStyle() {', '\n// ── The crop frame');
+    assert.ok(fn.includes('window.ImageOverlayEditor.styleControls(host, {'),
+        'the post editor builds its own controls instead of mounting the shared ones');
+    assert.ok(fn.includes('_pceSuggestOverlayText('), 'the assistant is not offered here');
+    assert.ok(fn.includes('video: _pcePostIsVideo(post)'),
+        'a still would be offered motion it cannot do');
+});
+
+check('it remounts on a change of SELECTION, not on every repaint', () => {
+    // ⚠️ The panel holds a textarea and a colour picker. Rebuilding it under the caret loses what is
+    // being typed; rebuilding it while the picker is open closes the picker.
+    const fn = slice('function _pceRenderTextStyle() {', '\n// ── The crop frame');
+    assert.ok(fn.includes('if (_pceStyleMountedFor === ov.id) return;'),
+        'the panel is rebuilt on every repaint');
+    // ...but editing the wording on the ROW has to invalidate it, or the textarea goes stale.
+    const tl = slice('function _rqBindTimeline() {', '\nasync function openPostReview(');
+    assert.ok(tl.includes('_pceStyleMountedFor = null;'),
+        'editing the row leaves the panel showing the old wording');
+});
+
+check('a slider repaints the picture; a commit saves and repaints the list', () => {
+    const fn = slice('function _pceRenderTextStyle() {', '\n// ── The crop frame');
+    const change = fn.slice(fn.indexOf('onChange:'), fn.indexOf('onCommit:'));
+    assert.ok(change.includes('_rqRenderCanvasOverlays(post)'), 'the picture does not follow the slider');
+    assert.ok(!change.includes('_rqPersistOverlays'), 'a save per pointermove');
+    const commit = fn.slice(fn.indexOf('onCommit:'));
+    assert.ok(commit.includes('_rqPersistOverlays('), 'nothing is ever saved');
+});
+
 console.log(`\n${passed} checks passed`);
