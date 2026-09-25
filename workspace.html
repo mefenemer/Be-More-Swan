@@ -1424,14 +1424,17 @@ window.showComplianceModals = function showComplianceModals(force) {
                 <span>Apply to all platforms <span id="insp-overlay-apply-all-list" class="text-gray-400"></span></span>
               </label>
 
+              <!-- "Add or edit text" opened a separate modal. It is gone: adding, wording, styling,
+                   placing, timing and deleting a box all happen beside the picture now — per clip on
+                   a video, in the Text list on a still. A modal that shows the post in order to edit
+                   the post was always the long way round, and on a cut it could only ever show one
+                   clip at a time. -->
               <div class="flex flex-wrap items-center gap-2">
-                <button type="button" onclick="_pceOpenOverlayEditor(_rqReviewPostId)"
-                  class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer">Add or edit text</button>
                 <button type="button" id="insp-overlay-clear" onclick="_pceClearOverlays()"
                   class="hidden text-xs font-semibold text-gray-500 hover:text-red-600 transition cursor-pointer">Remove all text</button>
               </div>
               <span id="insp-overlay-msg" class="block mt-2 text-xs font-semibold text-gray-500"></span>
-              <p id="insp-overlay-hint" class="text-[11px] text-gray-400 mt-3">Click a text box on the image to jump back here. It's baked into the picture when you approve.</p>
+              <p id="insp-overlay-hint" class="text-[11px] text-gray-400 mt-3">Add and edit text under the picture. Drag a box on the picture to place it; it's baked in when you approve.</p>
             </div>
 
             <!-- ── Sound. Voice notes and audio clips, placed exactly like text: a clip with no
@@ -7577,12 +7580,18 @@ function _pceClipsChanged(clips) {
  * ImageOverlayEditor.newOverlay, shared with the modal's own "+ Add text", so a box added here and
  * a box added there cannot look different.
  */
+/** True when the canvas is showing a still this post's text would be baked into. */
+function _pcePostHasPicture() {
+    return !!document.querySelector('#post-review-body [data-media-img]');
+}
+
 const _PCE_NEW_TEXT_S = 3;
 window._pceAddTextToClip = function (index) {
     const postId = _rqReviewPostId;
     const post = postId != null ? _rqPostCache[postId] : null;
     if (!post || !window.ImageOverlayEditor || !window.ImageOverlayEditor.newOverlay) return;
-    const spans = _pceSpansFor(_pceClips(post));
+    // index null ⇒ a still, which has no clips and so no timing: the box is simply always on.
+    const spans = index == null ? null : _pceSpansFor(_pceClips(post));
     const sp = spans && spans[index];
     const ov = window.ImageOverlayEditor.newOverlay(sp
         ? { startS: sp.start, endS: sp.start + Math.min(_PCE_NEW_TEXT_S, sp.len) }
@@ -7680,13 +7689,52 @@ function _pceRenderClips(clipsOverride) {
     // each one sits on. Built before the bail-out below because a post can have sound and no clips
     // at all — a voice note over a photo — and those rows still have to be drawn somewhere.
     const tl = _rqTimelineParts(post);
+    // ── A photo's text boxes ────────────────────────────────────────────────────────────────────
+    // A still has no clips and nothing with a duration, so none of the above applies — but it has
+    // text, and that text needs the same three things a clip's does: add one, say what it says,
+    // remove it. Rendered into THIS host deliberately: every field in this panel is wired by
+    // delegation from it, so a list built anywhere else would look identical and respond to
+    // nothing.
+    const photoText = (!tl.isVideo && _pcePostHasPicture()) ? ((post && post.overlays) || []) : null;
     // Shown whenever the post has video at all — including a single untouched clip.
     //
     // It used to hide until there were two clips or a trim, on the grounds that reordering a list of
     // one is noise. That reasoning was right about the list and wrong about the panel: "Add another
     // clip" lives here, so hiding it left no way to GET to two clips. A dead end exactly where the
     // feature starts.
-    if (!clips.length && !tl.any) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+    if (!clips.length && !tl.any && !photoText) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+
+    if (!clips.length && photoText) {
+        host.innerHTML = '<div class="pt-1">'
+            + '<div class="flex items-center justify-between mb-1">'
+            + '<span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Text</span>'
+            + '<span class="text-[10px] text-gray-400">' + (photoText.length || 'none') + '</span>'
+            + '</div>'
+            + (photoText.length
+                ? '<div class="divide-y divide-gray-100">' + photoText.map(function (ov, i) {
+                    const key = ov.id || String(i);
+                    const label = String(ov.text || '').split('\n')[0];
+                    return '<div data-tl-row="' + _rqEsc(key) + '" class="py-1">'
+                        + '<div class="flex items-center gap-1.5">'
+                        + '<input type="text" value="' + _rqEsc(label) + '" maxlength="500"'
+                        + ' class="flex-1 min-w-0 bg-transparent text-[11px] text-gray-700 border border-transparent rounded px-1 py-0.5'
+                        + ' hover:border-gray-200 focus:outline-none focus:border-pink-400 focus:bg-white"'
+                        + ' title="Edit this text" aria-label="Text" data-tl-text="' + _rqEsc(key) + '">'
+                        + '<button type="button" title="Remove this text" aria-label="Remove this text"'
+                        + ' class="px-1 text-gray-300 hover:text-red-600 cursor-pointer leading-none"'
+                        + ' onclick="window._pceOverlayRemove(\'' + _rqEsc(key) + '\')">&times;</button>'
+                        + '</div></div>';
+                }).join('') + '</div>'
+                : '<p class="text-[10px] text-gray-300 pb-1">No text on this picture yet</p>')
+            + '<button type="button" onclick="window._pceAddTextToClip(null)"'
+            + ' class="mt-1.5 w-full rounded-lg border border-dashed border-gray-300 py-1.5 text-[11px] font-semibold'
+            + ' text-gray-500 hover:border-pink-400 hover:text-pink-700 transition cursor-pointer">+ Add text</button>'
+            + '<p class="mt-1 text-[10px] text-gray-400">Drag a box on the picture to place it. It is baked in when you approve the post.</p>'
+            + '</div>';
+        host.classList.remove('hidden');
+        _pceRenderTextStyle();
+        return;
+    }
     // Nothing here is selected any more, so there is no stale selection to reconcile. The canvas is
     // borrowed only for the duration of a drag and handed back on release.
 
@@ -8085,7 +8133,18 @@ async function _rqPersistOverlays(postId) {
     try {
         await fetch('/.netlify/functions/save-post-overlays', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ postId, overlays: post.overlays || [] }),
+            // ⚠️ applyToGroup on EVERY call. save-post-overlays reads `body.applyToGroup === true`
+            // and says so in its own comment: "the client states the scope on every call, and a
+            // caller that says nothing gets the old single-post behaviour rather than a silent
+            // fan-out". This function said nothing. The modal always stated it, so while text was
+            // only editable there the default held — moving the editing inline quietly turned every
+            // cross-post into a single-platform write, with the tick-box still on screen saying
+            // otherwise. Nothing fails; the other platforms just do not get the text.
+            body: JSON.stringify({
+                postId,
+                overlays: post.overlays || [],
+                applyToGroup: _pceOverlayApplyToGroup(),
+            }),
         });
     } catch { /* a dropped save is recoverable — the next edit re-sends the whole set */ }
 }
@@ -17201,106 +17260,11 @@ function _pceNoBackdropMessage(base) {
         : 'Could not load this image for editing.';
 }
 
-async function _pceOpenOverlayEditor(postId) {
-    if (!postId) return;
-    if (!window.ImageOverlayEditor) { _pceSetOverlayMsg('Text editor could not load. Please refresh.', 'error'); return; }
-    _pceSetOverlayMsg('Opening the text editor…');
-    let base;
-    try {
-        const res = await fetch(`/.netlify/functions/get-post-image?postId=${encodeURIComponent(postId)}`);
-        if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Could not load the image.'); }
-        base = await res.json();   // photo: { dataUrl, assetId, overlays } | video: { isVideo, mediaUrl, … }
-    } catch (err) {
-        _pceSetOverlayMsg(err.message || 'Could not load the image.', 'error');
-        return;
-    }
-
-    // Video posts have no image to hand back, so build the backdrop here from a frame of the clip.
-    let backdrop = base.isVideo ? null : await _pceCorsCleanImageUrl(base);
-    if (!base.isVideo && !backdrop) { _pceSetOverlayMsg(_pceNoBackdropMessage(base), 'error'); return; }
-    if (base.isVideo) {
-        _pceSetOverlayMsg('Grabbing a frame from your video…');
-        const onCanvas = document.querySelector('#post-review-body [data-media-video]');
-        const frame = await _pceCaptureVideoFrame(base.mediaUrl, onCanvas && onCanvas.currentTime).catch(() => null);
-        if (frame) {
-            backdrop = frame.dataUrl;
-        } else {
-            backdrop = _pcePlaceholderBackdrop(
-                onCanvas && onCanvas.videoWidth, onCanvas && onCanvas.videoHeight);
-            _pceSetOverlayMsg('Could not read a frame from this clip — position your text on the outline instead.', 'error');
-        }
-    }
-    if (!base.isVideo) _pceSetOverlayMsg('');
-    // Prefer the cache's overlays (what the user is looking at) over the server copy, which can lag a
-    // just-saved edit by a request.
-    const cached = _rqPostCache[postId] && _rqPostCache[postId].overlays;
-    window.ImageOverlayEditor.open({
-        imageUrl: backdrop,
-        overlays: (cached && cached.length ? cached : base.overlays) || [],
-        // Lets the editor's "Suggest wording" / "Improve this" reach the assistant. The editor is
-        // deliberately DOM-agnostic and knows nothing about posts, so it is handed a function rather
-        // than a post id — bake() and the blog studio reuse it with no assistant at all, and the
-        // buttons simply do not appear when this is absent.
-        suggestText: (mode, currentText) => _pceSuggestOverlayText(postId, mode, currentText),
-        // The post's cut, when it has one. Same shape the When panel uses, and computed by the same
-        // function, so the two cannot disagree about which clip a box is on. Null on a still or a
-        // single clip, where the editor skips the controls entirely and behaves as it always did.
-        // GETTERS, not values. A clip's length is measured asynchronously off a <video> element, so
-        // at the moment this modal opens the answer is frequently "not yet" — and a snapshot of
-        // "not yet" is permanent. Passed as functions, the editor asks again each time it draws.
-        // RAW spans: null means "not measured yet", an array means "this is what the cut is", and how
-        // many there are is the editor's business. _pceClipSpans folds a one-clip post into null for
-        // the page's own UI, and handing that over made "one clip" and "still loading" the same
-        // answer — so the editor could not say which, and said nothing for both.
-        spans: () => (typeof _pceSpansFor === 'function' ? _pceSpansFor(_pceClips(_rqPostCache[postId])) : null),
-        // Separate from `spans`: a SINGLE-clip video has no cut to choose between, but its text can
-        // still fade in. A still cannot — its words are flattened into the pixels.
-        video: () => _pcePostIsVideo(_rqPostCache[postId]),
-        onDone: async (overlays) => {
-            if (overlays == null) return;   // cancelled — leave everything as it was
-            _pceSetOverlayMsg('Saving your text…');
-            try {
-                const applyToGroup = _pceOverlayApplyToGroup();
-                const res = await fetch('/.netlify/functions/save-post-overlays', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ postId, overlays, baseAssetId: base.assetId, applyToGroup }),
-                });
-                if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Could not save your text.'); }
-                const saved = await res.json().catch(() => ({}));
-                // Every platform the server actually wrote — not what we asked for. A design applied
-                // to three rows and mirrored into one cache entry leaves the other two tabs showing
-                // the text they had before, which is how the reviewer ends up adding it twice.
-                const written = Array.isArray(saved.postIds) && saved.postIds.length ? saved.postIds : [postId];
-                written.forEach(id => {
-                    if (_rqPostCache[id]) _rqPostCache[id].overlays = overlays;
-                    _gpOverlayCountByPost[id] = overlays.length;
-                });
-                if (overlays.length) {
-                    // Burn the text in NOW, while the reviewer is still here and a second costs
-                    // nothing — rather than at approval, where it was the slowest part of the one
-                    // click they wait on. Every platform the design landed on needs its own bake:
-                    // the flattened image is one post's picture, not the group's.
-                    _pceScheduleOverlayBake(written);
-                } else {
-                    // Deleting every box swaps the picture back to the clean original server-side,
-                    // so the cached flattened thumbnail has to go — otherwise the canvas shows text
-                    // that no longer exists. Nothing to bake, so no bake is scheduled.
-                    await _pceRefetchPostGroup(_rqPostCache[postId]);
-                }
-                // Repaint the canvas + inspector for the post on screen, then land back on this layer.
-                if (postId === _rqReviewPostId) { _rqReviewRenderActive(); _pceSelect('overlays'); }
-                const where = written.length > 1 ? ` on all ${written.length} platforms` : '';
-                _pceSetOverlayMsg(overlays.length
-                    ? `${overlays.length} text box${overlays.length > 1 ? 'es' : ''} on the ${base.isVideo ? 'video' : 'image'}${where} — ${base.isVideo
-                        ? 'rendered into the published clip on approval. Time each box on the timeline.'
-                        : 'baked into the published picture on approval.'}`
-                    : 'Text removed.', 'ok');
-            } catch (err) {
-                _pceSetOverlayMsg(err.message || 'Could not save your text.', 'error');
-            }
-        },
-    });
-}
+/* _pceOpenOverlayEditor lived here — it fetched a backdrop, opened ImageOverlayEditor.open and
+   saved the result. Nothing opens that modal from the post editor any more. The component keeps
+   open() because the newsletter designer still uses it; what went is this page's entry point, and
+   with it the only place that passed baseAssetId and applyToGroup on a save. ⚠️ _rqPersistOverlays
+   now states applyToGroup on every call, which is what that move had silently stopped doing. */
 
 // Flatten any saved overlays into the post's image right before it is approved/published. Idempotent
 // and a no-op when the post has none. Throws on failure so the approve flow surfaces the error rather

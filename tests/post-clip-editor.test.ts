@@ -180,8 +180,8 @@ check('the panel is shown for a single clip, so there is a way to reach two', ()
     // ⚠️ Not a fixed character window — this asserted on 1200 chars and broke the moment a comment
     // was added above the bail-out. Scan to a real boundary instead.
     const scope = slice('function _pceRenderClips(clipsOverride)', '_pceMeasureClips(clips);');
-    assert.ok(scope.includes('if (!clips.length && !tl.any) {'),
-        'only an empty cut with nothing timed hides the panel');
+    assert.ok(scope.includes('if (!clips.length && !tl.any && !photoText) {'),
+        'only an empty cut with nothing timed and no picture hides the panel');
     assert.ok(!scope.includes('worthShowing'), 'the two-clip threshold must be gone');
 });
 
@@ -461,7 +461,11 @@ check('the text editor itself can choose the clip and the moment', () => {
     assert.ok(ioe.includes('data-when-track'), 'with a scrub track');
     assert.ok(ioe.includes('data-clip='), 'and clip chips');
     // Fed the SAME spans the When panel uses, or the two disagree about which clip a box is on.
-    assert.ok(workspace.includes('spans: () => (typeof _pceSpansFor'), 'the page hands the editor its cut, as a getter');
+    // ⚠️ The post editor no longer opens this modal — text is edited beside the picture. The
+    // component keeps these controls because the newsletter designer still opens it, and because
+    // removing a working path is not the same job as stopping using it.
+    assert.strictEqual(workspace.indexOf('async function _pceOpenOverlayEditor'), -1,
+        'the post editor opens the modal again');
 });
 
 check('the editor skips all of it when there is no cut', () => {
@@ -470,7 +474,10 @@ check('the editor skips all of it when there is no cut', () => {
     assert.ok(ioe.slice(at, at + 220).includes('v.length > 1 ? v : null'));
     // The page hands over RAW spans. Folding a one-clip post into null there made "one clip" and
     // "still loading" the same answer, so the editor could not say which and said nothing for both.
-    assert.ok(workspace.includes('spans: () => (typeof _pceSpansFor'), 'the page must not pre-fold');
+    // Whoever passes spans must hand over RAW ones: folding a one-clip post into null makes "one
+    // clip" and "still loading" the same answer, and the editor then says nothing for both.
+    assert.ok(ioe.includes('typeof spans === \'function\' ? spans() : spans'),
+        'the editor must read spans fresh, and unfolded');
     // On a still it renders nothing; on a VIDEO whose clips are still being measured it says so,
     // because rendering nothing is indistinguishable from the feature not existing.
     const tr = only(ioe, 'function timingRow(ov)', 'image-overlay-editor.js');
@@ -615,7 +622,11 @@ check('the editor only offers motion on a video', () => {
     // published image cannot do.
     const at = only(ioe, 'function animRow(ov)', 'image-overlay-editor.js');
     assert.ok(ioe.slice(at, at + 200).includes("if (!isVideo()) return ''"));
-    assert.ok(workspace.includes('video: () => _pcePostIsVideo(_rqPostCache[postId])'), 'the page says which it is, as a getter');
+    // The post editor asks the same question of its own panel, which is the surface that has
+    // replaced this one for a post.
+    const style = slice('function _pceRenderTextStyle() {', '\n// ── The crop frame');
+    assert.ok(style.includes('video: _pcePostIsVideo(post)'),
+        'the panel beside the picture would offer a still motion it cannot do');
 });
 
 check('the panel is collapsible, and remembers what was open', () => {
@@ -1367,6 +1378,47 @@ check('startS of zero is stored as absent', () => {
     const fn = ioe.slice(ioe.indexOf('function newOverlay(opts) {'), ioe.indexOf('/**\n   * Drag a box'));
     assert.ok(fn.includes('if (opts.startS) ov.startS = opts.startS;'), 'a zero start is written out');
     assert.ok(fn.includes('if (opts.endS != null)'), 'a zero end would be dropped');
+});
+
+
+// ── A still's text, and the end of the modal ────────────────────────────────────────────────────
+
+console.log('\na photo post edits its text in the same place');
+
+check('a still gets a Text list and an add button', () => {
+    const scope = slice('function _pceRenderClips(clipsOverride)', '_pceMeasureClips(clips);');
+    assert.ok(scope.includes('const photoText ='), 'a photo post has no text list');
+    assert.ok(scope.includes('_pcePostHasPicture()'), 'the list is not gated on there being a picture');
+    assert.ok(scope.includes('window._pceAddTextToClip(null)'), 'no way to add the first box');
+    // ⚠️ Rendered into THIS host on purpose: every field in the panel is wired by delegation from
+    // #pce-clips-block, so a list built anywhere else looks identical and responds to nothing.
+    assert.ok(scope.includes('data-tl-text='), 'the wording is not editable on the row');
+    assert.ok(scope.includes('window._pceOverlayRemove('), 'no way to remove a box');
+});
+
+check('a still is offered no timing at all', () => {
+    const fn = slice('window._pceAddTextToClip = function (index) {', '\nwindow._pceClipMove');
+    assert.ok(fn.includes('index == null ? null : _pceSpansFor'),
+        'a photo would be handed clip spans it does not have');
+});
+
+check('the post editor no longer opens the text modal', () => {
+    assert.strictEqual(workspace.indexOf('async function _pceOpenOverlayEditor'), -1, 'the opener is back');
+    assert.strictEqual(workspace.indexOf('ImageOverlayEditor.open('), -1, 'the page opens the modal again');
+    // ⚠️ The COMPONENT keeps open(): the newsletter designer still uses it, and not using a path is
+    // not the same job as deleting it.
+    const ioe = readFileSync(join(root, 'src/components/image-overlay-editor.js'), 'utf8');
+    assert.ok(/window\.ImageOverlayEditor = \{[^}]*\bopen\b/.test(ioe), 'open() was removed from the component');
+    const nl = readFileSync(join(root, 'src/components/newsletter-designer.js'), 'utf8');
+    assert.ok(nl.includes('ImageOverlayEditor.open('), 'the newsletter designer lost its editor');
+});
+
+check('the bake still has its backdrop', () => {
+    // Removing the opener must not take the publish path with it: a photo's text is flattened into
+    // a new asset on approval, and that is a different call.
+    assert.ok(workspace.includes('ImageOverlayEditor.bake('), 'the bake is gone');
+    assert.ok(workspace.includes('const bakeFrom = await _pceCorsCleanImageUrl(base);'),
+        'the bake no longer resolves a CORS-clean backdrop');
 });
 
 console.log(`\n${passed} checks passed`);

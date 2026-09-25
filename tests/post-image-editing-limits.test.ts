@@ -96,12 +96,15 @@ check('the client proves CORS-cleanliness by loading, not by baking and catching
     assert.ok(body.includes('base.dataUrl'), 'the inline path must remain the fallback');
 });
 
-check('BOTH editor paths resolve the backdrop the same way', () => {
-    // The bake path is the one that matters most: an image the editor opened but approval could not
-    // bake would fail at the last step, after the reviewer had done the work.
-    at(WS, 'let backdrop = base.isVideo ? null : await _pceCorsCleanImageUrl(base);', 'workspace');
+check('the bake path resolves the backdrop through the CORS-clean route', () => {
+    // ⚠️ There used to be two paths through this — the editor modal's backdrop and the bake — and
+    // the point of the check was that they agreed. The modal is gone from the post editor, so the
+    // bake is the only one left, and it is the one that always mattered most: an image the reviewer
+    // has done the work on but approval cannot bake fails at the last possible step.
     at(WS, 'const bakeFrom = await _pceCorsCleanImageUrl(base);', 'workspace');
     assert.ok(!WS.includes('ImageOverlayEditor.bake(base.dataUrl'), 'the bake path still uses the capped inline URL');
+    assert.strictEqual(WS.indexOf('async function _pceOpenOverlayEditor'), -1,
+        'the modal is back and must resolve its backdrop the same way again');
 });
 
 check('the refusal, when it comes, names the size and a way out', () => {
