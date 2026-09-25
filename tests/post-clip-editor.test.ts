@@ -1459,4 +1459,64 @@ check('a suggestion lands as the box\'s wording, not as the placeholder', () => 
     assert.ok(fn.includes('text ? { text } : {}'), 'the suggested wording is dropped');
 });
 
+
+// ── Hiding a clip or a box while you work ───────────────────────────────────────────────────────
+
+console.log('\nhiding is a preview filter, never an edit');
+
+check('nothing about hiding is saved, or survives the post', () => {
+    // ⚠️ A hidden flag that persisted would be a way to publish a video missing a clip without ever
+    // being told. "Does this line work? let me see it without" is a question about the next ten
+    // seconds, not an edit.
+    const fn = slice('const _pceHidden = { postId: null', 'const _pcePrev = { on: false');
+    assert.ok(fn.includes('_pceHidden.clips.clear()'), 'hiding follows you to the next post');
+    assert.ok(!/fetch\(/.test(fn), 'hiding is being sent somewhere');
+    const toggle = slice('window._pceToggleHidden = function (kind, id) {', '/** "2 clips and 1 text"');
+    assert.ok(!toggle.includes('_rqPersistOverlays'), 'toggling saves the post');
+    assert.ok(!toggle.includes('splice('), 'toggling removes something');
+    assert.ok(workspace.includes('_pceHiddenReset('), 'the state is never reset on open');
+});
+
+check('while anything is hidden, the panel says so and says it standing', () => {
+    // A preview quietly missing a clip is a preview of a video that does not exist, and the
+    // reviewer approves against what they can see.
+    assert.ok(workspace.includes('hidden while you edit \\u2014 the published video still has everything.'),
+        'the note is missing or no longer says the published video is intact');
+    const sum = slice('function _pceHiddenSummary() {', '/** The next clip the preview should play');
+    assert.ok(sum.includes("' clip'") && sum.includes("' text box'"),
+        'the note counts without saying what kind of thing is missing');
+});
+
+check('the preview skips a hidden clip, and still counts it', () => {
+    // ⚠️ The offset must keep counting the skipped clip: a box on a later clip is timed against the
+    // real cut, and shifting the clock would show it at a second that does not exist.
+    const fn = slice('function _pceNextVisibleClip(from) {', 'const _pcePrev = { on: false');
+    assert.ok(fn.includes('!_pceClipHidden(clips[i].id)'), 'the search does not skip hidden clips');
+    const tick = slice('function _pcePreviewTick(video) {', '/** Seconds this clip contributes');
+    assert.ok(tick.includes('_pceNextVisibleClip(_pcePrev.i + 1)'), 'the preview plays hidden clips anyway');
+    const seat = slice('async function _pcePreviewSeat(i) {', '\nwindow._pcePreviewStart');
+    assert.ok(seat.includes('_pcePrev.offset += _pceClipLength(clips[k])'),
+        'the offset no longer counts every earlier clip, so later text is timed wrong');
+});
+
+check('hiding every clip refuses to preview, and says why', () => {
+    const fn = slice('window._pcePreviewStart = async function () {', '\nwindow._pcePreviewStop');
+    assert.ok(fn.includes('Every clip is hidden'), 'an all-hidden preview fails silently');
+    assert.ok(fn.indexOf('const first = _pceNextVisibleClip(0)') < fn.indexOf('_pcePrev.on = true'),
+        'the preview turns itself on before finding out there is nothing to play');
+});
+
+check('a hidden box is filtered from the canvas, not removed from the post', () => {
+    const canvas = slice('function _rqRenderCanvasOverlays(post) {', '\n/**');
+    assert.ok(canvas.includes('overlays.filter((ov) => !_pceTextHidden(ov && ov.id))'),
+        'hidden text is still painted');
+    assert.ok(canvas.includes('render(layer, shown,'), 'the filtered list is not the one painted');
+});
+
+check('hiding the clip that is playing moves on rather than stopping on it', () => {
+    const fn = slice('window._pceToggleHidden = function (kind, id) {', '/** "2 clips and 1 text"');
+    assert.ok(fn.includes('_pceNextVisibleClip(_pcePrev.i + 1)'),
+        'hiding the clip on screen leaves it on screen');
+});
+
 console.log(`\n${passed} checks passed`);

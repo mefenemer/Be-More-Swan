@@ -6458,7 +6458,10 @@ function _rqRenderCanvasOverlays(post) {
         // Draggable here, not only inside the modal. Positioning a box was the one thing the
         // modal still had to itself, and reaching it meant leaving the post, placing the box
         // against a single frame, and coming back.
-        const nodes = window.ImageOverlayEditor.render(layer, overlays, {
+        // A hidden box is not painted. It is still in `overlays` and still saved — this is a filter
+        // on what is on screen, nothing more.
+        const shown = overlays.filter((ov) => !_pceTextHidden(ov && ov.id));
+        const nodes = window.ImageOverlayEditor.render(layer, shown, {
             refEl: media || undefined,
             onGrab: (ov) => {
                 _rqOvDragId = ov.id || null;
@@ -6734,6 +6737,15 @@ function _rqTimelineParts(post) {
         const within = sub ? `<p class="mt-0.5 text-[10px] text-gray-400" style="font-variant-numeric:tabular-nums">${sub}</p>` : '';
         // Removing a box was only possible inside the text editor — you had to open a modal, find
         // the right box among several and delete it there. It is a layer in a list; the list deletes.
+        // Hide while you work: "does this line work? let me see it without" is a question about the
+        // next ten seconds, not an edit. Nothing about it is saved.
+        const hidden = kind === 'text' && _pceTextHidden(key);
+        const eye = kind === 'text'
+            ? `<button type="button" title="${hidden ? 'Show this text again' : 'Hide this text while you edit'}"
+                 aria-label="${hidden ? 'Show' : 'Hide'} ${esc}" aria-pressed="${hidden}"
+                 class="px-1 cursor-pointer leading-none ${hidden ? 'text-pink-600' : 'text-gray-300 hover:text-gray-600'}"
+                 onclick="window._pceToggleHidden('text','${_rqEsc(key)}')">${hidden ? '\u25CC' : '\u25C9'}</button>`
+            : '';
         const del = kind === 'text'
             ? `<button type="button" title="Remove this text" aria-label="Remove ${esc}"
                  class="px-1 text-gray-300 hover:text-red-600 cursor-pointer leading-none"
@@ -6756,9 +6768,10 @@ function _rqTimelineParts(post) {
         const startVal = src(start);
         const endVal = item.endS == null ? '' : src(end);
         return `
-          <div data-tl-row="${_rqEsc(key)}">
+          <div data-tl-row="${_rqEsc(key)}"${hidden ? ' style="opacity:.45"' : ''}>
             <div class="flex items-center gap-1.5">
               ${kind === 'text' ? nameInput(key, label) : `<span class="flex-1 min-w-0 truncate text-[10px] font-semibold text-gray-500" title="${esc}">${esc}</span>`}
+              ${eye}
               ${del}
             </div>
             <div class="flex items-center gap-1">
@@ -7015,6 +7028,64 @@ function _pceClipsTotalS(post) {
  *
  * Which also means a scrub, a pause and the playhead keep working with no changes of their own.
  */
+/**
+ * Clips and text boxes taken out of the PREVIEW while the reviewer works. Ids, per post.
+ *
+ * ⚠️ Deliberately NOT a property of the post. "Does this line work? let me see it without" is a
+ * question about the next ten seconds, not an edit — and a hidden flag that saved would be a way to
+ * publish a video missing a clip without ever being told. Nothing here is sent anywhere, it is
+ * cleared when another post is opened, and while anything is hidden the panel says so in as many
+ * words: the published video still has all of it.
+ */
+const _pceHidden = { postId: null, clips: new Set(), text: new Set() };
+
+function _pceHiddenReset(postId) {
+    if (_pceHidden.postId === postId) return;
+    _pceHidden.postId = postId;
+    _pceHidden.clips.clear();
+    _pceHidden.text.clear();
+}
+
+const _pceClipHidden = (id) => _pceHidden.clips.has(String(id));
+const _pceTextHidden = (id) => _pceHidden.text.has(String(id));
+
+window._pceToggleHidden = function (kind, id) {
+    const set = kind === 'clip' ? _pceHidden.clips : _pceHidden.text;
+    const key = String(id);
+    if (set.has(key)) set.delete(key); else set.add(key);
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    // A hidden clip that is playing right now has to be left: the preview seats the NEXT visible
+    // one rather than stopping on something the reviewer has just said they do not want to see.
+    if (kind === 'clip' && _pcePrev.on && _pceClipHidden(key)) {
+        const clips = _pceClips(post);
+        if (clips[_pcePrev.i] && String(clips[_pcePrev.i].id) === key) {
+            const next = _pceNextVisibleClip(_pcePrev.i + 1);
+            if (next < 0) window._pcePreviewStop(); else _pcePreviewSeat(next);
+        }
+    }
+    _rqRenderCanvasOverlays(post);
+    _rqRenderTimeline(post);
+};
+
+/** "2 clips and 1 text" — named rather than counted, so the note says what is missing. */
+function _pceHiddenSummary() {
+    const bits = [];
+    const c = _pceHidden.clips.size;
+    const t = _pceHidden.text.size;
+    if (c) bits.push(c + (c === 1 ? ' clip' : ' clips'));
+    if (t) bits.push(t + (t === 1 ? ' text box' : ' text boxes'));
+    return bits.join(' and ');
+}
+
+/** The next clip the preview should play, at or after `from`. -1 when they are all hidden. */
+function _pceNextVisibleClip(from) {
+    const clips = _pceClips();
+    for (let i = Math.max(0, from); i < clips.length; i++) {
+        if (!_pceClipHidden(clips[i].id)) return i;
+    }
+    return -1;
+}
+
 const _pcePrev = { on: false, i: 0, offset: 0, starting: false };
 
 /**
@@ -7181,10 +7252,16 @@ window._pcePreviewStart = async function () {
         return;
     }
     if (_pcePrev.on) { video.play().catch(() => {}); return; }
+    const first = _pceNextVisibleClip(0);
+    if (first < 0) {
+        _pcePrevMsg = 'Every clip is hidden, so there is nothing to play. Show one to preview the cut.';
+        _pceRenderClips();
+        return;
+    }
     _pcePrev.on = true;
     _pceCanvasBorrow();                 // put the canvas back exactly as we found it
     _pceRenderClips();
-    await _pcePreviewSeat(0);
+    await _pcePreviewSeat(first);
 };
 
 window._pcePreviewStop = function () {
@@ -7208,7 +7285,11 @@ function _pcePreviewTick(video) {
     const out = clip.outS != null ? clip.outS
         : (_pceClipFullLength(clip) != null ? _pceClipFullLength(clip) : video.duration);
     if (!(out > 0) || video.currentTime < out - 0.03) return;
-    if (_pcePrev.i + 1 < clips.length) _pcePreviewSeat(_pcePrev.i + 1);
+    // The next VISIBLE clip. A hidden one is skipped rather than played silently past — that is the
+    // whole point of hiding it — and the offset still counts it, so a box on a later clip still
+    // shows at the second it will really show at.
+    const next = _pceNextVisibleClip(_pcePrev.i + 1);
+    if (next >= 0) _pcePreviewSeat(next);
     else _pcePreviewStop();
 }
 
@@ -7798,7 +7879,7 @@ function _pceRenderClips(clipsOverride) {
     const rows = clips.map((c, i) => {
         const len = _pceClipLength(c);
         const name = _rqEsc(String(c.name || ('Clip ' + (i + 1))).slice(0, 28));
-        return '<div data-clip-row="' + i + '">'
+        return '<div data-clip-row="' + i + '"' + (_pceClipHidden(c.id) ? ' style="opacity:.5"' : '') + '>'
             + '<div class="flex items-center gap-1.5 py-1">'
             + '<span class="w-4 shrink-0 text-[10px] font-bold text-gray-400" style="font-variant-numeric:tabular-nums">' + (i + 1) + '</span>'
             + '<span class="flex-1 min-w-0 truncate text-[11px] text-gray-700" title="' + name + '">' + name + '</span>'
@@ -7809,6 +7890,13 @@ function _pceRenderClips(clipsOverride) {
             + '<button type="button" title="Move later" aria-label="Move clip ' + (i + 1) + ' later"'
             + ' class="px-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 cursor-pointer leading-none"'
             + (i === clips.length - 1 ? ' disabled' : '') + ' onclick="window._pceClipMove(' + i + ',1)">&#9660;</button>'
+            + '<button type="button" aria-pressed="' + _pceClipHidden(c.id) + '"'
+            + ' title="' + (_pceClipHidden(c.id) ? 'Show this clip again' : 'Skip this clip while you edit') + '"'
+            + ' aria-label="' + (_pceClipHidden(c.id) ? 'Show' : 'Hide') + ' clip ' + (i + 1) + '"'
+            + ' class="px-1 cursor-pointer leading-none '
+            + (_pceClipHidden(c.id) ? 'text-pink-600' : 'text-gray-300 hover:text-gray-600') + '"'
+            + ' onclick="window._pceToggleHidden(\'clip\',\'' + _rqEsc(c.id) + '\')">'
+            + (_pceClipHidden(c.id) ? '\u25CC' : '\u25C9') + '</button>'
             + '<button type="button" title="Remove this clip" aria-label="Remove clip ' + (i + 1) + '"'
             + ' class="px-1 text-gray-300 hover:text-red-600 cursor-pointer leading-none"'
             + ' onclick="window._pceClipRemove(' + i + ')">&times;</button>'
@@ -7885,6 +7973,13 @@ function _pceRenderClips(clipsOverride) {
               + ' class="mt-1.5 w-full rounded-lg border border-dashed border-gray-300 py-1.5 text-[11px] font-semibold text-gray-500 hover:border-emerald-400 hover:text-emerald-700 transition cursor-pointer">'
               + '+ Add another clip</button>'
             : '<p class="mt-1 text-[10px] text-amber-600">That is the most clips one post can hold.</p>')
+        + (_pceHidden.clips.size + _pceHidden.text.size
+            // ⚠️ Standing, not a toast. A preview that is quietly missing a clip is a preview of a
+            // video that does not exist, and the reviewer approves against what they can see.
+            ? '<p class="mt-1 text-[10px] text-pink-700">'
+              + _pceHiddenSummary()
+              + ' hidden while you edit \u2014 the published video still has everything.</p>'
+            : '')
         + (_pcePrevMsg
             ? '<p class="mt-1 text-[10px] text-amber-600">' + _rqEsc(_pcePrevMsg) + '</p>' : '')
         + (overLong
@@ -13835,6 +13930,9 @@ function _pceSyncForPost(post) {
     // it finishes.
     if (!_pceAiPoll) _pceSetAiMsg('');
     _pceRenderFormats();
+    // Hiding is an editing aid for THIS post; carrying it to the next one would mean opening a post
+    // with something already missing from the preview and no memory of asking for that.
+    _pceHiddenReset(post && post.id != null ? post.id : _rqReviewPostId);
     _pceSetStageWide(true, _pcePostIsVideo(post));
 
     const card = post.brandCard;
