@@ -7580,22 +7580,69 @@ function _pceClipsChanged(clips) {
  * ImageOverlayEditor.newOverlay, shared with the modal's own "+ Add text", so a box added here and
  * a box added there cannot look different.
  */
+/**
+ * Which beat of the cut clip `index` is, and what the OTHER clips already say.
+ *
+ * Null on anything that is not a cut — a still or a single clip has no sequence to belong to, and
+ * telling the model it is writing "clip 1 of 1" only invites it to say so.
+ */
+function _pceClipBriefFor(index) {
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const spans = post ? _pceSpansFor(_pceClips(post)) : null;
+    if (!spans || spans.length < 2 || !(index >= 0) || index >= spans.length) return null;
+    const others = ((post && post.overlays) || [])
+        .filter((ov) => {
+            const at = _pceSpanAt(spans, ov.startS == null ? 0 : ov.startS);
+            return at && at.i !== index && String(ov.text || '').trim();
+        })
+        .map((ov) => String(ov.text).split('\n')[0].trim());
+    return { index: index + 1, count: spans.length, others };
+}
+
+/**
+ * Ask the assistant for a line on one clip, and put it there.
+ *
+ * The box is created only once wording comes back: a box that appears and then sits empty because
+ * the call failed is worse than the button appearing to do nothing, because now there is rubbish to
+ * tidy up. A failure says so under the clip it belongs to.
+ */
+const _pceClipAi = { busy: null, msg: '', at: null };
+window._pceSuggestTextForClip = async function (index) {
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    if (!post || _pceClipAi.busy != null) return;
+    _pceClipAi.busy = index;
+    _pceClipAi.msg = '';
+    _pceClipAi.at = null;
+    _pceRenderClips();
+    try {
+        const text = await _pceSuggestOverlayText(postId, 'suggest', '', _pceClipBriefFor(index));
+        _pceClipAi.busy = null;
+        window._pceAddTextToClip(index, text);
+    } catch (err) {
+        _pceClipAi.busy = null;
+        _pceClipAi.msg = (err && err.message) || 'Could not write that wording.';
+        _pceClipAi.at = index;
+        _pceRenderClips();
+    }
+};
+
 /** True when the canvas is showing a still this post's text would be baked into. */
 function _pcePostHasPicture() {
     return !!document.querySelector('#post-review-body [data-media-img]');
 }
 
 const _PCE_NEW_TEXT_S = 3;
-window._pceAddTextToClip = function (index) {
+window._pceAddTextToClip = function (index, text) {
     const postId = _rqReviewPostId;
     const post = postId != null ? _rqPostCache[postId] : null;
     if (!post || !window.ImageOverlayEditor || !window.ImageOverlayEditor.newOverlay) return;
     // index null ⇒ a still, which has no clips and so no timing: the box is simply always on.
     const spans = index == null ? null : _pceSpansFor(_pceClips(post));
     const sp = spans && spans[index];
-    const ov = window.ImageOverlayEditor.newOverlay(sp
-        ? { startS: sp.start, endS: sp.start + Math.min(_PCE_NEW_TEXT_S, sp.len) }
-        : {});
+    const ov = window.ImageOverlayEditor.newOverlay(Object.assign(
+        sp ? { startS: sp.start, endS: sp.start + Math.min(_PCE_NEW_TEXT_S, sp.len) } : {},
+        text ? { text } : {}));
     post.overlays = Array.isArray(post.overlays) ? post.overlays : [];
     post.overlays.push(ov);
     _pceSelectedOverlayId = ov.id;
@@ -7778,10 +7825,25 @@ function _pceRenderClips(clipsOverride) {
             // happened to be selected — so "put a line on clip three" was two steps and a guess.
             // Here the clip is the button you pressed.
             + (tl.isVideo
-                ? '<div class="px-1 pb-1.5"><button type="button" onclick="window._pceAddTextToClip(' + i + ')"'
-                  + ' class="w-full rounded-lg border border-dashed border-gray-300 py-1 text-[10px] font-semibold'
+                ? '<div class="px-1 pb-1.5 flex items-center gap-1">'
+                  + '<button type="button" onclick="window._pceAddTextToClip(' + i + ')"'
+                  + ' class="flex-1 rounded-lg border border-dashed border-gray-300 py-1 text-[10px] font-semibold'
                   + ' text-gray-500 hover:border-pink-400 hover:text-pink-700 transition cursor-pointer">'
-                  + '+ Add text to this clip</button></div>'
+                  + '+ Add text</button>'
+                  // The assistant writes the overlay, per clip. A cut is one piece with several
+                  // beats, and the wording for beat three is a different question from "write a
+                  // hook for this post" — so the clip is part of what gets asked.
+                  + '<button type="button" onclick="window._pceSuggestTextForClip(' + i + ')"'
+                  + (_pceClipAi.busy != null ? ' disabled' : '')
+                  + ' title="Ask the assistant for a line on this clip"'
+                  + ' class="flex-1 rounded-lg border border-dashed border-gray-300 py-1 text-[10px] font-semibold'
+                  + ' text-gray-500 hover:border-pink-400 hover:text-pink-700 transition cursor-pointer'
+                  + ' disabled:opacity-40 disabled:cursor-default">'
+                  + (_pceClipAi.busy === i ? 'Thinking\u2026' : '\u2728 Suggest') + '</button>'
+                  + '</div>'
+                  + (_pceClipAi.at === i && _pceClipAi.msg
+                      ? '<p class="px-1 pb-1.5 text-[10px] text-amber-600">' + _rqEsc(_pceClipAi.msg) + '</p>'
+                      : '')
                 : '')
             + '</div>';
     }).join('');
@@ -7873,7 +7935,11 @@ function _pceRenderTextStyle() {
         overlay: ov,
         video: _pcePostIsVideo(post),
         // The assistant writes the overlay, not just the caption. Same call the modal makes.
-        suggestText: (mode, current) => _pceSuggestOverlayText(_rqReviewPostId, mode, current),
+        // Clip-aware too: a box already sitting on clip three should be rewritten as clip three's
+        // line, not as a fresh hook for the whole post.
+        suggestText: (mode, current) => _pceSuggestOverlayText(
+            _rqReviewPostId, mode, current,
+            _pceClipBriefFor(_rqClipIndexAt(ov.startS == null ? 0 : ov.startS))),
         // As you drag a slider: repaint the picture only. The clip list carries the wording, so it
         // is repainted on commit rather than per keystroke — a repaint would take the caret with it.
         onChange: () => _rqRenderCanvasOverlays(post),
@@ -17211,10 +17277,17 @@ function _pcePlaceholderBackdrop(width, height) {
  * request. The endpoint spends a task credit, so 403 (cap reached) and 503 (cap check failed, or AI
  * off) are both real answers the user needs to read — not "something went wrong".
  */
-async function _pceSuggestOverlayText(postId, mode, currentText) {
+/**
+ * `clip` tells the model which beat of a cut it is writing, and what the other beats already say.
+ *
+ * Without it, asking four times gives four competing hooks that each assume they are the only thing
+ * on screen — four unrelated posts stitched together rather than one piece. Omitted on a still, and
+ * on a single-clip video, where there is no sequence to belong to.
+ */
+async function _pceSuggestOverlayText(postId, mode, currentText, clip) {
     const res = await fetch('/.netlify/functions/suggest-overlay-text', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ postId, mode, currentText: currentText || '' }),
+        body: JSON.stringify({ postId, mode, currentText: currentText || '', ...(clip ? { clip } : {}) }),
     });
     const d = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(d.error || 'Could not write that wording.');

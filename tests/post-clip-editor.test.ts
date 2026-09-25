@@ -1362,7 +1362,7 @@ check('the defaults come from one factory, shared with the modal', () => {
 });
 
 check('a new box is visible immediately, and never longer than its clip', () => {
-    const fn = slice('window._pceAddTextToClip = function (index) {', '\nwindow._pceClipMove');
+    const fn = slice('window._pceAddTextToClip = function (index, text) {', '\nwindow._pceClipMove');
     assert.ok(fn.includes('Math.min(_PCE_NEW_TEXT_S, sp.len)'),
         'a three-second default would outlast a two-second clip');
     assert.ok(fn.includes('_pceSelectedOverlayId = ov.id'), 'the new box is not selected');
@@ -1397,7 +1397,7 @@ check('a still gets a Text list and an add button', () => {
 });
 
 check('a still is offered no timing at all', () => {
-    const fn = slice('window._pceAddTextToClip = function (index) {', '\nwindow._pceClipMove');
+    const fn = slice('window._pceAddTextToClip = function (index, text) {', '\nwindow._pceClipMove');
     assert.ok(fn.includes('index == null ? null : _pceSpansFor'),
         'a photo would be handed clip spans it does not have');
 });
@@ -1419,6 +1419,44 @@ check('the bake still has its backdrop', () => {
     assert.ok(workspace.includes('ImageOverlayEditor.bake('), 'the bake is gone');
     assert.ok(workspace.includes('const bakeFrom = await _pceCorsCleanImageUrl(base);'),
         'the bake no longer resolves a CORS-clean backdrop');
+});
+
+
+// ── The assistant writes a line for one clip ────────────────────────────────────────────────────
+
+console.log('\nthe assistant can write a line per clip');
+
+check('every clip offers it, and only one runs at a time', () => {
+    const at = only(workspace, 'window._pceSuggestTextForClip(' + "' + i + '" + ')', 'workspace.html');
+    assert.ok(at > 0, 'no per-clip suggest button');
+    const scope = workspace.slice(at - 200, at + 700);
+    assert.ok(scope.includes("_pceClipAi.busy === i ? 'Thinking"), 'the pressed button does not say it is working');
+    assert.ok(scope.includes("_pceClipAi.busy != null ? ' disabled'"), 'a second request can be started on top of the first');
+});
+
+check('a failure creates nothing, and says why under that clip', () => {
+    // A box that appears and then sits empty because the call failed is worse than the button
+    // appearing to do nothing — now there is rubbish to tidy up.
+    const fn = slice('window._pceSuggestTextForClip = async function (index) {', "/** True when the canvas is showing a still");
+    const order = fn.indexOf('await _pceSuggestOverlayText') < fn.indexOf('_pceAddTextToClip(index, text)');
+    assert.ok(order, 'the box is created before the wording arrives');
+    assert.ok(fn.includes('_pceClipAi.msg ='), 'a failure is silent');
+    assert.ok(fn.includes('_pceClipAi.at = index'), 'the message is not tied to the clip it belongs to');
+});
+
+check('the request says which beat it is, and what the others already say', () => {
+    const fn = slice('function _pceClipBriefFor(index) {', '/**\n * Ask the assistant for a line');
+    assert.ok(fn.includes('spans.length < 2'), 'a single clip would be told it is "clip 1 of 1"');
+    assert.ok(fn.includes('at.i !== index'), 'the clip\'s own wording would be listed as something to avoid');
+    assert.ok(fn.includes('index: index + 1'), 'the brief is zero-based, which reads as an off-by-one to the model');
+    // And the panel's own Suggest/Improve asks the same question for the box's clip.
+    const style = slice('function _pceRenderTextStyle() {', '\n// ── The crop frame');
+    assert.ok(style.includes('_pceClipBriefFor('), 'the panel still asks for a whole-post hook');
+});
+
+check('a suggestion lands as the box\'s wording, not as the placeholder', () => {
+    const fn = slice('window._pceAddTextToClip = function (index, text) {', '\nwindow._pceClipMove');
+    assert.ok(fn.includes('text ? { text } : {}'), 'the suggested wording is dropped');
 });
 
 console.log(`\n${passed} checks passed`);

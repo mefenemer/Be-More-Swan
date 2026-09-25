@@ -94,6 +94,40 @@ check('an accepted suggestion updates the textarea AND the canvas', () => {
     assert.match(block.slice(0, 500), /committed\(\)/);
 });
 
+// ── Writing for one beat of a cut ───────────────────────────────────────────────────────────────
+// A four-clip reel is not four posts. Asking "write the overlay wording for this post" four times
+// gives four competing hooks that each assume they are the only thing on screen, and they read as
+// four unrelated posts stitched together.
+
+check('the endpoint accepts which clip it is writing, and what the others say', () => {
+
+    assert.match(fn, /clip\?: \{ index\?: unknown; count\?: unknown; others\?: unknown \}/,
+        'the request cannot carry a clip');
+    // A client that knows nothing about clips must keep working, and a malformed block must not be
+    // the difference between wording and a 400.
+    assert.match(fn, /clipCount > 1/, 'a single clip is not a sequence and must be ignored');
+    assert.match(fn, /clipIndex >= 1 && clipIndex <= clipCount/, 'an out-of-range clip is not validated');
+    assert.match(fn, /: null;/, 'there is no fall-back to the whole-post request');
+});
+
+check('the brief names the JOB of the beat, not just its number', () => {
+    // "clip 1 of 4" alone produces four variations of the same hook, because every clip is still
+    // being asked to open.
+
+    const brief = fn.slice(fn.indexOf('function clipBrief('), fn.indexOf('const json ='));
+    assert.match(brief, /FIRST clip/, 'the opener has no stated job');
+    assert.match(brief, /LAST clip/, 'the closer has no stated job');
+    assert.match(brief, /MIDDLE clip/, 'the middle has no stated job');
+    assert.match(brief, /Do not repeat any of those/, 'the other clips\' wording is not ruled out');
+});
+
+check('the other clips are context, not the task', () => {
+    // A reel can carry twenty boxes; all of them in the prompt would drown the instruction.
+
+    assert.match(fn, /\.slice\(0, 12\)/, 'the other clips are unbounded');
+    assert.match(fn, /\.slice\(0, MAX_OVERLAY_CHARS\)/, 'each one is unbounded');
+});
+
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);
 // The runner (scripts/run-tests.mjs) decides pass/fail from this process's exit status alone.
 // Without this line a failed check prints its ✗ and the file still reports green.

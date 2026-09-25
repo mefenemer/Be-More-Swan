@@ -7,7 +7,14 @@
 // and stops being readable. Hence the hard character ceiling in the prompt AND enforced on the way
 // out, rather than a request that the model please be brief.
 //
-// POST { postId, mode: 'suggest'|'improve', currentText? } → { text }
+// POST { postId, mode: 'suggest'|'improve', currentText?, clip? } → { text }
+//
+// `clip` is what makes this work on a CUT. A four-clip reel is not four posts, it is one piece with
+// four beats — clip one has to earn the next three seconds, the last one has to land. Asking for
+// "the overlay wording for this post" four times gives four competing hooks that each assume they
+// are the only thing on screen, and they read as four unrelated posts stitched together. Told which
+// beat it is writing and what the other beats already say, the model writes a line that belongs to a
+// sequence and does not repeat one that is already there.
 
 import { HandlerEvent } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
@@ -27,6 +34,25 @@ const MODEL = 'claude-haiku-4-5-20251001';
 const MAX_OVERLAY_CHARS = 80;
 const MAX_INPUT_CHARS = 400;
 
+/**
+ * Where this clip sits in the cut, in words the model can use.
+ *
+ * The position is stated rather than implied: "clip 1 of 4" alone tends to produce four variations
+ * of the same hook, because every clip is still being asked to open. Naming the JOB of the beat —
+ * earn the next few seconds, carry it, land it — is what makes the four read as one piece.
+ */
+function clipBrief(clip: { index: number; count: number; others: string[] }): string {
+    const role = clip.index === 1
+        ? 'It is the FIRST clip: its job is to stop the scroll and earn the next few seconds.'
+        : clip.index === clip.count
+            ? 'It is the LAST clip: its job is to land the point or say what to do next.'
+            : 'It is a MIDDLE clip: it carries the idea on. It does not need to re-open the video.';
+    const others = clip.others.length
+        ? `\nThe other clips already say:\n${clip.others.map(t => `- ${t}`).join('\n')}\nDo not repeat any of those.`
+        : '';
+    return `This video is a cut of ${clip.count} clips, and you are writing the words on clip ${clip.index}. ${role}${others}`;
+}
+
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 });
@@ -42,7 +68,10 @@ export default withLambda(async (event: HandlerEvent) => {
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
 
-    let body: { postId?: unknown; mode?: unknown; currentText?: unknown };
+    let body: {
+        postId?: unknown; mode?: unknown; currentText?: unknown;
+        clip?: { index?: unknown; count?: unknown; others?: unknown };
+    };
     try { body = JSON.parse(event.body || '{}'); }
     catch { return json(400, { error: 'Invalid JSON body.' }); }
 
@@ -53,6 +82,28 @@ export default withLambda(async (event: HandlerEvent) => {
     // "Improve" with nothing to improve is a suggest request wearing the wrong hat — asking the model
     // to improve an empty string reliably returns an apology rather than any wording.
     if (mode === 'improve' && !currentText) return json(400, { error: 'There is no wording to improve yet.' });
+
+    // ── Which beat of the cut this is ───────────────────────────────────────────────────────────
+    // Absent or nonsense ⇒ treated as a whole-post request, exactly as before. A client that knows
+    // nothing about clips must keep working, and a malformed clip block must not be the difference
+    // between wording and a 400.
+    const rawClip = body.clip && typeof body.clip === 'object' ? body.clip : null;
+    const clipCount = rawClip ? Math.trunc(Number(rawClip.count)) : 0;
+    const clipIndex = rawClip ? Math.trunc(Number(rawClip.index)) : 0;
+    const clip = (Number.isFinite(clipCount) && clipCount > 1
+        && Number.isFinite(clipIndex) && clipIndex >= 1 && clipIndex <= clipCount)
+        ? {
+            index: clipIndex,
+            count: clipCount,
+            // What the OTHER clips already say, so the model does not write it again. Trimmed hard:
+            // this is context, not the task, and a reel can carry twenty boxes.
+            others: (rawClip && Array.isArray(rawClip.others) ? rawClip.others : [])
+                .filter((t): t is string => typeof t === 'string')
+                .map((t: string) => t.trim().slice(0, MAX_OVERLAY_CHARS))
+                .filter(Boolean)
+                .slice(0, 12),
+        }
+        : null;
 
     // Tenant guard on the post, and its caption is the only context worth sending: the overlay has
     // to say something the post is actually about.
@@ -95,9 +146,12 @@ export default withLambda(async (event: HandlerEvent) => {
                 role: 'user',
                 content: mode === 'improve'
                     ? `The post's caption, for context:\n"""${caption.slice(0, 1200)}"""\n\n`
+                      + (clip ? clipBrief(clip) + '\n\n' : '')
                       + `Improve this overlay wording — sharper and easier to read at a glance, same meaning and language:\n"""${currentText}"""`
                     : `The post's caption:\n"""${caption.slice(0, 1200)}"""\n\n`
-                      + 'Write the overlay wording for this post.',
+                      + (clip
+                          ? clipBrief(clip) + '\n\nWrite the overlay wording for THIS clip.'
+                          : 'Write the overlay wording for this post.'),
             }],
         });
 
