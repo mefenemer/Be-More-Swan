@@ -7869,10 +7869,22 @@ function _pceClipBriefFor(index) {
  * the call failed is worse than the button appearing to do nothing, because now there is rubbish to
  * tidy up. A failure says so under the clip it belongs to.
  */
-/** Put a message under one clip — or under the panel, for a still. */
+/**
+ * Say why something did not happen.
+ *
+ * ⚠️ Written to the banner at the top of the editor as well as under the clip. The per-clip message
+ * is drawn BY the clip list, so when the thing that failed is the clip list refusing to repaint,
+ * the explanation is swallowed by the same fault it is explaining — and the button goes on looking
+ * dead. The banner is outside the panel and is rendered by nothing else.
+ */
 function _pceClipSay(index, msg) {
     _pceClipAi.msg = msg;
     _pceClipAi.at = index;
+    const el = document.getElementById('post-review-script-alert');
+    if (el) {
+        el.textContent = msg;
+        el.classList.remove('hidden');
+    }
     _pceRenderClips();
 }
 
@@ -7891,9 +7903,9 @@ window._pceSuggestTextForClip = async function (index) {
         window._pceAddTextToClip(index, text);
     } catch (err) {
         _pceClipAi.busy = null;
-        _pceClipAi.msg = (err && err.message) || 'Could not write that wording.';
-        _pceClipAi.at = index;
-        _pceRenderClips();
+        // Through _pceClipSay, so the reason reaches the banner too — a panel that will not repaint
+        // cannot be the only place the explanation is written.
+        _pceClipSay(index, (err && err.message) || 'Could not write that wording.');
     }
 };
 
@@ -8790,7 +8802,31 @@ function _rqBindTimeline() {
     window.addEventListener('pointercancel', end);
 }
 
+/**
+ * A busy pointer while the editor is being built.
+ *
+ * Opening a post fetches it, resolves its media and lays out the mock-up, which on a cut takes a
+ * few seconds — and until now the only sign anything was happening was the modal eventually
+ * appearing. Worse on the "new post" path, where the button that said "Working…" is dismissed
+ * before the slow part even starts. Applied to <html> so it wins over per-element cursors, and
+ * cleared in a finally so a failure cannot leave the page stuck looking busy.
+ */
+function _rqSetBusyCursor(on) {
+    const el = document.documentElement;
+    if (!el) return;
+    el.style.cursor = on ? 'progress' : '';
+}
+
 async function openPostReview(postId, opts = {}) {
+    _rqSetBusyCursor(true);
+    try {
+        return await _rqOpenPostReview(postId, opts);
+    } finally {
+        _rqSetBusyCursor(false);
+    }
+}
+
+async function _rqOpenPostReview(postId, opts = {}) {
     // Cards elsewhere in the Review Queue warm this cache as they render, but callers outside
     // it (e.g. the dashboard's "Requires your attention" list) can invoke this on a cold cache —
     // fall back to fetching the pending drafts once so the modal still has data to show. Running the
@@ -12311,6 +12347,9 @@ async function pceConfirmDestinations() {
 
     try {
         if (_pceDestMode === 'create') {
+            // Starting a post is a server round trip and then a whole editor being built. The
+            // button below says "Working…" but is dismissed before the slow half even begins.
+            _rqSetBusyCursor(true);
             const res = await fetch('/.netlify/functions/create-manual-post', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ assistantId: _pceDestAssistantId, destinations, blank: true }),
@@ -12338,6 +12377,7 @@ async function pceConfirmDestinations() {
         window.showToast?.(err.message || 'Could not save the destinations.', { icon: '⚠️' });
         btn.textContent = was;
     } finally {
+        _rqSetBusyCursor(false);
         _pceDestBusy = false;
         _pceRenderDestinations();
     }

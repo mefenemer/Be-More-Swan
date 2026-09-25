@@ -1440,8 +1440,10 @@ check('a failure creates nothing, and says why under that clip', () => {
     const fn = slice('window._pceSuggestTextForClip = async function (index) {', "/** True when the canvas is showing a still");
     const order = fn.indexOf('await _pceSuggestOverlayText') < fn.indexOf('_pceAddTextToClip(index, text)');
     assert.ok(order, 'the box is created before the wording arrives');
-    assert.ok(fn.includes('_pceClipAi.msg ='), 'a failure is silent');
-    assert.ok(fn.includes('_pceClipAi.at = index'), 'the message is not tied to the clip it belongs to');
+    // Through _pceClipSay now, which tags the clip AND writes the banner.
+    assert.ok(fn.includes('_pceClipSay(index,'), 'a failure is silent');
+    const say = slice('function _pceClipSay(index, msg) {', '\nconst _pceClipAi =');
+    assert.ok(say.includes('_pceClipAi.at = index'), 'the message is not tied to the clip it belongs to');
 });
 
 check('the request says which beat it is, and what the others already say', () => {
@@ -1718,6 +1720,34 @@ check('the rail can still add text', () => {
     const fn = slice('window._pceAddTextHere = function () {', 'window._pceAddTextToClip = function (index, text) {');
     assert.ok(fn.includes('clips.length ? 0 : null'),
         'a still would be handed a clip index it does not have');
+});
+
+
+console.log('\nand a reason cannot be swallowed by the thing it explains');
+
+check('why-it-did-not-happen reaches the banner, not only the panel', () => {
+    // ⚠️ The per-clip message is drawn BY the clip list. When the thing that failed IS the clip
+    // list refusing to repaint, the explanation is swallowed by the same fault it is explaining,
+    // and the button goes on looking dead. The banner is outside the panel.
+    const fn = slice('function _pceClipSay(index, msg) {', '\nconst _pceClipAi =');
+    assert.ok(fn.includes("getElementById('post-review-script-alert')"), 'the reason only goes to the panel');
+    assert.ok(fn.indexOf('el.classList.remove') < fn.indexOf('_pceRenderClips()'),
+        'the banner is written after the repaint that may never happen');
+    // The assistant's failures go the same way.
+    const ai = slice('window._pceSuggestTextForClip = async function (index) {', '/** True when the canvas is showing a still');
+    assert.ok(ai.includes('_pceClipSay(index,'), 'a refused suggestion is still panel-only');
+});
+
+check('opening a post shows a busy pointer', () => {
+    // It fetches the post, resolves its media and lays out the mock-up; on a cut that is seconds,
+    // and the only sign anything was happening was the modal eventually appearing.
+    const fn = slice('function _rqSetBusyCursor(on) {', 'async function _rqOpenPostReview(postId, opts = {}) {');
+    assert.ok(fn.includes('document.documentElement'), 'a per-element cursor would be overridden');
+    assert.ok(fn.includes('finally {'), 'a failed open would leave the page stuck looking busy');
+    // The create path starts it before the fetch: its own button is dismissed before the slow half.
+    const dest = slice('async function pceConfirmDestinations() {', '\n// Scheduling choice');
+    assert.ok(dest.includes('_rqSetBusyCursor(true)'), 'starting a post shows nothing while it works');
+    assert.ok(dest.includes('_rqSetBusyCursor(false)'), 'the busy pointer is never cleared');
 });
 
 console.log(`\n${passed} checks passed`);
