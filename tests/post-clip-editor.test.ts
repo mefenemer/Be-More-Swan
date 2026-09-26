@@ -1893,10 +1893,46 @@ check('failures toast, they do not only fill a banner', () => {
 check('an upstream AI failure is not dressed up as "try again"', () => {
     const fn = readFileSync(join(root, 'netlify/functions/suggest-overlay-text.ts'), 'utf8');
     const tail = fn.slice(fn.indexOf("console.error('[suggest-overlay-text] error:'"));
-    assert.ok(/credit balance\|quota\|billing/.test(tail), 'an exhausted balance is not recognised');
+    assert.ok(tail.includes('isUpstreamBlocked(error)'), 'an exhausted balance is not recognised');
     assert.ok(tail.includes('this is at our end, not yours'),
         'the writer is still told to retry a failure that will never clear');
     assert.ok(tail.includes('json(503'), 'an upstream outage is still reported as a generic failure');
+});
+
+check('one classifier decides which failures are ours', () => {
+    // ⚠️ This was a regex over the error message in suggest-overlay-text, and review-post-quality was
+    // about to grow a second copy — two answers to "which failures are ours", drifting apart the
+    // first time a status changed. Asked by CLASS where the SDK has one, because a status is a fact
+    // and a message is prose.
+    const gw = readFileSync(join(root, 'src/lib/ai-gateway.ts'), 'utf8');
+    const fn = gw.slice(gw.indexOf('export function isUpstreamBlocked('));
+    for (const cls of ['AuthenticationError', 'PermissionDeniedError', 'RateLimitError']) {
+        assert.ok(fn.includes(`Anthropic.${cls}`), `${cls} is not recognised as ours`);
+    }
+    // The exception that must be matched on text: an exhausted balance arrives as a 400
+    // invalid_request_error, indistinguishable by status from a malformed prompt.
+    assert.ok(/credit balance\|quota\|billing/.test(fn), 'an exhausted balance is not recognised');
+    for (const f of ['suggest-overlay-text', 'review-post-quality']) {
+        const src = readFileSync(join(root, `netlify/functions/${f}.ts`), 'utf8');
+        assert.ok(src.includes("isUpstreamBlocked") && src.includes("ai-gateway"),
+            `${f} classifies upstream failures on its own`);
+    }
+});
+
+check('a raw upstream body never reaches the reviewer', () => {
+    // ⚠️ It did. `error: e?.message` is the SDK's message, which is the upstream body verbatim, so a
+    // reviewer opening a post got our billing state, our request id and an instruction to top up an
+    // account they have no access to, across the top of the modal.
+    const fn = readFileSync(join(root, 'netlify/functions/review-post-quality.ts'), 'utf8');
+    assert.ok(!/error: e\?\.message/.test(fn), 'the upstream body is sent to the client again');
+    assert.ok(fn.includes("console.error('[review-post-quality] review failed:'"),
+        'the real reason is no longer logged anywhere');
+    assert.ok(fn.includes('isUpstreamBlocked(e)'), 'an outage reads as the reviewer\'s fault');
+    // Belt as well as braces on the client: this banner spans the top of the modal, so it does not
+    // take a server string on trust.
+    const guard = slice('                const why = await res.json()', '\n                const text =');
+    assert.ok(guard.includes("!/^[[{]/.test(why.trim())"), 'a JSON blob still renders in the banner');
+    assert.ok(guard.includes('why.length <= 200'), 'an essay still renders in the banner');
 });
 
 
@@ -1927,6 +1963,44 @@ check('a drag that ends over a button does not press it', () => {
         'press and release resolve the control differently');
     assert.ok(fn.includes("if (ev.type === 'pointerup' && pressedEl !== el) return;"),
         'a release anywhere fires whatever it lands on');
+});
+
+console.log('\ndeleting asks in the app\'s own voice');
+
+check('the clip panel never raises a browser confirm', () => {
+    // ⚠️ A native confirm is the browser's chrome, not ours: it names the host, it cannot be styled,
+    // and it BLOCKS — which inside a modal that is mid-render is a hazard of its own. showConfirmModal
+    // is what the rest of the app asks with.
+    const ask = slice('function _pceAsk(title, detail, verb, onYes) {', '\nwindow._pceClipTrim');
+    assert.ok(ask.includes('window.showConfirmModal'), 'the house dialog is not used');
+    assert.ok(ask.includes("confirmLabel: verb") && ask.includes("cancelLabel: 'Keep it'"),
+        'the buttons fall back to generic verbs again');
+    // A page where dialogs.js failed to load must still ASK. Ugly and correct beats silent deletion.
+    assert.ok(ask.includes('if (window.confirm(title)) onYes();'),
+        'a missing dialogs.js deletes without a question');
+    // ...and that fallback is the only confirm() left in the panel.
+    // ⚠️ CODE only. The first version of this read the whole slice and failed on the sentence
+    // "The house dialog, not window.confirm" in the comment explaining the fix — a source scan reads
+    // prose as happily as it reads calls, and a check that a string is ABSENT is the one that trips
+    // over its own documentation.
+    const del = slice('window._pceOverlayRemove = function (key) {', '\n/**\n * Ask before something')
+        .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+    assert.ok(!del.includes('window.confirm'), 'removing text still raises the browser dialog');
+    assert.ok(del.includes('_pceAsk('), 'removing text no longer asks at all');
+});
+
+check('removing a clip says what it will do to the text on it', () => {
+    // It went through without a word, on the grounds that a clip is re-addable from the library. True
+    // of the clip; not true of the text sitting on it, which gets re-timed or orphaned when the cut
+    // shuffles up.
+    const rm = slice('window._pceClipRemove = function (index) {', '\n/** The text boxes whose start');
+    assert.ok(rm.includes('_pceAsk('), 'a clip still disappears without a question');
+    assert.ok(rm.includes('_pceOverlaysOnClip(index).length'), 'it does not count what it would disturb');
+    assert.ok(rm.includes('re-timed onto the clips either side'), 'the consequence is not named');
+    // ⚠️ Re-read INSIDE the callback. The list was captured before the question was asked, so
+    // anything changed while the dialog was open would be written back over.
+    assert.ok(rm.includes('const next = _pceClips().slice();'),
+        'the clip list is captured before the user answers');
 });
 
 console.log('\nthe playhead never outlives the thing it points at');

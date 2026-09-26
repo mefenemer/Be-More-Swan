@@ -28,6 +28,7 @@ import { consumeTaskCredit } from '../../src/utils/task-credit';
 import { displayCaption } from '../../src/utils/model-json';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { stripCodeFences } from '../../src/utils/model-json';
+import { isUpstreamBlocked } from '../../src/lib/ai-gateway';
 
 const MODEL = 'claude-haiku-4-5-20251001';
 /** What fits on a still at a readable size. The overlay renderer shrinks past this, it does not wrap well. */
@@ -178,10 +179,11 @@ export default withLambda(async (event: HandlerEvent) => {
         // exhausted API balance, a revoked key or a rate limit are OUR problems, not the writer's,
         // and telling them to retry sends them round a loop that cannot end. Say which it is —
         // vaguely enough not to leak our billing state, plainly enough that they stop retrying.
-        const msg = String((error as { message?: string })?.message || '');
-        const upstreamBlocked = /credit balance|quota|billing|insufficient|rate limit|429|401|403/i.test(msg);
+        // ⚠️ ONE classifier, in the gateway, asked by class where the SDK has one. This was a regex
+        // over the message here, and a second one would have grown beside it in review-post-quality —
+        // two copies of "which failures are ours", drifting apart the first time a status changed.
         return json(503, {
-            error: upstreamBlocked
+            error: isUpstreamBlocked(error)
                 ? 'The writing assistant is unavailable right now — this is at our end, not yours. Please write the wording yourself for now; we are on it.'
                 : 'Could not write that wording. Please try again.',
         });

@@ -60,6 +60,32 @@ export function isTimeoutError(err: unknown): boolean {
     return err instanceof Anthropic.APIConnectionTimeoutError;
 }
 
+/**
+ * Is this failure OURS — an account or key problem the reader cannot fix, and that retrying will
+ * never clear?
+ *
+ * ⚠️ Callers were putting the caught error's `.message` straight into a user-facing field, and the
+ * SDK's message is the upstream body verbatim. A reviewer opening a post was shown
+ *
+ *   The quality review could not run: 400 {"type":"error","error":{"type":"invalid_request_error",
+ *   "message":"Your credit balance is too low to access the Anthropic API. Please go to Plans &
+ *   Billing to upgrade or purchase credits."},"request_id":"req_011Cf…"}
+ *
+ * across the top of the modal — our billing state, our request id, and an instruction to go and top
+ * up an account they have no access to. Ask this instead, and say something the reader can act on.
+ *
+ * Asked by CLASS wherever the SDK has one, because a status is a fact and a message is prose that
+ * changes underneath you. The exhausted balance is the exception that has to be matched on text: it
+ * arrives as a 400 invalid_request_error, indistinguishable by status from a malformed prompt.
+ */
+export function isUpstreamBlocked(err: unknown): boolean {
+    if (err instanceof Anthropic.AuthenticationError) return true;    // 401 — key revoked or wrong
+    if (err instanceof Anthropic.PermissionDeniedError) return true;  // 403
+    if (err instanceof Anthropic.RateLimitError) return true;         // 429
+    const msg = String((err as { message?: string } | null)?.message || '');
+    return /credit balance|quota|billing|insufficient/i.test(msg);
+}
+
 function isFailoverError(err: unknown): boolean {
     if (err instanceof Anthropic.RateLimitError)     return true;  // 429
     if (err instanceof Anthropic.APIError && err.status === 503) return true;

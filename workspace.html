@@ -8320,9 +8320,32 @@ window._pceClipMove = function (index, dir) {
 
 window._pceClipRemove = function (index) {
     const clips = _pceClips().slice();
-    clips.splice(index, 1);
-    _pceClipsChanged(clips);
+    const clip = clips[index];
+    if (!clip) return;
+    // ⚠️ A clip is re-addable from the library, so this used to go through without a word — but the
+    // cut re-times when it goes, and any text sitting on it moves or is orphaned. That part is not
+    // re-addable in two clicks, so it is worth naming before it happens rather than after.
+    const texts = _pceOverlaysOnClip(index).length;
+    _pceAsk(
+        `Remove clip ${index + 1}?`,
+        texts
+            ? `The ${texts === 1 ? 'text on it' : texts + ' texts on it'} will be re-timed onto the clips either side.`
+            : 'The rest of the cut shuffles up to close the gap.',
+        'Remove clip',
+        () => {
+            const next = _pceClips().slice();
+            next.splice(index, 1);
+            _pceClipsChanged(next);
+        },
+    );
 };
+
+/** The text boxes whose start falls inside clip `index` — what a removal would disturb. */
+function _pceOverlaysOnClip(index) {
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const overlays = (post && post.overlays) || [];
+    return overlays.filter((ov) => ov && _rqClipIndexAt(ov.startS == null ? 0 : ov.startS) === index);
+}
 
 /**
  * Delete a text box from the post editor.
@@ -8346,14 +8369,45 @@ window._pceOverlayRemove = function (key) {
     const what = String(ov.text || '').split('\n')[0].trim();
     // Typed words, and nothing here can bring them back — unlike a clip, which is re-addable from
     // the library in two clicks. Worth one question.
-    if (!window.confirm(what ? `Remove the text "${what.slice(0, 40)}"?` : 'Remove this text box?')) return;
-    post.overlays.splice(i, 1);
-    if (_pceSelectedOverlayId && _pceSelectedOverlayId === (ov.id || String(i))) _pceSelectedOverlayId = null;
-    _rqPersistOverlays(postId);
-    _rqRenderCanvasOverlays(post);   // off the picture as well as out of the list
-    _rqRenderTimeline(post);
-    if (typeof _pceRefreshOverlayTiming === 'function') _pceRefreshOverlayTiming();
+    //
+    // ⚠️ The house dialog, not window.confirm. A native confirm is the browser's chrome, not ours:
+    // it names the host, it cannot be styled, and it BLOCKS — which in a modal that is mid-render is
+    // its own hazard. showConfirmModal is what the rest of the app asks with.
+    _pceAsk(
+        what ? `Remove the text “${what.slice(0, 40)}”?` : 'Remove this text box?',
+        'Nothing else on the post changes.',
+        'Remove text',
+        () => {
+            post.overlays.splice(i, 1);
+            if (_pceSelectedOverlayId && _pceSelectedOverlayId === (ov.id || String(i))) _pceSelectedOverlayId = null;
+            if (_pceTextEditing === (ov.id || String(i))) _pceCloseTextLook();
+            _rqPersistOverlays(postId);
+            _rqRenderCanvasOverlays(post);   // off the picture as well as out of the list
+            _rqRenderTimeline(post);
+            if (typeof _pceRefreshOverlayTiming === 'function') _pceRefreshOverlayTiming();
+        },
+    );
 };
+
+/**
+ * Ask before something that cannot be undone, in the app's own dialog.
+ *
+ * One wrapper so the two delete paths cannot drift in wording or in behaviour, and so a page where
+ * dialogs.js failed to load still asks rather than silently deleting — the fallback is the browser's
+ * confirm, which is ugly and correct, and it is much better than no question at all.
+ */
+function _pceAsk(title, detail, verb, onYes) {
+    if (typeof window.showConfirmModal === 'function') {
+        window.showConfirmModal(detail, onYes, {
+            title,
+            confirmLabel: verb,
+            cancelLabel: 'Keep it',
+            confirmColor: '#dc2626',
+        });
+        return;
+    }
+    if (window.confirm(title)) onYes();
+}
 
 window._pceClipTrim = function (index, field, raw) {
     const clips = _pceClips().map((c) => Object.assign({}, c));
@@ -9467,7 +9521,15 @@ async function _rqLoadQualityReview(postId) {
             if (res.status >= 500) {
                 const why = await res.json().then(d => d && d.error).catch(() => null);
                 console.error('[quality review]', res.status, why || '(no reason given)');
-                const text = `The quality review could not run: ${why || 'the server did not say why'}`;
+                // ⚠️ A REASON, not a payload. The function is the right place to phrase this and now
+                // does — but this banner spans the top of the modal, so it does not take a server
+                // string on trust: anything that arrives looking like a blob (JSON, or longer than a
+                // sentence) goes to the console and the reader gets a sentence. An upstream body
+                // reached a customer through here once, carrying our billing state and a request id.
+                const clean = typeof why === 'string' && why.length <= 200
+                    && !/^[[{]/.test(why.trim()) && !why.includes('"type":')
+                    ? why : '';
+                const text = clean || 'The quality review could not run just now. Your post is unaffected — you can still edit and schedule it.';
                 window.showToast?.(text, { icon: '⚠️' });
                 const el = document.getElementById('post-review-script-alert');
                 if (el) { el.textContent = text; el.classList.remove('hidden'); }
