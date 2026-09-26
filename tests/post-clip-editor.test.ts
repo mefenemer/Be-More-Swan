@@ -1922,6 +1922,36 @@ check('a drag that ends over a button does not press it', () => {
         'a release anywhere fires whatever it lands on');
 });
 
+console.log('\na render cannot land inside another render');
+
+check('the panel refuses to repaint while it is already repainting', () => {
+    // ⚠️ THE BUG, and the browser named it:
+    //   NotFoundError: Failed to set the 'innerHTML' property on 'Element':
+    //   The node to be removed is no longer a child of this node.
+    // innerHTML removes the old children one at a time, and removing a node dispatches events. A
+    // handler that renders this panel again runs inside that loop, replaces the children, and the
+    // outer write then reaches for a node that has gone — so the write dies half-done and everything
+    // after it (unhiding, the playheads, the style panel) never runs.
+    const outer = slice('function _pceRenderClips(clipsOverride) {', '\nlet _pceRenderingClips = false;');
+    assert.ok(outer.includes('if (_pceRenderingClips) { _pceClipsRepaintPending = true; return; }'),
+        'a render can still begin inside another one');
+    assert.ok(outer.includes('finally {'), 'a throw mid-render leaves the flag set and the panel frozen');
+    assert.ok(/requestAnimationFrame\(\(\) => \{ try \{ _pceRenderClips\(\)/.test(outer),
+        'the collided repaint is dropped, or runs nested on the same stack');
+    // The deferred run must not fire under a pointer either — that is the older guard beside it.
+    assert.ok(outer.includes('if (_pceClipsRepaintPending && !_pceDragActive())'),
+        'a deferred repaint can still tear the node out from under a drag');
+});
+
+check('a measurement repaints on the next frame, not on its own stack', () => {
+    // _pceMeasureClips is called BY the render, so a clip that fails fast fires its error handler
+    // while the panel's innerHTML write is still running. That is how the nesting happened.
+    const soon = slice('function _pceRepaintClipsSoon() {', '\nfunction _pceMeasureClips(clips) {');
+    assert.ok(soon.includes('requestAnimationFrame('), 'the repaint still runs on the caller\'s stack');
+    assert.ok(soon.includes('if (_pceRepaintSoonQueued) return;'),
+        'four failing clips queue four repaints of the same list');
+});
+
 console.log('\nthe panel says when it cannot be clicked');
 
 check('a covered button is still pressed, through the stack at that point', () => {
@@ -1959,9 +1989,16 @@ check('it hit-tests its own first button and names whatever is in front', () => 
         'it still hit-tests a disabled control, which proves nothing');
     assert.ok(fn.includes('x > (window.innerWidth || 0) || y > (window.innerHeight || 0)'),
         'a button below the fold is still reported as blocked');
+    // ⚠️ And the second false positive: the point was inside the viewport but scrolled up UNDER the
+    // modal's sticky header, so the hit-test found the header and the check called it a blocker.
+    // Every ancestor that clips has to agree the point is inside it.
+    assert.ok(fn.includes('for (let a = btn.parentElement; a; a = a.parentElement)'),
+        'a button scrolled under the modal header is still reported as covered');
+    assert.ok(fn.includes("st.overflow === 'visible' && st.overflowX === 'visible'"),
+        'a non-clipping ancestor is treated as if it clipped');
     // It has to run AFTER layout — a rect read in the same tick as the innerHTML write is the rect
     // the panel had before it changed.
-    const render = slice('function _pceRenderClips(clipsOverride) {', '\n/**');
+    const render = slice('function _pceRenderClipsInner(host, clipsOverride) {', '\n/**');
     assert.ok(/requestAnimationFrame\(\(\) => \{ try \{ _pceCheckPanelReachable\(\)/.test(render),
         'the check runs inside the render, against a stale rect, or not at all');
 });

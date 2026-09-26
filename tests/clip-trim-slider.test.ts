@@ -144,7 +144,16 @@ check('a failed measure is recorded and repainted, not swallowed', () => {
     const fn = slice('function _pceMeasureClips(clips) {', '\n/**\n * ── Trimming by eye');
     const onerror = fn.slice(fn.indexOf('v.onerror'));
     assert.ok(onerror.includes('_pceClipMeasureFailed.add'), 'the failure is not recorded');
-    assert.ok(onerror.includes('_pceRenderClips()'), 'nothing redraws, so the row cannot say so');
+    // ⚠️ SOON, not now. `v.src = ''` is itself a media error, so a handler that clears the source
+    // re-enters itself; and _pceMeasureClips is called BY the render, so a clip that fails fast fires
+    // this while the panel's own innerHTML write is still removing the old children. Repainting from
+    // here nested a render inside a render, and the browser said so:
+    //   NotFoundError: The node to be removed is no longer a child of this node.
+    assert.ok(onerror.includes('_pceRepaintClipsSoon()'), 'nothing redraws, so the row cannot say so');
+    assert.ok(!/v\.onerror = \(\) => \{[^}]*_pceRenderClips\(\)/.test(fn),
+        'the repaint is synchronous again, so it can land inside the write that triggered it');
+    assert.ok(fn.includes('const done = () => { v.onloadedmetadata = null; v.onerror = null; v.src = \'\'; };'),
+        'clearing the src can re-enter the handler that cleared it');
 });
 
 check('a measured clip length is written back to the asset', () => {

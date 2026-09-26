@@ -7439,6 +7439,26 @@ const _pceClipMeasureFailed = new Set();
  * fetchable. Reporting it makes the NEXT open need no measurement at all — the same write-once
  * backfill _pceBackfillAssetMetrics uses for the canvas asset, which never saw clips.
  */
+/**
+ * Repaint the clip list, but never on the stack that asked for it.
+ *
+ * ⚠️ A media event can arrive DURING the panel's own innerHTML write — `_pceMeasureClips` is called
+ * by the render, and a clip whose url will not load can fail before that call returns. Repainting
+ * from there nests a render inside a render. The guard in _pceRenderClips now refuses that, but the
+ * honest fix is not to ask: a measurement that has just landed is news for the next frame, not for
+ * the middle of this one.
+ */
+let _pceRepaintSoonQueued = false;
+function _pceRepaintClipsSoon() {
+    if (_pceRepaintSoonQueued) return;
+    _pceRepaintSoonQueued = true;
+    requestAnimationFrame(() => {
+        _pceRepaintSoonQueued = false;
+        try { _pceRenderClips(); }
+        catch (err) { console.error('[clips] repaint after measure', err); }
+    });
+}
+
 function _pceMeasureClips(clips) {
     for (const c of clips) {
         if (!c.url) continue;
@@ -7449,28 +7469,34 @@ function _pceMeasureClips(clips) {
         const v = document.createElement('video');
         v.preload = 'metadata';
         v.muted = true;
+        // ⚠️ ONE SHOT, and detached before the src is cleared. `v.src = ''` is itself an error for a
+        // media element ("Empty src attribute"), so a handler that clears the source re-enters
+        // itself — and each pass repainted the panel, which is how a render ended up nested inside
+        // its own innerHTML write. Nulling both handlers first makes the clear silent.
+        const done = () => { v.onloadedmetadata = null; v.onerror = null; v.src = ''; };
         v.onloadedmetadata = () => {
             _pceClipMeasuring.delete(c.assetId);
-            if (isFinite(v.duration) && v.duration > 0) {
-                _pceClipDurations[c.assetId] = v.duration;
-                _pceReportClipMetrics(c.assetId, v.videoWidth, v.videoHeight, v.duration);
+            const w = v.videoWidth, h = v.videoHeight, dur = v.duration;
+            done();
+            if (isFinite(dur) && dur > 0) {
+                _pceClipDurations[c.assetId] = dur;
+                _pceReportClipMetrics(c.assetId, w, h, dur);
                 // One repaint: the axis IS the cut's total and the timed rows live in this same
                 // list, so they grow together as each clip reports its length.
-                _pceRenderClips();
+                _pceRepaintClipsSoon();
             }
-            if (v.videoWidth > 0 && v.videoHeight > 0) {
-                _pceClipAspect[c.assetId] = v.videoWidth / v.videoHeight;
+            if (w > 0 && h > 0) {
+                _pceClipAspect[c.assetId] = w / h;
                 _pceRenderCropFrame();
             }
-            v.src = '';
         };
         v.onerror = () => {
             _pceClipMeasuring.delete(c.assetId);
             _pceClipMeasureFailed.add(c.assetId);
-            v.src = '';
+            done();
             // Repaint, so the row can say so. Silence here is what made a dead clip and a slow one
             // look identical.
-            _pceRenderClips();
+            _pceRepaintClipsSoon();
         };
         v.src = c.url;
     }
@@ -7648,6 +7674,7 @@ const PCE_ACTS = {
 
     // ⚠️ Reported once, named once. A covered panel is one fact, not one per click.
     let coverSaid = '';
+    let missSaid = '';
     /**
      * The control under the pointer, even when something is drawn over it.
      *
@@ -7684,6 +7711,16 @@ const PCE_ACTS = {
                 }
             }
             return hit;
+        }
+        // ⚠️ The last silent case, so it is not silent. A press landed inside the panel and matched no
+        // control — not by `closest`, and not anywhere in the stack at that point. Everything else
+        // here now reports itself: an action that throws toasts, an action that runs changes the
+        // screen, a covered control says what covered it. This one used to be indistinguishable from
+        // a press that was never made, which is the whole history of this bug.
+        if (missSaid !== ev.type) {
+            missSaid = ev.type;
+            console.warn('[clip panel] ' + ev.type + ' inside the panel matched no control',
+                ev.target, 'at', ev.clientX, ev.clientY);
         }
         return null;
     };
@@ -8067,11 +8104,21 @@ function _pceCheckPanelReachable() {
     if (!(r.width > 0) || !(r.height > 0)) return;          // not laid out yet — nothing to conclude
     const x = r.left + r.width / 2;
     const y = r.top + r.height / 2;
-    // ⚠️ AND the point has to be ON SCREEN. elementFromPoint returns null for anything outside the
-    // viewport, and the panel renders while the modal is still being built, usually below the fold —
-    // so the first version of this check reported "blocked by null" on a perfectly healthy panel and
-    // sent me after a bug that was its own measurement. Off screen is not a finding.
+    // ⚠️ AND the point has to be somewhere a hit-test can mean anything. The panel renders while the
+    // modal is still being built and is usually scrolled out of view at that moment, which produced
+    // two confident, wrong reports from the first version of this check: "blocked by null" (the point
+    // was outside the viewport, where elementFromPoint finds nothing at all) and "blocked by the
+    // modal's header" (the button was scrolled up underneath it). Neither was a blocker. Out of view
+    // is not a finding, and a check that cannot tell the difference is worse than no check.
     if (x < 0 || y < 0 || x > (window.innerWidth || 0) || y > (window.innerHeight || 0)) return;
+    // Every ancestor that CLIPS has to agree the point is inside it — that is what "scrolled out of
+    // view" means, and the modal's scroller is one of them.
+    for (let a = btn.parentElement; a; a = a.parentElement) {
+        const st = getComputedStyle(a);
+        if (st.overflow === 'visible' && st.overflowX === 'visible' && st.overflowY === 'visible') continue;
+        const b = a.getBoundingClientRect();
+        if (x < b.left || x > b.right || y < b.top || y > b.bottom) return;
+    }
     const at = document.elementFromPoint(x, y);
     if (at === btn || (at && (btn.contains(at) || at.contains(btn)))) { _pceCoverWarned = ''; return; }
 
@@ -8254,6 +8301,36 @@ function _pceRenderClips(clipsOverride) {
     if (!host) return;
     // See _pceDragActive: repainting now would tear the node out from under the pointer.
     if (_pceDragActive()) { _pceClipsRepaintPending = true; return; }
+    // ⚠️ NOT RE-ENTRANT, and the browser will not forgive it:
+    //
+    //   Uncaught NotFoundError: Failed to set the 'innerHTML' property on 'Element':
+    //   The node to be removed is no longer a child of this node.
+    //
+    // Setting innerHTML removes the old children one at a time, and removing a node dispatches
+    // events. A handler that renders this panel again runs INSIDE that loop, replaces the children,
+    // and the outer write then reaches for a node that is no longer there — so the write dies
+    // half-done, the panel is left with whatever survived, and everything after the write
+    // (unhiding, the playheads, the style panel) never runs for that call.
+    //
+    // The route in was _pceMeasureClips: a clip whose url will not load fires `error`, and that
+    // handler repainted synchronously. Same shape as the drag guard directly above — a repaint
+    // arriving during work that is holding a node — so it takes the same answer.
+    if (_pceRenderingClips) { _pceClipsRepaintPending = true; return; }
+    _pceRenderingClips = true;
+    try { _pceRenderClipsInner(host, clipsOverride); }
+    finally {
+        _pceRenderingClips = false;
+        // A render that asked to happen while this one was running still has to happen — but on a
+        // clean stack, not nested inside the write it collided with.
+        if (_pceClipsRepaintPending && !_pceDragActive()) {
+            _pceClipsRepaintPending = false;
+            requestAnimationFrame(() => { try { _pceRenderClips(); } catch (e) { console.error('[clips] deferred repaint', e); } });
+        }
+    }
+}
+
+let _pceRenderingClips = false;
+function _pceRenderClipsInner(host, clipsOverride) {
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
     const clips = clipsOverride || _pceClips(post);
     // The timed rows that used to be a Timeline panel of their own, now folded in under the clip
