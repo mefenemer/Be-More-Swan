@@ -1912,12 +1912,31 @@ check('pointerup drives them too, not click alone', () => {
 check('a drag that ends over a button does not press it', () => {
     // Releasing a clip you were reordering on top of "+ Add text" would otherwise add text.
     const fn = slice('(function _pceBindPanelActionsOnce() {', '\n})();');
-    assert.ok(fn.includes('pressedEl = ev.target && ev.target.closest'), 'the press start is not recorded');
+    assert.ok(fn.includes("closest('[data-pce-act]')) || under(ev);"), 'the press start is not recorded');
+    // ⚠️ Resolved the SAME way at both ends. A covered button records a press of `null` and is then
+    // rejected on release for not matching itself — the fallback would work on click and never on
+    // pointerup, which is the half-working version of this bug.
+    assert.strictEqual(fn.split('|| under(ev)').length - 1, 2,
+        'press and release resolve the control differently');
     assert.ok(fn.includes("if (ev.type === 'pointerup' && pressedEl !== el) return;"),
         'a release anywhere fires whatever it lands on');
 });
 
 console.log('\nthe panel says when it cannot be clicked');
+
+check('a covered button is still pressed, through the stack at that point', () => {
+    // Capture on document guarantees the handler RUNS; it cannot fix ev.target. With something over
+    // the panel the target is that something, and closest() walks up its ancestry and never reaches
+    // the button. elementsFromPoint returns the whole stack, so the press can be honoured anyway.
+    const fn = slice('(function _pceBindPanelActionsOnce() {', '\n})();');
+    assert.ok(fn.includes('document.elementsFromPoint(ev.clientX, ev.clientY)'),
+        'a covered control is still silently dropped');
+    assert.ok(fn.includes('!host.contains(hit)'), 'it would press a control outside the panel');
+    // Gated on the panel's rect: a stray click anywhere else must not cost a stack walk.
+    assert.ok(fn.includes('ev.clientX < box.left || ev.clientX > box.right'),
+        'every click on the page pays for this');
+    assert.ok(fn.includes("if (what !== coverSaid)"), 'the coverer is named on every click, not once');
+});
 
 check('it hit-tests its own first button and names whatever is in front', () => {
     // ⚠️ Four wrong diagnoses in, the decisive report was that the DevTools element picker would not
@@ -1933,6 +1952,13 @@ check('it hit-tests its own first button and names whatever is in front', () => 
     assert.ok(fn.includes('if (what === _pceCoverWarned) return;'),
         'one cause would toast on every repaint');
     assert.ok(fn.includes('window.showToast'), 'the finding goes only where nobody is looking');
+    // ⚠️ Both of these were flaws in the first version, and it duly reported "blocked by null" on a
+    // healthy panel: it hit-tested clip 1's "move earlier", which is disabled by definition, at a
+    // point below the fold, where elementFromPoint returns null for anything at all.
+    assert.ok(fn.includes("'[data-pce-act]:not([disabled])'"),
+        'it still hit-tests a disabled control, which proves nothing');
+    assert.ok(fn.includes('x > (window.innerWidth || 0) || y > (window.innerHeight || 0)'),
+        'a button below the fold is still reported as blocked');
     // It has to run AFTER layout — a rect read in the same tick as the innerHTML write is the rect
     // the panel had before it changed.
     const render = slice('function _pceRenderClips(clipsOverride) {', '\n/**');

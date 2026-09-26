@@ -7641,11 +7641,55 @@ const PCE_ACTS = {
     // top of "+ Add text" would add text. It is also what a click actually means.
     let pressedEl = null;
     document.addEventListener('pointerdown', (ev) => {
-        pressedEl = ev.target && ev.target.closest ? ev.target.closest('[data-pce-act]') : null;
+        // Resolved the SAME way as the release, or a covered button records a press of `null` and is
+        // then rejected on pointerup for not matching itself.
+        pressedEl = (ev.target && ev.target.closest && ev.target.closest('[data-pce-act]')) || under(ev);
     }, true);
 
+    // ⚠️ Reported once, named once. A covered panel is one fact, not one per click.
+    let coverSaid = '';
+    /**
+     * The control under the pointer, even when something is drawn over it.
+     *
+     * Capture on `document` means nothing can stop this handler running — but it cannot fix
+     * `ev.target`. If an element is over the panel, the click's target is that element, and a
+     * `closest()` from it walks up through the coverer's own ancestry and never reaches the button.
+     *
+     * So when a press inside the panel's box finds no control, ask the page what else is at that
+     * point. `elementsFromPoint` returns the whole stack, deepest paint first, so the button is in
+     * there behind whatever is on top of it — and the press can be honoured anyway rather than
+     * silently dropped. The coverer gets named, because a panel you can only use through a fallback
+     * is still broken.
+     *
+     * Gated on the panel's own rect so a stray click anywhere else on the page costs nothing.
+     */
+    const under = (ev) => {
+        const host = document.getElementById('pce-clips-block');
+        if (!host || !document.elementsFromPoint || ev.clientX == null) return null;
+        const box = host.getBoundingClientRect();
+        if (!box.width || ev.clientX < box.left || ev.clientX > box.right
+            || ev.clientY < box.top || ev.clientY > box.bottom) return null;
+        for (const cand of document.elementsFromPoint(ev.clientX, ev.clientY)) {
+            const hit = cand.closest && cand.closest('[data-pce-act]');
+            if (!hit || !host.contains(hit)) continue;
+            const what = ev.target && ev.target.tagName
+                ? ev.target.tagName.toLowerCase() + (ev.target.id ? '#' + ev.target.id : '')
+                : 'something';
+            if (what !== coverSaid) {
+                coverSaid = what;
+                console.error('[clip panel] ' + what + ' is over the controls; using the button beneath it', ev.target);
+                if (window.showToast) {
+                    window.showToast(what + ' is covering the clip controls \u2014 using the button underneath.',
+                        { icon: '\u26a0\ufe0f' });
+                }
+            }
+            return hit;
+        }
+        return null;
+    };
+
     const fire = (ev) => {
-        const el = ev.target && ev.target.closest && ev.target.closest('[data-pce-act]');
+        const el = (ev.target && ev.target.closest && ev.target.closest('[data-pce-act]')) || under(ev);
         if (!el || el.disabled) return;
         const key = el.getAttribute('data-pce-act');
         if (key === 'clip-trim') return;                // a number box, handled on `change`
@@ -8015,15 +8059,24 @@ let _pceCoverWarned = '';
 function _pceCheckPanelReachable() {
     const host = document.getElementById('pce-clips-block');
     if (!host || host.classList.contains('hidden')) return;
-    const btn = host.querySelector('[data-pce-act]');
+    // ⚠️ Not a DISABLED one. The first control in the panel is clip 1's "move earlier", which is
+    // disabled by definition, and hit-testing it proves nothing about the buttons that do something.
+    const btn = host.querySelector('[data-pce-act]:not([disabled])');
     if (!btn) return;
     const r = btn.getBoundingClientRect();
     if (!(r.width > 0) || !(r.height > 0)) return;          // not laid out yet — nothing to conclude
-    const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    const x = r.left + r.width / 2;
+    const y = r.top + r.height / 2;
+    // ⚠️ AND the point has to be ON SCREEN. elementFromPoint returns null for anything outside the
+    // viewport, and the panel renders while the modal is still being built, usually below the fold —
+    // so the first version of this check reported "blocked by null" on a perfectly healthy panel and
+    // sent me after a bug that was its own measurement. Off screen is not a finding.
+    if (x < 0 || y < 0 || x > (window.innerWidth || 0) || y > (window.innerHeight || 0)) return;
+    const at = document.elementFromPoint(x, y);
     if (at === btn || (at && (btn.contains(at) || at.contains(btn)))) { _pceCoverWarned = ''; return; }
 
     const name = (el) => {
-        if (!el) return 'something outside the page is taking the click';
+        if (!el) return 'nothing the page can see';
         const id = el.id ? '#' + el.id : '';
         const cls = typeof el.className === 'string' && el.className.trim()
             ? '.' + el.className.trim().split(/\s+/).slice(0, 3).join('.')
