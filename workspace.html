@@ -7296,6 +7296,19 @@ function _pceCutTime(video) {
     const clips = _pceClips();
     if (!clips.length) return t;
 
+    // ⚠️ AN ELEMENT MID-LOAD KNOWS NOTHING, and says so confidently.
+    //
+    // `currentSrc` lags `src`: assigning src starts the load algorithm asynchronously, and until it
+    // gets going the element still reports the PREVIOUS file and the previous currentTime. Stopping a
+    // preview restores the base asset and repaints in the same breath, so the match below found the
+    // clip that had just been playing and returned a moment from the middle of the cut — a playhead
+    // stranded across clip 2's text row on a video reading 0:00. Reported as "a black vertical line
+    // left on top of the second text overlay".
+    //
+    // readyState is HAVE_NOTHING for exactly that window. Nought is the honest answer there, and the
+    // next paint (below, on loadedmetadata) has the real one.
+    if (!_pcePrev.on && video && video.readyState === 0) return 0;
+
     let i = -1;
     if (_pcePrev.on) i = _pcePrev.i;
     else if (video && video.currentSrc) i = clips.findIndex((c) => c && c.url && c.url === video.currentSrc);
@@ -7400,6 +7413,14 @@ window._pcePreviewStop = function () {
     _pceCloseTextLook();
     _pceCanvasRestore();
     _pceRenderClips();
+    // ⚠️ And again once the restored clip is actually loaded. The repaint above runs while the element
+    // is still reporting the preview's last clip, so it can only draw the playhead at nought; this is
+    // where the truth arrives. `once`, so stopping twice does not stack listeners.
+    const v = _pcePreviewVideoEl();
+    if (v) v.addEventListener('loadedmetadata', () => {
+        const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+        _rqPaintPlayheads(_pceCutTime(v), _rqTimelineDuration(post));
+    }, { once: true });
 };
 
 /**

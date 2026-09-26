@@ -1929,6 +1929,29 @@ check('a drag that ends over a button does not press it', () => {
         'a release anywhere fires whatever it lands on');
 });
 
+console.log('\nthe playhead never outlives the thing it points at');
+
+check('an element mid-load is not asked where it is', () => {
+    // ⚠️ `currentSrc` LAGS `src`. Assigning src starts the load algorithm asynchronously, so until it
+    // gets going the element still reports the previous file and the previous currentTime. Stopping a
+    // preview restores the base asset and repaints in the same breath, so the clip match found the
+    // clip that had just been playing and returned a moment from the middle of the cut — a playhead
+    // stranded across clip 2's text row on a video reading 0:00.
+    const fn = slice('function _pceCutTime(video) {', '\nfunction _pcePreviewVideoEl()');
+    assert.ok(fn.includes('if (!_pcePrev.on && video && video.readyState === 0) return 0;'),
+        'a reloading element is still trusted to say where the cut is');
+    assert.ok(fn.indexOf('readyState === 0') < fn.indexOf('video.currentSrc'),
+        'the stale currentSrc is matched before the guard can stop it');
+});
+
+check('stopping repaints again once the restored clip has loaded', () => {
+    // Nought is the honest answer during the reload; this is where the truth arrives.
+    const stop = slice('window._pcePreviewStop = function () {', '\nfunction _pcePreviewTick(video) {');
+    assert.ok(stop.includes("v.addEventListener('loadedmetadata'"), 'the playhead is left at nought for good');
+    assert.ok(stop.includes('{ once: true }'), 'stopping twice stacks listeners');
+    assert.ok(stop.includes('_rqPaintPlayheads(_pceCutTime(v)'), 'it repaints something other than the playheads');
+});
+
 console.log('\nstyling opens because you asked, not because something got selected');
 
 check('an intent opens it, and a selection does not', () => {
