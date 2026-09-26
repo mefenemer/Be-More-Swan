@@ -1303,14 +1303,14 @@ check('a click selects without writing a position', () => {
     const ioe = readFileSync(join(root, 'src/components/image-overlay-editor.js'), 'utf8');
     const fn = ioe.slice(ioe.indexOf('function attachPositionDrag('), ioe.indexOf('// ══ Shared controls'));
     assert.ok(fn.includes('hooks.onDrop(ov, moved)'), 'the drop is not told whether anything moved');
-    const canvas = slice('function _rqRenderCanvasOverlays(post) {', '\n/**');
+    const canvas = slice('function _rqRenderCanvasOverlays(post, canvasOnly) {', '\n/**');
     assert.ok(canvas.includes('if (!moved) return;'), 'a plain click saves a position that did not change');
 });
 
 check('the canvas does not repaint under a drag', () => {
     // Third surface, same rule as the clip list and the timeline: repainting replaces the node the
     // pointer is holding, and the drag then writes positions nothing can see.
-    const canvas = slice('function _rqRenderCanvasOverlays(post) {', '\n/**');
+    const canvas = slice('function _rqRenderCanvasOverlays(post, canvasOnly) {', '\n/**');
     assert.ok(canvas.includes('if (_rqOvDragId && _pcePointerHeld) return;'), 'the layer repaints mid-drag');
     assert.ok(canvas.includes('_rqOvDragId = null;'), 'the guard is never released');
 });
@@ -1510,7 +1510,7 @@ check('hiding every clip refuses to preview, and says why', () => {
 });
 
 check('a hidden box is filtered from the canvas, not removed from the post', () => {
-    const canvas = slice('function _rqRenderCanvasOverlays(post) {', '\n/**');
+    const canvas = slice('function _rqRenderCanvasOverlays(post, canvasOnly) {', '\n/**');
     assert.ok(canvas.includes('overlays.filter((ov) => !_pceTextHidden(ov && ov.id))'),
         'hidden text is still painted');
     assert.ok(canvas.includes('render(layer, shown,'), 'the filtered list is not the one painted');
@@ -1861,7 +1861,7 @@ check("the buttons do not depend on the canvas having painted", () => {
 check('a canvas drag cannot wedge the layer, or the binders behind it', () => {
     // Same leak class as _pceDragActive, on the surface I had not applied it to — and this one
     // takes _rqBindTimeline down with it, because that call sits below the guard.
-    const canvas = slice('function _rqRenderCanvasOverlays(post) {', '\n/**');
+    const canvas = slice('function _rqRenderCanvasOverlays(post, canvasOnly) {', '\n/**');
     assert.ok(canvas.includes('if (_rqOvDragId && _pcePointerHeld) return;'),
         'a leaked canvas drag still stops the layer repainting for good');
     assert.ok(canvas.includes('if (_rqOvDragId) _rqOvDragId = null;'), 'the stale drag is never cleared');
@@ -1920,6 +1920,54 @@ check('a drag that ends over a button does not press it', () => {
         'press and release resolve the control differently');
     assert.ok(fn.includes("if (ev.type === 'pointerup' && pressedEl !== el) return;"),
         'a release anywhere fires whatever it lands on');
+});
+
+console.log('\nthe caret survives, and so do the text rows');
+
+check('typing paints the picture without rebuilding the row it is typed in', () => {
+    // ⚠️ _rqRenderCanvasOverlays does two jobs, and a keystroke only wants the first — it ends by
+    // repainting the clip list. The input handler called it under a comment reading "the picture keeps
+    // up; the list waits for the caret", which described the intent and not the call. Every letter
+    // rebuilt the field being typed in: "I can add text but only one letter at a time".
+    const canvas = slice('function _rqRenderCanvasOverlays(post, canvasOnly) {', '\n/**');
+    assert.ok(canvas.includes('if (canvasOnly) return;'), 'there is no canvas-only paint to ask for');
+    assert.ok(canvas.indexOf('if (canvasOnly) return;') < canvas.indexOf('_pceRenderClips()'),
+        'the canvas-only path still repaints the list');
+    const input = workspace.slice(workspace.indexOf("host.addEventListener('input', (ev) => {"));
+    const body = input.slice(0, input.indexOf('});'));
+    assert.ok(body.includes("data-tl-text"), 'that is not the text field\'s input handler any more');
+    assert.ok(body.includes('_rqRenderCanvasOverlays(post, true)'),
+        'a keystroke still triggers a full repaint');
+});
+
+check('a repaint under the caret puts it back', () => {
+    // A belt for those braces: the list holds a text field and two number boxes per row and is
+    // repainted by eleven callers. One of them repainting while a field has focus is a matter of time,
+    // and it reads as the field rejecting input rather than as a repaint.
+    const memo = slice('function _pceFocusMemo() {', '\nfunction _pceFocusRestore(m) {');
+    // Re-found by IDENTIFYING ATTRIBUTE, never by node identity — the node is gone by then.
+    for (const a of ['data-tl-text', 'data-tl-num', 'data-pce-act']) {
+        assert.ok(memo.includes(`'${a}'`), `${a} fields lose the caret on a repaint`);
+    }
+    const outer = slice('function _pceRenderClips(clipsOverride) {', '\nlet _pceRenderingClips = false;');
+    assert.ok(outer.includes('const focus = _pceFocusMemo();'), 'nothing remembers where the caret was');
+    assert.ok(outer.includes('_pceFocusRestore(focus)'), 'nothing puts it back');
+    assert.ok(outer.indexOf('_pceFocusRestore(focus)') > outer.indexOf('_pceRenderingClips = false;'),
+        'the restore runs before the render is marked finished');
+    const restore = slice('function _pceFocusRestore(m) {', '\nfunction _pceRenderClipsInner(');
+    assert.ok(restore.includes('m.memo.selectionStart'),
+        'the selection is read off the new node, which has not got one yet');
+    assert.ok(restore.includes('preventScroll: true'), 'restoring focus scrolls the modal');
+});
+
+check('the text rows come from the post, not from what is painted', () => {
+    // ⚠️ `isVideo` read only the canvas — "is there a video element in the preview right now" — and
+    // previewing the cut swaps that element's source clip by clip. A repaint mid-swap saw no video, so
+    // overlays came back EMPTY: "when I watch the whole video, it then hides any text layers".
+    const parts = slice('function _rqTimelineParts(post) {', '\n/**');
+    assert.ok(parts.includes('_pcePostIsVideo(post) ||'),
+        'the panel still decides a post is not a video because the picture moved');
+    assert.ok(parts.includes("const overlays = isVideo ?"), 'the overlay source changed shape');
 });
 
 console.log('\na render cannot land inside another render');

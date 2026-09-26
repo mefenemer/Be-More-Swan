@@ -6508,7 +6508,16 @@ function _pceFitCanvasToView() {
 }
 window.addEventListener('resize', () => _pceFitCanvasToView());
 
-function _rqRenderCanvasOverlays(post) {
+/**
+ * @param canvasOnly Paint the boxes on the picture and STOP — no list repaint, no rebinding.
+ *
+ * ⚠️ This function does two jobs, and a keystroke only wants the first. It paints the overlay layer,
+ * and then it repaints the clip list, the crop frame and the timeline. The panel's text field called
+ * it on every `input` — under a comment reading "the picture keeps up; the list waits for the caret",
+ * which described the intent and not the call — so every letter typed rebuilt the row the caret was
+ * in. One letter, then focus gone, reported exactly that way.
+ */
+function _rqRenderCanvasOverlays(post, canvasOnly) {
     const body = document.getElementById('post-review-body');
     const layer = body && body.querySelector('[data-overlay-layer]');
     if (!layer || !window.ImageOverlayEditor) { _rqHideTimeline(); return; }
@@ -6614,6 +6623,7 @@ function _rqRenderCanvasOverlays(post) {
     // place on it. _rqRenderTimeline decides what rows there are (text is timed on video only).
     //
     // Clips first: the cut decides how long the piece is, so the timeline's axis is downstream of it.
+    if (canvasOnly) return;
     _pceRenderClips();
     _pceRenderCropFrame();
     _pceBindCropFrame();
@@ -6749,7 +6759,17 @@ const _RQ_TL_COLOURS = {
  */
 function _rqTimelineParts(post) {
     const none = { any: false, note: '', dur: 0, byClip: [], orphans: '', audio: '', isVideo: false };
-    const isVideo = !!document.querySelector('#post-review-body [data-media-video]');
+    // ⚠️ THE POST decides this, not what is painted at this instant.
+    //
+    // It read only the canvas — "is there a video element in the preview right now" — and previewing
+    // the cut swaps that element's source clip by clip. Any repaint during the swap, or after a
+    // restore whose source will not load, saw no video, so `overlays` came back EMPTY and every text
+    // row vanished from the panel. Reported as "when I watch the whole video, it then hides any text
+    // layers from the right panel", and it was: the rows were gone because the picture had moved.
+    //
+    // A post's format does not change while you watch it. The canvas stays as a fallback for the one
+    // case the post cannot answer — a draft carrying a video that the record does not describe yet.
+    const isVideo = _pcePostIsVideo(post) || !!document.querySelector('#post-review-body [data-media-video]');
     const overlays = isVideo ? ((post && post.overlays) || []) : [];
     const audioClips = _pceAudioClips(post);
     // ⚠️ isVideo travels even when there is nothing timed yet. The per-clip "+ Add text" is drawn
@@ -8317,9 +8337,11 @@ function _pceRenderClips(clipsOverride) {
     // arriving during work that is holding a node — so it takes the same answer.
     if (_pceRenderingClips) { _pceClipsRepaintPending = true; return; }
     _pceRenderingClips = true;
+    const focus = _pceFocusMemo();
     try { _pceRenderClipsInner(host, clipsOverride); }
     finally {
         _pceRenderingClips = false;
+        try { _pceFocusRestore(focus); } catch (e) { console.error('[clips] focus restore', e); }
         // A render that asked to happen while this one was running still has to happen — but on a
         // clean stack, not nested inside the write it collided with.
         if (_pceClipsRepaintPending && !_pceDragActive()) {
@@ -8330,6 +8352,52 @@ function _pceRenderClips(clipsOverride) {
 }
 
 let _pceRenderingClips = false;
+
+/**
+ * Put the caret back where it was after the panel is rebuilt.
+ *
+ * ⚠️ A belt for the braces. Typing now paints the canvas without rebuilding the list, so the caret
+ * should survive on its own — but the list holds a text field and two number boxes per row, and it is
+ * repainted by eleven different callers. One of them wanting to repaint while a field has focus is a
+ * matter of time, and the symptom is miserable to diagnose: it looks like the field rejecting input
+ * rather than like a repaint, which is how "I can add text but only one letter at a time" was read for
+ * a while.
+ *
+ * Fields are re-found by the attribute that identifies them (`data-tl-text`, `data-tl-num` with
+ * `data-tl-for`, `data-pce-act` with `data-pce-i`) rather than by node identity, because the node is
+ * gone by then — that is the whole problem.
+ */
+function _pceFocusMemo() {
+    const el = document.activeElement;
+    const host = document.getElementById('pce-clips-block');
+    if (!el || !host || !host.contains(el)) return null;
+    const attrs = ['data-tl-text', 'data-tl-num', 'data-pce-act'];
+    const sel = attrs
+        .filter((a) => el.hasAttribute(a))
+        .map((a) => `[${a}="${CSS.escape(el.getAttribute(a))}"]`)
+        .join('');
+    if (!sel) return null;
+    for (const a of ['data-tl-for', 'data-pce-i', 'data-pce-key', 'data-pce-field']) {
+        if (el.hasAttribute(a)) return { sel: sel + `[${a}="${CSS.escape(el.getAttribute(a))}"]` , memo: el };
+    }
+    return { sel, memo: el };
+}
+
+function _pceFocusRestore(m) {
+    if (!m) return;
+    const host = document.getElementById('pce-clips-block');
+    const next = host && host.querySelector(m.sel);
+    if (!next || next === document.activeElement) return;
+    // Selection read AFTER the rebuild would be the new field's; it has to come off the old node,
+    // which is detached but still holds what was typed into it.
+    let start = null, end = null;
+    try { start = m.memo.selectionStart; end = m.memo.selectionEnd; } catch (e) { /* not a text field */ }
+    try {
+        next.focus({ preventScroll: true });
+        if (start != null && next.setSelectionRange) next.setSelectionRange(start, end);
+    } catch (e) { /* a field that cannot take a range is still focused */ }
+}
+
 function _pceRenderClipsInner(host, clipsOverride) {
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
     const clips = clipsOverride || _pceClips(post);
@@ -9092,7 +9160,13 @@ function _rqBindTimeline() {
         const ov = post && _rqTimelineItem('text', el.getAttribute('data-tl-text'));
         if (!ov) return;
         ov.text = el.value;
-        _rqRenderCanvasOverlays(post);   // the picture keeps up; the list waits for the caret
+        // ⚠️ NOT _rqRenderCanvasOverlays. That comment said "the list waits for the caret" and was
+        // true of the intent and false of the call: _rqRenderCanvasOverlays ends by calling
+        // _pceRenderClips, so every keystroke rebuilt the row the caret was in. One letter, then the
+        // focus was gone — which is exactly how it was reported.
+        // Canvas only. The picture has to keep up — watching the words land on the image is why this
+        // field is in the panel and not in a modal — but the list must not be rebuilt under the caret.
+        _rqRenderCanvasOverlays(post, true);
     });
 
     host.addEventListener('pointerup', end);

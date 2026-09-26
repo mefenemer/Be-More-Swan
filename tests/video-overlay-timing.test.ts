@@ -106,7 +106,7 @@ check('an unreadable clip is never given an invented length', () => {
 check('reconciling runs on both metadata paths', () => {
     // A cached <video> already has its metadata when the canvas mounts and fires no loadedmetadata,
     // so hanging the repair only on the event would skip the reopened post entirely.
-    const paint = extract('function _rqRenderCanvasOverlays(post) {');
+    const paint = extract('function _rqRenderCanvasOverlays(post, canvasOnly) {');
     const calls = paint.match(/_rqReconcileOverlayTimes\(/g) || [];
     assert.strictEqual(calls.length, 2, 'both the loadedmetadata path and the already-loaded path');
 });
