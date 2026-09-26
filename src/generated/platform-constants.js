@@ -648,6 +648,113 @@
     neutral: "#9ca3af",
   };
 
+  // ── Overlay fonts (src/lib/overlay-fonts.ts) ─────────────────────────────────────────────────
+  // The text-overlay picker, and the CSS stack each choice resolves to.
+  //
+  // The 'id' is the value STORED on an overlay and is unchanged from when the picker offered bare
+  // OS font names - this is a resolution layer, not a migration. The stack puts a webfont first so the
+  // editor, the browser bake and Remotion Lambda all draw with the same file rather than with
+  // whatever each machine happens to have installed. See the module for why that was necessary.
+  var OVERLAY_FONTS = [
+    {"id":"Arial","label":"Arial","stack":"'Arimo', Arial, Helvetica, sans-serif","metricClone":true},
+    {"id":"Helvetica","label":"Helvetica","stack":"'Arimo', Helvetica, Arial, sans-serif","metricClone":true},
+    {"id":"Georgia","label":"Georgia","stack":"'Gelasio', Georgia, serif","metricClone":true},
+    {"id":"Times New Roman","label":"Times New Roman","stack":"'Tinos', 'Times New Roman', Times, serif","metricClone":true},
+    {"id":"Courier New","label":"Courier New","stack":"'Cousine', 'Courier New', Courier, monospace","metricClone":true},
+    {"id":"Verdana","label":"Verdana","stack":"'Open Sans', Verdana, Geneva, sans-serif","metricClone":false},
+    {"id":"Trebuchet MS","label":"Trebuchet MS","stack":"'Cabin', 'Trebuchet MS', sans-serif","metricClone":false},
+    {"id":"Impact","label":"Impact","stack":"'Anton', Impact, 'Arial Narrow Bold', sans-serif","metricClone":false},
+    {"id":"Comic Sans MS","label":"Comic Sans","stack":"'Comic Neue', 'Comic Sans MS', cursive","metricClone":false},
+  ];
+
+  /**
+   * How a text box arrives and leaves — the browser's copy of overlayAnimAt.
+   *
+   * ⚠️ The canvas preview used to only toggle boxes on and off, so picking Fade, Rise or Pop
+   * changed nothing you could see until the video had been rendered on Lambda. Three options that
+   * appear to do nothing are worse than not offering them.
+   *
+   * This is the ONE place the maths is mirrored, and tests/overlay-anim-client.test.ts runs it
+   * against overlayAnimAt over a grid of inputs — if either side changes, that fails. Do not edit
+   * this by hand: it is generated, and a hand edit is exactly the drift the generator exists to
+   * stop. Frame-based, same as the renderer, so the preview cannot be a second off by rounding.
+   */
+  window.OverlayAnims = {
+    RAMP_S: 0.35,
+    OPTIONS: [{"id":"none","label":"Cut","hint":"Appears and disappears instantly"},{"id":"fade","label":"Fade","hint":"Fades in and out"},{"id":"rise","label":"Rise","hint":"Slides up as it fades in"},{"id":"pop","label":"Pop","hint":"Springs up to size"}],
+
+    read: function (v) {
+      var ids = window.OverlayAnims.OPTIONS.map(function (a) { return a.id; });
+      return typeof v === 'string' && ids.indexOf(v) !== -1 ? v : 'none';
+    },
+
+    /** { opacity, transform } at frame N of a box that is on screen for a total of M frames. */
+    at: function (anim, frame, frames, fps) {
+      var kind = window.OverlayAnims.read(anim);
+      if (kind === 'none') return { opacity: 1, transform: 'none' };
+      var clamp01 = function (n) { return Math.min(1, Math.max(0, n)); };
+      var total = Math.max(1, Math.floor(frames) || 1);
+      var ramp = Math.max(1, Math.min(Math.round(window.OverlayAnims.RAMP_S * fps), Math.floor(total / 2)));
+      var f = Math.min(Math.max(Math.floor(frame) || 0, 0), total);
+      var inP = clamp01(f / ramp);
+      var outP = clamp01((total - f) / ramp);
+      var p = Math.min(inP, outP);
+      if (kind === 'fade') return { opacity: p, transform: 'none' };
+      if (kind === 'rise') {
+        var y = (1 - inP) * 4;
+        return { opacity: p, transform: y > 0.01 ? 'translateY(' + y + '%)' : 'none' };
+      }
+      var c = 1.70158;
+      var u = inP - 1;
+      var ease = 1 + (c + 1) * u * u * u + c * u * u;
+      var scale = inP >= 1 ? 1 : 0.82 + 0.18 * ease;
+      return { opacity: p, transform: Math.abs(scale - 1) > 0.001 ? 'scale(' + scale + ')' : 'none' };
+    },
+  };
+
+  window.OverlayFonts = {
+    /** [{ id, label, stack, metricClone }] in picker order. */
+    all: OVERLAY_FONTS,
+
+    /** The Google Fonts stylesheet covering every family the picker can ask for. */
+    href: "https://fonts.googleapis.com/css2?family=Arimo&family=Gelasio&family=Tinos&family=Cousine&family=Open+Sans&family=Cabin&family=Anton&family=Comic+Neue&display=swap",
+
+    /** The CSS stack for a stored family name. Unknown names fall back to the first entry. */
+    stack: function (id) {
+      var want = String(id == null ? '' : id).trim().toLowerCase();
+      for (var i = 0; i < OVERLAY_FONTS.length; i++) {
+        if (OVERLAY_FONTS[i].id.toLowerCase() === want) return OVERLAY_FONTS[i].stack;
+      }
+      return OVERLAY_FONTS[0].stack;
+    },
+
+    /** Inject the stylesheet once, and resolve when the faces are actually usable. */
+    ready: function () {
+      if (!this._p) {
+        var href = this.href;
+        if (href && !document.getElementById('overlay-fonts-css')) {
+          var link = document.createElement('link');
+          link.id = 'overlay-fonts-css';
+          link.rel = 'stylesheet';
+          link.href = href;
+          document.head.appendChild(link);
+        }
+        // Canvas does NOT trigger a webfont download the way the DOM does: measureText on an
+        // unloaded face silently measures the fallback, so a bake fired before this resolves is
+        // exactly the drift we are removing. Each face is requested explicitly, and a failure
+        // resolves rather than rejects — a bake with a fallback font beats no bake at all.
+        var faces = OVERLAY_FONTS.map(function (f) { return f.stack.split(',')[0].trim(); });
+        this._p = (document.fonts && document.fonts.load)
+          ? Promise.all(faces.map(function (f) { return document.fonts.load('400 100px ' + f).catch(function () {}); }))
+              .then(function () { return document.fonts.ready; })
+              .catch(function () {})
+          : Promise.resolve();
+      }
+      return this._p;
+    },
+    _p: null,
+  };
+
   window.BlogFonts = {
     all: BLOG_FONTS,
     categories: ["System","Sans serif","Serif","Display","Monospace"],

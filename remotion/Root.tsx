@@ -6,7 +6,8 @@
 import React from 'react';
 import { Composition } from 'remotion';
 import { getAudioDurationInSeconds, getImageDimensions, getVideoMetadata } from '@remotion/media-utils';
-import { PostOverlay, type PostOverlayProps } from './PostOverlay';
+import { PostOverlay, timelineOf, type PostOverlayProps, type TimelineClip } from './PostOverlay';
+import { DEFAULT_TARGET_RATIO, MAX_TIMELINE_SECONDS, frameForRatio } from '../src/lib/video-edit';
 
 const DEFAULT_PROPS: PostOverlayProps = {
     // A public sample so `npm run remotion:studio` previews something; real renders override every field.
@@ -40,11 +41,70 @@ export const RemotionRoot: React.FC = () => {
                 let width = props.width ?? 1080;
                 let height = props.height ?? 1920;
                 let seconds = (props.durationInFrames ?? 150) / fps;
+                // Measured clips, with the per-sequence lengths the component needs. Returned as
+                // props at the end so the file is opened once, not once here and again per frame.
+                let measured: TimelineClip[] | null = null;
+                const timeline = timelineOf(props);
                 try {
-                    if (props.videoSrc) {
-                        const meta = await getVideoMetadata(props.videoSrc);
-                        if (meta.width > 0 && meta.height > 0) { width = meta.width; height = meta.height; }
-                        if (Number.isFinite(meta.durationInSeconds) && meta.durationInSeconds > 0) seconds = meta.durationInSeconds;
+                    if (timeline.length) {
+                        // ── The frame is STATED, not inherited, as soon as there is more than one clip ──
+                        // A single clip is still measured and rendered at its own size: an untouched
+                        // video should come back the size it went in, not resampled to our idea of
+                        // vertical. Several clips have no single source to inherit from — that is the
+                        // whole point of a timeline — so the target ratio decides, defaulting to the
+                        // 9:16 master that four of the six platforms take as-is.
+                        const ratio = props.targetRatio ?? (timeline.length > 1 ? DEFAULT_TARGET_RATIO : null);
+                        const frame = frameForRatio(ratio);
+                        if (frame) { width = frame.width; height = frame.height; }
+
+                        const clips: TimelineClip[] = [];
+                        let total = 0;
+                        for (const clip of timeline) {
+                            let full: number | null = null;
+                            try {
+                                const meta = await getVideoMetadata(clip.src);
+                                if (!frame && meta.width > 0 && meta.height > 0) { width = meta.width; height = meta.height; }
+                                if (Number.isFinite(meta.durationInSeconds) && meta.durationInSeconds > 0) full = meta.durationInSeconds;
+                            } catch { /* unreadable clip — fall back to its declared window below */ }
+
+                            // The TRIM is intersected with the real file HERE, not upstream, for the
+                            // same reason the duration is measured here at all: nothing server-side
+                            // can open the video, so every trim that arrives was computed from numbers
+                            // a browser reported about (possibly) a different asset. An out point past
+                            // the end of the file clamps to the end rather than asking Remotion for
+                            // frames that do not exist.
+                            const inS = full != null ? Math.min(Math.max(clip.inS ?? 0, 0), full) : (clip.inS ?? 0);
+                            const outS = clip.outS != null
+                                ? (full != null ? Math.min(clip.outS, full) : clip.outS)
+                                : full;
+                            // A collapsed window (an in point past a shorter-than-expected file) falls
+                            // back to the whole clip: a visible mistake beats a zero-length sequence,
+                            // which is a hard Remotion error at the end of a paid render.
+                            const span = outS != null && outS > inS ? outS - inS : (full ?? 0);
+                            const useWhole = !(outS != null && outS > inS);
+
+                            const durationInFrames = Math.max(1, Math.ceil(span * fps));
+                            total += durationInFrames;
+                            // Spread the ORIGINAL clip and override only what was measured. Listing
+                            // fields by hand here silently dropped `gain` the moment phase 3 added
+                            // it — these props REPLACE the ones the worker sent, so anything not
+                            // copied forward is lost, and a lost gain is a reel that plays its own
+                            // camera audio under the music with nothing to show why.
+                            const { inS: _inS, outS: _outS, ...carried } = clip;
+                            clips.push({
+                                ...carried,
+                                ...(useWhole ? {} : { inS, ...(outS != null ? { outS } : {}) }),
+                                durationInFrames,
+                            });
+                        }
+
+                        // The composition's length is the SUM of the sequences, not an independent
+                        // calculation of it. Rounding each clip up and the whole piece separately
+                        // would leave the last clip either clipped or frozen on its final frame.
+                        if (total > 0) {
+                            measured = clips;
+                            seconds = Math.min(MAX_TIMELINE_SECONDS, total / fps);
+                        }
                     } else if (props.imageSrc) {
                         // A STILL has no duration of its own, so the piece is exactly as long as its
                         // audio — this is the "voice note over a photo" case, and without it the
@@ -77,12 +137,31 @@ export const RemotionRoot: React.FC = () => {
                 // h264 chroma subsampling requires even dimensions; an odd one fails the encode at the
                 // very end of an otherwise successful render.
                 const even = (n: number) => { const r = Math.round(n); return r % 2 === 0 ? r : r + 1; };
+                // Round UP: a half-frame of tail is better than clipping the last frame off.
+                const durationInFrames = Math.max(1, Math.ceil(seconds * fps));
+
+                // A <Series> covers exactly the sum of its sequences and NOTHING after it, so audio
+                // that outlasts the footage would have played over black — the one regression the
+                // move from a single <OffthreadVideo> to a timeline could introduce. Hold the last
+                // clip's final frame for the overhang instead, which is what the still + voice note
+                // case has always done with its image.
+                if (measured?.length) {
+                    const covered = measured.reduce((n, c) => n + (c.durationInFrames ?? 0), 0);
+                    if (durationInFrames > covered) {
+                        const last = measured[measured.length - 1];
+                        last.durationInFrames = (last.durationInFrames ?? 0) + (durationInFrames - covered);
+                    }
+                }
+
                 return {
                     width: even(width),
                     height: even(height),
                     fps,
-                    // Round UP: a half-frame of tail is better than clipping the last frame off.
-                    durationInFrames: Math.max(1, Math.ceil(seconds * fps)),
+                    durationInFrames,
+                    // Hand the measured timeline to the component so the file is opened once here
+                    // rather than re-measured per frame — and so the sequence lengths it draws are
+                    // the exact ones this function summed to get durationInFrames.
+                    ...(measured ? { props: { ...props, clips: measured } } : {}),
                 };
             }}
         />

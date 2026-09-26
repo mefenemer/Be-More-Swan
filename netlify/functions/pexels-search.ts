@@ -13,8 +13,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, userOrganisations, organisations, scheduledPosts } from '../../db/schema';
 import {
-    searchUniqueImages, searchUniqueVideos, attachPexelsImageToPost, creditLine,
-    PexelsRateLimitError, PEXELS_RATE_LIMIT_MESSAGE, type PexelsCandidate, type PexelsVideoCandidate,
+    searchUniqueImages, searchUniqueVideos, attachPexelsImageToPost, creditLine, PexelsRateLimitError, PEXELS_RATE_LIMIT_MESSAGE, type PexelsCandidate, type PexelsVideoCandidate, createPexelsAsset,
 } from '../../src/utils/pexels';
 import { mediaTargetPostIds } from '../../src/utils/crosspost-media';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -49,7 +48,7 @@ export default withLambda(async (event) => {
     if (!user) return { statusCode: 403, body: JSON.stringify({ error: 'User not found.' }) };
     const orgId = user.organisationId;
 
-    let body: { action?: string; topic?: string; postId?: number; candidate?: PexelsCandidate | PexelsVideoCandidate; mediaType?: string; dedup?: boolean; applyToGroup?: boolean };
+    let body: { action?: string; topic?: string; postId?: number; candidate?: PexelsCandidate | PexelsVideoCandidate; mediaType?: string; dedup?: boolean; applyToGroup?: boolean; append?: boolean };
     try { body = JSON.parse(event.body || '{}'); } catch { body = {}; }
 
     const mediaType: 'image' | 'video' = body.mediaType === 'video' ? 'video' : 'image';
@@ -80,9 +79,22 @@ export default withLambda(async (event) => {
                 ? await mediaTargetPostIds(db, { postId, orgId, applyToGroup: body.applyToGroup })
                 : [postId];
 
-            const assetId = await attachPexelsImageToPost(db, { postId, postIds: targetIds, userId, orgId, candidate, assetType: mediaType });
+            // ── Append: make the asset, do NOT put it on the post ───────────────────────────────
+            // A clip being added to a cut is not the post's media — the edit list decides what the
+            // rendered video contains, and attaching would REPLACE the very clip being added to
+            // (attachPexelsImageToPost clears scheduled_post_assets first, by design).
+            //
+            // The asset is still created, so it lands in the library and in the per-org dedup the
+            // search relies on. The caller appends it through save-post-video-edit, which keeps one
+            // implementation of "what is in this cut" rather than a second one in here.
+            const append = body.append === true;
+            const assetId = append
+                ? await createPexelsAsset(db, { userId, orgId, candidate, assetType: mediaType })
+                : await attachPexelsImageToPost(db, { postId, postIds: targetIds, userId, orgId, candidate, assetType: mediaType });
 
             // US3 AC3.3: append the credit line to the draft only when the org opts in.
+            // Unconditional on `append`: an appended clip still publishes inside the rendered video,
+            // so the licence condition is exactly the same one.
             // Every post carrying the photo needs the credit — attributing it on one platform while
             // three others publish the same picture uncredited is the licence breach this prevents.
             let attributionAppended = false;
@@ -107,7 +119,7 @@ export default withLambda(async (event) => {
                 }
             }
 
-            return { statusCode: 200, body: JSON.stringify({ assetId, attributionAppended, postIds: targetIds }) };
+            return { statusCode: 200, body: JSON.stringify({ assetId, attributionAppended, postIds: targetIds, appended: append }) };
         }
 
         // ── SEARCH: return unique candidates for the picker ───────────────────

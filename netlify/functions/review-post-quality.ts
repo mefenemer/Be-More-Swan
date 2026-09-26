@@ -1,4 +1,5 @@
 // netlify/functions/review-post-quality.ts
+import { isUpstreamBlocked } from '../../src/lib/ai-gateway';
 // US-CAL-5.1: AI Content Quality Review
 //
 // POST { postId }
@@ -133,7 +134,20 @@ export default withLambda(async (event) => {
             body: JSON.stringify({ ...result, openWarnings: openWarnings(result) }),
         };
     } catch (e: any) {
-        return { statusCode: 502, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: e?.message || 'Quality review failed.' }) };
+        // ⚠️ NEVER e.message. The SDK's message is the upstream body verbatim, and this banner sits
+        // across the top of the review modal — so an exhausted balance printed our billing state, our
+        // request id and "go to Plans & Billing" to a reviewer who has no such account. The reason
+        // belongs in the log, where we can read it; the reader gets a sentence they can act on.
+        console.error('[review-post-quality] review failed:', e);
+        return {
+            statusCode: 502,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                error: isUpstreamBlocked(e)
+                    ? 'The quality reviewer is unavailable right now — this is at our end, not yours. Your post is unaffected; you can still edit and schedule it.'
+                    : 'The quality review could not be completed. Please try again.',
+            }),
+        };
     }
     } catch (err: any) {
         console.error('[review-post-quality] Unhandled error:', err);

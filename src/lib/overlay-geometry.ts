@@ -22,6 +22,8 @@ export const RADIUS_RATIO = 0.15;  // corner radius= fontSize * RADIUS_RATIO
 export const FONT_MIN = 0.005;
 export const FONT_MAX = 0.5;
 
+import { overlayFontStack } from './overlay-fonts';
+
 export interface Overlay {
     id: string;
     text: string;
@@ -35,6 +37,77 @@ export interface Overlay {
     boxOpacity: number;   // 0..1 (1 = solid)
     startS?: number;      // video only: seconds the box appears (absent = from 0)
     endS?: number;        // video only: seconds the box disappears (absent = to the end)
+    /**
+     * How the box arrives and leaves. Video only: a still has no time for anything to happen in,
+     * and its text is flattened into the pixels. Absent = 'none', which is how every overlay
+     * written before this existed behaves.
+     */
+    anim?: OverlayAnim;
+}
+
+/** The ways a box can appear. Stored on the overlay, so never rename one. */
+export type OverlayAnim = 'none' | 'fade' | 'rise' | 'pop';
+
+export const OVERLAY_ANIMS: ReadonlyArray<{ id: OverlayAnim; label: string; hint: string }> = [
+    { id: 'none', label: 'Cut',  hint: 'Appears and disappears instantly' },
+    { id: 'fade', label: 'Fade', hint: 'Fades in and out' },
+    { id: 'rise', label: 'Rise', hint: 'Slides up as it fades in' },
+    { id: 'pop',  label: 'Pop',  hint: 'Springs up to size' },
+];
+
+const ANIM_IDS = new Set<string>(OVERLAY_ANIMS.map(a => a.id));
+
+export function readOverlayAnim(v: unknown): OverlayAnim {
+    return typeof v === 'string' && ANIM_IDS.has(v) ? (v as OverlayAnim) : 'none';
+}
+
+/**
+ * How long the arrival and departure take. Capped at HALF the box's visible window, so a box shown
+ * for a third of a second does not spend all of it fading — an animation that never finishes reads
+ * as a rendering fault rather than a choice.
+ */
+export const OVERLAY_ANIM_S = 0.35;
+
+/** easeOutBack: overshoots slightly and settles. What makes 'pop' read as a pop. */
+function easeOutBack(t: number): number {
+    const c = 1.70158;
+    const u = t - 1;
+    return 1 + (c + 1) * u * u * u + c * u * u;
+}
+
+const clamp01v = (n: number) => Math.min(1, Math.max(0, n));
+
+/**
+ * The opacity and transform for one box at one frame of its own window.
+ *
+ * Pure, and deliberately not inside the composition: this is the one part of an animation that can
+ * be wrong in a way nobody sees until a render comes back, so it is testable without a renderer.
+ * `frame` is relative to the box's own Sequence; `frames` is how long that Sequence lasts.
+ */
+export function overlayAnimAt(
+    anim: OverlayAnim | undefined, frame: number, frames: number, fps: number,
+): { opacity: number; transform: string } {
+    const kind = readOverlayAnim(anim);
+    if (kind === 'none') return { opacity: 1, transform: 'none' };
+
+    const total = Math.max(1, Math.floor(frames) || 1);
+    const ramp = Math.max(1, Math.min(Math.round(OVERLAY_ANIM_S * fps), Math.floor(total / 2)));
+    const f = Math.min(Math.max(Math.floor(frame) || 0, 0), total);
+
+    const inP = clamp01v(f / ramp);
+    const outP = clamp01v((total - f) / ramp);
+    const p = Math.min(inP, outP);                 // whichever end we are nearer
+
+    if (kind === 'fade') return { opacity: p, transform: 'none' };
+    if (kind === 'rise') {
+        // Rises on the way in and settles; on the way out it fades where it is rather than sinking,
+        // which reads as the text leaving rather than falling over.
+        const y = (1 - inP) * 4;                   // % of the frame height
+        return { opacity: p, transform: y > 0.01 ? `translateY(${y}%)` : 'none' };
+    }
+    // pop
+    const scale = inP >= 1 ? 1 : 0.82 + 0.18 * easeOutBack(inP);
+    return { opacity: p, transform: Math.abs(scale - 1) > 0.001 ? `scale(${scale})` : 'none' };
 }
 
 export const OVERLAY_DEFAULTS = {
@@ -70,7 +143,11 @@ export function overlayBoxStyle(ov: Partial<Overlay>, refHeightPx: number): Reco
         whiteSpace: 'pre',
         overflow: 'visible',
         lineHeight: LINE_HEIGHT,
-        fontFamily: ov.fontFamily || OVERLAY_DEFAULTS.fontFamily,
+        // A STACK, not the bare stored name. Lambda has none of the OS fonts the picker offers and
+        // substitutes silently, which moves the box as well as the letterforms — see
+        // src/lib/overlay-fonts.ts. Every surface that draws an overlay resolves the name here, so
+        // the preview and the published file cannot disagree about what 'Impact' means.
+        fontFamily: overlayFontStack(ov.fontFamily),
         fontSize: fontSize + 'px',
         color: ov.color || OVERLAY_DEFAULTS.color,
         padding: (fontSize * PAD_RATIO) + 'px',

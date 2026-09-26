@@ -15,12 +15,13 @@
 // far worse here than a visible failure, which the reviewer can see and retry.
 
 import { HandlerEvent } from '@netlify/functions';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray, ne } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { contentAssets, postRenderJobs, scheduledPosts } from '../../db/schema';
 import { presignR2Get } from '../../src/utils/social-publish';
 import { persistRemoteMediaToR2, r2IsConfigured } from '../../src/lib/media-persist';
-import { attachRenderedVideo, frameMeta, frameMetaFromJson, readForceVideo, renderableOverlays, resolveAudioTracks, resolveOverlayVideoBase } from '../../src/lib/post-render';
+import { attachRenderedVideo, frameMeta, frameMetaFromJson, readForceVideo, readPostVideoEdit, renderPlanFor, renderableOverlays, resolveAudioTracks, resolveEditClips, resolveOverlayVideoBase } from '../../src/lib/post-render';
+import { editChangesMedia } from '../../src/lib/video-edit';
 import { remotionConfigured, renderProgress, startRender, type StartedRender } from '../../src/lib/remotion-lambda';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -81,16 +82,45 @@ export default withLambda(async (event: HandlerEvent) => {
         // Re-derived, not taken from the job: the overlay design may have been edited after queueing,
         // and the presigned source URL has to be minted fresh because they expire.
         const [post] = await db
-            .select({ id: scheduledPosts.id, imageOverlays: scheduledPosts.imageOverlays, audioOverlays: scheduledPosts.audioOverlays })
+            .select({
+                id: scheduledPosts.id,
+                imageOverlays: scheduledPosts.imageOverlays,
+                audioOverlays: scheduledPosts.audioOverlays,
+                platform: scheduledPosts.platform,
+                formatKey: scheduledPosts.formatKey,
+                crosspostGroupId: scheduledPosts.crosspostGroupId,
+            })
             .from(scheduledPosts)
             .where(eq(scheduledPosts.id, job.postId))
             .limit(1);
         if (!post) { await fail('The post no longer exists.'); return { statusCode: 200, body: 'No post' }; }
 
+        // Read on its own so a missing column cannot take the whole post query down — see
+        // readPostVideoEdit. An environment without it renders every post unedited, as before.
+        const videoEdit = await readPostVideoEdit(db, job.postId, job.organisationId);
         const overlays = renderableOverlays(post.imageOverlays);
         const audio = await resolveAudioTracks(db, post.audioOverlays, job.organisationId, presignR2Get);
         const base = await resolveOverlayVideoBase(db, job.postId, job.organisationId);
         if (!base) { await fail('The post no longer has media to render.'); return { statusCode: 200, body: 'No media' }; }
+
+        // ── The timeline ────────────────────────────────────────────────────────────────────────
+        // The edit list is the authority on WHAT renders; `base` now only answers "is this a video
+        // post at all" and supplies the overlay pin. resolveEditClips falls back to [base] when there
+        // is no edit, so a post that has never been edited renders exactly as it always did.
+        //
+        // Phase 1 matched the trim to base.assetId to avoid applying one clip's in/out points to a
+        // different video. That mismatch is gone: the edit now names its own clips, so there is
+        // nothing to reconcile.
+        const timeline = await resolveEditClips(
+            db,
+            { videoEdit, orgId: job.organisationId, base, hasTimelineAudio: audio.length > 0 },
+            presignR2Get,
+        );
+        const hasEdit = editChangesMedia(videoEdit);
+        // The same plan the trigger computed — ratio, crop position and the fingerprint that decides
+        // who else may have this file. Re-derived rather than read off the job because the edit may
+        // have been changed while the job sat queued, exactly as the overlays are.
+        const plan = renderPlanFor({ ...post, videoEdit }, base, audio.length > 0);
 
         // Both were removed while the job was queued. Nothing to burn in — clear the gate and let
         // the original media publish rather than failing a post that is perfectly publishable.
@@ -102,7 +132,11 @@ export default withLambda(async (event: HandlerEvent) => {
         // whose words are already drawn into the image — and YouTube has no image post, so the still
         // has to become an mp4 with nothing burned on top. Bailing here would clear the gate and
         // leave a video-only platform holding a photo it can never publish.
-        if (!overlays.length && !audio.length && !readForceVideo(job.renderInput)) {
+        // An edit counts here exactly as text and audio do: a cut or a stitch only exists once the
+        // clip has been re-encoded, so a post whose overlays were deleted while its cut survived
+        // still has to render. Dropping through would clear the gate and publish the raw original —
+        // the first clip alone, including whatever the user cut off the front.
+        if (!overlays.length && !audio.length && !hasEdit && !readForceVideo(job.renderInput)) {
             await db.update(postRenderJobs)
                 .set({ status: 'completed', updatedAt: new Date() })
                 .where(eq(postRenderJobs.id, jobId));
@@ -112,9 +146,14 @@ export default withLambda(async (event: HandlerEvent) => {
             return { statusCode: 200, body: 'No overlays left' };
         }
 
-        const mediaSrc = base.storageKey
-            ? await presignR2Get(base.storageKey, SOURCE_URL_TTL_SEC)
-            : base.externalUrl!;
+        // Every clip is presigned inside resolveEditClips; a still has no timeline and is presigned here.
+        if (base.kind === 'video' && !timeline.length) {
+            await fail('The post’s video could not be read.');
+            return { statusCode: 200, body: 'No source' };
+        }
+        const mediaSrc = base.kind === 'image'
+            ? (base.storageKey ? await presignR2Get(base.storageKey, SOURCE_URL_TTL_SEC) : base.externalUrl!)
+            : timeline[0].src;
 
         // The snapshot is authoritative (it carries the duration, which is stored nowhere else); the
         // recompute is the fallback for a row written before render_input existed.
@@ -123,8 +162,17 @@ export default withLambda(async (event: HandlerEvent) => {
         // A still goes in as imageSrc, not videoSrc — the composition branches on which is set, and
         // its calculateMetadata takes the LENGTH from the audio when there is no video to measure.
         const started: StartedRender = await startRender({
+            // videoSrc + videoTrim describe the FIRST clip only. They are sent alongside `clips`
+            // purely so props from this deploy still render on the previous site bundle, which a git
+            // push does not update — an old bundle then produces clip one instead of nothing at all.
             videoSrc: base.kind === 'video' ? mediaSrc : '',
             ...(base.kind === 'image' ? { imageSrc: mediaSrc } : {}),
+            ...(base.kind === 'video' && (timeline[0].inS || timeline[0].outS != null)
+                ? { videoTrim: { inS: timeline[0].inS ?? 0, outS: timeline[0].outS ?? null } }
+                : {}),
+            ...(base.kind === 'video' ? { clips: timeline } : {}),
+            ...(plan.targetRatio ? { targetRatio: plan.targetRatio } : {}),
+            ...(plan.framePosition ? { framePosition: plan.framePosition } : {}),
             audio,
             overlays,
             ...meta,
@@ -176,6 +224,57 @@ export default withLambda(async (event: HandlerEvent) => {
         }).returning({ id: contentAssets.id });
 
         await attachRenderedVideo(db, job.postId, asset.id);
+
+        // ── Hand this file to every sibling it genuinely fits ───────────────────────────────────
+        // Siblings that wanted the identical output were gated and queued nothing (see the sharing
+        // branch in trigger-post-render). Their gate is only cleared here, so this loop is the ONLY
+        // thing standing between them and a post that never publishes — it must run on the success
+        // path unconditionally, and it must not throw.
+        //
+        // Each one's fingerprint is RECOMPUTED from its row as it stands now, not trusted from the
+        // moment it decided to wait. That check is the whole safety of sharing: text overlays are
+        // per-post by design, so a sibling whose words changed in the meantime no longer matches,
+        // is left gated, and renders its own file instead of publishing this one's text.
+        if (post.crosspostGroupId) {
+            try {
+                const siblings = await db
+                    .select({
+                        id: scheduledPosts.id,
+                        platform: scheduledPosts.platform,
+                        formatKey: scheduledPosts.formatKey,
+                        imageOverlays: scheduledPosts.imageOverlays,
+                        audioOverlays: scheduledPosts.audioOverlays,
+                            })
+                    .from(scheduledPosts)
+                    .where(and(
+                        eq(scheduledPosts.crosspostGroupId, post.crosspostGroupId),
+                        eq(scheduledPosts.organisationId, job.organisationId),
+                        ne(scheduledPosts.id, job.postId),
+                        inArray(scheduledPosts.renderStatus, ['pending']),
+                    ));
+                for (const sibling of siblings) {
+                    // Its OWN base asset, not this post's. Media normally fans out across a group,
+                    // but "normally" is not a guarantee — and passing the anchor's base here would
+                    // make a sibling carrying different footage fingerprint as identical and receive
+                    // this post's video. The fingerprint is only worth checking if what goes into it
+                    // belongs to the post being checked.
+                    const siblingBase = await resolveOverlayVideoBase(db, sibling.id, job.organisationId);
+                    if (!siblingBase) continue;
+                    const siblingAudio = await resolveAudioTracks(db, sibling.audioOverlays, job.organisationId, presignR2Get);
+                    const siblingEdit = await readPostVideoEdit(db, sibling.id, job.organisationId);
+                    const siblingPlan = renderPlanFor({ ...sibling, videoEdit: siblingEdit }, siblingBase, siblingAudio.length > 0);
+                    if (siblingPlan.fingerprint !== plan.fingerprint) continue;
+                    await attachRenderedVideo(db, sibling.id, asset.id);
+                    await db.update(scheduledPosts)
+                        .set({ renderStatus: 'done', updatedAt: new Date() })
+                        .where(eq(scheduledPosts.id, sibling.id));
+                }
+            } catch (err) {
+                // A sibling left gated is visible and retryable in the Review Queue; failing THIS
+                // post because someone else could not be updated would be the worse outcome.
+                console.error(`[render-post-video-background] job ${jobId} could not share its output:`, err);
+            }
+        }
 
         await db.update(postRenderJobs)
             .set({ status: 'completed', outputAssetId: asset.id, updatedAt: new Date() })

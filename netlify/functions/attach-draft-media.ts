@@ -85,6 +85,20 @@ export default withLambda(async (event) => {
         .set({ contentAssetIds: [assetId], mediaMissing: false, mediaMissingNote: null, updatedAt: new Date(), ...overlayReset })
         .where(inArray(scheduledPosts.id, targetIds));
 
+    // ── A post with media is not a blank draft any more ─────────────────────────────────────────
+    // create-manual-post stamps 'draft' on the empty shell the composer needs before it can open,
+    // and nothing ever moved it off that. So an hour of work — clips, a cut, text — lived on a row
+    // that the Review queue, the calendar and every column deliberately ignore, and closing the
+    // composer read as losing the lot.
+    //
+    // Media is the first real content a post gets, and everything else (the cut, the overlays)
+    // requires it, so this is the moment the row stops being a shell. get-social-drafts ALSO shows
+    // contentful drafts, which is what rescues the rows already stranded; this is what keeps the
+    // status honest from here on.
+    await db.update(scheduledPosts)
+        .set({ status: 'pending_approval', updatedAt: new Date() })
+        .where(and(inArray(scheduledPosts.id, targetIds), eq(scheduledPosts.status, 'draft')));
+
     // keepOverlays is the overlay bake announcing itself — this asset is the post's overlay design
     // flattened into pixels. Stamp it with a fingerprint of the design it was made from, so
     // approve-post can tell a CURRENT bake from a stale one.

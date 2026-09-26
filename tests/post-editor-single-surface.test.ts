@@ -52,6 +52,10 @@ check('the layout flag and its switch are gone', () => {
 });
 
 check('the collapsible panes are gone', () => {
+    // ⚠️ "Panes" here means the OLD layout: a left pane and a right pane of controls either side of
+    // the canvas, deleted in favour of the step rail. Folding today's two columns — the rail of
+    // steps, and the clip list beside the video — is a different thing and uses different names on
+    // purpose (_pceFoldColumn), so that this check keeps meaning what it meant.
     for (const token of ['_pceApplyPanes', '_pceTogglePane', '_pceShowLeftPane', '_pceCollapsed', 'pce-left-reopen', 'pce-right-reopen']) {
         const live = workspace
             .split('\n')
