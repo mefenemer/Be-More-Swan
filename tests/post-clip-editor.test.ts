@@ -1827,9 +1827,25 @@ check("the buttons do not depend on the canvas having painted", () => {
     // mock-up, or a box mid-drag on the canvas. Take either and the panel still renders and its
     // POINTER handlers still bind (trimming works, dragging a clip works) while its CLICK handler
     // never attaches. Buttons that render and do nothing, with no error anywhere.
-    const trim = slice('function _pceBindClipTrim() {', '\n/** Move the lit section');
-    assert.ok(trim.includes('_pceBindPanelActions(host)'),
-        'the buttons are bound somewhere other than the binder that renders with the panel');
+    // ⚠️ AND THEN it was bound by _pceBindClipTrim, which is latched on the panel element's own
+    // dataset and reached only once that element exists — with the latch set BEFORE the work, so one
+    // throw in the binder killed the panel for the rest of the page's life. Three homes, three
+    // versions of "the buttons do nothing", all the same shape: aliveness that depended on timing.
+    // It now lives on `document`, bound at load by an IIFE, depending on nothing.
+    const once = slice('(function _pceBindPanelActionsOnce() {', '\n})();');
+    for (const ev of ['pointerdown', 'pointerup', 'click', 'change']) {
+        assert.ok(once.includes(`document.addEventListener('${ev}'`),
+            `${ev} is bound to something that can be missing, replaced or unreached`);
+    }
+    assert.ok(!once.includes('host.addEventListener'),
+        'the dispatcher still binds to the panel, so it needs the panel to exist first');
+    // Capture on every one: a handler between the button and the document can stop a bubbling
+    // event, and there is no auditing every one of those from here.
+    assert.strictEqual(once.split(', true);').length - 1, 4,
+        'a listener bubbles, so anything in the panel can still swallow it before it arrives');
+    const trim = slice('function _pceBindClipTrim() {', '\nfunction _pceBindClipTrimOn(host) {');
+    assert.ok(trim.indexOf('_pceBindClipTrimOn(host)') < trim.indexOf("dataset.trimBound = '1'"),
+        'the latch is set before the work again, so one throw disables the drags permanently');
     const panels = slice('function _pceRenderStagePanels() {', '\nfunction _pceRenderLayers()');
     assert.ok(panels.includes('_pceBindClipTrim'), 'the panel binder is not called on render');
     assert.ok(panels.includes('_rqBindTimeline'),
@@ -1885,20 +1901,43 @@ check('pointerup drives them too, not click alone', () => {
     // Pointer events reach this container and carry the right target; `click` specifically does
     // not. The buttons should not be the only controls here depending on the one mechanism that
     // has never worked.
-    const fn = slice('let lastEl = null;', '\n// The typed in/out on a clip row');
-    assert.ok(fn.includes("host.addEventListener('pointerup'"), 'the buttons still need a click');
+    const fn = slice('(function _pceBindPanelActionsOnce() {', '\n})();');
+    assert.ok(fn.includes("document.addEventListener('pointerup'"), 'the buttons still need a click');
     // Click is KEPT: a keyboard Enter fires click and no pointer event at all.
-    assert.ok(fn.includes("host.addEventListener('click', fire)"),
+    assert.ok(fn.includes("document.addEventListener('click', fire, true)"),
         'dropping click trades a mouse problem for a keyboard one');
     assert.ok(fn.includes('now - lastAt < 400'), 'one press would run the action twice');
 });
 
 check('a drag that ends over a button does not press it', () => {
     // Releasing a clip you were reordering on top of "+ Add text" would otherwise add text.
-    const fn = slice('let lastEl = null;', '\n// The typed in/out on a clip row');
+    const fn = slice('(function _pceBindPanelActionsOnce() {', '\n})();');
     assert.ok(fn.includes('pressedEl = ev.target && ev.target.closest'), 'the press start is not recorded');
     assert.ok(fn.includes("if (ev.type === 'pointerup' && pressedEl !== el) return;"),
         'a release anywhere fires whatever it lands on');
+});
+
+console.log('\nthe panel says when it cannot be clicked');
+
+check('it hit-tests its own first button and names whatever is in front', () => {
+    // ⚠️ Four wrong diagnoses in, the decisive report was that the DevTools element picker would not
+    // land on these buttons either. A click that never arrives can be a hundred things; a picker
+    // that cannot reach an element is one of two, and both are answerable from the page itself
+    // rather than guessed at from here. So the panel asks, on the machine that has the bug.
+    const fn = slice('function _pceCheckPanelReachable() {', '\nfunction _pceClipSay(');
+    assert.ok(fn.includes('document.elementFromPoint('), 'the panel still cannot tell if it is covered');
+    assert.ok(fn.includes('btn.contains(at) || at.contains(btn)'),
+        'a hit on the button\'s own icon or label would be reported as a blocker');
+    assert.ok(fn.includes('if (!(r.width > 0) || !(r.height > 0)) return;'),
+        'an unlaid-out panel reports a phantom blocker');
+    assert.ok(fn.includes('if (what === _pceCoverWarned) return;'),
+        'one cause would toast on every repaint');
+    assert.ok(fn.includes('window.showToast'), 'the finding goes only where nobody is looking');
+    // It has to run AFTER layout — a rect read in the same tick as the innerHTML write is the rect
+    // the panel had before it changed.
+    const render = slice('function _pceRenderClips(clipsOverride) {', '\n/**');
+    assert.ok(/requestAnimationFrame\(\(\) => \{ try \{ _pceCheckPanelReachable\(\)/.test(render),
+        'the check runs inside the render, against a stale rect, or not at all');
 });
 
 console.log(`\n${passed} checks passed`);

@@ -7587,16 +7587,28 @@ function _pceTrimTimeAt(ev, track, full) {
  * Delegated rather than per-button because the rows are replaced wholesale on every repaint: a
  * listener bound to a button dies with the first redraw.
  */
-function _pceBindPanelActions(host) {
-    // ⚠️ These were inline onclick attributes, and "+ Add text does nothing, and no error appears"
-// survived three rounds of fixes to what the handlers DO — because the handlers were never
-// being reached. Everything in this panel driven by pointer events (trimming, dragging a text
-// bar, reordering a clip) worked throughout; everything driven by an inline attribute did not.
-//
-// Delegation is how the rest of the panel already works — the text fields and the number boxes
-// are bound exactly this way, on this same element — so this makes the buttons consistent with
-// their neighbours and removes a whole class of "the markup rendered but nothing responds".
-// It also survives the repaints: a listener bound to a button dies with the first redraw.
+/**
+ * Every button in the clip panel, through one delegated listener on DOCUMENT.
+ *
+ * ⚠️ Bound at load, once, to `document` — NOT to the panel, and not from any render path. This is
+ * the third place these handlers have lived, and each move was prompted by the same report ("the
+ * buttons do nothing, no error") with a different cause underneath:
+ *
+ *   1. Inline `onclick` attributes. Never fired.
+ *   2. Delegated from `_rqBindTimeline`, which returns early when the canvas has no overlay layer —
+ *      so the panel rendered and its click handler never attached.
+ *   3. Delegated from `_pceBindClipTrim`, which is latched on `#pce-clips-block`'s own dataset and
+ *      reached only when that element already exists. It sets the latch BEFORE doing the work, so
+ *      one throw in the binder disabled the panel permanently, for the rest of the page's life.
+ *
+ * Every one of those is the same shape: the buttons' aliveness depended on when, and on what else
+ * had succeeded. On `document` it depends on nothing. `document` is there before the modal is built,
+ * it is never replaced, there is no container to miss and no guard to be wrong about — and it keeps
+ * working if these buttons are ever rendered somewhere else, which they have been twice.
+ *
+ * `data-pce-act` appears nowhere but this panel, so listening page-wide costs one `closest` on
+ * clicks that were going to be ignored anyway.
+ */
 const PCE_ACTS = {
     'add-text': (el) => window._pceAddTextToClip(Number(el.getAttribute('data-pce-i'))),
     'add-text-still': () => window._pceAddTextToClip(null),
@@ -7612,64 +7624,72 @@ const PCE_ACTS = {
     'preview-stop': () => window._pcePreviewStop(),
 };
 
-// ⚠️ POINTERUP as well as click, and the reason is evidence rather than caution.
-//
-// In the session where these buttons are dead, the DRAGS in this same panel work — trimming,
-// dragging a text bar, dragging a clip by its grip. Those are pointerdown/move/up on this exact
-// element. So pointer events reach this container and carry the right target; it is `click`
-// specifically that never arrives. Whatever is eating it — something over the panel, a swallowed
-// compatibility event — the panel's buttons should not be the only controls in it that depend on
-// the one mechanism that has never worked there.
-//
-// Click is KEPT: a keyboard Enter on a focused button fires click and no pointer event at all, and
-// dropping it would trade a mouse problem for a keyboard one. Both go through `fire`, which ignores
-// a repeat of the same action within a moment — otherwise one press would do the job twice.
-let lastEl = null;
-let lastAt = 0;
-// ⚠️ The press must have STARTED on the same control. Without this, a drag that happens to end
-// over a button would press it — releasing a clip you were reordering on top of "+ Add text"
-// would add text. It is also what a click actually means.
-let pressedEl = null;
-host.addEventListener('pointerdown', (ev) => {
-    pressedEl = ev.target && ev.target.closest ? ev.target.closest('[data-pce-act]') : null;
-});
-const fire = (ev) => {
-    const el = ev.target && ev.target.closest && ev.target.closest('[data-pce-act]');
-    if (!el || el.disabled) return;
-    if (ev.type === 'pointerup' && pressedEl !== el) return;
-    const act = PCE_ACTS[el.getAttribute('data-pce-act')];
-    if (!act) return;
-    const now = Date.now();
-    if (el === lastEl && now - lastAt < 400) return;   // pointerup then click, one press
-    lastEl = el;
-    lastAt = now;
-    ev.preventDefault();
-    // ⚠️ Caught and SHOWN. An exception here used to stop the handler and nothing else, which
-    // is the same dead button by another route.
-    try { act(el); }
-    catch (err) {
-        const at = el.getAttribute('data-pce-i');
-        _pceClipSay(at == null ? null : Number(at),
-            (err && err.message) || 'That did not work. Please try again.');
-    }
-};
-host.addEventListener('pointerup', (ev) => { fire(ev); pressedEl = null; });
-host.addEventListener('click', fire);
+(function _pceBindPanelActionsOnce() {
+    // ⚠️ POINTERUP as well as click, and CAPTURE on both.
+    //
+    // Capture, because a handler on an element between the button and the document can stop a
+    // bubbling event and there is no way to audit every one of them from here — the capture phase
+    // runs on the way down, before anything in the panel gets to swallow it.
+    //
+    // Pointerup, because in the session where these buttons were dead, the DRAGS in the same panel
+    // worked. Those are pointer events on the same subtree, so pointer events reach it and carry the
+    // right target. Click is kept as well: a keyboard Enter on a focused button fires click and no
+    // pointer event at all, and dropping it would trade a mouse problem for a keyboard one.
+    let lastEl = null;
+    let lastAt = 0;
+    // ⚠️ The press must have STARTED on the same control, or releasing a clip you were dragging on
+    // top of "+ Add text" would add text. It is also what a click actually means.
+    let pressedEl = null;
+    document.addEventListener('pointerdown', (ev) => {
+        pressedEl = ev.target && ev.target.closest ? ev.target.closest('[data-pce-act]') : null;
+    }, true);
 
-// The typed in/out on a clip row, same delegation as the text rows' own fields.
-host.addEventListener('change', (ev) => {
-    const el = ev.target;
-    if (!el || !el.getAttribute || el.getAttribute('data-pce-act') !== 'clip-trim') return;
-    window._pceClipTrim(Number(el.getAttribute('data-pce-i')), el.getAttribute('data-pce-field'), el.value);
-});
+    const fire = (ev) => {
+        const el = ev.target && ev.target.closest && ev.target.closest('[data-pce-act]');
+        if (!el || el.disabled) return;
+        const key = el.getAttribute('data-pce-act');
+        if (key === 'clip-trim') return;                // a number box, handled on `change`
+        if (ev.type === 'pointerup' && pressedEl !== el) return;
+        const act = PCE_ACTS[key];
+        if (!act) return;
+        const now = Date.now();
+        if (el === lastEl && now - lastAt < 400) return;  // pointerup then click, one press
+        lastEl = el;
+        lastAt = now;
+        ev.preventDefault();
+        // ⚠️ Caught and SHOWN. An exception here used to stop the handler and nothing else, which is
+        // the same dead button by another route.
+        try { act(el); }
+        catch (err) {
+            const at = el.getAttribute('data-pce-i');
+            _pceClipSay(at == null ? null : Number(at),
+                (err && err.message) || 'That did not work. Please try again.');
+        }
+    };
+    document.addEventListener('pointerup', (ev) => { fire(ev); pressedEl = null; }, true);
+    document.addEventListener('click', fire, true);
 
-}
+    // The typed in/out on a clip row. `change` does not have the same reachability problem — it is
+    // the field's own event — but it belongs with its buttons rather than in a render path.
+    document.addEventListener('change', (ev) => {
+        const el = ev.target;
+        if (!el || !el.getAttribute || el.getAttribute('data-pce-act') !== 'clip-trim') return;
+        window._pceClipTrim(Number(el.getAttribute('data-pce-i')), el.getAttribute('data-pce-field'), el.value);
+    }, true);
+})();
 
 function _pceBindClipTrim() {
     const host = document.getElementById('pce-clips-block');
     if (!host || host.dataset.trimBound === '1') return;
+    // ⚠️ The latch goes on at the END, not here. Set first, it turns any throw below into a panel
+    // that is dead for the rest of the page's life — no retry on the next render, and the drags gone
+    // as well as the buttons. The listeners are added to a container that is never replaced, so a
+    // second pass that runs because the first one failed is the behaviour we want.
+    _pceBindClipTrimOn(host);
     host.dataset.trimBound = '1';
-    _pceBindPanelActions(host);
+}
+
+function _pceBindClipTrimOn(host) {
 
     const clipsNow = () => (_pceTrimDrag.clips || _pceClips()).map(c => Object.assign({}, c));
 
@@ -7977,6 +7997,49 @@ function _pceClipBriefFor(index) {
  * the explanation is swallowed by the same fault it is explaining — and the button goes on looking
  * dead. The banner is outside the panel and is rendered by nothing else.
  */
+/**
+ * Is anything actually on top of the clip list?
+ *
+ * ⚠️ Reported for several rounds as "no response when clicking them", and then, decisively: the
+ * DevTools element picker would not land on those buttons either. A click that never arrives can be
+ * a hundred things, and I guessed wrong at four of them. A picker that cannot reach an element is
+ * one of two — something is drawn over it, or something in its ancestry is not accepting pointer
+ * input — and both are answerable from the page itself, on the machine that has the bug.
+ *
+ * So the panel asks. After it renders, it hit-tests the middle of its own first button: if the
+ * element at that point is not that button, something else is, and that something gets named on
+ * screen. One elementFromPoint per render, silent when all is well, and it names each distinct cause
+ * once rather than once per repaint.
+ */
+let _pceCoverWarned = '';
+function _pceCheckPanelReachable() {
+    const host = document.getElementById('pce-clips-block');
+    if (!host || host.classList.contains('hidden')) return;
+    const btn = host.querySelector('[data-pce-act]');
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    if (!(r.width > 0) || !(r.height > 0)) return;          // not laid out yet — nothing to conclude
+    const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    if (at === btn || (at && (btn.contains(at) || at.contains(btn)))) { _pceCoverWarned = ''; return; }
+
+    const name = (el) => {
+        if (!el) return 'something outside the page is taking the click';
+        const id = el.id ? '#' + el.id : '';
+        const cls = typeof el.className === 'string' && el.className.trim()
+            ? '.' + el.className.trim().split(/\s+/).slice(0, 3).join('.')
+            : '';
+        return el.tagName.toLowerCase() + id + cls;
+    };
+    const what = name(at);
+    if (what === _pceCoverWarned) return;
+    _pceCoverWarned = what;
+    const msg = 'The clip controls cannot be clicked \u2014 ' + what + ' is in front of them.';
+    if (window.showToast) window.showToast(msg, { icon: '\u26a0\ufe0f' });
+    console.error('[clip panel] blocked by', at, 'over', btn, at ? getComputedStyle(at).pointerEvents : '');
+    const el = document.getElementById('post-review-script-alert');
+    if (el) { el.textContent = msg; el.classList.remove('hidden'); }
+}
+
 function _pceClipSay(index, msg) {
     _pceClipAi.msg = msg;
     _pceClipAi.at = index;
@@ -8334,6 +8397,9 @@ function _pceRenderClips(clipsOverride) {
     // leaving a panel that looks finished and whose callers below never ran.
     try { _pceRenderTextStyle(); }
     catch (err) { console.error('[clips] style panel', err); }
+    // After layout, not inside it: a rect read in the same tick as the write is the rect the panel
+    // had before it changed.
+    requestAnimationFrame(() => { try { _pceCheckPanelReachable(); } catch (e) { /* never fatal */ } });
 }
 
 /**
