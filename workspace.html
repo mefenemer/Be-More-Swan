@@ -6781,8 +6781,18 @@ function _rqTimelineParts(post) {
     // fallback is how boxes end up timed past the end of a six-second clip — invisible in the preview
     // and a single frame in the render. Say so instead: it is also the visible symptom of a media URL
     // that has stopped answering, which is worth the reviewer knowing before they approve.
-    if (isVideo && !_rqVideoDurationKnown()) {
-        return Object.assign({}, none, { any: true,
+    //
+    // ⚠️ ASK THE CLIPS FIRST. _rqVideoDurationKnown measures the <video> on the canvas, and previewing
+    // the cut points that element at one clip at a time — so mid-preview, and for the moment after a
+    // swap, the element has no duration and this branch threw away every row. That was the rest of
+    // "when I watch the whole video, it then hides any text layers": the axis was fine, the canvas was
+    // just busy. _rqTimelineDuration already prefers the clips' own total for exactly this reason.
+    //
+    // ⚠️ And `isVideo` has to travel, as it does in the bail-out above: `none` sets it false, so
+    // returning a bare `none` here also took away every "+ Add text" button on the panel.
+    const cutLen = typeof _pceClipsTotalS === 'function' ? _pceClipsTotalS(post) : null;
+    if (isVideo && !(cutLen > 0) && !_rqVideoDurationKnown()) {
+        return Object.assign({}, none, { isVideo, any: true,
             note: `<p class="text-[11px] text-gray-500 px-1 py-1">Reading the clip's length… If this doesn't clear, the video isn't loading — reopen the post before timing your text.</p>` });
     }
 
@@ -6838,6 +6848,18 @@ function _rqTimelineParts(post) {
                  class="px-1 cursor-pointer leading-none ${hidden ? 'text-pink-600' : 'text-gray-300 hover:text-gray-600'}"
                  data-pce-act="hide-text" data-pce-key="${_rqEsc(key)}">${hidden ? '\u25CC' : '\u25C9'}</button>`
             : '';
+        // ── The way in to styling ───────────────────────────────────────────────────────────────
+        // The controls exist and nothing pointed at them. They used to appear on their own, because
+        // anything that selected a box opened them, so there was never a reason to offer a button —
+        // and when that stopped (a selection is not an intent) the feature would have had no door at
+        // all. "Aa" is the door, and its tooltip is the answer to "can I put an emoji in this".
+        const look = kind === 'text'
+            ? `<button type="button" title="Emojis, font, colour, size and animation"
+                 aria-label="Style ${esc}" aria-expanded="${_pceTextEditing === key}"
+                 class="px-1 text-[11px] font-bold cursor-pointer leading-none ${
+                     _pceTextEditing === key ? 'text-pink-600' : 'text-gray-300 hover:text-gray-600'}"
+                 data-pce-act="style-text" data-pce-key="${_rqEsc(key)}">Aa</button>`
+            : '';
         const del = kind === 'text'
             ? `<button type="button" title="Remove this text" aria-label="Remove ${esc}"
                  class="px-1 text-gray-300 hover:text-red-600 cursor-pointer leading-none"
@@ -6863,6 +6885,7 @@ function _rqTimelineParts(post) {
           <div data-tl-row="${_rqEsc(key)}"${hidden ? ' style="opacity:.45"' : ''}>
             <div class="flex items-center gap-1.5">
               ${kind === 'text' ? nameInput(key, label) : `<span class="flex-1 min-w-0 truncate text-[10px] font-semibold text-gray-500" title="${esc}">${esc}</span>`}
+              ${look}
               ${eye}
               ${del}
             </div>
@@ -7359,6 +7382,7 @@ window._pcePreviewStart = async function () {
         return;
     }
     _pcePrev.on = true;
+    _pceCloseTextLook();                // watching the cut is not editing a line of it
     _pceCanvasBorrow();                 // put the canvas back exactly as we found it
     _pceRenderClips();
     await _pcePreviewSeat(first);
@@ -7369,6 +7393,11 @@ window._pcePreviewStop = function () {
     _pcePrev.on = false;
     _pcePrev.i = 0;
     _pcePrev.offset = 0;
+    // ⚠️ Stopping must not OPEN anything. Pressing Stop only repaints, and a repaint used to be
+    // enough to draw the styling controls — because they keyed off whatever was last selected, and
+    // scrubbing the cut selects. Closing here is belt as well as braces: the intent was already
+    // cleared when the preview began, and nothing between then and now should have set it.
+    _pceCloseTextLook();
     _pceCanvasRestore();
     _pceRenderClips();
 };
@@ -7665,6 +7694,12 @@ const PCE_ACTS = {
     'hide-clip': (el) => window._pceToggleHidden('clip', el.getAttribute('data-pce-key')),
     'hide-text': (el) => window._pceToggleHidden('text', el.getAttribute('data-pce-key')),
     'remove-text': (el) => window._pceOverlayRemove(el.getAttribute('data-pce-key')),
+    'style-text': (el) => {
+        const key = el.getAttribute('data-pce-key');
+        // A second press closes it — the button reads as a toggle, so it is one.
+        window._pceEditTextLook(window._pceEditingTextId() === key ? null : key);
+    },
+    'close-text-look': () => window._pceEditTextLook(null),
     'add-clip': () => window._pceAddClipFiles(),
     'preview-start': () => window._pcePreviewStart(),
     'preview-stop': () => window._pcePreviewStop(),
@@ -8235,6 +8270,10 @@ window._pceAddTextToClip = function (index, text) {
     post.overlays.push(ov);
     _pceSelectedOverlayId = ov.id;
     _pceStyleMountedFor = null;          // the panel must mount against the new box
+    // A box you have just made is a box you are editing, so the styling opens with it — this is the
+    // one moment the offer is certainly wanted, and it is how the Aa button gets noticed for next
+    // time. Everything else has to ask.
+    _pceTextEditing = ov.id;
     _rqPersistOverlays(postId);
     _rqRenderCanvasOverlays(post);
     _rqRenderTimeline(post);
@@ -8613,22 +8652,81 @@ function _pceRenderClipsInner(host, clipsOverride) {
  * while a colour input is open closes the picker.
  */
 let _pceStyleMountedFor = null;
+/**
+ * Which box the styling controls are open for — an INTENT, not a selection.
+ *
+ * ⚠️ They were drawn whenever `_pceSelectedOverlayId` pointed at a real box, and nothing ever cleared
+ * that. Selection is a side effect of half the things you can do here: grabbing a box on the canvas
+ * sets it, dragging a text bar sets it, adding text sets it. So once you had touched any text at all,
+ * Wording / How it looks / How it appears were open underneath the panel for the rest of the session —
+ * including, as reported, the moment you pressed Stop on the preview, which merely repaints.
+ *
+ * "I am editing this text" is a different statement from "this text is selected", and only the first
+ * should open a styling panel. It is set by asking — the row's Aa button, or adding a new box — and
+ * cleared by anything that means you have moved on: previewing, stopping, or styling something else.
+ */
+let _pceTextEditing = null;
+function _pceEditTextLook(id) {
+    _pceTextEditing = id || null;
+    _pceSelectedOverlayId = id || _pceSelectedOverlayId;
+    _pceStyleMountedFor = null;
+    if (id) _pceSelect('overlays');
+    _pceRenderClips();
+    // Scrolled to, because the panel it opens is below the row that opened it and the column scrolls.
+    if (id) requestAnimationFrame(() => {
+        const el = document.getElementById('pce-text-style');
+        if (el && !el.classList.contains('hidden') && el.scrollIntoView) {
+            el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+    });
+}
+window._pceEditTextLook = _pceEditTextLook;
+window._pceEditingTextId = () => _pceTextEditing;
+
+/** Watching the cut is not editing it. */
+function _pceCloseTextLook() {
+    if (_pceTextEditing == null) return;
+    _pceTextEditing = null;
+    _pceStyleMountedFor = null;
+}
+
 function _pceRenderTextStyle() {
     const host = document.getElementById('pce-text-style');
     if (!host) return;
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
     const overlays = (post && post.overlays) || [];
-    const ov = _pceSelectedOverlayId ? overlays.find((o) => o && o.id === _pceSelectedOverlayId) : null;
+    const ov = _pceTextEditing ? overlays.find((o) => o && o.id === _pceTextEditing) : null;
     if (!ov || !window.ImageOverlayEditor || !window.ImageOverlayEditor.styleControls) {
         host.classList.add('hidden');
         host.innerHTML = '';
         _pceStyleMountedFor = null;
+        // A box that has been deleted cannot go on being edited.
+        if (!ov) _pceTextEditing = null;
         return;
     }
     host.classList.remove('hidden');
     if (_pceStyleMountedFor === ov.id) return;
     _pceStyleMountedFor = ov.id;
-    window.ImageOverlayEditor.styleControls(host, {
+    // ── Say what this is and what it can do ─────────────────────────────────────────────────────
+    // The three sections are titled "Wording", "How it looks" and "How it appears", which describe
+    // themselves once you are reading them and say nothing from a row away. Naming the box being
+    // styled, and the four things on offer, is what makes the Aa button worth pressing.
+    const head = document.createElement('div');
+    head.className = 'flex items-start justify-between gap-2 pb-1.5';
+    const first = String(ov.text || '').split('\n')[0];
+    head.innerHTML = '<div class="min-w-0">'
+        + '<p class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Styling</p>'
+        + '<p class="text-[11px] font-semibold text-gray-700 truncate" title="' + _rqEsc(first) + '">'
+        + (first ? _rqEsc(first) : 'this text') + '</p>'
+        + '<p class="mt-0.5 text-[10px] text-gray-400">Emojis, font, colour, size and how it animates in.</p>'
+        + '</div>'
+        + '<button type="button" data-pce-act="close-text-look" title="Finish styling this text"'
+        + ' class="px-1.5 py-0.5 text-[10px] font-bold text-gray-400 hover:text-gray-700 cursor-pointer leading-none">Done</button>';
+    host.innerHTML = '';
+    host.appendChild(head);
+    const body = document.createElement('div');
+    host.appendChild(body);
+    window.ImageOverlayEditor.styleControls(body, {
         overlay: ov,
         video: _pcePostIsVideo(post),
         // The assistant writes the overlay, not just the caption. Same call the modal makes.
@@ -8637,9 +8735,12 @@ function _pceRenderTextStyle() {
         suggestText: (mode, current) => _pceSuggestOverlayText(
             _rqReviewPostId, mode, current,
             _pceClipBriefFor(_rqClipIndexAt(ov.startS == null ? 0 : ov.startS))),
-        // As you drag a slider: repaint the picture only. The clip list carries the wording, so it
-        // is repainted on commit rather than per keystroke — a repaint would take the caret with it.
-        onChange: () => _rqRenderCanvasOverlays(post),
+        // As you drag a slider: repaint the picture ONLY. The clip list carries the wording, so it is
+        // repainted on commit rather than per keystroke — a repaint would take the caret with it.
+        // ⚠️ The `true` is the whole of that promise: without it _rqRenderCanvasOverlays ends by
+        // repainting the list, which is the same way the row's own field lost the caret on every
+        // letter. The comment was here and the argument was not.
+        onChange: () => _rqRenderCanvasOverlays(post, true),
         onCommit: () => {
             _rqRenderTimeline(post);
             _rqPersistOverlays(_rqReviewPostId);

@@ -379,8 +379,10 @@ check('the canvas is borrowed and returned through ONE door', () => {
     // the post appeared to be attached to for the rest of the session.
     only(workspace, 'function _pceCanvasBorrow()', 'workspace.html');
     only(workspace, 'function _pceCanvasRestore()', 'workspace.html');
-    const stop = only(workspace, 'window._pcePreviewStop = function', 'workspace.html');
-    assert.ok(workspace.slice(stop, stop + 400).includes('_pceCanvasRestore()'), 'preview returns it');
+    // ⚠️ A boundary slice, not a character window. This was `slice(stop, stop + 400)` and it broke the
+    // moment the function grew a comment — the same trap logged five times in this file already.
+    const stopFn = slice('window._pcePreviewStop = function () {', '\nfunction _pcePreviewTick(video) {');
+    assert.ok(stopFn.includes('_pceCanvasRestore()'), 'preview returns it');
     // The trim drag borrows it for the duration of the drag and hands it back on release; there is
     // no selection to deselect any more.
     // Bounded by the end of the handler, not by a character count. Three times now a fixed window
@@ -1246,7 +1248,9 @@ console.log('\nand they are mounted under the clip list');
 check('the panel exists, and is mounted rather than written out', () => {
     only(workspace, 'id="pce-text-style"', 'workspace.html');
     const fn = slice('function _pceRenderTextStyle() {', '\n// ── The crop frame');
-    assert.ok(fn.includes('window.ImageOverlayEditor.styleControls(host, {'),
+    // Mounted into `body`, not `host`: the panel now carries a header above the controls naming the
+    // box being styled and what is on offer, and mounting over `host` would wipe it.
+    assert.ok(fn.includes('window.ImageOverlayEditor.styleControls(body, {'),
         'the post editor builds its own controls instead of mounting the shared ones');
     assert.ok(fn.includes('_pceSuggestOverlayText('), 'the assistant is not offered here');
     assert.ok(fn.includes('video: _pcePostIsVideo(post)'),
@@ -1268,7 +1272,10 @@ check('it remounts on a change of SELECTION, not on every repaint', () => {
 check('a slider repaints the picture; a commit saves and repaints the list', () => {
     const fn = slice('function _pceRenderTextStyle() {', '\n// ── The crop frame');
     const change = fn.slice(fn.indexOf('onChange:'), fn.indexOf('onCommit:'));
-    assert.ok(change.includes('_rqRenderCanvasOverlays(post)'), 'the picture does not follow the slider');
+    // ⚠️ With `true`. Without it the call ends by repainting the clip list, which is exactly how the
+    // row's own field lost the caret on every letter — the same mistake, one function along.
+    assert.ok(change.includes('_rqRenderCanvasOverlays(post, true)'),
+        'dragging a slider rebuilds the list under the caret');
     assert.ok(!change.includes('_rqPersistOverlays'), 'a save per pointermove');
     const commit = fn.slice(fn.indexOf('onCommit:'));
     assert.ok(commit.includes('_rqPersistOverlays('), 'nothing is ever saved');
@@ -1922,6 +1929,50 @@ check('a drag that ends over a button does not press it', () => {
         'a release anywhere fires whatever it lands on');
 });
 
+console.log('\nstyling opens because you asked, not because something got selected');
+
+check('an intent opens it, and a selection does not', () => {
+    // ⚠️ It keyed off `_pceSelectedOverlayId`, which nothing ever cleared — and selection is a side
+    // effect of half the things you can do here: grabbing a box on the canvas, dragging a text bar,
+    // adding text. So once any text had been touched, Wording / How it looks / How it appears stayed
+    // open for the session, including the moment you pressed Stop, which merely repaints.
+    const fn = slice('function _pceRenderTextStyle() {', '\n// ── The crop frame');
+    assert.ok(fn.includes('_pceTextEditing ? overlays.find('),
+        'the panel still opens for whatever happens to be selected');
+    assert.ok(!fn.includes('_pceSelectedOverlayId ? overlays.find('), 'the old selection key is back');
+    // A deleted box cannot go on being edited.
+    assert.ok(fn.includes('if (!ov) _pceTextEditing = null;'), 'a removed box leaves the intent set');
+});
+
+check('watching the cut closes it; adding text opens it', () => {
+    const start = slice('window._pcePreviewStart = async function () {', '\nwindow._pcePreviewStop');
+    assert.ok(start.includes('_pceCloseTextLook()'), 'previewing leaves the styling open over the video');
+    const stop = slice('window._pcePreviewStop = function () {', '\nfunction _pcePreviewTick(video) {');
+    assert.ok(stop.includes('_pceCloseTextLook()'), 'pressing Stop still opens the styling panel');
+    // The one moment the offer is certainly wanted — and how the Aa button gets noticed.
+    const add = slice('window._pceAddTextToClip = function (index, text) {', '\nwindow._pceClipMove = function (index, dir) {');
+    assert.ok(add.includes('_pceTextEditing = ov.id;'), 'a box you just made does not open its styling');
+});
+
+check('every text row has a door to it, and says what is behind it', () => {
+    // Without this the feature would have no way in at all, now that a selection no longer opens it.
+    assert.ok(workspace.includes("data-pce-act=\"style-text\""), 'no row offers styling');
+    assert.ok(workspace.includes('title="Emojis, font, colour, size and animation"'),
+        'the button does not say what it does, which is the question being asked');
+    // The panel names the box it is styling and what is on offer; "Wording / How it looks / How it
+    // appears" describe themselves only once you are already reading them.
+    const fn = slice('function _pceRenderTextStyle() {', '\n// ── The crop frame');
+    assert.ok(fn.includes('Emojis, font, colour, size and how it animates in.'),
+        'the panel opens without saying what it can do');
+    assert.ok(fn.includes("data-pce-act=\"close-text-look\""), 'there is no way to close it');
+    // A toggle, because the button reads as one.
+    const acts = slice('const PCE_ACTS = {', '\n};');
+    assert.ok(acts.includes("'style-text'") && acts.includes("'close-text-look'"),
+        'the new controls have no handler');
+    assert.ok(acts.includes('window._pceEditingTextId() === key ? null : key'),
+        'pressing Aa twice does not close what it opened');
+});
+
 console.log('\nthe caret survives, and so do the text rows');
 
 check('typing paints the picture without rebuilding the row it is typed in', () => {
@@ -1968,6 +2019,14 @@ check('the text rows come from the post, not from what is painted', () => {
     assert.ok(parts.includes('_pcePostIsVideo(post) ||'),
         'the panel still decides a post is not a video because the picture moved');
     assert.ok(parts.includes("const overlays = isVideo ?"), 'the overlay source changed shape');
+    // ⚠️ The other half, and the reason it was still broken after the first fix: this branch measures
+    // the <video> on the canvas, and previewing points that element at ONE CLIP at a time. Mid-preview
+    // it has no duration, so every row was thrown away — and `none` sets isVideo false, which took
+    // every "+ Add text" button with it.
+    assert.ok(parts.includes('if (isVideo && !(cutLen > 0) && !_rqVideoDurationKnown())'),
+        'a busy canvas still empties the panel');
+    assert.ok(parts.includes('return Object.assign({}, none, { isVideo, any: true,'),
+        'the bail-out still reports a video post as not a video');
 });
 
 console.log('\na render cannot land inside another render');

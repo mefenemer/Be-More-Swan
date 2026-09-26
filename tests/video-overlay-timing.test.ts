@@ -94,8 +94,15 @@ check('an unreadable clip is never given an invented length', () => {
     assert.match(known, /:\s*0;/, 'unknown must be 0, not a plausible default');
     // The timed rows moved into the clip list; _rqTimelineParts is what builds them now.
     const timeline = extract('function _rqTimelineParts(post) {');
-    assert.match(timeline, /isVideo && !_rqVideoDurationKnown\(\)/,
+    assert.match(timeline, /isVideo && !\(cutLen > 0\) && !_rqVideoDurationKnown\(\)/,
         'the timeline must refuse to draw a draggable axis it cannot measure');
+    // ⚠️ The CUT's own total counts as a measurement, and has to: _rqVideoDurationKnown reads the
+    // <video> on the canvas, and previewing points that element at one clip at a time, so mid-preview
+    // it reports nothing and every row was thrown away. This is not the invented length this check
+    // exists to stop — _pceClipsTotalS is null until the clips have really been measured, and derives
+    // from the stored trims rather than from a fallback.
+    assert.match(timeline, /const cutLen = typeof _pceClipsTotalS === 'function' \? _pceClipsTotalS\(post\) : null;/,
+        'the cut total is taken from somewhere that can guess');
     // The Start/End inputs moved onto the rows, and a row only exists inside a block _rqTimelineParts
     // built — which is the check above. There is no second place left to type a phantom second.
     const ws = readFileSync(path.join(import.meta.dirname, '..', 'workspace.html'), 'utf8');
