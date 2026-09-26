@@ -1876,4 +1876,29 @@ check('an upstream AI failure is not dressed up as "try again"', () => {
     assert.ok(tail.includes('json(503'), 'an upstream outage is still reported as a generic failure');
 });
 
+
+console.log('\nthe buttons answer to a pointer, like everything else that works here');
+
+check('pointerup drives them too, not click alone', () => {
+    // ⚠️ Evidence, not caution: in the session where these are dead, the DRAGS in this same panel
+    // work — trim, text bar, clip grip — and those are pointerdown/move/up on this exact element.
+    // Pointer events reach this container and carry the right target; `click` specifically does
+    // not. The buttons should not be the only controls here depending on the one mechanism that
+    // has never worked.
+    const fn = slice('let lastEl = null;', '\n// The typed in/out on a clip row');
+    assert.ok(fn.includes("host.addEventListener('pointerup'"), 'the buttons still need a click');
+    // Click is KEPT: a keyboard Enter fires click and no pointer event at all.
+    assert.ok(fn.includes("host.addEventListener('click', fire)"),
+        'dropping click trades a mouse problem for a keyboard one');
+    assert.ok(fn.includes('now - lastAt < 400'), 'one press would run the action twice');
+});
+
+check('a drag that ends over a button does not press it', () => {
+    // Releasing a clip you were reordering on top of "+ Add text" would otherwise add text.
+    const fn = slice('let lastEl = null;', '\n// The typed in/out on a clip row');
+    assert.ok(fn.includes('pressedEl = ev.target && ev.target.closest'), 'the press start is not recorded');
+    assert.ok(fn.includes("if (ev.type === 'pointerup' && pressedEl !== el) return;"),
+        'a release anywhere fires whatever it lands on');
+});
+
 console.log(`\n${passed} checks passed`);

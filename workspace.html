@@ -7612,11 +7612,37 @@ const PCE_ACTS = {
     'preview-stop': () => window._pcePreviewStop(),
 };
 
-host.addEventListener('click', (ev) => {
-    const el = ev.target.closest && ev.target.closest('[data-pce-act]');
+// ⚠️ POINTERUP as well as click, and the reason is evidence rather than caution.
+//
+// In the session where these buttons are dead, the DRAGS in this same panel work — trimming,
+// dragging a text bar, dragging a clip by its grip. Those are pointerdown/move/up on this exact
+// element. So pointer events reach this container and carry the right target; it is `click`
+// specifically that never arrives. Whatever is eating it — something over the panel, a swallowed
+// compatibility event — the panel's buttons should not be the only controls in it that depend on
+// the one mechanism that has never worked there.
+//
+// Click is KEPT: a keyboard Enter on a focused button fires click and no pointer event at all, and
+// dropping it would trade a mouse problem for a keyboard one. Both go through `fire`, which ignores
+// a repeat of the same action within a moment — otherwise one press would do the job twice.
+let lastEl = null;
+let lastAt = 0;
+// ⚠️ The press must have STARTED on the same control. Without this, a drag that happens to end
+// over a button would press it — releasing a clip you were reordering on top of "+ Add text"
+// would add text. It is also what a click actually means.
+let pressedEl = null;
+host.addEventListener('pointerdown', (ev) => {
+    pressedEl = ev.target && ev.target.closest ? ev.target.closest('[data-pce-act]') : null;
+});
+const fire = (ev) => {
+    const el = ev.target && ev.target.closest && ev.target.closest('[data-pce-act]');
     if (!el || el.disabled) return;
+    if (ev.type === 'pointerup' && pressedEl !== el) return;
     const act = PCE_ACTS[el.getAttribute('data-pce-act')];
     if (!act) return;
+    const now = Date.now();
+    if (el === lastEl && now - lastAt < 400) return;   // pointerup then click, one press
+    lastEl = el;
+    lastAt = now;
     ev.preventDefault();
     // ⚠️ Caught and SHOWN. An exception here used to stop the handler and nothing else, which
     // is the same dead button by another route.
@@ -7626,7 +7652,9 @@ host.addEventListener('click', (ev) => {
         _pceClipSay(at == null ? null : Number(at),
             (err && err.message) || 'That did not work. Please try again.');
     }
-});
+};
+host.addEventListener('pointerup', (ev) => { fire(ev); pressedEl = null; });
+host.addEventListener('click', fire);
 
 // The typed in/out on a clip row, same delegation as the text rows' own fields.
 host.addEventListener('change', (ev) => {
