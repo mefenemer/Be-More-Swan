@@ -985,6 +985,8 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             autoPublished = await runAutoPublishGate(db, {
                 postId: post.id, platform, assistantId: job.assistant_id, organisationId: job.organisation_id,
                 caption: captionFor(platform, stockCreditSuffix).caption, mediaSource: attachedMediaSource, now,
+                // The slot this draft is for — the gate refuses to publish one that is hours late.
+                publishDate: job.target_publish_date ? new Date(job.target_publish_date) : null,
             });
         }
 
@@ -1033,6 +1035,10 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                                 postId: sibling.id, platform: siblingPlatform, assistantId: job.assistant_id,
                                 organisationId: job.organisation_id, caption: siblingFit.caption,
                                 mediaSource: attachedMediaSource, now,
+                                // ⚠️ The SAME slot as the primary — a sibling shares the post's moment,
+                                // and judging it against anything else would let half a cross-post
+                                // publish itself while the other half went to review.
+                                publishDate: primary?.publishDate ?? (job.target_publish_date ? new Date(job.target_publish_date) : null),
                             });
                         }
                         made.push(siblingPlatform);
@@ -1247,6 +1253,12 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
 async function runAutoPublishGate(db: ReturnType<typeof getDb>, args: {
     postId: number; platform: string; assistantId: number; organisationId: number;
     caption: string; mediaSource: MediaSource; now: Date;
+    /**
+     * The slot this draft is for. ⚠️ Read from the POST that was just written rather than taken from
+     * the job, because a fanned-out sibling and the primary must be judged against the same moment,
+     * and because the post is the row the publisher will act on.
+     */
+    publishDate?: Date | null;
 }): Promise<boolean> {
     try {
         const [asst] = await db.select({ onboardingContext: aiAssistants.onboardingContext })
@@ -1259,6 +1271,7 @@ async function runAutoPublishGate(db: ReturnType<typeof getDb>, args: {
             caption: args.caption,
             mediaSource: args.mediaSource,
             onboardingContext: asst?.onboardingContext ?? null,
+            publishDate: args.publishDate ?? null,
             now: args.now,
         });
 
