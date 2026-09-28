@@ -34,8 +34,13 @@
 //
 // So requeuing this backlog unmodified would publish a fortnight of backdated posts to five
 // customers' real accounts, all within five minutes, with nobody having read them. --shift-days
-// moves every requeued slot forward by the same number of days, which keeps the original spacing
-// (they were a cadence, not a pile) while putting all of it in the future.
+// moves the slots that have PASSED forward by the same number of days, which keeps their spacing
+// relative to each other (they were a cadence, not a pile) while putting all of it in the future.
+//
+// ⚠️ Only the ones that have passed. A job is enqueued ahead of the slot it is for, so most of a
+// backlog like this is still correctly dated — the first real dry run found 275 stale out of 1,834.
+// Shifting all of them would move fifteen hundred perfectly good posts later than the customer
+// asked for, silently, and call it a recovery.
 //
 // It is REFUSED rather than defaulted: the right shift depends on when you run this, it must be the
 // same for every batch or the batches interleave, and guessing it on the operator's behalf is how
@@ -148,7 +153,8 @@ async function main() {
         console.log('      A draft inherits that slot. Autopilot can promote a draft to \'scheduled\',');
         console.log('      and anything scheduled with a past date publishes on the next 5-minute tick —');
         console.log('      so left alone this posts a fortnight of old content to real accounts at once.');
-        console.log(`      Use --shift-days=${recommended} to move every slot forward and keep the spacing.`);
+        console.log(`      Use --shift-days=${recommended} to move THOSE ${stale} forward; the other `
+            + `${eligible - stale} are still correctly dated and are left alone.`);
         console.log('');
     }
 
@@ -175,9 +181,23 @@ async function main() {
     // attempt = 0, because these never had a real attempt: three calls to an API that could not
     // answer is not three tries at writing the post. next_retry_at = now() so the next tick takes
     // them. Oldest first — the customer has been waiting longest for those.
+    // ── ⚠️ ONLY THE SLOTS THAT HAVE PASSED ──────────────────────────────────────────────────────
+    // The first version of this shifted every job in the batch, and the first real dry run showed
+    // why that is wrong: of 1,834 eligible jobs only 275 carried a stale slot. A job is enqueued
+    // AHEAD of the slot it is for, so most of this backlog is still correctly dated — shifting all
+    // of them would have moved about 1,500 perfectly good posts eight days later than the customer
+    // asked for, silently, and called it a recovery.
+    //
     // The shift is applied to the slot, not to created_at: the ORDER BY below still releases the
-    // jobs the customer has been waiting longest for first, and the slots keep their spacing.
-    const shiftSql = shiftDays ? `, target_publish_date = target_publish_date + interval '${shiftDays} days'` : '';
+    // jobs the customer has been waiting longest for first, and the stale slots keep their spacing
+    // relative to each other.
+    const shiftSql = shiftDays
+        ? `, target_publish_date = CASE
+                 WHEN target_publish_date < now()
+                 THEN target_publish_date + interval '${shiftDays} days'
+                 ELSE target_publish_date
+               END`
+        : '';
     const updated = await db.execute<{ id: number; organisation_id: number }>(
         `UPDATE content_generation_jobs
             SET status = 'queued', attempt = 0, next_retry_at = now(),
