@@ -23,6 +23,24 @@
 // its own idempotency guard, but this script must not depend on it: a job requeued after it had
 // already written a post is exactly how one job came to write two posts into one cross-post group.
 //
+// ── ⚠️ THE DATES, WHICH ARE THE DANGEROUS PART ──────────────────────────────────────────────────
+// A job carries the slot it was meant to publish in, and for this backlog that slot is up to eleven
+// days in the PAST. The draft it writes inherits it. That is harmless while the draft sits in the
+// review queue — and it is not harmless at all for a workspace with Autopilot publishing on:
+//
+//   • the post is inserted 'pending_approval', then runAutoPublishGate may promote it to 'scheduled'
+//   • runAutoPublishGate has NO staleness check — it asks about confidence, media and connections
+//   • publish-social-posts takes everything 'scheduled' with publish_date <= now()
+//
+// So requeuing this backlog unmodified would publish a fortnight of backdated posts to five
+// customers' real accounts, all within five minutes, with nobody having read them. --shift-days
+// moves every requeued slot forward by the same number of days, which keeps the original spacing
+// (they were a cadence, not a pile) while putting all of it in the future.
+//
+// It is REFUSED rather than defaulted: the right shift depends on when you run this, it must be the
+// same for every batch or the batches interleave, and guessing it on the operator's behalf is how
+// you get the incident this flag exists to prevent. The dry run computes it and prints it.
+//
 // ── Pace it ─────────────────────────────────────────────────────────────────────────────────────
 // ⚠️ The drain takes 20 jobs per tick, every 10 minutes, and each one is a model call. Releasing
 // 1,829 at once is its own incident — it is a thundering herd at the provider that just came back,
@@ -32,8 +50,8 @@
 // DRY RUN by default. Nothing is written without --apply.
 //
 //   npx tsx scripts/requeue-failed-content-jobs.ts
-//   npx tsx scripts/requeue-failed-content-jobs.ts --apply --limit=50
-//   npx tsx scripts/requeue-failed-content-jobs.ts --apply --limit=200 --org=37 --url-var=DATABASE_URL_PROD
+//   npx tsx scripts/requeue-failed-content-jobs.ts --apply --limit=50 --shift-days=12
+//   npx tsx scripts/requeue-failed-content-jobs.ts --apply --limit=200 --shift-days=12 --org=37 --url-var=DATABASE_URL_PROD
 //
 // ⚠️ --url-var takes the NAME of an environment variable, never a connection string: a URL on the
 // command line ends up in shell history and in this session's transcript.
@@ -51,6 +69,8 @@ const limit = Number(flag('limit')) || 100;
 const org = Number(flag('org')) || null;
 const match = flag('match') ?? 'credit balance is too low';
 const sinceDays = Number(flag('since-days')) || 30;
+const shiftDays = flag('shift-days') != null ? Number(flag('shift-days')) : null;
+const keepDates = args.includes('--keep-dates');
 
 /** Host + database of the connection, so the operator can confirm the target. Never the password. */
 function describeTarget(): string {
@@ -94,6 +114,7 @@ async function main() {
     console.log(`  match  : error_message contains "${match}"`);
     console.log(`  scope  : ${org ? `organisation ${org}` : 'all organisations'}, failed in the last ${sinceDays} days`);
     console.log(`  batch  : ${limit} job${limit === 1 ? '' : 's'} (the drain takes 20 per 10-minute tick)`);
+    console.log(`  dates  : ${keepDates ? '⚠️  KEPT AS THEY ARE' : shiftDays != null ? `moved forward ${shiftDays} days` : 'not decided yet'}`);
     console.log('');
 
     const totals = await db.execute<{ organisation_id: number; jobs: number }>(
@@ -109,18 +130,58 @@ async function main() {
     for (const r of totals) console.log(`    organisation ${r.organisation_id}: ${r.jobs}`);
     console.log('');
 
+    // ── The slot check ──────────────────────────────────────────────────────────────────────────
+    const [slots] = await db.execute<{ oldest: string | null; stale: number }>(
+        `SELECT min(target_publish_date) AS oldest,
+                count(*) FILTER (WHERE target_publish_date < now())::int AS stale
+           FROM content_generation_jobs ${where}`
+    );
+    const stale = Number(slots?.stale ?? 0);
+    const oldest = slots?.oldest ? new Date(slots.oldest) : null;
+    const recommended = oldest
+        ? Math.ceil((Date.now() + 86_400_000 - oldest.getTime()) / 86_400_000)
+        : 0;
+
+    if (stale) {
+        console.log(`  ⚠️  ${stale} of them are scheduled for a slot that has already passed`
+            + `${oldest ? ` (oldest: ${oldest.toISOString().slice(0, 10)})` : ''}.`);
+        console.log('      A draft inherits that slot. Autopilot can promote a draft to \'scheduled\',');
+        console.log('      and anything scheduled with a past date publishes on the next 5-minute tick —');
+        console.log('      so left alone this posts a fortnight of old content to real accounts at once.');
+        console.log(`      Use --shift-days=${recommended} to move every slot forward and keep the spacing.`);
+        console.log('');
+    }
+
     if (!apply) {
-        console.log(`  DRY RUN — nothing written. Re-run with --apply to release ${Math.min(limit, eligible)} of them.\n`);
+        console.log(`  DRY RUN — nothing written. Re-run with --apply --limit=${Math.min(limit, eligible)}`
+            + `${stale ? ` --shift-days=${recommended}` : ''} to release them.\n`);
         return;
+    }
+
+    // ⚠️ REFUSED, not defaulted. The right shift depends on when this is run, and it must be the
+    // same across every batch or the batches interleave. Choosing it for the operator is how you get
+    // the incident this exists to prevent.
+    if (stale && shiftDays == null && !keepDates) {
+        console.error(`  REFUSING: ${stale} jobs carry a slot in the past and no --shift-days was given.`);
+        console.error(`  Pass --shift-days=${recommended}, or --keep-dates if you have decided you want`);
+        console.error('  backdated posts to go live immediately for every workspace on Autopilot.\n');
+        process.exit(1);
+    }
+    if (shiftDays != null && (!Number.isFinite(shiftDays) || shiftDays < 0)) {
+        console.error('  --shift-days must be a whole number of days, zero or more.\n');
+        process.exit(1);
     }
 
     // attempt = 0, because these never had a real attempt: three calls to an API that could not
     // answer is not three tries at writing the post. next_retry_at = now() so the next tick takes
     // them. Oldest first — the customer has been waiting longest for those.
+    // The shift is applied to the slot, not to created_at: the ORDER BY below still releases the
+    // jobs the customer has been waiting longest for first, and the slots keep their spacing.
+    const shiftSql = shiftDays ? `, target_publish_date = target_publish_date + interval '${shiftDays} days'` : '';
     const updated = await db.execute<{ id: number; organisation_id: number }>(
         `UPDATE content_generation_jobs
             SET status = 'queued', attempt = 0, next_retry_at = now(),
-                error_message = NULL, updated_at = now()
+                error_message = NULL, updated_at = now()${shiftSql}
           WHERE id IN (SELECT id FROM content_generation_jobs ${where} ORDER BY created_at LIMIT ${limit})
       RETURNING id, organisation_id`
     );

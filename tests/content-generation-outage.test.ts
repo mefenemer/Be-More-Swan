@@ -158,6 +158,31 @@ check('the match cannot be widened into "every failed job" by accident', () => {
     assert.ok(requeue.includes("ESCAPE '\\\\'"), 'the escaped pattern is not declared to postgres');
 });
 
+check('it refuses to release backdated slots without being told to', () => {
+    // ⚠️ THE DANGEROUS PART, and it is not the API spend. A job carries the slot it was meant to
+    // publish in, the draft inherits it, runAutoPublishGate can promote a draft to 'scheduled' and
+    // has NO staleness check, and publish-social-posts takes everything scheduled with
+    // publish_date <= now(). Requeued unmodified, this backlog posts a fortnight of old content to
+    // five customers' real accounts within five minutes, unread.
+    assert.ok(requeue.includes('--shift-days'), 'the slots cannot be moved out of the past');
+    assert.ok(requeue.includes('REFUSING'), 'it releases backdated slots silently');
+    assert.ok(landmark(requeue, 'if (stale && shiftDays == null && !keepDates) {')
+              < landmark(requeue, 'UPDATE content_generation_jobs\n            SET'),
+        'the refusal is checked after the write');
+    // Refused rather than defaulted: the right shift depends on when it is run and must be the same
+    // for every batch, so guessing it for the operator is the incident this prevents.
+    assert.ok(requeue.includes('--keep-dates'), 'there is no way to say "yes, I meant that"');
+    assert.ok(requeue.includes("target_publish_date + interval '${shiftDays} days'"),
+        'the shift is computed but never applied');
+    // Applied to the slot, not to created_at — the oldest waiting customer still goes first.
+    assert.ok(requeue.includes('ORDER BY created_at LIMIT'), 'the release order changed');
+});
+
+check('the dry run computes the shift so the operator does not have to', () => {
+    assert.ok(requeue.includes('const recommended'), 'the operator is asked for a number with no way to know it');
+    assert.ok(requeue.includes('target_publish_date < now()'), 'it cannot tell which slots have passed');
+});
+
 check('--url-var takes a NAME, never a connection string', () => {
     assert.ok(requeue.includes("flag('url-var') ?? 'NETLIFY_DATABASE_URL'"), 'the target cannot be chosen');
     assert.ok(requeue.includes('describeTarget'), 'it does not announce which database it will write to');
