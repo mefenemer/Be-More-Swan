@@ -9,6 +9,7 @@
 // Changing the target model requires only an env-var update; no business logic changes needed.
 
 import Anthropic from '@anthropic-ai/sdk';
+import { logAiUsage, type DataCategory } from '../utils/ai-usage';
 
 export interface GatewayRequest {
     system: string;
@@ -26,6 +27,33 @@ export interface GatewayRequest {
      * room to serialise a reply.
      */
     deadlineMs?: number;
+    /**
+     * Who this call is for, so the gateway can record what it cost.
+     *
+     * ⚠️ Post generation — the product's single biggest AI consumer — was never recorded at all.
+     * `process-content-jobs.ts` never called logAiUsage and neither did this module, so
+     * `ai_usage_log` held only the ad-hoc paths (chat, quality review, rewrite, hooks). Measured on
+     * production 2026-09-28: ten drafting jobs completed in thirty minutes while the table recorded
+     * four calls in two hours. Token and cost attribution for the largest consumer simply did not
+     * exist, which takes billing, task credits and per-workspace COGS with it — and it is why a
+     * backlog's cost could not be read from our own database.
+     *
+     * Logging belongs HERE because this is the one place every model call passes through, and it is
+     * the only place that knows which model actually answered after a failover.
+     *
+     * ⚠️ OPT-IN, deliberately. About a dozen callers already log for themselves; making this
+     * unconditional would double-count every one of them. Passing `usage` is the signal that this
+     * caller does NOT log on its own. The end state is for those callers to move here and their own
+     * calls to go — until then, pass this only from a caller that has none.
+     */
+    usage?: {
+        workspaceId?: number | null;
+        userId?: number | null;
+        assistantId?: number | null;
+        dataCategories?: DataCategory[];
+        taskRunId?: number | null;
+        sessionId?: string | null;
+    };
 }
 
 export interface GatewayResponse {
@@ -119,6 +147,7 @@ export async function gatewayGenerate(req: GatewayRequest): Promise<GatewayRespo
     }
 
     const text = response.content.find(b => b.type === 'text')?.text ?? '';
+    recordUsage(req, response, usedFallback ? FALLBACK_MODEL : PRIMARY_MODEL);
     return {
         text,
         stopReason: response.stop_reason ?? null,
@@ -127,6 +156,38 @@ export async function gatewayGenerate(req: GatewayRequest): Promise<GatewayRespo
         tokensInput:  response.usage?.input_tokens  ?? null,
         tokensOutput: response.usage?.output_tokens ?? null,
     };
+}
+
+/**
+ * Write one ai_usage_log row for a call that has just succeeded.
+ *
+ * Never awaited and never able to throw: a book-keeping failure must not turn a generated post into
+ * a failed job. logAiUsage swallows its own errors; the void and the catch here cover the rest.
+ *
+ * ⚠️ The model KEY WE INVOKED, not `response.model`. The API resolves a request for
+ * `claude-sonnet-4-6` into a dated id, and `ai_model_pricing` is keyed on the undated constant —
+ * every other caller in the codebase logs its own `MODEL` constant, so recording the dated string
+ * here would match no pricing row and quietly write every drafting call in at $0.00, which is the
+ * exact hole this change exists to close. Still accurate after a failover, because the caller passes
+ * the model it actually called.
+ */
+function recordUsage(req: GatewayRequest, response: Anthropic.Message, modelKey: string): void {
+    if (!req.usage) return;
+    try {
+        void logAiUsage({
+            workspaceId:  req.usage.workspaceId  ?? null,
+            userId:       req.usage.userId       ?? null,
+            assistantId:  req.usage.assistantId  ?? null,
+            model:        modelKey,
+            inputTokens:  response.usage?.input_tokens  ?? 0,
+            outputTokens: response.usage?.output_tokens ?? 0,
+            taskRunId:    req.usage.taskRunId    ?? null,
+            sessionId:    req.usage.sessionId    ?? null,
+            dataCategories: req.usage.dataCategories,
+        });
+    } catch (err) {
+        console.error('[ai-gateway] usage logging failed (the call itself succeeded)', err);
+    }
 }
 
 // ── Web search ───────────────────────────────────────────────────────────────────────────────
@@ -254,6 +315,7 @@ export async function gatewayGenerateGrounded(req: GatewayRequest): Promise<Grou
     const { urls, searches } = collectSearchedUrls(allContent);
     const text = allContent.filter(b => b.type === 'text').map(b => (b as any).text).join('\n').trim();
 
+    recordUsage(req, response, model);
     return {
         text,
         stopReason: response.stop_reason ?? null,

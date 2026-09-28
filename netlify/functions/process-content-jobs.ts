@@ -598,7 +598,17 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // tokens, so the budget was being spent before the later fields were written. Output tokens
         // are only billed for what is generated, so the higher ceiling costs nothing on the replies
         // that were already fitting.
-        const gwResponse = await gatewayGenerate({ system: systemPrompt, messages, maxTokens: 4096 });
+        // ⚠️ `usage` is what puts this call in ai_usage_log. Drafting is the biggest AI consumer in
+        // the product and was recorded NOWHERE — neither here nor in the gateway — so token and cost
+        // attribution for it did not exist, and a backlog's spend could not be read from our own
+        // database at all. Opt-in because a dozen other callers log for themselves; this one does not.
+        const jobUsage = {
+            workspaceId: job.organisation_id,
+            userId: job.user_id,
+            assistantId: job.assistant_id,
+            dataCategories: ['business_context' as const],
+        };
+        const gwResponse = await gatewayGenerate({ system: systemPrompt, messages, maxTokens: 4096, usage: jobUsage });
         const { text: rawText, tokensInput, tokensOutput } = gwResponse;
         let generated: {
             caption?: string; captionShort?: string; hashtags?: string;
@@ -651,6 +661,10 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                         { role: 'user', content: nearDuplicateRetryPrompt(dup) },
                     ],
                     maxTokens: 4096,
+                    // The near-duplicate re-ask is a second billable call for the same post. Logged
+                    // separately rather than folded into the first, because "one post cost two
+                    // calls" is the fact worth being able to see.
+                    usage: jobUsage,
                 });
                 dupTokensIn = retry.tokensInput ?? 0;
                 dupTokensOut = retry.tokensOutput ?? 0;
