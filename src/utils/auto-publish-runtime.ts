@@ -20,6 +20,7 @@ import { scheduledPosts } from '../../db/schema';
 import {
     gateAutonomousDraft,
     autoPublishWeeklyCeiling,
+    AUTO_PUBLISH_STALE_AFTER_H,
     AUTONOMOUS_DRAFT_PLATFORMS,
     type AutonomousDraftPlatform,
     type GateDecision,
@@ -109,6 +110,11 @@ export async function decideAutoPublish(db: Db, args: {
     caption: string;
     mediaSource: MediaSource;
     onboardingContext: unknown;
+    /**
+     * The slot this post is for. Absent means unknown, which is treated as on time — a caller that
+     * cannot say when the post is due must not have its drafts silently held back.
+     */
+    publishDate?: Date | null;
     now?: Date;
 }): Promise<AutoPublishDecision> {
     const now = args.now ?? new Date();
@@ -140,12 +146,45 @@ export async function decideAutoPublish(db: Db, args: {
         return { ...gate, status: 'pending_approval', reason: 'weekly_cap_reached', connectionId };
     }
 
+    // ── Is this draft still for a moment that is coming? ─────────────────────────────────────────
+    //
+    // ⚠️ Nothing here asked. The gate weighed publish mode, media, confidence, claims, the connection
+    // and the weekly ceiling, then promoted the draft to 'scheduled' — and publish-social-posts takes
+    // anything scheduled with publish_date <= now() on its next tick. So a post drafted a week after
+    // its slot published INSTANTLY, unread, and read to the customer as the product deciding by
+    // itself to post something stale.
+    //
+    // Whether a draft is late is not something the drafter can know. The job carries the slot, the
+    // post inherits it, and how long the job waited in a queue is invisible from here — which is why
+    // the check belongs at the moment of the decision rather than anywhere upstream of it.
+    //
+    // Review, never a drop: the post is complete and a human may still want it out. It arrives in the
+    // queue with generationReason explaining that the moment passed.
+    const dueAt = args.publishDate ? args.publishDate.getTime() : null;
+    if (dueAt != null && Number.isFinite(dueAt)) {
+        const hoursLate = (now.getTime() - dueAt) / 3_600_000;
+        if (hoursLate > AUTO_PUBLISH_STALE_AFTER_H) {
+            return { ...gate, status: 'pending_approval', reason: 'slot_has_passed', connectionId };
+        }
+    }
+
     return { ...gate, connectionId };
 }
 
 /** Human-readable trail for generationReason, so a queue can be debugged without reading code. */
 export function describeDecision(decision: AutoPublishDecision): string {
-    return decision.status === 'scheduled'
-        ? 'Auto-published: Autopilot is in publish mode for this platform and the caption scored green with no factual claims.'
-        : `Sent for review (${decision.reason.replace(/_/g, ' ')}).`;
+    if (decision.status === 'scheduled') {
+        return 'Auto-published: Autopilot is in publish mode for this platform and the caption scored green with no factual claims.';
+    }
+    // ⚠️ Spelled out rather than left as "slot has passed". Every other reason here names something
+    // the reviewer already knows about — their publish mode, their connection, their weekly ceiling.
+    // This one names something they have never seen: the post was written for a moment that went by
+    // while it waited, which sounds like a fault unless it says why it is in front of them and what
+    // publishing it now would mean.
+    if (decision.reason === 'slot_has_passed') {
+        return 'Sent for review: this was written for a time that has already passed, so Autopilot did '
+            + 'not publish it unattended. Approving it will publish straight away — check it still reads '
+            + 'as current, or move it to a new slot first.';
+    }
+    return `Sent for review (${decision.reason.replace(/_/g, ' ')}).`;
 }

@@ -77,7 +77,30 @@ export type GateReason =
     | 'scoring_unavailable'       // timeout / unparseable response → amber fallback, not a verdict
     | 'no_live_connection'        // nothing to publish through — runtime gate downgrades
     | 'weekly_cap_reached'        // runaway guard tripped — routed to review, never dropped
+    | 'slot_has_passed'           // drafted long after the slot it was for — a human should look
     | 'auto_published';           // cleared every gate
+
+/**
+ * How late a draft may be for its own slot and still publish itself.
+ *
+ * ⚠️ The gate had no notion of time at all: it asks about publish mode, media, confidence, claims,
+ * a live connection and the weekly ceiling, and then promotes the draft to 'scheduled' — whereupon
+ * publish-social-posts takes anything scheduled with `publish_date <= now()` on its next tick. A post
+ * generated a week after its slot therefore published INSTANTLY, and looked to the customer like the
+ * product deciding on its own to post something stale.
+ *
+ * That was theoretical until 2026-09-28, when 1,834 jobs were requeued after an eleven-day outage.
+ * Slots already in the past were shifted forward before release, but the drain manages about twelve
+ * jobs an hour, so the backlog takes days — and slots that were comfortably in the future when they
+ * were released go stale while they wait. A guard in the script could never have covered that; only
+ * one here can.
+ *
+ * Six hours, and the number is a judgement rather than a constant anyone can derive. An autopilot
+ * slot means "post around this time", so being an hour or two late is the system working, not
+ * failing. Half a day later the content may reference something that has moved, and publishing it
+ * unattended is a worse answer than asking. It degrades to review, never to a drop.
+ */
+export const AUTO_PUBLISH_STALE_AFTER_H = 6;
 
 // Headroom above the schedule's own weekly slot count. Absorbs timezone/boundary effects and the
 // secondary gap-filler engine, while still catching a runaway (duplicated cron, bad schedule, a bug
