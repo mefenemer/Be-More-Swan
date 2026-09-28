@@ -174,6 +174,12 @@ check('it refuses to release backdated slots without being told to', () => {
     assert.ok(requeue.includes('--keep-dates'), 'there is no way to say "yes, I meant that"');
     assert.ok(requeue.includes("target_publish_date + interval '${shiftDays} days'"),
         'the shift is computed but never applied');
+    // ⚠️ ONLY the slots that have passed. A job is enqueued AHEAD of its slot, so most of a backlog
+    // is still correctly dated — the first real dry run found 275 stale out of 1,834. Shifting the
+    // batch wholesale would move fifteen hundred good posts later than the customer asked for.
+    assert.ok(requeue.includes('WHEN target_publish_date < now()'),
+        'it shifts correctly-dated posts too, and calls that a recovery');
+    assert.ok(requeue.includes('ELSE target_publish_date'), 'a future slot is not preserved');
     // Applied to the slot, not to created_at — the oldest waiting customer still goes first.
     assert.ok(requeue.includes('ORDER BY created_at LIMIT'), 'the release order changed');
 });
