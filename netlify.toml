@@ -840,6 +840,16 @@ node_bundler = "esbuild"
 [functions.check-optimiser-health]
   schedule = "20 9 * * *"
 
+# Is content generation working for ANYBODY? 07:50 UTC — before the working day, and a different
+# entry from the drain it watches (every 10 min) so one broken entry cannot take both.
+#
+# ⚠️ Added after an outage that ran for ELEVEN DAYS. Every AI draft on prod failed from 2026-09-17
+# to 09-28 — the Anthropic balance had run out — and nothing noticed, because each failure notified
+# only the owner of the workspace it happened in and nobody sees five workspaces at once. It alerts
+# on the SPREAD (two organisations is a platform fault at any volume), not on a job count.
+[functions.check-content-generation-health]
+  schedule = "50 7 * * *"
+
 # US 5.2: resolve widget A/B hook tests (promote the winning variant) — hourly
 [functions.resolve-ab-tests]
   schedule = "0 * * * *"

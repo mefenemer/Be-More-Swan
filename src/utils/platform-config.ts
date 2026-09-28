@@ -59,6 +59,14 @@ export const CONFIG_KEYS = {
     META_APP_BLOCK_SINCE:      'meta.app_block_since',
     // When we last emailed a human about it, so an ongoing block does not alert every ten minutes.
     META_APP_BLOCK_LAST_ALERT: 'meta.app_block_last_alert',
+    // ── Content generation health ──
+    // When we last emailed a human about drafting failing across the platform, so an ongoing
+    // incident does not alert on every scheduled run.
+    // ⚠️ This exists because nothing watched content generation at all. Between 2026-09-17 and
+    // 09-28 every AI draft on prod failed — 1,829 jobs across all five organisations — and the only
+    // signal was each workspace owner's own notification feed. Eleven days, four customers, no
+    // alert. A failure that is only ever reported to the person it happened to is not reported.
+    CONTENT_GEN_LAST_ALERT:    'content_generation.last_alert',
 } as const;
 
 export type ConfigKey = typeof CONFIG_KEYS[keyof typeof CONFIG_KEYS];

@@ -574,6 +574,27 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [],
     },
     {
+        // ⚠️ The one above says "Please try again or contact support", and for eleven days in
+        // September 2026 that was the wrong advice, sent ~1,200 times to four customers. The
+        // Anthropic account's balance had run out; no amount of trying again was going to write a
+        // post, and support already knew. Telling someone to retry a failure that cannot clear
+        // wastes their afternoon and reads as their fault.
+        //
+        // Same `type`, so routing, preferences and the action mapping are untouched — a new type
+        // touches five places and none of them needed to change. Only the words differ, and the
+        // words are the whole point: it is ours, we know, nothing for you to do, your work is safe.
+        //
+        // No variables. A customer does not want the upstream error, and the raw body carries our
+        // billing state — that leak is exactly what the review banner was fixed for.
+        templateKey: 'post_generation_blocked_upstream',
+        name: 'Post generation paused (our end)',
+        category: 'Content',
+        type: 'post_generation_failed',
+        title: 'We could not write this post',
+        message: 'Our writing service is unavailable at the moment — this is at our end, not yours, and we are on it. Nothing you need to do: your settings and schedule are untouched, and this post can be generated again once service is back.',
+        variables: [],
+    },
+    {
         // Sent ONCE, on the first retry of a job someone is waiting on. Without it the only
         // notification is "Generating your post…" at enqueue, so a job that failed and is retrying
         // is indistinguishable from a job that has hung — which is exactly how it was reported.
