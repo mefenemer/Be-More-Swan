@@ -4949,3 +4949,52 @@ export const swanIndexSections = pgTable("swan_index_sections", {
 }, (t) => [
   check("swan_index_sections_key_check", sql`${t.key} ~ '^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$'`),
 ]);
+
+// ── The curated music library ───────────────────────────────────────────────────────────────────
+// Tracks we licensed ourselves and host ourselves — deliberately not a stock provider's search API.
+// A customer publishes commercially, so the exposure from a wrongly-licensed bed lands on them and
+// on us; a library we can produce the paperwork for is one we can answer for. Full reasoning in
+// db/music-library.sql; the rules about what may be offered and what must be credited are pure and
+// live in src/lib/music-library.ts.
+//
+// ⚠️ A picked track does NOT become a new kind of asset. It creates an ordinary content_assets row
+// with provider 'library' and external_url pointing at our own storage, so the Sound layer, the
+// timeline, audio_overlays and the Remotion render all carry on unchanged — it is a new SOURCE of an
+// assetId, not a new pipeline.
+export const musicTracks = pgTable("music_tracks", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  artist: text("artist").notNull(),
+  // Our storage, never a third party's CDN. Both, because moving a bucket changes the url and not
+  // the object.
+  storageKey: text("storage_key"),
+  url: text("url").notNull(),
+  // ⚠️ STORED, not measured. A clip's length is measured in the browser because Pexels supplies
+  // none, and a failed measurement is what once removed the trim slider from a correct-looking
+  // timeline. We control ingestion here, so the picker can state a length before fetching anything.
+  durationS: real("duration_s").notNull(),
+  // Mood and genre, lower-case. Free-form on purpose — curation is human and a fixed vocabulary
+  // would be wrong within a month.
+  tags: text("tags").array().notNull().default([]),
+  // ── Licence, as the vendor words it ──
+  // ⚠️ attributionRequired is NOT a preference and must never be joined to one. Pexels credits are a
+  // courtesy offered per organisation; a licence that DEMANDS a credit is a condition of use, so an
+  // organisation with credits off must not be OFFERED those tracks at all. Defaults true: an
+  // unrecorded licence is treated as the stricter one.
+  licenceName: text("licence_name").notNull(),
+  licenceTermsUrl: text("licence_terms_url"),
+  attributionRequired: boolean("attribution_required").notNull().default(true),
+  attributionText: text("attribution_text"),
+  // NULL = perpetual. A date, because licences run to a day rather than an instant.
+  licenceExpiresAt: date("licence_expires_at"),
+  // Provenance. No code path reads these — they are the answer to "prove you may use this", which
+  // is the whole argument for owning the library rather than borrowing it.
+  source: text("source"),
+  sourceReference: text("source_reference"),
+  acquiredAt: timestamp("acquired_at").defaultNow().notNull(),
+  // ⚠️ Withdrawal is not retroactive: this stops a track being OFFERED and never hides it from a
+  // post that already carries it. Rows are not deleted, so published posts keep resolving.
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
