@@ -17,7 +17,7 @@ import {
     auditLogs, organisations,
 } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
-import { gatewayGenerate } from '../../src/lib/ai-gateway';
+import { gatewayGenerate, isUpstreamBlocked } from '../../src/lib/ai-gateway';
 import { buildInspoBlock } from '../../src/utils/inspo-profile';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmark';
 import { CONTENT_QUALITY_STANDARDS } from '../../src/constants/content-quality';
@@ -59,6 +59,15 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 const AI_IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
 
 const BACKOFF_SECS = [10, 30, 90];
+/**
+ * How long a job waits out an outage at our end, and how long it is willing to wait in total.
+ *
+ * 15 minutes rather than seconds: there is nothing to discover by asking a refusing API sooner, and
+ * a parked backlog wakes 20 at a time on the next tick once service returns. 72 hours rather than
+ * forever: a revoked key never comes back, and a job that can never run has to say so eventually.
+ */
+const PARK_RETRY_MINS = 15;
+const PARK_MAX_HOURS = 72;
 
 
 // Scheduled/conversion jobs (draft-horizon-fill.ts, schedule-conversion-posts.ts) never set
@@ -116,11 +125,11 @@ export async function drainContentJobs(): Promise<number> {
         organisation_id: number; user_id: number; attempt: number; max_attempts: number;
         context_prompt: string | null; trigger_type: string | null; platform: string | null;
         admin_id: number | null; target_publish_date: string | null; crosspost_group_id: string | null;
-        platforms: string[] | null; revised_from_post_id: number | null;
+        platforms: string[] | null; revised_from_post_id: number | null; created_at: string;
     }>(
         `SELECT id, job_id, blueprint_id, assistant_id, organisation_id, user_id, attempt, max_attempts,
                 context_prompt, trigger_type, platform, admin_id, target_publish_date, crosspost_group_id,
-                platforms, revised_from_post_id
+                platforms, revised_from_post_id, created_at
          FROM content_generation_jobs
          WHERE status = 'queued'
            AND content_type = 'social'
@@ -162,7 +171,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
     organisation_id: number; user_id: number; attempt: number; max_attempts: number;
     context_prompt: string | null; trigger_type: string | null; platform: string | null;
     admin_id: number | null; target_publish_date: string | null; crosspost_group_id: string | null;
-    platforms: string[] | null; revised_from_post_id: number | null;
+    platforms: string[] | null; revised_from_post_id: number | null; created_at?: string;
 }, now: Date) {
     // Claim the job ATOMICALLY. `AND status = 'queued'` is the whole guard: the SELECT above uses
     // FOR UPDATE SKIP LOCKED, but it runs as a standalone statement, so postgres-js autocommits and
@@ -1135,6 +1144,53 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 `UPDATE post_idea_suggestions SET status = 'pending', used_at = NULL
                  WHERE id = ${consumedIdeaId} AND used_post_id IS NULL`
             ).catch(() => {});
+        }
+
+        // ── An outage at OUR end must not spend the customer's retries ──────────────────────────
+        //
+        // ⚠️ This cost 1,829 posts across every organisation on prod, 2026-09-17 → 09-28. The
+        // Anthropic account's balance ran out, and a credit-balance failure arrives as a 400 —
+        // which isFailoverError does not cover (only 429 and 503), so there was no failover and no
+        // early exit. Every job burned all three attempts in seconds against an API that could not
+        // possibly answer, then marked itself 'failed' — which is TERMINAL, because nothing requeues
+        // a failed job. Eleven days of drafting for five customers, unrecoverable without a manual
+        // requeue, and each one told its owner to "please try again".
+        //
+        // So: give the attempt back and park the job. A failure that is ours is not evidence that
+        // this job is bad, and the customer's three tries exist for jobs that are.
+        //
+        // Bounded, because a revoked key never comes back: after PARK_MAX_HOURS the job gives up for
+        // real — and says whose fault it was.
+        if (isUpstreamBlocked(err)) {
+            const ageHours = job.created_at
+                ? (Date.now() - new Date(job.created_at).getTime()) / 3_600_000
+                : 0;
+            if (ageHours < PARK_MAX_HOURS) {
+                const until = new Date(Date.now() + PARK_RETRY_MINS * 60_000).toISOString();
+                await db.execute(
+                    `UPDATE content_generation_jobs
+                        SET status = 'queued',
+                            attempt = GREATEST(attempt - 1, 0),
+                            next_retry_at = '${until}',
+                            error_message = '${errorMessage.replace(/'/g, "''").slice(0, 400)}',
+                            updated_at = now()
+                      WHERE id = ${job.id}`
+                );
+                console.error(`[process-content-jobs] job ${job.job_id} PARKED (${ageHours.toFixed(1)}h old) — `
+                    + `the AI provider is refusing our calls, so this attempt does not count: ${errorMessage.slice(0, 200)}`);
+                return;
+            }
+            await db.execute(
+                `UPDATE content_generation_jobs SET status = 'failed', error_message = '${errorMessage.replace(/'/g, "''").slice(0, 400)}', updated_at = now() WHERE id = ${job.id}`
+            );
+            // ⚠️ A DIFFERENT template. "Please try again or contact support" is advice that cannot
+            // work when the fault is ours, and four customers were given it ~1,200 times.
+            await createNotification(db, 'post_generation_blocked_upstream', {
+                userId: job.user_id,
+                metadata: { jobId: job.job_id, error: errorMessage, assistantId: job.assistant_id },
+            });
+            await db.insert(auditLogs).values({ actionType: 'post_generation_failed', resourceType: 'content_generation_jobs', resourceId: job.job_id, userId: job.user_id, newState: { errorMessage, attempt, upstreamBlocked: true, ageHours } });
+            return;
         }
 
         if (attempt >= job.max_attempts) {
