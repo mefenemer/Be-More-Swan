@@ -1493,6 +1493,27 @@ window.showComplianceModals = function showComplianceModals(force) {
                   class="px-3 py-2 rounded-lg border border-gray-300 text-gray-700 text-xs font-bold hover:bg-gray-50 transition cursor-pointer">Upload audio</button>
                 <input type="file" id="insp-audio-file" accept="audio/mpeg,audio/mp4,audio/wav,audio/webm,audio/ogg,.mp3,.m4a,.wav,.webm,.ogg"
                   class="hidden" onchange="_pceAddAudioFile(this.files && this.files[0]); this.value='';">
+                <!-- The library. Third way to get sound onto a post, and the only one that needs no
+                     file of your own — tracks we licensed and host, so anything offered here is
+                     already cleared for a commercial post. -->
+                <button type="button" data-music-act="open"
+                  class="px-3 py-2 rounded-lg border border-gray-300 text-gray-700 text-xs font-bold hover:bg-gray-50 transition cursor-pointer">&#9835; Browse music</button>
+              </div>
+
+              <!-- ── The music library ────────────────────────────────────────────────────────
+                   Inline rather than a dialog: the post editor is already a modal, and a picker
+                   inside one is a modal in a modal — which is also how the text editor ended up
+                   being folded back into this panel. -->
+              <div id="insp-music" class="hidden mt-3 rounded-xl border border-gray-200 bg-gray-50 p-2.5">
+                <div class="flex items-center gap-2 mb-2">
+                  <input type="text" id="insp-music-q" placeholder="Search by name, artist or mood"
+                    class="flex-1 min-w-0 text-xs border border-gray-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:border-pink-400">
+                  <button type="button" data-music-act="close"
+                    class="px-1.5 py-0.5 text-[10px] font-bold text-gray-400 hover:text-gray-700 cursor-pointer leading-none">Done</button>
+                </div>
+                <div id="insp-music-tags" class="flex flex-wrap gap-1 mb-2"></div>
+                <div id="insp-music-list" class="space-y-1 max-h-64 overflow-y-auto"></div>
+                <p id="insp-music-msg" class="mt-2 text-[11px] text-gray-400">Loading the library…</p>
               </div>
 
               <!-- One row per clip. Selecting a row drives both the timing panel below and the
@@ -14352,6 +14373,241 @@ async function _pceAddAudioFile(file) {
         await _pcePersistAudio(postId);
     } catch (err) {
         _pceSetAudioMsg(err.message || 'Could not add that clip.', 'error');
+    }
+}
+
+// ── The music library ───────────────────────────────────────────────────────────────────────────
+//
+// A third way to get sound onto a post, beside recording and uploading — and the only one that needs
+// no file of your own. Everything offered here is a track we licensed and host, so it is already
+// cleared for a commercial post; the endpoint withholds anything whose licence has lapsed or whose
+// terms demand a credit we cannot yet surface.
+//
+// The picking ENDS exactly where an upload ends: a content_assets id becomes a clip in `post.audio`,
+// and from there it times, fades, previews and renders through code that knows nothing about the
+// library. That is the whole design — a new source of an assetId, not a new pipeline.
+
+let _pceMusic = { open: false, loading: false, tracks: [], tags: [], tag: '', q: '', playing: null };
+const _pceMusicPreviewEls = {};
+
+/**
+ * ⚠️ Bound to DOCUMENT, once, at load — not from whatever renders the panel.
+ *
+ * The clip panel's buttons lived in three different homes before this rule was learned, and each one
+ * failed the same way: a binder reached from a render path is a binder some early return can skip,
+ * and the symptom is a button that draws perfectly and does nothing, with no error anywhere. See
+ * _pceBindPanelActionsOnce. There is no reason to learn it twice.
+ */
+(function _pceBindMusicOnce() {
+    document.addEventListener('click', (ev) => {
+        const el = ev.target && ev.target.closest && ev.target.closest('[data-music-act]');
+        if (!el) return;
+        ev.preventDefault();
+        const act = el.getAttribute('data-music-act');
+        if (act === 'open') _pceOpenMusicLibrary();
+        else if (act === 'close') _pceCloseMusicLibrary();
+        else if (act === 'tag') { _pceMusic.tag = el.getAttribute('data-music-tag') || ''; _pceRenderMusicList(); }
+        else if (act === 'play') _pceToggleMusicPreview(el.getAttribute('data-music-id'));
+        else if (act === 'add') _pceAddLibraryTrack(Number(el.getAttribute('data-music-id')));
+    }, true);
+
+    // Typing filters what is already loaded rather than re-fetching: the library is a curated few
+    // dozen, so a round trip per keystroke would be slower than the filter and no more correct.
+    document.addEventListener('input', (ev) => {
+        const el = ev.target;
+        if (!el || el.id !== 'insp-music-q') return;
+        _pceMusic.q = String(el.value || '').toLowerCase();
+        _pceRenderMusicList();
+    }, true);
+})();
+
+async function _pceOpenMusicLibrary() {
+    const host = document.getElementById('insp-music');
+    if (!host) return;
+    _pceMusic.open = true;
+    host.classList.remove('hidden');
+    if (_pceMusic.tracks.length || _pceMusic.loading) { _pceRenderMusicList(); return; }
+
+    _pceMusic.loading = true;
+    _pceSetMusicMsg('Loading the library…');
+    try {
+        const res = await fetch('/.netlify/functions/music-library', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'list' }),
+        });
+        if (!res.ok) {
+            const e = await res.json().catch(() => ({}));
+            throw new Error(e.error || 'Could not load the music library.');
+        }
+        const data = await res.json();
+        _pceMusic.tracks = Array.isArray(data.tracks) ? data.tracks : [];
+        _pceMusic.tags = Array.isArray(data.tags) ? data.tags : [];
+    } catch (err) {
+        _pceSetMusicMsg(err.message || 'Could not load the music library.');
+        _pceMusic.loading = false;
+        return;
+    }
+    _pceMusic.loading = false;
+    _pceRenderMusicList();
+}
+
+function _pceCloseMusicLibrary() {
+    _pceMusic.open = false;
+    _pceStopMusicPreview();
+    document.getElementById('insp-music')?.classList.add('hidden');
+}
+
+function _pceSetMusicMsg(text) {
+    const el = document.getElementById('insp-music-msg');
+    if (el) { el.textContent = text || ''; el.classList.toggle('hidden', !text); }
+}
+
+/** mm:ss, because a bed is chosen by how long it is as much as by how it sounds. */
+function _pceMusicLen(s) {
+    const n = Math.max(0, Math.round(Number(s) || 0));
+    return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
+}
+
+function _pceRenderMusicList() {
+    const host = document.getElementById('insp-music-list');
+    const tagHost = document.getElementById('insp-music-tags');
+    if (!host) return;
+
+    if (tagHost) {
+        tagHost.innerHTML = ['', ..._pceMusic.tags].map((t) => {
+            const on = _pceMusic.tag === t;
+            return `<button type="button" data-music-act="tag" data-music-tag="${_rqEsc(t)}"
+                class="px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer border"
+                style="${on ? 'background:#ec4899;border-color:#ec4899;color:#fff' : 'background:#fff;border-color:#e5e7eb;color:#6b7280'}"
+                >${t ? _rqEsc(t) : 'All'}</button>`;
+        }).join('');
+    }
+
+    const q = _pceMusic.q;
+    const shown = _pceMusic.tracks.filter((t) => {
+        if (_pceMusic.tag && !(t.tags || []).includes(_pceMusic.tag)) return false;
+        if (!q) return true;
+        return String(t.title || '').toLowerCase().includes(q)
+            || String(t.artist || '').toLowerCase().includes(q)
+            || (t.tags || []).some((x) => String(x).toLowerCase().includes(q));
+    });
+
+    if (!_pceMusic.tracks.length) {
+        host.innerHTML = '';
+        _pceSetMusicMsg('There is no music in the library yet.');
+        return;
+    }
+    if (!shown.length) {
+        host.innerHTML = '';
+        _pceSetMusicMsg('Nothing matches that.');
+        return;
+    }
+    _pceSetMusicMsg('');
+
+    host.innerHTML = shown.map((t) => {
+        const playing = _pceMusic.playing === String(t.id);
+        // ⚠️ A track with no preview is still OFFERED. A failed presign loses the audition, not the
+        // right to use the bed — hiding it would make a workspace's own licensed music disappear
+        // because a signature could not be minted.
+        const play = t.previewUrl
+            ? `<button type="button" data-music-act="play" data-music-id="${_rqEsc(String(t.id))}"
+                 title="${playing ? 'Stop' : 'Listen'}" aria-label="${playing ? 'Stop' : 'Listen to'} ${_rqEsc(t.title)}"
+                 class="px-1.5 text-sm cursor-pointer leading-none"
+                 style="color:${playing ? '#ec4899' : '#9ca3af'}">${playing ? '\u25A0' : '\u25B6'}</button>`
+            : '<span class="px-1.5 text-[10px] text-gray-300" title="Preview unavailable">—</span>';
+        return `<div class="flex items-center gap-2 rounded-lg bg-white border border-gray-200 px-2 py-1.5">
+            ${play}
+            <div class="min-w-0 flex-1">
+              <p class="text-[11px] font-semibold text-gray-700 truncate">${_rqEsc(t.title)}</p>
+              <p class="text-[10px] text-gray-400 truncate">${_rqEsc(t.artist)} · ${_pceMusicLen(t.durationS)}${(t.tags || []).length ? ' · ' + _rqEsc((t.tags || []).join(', ')) : ''}</p>
+            </div>
+            <button type="button" data-music-act="add" data-music-id="${_rqEsc(String(t.id))}"
+              class="shrink-0 px-2 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-bold hover:bg-emerald-700 transition cursor-pointer">Add</button>
+          </div>`;
+    }).join('');
+}
+
+/**
+ * Audition one track at a time.
+ *
+ * ⚠️ One element per track, kept, rather than a new Audio() per press: a fresh element re-downloads
+ * the file on every listen, and a picker is pressed a lot. Starting one stops the other, because two
+ * beds playing at once tells you nothing about either.
+ */
+function _pceToggleMusicPreview(id) {
+    const key = String(id || '');
+    const track = _pceMusic.tracks.find((t) => String(t.id) === key);
+    if (!track || !track.previewUrl) return;
+    if (_pceMusic.playing === key) { _pceStopMusicPreview(); _pceRenderMusicList(); return; }
+
+    _pceStopMusicPreview();
+    let el = _pceMusicPreviewEls[key];
+    if (!el) {
+        el = new Audio(track.previewUrl);
+        el.preload = 'none';
+        // The button is drawn from _pceMusic.playing, so anything that ends playback has to clear it
+        // or the row keeps offering to stop a track that has already finished.
+        el.addEventListener('ended', () => { _pceMusic.playing = null; _pceRenderMusicList(); });
+        _pceMusicPreviewEls[key] = el;
+    }
+    _pceMusic.playing = key;
+    el.currentTime = 0;
+    el.play().catch(() => { _pceMusic.playing = null; _pceSetMusicMsg('That preview would not play.'); _pceRenderMusicList(); });
+    _pceRenderMusicList();
+}
+
+function _pceStopMusicPreview() {
+    const cur = _pceMusic.playing && _pceMusicPreviewEls[_pceMusic.playing];
+    if (cur) { try { cur.pause(); } catch (e) { /* already gone */ } }
+    _pceMusic.playing = null;
+}
+
+/**
+ * Put a library track on the post.
+ *
+ * Ends where _pceAddAudioFile ends, on purpose: same clip shape, same selection, same measure, same
+ * save. The only difference is where the assetId came from.
+ */
+async function _pceAddLibraryTrack(trackId) {
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    if (!post || !Number.isInteger(trackId)) return;
+    if (!Array.isArray(post.audio)) post.audio = [];
+    if (post.audio.length >= 10) {
+        _pceSetMusicMsg('That\u2019s the most sound a post can carry (10 clips).');
+        return;
+    }
+    _pceSetMusicMsg('Adding\u2026');
+    try {
+        const res = await fetch('/.netlify/functions/music-library', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'select', postId, trackId }),
+        });
+        if (!res.ok) {
+            const e = await res.json().catch(() => ({}));
+            throw new Error(e.error || 'Could not add that track.');
+        }
+        const picked = await res.json();
+        const clip = {
+            id: `a${picked.assetId}_${Date.now().toString(36)}`,
+            assetId: picked.assetId,
+            label: String(picked.label || 'Music').slice(0, 120),
+            volume: 1,
+            url: picked.url || null,
+            name: picked.name,
+        };
+        post.audio.push(clip);
+        _pceSelectedAudioId = clip.id;
+        _pceStopMusicPreview();
+        await _pceMeasureAudio(post);
+        _pceRefreshAudioInspector();
+        _rqRenderTimeline(post);
+        _pceRenderLayers();
+        await _pcePersistAudio(postId);
+        _pceSetMusicMsg('');
+        window.showToast?.(`\u201C${picked.label}\u201D added to this post.`, { icon: '\u266B' });
+    } catch (err) {
+        _pceSetMusicMsg(err.message || 'Could not add that track.');
     }
 }
 
