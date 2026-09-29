@@ -302,6 +302,51 @@ function deriveFormat(platform: string, assets: AssetMetrics[]): RouteResult {
  * Route one asset set across several platforms at once — what the composer's destination bar shows.
  * Returns a map keyed by platform so a caller can render a tab per entry without re-deriving.
  */
+/**
+ * The ratio this platform needs, when the master is the ratio the user cut to.
+ *
+ * ── Why this exists, and why it breaks rule 4 above ─────────────────────────────────────────────
+ * Rule 4 says nothing is ever silently re-cut: the router reports what an asset WOULD need and
+ * leaves the cutting to a person. That rule is right for an asset someone chose and attached — we
+ * have no business reshaping their photograph — and wrong for a video WE render. The master is our
+ * own output, produced from an edit list, and re-rendering it at a second ratio costs the user
+ * nothing and loses nothing. So for a rendered master, and only for one, the answer is acted on
+ * rather than reported. The crop is still shown before it publishes; it is automatic, not invisible.
+ *
+ * Returns null when the master publishes as-is — the common case, and the reason this is cheap:
+ * a 9:16 master is accepted by Instagram, LinkedIn, X and YouTube unchanged, so only Facebook and
+ * Threads need anything rendering a second time.
+ *
+ * Where a re-frame IS needed, the CLOSEST accepted ratio wins rather than the first one listed,
+ * because closest is the one that throws away the least picture. For a 9:16 master that picks 4:5
+ * on both Facebook and Threads — which is better than the 1:1 the plan assumed, and still one shared
+ * derivative rather than two.
+ */
+export function reframeRatioFor(
+    platform: string,
+    formatKey: string | null | undefined,
+    masterRatio: string,
+): string | null {
+    const master = parseRatio(masterRatio);
+    if (master == null) return null;
+
+    const declared = formatKey ? POST_FORMATS.find(f => f.key === formatKey) : null;
+    const fmt = declared && declared.availability === 'live' ? declared : defaultFormatFor(platform);
+    // No format, or a format with no opinion about shape: nothing to re-frame towards.
+    if (!fmt || !fmt.aspectRatios.length) return null;
+    if (ratioAccepted(fmt, master)) return null;
+
+    let best: string | null = null;
+    let bestDistance = Infinity;
+    for (const candidate of fmt.aspectRatios) {
+        const r = parseRatio(candidate);
+        if (r == null) continue;
+        const distance = Math.abs(Math.log(r / master));   // log space: 2:1 and 1:2 are equally far
+        if (distance < bestDistance) { bestDistance = distance; best = candidate; }
+    }
+    return best;
+}
+
 export function routeAcross(platforms: string[], assets: AssetMetrics[]): Record<string, RouteResult> {
     const out: Record<string, RouteResult> = {};
     for (const p of platforms) out[p] = routeAsset(p, assets);

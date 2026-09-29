@@ -39,10 +39,43 @@
   const BORDER_RATIO = 0.07;  // border width   = fontSize * BORDER_RATIO (min 1px)
   const RADIUS_RATIO = 0.15;  // corner radius  = fontSize * RADIUS_RATIO
 
-  const FONTS = [
-    'Arial', 'Helvetica', 'Verdana', 'Trebuchet MS', 'Georgia',
-    'Times New Roman', 'Courier New', 'Impact', 'Comic Sans MS',
-  ];
+  // The picker, and — more importantly — what each choice actually RESOLVES to.
+  //
+  // These used to be bare OS font names passed straight through to the renderer. Lambda has none of
+  // them and Chrome substitutes silently, so the published video was set in a different face from
+  // the one the reviewer approved, with a differently sized box (the box is sized by the rendered
+  // text). window.OverlayFonts is generated from src/lib/overlay-fonts.ts — the same module the
+  // Remotion composition imports — so the two cannot drift. See scripts/gen-client-constants.ts.
+  //
+  // The literal list is the last-resort fallback for a page that somehow loaded this file without
+  // platform-constants.js: the ids are unchanged, so nothing breaks, it just loses the webfonts.
+  const OF = (typeof window !== 'undefined' && window.OverlayFonts) || null;
+  const FONTS = OF
+    ? OF.all.map((f) => ({ id: f.id, label: f.label, stack: f.stack }))
+    : ['Arial', 'Helvetica', 'Verdana', 'Trebuchet MS', 'Georgia', 'Times New Roman', 'Courier New', 'Impact', 'Comic Sans MS']
+        .map((id) => ({ id: id, label: id, stack: id }));
+
+  /** The CSS stack for a stored family name. One answer, shared with the render. */
+  function fontStack(id) {
+    if (OF) return OF.stack(id);
+    const hit = FONTS.find((f) => f.id.toLowerCase() === String(id || '').trim().toLowerCase());
+    return (hit || FONTS[0]).stack;
+  }
+
+  /** Resolves once the webfaces are usable. Canvas will NOT fetch them on its own. */
+  function fontsReady() {
+    return OF ? OF.ready() : Promise.resolve();
+  }
+  // GENERATED from OVERLAY_ANIMS in src/lib/overlay-geometry.ts, same as the fonts above. This was
+  // a hand copy with a comment asking a test to keep it honest; now the list has one source and the
+  // test has nothing left to catch. A name that drifts here is stored and then silently ignored by
+  // the renderer, which is the quietest possible way for a chosen effect to do nothing.
+  const OA = (typeof window !== 'undefined' && window.OverlayAnims) || null;
+  const ANIMS = OA
+    ? OA.OPTIONS.map((a) => ({ id: a.id, label: a.label }))
+    : [{ id: 'none', label: 'Cut' }, { id: 'fade', label: 'Fade' },
+       { id: 'rise', label: 'Rise' }, { id: 'pop', label: 'Pop' }];
+
   const EMOJIS = ['😀','😍','🎉','🔥','✨','💯','👍','❤️','🙌','😎','🥳','💪','☕','🌟','📣','✅','👉','🎁','😂','🤩'];
 
   const DEFAULTS = {
@@ -99,7 +132,10 @@
     const lh     = fontSize * LINE_HEIGHT;
     const border = Math.max(1, fontSize * BORDER_RATIO);
     const radius = fontSize * RADIUS_RATIO;
-    const family = ov.fontFamily || DEFAULTS.fontFamily;
+    // The STACK, not the bare name: canvas honours a font list exactly as CSS does, and measureText
+    // is what sizes the box — so measuring with a different face is how the preview and the
+    // published file end up disagreeing about where the box edges are.
+    const family = fontStack(ov.fontFamily || DEFAULTS.fontFamily);
 
     ctx.font = `${fontSize}px ${family}`;
     ctx.textBaseline = 'top';
@@ -144,7 +180,7 @@
     const fontSize = clamp(ov.fontSizePct == null ? DEFAULTS.fontSizePct : ov.fontSizePct, 0.005, 0.5) * refHeightPx;
     node.style.left = (clamp(ov.x, 0, 1) * 100) + '%';
     node.style.top = (clamp(ov.y, 0, 1) * 100) + '%';
-    node.style.fontFamily = ov.fontFamily || DEFAULTS.fontFamily;
+    node.style.fontFamily = fontStack(ov.fontFamily || DEFAULTS.fontFamily);
     node.style.fontSize = fontSize + 'px';
     node.style.color = ov.color || DEFAULTS.color;
     node.style.padding = (fontSize * PAD_RATIO) + 'px';
@@ -161,6 +197,13 @@
   // the created nodes, each tagged data-id, so the caller can wire click/drag — this only paints.
   // Safe to call repeatedly; it removes the nodes it made. Returns [] if the image is not laid out
   // yet, so the caller should re-run on the image's load event and on resize.
+  /**
+   * Paint overlay nodes over a picture, optionally draggable.
+   *
+   * `opts.onMove` / `opts.onDrop` turn the read-only preview into an editable one — which is what
+   * lets the post editor's own canvas position a box without opening the modal. `opts.refEl` is the
+   * MEDIA element, and is what positions are measured against.
+   */
   function render(container, overlays, opts) {
     opts = opts || {};
     ensureStyles();
@@ -180,6 +223,13 @@
       node.style.pointerEvents = 'auto';
       styleOverlayNode(node, ov, h);
       container.appendChild(node);
+      if (opts.onMove || opts.onDrop || opts.onGrab) {
+        node.style.cursor = opts.cursor || 'move';
+        attachPositionDrag(node, ov, () => {
+          const r = refEl.getBoundingClientRect();
+          return { w: r.width, h: r.height, left: r.left, top: r.top };
+        }, { onGrab: opts.onGrab, onMove: opts.onMove, onDrop: opts.onDrop });
+      }
       nodes.push(node);
     }
     return nodes;
@@ -187,6 +237,10 @@
 
   // ── Public: bake overlays into the image at native resolution ────────────────
   async function bake(imageUrl, overlays) {
+    // Before ANY measuring. An unloaded webfont makes measureText silently return the fallback's
+    // metrics, which bakes a box sized for a font the picture is not set in — the exact drift this
+    // whole change removes, reintroduced at the last step.
+    await fontsReady();
     const img = await loadImage(imageUrl);
     const W = img.naturalWidth || img.width;
     const H = img.naturalHeight || img.height;
@@ -217,14 +271,41 @@
       .ioe-body{display:flex;gap:16px;padding:16px;overflow:auto}
       .ioe-stagewrap{flex:1 1 auto;min-width:0;display:flex;align-items:center;justify-content:center;background:#0f172a;border-radius:12px;overflow:hidden}
       .ioe-stage{position:relative;display:inline-block;max-width:100%;max-height:64vh;line-height:0;user-select:none;touch-action:none}
-      .ioe-stage img{display:block;max-width:100%;max-height:64vh;pointer-events:none}
+      .ioe-stage img,.ioe-stage video{display:block;max-width:100%;max-height:64vh;pointer-events:none}
       .ioe-ov{position:absolute;line-height:${LINE_HEIGHT};white-space:pre;cursor:move;box-sizing:border-box;transform:translate(-50%,-50%);overflow:visible}
       .ioe-ov.sel{outline:2px dashed #ec4899;outline-offset:3px}
-      .ioe-side{flex:0 0 300px;display:flex;flex-direction:column;gap:12px}
+      /* Scrolls on its own, so browsing the controls does not drag the picture off-screen —
+         and so the rows below the fold are reachable without scrolling the whole modal. */
+      .ioe-side{flex:0 0 300px;display:flex;flex-direction:column;gap:12px;min-height:0;overflow-y:auto;padding-right:4px}
+      /* ⚠️ flex-shrink:0, and it is load-bearing.
+         A column flex container whose content is taller than it is shrinks EVERY child to make it
+         fit — it does not scroll first. .ioe-sect is overflow:hidden, so it has no minimum and
+         collapses to a hairline, while a textarea or a <select> holds its intrinsic height and
+         looks untouched. The result is a section that is present in the DOM, correctly built, with
+         the right text inside it, and about one pixel tall: "the section has disappeared",
+         reported three times, every investigation finding the markup perfect. Without this line the
+         overflow-y above never engages, because there is never any overflow left to scroll. */
+      .ioe-side > *{flex-shrink:0}
       .ioe-side.empty{align-items:stretch}
+      /* The shared controls mounted OUTSIDE the modal. In the modal the spacing between rows comes
+         from .ioe-side's own gap; a bare container has none, so the sections butt together. */
+      .ioe-stack{display:flex;flex-direction:column;gap:10px}
+      .ioe-stack > *{flex-shrink:0}
       .ioe-row{display:flex;flex-direction:column;gap:5px}
       .ioe-row label{font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.03em}
       .ioe-inline{display:flex;align-items:center;gap:8px}
+      .ioe-sect{border:1px solid #e5e7eb;border-radius:10px;overflow:hidden}
+      .ioe-sect-h{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:#f8fafc;border:0;font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.03em;cursor:pointer}
+      .ioe-sect-h:hover{background:#f1f5f9}
+      .ioe-sect-x{font-size:14px;color:#94a3b8}
+      .ioe-sect-b{padding:10px;display:flex;flex-direction:column;gap:10px}
+      .ioe-chips{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
+      .ioe-chip{font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;cursor:pointer}
+      .ioe-chip:hover{border-color:#d1d5db}
+      .ioe-chip.on{border-color:#f472b6;background:#fdf2f8;color:#be185d}
+      .ioe-when{position:relative;height:26px;border-radius:6px;background:#f1f5f9;overflow:hidden;user-select:none}
+      .ioe-when-lit{position:absolute;top:0;bottom:0;background:rgba(236,72,153,.25)}
+      .ioe-when-h{position:absolute;top:0;bottom:0;width:8px;margin-left:-4px;border-radius:4px;background:#ec4899;cursor:ew-resize}
       .ioe-modal textarea,.ioe-modal select,.ioe-modal input[type=text]{width:100%;font-size:13px;border:1px solid #cbd5e1;border-radius:9px;padding:8px 10px;box-sizing:border-box;font-family:inherit}
       .ioe-modal textarea{resize:vertical;min-height:56px}
       .ioe-modal input[type=color]{width:38px;height:32px;padding:0;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer}
@@ -252,11 +333,177 @@
     document.head.appendChild(el);
   }
 
+  /** The clip a moment of the finished video falls in. Mirrors _pceSpanAt in workspace.html. */
+  function spanAt(spans, t) {
+    if (!spans || !spans.length) return null;
+    for (const sp of spans) if (t < sp.end - 0.001) return sp;
+    return spans[spans.length - 1];
+  }
+
+  const fmtS = (n) => `${Math.round(n * 10) / 10}s`;
+
   // ── The interactive editor ───────────────────────────────────────────────────
-  function open({ imageUrl, overlays, onDone, suggestText }) {
+  /**
+   * `spans` is the post's CUT, when it has one: [{ i, start, end, len }] in seconds of the finished
+   * video. The editor has never managed timing — it passed startS/endS through untouched — which was
+   * right while "when" was one number in a panel elsewhere. On a multi-clip post it is two questions
+   * ("which clip, where in it") and they belong beside the text they describe: deciding what a box
+   * says and deciding when it shows are the same act of writing.
+   *
+   * Absent or single-clip, everything below is skipped and the editor behaves exactly as before.
+   */
+  function open({ imageUrl, overlays, onDone, suggestText, spans, video }) {
     ensureStyles();
     const state = (overlays || []).map((o) => ({ ...DEFAULTS, ...o, id: o.id || uid() }));
     let selectedId = state.length ? state[state.length - 1].id : null;
+
+    // ── When this box shows ────────────────────────────────────────────────────
+    // Rendered only for a real cut. On a still, or a single clip, "when" has one answer and a
+    // control offering to choose it is noise.
+    /**
+     * ⚠️ Read fresh every time, never snapshotted.
+     *
+     * `spans` and `video` may be passed as VALUES or as GETTERS, and the getter form is the one the
+     * page uses — because a clip's length is measured asynchronously off a <video> element, so at
+     * the moment this modal opens the answer is quite often "not yet". Snapshotting it produced a
+     * modal that had decided, permanently, that the post was not a cut: no clip chips, no timing,
+     * and no explanation. Exactly the failure mode this feature has had three times already, in
+     * three different places.
+     */
+    const readSpans = () => {
+      const v = typeof spans === 'function' ? spans() : spans;
+      return Array.isArray(v) && v.length > 1 ? v : null;
+    };
+    const isVideo = () => (typeof video === 'function' ? !!video() : !!video);
+
+    function ovSpan(ov) {
+      return spanAt(readSpans(), ov.startS == null ? 0 : ov.startS);
+    }
+
+    function timingRow(ov) {
+      const cut = readSpans();
+      // A video whose clips have not finished measuring yet: say so. Rendering nothing is
+      // indistinguishable from the feature not existing, which is how it was reported.
+      // ── Say WHY, always ─────────────────────────────────────────────────────
+      // There are three reasons these controls can be absent and they look identical on screen: the
+      // post is a photo, the post is one clip, or the clips have not finished measuring. Rendering
+      // nothing for all three sent two rounds of "the section has disappeared" — the section was
+      // correct every time and simply mute about it. Silence is the bug.
+      if (!cut) {
+        if (!isVideo()) {
+          return '<p class="ioe-count">This is a photo post — the text is part of the picture, so it has no timing.</p>';
+        }
+        const raw = typeof spans === 'function' ? spans() : spans;
+        return Array.isArray(raw)
+          ? '<p class="ioe-count">One clip, so there is nothing to choose between — this text shows for the whole video. Add another clip to place it on one of them.</p>'
+          : '<p class="ioe-count">Reading the clips… the per-clip controls appear once their lengths are known.</p>';
+      }
+      const sp = ovSpan(ov);
+      const start = ov.startS == null ? 0 : ov.startS;
+      const end = ov.endS == null ? sp.end : Math.min(ov.endS, sp.end);
+      const a = Math.max(0, (start - sp.start) / sp.len) * 100;
+      const b = Math.min(1, (end - sp.start) / sp.len) * 100;
+      const chips = cut.map((x) => `<button type="button" data-clip="${x.i}"
+        class="ioe-chip${x.i === sp.i ? ' on' : ''}">Clip ${x.i + 1}</button>`).join('');
+      return `
+        <div class="ioe-row">
+          <label>Shows on</label>
+          <div class="ioe-chips">${chips}</div>
+          <div class="ioe-when" data-when-track>
+            <div class="ioe-when-lit" data-when-lit style="left:${a}%;width:${Math.max(0, b - a)}%"></div>
+            <span class="ioe-when-h" data-when="start" style="left:${a}%" role="slider" tabindex="0" aria-label="When the text appears"></span>
+            <span class="ioe-when-h" data-when="end" style="left:${b}%" role="slider" tabindex="0" aria-label="When the text disappears"></span>
+          </div>
+          <span class="ioe-count" data-when-label>Clip ${sp.i + 1} · ${fmtS(start - sp.start)} → ${fmtS(end - sp.start)} of it</span>
+        </div>`;
+    }
+
+    /**
+     * Put the selected box's clip on the stage, at the moment the box appears.
+     *
+     * `t` is seconds of the FINISHED video; the element needs seconds into its own source, so the
+     * clip's own in point is added back. Paused throughout — this is a frame to judge against, not
+     * playback, and a clip that started playing under a drag would move the thing being aimed at.
+     */
+    async function showClipFrame(ov, t) {
+      if (!readSpans() || !vidEl) return;
+      const sp = ovSpan(ov);
+      const clip = sp && sp.clip;
+      if (!clip || !clip.url) return;
+      imgEl.style.display = 'none';
+      vidEl.style.display = '';
+      if (vidEl.getAttribute('src') !== clip.url) {
+        vidEl.src = clip.url;
+        await new Promise((res) => {
+          if (vidEl.readyState >= 1) return res();
+          vidEl.addEventListener('loadedmetadata', res, { once: true });
+          vidEl.addEventListener('error', res, { once: true });
+        });
+        // The clip's shape decides how tall the stage is, and fontSizePct is measured against that.
+        // A frame later, so the swap has actually been laid out — measuring in the same tick reads
+        // the size the element had before it was shown.
+        requestAnimationFrame(renderOverlays);
+      }
+      vidEl.pause();
+      const within = Math.max(0, (t == null ? sp.start : t) - sp.start);
+      try { vidEl.currentTime = (clip.inS || 0) + within; } catch (e) { /* not seekable yet */ }
+    }
+
+    // ── Collapsible sections ───────────────────────────────────────────────────
+    // The panel grew from "text, font, colour" to eight groups, which on a laptop means the thing
+    // you came to change is below the fold. Which sections are open is remembered for the life of
+    // the editor, so opening a box, closing it and opening another does not reset the view.
+    const openSections = { text: true, style: false, when: true, anim: false };
+
+    function sect(key, title, body) {
+      if (!body) return '';
+      const on = openSections[key] !== false;
+      return `
+        <div class="ioe-sect${on ? ' on' : ''}" data-sect="${key}">
+          <button type="button" class="ioe-sect-h" data-sect-toggle="${key}" aria-expanded="${on}">
+            <span>${title}</span><span class="ioe-sect-x">${on ? '−' : '+'}</span>
+          </button>
+          <div class="ioe-sect-b"${on ? '' : ' style="display:none"'}>${body}</div>
+        </div>`;
+    }
+
+    /**
+     * How the box arrives and leaves.
+     *
+     * Video only. A still's text is flattened into the pixels — there is no time for anything to
+     * happen in — so offering motion there would promise something the published image cannot do.
+     */
+    function animRow(ov) {
+      if (!isVideo()) return '';
+      const cur = ov.anim || 'none';
+      return `
+        <div class="ioe-row">
+          <div class="ioe-chips">${ANIMS.map((a) => `<button type="button" data-anim="${a.id}"
+            class="ioe-chip${a.id === cur ? ' on' : ''}">${a.label}</button>`).join('')}</div>
+          <span class="ioe-count">Applies to the rendered video, not to the still preview.</span>
+        </div>`;
+    }
+
+    /** Move the handles without rebuilding the panel — a rebuild mid-drag drops the pointer. */
+    function paintWhen(ov) {
+      const cut = readSpans();
+      if (!cut) return;
+      const track = backdrop.querySelector('[data-when-track]');
+      if (!track) return;
+      const sp = ovSpan(ov);
+      const start = ov.startS == null ? 0 : ov.startS;
+      const end = ov.endS == null ? sp.end : Math.min(ov.endS, sp.end);
+      const a = Math.max(0, (start - sp.start) / sp.len) * 100;
+      const b = Math.min(1, (end - sp.start) / sp.len) * 100;
+      const lit = track.querySelector('[data-when-lit]');
+      if (lit) { lit.style.left = a + '%'; lit.style.width = Math.max(0, b - a) + '%'; }
+      const h1 = track.querySelector('[data-when="start"]');
+      const h2 = track.querySelector('[data-when="end"]');
+      if (h1) h1.style.left = a + '%';
+      if (h2) h2.style.left = b + '%';
+      const lbl = backdrop.querySelector('[data-when-label]');
+      if (lbl) lbl.textContent = `Clip ${sp.i + 1} · ${fmtS(start - sp.start)} → ${fmtS(end - sp.start)} of it`;
+    }
 
     const backdrop = document.createElement('div');
     backdrop.className = 'ioe-backdrop';
@@ -268,7 +515,10 @@
         </div>
         <div class="ioe-body">
           <div class="ioe-stagewrap">
-            <div class="ioe-stage" data-stage><img alt="Post image" data-img></div>
+            <!-- Two backdrops, one shown at a time. A still post keeps the <img> it always had; a
+                 cut shows the CLIP the selected text sits on, because "where does this go" cannot be
+                 answered against a frame of a different clip. -->
+            <div class="ioe-stage" data-stage><img alt="Post image" data-img><video data-vid muted playsinline preload="metadata" style="display:none"></video></div>
           </div>
           <div class="ioe-side" data-side></div>
         </div>
@@ -284,6 +534,7 @@
 
     const stage = backdrop.querySelector('[data-stage]');
     const imgEl = backdrop.querySelector('[data-img]');
+    const vidEl = backdrop.querySelector('[data-vid]');
     const side = backdrop.querySelector('[data-side]');
     const countEl = backdrop.querySelector('[data-count]');
     imgEl.src = imageUrl;
@@ -299,16 +550,51 @@
     backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) close(null); });
 
     // ── Render the overlay DOM nodes over the image ────────────────────────────
+    /**
+     * Whichever backdrop is actually on screen.
+     *
+     * This measured the <img> unconditionally, which was fine while the <img> was the only backdrop
+     * there was. Once a clip could replace it, the hidden image measured 0×0 — so fontSizePct, which
+     * is a fraction of the backdrop's HEIGHT, resolved to zero and every box rendered as an empty
+     * two-pixel square. Dragging was equally broken, since it positions against the same rect.
+     */
+    function backdropEl() {
+      return vidEl && vidEl.style.display !== 'none' ? vidEl : imgEl;
+    }
+
     function stageMetrics() {
-      const r = imgEl.getBoundingClientRect();
+      const r = backdropEl().getBoundingClientRect();
       return { w: r.width, h: r.height, left: r.left, top: r.top };
     }
 
+    /** Whenever the selection changes, the stage follows it onto that box's clip. */
+    function syncStageToSelection() {
+      if (!readSpans()) return;
+      const ov = state.find((o) => o.id === selectedId);
+      if (ov) showClipFrame(ov, ov.startS);
+    }
+
+    /**
+     * The boxes that belong on the clip currently being shown.
+     *
+     * The stage drew ALL of them, which on a cut stacked every overlay in the post on top of
+     * whichever clip you were looking at — so four boxes on four different clips looked like four
+     * boxes on every clip, and there was no way to tell which was which. A box belongs to the clip
+     * its start time falls in; that is the same rule the chips and the renderer use.
+     */
+    function stageOverlays() {
+      if (!readSpans()) return state;
+      const sel = state.find((o) => o.id === selectedId);
+      if (!sel) return state;
+      const here = ovSpan(sel).i;
+      return state.filter((o) => ovSpan(o).i === here);
+    }
+
     function renderOverlays() {
-      // Clear existing nodes (keep the <img>).
+      // Clear existing nodes (keep the backdrops).
       stage.querySelectorAll('.ioe-ov').forEach((n) => n.remove());
       const { h } = stageMetrics();
-      for (const ov of state) {
+      for (const ov of stageOverlays()) {
         const node = document.createElement('div');
         node.className = 'ioe-ov' + (ov.id === selectedId ? ' sel' : '');
         node.dataset.id = ov.id;
@@ -316,30 +602,25 @@
         stage.appendChild(node);
         attachDrag(node, ov);
       }
-      countEl.textContent = state.length ? `${state.length} text overlay${state.length > 1 ? 's' : ''}` : 'No overlays yet';
+      const shown = stageOverlays().length;
+      countEl.textContent = !state.length ? 'No overlays yet'
+        : readSpans() && shown !== state.length
+          ? `${shown} of ${state.length} text overlays — showing this clip's`
+          : `${state.length} text overlay${state.length > 1 ? 's' : ''}`;
     }
 
-    // ── Drag to reposition (pointer events) ────────────────────────────────────
+    // ── Drag to reposition ─────────────────────────────────────────────────────
+    // The gesture itself is attachPositionDrag, shared with the post editor's canvas. What is left
+    // here is what the MODAL does about it: selecting a box moves the stage onto that box's clip.
     function attachDrag(node, ov) {
-      node.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        selectedId = ov.id;
-        renderSide();
-        markSelected();
-        const m = stageMetrics();
-        node.setPointerCapture(e.pointerId);
-        const move = (ev) => {
-          ov.x = clamp((ev.clientX - m.left) / m.w, 0, 1);
-          ov.y = clamp((ev.clientY - m.top) / m.h, 0, 1);
-          node.style.left = (ov.x * 100) + '%';
-          node.style.top = (ov.y * 100) + '%';
-        };
-        const up = () => {
-          node.removeEventListener('pointermove', move);
-          node.removeEventListener('pointerup', up);
-        };
-        node.addEventListener('pointermove', move);
-        node.addEventListener('pointerup', up);
+      attachPositionDrag(node, ov, stageMetrics, {
+        onGrab: () => {
+          const changed = selectedId !== ov.id;
+          selectedId = ov.id;
+          if (changed) setTimeout(() => syncStageToSelection(), 0);
+          renderSide();
+          markSelected();
+        },
       });
     }
 
@@ -357,154 +638,142 @@
       }
       side.classList.remove('empty');
       const transparencyPct = Math.round((1 - (ov.boxOpacity == null ? 1 : ov.boxOpacity)) * 100);
+      // Which box am I editing? With several on several clips, the canvas alone cannot answer it —
+      // the ones on other clips are not even on screen. Picking from here moves the stage to that
+      // box's clip, which is the only way to reach a box that is not in front of you.
+      const boxList = state.length < 2 ? '' : `
+        <div class="ioe-row">
+          <label>Text boxes</label>
+          <div class="ioe-chips">${state.map((o) => {
+            const label = String(o.text || 'Empty').split('\n')[0].slice(0, 18) || 'Empty';
+            const where = readSpans() ? ` · C${ovSpan(o).i + 1}` : '';
+            return `<button type="button" data-pick="${esc(o.id)}" class="ioe-chip${o.id === selectedId ? ' on' : ''}">${esc(label)}${where}</button>`;
+          }).join('')}</div>
+        </div>`;
       side.innerHTML = `
-        <div class="ioe-row">
-          <label>Text</label>
-          <textarea data-f="text" maxlength="500" placeholder="Type your text…">${esc(ov.text || '')}</textarea>
-          <!-- The assistant writes the overlay, not just the caption. Overlay wording is the one
-               piece of copy on a post that is read on mute in about a second, and it is the piece
-               people stare at a blank box over. Improve is disabled until there is something to
-               improve — asking a model to improve an empty string returns an apology, not wording. -->
-          <div class="ioe-ai" data-ai-row>
-            <button type="button" data-ai="suggest" class="ioe-btn">✨ Suggest wording</button>
-            <button type="button" data-ai="improve" class="ioe-btn"${String(ov.text || '').trim() ? '' : ' disabled'}>Improve this</button>
-            <span data-ai-msg class="ioe-ai-msg"></span>
-          </div>
-          <div class="ioe-emojis" data-emojis>${EMOJIS.map((em) => `<button type="button" data-em="${em}">${em}</button>`).join('')}</div>
-        </div>
-        <div class="ioe-row">
-          <label>Font</label>
-          <select data-f="fontFamily">${FONTS.map((f) => `<option value="${f}"${f === ov.fontFamily ? ' selected' : ''} style="font-family:${f}">${f}</option>`).join('')}</select>
-        </div>
-        <div class="ioe-row">
-          <label>Font size — ${Math.round(ov.fontSizePct * 100)}%</label>
-          <input type="range" data-f="fontSizePct" min="2" max="25" step="1" value="${Math.round(ov.fontSizePct * 100)}">
-        </div>
-        <div class="ioe-row">
-          <label>Font colour</label>
-          <div class="ioe-inline"><input type="color" data-f="color" value="${ov.color || '#ffffff'}"><span class="ioe-count">${ov.color}</span></div>
-        </div>
-        <div class="ioe-row">
-          <label>Box outline</label>
-          <div class="ioe-inline">
-            <label class="ioe-none"><input type="checkbox" data-f="strokeOn" ${ov.boxStroke ? 'checked' : ''}> Show</label>
-            <input type="color" data-f="boxStroke" value="${ov.boxStroke || '#ec4899'}" class="${ov.boxStroke ? '' : 'ioe-swatchoff'}">
-          </div>
-        </div>
-        <div class="ioe-row">
-          <label>Box background</label>
-          <div class="ioe-inline">
-            <label class="ioe-none"><input type="checkbox" data-f="fillOn" ${ov.boxFill ? 'checked' : ''}> Show</label>
-            <input type="color" data-f="boxFill" value="${ov.boxFill || '#000000'}" class="${ov.boxFill ? '' : 'ioe-swatchoff'}">
-          </div>
-        </div>
-        <div class="ioe-row">
-          <label>Background transparency — ${transparencyPct}%</label>
-          <input type="range" data-f="transparency" min="0" max="100" step="1" value="${transparencyPct}" ${ov.boxFill ? '' : 'disabled'}>
-        </div>
+        ${boxList}
+        <div class="ioe-row"><label>Text</label></div>
+        ${textRowHtml(ov, typeof suggestText === 'function')}
+        <!-- ── Above the styling, deliberately ──────────────────────────────────────────────
+             On a video the question "which clip, and when" is the one being answered; the colour
+             of the box is not. These sat at the BOTTOM of the panel, below seven styling rows, in
+             a column that scrolls with the whole modal body — so on a laptop they were off-screen
+             unless you knew to scroll for them, and "the section has disappeared" was reported
+             three times over. Being rendered is not the same as being findable. -->
+        ${sect('when', 'When it shows', timingRow(ov))}
+        ${sect('anim', 'How it appears', animRow(ov))}
+        ${lookRowsHtml(ov)}
         <button class="ioe-btn danger block" data-act="delete">Delete this overlay</button>
       `;
       wireSide(ov);
     }
 
     function wireSide(ov) {
-      const q = (sel) => side.querySelector(sel);
       const rerender = () => { renderOverlays(); markSelected(); };
-
-      q('[data-f="text"]').addEventListener('input', (e) => {
-        ov.text = e.target.value;
-        // "Improve this" only means something once there is something to improve.
-        const imp = q('[data-ai="improve"]');
-        if (imp) imp.disabled = !String(ov.text || '').trim();
-        rerender();
+      // ⚠️ ONE wiring, shared with the post editor's panel — see wireStyleControls. This was ~70
+      // lines of listeners written out here, and the same listeners written out again would be the
+      // third copy of a control set in this file's history. The two that already happened (the font
+      // list, the animation list) both drifted, and both drifts were silent.
+      wireStyleControls(side, ov, {
+        onChange: rerender,
+        suggestText: typeof suggestText === 'function' ? suggestText : null,
+        // The modal repaints its own panel for the controls that change what OTHER controls look
+        // like — turning a box fill off disables the transparency slider.
+        rerender: renderSide,
       });
 
-      // ── Assistant wording ────────────────────────────────────────────────────────────────────
-      // Only wired when the host passed a suggestText function. The editor is reused by surfaces
-      // that have no assistant behind them, and a button that cannot work is worse than no button.
-      const aiRow = q('[data-ai-row]');
-      if (aiRow && typeof suggestText !== 'function') {
-        aiRow.remove();
-      } else if (aiRow) {
-        const msg = q('[data-ai-msg]');
-        const buttons = Array.prototype.slice.call(aiRow.querySelectorAll('[data-ai]'));
-        aiRow.addEventListener('click', async (e) => {
-          const btn = e.target.closest('[data-ai]');
-          if (!btn || btn.disabled) return;
-          const mode = btn.dataset.ai;
-          const before = btn.textContent;
-          buttons.forEach((b) => { b.disabled = true; });
-          btn.textContent = 'Thinking…';
-          if (msg) { msg.textContent = ''; msg.classList.remove('err'); }
-          try {
-            const text = await suggestText(mode, ov.text || '');
-            ov.text = text;
-            // The textarea is the model the rest of this panel reads from, so write it there and
-            // repaint the canvas — not one or the other, or the box and the picture disagree.
-            const ta = q('[data-f="text"]');
-            if (ta) ta.value = text;
-            rerender();
-          } catch (err) {
-            if (msg) { msg.textContent = (err && err.message) || 'Could not write that wording.'; msg.classList.add('err'); }
-          } finally {
-            btn.textContent = before;
-            buttons.forEach((b) => { b.disabled = false; });
-            const imp = q('[data-ai="improve"]');
-            if (imp) imp.disabled = !String(ov.text || '').trim();
-          }
+      for (const b of backdrop.querySelectorAll('[data-sect-toggle]')) {
+        b.addEventListener('click', () => {
+          const key = b.getAttribute('data-sect-toggle');
+          openSections[key] = openSections[key] === false;
+          renderSide();
         });
       }
-      q('[data-f="fontFamily"]').addEventListener('change', (e) => { ov.fontFamily = e.target.value; rerender(); });
-      q('[data-f="fontSizePct"]').addEventListener('input', (e) => {
-        ov.fontSizePct = clamp(Number(e.target.value) / 100, 0.02, 0.25);
-        side.querySelector('[data-f="fontSizePct"]').previousElementSibling.textContent = `Font size — ${Math.round(ov.fontSizePct * 100)}%`;
-        rerender();
-      });
-      q('[data-f="color"]').addEventListener('input', (e) => {
-        ov.color = e.target.value;
-        e.target.nextElementSibling.textContent = ov.color;
-        rerender();
-      });
-      q('[data-f="strokeOn"]').addEventListener('change', (e) => {
-        ov.boxStroke = e.target.checked ? (side.querySelector('[data-f="boxStroke"]').value || '#ec4899') : null;
-        renderSide(); rerender();
-      });
-      q('[data-f="boxStroke"]').addEventListener('input', (e) => { if (ov.boxStroke) { ov.boxStroke = e.target.value; rerender(); } });
-      q('[data-f="fillOn"]').addEventListener('change', (e) => {
-        ov.boxFill = e.target.checked ? (side.querySelector('[data-f="boxFill"]').value || '#000000') : null;
-        renderSide(); rerender();
-      });
-      q('[data-f="boxFill"]').addEventListener('input', (e) => { if (ov.boxFill) { ov.boxFill = e.target.value; rerender(); } });
-      q('[data-f="transparency"]').addEventListener('input', (e) => {
-        ov.boxOpacity = clamp(1 - Number(e.target.value) / 100, 0, 1);
-        side.querySelector('[data-f="transparency"]').previousElementSibling.textContent = `Background transparency — ${e.target.value}%`;
-        rerender();
-      });
-      // Emoji insert at cursor.
-      side.querySelectorAll('[data-emojis] button').forEach((b) => {
+      // Pick a different box — including one on another clip, which the stage then moves to.
+      for (const b of backdrop.querySelectorAll('[data-pick]')) {
         b.addEventListener('click', () => {
-          const ta = q('[data-f="text"]');
-          const s = ta.selectionStart || ta.value.length;
-          const em = b.dataset.em;
-          ta.value = ta.value.slice(0, s) + em + ta.value.slice(ta.selectionEnd || s);
-          ov.text = ta.value;
-          ta.focus();
-          ta.selectionStart = ta.selectionEnd = s + em.length;
-          rerender();
+          selectedId = b.getAttribute('data-pick');
+          renderOverlays(); renderSide(); syncStageToSelection();
         });
-      });
-      q('[data-act="delete"]').addEventListener('click', () => {
+      }
+
+      // ── When: the clip, and where in it ──────────────────────────────────────
+      const cutNow = readSpans();
+      if (cutNow) {
+        for (const b of backdrop.querySelectorAll('[data-clip]')) {
+          b.addEventListener('click', () => {
+            // Keep how long it shows for and re-base onto the new clip — "the same text, on the
+            // next clip" is the move, not "the same seconds".
+            const from = ovSpan(ov);
+            const to = cutNow[Number(b.getAttribute('data-clip'))];
+            if (!to) return;
+            const within = (ov.startS == null ? 0 : ov.startS) - from.start;
+            const shown = (ov.endS == null ? from.end : ov.endS) - (ov.startS == null ? 0 : ov.startS);
+            ov.startS = to.start + Math.min(within, Math.max(0, to.len - 0.2));
+            ov.endS = Math.min(to.end, ov.startS + Math.max(0.2, shown));
+            if (ov.startS <= 0.001) ov.startS = undefined;
+            // The stage's contents change with the clip, so both are redrawn.
+            renderOverlays();
+            renderSide();
+            showClipFrame(ov, ov.startS);
+          });
+        }
+        const track = backdrop.querySelector('[data-when-track]');
+        if (track) {
+          let edge = null;
+          track.addEventListener('pointerdown', (e) => {
+            const h = e.target.closest && e.target.closest('[data-when]');
+            if (!h) return;
+            edge = h.getAttribute('data-when');
+            h.setPointerCapture && h.setPointerCapture(e.pointerId);
+            e.preventDefault();
+          });
+          track.addEventListener('pointermove', (e) => {
+            if (!edge) return;
+            const box = track.getBoundingClientRect();
+            if (!box.width) return;
+            const sp = ovSpan(ov);
+            const f = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
+            const t = sp.start + f * sp.len;
+            const MIN = 0.2;
+            if (edge === 'start') {
+              const end = ov.endS == null ? sp.end : ov.endS;
+              ov.startS = Math.min(t, end - MIN);
+              if (ov.startS <= sp.start + 0.001 && sp.i === 0) ov.startS = undefined;
+            } else {
+              ov.endS = Math.max(t, (ov.startS == null ? sp.start : ov.startS) + MIN);
+            }
+            // Paint only. Rebuilding the panel mid-drag tears the handle out from under the pointer.
+            paintWhen(ov);
+            // ...and show the frame under the handle being moved, which is the whole point of a
+            // slider over a number: the start is chosen by seeing where it starts.
+            showClipFrame(ov, edge === 'start' ? ov.startS : ov.endS);
+          });
+          const stop = () => { edge = null; };
+          track.addEventListener('pointerup', stop);
+          track.addEventListener('pointercancel', stop);
+        }
+      }
+
+      side.querySelector('[data-act="delete"]').addEventListener('click', () => {
         const i = state.findIndex((o) => o.id === ov.id);
         if (i >= 0) state.splice(i, 1);
         selectedId = state.length ? state[state.length - 1].id : null;
-        renderOverlays(); renderSide();
+        renderOverlays(); renderSide(); syncStageToSelection();
       });
     }
 
     // ── Footer actions ─────────────────────────────────────────────────────────
     backdrop.querySelector('[data-act="cancel"]').addEventListener('click', () => close(null));
     backdrop.querySelector('[data-act="add"]').addEventListener('click', () => {
-      const ov = { ...DEFAULTS, id: uid(), text: 'Your text', x: 0.5, y: 0.5 };
+      // A second box starts on the SAME clip as the one that was selected — adding text while
+      // looking at clip three and having it appear over clip one is the thing that makes the
+      // feature look like it only works once.
+      // The clip ON SCREEN, which is the selected box's clip — a new box belongs where the user is
+      // looking, and now that the stage only shows one clip's boxes, that is unambiguous.
+      const sel = state.find((o) => o.id === selectedId);
+      const onSpan = readSpans() && sel ? ovSpan(sel) : null;
+      const ov = newOverlay(onSpan ? { startS: onSpan.start, endS: onSpan.end } : {});
       state.push(ov);
       selectedId = ov.id;
       renderOverlays(); renderSide();
@@ -523,16 +792,371 @@
           // must not drop it, or editing a box's text/style would wipe when it appears on the video.
           ...(o.startS != null ? { startS: o.startS } : {}),
           ...(o.endS != null ? { endS: o.endS } : {}),
+          ...(o.anim && o.anim !== 'none' ? { anim: o.anim } : {}),
         }));
       close(clean);
     });
 
-    // The image must be laid out before we can size overlays against it.
-    if (imgEl.complete && imgEl.naturalWidth) { renderOverlays(); renderSide(); }
-    else imgEl.addEventListener('load', () => { renderOverlays(); renderSide(); }, { once: true });
+    // ── The clips arrive late ──────────────────────────────────────────────────
+    // Their lengths are read off <video> elements on the page, so "is this a cut" is often still
+    // unanswerable when this modal opens. Waiting for the user to click something would mean the
+    // controls appear only if they happen to poke the panel; this brings them in as soon as the
+    // answer exists, and stops asking once it does or once it plainly never will.
+    let spanWatch = 0;
+    const watchForSpans = () => {
+      if (!backdrop.isConnected) return;
+      if (readSpans()) { renderSide(); syncStageToSelection(); return; }
+      if (++spanWatch > 25) return;            // ~10s, then it is not a cut and never was
+      setTimeout(watchForSpans, 400);
+    };
+    if (!readSpans()) setTimeout(watchForSpans, 400);
+
+    // The backdrop must be laid out before we can size overlays against it.
+    if (imgEl.complete && imgEl.naturalWidth) { renderOverlays(); renderSide(); syncStageToSelection(); }
+    else imgEl.addEventListener('load', () => { renderOverlays(); renderSide(); syncStageToSelection(); }, { once: true });
+    // The clip that replaces it has its own dimensions, so overlays are re-sized when it arrives.
+    if (vidEl) vidEl.addEventListener('loadedmetadata', () => requestAnimationFrame(renderOverlays));
     // Keep overlay sizing correct if the modal/image resizes.
     window.addEventListener('resize', renderOverlays);
   }
 
-  window.ImageOverlayEditor = { open, bake, render };
+  /**
+   * What a new text box is, before anyone has typed in it.
+   *
+   * Shared so the modal's "+ Add text" and the post editor's per-clip "+" cannot disagree about the
+   * defaults — a box added one way looking different from a box added the other way is the kind of
+   * thing that gets reported as "it changed my font".
+   *
+   * `startS` of zero is stored as absent: the first second of the video is what "no start" MEANS,
+   * and writing the default onto the row is noise the renderer then has to ignore.
+   */
+  function newOverlay(opts) {
+    opts = opts || {};
+    const ov = Object.assign({}, DEFAULTS, {
+      id: uid(),
+      text: opts.text == null ? 'Your text' : opts.text,
+      x: 0.5,
+      y: 0.5,
+    });
+    if (opts.startS) ov.startS = opts.startS;
+    if (opts.endS != null) ov.endS = opts.endS;
+    return ov;
+  }
+
+  /**
+   * Drag a box around whatever it is drawn over.
+   *
+   * Shared, like the controls above: the modal positions a box this way and so does the post
+   * editor's canvas, and one of them having a subtly different idea of where the pointer is would
+   * be a bug nobody could describe. Positions are stored as fractions of the MEDIA's box, not the
+   * layer's — a letterboxed video and its layer are not the same rectangle, and using the wrong one
+   * puts every box out by the size of the bars.
+   *
+   * `getRect` is read once, at pointerdown: re-reading it per move would let a reflow move the
+   * reference frame under the pointer. `onDrop` is told whether anything actually moved, so a plain
+   * click can select without writing a position that has not changed.
+   */
+  function attachPositionDrag(node, ov, getRect, hooks) {
+    hooks = hooks || {};
+    node.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      if (hooks.onGrab) hooks.onGrab(ov);
+      const m = getRect();
+      if (!m || !(m.w > 0) || !(m.h > 0)) return;
+      let moved = false;
+      try { node.setPointerCapture(e.pointerId); } catch (err) { /* not capturable */ }
+      const move = (ev) => {
+        moved = true;
+        ov.x = clamp((ev.clientX - m.left) / m.w, 0, 1);
+        ov.y = clamp((ev.clientY - m.top) / m.h, 0, 1);
+        node.style.left = (ov.x * 100) + '%';
+        node.style.top = (ov.y * 100) + '%';
+        if (hooks.onMove) hooks.onMove(ov);
+      };
+      const up = () => {
+        node.removeEventListener('pointermove', move);
+        node.removeEventListener('pointerup', up);
+        // ⚠️ pointercancel too. Without it a drag the browser cancels — a touch turning into a
+        // scroll, the element being removed — leaves the move listener attached to the node for as
+        // long as it lives, still writing positions.
+        node.removeEventListener('pointercancel', up);
+        if (hooks.onDrop) hooks.onDrop(ov, moved);
+      };
+      node.addEventListener('pointermove', move);
+      node.addEventListener('pointerup', up);
+      node.addEventListener('pointercancel', up);
+    });
+  }
+
+  // ══ Shared controls ═══════════════════════════════════════════════════════════════════════════
+  //
+  // What a text box LOOKS like — its wording, face, size, colour, box and motion — asked for in one
+  // place and rendered wherever it is needed. The modal uses these, and so does the post editor's
+  // clip list, which is what lets the modal eventually go away without the controls being written
+  // out a second time. Two copies of a control set is how the font list and the animation list both
+  // drifted before; the fix each time was one source, and this is that source.
+  //
+  // Deliberately NOT here: which clip a box is on and when it shows. Those are properties of the
+  // CUT, they are answered by the timeline's own rows, and an overlay on a still has neither.
+
+  /** Open/closed per section, remembered for the life of the page rather than per panel. */
+  const SHARED_OPEN = { text: true, look: false, anim: false };
+
+  function sharedSect(key, title, body) {
+    if (!body) return '';
+    const on = SHARED_OPEN[key] !== false;
+    return `
+      <div class="ioe-sect${on ? ' on' : ''}" data-sect="${key}">
+        <button type="button" class="ioe-sect-h" data-sect-toggle="${key}" aria-expanded="${on}">
+          <span>${title}</span><span class="ioe-sect-x">${on ? '\u2212' : '+'}</span>
+        </button>
+        <div class="ioe-sect-b"${on ? '' : ' style="display:none"'}>${body}</div>
+      </div>`;
+  }
+
+  /**
+   * The wording, and the assistant that can write it.
+   *
+   * Overlay copy is the one piece of a post that is read on mute in about a second, and it is the
+   * piece people stare at a blank box over. Improve is disabled until there is something to
+   * improve — asking a model to improve an empty string returns an apology, not wording.
+   */
+  function textRowHtml(ov, withAi) {
+    return `
+      <div class="ioe-row">
+        <textarea data-f="text" maxlength="500" placeholder="Type your text\u2026">${esc(ov.text || '')}</textarea>
+        ${withAi ? `<div class="ioe-ai" data-ai-row>
+          <button type="button" data-ai="suggest" class="ioe-btn">\u2728 Suggest wording</button>
+          <button type="button" data-ai="improve" class="ioe-btn"${String(ov.text || '').trim() ? '' : ' disabled'}>Improve this</button>
+          <span data-ai-msg class="ioe-ai-msg"></span>
+        </div>` : ''}
+        <div class="ioe-emojis" data-emojis>${EMOJIS.map((em) => `<button type="button" data-em="${em}">${em}</button>`).join('')}</div>
+      </div>`;
+  }
+
+  /** Face, size, colour, outline, background. */
+  function lookRowsHtml(ov) {
+    const transparencyPct = Math.round((1 - (ov.boxOpacity == null ? 1 : ov.boxOpacity)) * 100);
+    return `
+      <div class="ioe-row">
+        <label>Font</label>
+        <select data-f="fontFamily">${FONTS.map((f) => `<option value="${f.id}"${f.id === ov.fontFamily ? ' selected' : ''} style="font-family:${f.stack}">${f.label}</option>`).join('')}</select>
+      </div>
+      <div class="ioe-row">
+        <label>Font size \u2014 ${Math.round(ov.fontSizePct * 100)}%</label>
+        <input type="range" data-f="fontSizePct" min="2" max="25" step="1" value="${Math.round(ov.fontSizePct * 100)}">
+      </div>
+      <div class="ioe-row">
+        <label>Font colour</label>
+        <div class="ioe-inline"><input type="color" data-f="color" value="${ov.color || '#ffffff'}"><span class="ioe-count">${ov.color}</span></div>
+      </div>
+      <div class="ioe-row">
+        <label>Box outline</label>
+        <div class="ioe-inline">
+          <label class="ioe-none"><input type="checkbox" data-f="strokeOn" ${ov.boxStroke ? 'checked' : ''}> Show</label>
+          <input type="color" data-f="boxStroke" value="${ov.boxStroke || '#ec4899'}" class="${ov.boxStroke ? '' : 'ioe-swatchoff'}">
+        </div>
+      </div>
+      <div class="ioe-row">
+        <label>Box background</label>
+        <div class="ioe-inline">
+          <label class="ioe-none"><input type="checkbox" data-f="fillOn" ${ov.boxFill ? 'checked' : ''}> Show</label>
+          <input type="color" data-f="boxFill" value="${ov.boxFill || '#000000'}" class="${ov.boxFill ? '' : 'ioe-swatchoff'}">
+        </div>
+      </div>
+      <div class="ioe-row">
+        <label>Background transparency \u2014 ${transparencyPct}%</label>
+        <input type="range" data-f="transparency" min="0" max="100" step="1" value="${transparencyPct}" ${ov.boxFill ? '' : 'disabled'}>
+      </div>`;
+  }
+
+  /**
+   * How the box arrives and leaves. Video only — a still's text is flattened into the pixels, so
+   * there is no time for anything to happen in, and offering motion would promise something the
+   * published image cannot do.
+   */
+  function animRowsHtml(ov, isVideo) {
+    if (!isVideo) return '';
+    const cur = ov.anim || 'none';
+    return `
+      <div class="ioe-row">
+        <div class="ioe-chips">${ANIMS.map((a) => `<button type="button" data-anim="${a.id}"
+          class="ioe-chip${a.id === cur ? ' on' : ''}">${a.label}</button>`).join('')}</div>
+      </div>`;
+  }
+
+  /**
+   * Wire whichever of the above are present inside `root`.
+   *
+   * `onChange` is called after every edit — repaint whatever is showing the box. `onCommit` is
+   * called when a change is finished (a committed colour, a chosen font) and is where a host saves.
+   * Anything absent from `root` is simply skipped, so the same wiring serves a panel with the AI row
+   * and one without.
+   */
+  function wireStyleControls(root, ov, opts) {
+    opts = opts || {};
+    const q = (sel) => root.querySelector(sel);
+    const changed = () => { if (opts.onChange) opts.onChange(ov); };
+    const committed = () => { if (opts.onCommit) opts.onCommit(ov); };
+    const redraw = () => { if (opts.rerender) opts.rerender(); };
+
+    const ta = q('[data-f="text"]');
+    if (ta) ta.addEventListener('input', (e) => {
+      ov.text = e.target.value;
+      const imp = q('[data-ai="improve"]');
+      if (imp) imp.disabled = !String(ov.text || '').trim();
+      changed();
+    });
+    if (ta) ta.addEventListener('change', committed);
+
+    const aiRow = q('[data-ai-row]');
+    if (aiRow && typeof opts.suggestText === 'function') {
+      const msg = q('[data-ai-msg]');
+      const buttons = Array.prototype.slice.call(aiRow.querySelectorAll('[data-ai]'));
+      aiRow.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-ai]');
+        if (!btn || btn.disabled) return;
+        const before = btn.textContent;
+        buttons.forEach((b) => { b.disabled = true; });
+        btn.textContent = 'Thinking\u2026';
+        if (msg) { msg.textContent = ''; msg.classList.remove('err'); }
+        try {
+          const text = await opts.suggestText(btn.dataset.ai, ov.text || '');
+          ov.text = text;
+          // The textarea is the model the rest of the panel reads from, so write it there AND
+          // repaint — not one or the other, or the box and the picture disagree.
+          if (ta) ta.value = text;
+          changed();
+          committed();
+        } catch (err) {
+          if (msg) { msg.textContent = (err && err.message) || 'Could not write that wording.'; msg.classList.add('err'); }
+        } finally {
+          btn.textContent = before;
+          buttons.forEach((b) => { b.disabled = false; });
+          const imp = q('[data-ai="improve"]');
+          if (imp) imp.disabled = !String(ov.text || '').trim();
+        }
+      });
+    } else if (aiRow) {
+      // A button that cannot work is worse than no button: the editor is reused by surfaces with no
+      // assistant behind them.
+      aiRow.remove();
+    }
+
+    const fam = q('[data-f="fontFamily"]');
+    if (fam) fam.addEventListener('change', (e) => { ov.fontFamily = e.target.value; changed(); committed(); });
+
+    const size = q('[data-f="fontSizePct"]');
+    if (size) {
+      size.addEventListener('input', (e) => {
+        ov.fontSizePct = clamp(Number(e.target.value) / 100, 0.02, 0.25);
+        const lbl = e.target.previousElementSibling;
+        if (lbl) lbl.textContent = `Font size \u2014 ${Math.round(ov.fontSizePct * 100)}%`;
+        changed();
+      });
+      size.addEventListener('change', committed);
+    }
+
+    const col = q('[data-f="color"]');
+    if (col) {
+      col.addEventListener('input', (e) => {
+        ov.color = e.target.value;
+        if (e.target.nextElementSibling) e.target.nextElementSibling.textContent = ov.color;
+        changed();
+      });
+      col.addEventListener('change', committed);
+    }
+
+    const strokeOn = q('[data-f="strokeOn"]');
+    if (strokeOn) strokeOn.addEventListener('change', (e) => {
+      const sw = q('[data-f="boxStroke"]');
+      ov.boxStroke = e.target.checked ? ((sw && sw.value) || '#ec4899') : null;
+      changed(); committed(); redraw();
+    });
+    const stroke = q('[data-f="boxStroke"]');
+    if (stroke) {
+      stroke.addEventListener('input', (e) => { if (ov.boxStroke) { ov.boxStroke = e.target.value; changed(); } });
+      stroke.addEventListener('change', committed);
+    }
+
+    const fillOn = q('[data-f="fillOn"]');
+    if (fillOn) fillOn.addEventListener('change', (e) => {
+      const sw = q('[data-f="boxFill"]');
+      ov.boxFill = e.target.checked ? ((sw && sw.value) || '#000000') : null;
+      changed(); committed(); redraw();
+    });
+    const fill = q('[data-f="boxFill"]');
+    if (fill) {
+      fill.addEventListener('input', (e) => { if (ov.boxFill) { ov.boxFill = e.target.value; changed(); } });
+      fill.addEventListener('change', committed);
+    }
+
+    const trans = q('[data-f="transparency"]');
+    if (trans) {
+      trans.addEventListener('input', (e) => {
+        ov.boxOpacity = clamp(1 - Number(e.target.value) / 100, 0, 1);
+        const lbl = e.target.previousElementSibling;
+        if (lbl) lbl.textContent = `Background transparency \u2014 ${e.target.value}%`;
+        changed();
+      });
+      trans.addEventListener('change', committed);
+    }
+
+    root.querySelectorAll('[data-emojis] button').forEach((b) => {
+      b.addEventListener('click', () => {
+        if (!ta) return;
+        const at = ta.selectionStart || ta.value.length;
+        const em = b.dataset.em;
+        ta.value = ta.value.slice(0, at) + em + ta.value.slice(ta.selectionEnd || at);
+        ov.text = ta.value;
+        ta.focus();
+        ta.selectionStart = ta.selectionEnd = at + em.length;
+        changed(); committed();
+      });
+    });
+
+    root.querySelectorAll('[data-anim]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const next = b.getAttribute('data-anim');
+        // 'none' is the default, and storing the default writes a field onto every overlay row for
+        // no reason. undefined and 'none' read the same through readOverlayAnim.
+        ov.anim = next === 'none' ? undefined : next;
+        changed(); committed(); redraw();
+      });
+    });
+  }
+
+  /**
+   * Mount the shared controls into any container — the post editor's clip list, in practice.
+   *
+   * Collapsible, because this is eight controls in a 22rem column beside a video and all of them at
+   * once is a wall. Which sections are open is remembered across selections, so working through
+   * four boxes does not mean opening "Look" four times.
+   */
+  function styleControls(container, opts) {
+    opts = opts || {};
+    const ov = opts.overlay;
+    if (!container) return;
+    ensureStyles();
+    if (!ov) { container.innerHTML = ''; return; }
+    container.classList.add('ioe-stack');
+    const draw = () => {
+      container.innerHTML = sharedSect('text', 'Wording', textRowHtml(ov, typeof opts.suggestText === 'function'))
+        + sharedSect('look', 'How it looks', lookRowsHtml(ov))
+        + sharedSect('anim', 'How it appears', animRowsHtml(ov, !!opts.video));
+      wireStyleControls(container, ov, {
+        onChange: opts.onChange, onCommit: opts.onCommit, suggestText: opts.suggestText, rerender: draw,
+      });
+      container.querySelectorAll('[data-sect-toggle]').forEach((b) => {
+        b.addEventListener('click', () => {
+          const key = b.getAttribute('data-sect-toggle');
+          SHARED_OPEN[key] = SHARED_OPEN[key] === false;
+          draw();
+        });
+      });
+    };
+    draw();
+  }
+
+  window.ImageOverlayEditor = { open, bake, render, styleControls, newOverlay };
 })();

@@ -61,8 +61,16 @@ check('improve with nothing to improve is refused up front', () => {
 
 check('the editor stays DOM-agnostic — no post ids inside it', () => {
     assert.ok(!/postId/.test(editor), 'this component is reused by hosts with no post behind them');
-    assert.match(editor, /function open\(\{ imageUrl, overlays, onDone, suggestText \}\)/, 'the host injects the capability');
-    assert.match(editor, /if \(aiRow && typeof suggestText !== 'function'\) \{\s*\n\s*aiRow\.remove\(\)/,
+    // Tolerates further INJECTED parameters (the post's cut arrived as `spans`) while keeping the
+    // guard that matters: everything the editor needs is handed to it, and nothing about a post
+    // leaks in. The literal form failed on a change that did not weaken that at all.
+    assert.match(editor, /function open\(\{ imageUrl, overlays, onDone, suggestText(?:, \w+)* \}\)/,
+        'the host injects the capability');
+    // The wiring moved into the shared wireStyleControls, which the modal and the post editor's
+    // panel both call — one control set, so the assistant row cannot exist in one and not the other.
+    assert.match(editor, /aiRow && typeof opts\.suggestText === 'function'/,
+        'the row is no longer gated on the capability being present');
+    assert.match(editor, /\} else if \(aiRow\) \{[\s\S]{0,240}aiRow\.remove\(\)/,
         'a button that cannot work is worse than no button');
 });
 
@@ -77,10 +85,47 @@ check('a failure shows the server\'s own message', () => {
 check('an accepted suggestion updates the textarea AND the canvas', () => {
     // The textarea is the model the rest of the panel reads from; the canvas is what the user is
     // looking at. Writing one and not the other leaves them disagreeing.
-    const block = editor.slice(landmark(editor, "const text = await suggestText("));
-    assert.match(block.slice(0, 400), /ov\.text = text/);
-    assert.match(block.slice(0, 400), /if \(ta\) ta\.value = text/);
-    assert.match(block.slice(0, 400), /rerender\(\)/);
+    const block = editor.slice(landmark(editor, "const text = await opts.suggestText("));
+    assert.match(block.slice(0, 500), /ov\.text = text/);
+    assert.match(block.slice(0, 500), /if \(ta\) ta\.value = text/);
+    // changed() repaints whatever is showing the box; committed() is where the host saves it. The
+    // modal passes a repaint for the first and nothing for the second; the post editor passes both.
+    assert.match(block.slice(0, 500), /changed\(\)/);
+    assert.match(block.slice(0, 500), /committed\(\)/);
+});
+
+// ── Writing for one beat of a cut ───────────────────────────────────────────────────────────────
+// A four-clip reel is not four posts. Asking "write the overlay wording for this post" four times
+// gives four competing hooks that each assume they are the only thing on screen, and they read as
+// four unrelated posts stitched together.
+
+check('the endpoint accepts which clip it is writing, and what the others say', () => {
+
+    assert.match(fn, /clip\?: \{ index\?: unknown; count\?: unknown; others\?: unknown \}/,
+        'the request cannot carry a clip');
+    // A client that knows nothing about clips must keep working, and a malformed block must not be
+    // the difference between wording and a 400.
+    assert.match(fn, /clipCount > 1/, 'a single clip is not a sequence and must be ignored');
+    assert.match(fn, /clipIndex >= 1 && clipIndex <= clipCount/, 'an out-of-range clip is not validated');
+    assert.match(fn, /: null;/, 'there is no fall-back to the whole-post request');
+});
+
+check('the brief names the JOB of the beat, not just its number', () => {
+    // "clip 1 of 4" alone produces four variations of the same hook, because every clip is still
+    // being asked to open.
+
+    const brief = fn.slice(fn.indexOf('function clipBrief('), fn.indexOf('const json ='));
+    assert.match(brief, /FIRST clip/, 'the opener has no stated job');
+    assert.match(brief, /LAST clip/, 'the closer has no stated job');
+    assert.match(brief, /MIDDLE clip/, 'the middle has no stated job');
+    assert.match(brief, /Do not repeat any of those/, 'the other clips\' wording is not ruled out');
+});
+
+check('the other clips are context, not the task', () => {
+    // A reel can carry twenty boxes; all of them in the prompt would drown the instruction.
+
+    assert.match(fn, /\.slice\(0, 12\)/, 'the other clips are unbounded');
+    assert.match(fn, /\.slice\(0, MAX_OVERLAY_CHARS\)/, 'each one is unbounded');
 });
 
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);

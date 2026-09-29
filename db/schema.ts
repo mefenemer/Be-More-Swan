@@ -1904,6 +1904,13 @@ export const scheduledPosts = pgTable("scheduled_posts", {
   // platform accepts, so an image + audio has to become an mp4). See src/lib/audio-overlays.ts and
   // db/post-audio-overlays.sql.
   audioOverlays: jsonb("audio_overlays"),
+  // The edit list — what the user did to their footage before any platform was involved:
+  // { clips: [{ id, assetId, inS?, outS?, gain? }], targetRatio?, frames? }. Deliberately NOT
+  // scheduled_post_assets: attachRenderedVideo() deletes every junction row for the post, so the
+  // junction table means "what publishes" and this means "what the user assembled". Phase 1 honours
+  // clips[0] and its trim; the rest is stored and ignored until later phases. See
+  // src/lib/video-edit.ts, db/post-video-edit.sql and docs/video-editing-plan.md.
+  videoEdit: jsonb("video_edit"),
   // Phase 4 video overlays: gates publishing while a video's timed text is being rendered by Remotion
   // Lambda. null = nothing to render (photo, or video with no overlays); 'pending'|'rendering' = a
   // render is in flight (publish must wait); 'done' = the overlaid video is attached; 'failed' = the
@@ -4942,3 +4949,53 @@ export const swanIndexSections = pgTable("swan_index_sections", {
 }, (t) => [
   check("swan_index_sections_key_check", sql`${t.key} ~ '^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$'`),
 ]);
+
+// ── The curated music library ───────────────────────────────────────────────────────────────────
+// Tracks we licensed ourselves and host ourselves — deliberately not a stock provider's search API.
+// A customer publishes commercially, so the exposure from a wrongly-licensed bed lands on them and
+// on us; a library we can produce the paperwork for is one we can answer for. Full reasoning in
+// db/music-library.sql; the rules about what may be offered and what must be credited are pure and
+// live in src/lib/music-library.ts.
+//
+// ⚠️ A picked track does NOT become a new kind of asset. It creates an ordinary content_assets row
+// with provider 'library' and external_url pointing at our own storage, so the Sound layer, the
+// timeline, audio_overlays and the Remotion render all carry on unchanged — it is a new SOURCE of an
+// assetId, not a new pipeline.
+export const musicTracks = pgTable("music_tracks", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  artist: text("artist").notNull(),
+  // ⚠️ The OBJECT is the identity, and there is no durable url. R2 objects here are private:
+  // resolveAudioTracks presigns storageKey for an hour and only falls back to external_url when
+  // there is no key, and the picker mints a signed url to preview with. A stored public url would
+  // have meant a public bucket for files we paid to licence. See db/music-library-storage-key.sql.
+  storageKey: text("storage_key").notNull(),
+  // ⚠️ STORED, not measured. A clip's length is measured in the browser because Pexels supplies
+  // none, and a failed measurement is what once removed the trim slider from a correct-looking
+  // timeline. We control ingestion here, so the picker can state a length before fetching anything.
+  durationS: real("duration_s").notNull(),
+  // Mood and genre, lower-case. Free-form on purpose — curation is human and a fixed vocabulary
+  // would be wrong within a month.
+  tags: text("tags").array().notNull().default([]),
+  // ── Licence, as the vendor words it ──
+  // ⚠️ attributionRequired is NOT a preference and must never be joined to one. Pexels credits are a
+  // courtesy offered per organisation; a licence that DEMANDS a credit is a condition of use, so an
+  // organisation with credits off must not be OFFERED those tracks at all. Defaults true: an
+  // unrecorded licence is treated as the stricter one.
+  licenceName: text("licence_name").notNull(),
+  licenceTermsUrl: text("licence_terms_url"),
+  attributionRequired: boolean("attribution_required").notNull().default(true),
+  attributionText: text("attribution_text"),
+  // NULL = perpetual. A date, because licences run to a day rather than an instant.
+  licenceExpiresAt: date("licence_expires_at"),
+  // Provenance. No code path reads these — they are the answer to "prove you may use this", which
+  // is the whole argument for owning the library rather than borrowing it.
+  source: text("source"),
+  sourceReference: text("source_reference"),
+  acquiredAt: timestamp("acquired_at").defaultNow().notNull(),
+  // ⚠️ Withdrawal is not retroactive: this stops a track being OFFERED and never hides it from a
+  // post that already carries it. Rows are not deleted, so published posts keep resolving.
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});

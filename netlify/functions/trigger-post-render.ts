@@ -21,14 +21,15 @@
 // security-relevant rides on them; the worst a bad value buys is a wrongly-sized render of the
 // caller's own clip.
 
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { postRenderJobs, scheduledPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { postFormatSpec } from '../../src/config/post-formats';
-import { frameMeta, frameMetaFromJson, queuePostRender, renderableOverlays, resolveOverlayVideoBase } from '../../src/lib/post-render';
+import { frameMeta, frameMetaFromJson, queuePostRender, readFingerprint, readPostVideoEdit, renderPlanFor, renderableOverlays, resolveOverlayVideoBase } from '../../src/lib/post-render';
 import { needsVideoRender, renderableAudio } from '../../src/lib/audio-overlays';
+import { editChangesMedia } from '../../src/lib/video-edit';
 import { remotionConfigured } from '../../src/lib/remotion-lambda';
 import { r2IsConfigured } from '../../src/lib/media-persist';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -63,6 +64,8 @@ export default withLambda(async (event) => {
             imageOverlays: scheduledPosts.imageOverlays,
             audioOverlays: scheduledPosts.audioOverlays,
             formatKey: scheduledPosts.formatKey,
+            platform: scheduledPosts.platform,
+            crosspostGroupId: scheduledPosts.crosspostGroupId,
         })
         .from(scheduledPosts)
         .where(and(eq(scheduledPosts.id, postId), eq(scheduledPosts.organisationId, orgId)))
@@ -71,6 +74,12 @@ export default withLambda(async (event) => {
 
     const overlays = renderableOverlays(post.imageOverlays);
     const audioCount = renderableAudio(post.audioOverlays).length;
+    // An untouched trim (in at 0, no out point) on a single clip is deliberately NOT an edit —
+    // gating a post behind a render that changes nothing would burn a Lambda slot and delay the
+    // publish for no visible difference. Several clips always count: stitching changes the file even
+    // when each one plays whole. See editChangesMedia().
+    const videoEdit = await readPostVideoEdit(db, postId, orgId);
+    const hasEdit = editChangesMedia(videoEdit);
     const base = await resolveOverlayVideoBase(db, postId, orgId);
 
     // No media at all → nothing to render onto. Clear any stale gate so the post can still publish.
@@ -96,7 +105,7 @@ export default withLambda(async (event) => {
     const declared = postFormatSpec(post.formatKey);
     const forceVideo = base.kind === 'image' && declared?.media === 'video';
 
-    if (!forceVideo && !needsVideoRender({ hasVideo: base.kind === 'video', textOverlays: overlays.length, audioOverlays: audioCount })) {
+    if (!forceVideo && !needsVideoRender({ hasVideo: base.kind === 'video', textOverlays: overlays.length, audioOverlays: audioCount, hasEdit })) {
         await db.update(scheduledPosts).set({ renderStatus: null, updatedAt: new Date() }).where(eq(scheduledPosts.id, postId));
         // 'not_video' keeps the existing contract with gpQueueVideoRender: a photo whose text still
         // bakes in the browser must fall through to that path, not stop here.
@@ -137,6 +146,47 @@ export default withLambda(async (event) => {
         meta = frameMetaFromJson(prior?.renderInput) ?? meta;
     }
 
+    // ── Is a sibling already rendering this exact file? ─────────────────────────────────────────
+    // A cross-post is one edit across up to six rows, and four of them want the identical 9:16
+    // master. Rendering it four times would ask for four times a Lambda budget we do not have (the
+    // account cap is 10 concurrent and a single render already spends up to 8), and they would
+    // starve each other rather than queue.
+    //
+    // Approvals arrive in a loop, so the sibling's render is usually still IN FLIGHT rather than
+    // finished — checking for a completed asset would miss almost every time. So this waits on the
+    // JOB: gate this post, queue nothing, and let the running worker hand its output to everyone it
+    // fits. The worker re-checks each recipient's fingerprint before attaching, so a post that has
+    // drifted since this moment is rendered on its own rather than given the wrong file.
+    const plan = renderPlanFor({ ...post, videoEdit }, base, audioCount > 0);
+    if (post.crosspostGroupId) {
+        const siblings = await db
+            .select({ id: scheduledPosts.id })
+            .from(scheduledPosts)
+            .where(and(
+                eq(scheduledPosts.crosspostGroupId, post.crosspostGroupId),
+                eq(scheduledPosts.organisationId, orgId),
+                ne(scheduledPosts.id, postId),
+            ));
+        if (siblings.length) {
+            const inFlight = await db
+                .select({ id: postRenderJobs.id, renderInput: postRenderJobs.renderInput })
+                .from(postRenderJobs)
+                .where(and(
+                    inArray(postRenderJobs.postId, siblings.map(sib => sib.id)),
+                    inArray(postRenderJobs.status, ['queued', 'rendering']),
+                ));
+            const shared = inFlight.find(j => readFingerprint(j.renderInput) === plan.fingerprint);
+            if (shared) {
+                await db.update(scheduledPosts)
+                    .set({ renderStatus: 'pending', updatedAt: new Date() })
+                    .where(eq(scheduledPosts.id, postId));
+                // NOT `skipped` — the client reads that as "nothing to render, this is publishable
+                // now" and drops the render banner. This post IS gated and IS waiting.
+                return json(200, { ok: true, jobId: shared.id, sharedWith: shared.id });
+            }
+        }
+    }
+
     const queued = await queuePostRender(db, {
         orgId,
         postId,
@@ -144,7 +194,12 @@ export default withLambda(async (event) => {
         // forceVideo travels ON THE JOB because the worker cannot re-derive it: it sees no overlays
         // and no audio and would take its own "nothing to do" bail-out, clearing the gate and
         // leaving the still exactly as this endpoint used to.
-        input: { ...meta, ...(forceVideo ? { forceVideo: true } : {}) },
+        input: {
+            ...meta,
+            ...(forceVideo ? { forceVideo: true } : {}),
+            ...(plan.targetRatio ? { targetRatio: plan.targetRatio } : {}),
+            fingerprint: plan.fingerprint,
+        },
         baseUrl: resolveBaseUrl(event.headers as Record<string, string | undefined>),
     });
     if (!queued.ok) return json(502, { error: 'Could not start the video render — please try again in a moment.' });

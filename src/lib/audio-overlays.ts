@@ -99,9 +99,61 @@ export function needsVideoRender(params: {
     hasVideo: boolean;
     textOverlays: number;
     audioOverlays: number;
+    /**
+     * The post carries an edit that changes its media — a cut, or several clips to stitch
+     * (editChangesMedia in src/lib/video-edit.ts). Like audio, an edit only exists once the file has
+     * been re-encoded — no platform understands a "trimmed" or "stitched" flag — so it forces a
+     * render on its own, even with nothing to burn in.
+     *
+     * It lives in this one function rather than as a second condition at the call sites because two
+     * paths deciding independently whether a render is needed is exactly what produced the
+     * silently-un-gated Short (see the comment block in trigger-post-render.ts).
+     */
+    hasEdit?: boolean;
 }): boolean {
     if (params.audioOverlays > 0) return true;              // audio always has to be rendered in
+    if (params.hasEdit && params.hasVideo) return true;     // a cut or a stitch only exists once re-encoded
     return params.hasVideo && params.textOverlays > 0;      // text: video only
+}
+
+/**
+ * The gain for one audio track at one frame — its own volume, shaped by its fades.
+ *
+ * ── Why this is here and not in the composition ─────────────────────────────────────────────────
+ * fadeInS/fadeOutS were stored, defaulted and passed all the way into the render for over a month
+ * and then ignored: the composition set `volume` and nothing else, so every voice note and every
+ * track hard-cut. Dead data of that kind is worse than a missing feature, because the editor offers
+ * a control that demonstrably does nothing. The arithmetic lives in this pure module so it can be
+ * tested without a renderer, which is the only way anyone would have noticed.
+ *
+ * `frame` is relative to the track's own sequence, not the composition — Remotion's volume callback
+ * already works that way, and a fade has to be measured from the clip's own edges regardless of
+ * where on the timeline it sits.
+ *
+ * Fades are capped at half the clip each, so a 0.5s fade on a 0.4s blip ramps up and straight back
+ * down instead of overlapping into a gain above the one the user set.
+ */
+export function audioGainAt(params: {
+    frame: number;
+    durationInFrames: number;
+    fps: number;
+    volume: number;
+    fadeInS?: number;
+    fadeOutS?: number;
+}): number {
+    const total = Math.max(1, Math.floor(params.durationInFrames) || 1);
+    const frame = Math.min(Math.max(Math.floor(params.frame) || 0, 0), total);
+    const half = Math.floor(total / 2);
+    const toFrames = (s: number | undefined) =>
+        Math.min(Math.max(Math.round((s ?? 0) * params.fps) || 0, 0), half);
+
+    const fadeIn = toFrames(params.fadeInS);
+    const fadeOut = toFrames(params.fadeOutS);
+
+    let gain = clamp01(params.volume);
+    if (fadeIn > 0 && frame < fadeIn) gain *= frame / fadeIn;
+    if (fadeOut > 0 && frame > total - fadeOut) gain *= (total - frame) / fadeOut;
+    return clamp01(gain);
 }
 
 /**

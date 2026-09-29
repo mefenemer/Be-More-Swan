@@ -327,8 +327,15 @@ check('the text design takes the scope the reviewer chose', () => {
         'all platforms is the DEFAULT here too, so it ships ticked');
     assert.match(ws, /applyToGroup: _pceOverlayApplyToGroup\(\)/,
         'removing the text must state the same scope as adding it');
-    assert.match(ws, /baseAssetId: base\.assetId, applyToGroup/,
-        'saving the design must state its scope rather than relying on the server default');
+    // ⚠️ The modal was the only caller that stated the scope, and it is gone — text is edited beside
+    // the picture now. _rqPersistOverlays is what saves every one of those edits, and while it said
+    // nothing every cross-post silently became a single-platform write with the tick-box still on
+    // screen claiming otherwise. save-post-overlays reads `body.applyToGroup === true`.
+    const persist = ws.slice(ws.indexOf('async function _rqPersistOverlays(postId) {'));
+    assert.match(persist.slice(0, 1400), /applyToGroup: _pceOverlayApplyToGroup\(\)/,
+        'the inline editor saves without stating its scope, so nothing fans out');
+    assert.strictEqual(ws.indexOf('async function _pceOpenOverlayEditor'), -1,
+        'the modal opener is back; if it saves again it must state the scope too');
 });
 
 // ── The text appeared TWICE ─────────────────────────────────────────────────────────────────────
