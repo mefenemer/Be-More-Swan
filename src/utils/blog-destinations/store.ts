@@ -293,6 +293,30 @@ export interface SwanProfileFields {
     socials: SocialsMap;
 }
 
+/**
+ * The workspace's Swan Index profile — provisioned if it has never had one.
+ *
+ * The Swan Index is ON BY DEFAULT for every workspace. Absent a row, the workspace has never made a
+ * choice, so it gets a profile and its published posts go to the editorial desk (as `pending` —
+ * nothing reaches the magazine until an editor curates it). A `withdrawn` row is different: that is
+ * an author who clicked Disconnect, and it is returned as-is so the choice sticks.
+ *
+ * Provisioned here rather than at sign-up because this is the one read every surface shares —
+ * Connections grid, Blog Studio picker, Overview, and syndicatePublishedPost — so existing workspaces
+ * are covered on their next publish with no backfill, and a workspace created by any path is too.
+ * A failure degrades to "not connected" rather than failing the list (and with it, a publish).
+ */
+async function defaultOnSwanProfile(db: Db, organisationId: number) {
+    const existing = await getProfileByOrg(db, organisationId);
+    if (existing) return existing;
+    try {
+        return await ensureProfile(db, organisationId);
+    } catch (err) {
+        console.error(`[blog-destinations] could not provision Swan Index profile for org ${organisationId}:`, err);
+        return null;
+    }
+}
+
 /** Connection state for every adapter, for the integrations/settings UI. */
 export async function listBlogDestinations(db: Db, organisationId: number): Promise<BlogDestinationStatus[]> {
     const rows = await db
@@ -305,7 +329,7 @@ export async function listBlogDestinations(db: Db, organisationId: number): Prom
     // First-party connection state lives in the profile table, not workspace_integrations — there is
     // no vault secret to hang a row off. One extra read for the whole list.
     const swanProfile = AVAILABLE_BLOG_DESTINATION_IDS.some((id) => getBlogAdapter(id).authKind === 'firstparty')
-        ? await getProfileByOrg(db, organisationId)
+        ? await defaultOnSwanProfile(db, organisationId)
         : null;
     // Social connection state lives in system_connections, the pool the social assistants share.
     // Liveness mirrors resolveLiveSocialConnections: active + is_active, AND a vault_ref_key — a row

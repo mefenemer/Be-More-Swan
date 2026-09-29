@@ -695,6 +695,31 @@ check('a profile created on connect no longer copies the org name into the compa
         'seeding companyName from the org name is what produced "Acme, Acme" on every unedited profile');
 });
 
+check('the Swan Index is on by default: a workspace with no profile gets one, a withdrawn one stays off', () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..',
+        'src/utils/blog-destinations/store.ts'), 'utf8');
+    const list = src.slice(
+        landmark(src, 'export async function listBlogDestinations('),
+        landmark(src, 'export async function connectSwanIndex('),
+    );
+    assert.ok(list.length > 0, 'listBlogDestinations must still be findable');
+    // Only two workspaces were ever syndicating: the ones whose owner clicked Connect. Every other
+    // workspace had no profile row, so syndicatePublishedPost filtered the destination out silently.
+    assert.match(list, /await defaultOnSwanProfile\(db, organisationId\)/,
+        'listBlogDestinations must provision a missing profile, not merely read it');
+    const helper = src.slice(
+        landmark(src, 'async function defaultOnSwanProfile('),
+        landmark(src, '/** Connection state for every adapter'),
+    );
+    assert.match(helper, /if \(existing\) return existing;/,
+        'an existing row — including a WITHDRAWN one, i.e. a Disconnect — must be returned untouched');
+    assert.ok(!/status: 'active'/.test(helper), 'the default must never reactivate a disconnected profile');
+    const profile = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..',
+        'src/utils/swan-index/profile.ts'), 'utf8');
+    assert.match(profile, /onConflictDoNothing\(\{ target: swanIndexProfiles\.organisationId \}\)/,
+        'provisioning on read races; the insert must tolerate a concurrent winner');
+});
+
 // ── routes, about and the feed ──────────────────────────────────────────────
 console.log('\nAbout, feed and SEO');
 
