@@ -25,7 +25,7 @@ function check(name: string, fn: () => void): void {
 }
 
 const track = (over: Partial<MusicTrack> = {}): MusicTrack => ({
-    id: 1, title: 'Slow Water', artist: 'K. Reed', url: 'https://r2.example/slow-water.mp3',
+    id: 1, title: 'Slow Water', artist: 'K. Reed', storageKey: 'library/music/slow-water.mp3',
     durationS: 92, tags: ['calm', 'ambient'],
     licence: { name: 'Standard Commercial (perpetual)', attributionRequired: false },
     isActive: true,
@@ -107,20 +107,30 @@ check('is offered only the tracks that do not need one', () => {
 
 console.log('\nreading a row');
 
-check('a row with no url or no duration is not a track', () => {
-    // ⚠️ null rather than a partial: a bed with no url renders silence, and one with no duration
+check('a row with no object or no duration is not a track', () => {
+    // ⚠️ null rather than a partial: a bed with no object renders silence, and one with no duration
     // cannot be drawn on the timeline. Both would reach the editor looking like a track and behaving
     // like a fault — which is the shape of every bug in this feature's history.
-    assert.strictEqual(toTrack({ id: 1, url: '', durationS: 90 }), null, 'a track with no file is accepted');
-    assert.strictEqual(toTrack({ id: 1, url: 'x', durationS: 0 }), null, 'a track with no length is accepted');
-    assert.strictEqual(toTrack({ id: 0, url: 'x', durationS: 9 }), null, 'a track with no id is accepted');
+    assert.strictEqual(toTrack({ id: 1, storageKey: '', durationS: 90 }), null, 'a track with no file is accepted');
+    assert.strictEqual(toTrack({ id: 1, storageKey: 'x', durationS: 0 }), null, 'a track with no length is accepted');
+    assert.strictEqual(toTrack({ id: 0, storageKey: 'x', durationS: 9 }), null, 'a track with no id is accepted');
     assert.strictEqual(toTrack(null), null);
+});
+
+check('the OBJECT is the identity — there is no durable url', () => {
+    // ⚠️ The first version of this table had `url NOT NULL UNIQUE` and an optional storage_key, which
+    // was the wrong way round: R2 objects here are private, resolveAudioTracks presigns storageKey
+    // for an hour, and a stored public url would have meant a public bucket for files we paid to
+    // licence. Caught by reading the render path, while both databases still held zero rows.
+    const t = toTrack({ id: 1, storage_key: 'library/music/x.mp3', duration_s: 30 });
+    assert.strictEqual(t?.storageKey, 'library/music/x.mp3');
+    assert.ok(!('url' in (t as object)), 'a url is back on the track, and nothing can populate it');
 });
 
 check('an unrecorded licence is read as the STRICTER one', () => {
     // Crediting a track that did not need it costs a line of caption. Not crediting one that did is
     // a breach on the customer's account. The default has to fall on the safe side.
-    const t = toTrack({ id: 1, url: 'https://r2/x.mp3', durationS: 30, title: 'X', artist: 'Y' });
+    const t = toTrack({ id: 1, storageKey: 'library/x.mp3', durationS: 30, title: 'X', artist: 'Y' });
     assert.ok(t, 'a usable row was rejected');
     assert.strictEqual(t!.licence.attributionRequired, true, 'an unknown licence is assumed permissive');
     assert.strictEqual(t!.licence.name, 'Unspecified');
@@ -129,13 +139,13 @@ check('an unrecorded licence is read as the STRICTER one', () => {
 check('snake_case and camelCase rows both read', () => {
     // The row arrives from drizzle as camelCase and from a raw db.execute as snake_case, and both
     // are used in this codebase.
-    const a = toTrack({ id: 1, url: 'https://r2/x.mp3', duration_s: 30, title: 'X', artist: 'Y', is_active: false });
+    const a = toTrack({ id: 1, storage_key: 'library/x.mp3', duration_s: 30, title: 'X', artist: 'Y', is_active: false });
     assert.strictEqual(a?.durationS, 30, 'a raw SQL row loses its duration');
     assert.strictEqual(a?.isActive, false, 'a raw SQL row is always read as active');
 });
 
 check('tags are normalised, because a picker filters on them', () => {
-    const t = toTrack({ id: 1, url: 'https://r2/x.mp3', durationS: 30, tags: ['  Calm ', 'AMBIENT', ''] });
+    const t = toTrack({ id: 1, storageKey: 'library/x.mp3', durationS: 30, tags: ['  Calm ', 'AMBIENT', ''] });
     assert.deepStrictEqual(t?.tags, ['calm', 'ambient'], 'a stray capital or space makes a filter miss');
 });
 

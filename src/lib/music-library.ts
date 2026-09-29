@@ -53,8 +53,13 @@ export interface MusicTrack {
     id: number;
     title: string;
     artist: string;
-    /** Our own storage. Never a third party's CDN — that is the whole point of the library. */
-    url: string;
+    /**
+     * The R2 object key. ⚠️ Not a url, and there is no durable one: objects here are private, so
+     * both the renderer and the picker mint a signed url from this key when they need one
+     * (resolveAudioTracks in src/lib/post-render.ts presigns it for an hour). A stored public url
+     * would have meant a public bucket for files we paid to licence.
+     */
+    storageKey: string;
     /**
      * Length in seconds, STORED rather than measured.
      *
@@ -136,7 +141,7 @@ export function offerableTo(tracks: MusicTrack[], opts: { creditsEnabled: boolea
 /**
  * Normalise a row out of `music_tracks` into a track, or null if it is not usable.
  *
- * Returns null rather than a partial track: a bed with no url renders silence, and a bed with no
+ * Returns null rather than a partial track: a bed with no object renders silence, and a bed with no
  * duration cannot be drawn on the timeline — both would reach the editor looking like a track and
  * behave like a fault.
  */
@@ -144,16 +149,17 @@ export function toTrack(row: unknown): MusicTrack | null {
     if (!row || typeof row !== 'object') return null;
     const r = row as Record<string, any>;
     const id = Number(r.id);
-    const url = typeof r.url === 'string' ? r.url.trim() : '';
+    const storageKey = typeof (r.storageKey ?? r.storage_key) === 'string'
+        ? String(r.storageKey ?? r.storage_key).trim() : '';
     const durationS = Number(r.durationS ?? r.duration_s);
-    if (!Number.isInteger(id) || id <= 0 || !url || !(durationS > 0)) return null;
+    if (!Number.isInteger(id) || id <= 0 || !storageKey || !(durationS > 0)) return null;
 
     const rawLic = (r.licence ?? r.license ?? {}) as Record<string, any>;
     return {
         id,
         title: String(r.title || 'Untitled').slice(0, 200),
         artist: String(r.artist || 'Unknown').slice(0, 200),
-        url,
+        storageKey,
         durationS,
         tags: Array.isArray(r.tags) ? r.tags.map((t: any) => String(t).toLowerCase().trim()).filter(Boolean) : [],
         licence: {

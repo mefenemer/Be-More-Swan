@@ -4965,10 +4965,11 @@ export const musicTracks = pgTable("music_tracks", {
   id: serial("id").primaryKey(),
   title: text("title").notNull(),
   artist: text("artist").notNull(),
-  // Our storage, never a third party's CDN. Both, because moving a bucket changes the url and not
-  // the object.
-  storageKey: text("storage_key"),
-  url: text("url").notNull(),
+  // ⚠️ The OBJECT is the identity, and there is no durable url. R2 objects here are private:
+  // resolveAudioTracks presigns storageKey for an hour and only falls back to external_url when
+  // there is no key, and the picker mints a signed url to preview with. A stored public url would
+  // have meant a public bucket for files we paid to licence. See db/music-library-storage-key.sql.
+  storageKey: text("storage_key").notNull(),
   // ⚠️ STORED, not measured. A clip's length is measured in the browser because Pexels supplies
   // none, and a failed measurement is what once removed the trim slider from a correct-looking
   // timeline. We control ingestion here, so the picker can state a length before fetching anything.
