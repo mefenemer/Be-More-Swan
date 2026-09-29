@@ -67,4 +67,30 @@ check('the give-up message is safe to inline into SQL', () => {
         'INTERRUPTED_GIVE_UP contains an apostrophe');
 });
 
+console.log('\nthe crons hand the drain to the background function');
+
+for (const [file, caller] of [
+    ['netlify/functions/process-blog-jobs.ts', 'process-blog-jobs'],
+    ['netlify/functions/run-blog-jobs.ts', 'run-blog-jobs'],
+] as const) {
+    check(`${caller} starts run-blog-jobs-background before draining in-process`, () => {
+        // ⚠️ Both run on a seconds-long budget, and one draft is a 30–60s model call: drained in-process
+        // a run was killed mid-draft as a matter of course. That is what stranded the title-only posts.
+        const src = readFileSync(join(import.meta.dirname, '..', file), 'utf8');
+        const handler = src.slice(landmark(src, 'export default withLambda('));
+        const poke = landmark(handler, 'triggerBlogDrain(');
+        const drain = landmark(handler, 'await drainBlogJobs()');
+        assert.ok(poke < drain, 'the drain runs in-process before the hand-off is even tried');
+        // The in-process drain survives only as the fallback for a hand-off that could not start.
+        assert.ok(/handedOff\s*\?\s*undefined\s*:\s*await drainBlogJobs\(\)|if \(await triggerBlogDrain\([\s\S]*?return[\s\S]*?\}\s*\n[\s\S]*await drainBlogJobs\(\)/.test(handler),
+            'the in-process drain is not conditional on the hand-off failing');
+    });
+}
+
+check('the scheduled handler honours the kill switch BEFORE handing off', () => {
+    const handler = worker.slice(landmark(worker, 'export default withLambda('));
+    assert.ok(landmark(handler, 'isGlobalAiDisabled()') < landmark(handler, 'triggerBlogDrain('),
+        'a switched-off platform still spends a background invocation');
+});
+
 console.log(`\n${passed} checks passed.\n`);

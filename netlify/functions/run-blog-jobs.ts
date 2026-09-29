@@ -7,20 +7,24 @@
 // This endpoint lets an external scheduler (.github/workflows/staging-crons.yml) poke BOTH
 // halves over HTTP so staging behaves like production.
 //
-// Both halves run in one call, horizon-fill first, so a slot enqueued this tick is drafted in the
-// same tick rather than waiting for the next one.
+// Horizon-fill runs here; the drain is HANDED OFF to run-blog-jobs-background, exactly as the
+// production cron (process-blog-jobs) does. ⚠️ This function is synchronous and has a seconds-long
+// budget, and one draft is a 30–60s model call — drained in-process it was killed mid-draft, which
+// is what left title-only posts behind. The hand-off still starts this tick, so a slot enqueued now
+// is drafted now. If the hand-off cannot be started it drains in-process, as it always used to.
 //
 // AUTH: guarded by the same shared secret as run-content-jobs. If CRON_TRIGGER_SECRET is not
 // configured the endpoint refuses to run (fail closed) so it can never be an open, cost-incurring
 // endpoint. Callers pass the secret as `Authorization: Bearer <secret>`.
 //
 // POST /.netlify/functions/run-blog-jobs
-//   → 200 { ok: true, enqueued: <n>, processed: <n> }
+//   → 200 { ok: true, enqueued: <n>, handedOff: true }  (or handedOff: false, processed: <n>)
 
 import { Handler } from '@netlify/functions';
 import { fillBlogHorizons } from './blog-horizon-fill';
 import { drainBlogJobs } from './process-blog-jobs';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
+import { triggerBlogDrain } from '../../src/utils/trigger-drain';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -43,11 +47,13 @@ export default withLambda(async (event) => {
 
     try {
         const { jobsEnqueued } = await fillBlogHorizons();
-        const processed = await drainBlogJobs();
+        const handedOff = await triggerBlogDrain(
+            event.headers as Record<string, string | undefined>, 'cron', 'run-blog-jobs');
+        const processed = handedOff ? undefined : await drainBlogJobs();
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ok: true, enqueued: jobsEnqueued, processed }),
+            body: JSON.stringify({ ok: true, enqueued: jobsEnqueued, handedOff, processed }),
         };
     } catch (err) {
         console.error('[run-blog-jobs] error:', err);

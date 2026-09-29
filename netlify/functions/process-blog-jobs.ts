@@ -23,6 +23,7 @@ import { generateBlogBody } from '../../src/utils/blog-generate';
 import { decodeInteractiveBrief } from '../../src/utils/blog-interactive-brief';
 import { ideateBlogTopic } from '../../src/utils/blog-topic-ideation';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
+import { triggerBlogDrain } from '../../src/utils/trigger-drain';
 import { createNotification } from '../../src/utils/notify';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -452,15 +453,44 @@ async function failJob(
         .where(eq(contentGenerationJobs.id, job.id));
 }
 
+/**
+ * The ten-minute cron. It STARTS the drain in run-blog-jobs-background rather than running it here.
+ *
+ * ⚠️ A scheduled function runs on a time budget measured in seconds, and one blog draft is a 30–60s
+ * model call — five of them, sequentially, per batch. Drained here, a run was killed mid-draft as a
+ * matter of course: the job stranded in 'processing' until the ten-minute reclaim, and the title-only
+ * post the killed attempt had inserted sat in the Blogs tab (prod orgs 37 and 40, see EMPTY_AUTOPILOT_DRAFT).
+ * The `-background` function gets fifteen minutes, which fits a full batch several times over.
+ *
+ * Same move dispatch-discovery-runs made for the same reason. The drain is safe to overlap with a
+ * poke from generate-blog: the status-guarded claim in processBlogJob is what makes it so.
+ */
 export default withLambda(async () => {
-    // Respect the global kill switch — this is an unattended, cost-incurring path.
+    // Respect the global kill switch — this is an unattended, cost-incurring path. Checked here as
+    // well as in the background function, so a switched-off platform does not spend an invocation.
     if (await isGlobalAiDisabled()) {
         return { statusCode: 200, body: JSON.stringify({ ran: false, reason: 'ai_disabled' }) };
     }
+
+    // No request headers on a cron, so the target resolves from BASE_URL — as publish-blog-posts'
+    // does on the same schedule.
+    if (await triggerBlogDrain(undefined, 'cron', 'process-blog-jobs')) {
+        return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ran: true, handedOff: true }),
+        };
+    }
+
+    // The hand-off could not be started (no CRON_TRIGGER_SECRET, no base URL, or the invoke was
+    // refused). Drain here rather than not at all: a run that is killed part-way still finishes the
+    // jobs it reached, and the orphan cleanup above means a killed attempt no longer leaves a
+    // title-only post behind. Logged, because this is the slow path and it should not be the usual one.
+    console.warn('[process-blog-jobs] background drain not started — draining in-process, and a long batch may be cut short.');
     const processed = await drainBlogJobs();
     return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ran: true, processed }),
+        body: JSON.stringify({ ran: true, handedOff: false, processed }),
     };
 });
