@@ -22,15 +22,24 @@
 -- Idempotent: safe to re-run. Apply MANUALLY as the DB owner to BOTH staging and prod BEFORE the
 -- code that selects it ships — db.select() names every column.
 
-ALTER TABLE music_tracks
+-- Order-independent: the runner sorts `-` before `.`, so on a FRESH database this file runs BEFORE
+-- music-library.sql creates the table. Everything is therefore guarded on the table existing, and
+-- the create in music-library.sql already carries the final shape — this file only corrects a table
+-- still in the old one.
+ALTER TABLE IF EXISTS music_tracks
   ALTER COLUMN storage_key SET NOT NULL;
 
 -- The object is the identity. Two rows pointing at one file is a curation mistake that would show
 -- the same bed twice in the picker under two names.
 DROP INDEX IF EXISTS music_tracks_url_key;
-CREATE UNIQUE INDEX IF NOT EXISTS music_tracks_storage_key_key ON music_tracks (storage_key);
+DO $$
+BEGIN
+  IF to_regclass('music_tracks') IS NOT NULL THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS music_tracks_storage_key_key ON music_tracks (storage_key);
+  END IF;
+END $$;
 
 -- Nothing reads it, nothing can populate it honestly, and a nullable column under a unique index is
 -- how duplicates get in.
-ALTER TABLE music_tracks
+ALTER TABLE IF EXISTS music_tracks
   DROP COLUMN IF EXISTS url;
