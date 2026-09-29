@@ -94,10 +94,41 @@ export default withLambda(async (event) => {
         // --- SCENARIO 5: ENUMERATION PROTECTION ---
         // Check if user already exists BEFORE doing anything else
         phase = 'duplicate-check';
-        const existingUsers = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
-        if (existingUsers.length > 0) {
-            // Silently return success to the UI to prevent scraping, do not create a duplicate
-            console.log(`[Security] Blocked duplicate registration attempt for: ${email}`);
+        const [existingUser] = await db.select({ id: users.id, status: users.status })
+            .from(users).where(eq(users.email, email)).limit(1);
+        if (existingUser) {
+            // Silently return success to the UI to prevent scraping, do not create a duplicate.
+            // An UNVERIFIED account now survives 24h (purge-ghost-accounts), so someone who comes
+            // back and registers again would otherwise get nothing: send them a fresh link instead.
+            // Same response body either way, so this reveals nothing about the address.
+            if (existingUser.status === 'pending_verification') {
+                const token = crypto.randomBytes(32).toString('hex');
+                await db.update(users).set({
+                    verificationToken: crypto.createHash('sha256').update(token).digest('hex'),
+                    tokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000),
+                    updatedAt: new Date(),
+                }).where(eq(users.id, existingUser.id));
+                const link = `${baseUrl}/verify-account.html?token=${token}${planTier ? `&tier=${encodeURIComponent(planTier)}` : ''}`;
+                await sendMagicLinkEmail({
+                    to: email,
+                    subject: 'Welcome to Be More Swan - Verify your email',
+                    html: `
+                        <div style="font-family: sans-serif; text-align: center; padding: 40px 20px; background-color: #fdfcf9;">
+                            <div style="max-width: 500px; margin: 0 auto; background-color: white; padding: 40px; border-radius: 16px; border: 1px solid #eae4d7; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+                                <h2 style="color: #1f1e1b; margin-top: 0;">Welcome back, ${firstName}!</h2>
+                                <p style="color: #5c564b; font-size: 16px; line-height: 1.5;">Your account is already set up — it just needs verifying. Click the button below to verify it and finish your workspace setup.</p>
+                                <a href="${link}" style="background-color: #00e55c; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; display: inline-block; margin: 24px 0; font-weight: bold; font-size: 16px;">
+                                    Verify & Log In
+                                </a>
+                                <p style="color: #787263; font-size: 14px; margin-bottom: 0;">This secure link expires in 15 minutes.</p>
+                            </div>
+                        </div>
+                    `,
+                }).catch((err: unknown) => console.error('[register] Re-send to pending account failed:', err));
+                console.log(`[register] Re-sent verification to existing pending account ${existingUser.id}`);
+            } else {
+                console.log(`[Security] Blocked duplicate registration attempt for: ${email}`);
+            }
             return { statusCode: 200, body: JSON.stringify({ success: true }) };
         }
 

@@ -43,6 +43,7 @@ import { sendMagicLinkEmail } from '../../src/utils/email';
 import { isAdminRole, hasPermission, requirePermission, permissionsForRole } from '../../src/utils/rbac';
 import { checkImpersonationBlock } from '../../src/utils/impersonation-guard';
 import { SPECIAL_CATEGORY_CLAUSE } from './get-dpa-content';
+import { deleteUserAndSoleOrgs } from '../../src/utils/user-deletion';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
@@ -315,11 +316,16 @@ export default withLambda(async (event) => {
             const [targetUser] = await db.select({ email: users.email, firstName: users.firstName, lastName: users.lastName })
                 .from(users).where(eq(users.id, uid)).limit(1);
 
-            // Hard delete — cascades to all related records via FK onDelete: 'cascade'
-            await db.delete(users).where(eq(users.id, uid));
+            // Hard delete — cascades to all related records via FK onDelete: 'cascade'. The org has
+            // no FK to its owner, so a workspace this user was the ONLY member of goes too (unless it
+            // still holds a live Stripe subscription — that is kept and reported, never stranded).
+            const deletion = await deleteUserAndSoleOrgs(db, uid);
 
             // SC1a: Audit log with actionType='DELETE_USER' and the admin's userId
-            await audit(db, adminId, 'DELETE_USER', 'users', uid);
+            await audit(db, adminId, 'DELETE_USER', 'users', uid, {
+                deletedOrgIds: deletion.deletedOrgIds,
+                keptOrgs: deletion.keptOrgs,
+            });
 
             // SC3: GDPR Erasure Log — anonymised record (email hash only, no plaintext)
             if (targetUser?.email) {
@@ -349,7 +355,7 @@ export default withLambda(async (event) => {
             return {
                 statusCode: 200,
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ success: true }),
+                body: JSON.stringify({ success: true, deletedOrgIds: deletion.deletedOrgIds, keptOrgs: deletion.keptOrgs }),
             };
         }
 
