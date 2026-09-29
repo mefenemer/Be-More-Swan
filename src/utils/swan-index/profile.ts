@@ -144,13 +144,16 @@ export async function ensureProfile(
     // "Acme at Acme" in the admin list, which is where it was finally noticed. A company that
     // repeats the byline is not a second fact about the author, it is the same one twice; the
     // author fills it in from Connections when it differs (a person writing on behalf of a firm).
+    // ON CONFLICT DO NOTHING on the org: listBlogDestinations now provisions on read (the Swan Index
+    // is on by default), so two concurrent reads for one workspace can both reach here. The loser's
+    // insert is a no-op and it re-reads the winner's row below, rather than 500ing a page load.
     await db.insert(swanIndexProfiles).values({
         organisationId,
         createdBy: opts.userId ?? null,
         handle,
         displayName,
         siteUrl: opts.siteUrl || org?.websiteUrl || null,
-    });
+    }).onConflictDoNothing({ target: swanIndexProfiles.organisationId });
 
     const created = await getProfileByOrg(db, organisationId);
     if (!created) throw new Error('Swan Index profile could not be created.');
