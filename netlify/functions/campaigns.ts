@@ -42,7 +42,7 @@ import {
 import { getDb } from '../../db/client';
 import { requireTenant } from '../../src/utils/tenant';
 import { campaignSpendTotals, fitsBudget, readPlanTaskGate } from '../../src/utils/campaign-ledger';
-import { placeOrder } from '../../src/utils/campaign-orders';
+import { placeOrder, recompileCampaignTargets } from '../../src/utils/campaign-orders';
 import { settleDecisionMirror } from '../../src/utils/campaign-mirror';
 import {
     CREATABLE_CAMPAIGN_MODES, LIVE_CAMPAIGN_STATUSES,
@@ -313,6 +313,10 @@ export default withLambda(async (event) => {
             patch.endsAt = Number.isNaN(d.getTime()) ? null : d;
         }
         await db.update(campaigns).set(patch).where(eq(campaigns.id, campaign.id));
+        // The objective and end date are what the directive says; an edit must reach drafting.
+        if (patch.objective !== undefined || patch.outcomeMetric !== undefined || patch.endsAt !== undefined) {
+            await recompileCampaignTargets(db, campaign.id, 'campaign-edited');
+        }
 
         if (body.maxWorkItems !== undefined || body.autonomyThresholdWork !== undefined) {
             const bpatch: Record<string, unknown> = { updatedAt: new Date() };
@@ -352,6 +356,8 @@ export default withLambda(async (event) => {
             haltedBy: null,
             updatedAt: new Date(),
         }).where(eq(campaigns.id, campaign.id));
+        // A resumed campaign that already has orders steers its assistants again from the next draft.
+        await recompileCampaignTargets(db, campaign.id, 'campaign-started');
 
         return json(200, { ok: true, status: 'active' });
     }
@@ -381,6 +387,8 @@ export default withLambda(async (event) => {
                 .set({ status: 'cancelled', resultSummary: 'Campaign paused', updatedAt: new Date() })
                 .where(eq(campaignOrders.id, o.id));
         }
+        // A paused campaign must stop steering drafts NOW, not whenever something else recompiles.
+        await recompileCampaignTargets(db, campaign.id, 'campaign-paused');
         return json(200, { ok: true, cancelledOrders: queued.length });
     }
 
@@ -408,6 +416,7 @@ export default withLambda(async (event) => {
             await db.update(campaignOrders)
                 .set({ status: 'cancelled', resultSummary: 'Stopped by you', updatedAt: new Date() })
                 .where(and(eq(campaignOrders.campaignId, c.id), inArray(campaignOrders.status, ['queued', 'blocked'])));
+            await recompileCampaignTargets(db, c.id, 'campaign-stopped');
         }
         // Deliberately does NOT touch delivered work. A post already drafted stays drafted; a
         // published article stays published. "Stop everything" stops the machine, it does not

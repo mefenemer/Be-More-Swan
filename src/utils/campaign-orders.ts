@@ -163,6 +163,13 @@ interface IssueContext {
  */
 export async function issueOrder(db: Db, orderId: number, ctx: IssueContext): Promise<PlaceOrderResult> {
     const executor = EXECUTORS[ctx.action];
+    // ⚠️ Recompile the target BEFORE the executor stamps any job. The campaign reaches drafting only
+    // through blueprint section 13-campaign, which is built from this assistant's campaign ORDERS —
+    // and this order only just came into existence. Without this, every job below was stamped with
+    // the blueprint compiled before the order, so the posts a campaign ordered were drafted with no
+    // campaign in them at all, and an adjust_messaging order changed nothing (found 2026-09-30).
+    // Best-effort: a failed recompile still lets the order run, just unsteered.
+    await recompileAssistantForCampaign(ctx.targetAssistantId, 'campaign-order');
     let outcome: ExecutorResult;
     try {
         outcome = await executor(db, ctx, orderId);
@@ -218,6 +225,38 @@ export async function issueOrder(db: Db, orderId: number, ctx: IssueContext): Pr
     });
 
     return { orderId, status: 'issued', workItems: ctx.workItems };
+}
+
+/** Recompile one assistant so its blueprint reflects the campaigns it serves. Never throws. */
+async function recompileAssistantForCampaign(assistantId: number, reason: string): Promise<void> {
+    try {
+        await assembleBlueprint(assistantId, 'campaign-orchestrator', reason);
+    } catch (err) {
+        console.warn('[campaign-orders] recompile failed — drafting stays on the previous blueprint', { assistantId, reason, err });
+    }
+}
+
+/**
+ * Recompile every assistant this campaign has given orders to.
+ *
+ * Call it whenever the campaign's state or wording changes: started or resumed, paused, stopped,
+ * finished, or its objective or end date edited. Generation reads the PERSISTED blueprint, and
+ * nothing else recompiles on these events — so without this a finished or paused campaign kept
+ * steering every draft until some unrelated edit happened to recompile, and an edited objective
+ * never arrived. Parallel and best-effort: one failed assistant must not block the rest, or the
+ * caller's own write.
+ */
+export async function recompileCampaignTargets(db: Db, campaignId: number, reason: string): Promise<void> {
+    try {
+        const rows = await db
+            .selectDistinct({ id: campaignOrders.targetAssistantId })
+            .from(campaignOrders)
+            .where(eq(campaignOrders.campaignId, campaignId));
+        const ids = rows.map((r) => r.id).filter((id): id is number => id != null);
+        await Promise.allSettled(ids.map((id) => recompileAssistantForCampaign(id, reason)));
+    } catch (err) {
+        console.warn('[campaign-orders] could not list campaign targets for recompile', { campaignId, reason, err });
+    }
 }
 
 interface ExecutorResult {

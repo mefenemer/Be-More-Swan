@@ -51,7 +51,7 @@ import {
 import { isScheduleActive } from '../config/post-status';
 import { recordCampaignSpend } from './campaign-ledger';
 import { mirrorOrder } from './campaign-mirror';
-import { issueOrder } from './campaign-orders';
+import { issueOrder, recompileCampaignTargets } from './campaign-orders';
 import { ORDER_ACTION_SPECS, type CampaignOrderAction } from '../config/campaign-vocab';
 
 type Db = ReturnType<typeof getDb>;
@@ -443,6 +443,9 @@ async function sweepExpiredCampaigns(db: Db, result: ReconcileResult): Promise<v
                     eq(campaignOrders.campaignId, campaign.id),
                     inArray(campaignOrders.status, ['queued', 'blocked']),
                 ));
+
+            // A finished campaign stops steering its assistants' drafts from the next one.
+            await recompileCampaignTargets(db, campaign.id, 'campaign-finished');
 
             result.finished++;
         } catch (err) {
