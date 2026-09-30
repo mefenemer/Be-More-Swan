@@ -211,6 +211,26 @@
       a.className = 'inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 transition w-fit';
       const label = typeof hubLink.label === 'string' && hubLink.label.trim() ? hubLink.label.trim() : 'View in Review Queue';
       a.textContent = `${label} →`;
+      // A drafted post opens straight in the post editor, in place. The href above went through a
+      // full page load of the assistant's detail page just to pop this same modal — slow, and it
+      // threw the user out of wherever they were. The href stays as the fallback for a page with
+      // no workspace shell (openPostReview lives in workspace.html).
+      if (hubLink.postId != null) {
+        a.addEventListener('click', (e) => {
+          if (typeof window.openPostReview !== 'function') return;
+          e.preventDefault();
+          // Busy cursor at once — openPostReview sets it too, but only after the chat closes.
+          document.documentElement.style.cursor = 'progress';
+          // The chat modal shares the editor's z-index and sits later in the DOM, so the editor
+          // would open BEHIND it. Close the chat first; its thread is kept and resumes from 💬 Chat.
+          const chatModal = document.getElementById('chat-modal');
+          if (chatModal && !chatModal.classList.contains('hidden') && chatModal.contains(a)) {
+            window.closeAssistantChatModal?.();
+          }
+          Promise.resolve(window.openPostReview(Number(hubLink.postId)))
+            .finally(() => { document.documentElement.style.cursor = ''; });
+        });
+      }
       return a;
     }
 
