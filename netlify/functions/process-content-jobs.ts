@@ -223,6 +223,56 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         return;
     }
 
+    // ── One post per SLOT, whichever job got there first ────────────────────────────────────────
+    // The guard above stops ONE job writing twice. It says nothing about TWO jobs for the same slot,
+    // and those pile up whenever drafting fails: a failed job does not count as covering its slot,
+    // so the hourly gap-fill enqueues a fresh one every hour. During the Anthropic outage
+    // (2026-09-17 → 09-28) that stacked ~30 failed jobs on every slot; requeuing the backlog on
+    // 2026-09-30 then drafted all of them — ~30 posts per slot, 1,800+ jobs across five customers.
+    //
+    // So: a scheduled job whose slot already holds a live post completes WITHOUT writing. Checked
+    // here, at the point of writing, because that protects against every source of stacked jobs
+    // (an outage, a requeue, a future bug in gap-fill), not just the one we know about. Before the
+    // idea claim below, so a skipped job never consumes a queued "Suggest an idea".
+    //
+    // ⚠️ The weekly YouTube Short shares its slot time with the day's cross-post ON PURPOSE (see
+    // schedule-gap-fill.ts, isWeeklyShort). The two streams are compared only with themselves, or the
+    // Short would cancel the day's post, or the post the Short.
+    // The slot is read back from the job row rather than interpolated, so no timestamp is ever
+    // re-serialised in JS — the two columns are compared exactly as gap-fill wrote them.
+    // A revision (revised_from_post_id) is exempt: it is ONE job answering one reviewer action, and
+    // it targets the rejected post's slot on purpose.
+    if (job.trigger_type === 'scheduled' && job.target_publish_date && job.assistant_id && !job.revised_from_post_id) {
+        const isShortJob = job.platform === 'youtube' && !job.crosspost_group_id;
+        const stream = isShortJob
+            ? `platform = 'youtube' AND crosspost_group_id IS NULL`
+            : `NOT (platform = 'youtube' AND crosspost_group_id IS NULL)`;
+        // Fails OPEN: this guard must never be the thing that stops drafting. A lookup error logs and
+        // falls through to the old behaviour (a possible duplicate), not an outage for every customer.
+        const occupied = await db.execute<{ id: number }>(
+            `SELECT id FROM scheduled_posts
+              WHERE assistant_id = ${Number(job.assistant_id)}
+                AND publish_date = (SELECT target_publish_date FROM content_generation_jobs WHERE id = ${job.id})
+                AND status IN ('draft','pending_approval','in_review','approved','scheduled')
+                AND ${stream}
+              ORDER BY id LIMIT 1`
+        ).catch((err) => {
+            console.error(`[process-content-jobs] slot guard lookup failed for job ${job.job_id} — drafting anyway:`, err);
+            return [] as { id: number }[];
+        });
+        if (occupied.length) {
+            const existingId = Number(occupied[0].id);
+            console.warn(`[process-content-jobs] job ${job.job_id}: slot already holds post ${existingId} — completing without drafting a duplicate.`);
+            await db.execute(
+                `UPDATE content_generation_jobs
+                    SET status = 'completed', result_post_id = ${existingId},
+                        error_message = 'Superseded: this slot already has a post (${existingId}).', updated_at = now()
+                  WHERE id = ${job.id}`
+            );
+            return;
+        }
+    }
+
     // "Create Post" → Suggest an idea: when a scheduled/conversion job carries no context of its
     // own, fold in the oldest pending user idea for this assistant (FIFO, consumed once). Best-effort
     // — a lookup failure must never fail the generation job. We mutate job.context_prompt so every
