@@ -60,7 +60,69 @@ export function parseModelJson<T = Record<string, unknown>>(raw: string): T | nu
             if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as T;
         } catch { /* try the next candidate */ }
     }
+    // Last resort: the same candidates with raw control characters escaped inside strings. Models
+    // writing long prose into a JSON string routinely emit a REAL line break between paragraphs,
+    // which JSON forbids — the whole reply then failed to parse, and on the blog path that put the
+    // raw `{"layout":[{"kind":…` on a customer's post (Restorative Futures, 2026-09-30).
+    for (const c of candidates) {
+        if (!c) continue;
+        try {
+            const parsed = JSON.parse(escapeControlCharsInStrings(c));
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as T;
+        } catch { /* nothing recoverable */ }
+    }
     return null;
+}
+
+/**
+ * Escape raw newlines, carriage returns and tabs that sit INSIDE JSON string literals, leaving the
+ * whitespace between tokens alone. String/escape aware, so an already-escaped `\n` is untouched.
+ */
+export function escapeControlCharsInStrings(text: string): string {
+    let out = '';
+    let inStr = false, escaped = false;
+    for (const ch of text) {
+        if (escaped) { escaped = false; out += ch; continue; }
+        if (ch === '\\') { escaped = inStr; out += ch; continue; }
+        if (ch === '"') { inStr = !inStr; out += ch; continue; }
+        if (inStr && ch === '\n') { out += '\\n'; continue; }
+        if (inStr && ch === '\r') { out += '\\r'; continue; }
+        if (inStr && ch === '\t') { out += '\\t'; continue; }
+        out += ch;
+    }
+    return out;
+}
+
+/**
+ * The COMPLETE elements of an array field, from a reply too damaged to parse whole — typically one
+ * that ran out of tokens part-way through the last element. Every element that closed is kept and
+ * parsed on its own; the unfinished tail is dropped. Returns null when the field isn't found or no
+ * element survives.
+ */
+export function salvageArrayElements(raw: string, field: string): unknown[] | null {
+    const text = stripCodeFences(raw);
+    const at = text.search(new RegExp(`"${field}"\\s*:\\s*\\[`));
+    if (at === -1) return null;
+    const open = text.indexOf('[', at);
+    const out: unknown[] = [];
+    let depth = 0, inStr = false, escaped = false, start = -1;
+    for (let i = open + 1; i < text.length; i++) {
+        const ch = text[i];
+        if (escaped) { escaped = false; continue; }
+        if (ch === '\\') { escaped = inStr; continue; }
+        if (ch === '"') { inStr = !inStr; continue; }
+        if (inStr) continue;
+        if (ch === '{') { if (depth++ === 0) start = i; }
+        else if (ch === '}' && depth > 0 && --depth === 0 && start !== -1) {
+            const piece = text.slice(start, i + 1);
+            try { out.push(JSON.parse(piece)); }
+            catch {
+                try { out.push(JSON.parse(escapeControlCharsInStrings(piece))); } catch { /* skip one bad element */ }
+            }
+            start = -1;
+        } else if (ch === ']' && depth === 0) break;
+    }
+    return out.length ? out : null;
 }
 
 /**
