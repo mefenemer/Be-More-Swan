@@ -93,4 +93,35 @@ check('the scheduled handler honours the kill switch BEFORE handing off', () => 
         'a switched-off platform still spends a background invocation');
 });
 
+console.log('\na draft still being written is hidden from what people read');
+
+const readSrc = (p: string) => readFileSync(join(import.meta.dirname, '..', p), 'utf8');
+
+check('the "still generating" condition is narrow', () => {
+    const helper = readSrc('src/utils/blog-still-generating.ts');
+    const cond = helper.slice(landmark(helper, 'export function notStillGenerating()'));
+    // Every arm narrows it. Drop one and something the author should see disappears:
+    assert.ok(cond.includes('${blogPosts.jobId} IS NOT NULL'), "an author's own blank post is hidden");
+    assert.ok(cond.includes("${blogPosts.status} = 'pending_approval'"), 'a post past review can be hidden');
+    // ⚠️ body_markdown is NOT NULL DEFAULT '' — IS NULL would match nothing and hide nothing.
+    assert.ok(cond.includes("btrim(${blogPosts.bodyMarkdown}) = ''"), 'the empty-body test is missing or wrong');
+    // Without this, an author who clears a FINISHED autopilot draft watches it vanish.
+    assert.ok(/EXISTS \(SELECT 1 FROM content_generation_jobs j[\s\S]*j\.job_id = \$\{blogPosts\.jobId\}[\s\S]*'queued', 'processing'/.test(cond),
+        "a finished job's emptied draft is hidden too");
+    assert.ok(cond.includes('NOT ('), 'the condition keeps ONLY the generating drafts instead of hiding them');
+});
+
+check('the Blogs list (and the Review Queue it feeds) applies it', () => {
+    const api = readSrc('netlify/functions/blog-posts.ts');
+    const list = api.slice(landmark(api, 'const posts = await db'), landmark(api, '// ---- Delete ----'));
+    assert.ok(list.includes('notStillGenerating(),'), 'the Blogs list shows a title-only draft mid-generation');
+});
+
+check("the assistant card's blog counts apply it", () => {
+    // Otherwise "Awaiting Human Review" counts a draft no human can review yet.
+    const card = readSrc('netlify/functions/get-assistants.ts');
+    const q = card.slice(landmark(card, 'assistantId: blogPosts.assistantId,'), landmark(card, '.groupBy(blogPosts.assistantId, blogPosts.status)'));
+    assert.ok(q.includes('notStillGenerating(),'), 'the card counts a draft that is still being written');
+});
+
 console.log(`\n${passed} checks passed.\n`);

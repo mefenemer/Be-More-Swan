@@ -16,6 +16,7 @@ import { aiAssistants, blogPosts } from '../../db/schema';
 import { ASSISTANT_DRAFT_REASON } from '../../src/utils/blog-ai-assisted';
 import { MAX_BODY_CHARS, MAX_TAGS, MAX_TAG_CHARS } from '../../src/utils/blog-chat-draft';
 import { requireTenant } from '../../src/utils/tenant';
+import { notStillGenerating } from '../../src/utils/blog-still-generating';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event: HandlerEvent) => {
@@ -89,6 +90,9 @@ export default withLambda(async (event: HandlerEvent) => {
             .where(and(
                 eq(blogPosts.organisationId, ctx.organisationId),
                 ...(assistantIdFilter != null ? [eq(blogPosts.assistantId, assistantIdFilter)] : []),
+                // Hide an autopilot draft that is still being WRITTEN — a title-only row that opens
+                // onto an empty page. It appears the moment its body lands. See blog-still-generating.
+                notStillGenerating(),
             ))
             .orderBy(desc(blogPosts.updatedAt))
             .limit(200);

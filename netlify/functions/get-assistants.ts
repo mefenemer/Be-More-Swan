@@ -1,5 +1,6 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, gte, sql, count, inArray } from 'drizzle-orm';
+import { notStillGenerating } from '../../src/utils/blog-still-generating';
 import { getDb, withTenant } from '../../db/client';
 import { aiAssistants, assistantRecords, blogPosts, contentGenerationJobs, goals, masterAssistants, newsletterIssues, scheduledPosts, userProfiles } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
@@ -159,6 +160,9 @@ export default withLambda(async (event) => {
                   .where(and(
                       eq(blogPosts.organisationId, orgId),
                       inArray(blogPosts.assistantId, assistantIds),
+                      // A draft still being written is not awaiting anyone's review yet — the card
+                      // already shows its job as running. Same rule as the Blogs list.
+                      notStillGenerating(),
                   ))
                   .groupBy(blogPosts.assistantId, blogPosts.status)
                 : Promise.resolve([] as { assistantId: number | null; status: string; c: number }[]),
