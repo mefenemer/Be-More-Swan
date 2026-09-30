@@ -64,6 +64,11 @@
     if (typeof rqOpenStatus === 'function') rqOpenStatus(statusKey, btn);
   };
   window._rqSafeOpenStatus('review', document.querySelector('.rq-col[data-status="review"]'));
+  // Count the Needs-attention column NOW. Opening the page only loads the Review column, and the
+  // 60s badge poll writes this counter only when it happens to run while the page is up (on any
+  // other view the element does not exist) — so the tab sat blank until clicked, or for up to a
+  // minute. The markup is in the DOM at this point, so one poll fills both counters.
+  if (typeof refreshPendingBadge === 'function') { try { refreshPendingBadge(); } catch { /* non-blocking */ } }
 
   // "+ Social Media Post" — resolve the assistant here rather than inheriting one.
   //
