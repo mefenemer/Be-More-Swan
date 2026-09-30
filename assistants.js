@@ -1070,6 +1070,15 @@ window._onBlogStudioChanged = function(opts) {
     // "Next post" line on the schedule being active, and hardcoding that true would advertise a next
     // post for an on-demand assistant that has no schedule at all.
     window._renderAutopilotCard?.();
+    // The org-wide Review page is the OTHER place Blog Studio opens from, and it listens on nothing
+    // but this hook. Without this, rejecting or approving a blog there closed the modal onto a list
+    // still showing the post (and the old tab counts) until a manual reload. rqLoadItems and
+    // refreshPendingBadge live in workspace.html; guarded so the assistant page is unaffected.
+    const rqGroups = document.getElementById('rq-groups');
+    if (rqGroups && rqGroups.offsetParent !== null && typeof window.rqLoadItems === 'function') {
+        try { window.rqLoadItems(); } catch { /* the list refreshes on its next poll anyway */ }
+        try { window.refreshPendingBadge?.(); } catch { /* non-blocking */ }
+    }
 };
 
 // A draft saved from the chat modal's Blog Draft card (chat-session.js → blog:created) lands in
