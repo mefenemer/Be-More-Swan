@@ -132,6 +132,12 @@ export async function syndicatePublishedPost(
     db: Db,
     organisationId: number,
     post: SyndicatablePost,
+    /**
+     * Restrict to these destinations (still subject to connection and the author's per-post choice).
+     * For operator backfills that must reach ONE destination — e.g. submitting old posts to The Swan
+     * Index — without re-sending to LinkedIn and every other connected platform as a side effect.
+     */
+    opts: { only?: string[] } = {},
 ): Promise<Record<string, SyndicationTargetResult>> {
     const stored = (post.destinations as Record<string, unknown>) || {};
     // null (not []) when the author never made a choice — an empty array is a real answer meaning
@@ -143,7 +149,8 @@ export async function syndicatePublishedPost(
     // keep unproven code away from a customer's public blog. See WITHHELD_BLOG_DESTINATIONS.
     const connected = (await listBlogDestinations(db, organisationId))
         .filter((d) => d.connected)
-        .filter((d) => selected === null || selected.includes(d.id));
+        .filter((d) => selected === null || selected.includes(d.id))
+        .filter((d) => !opts.only || opts.only.includes(d.id));
     if (!connected.length) return {};
 
     // The workspace's AI-badge preference governs the syndicated notice too, so a customer who turns
