@@ -187,8 +187,13 @@ check('the Needs-attention badge is counted before the column is opened', () => 
     const src = ws();
     assert.match(src, /status=failed&limit=1&offset=0/, 'the poll must count failed posts');
     assert.match(src, /function _rqSetAttentionBadge/);
-    assert.ok(readFileSync(path.join(import.meta.dirname, '..', 'review-queue.html'), 'utf8')
-        .includes('rq-col-count-attention'), 'the element the badge writes to must still exist');
+    const page = readFileSync(path.join(import.meta.dirname, '..', 'review-queue.html'), 'utf8');
+    assert.ok(page.includes('rq-col-count-attention'), 'the element the badge writes to must still exist');
+    // A poll existing was NOT enough (2026-09-30): it runs every 60s from every view and skips when
+    // this page's markup is absent, so on arrival the tab sat blank until clicked. The page must
+    // count on open, AFTER its markup exists — i.e. from its own init script.
+    const init = page.slice(page.indexOf('(function initReviewQueuePage()'));
+    assert.match(init, /refreshPendingBadge\(\)/, 'review-queue.html must count Needs attention when it opens');
 });
 
 check('workspace.html still parses', () => {
