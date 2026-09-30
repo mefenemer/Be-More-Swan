@@ -52,10 +52,21 @@ const str = (v: unknown, max: number): string =>
 /**
  * Propose the next blog topic for an assistant.
  *
- * Returns null rather than throwing when ideation can't produce something usable — no business
- * context to ground on, an unparseable reply, or an API failure. The caller treats null as "skip
- * this slot and try again next tick", which is the right outcome: a bad unattended topic costs the
- * user a review-queue rejection, whereas a skipped slot costs nothing and self-heals.
+ * Returns null when ideation genuinely cannot produce something usable: no business context to
+ * ground on, or a reply we cannot read. The caller treats null as "skip this slot and try again next
+ * tick", which is right — a bad unattended topic costs the user a review-queue rejection, a skipped
+ * slot costs nothing and self-heals.
+ *
+ * ⚠️ AN API FAILURE THROWS. It used to be swallowed into the same null, and that told three customers
+ * something untrue. Between 2026-09-19 and 09-28 the Anthropic balance was exhausted, every call here
+ * failed, and all 36 of them were reported as "Could not ground a topic for this slot." — a sentence
+ * that names the one cause the reader can act on, and blames their business profile for our unpaid
+ * bill. All three organisations had a business description AND a target audience; the topic was
+ * perfectly groundable every time.
+ *
+ * Four causes collapsed into one message is not a small inaccuracy. "We could not think of anything
+ * to write about you" and "our account stopped working" call for opposite responses from the person
+ * reading it, so they must not be the same return value.
  */
 export async function ideateBlogTopic(
     db: Db,
@@ -132,7 +143,10 @@ export async function ideateBlogTopic(
 
         return { title, topic: str(parsed.topic, 300), keywords: str(parsed.keywords, 300) };
     } catch (err) {
+        // ⚠️ RE-THROWN, not swallowed. The caller can tell an outage from an ungroundable assistant
+        // only if the two arrive differently — and only the caller can decide whether to park the
+        // job, retry it, or tell the user their profile is thin.
         console.error(`ideateBlogTopic: assistant ${assistantId} failed`, err);
-        return null;
+        throw err;
     }
 }

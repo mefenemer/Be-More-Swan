@@ -26,14 +26,50 @@ import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { createNotification } from '../../src/utils/notify';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { isUpstreamBlocked } from '../../src/lib/ai-gateway';
 
 const BACKOFF_SECS = [30, 120, 300];
+/**
+ * How long a blog job waits out a failure at OUR end, and how long it will wait in total.
+ *
+ * ⚠️ This worker had none of the social worker's outage protections, and the September credit outage
+ * showed what that costs: 36 jobs across three organisations failed, every one of them reported to
+ * the customer as "Could not ground a topic for this slot." — blaming their business profile for our
+ * unpaid bill. All three had a business description and a target audience.
+ *
+ * Fifteen minutes because there is nothing to learn by asking a refusing API sooner; 72 hours because
+ * a revoked key never comes back and a job that can never run has to say so eventually. Same numbers
+ * as process-content-jobs, deliberately — two workers with two waiting policies is two things to
+ * reason about during an incident.
+ */
+const PARK_RETRY_MINS = 15;
+const PARK_MAX_HOURS = 72;
 const BATCH = 5;
+
+/**
+ * A row an autopilot attempt inserted but never finished: a title and no body.
+ *
+ * ⚠️ The post row is inserted BEFORE the body is drafted (generateBlogBody writes into an existing
+ * row), so every attempt that dies between the two leaves one of these behind. failJob removes it
+ * when the attempt fails in-process — but a run the platform KILLS mid-draft never reaches its catch,
+ * and that is the ordinary way a 30–60s draft ends inside a time-limited function. Those are the
+ * "blog with a title and no content" reports.
+ *
+ * Scoped tightly on purpose: only rows still awaiting review, with no body at all. A draft someone
+ * has since written into, approved or published is never touched — and an interactive draft is
+ * never matched, because the author's post is not stamped with the job's id.
+ */
+const EMPTY_AUTOPILOT_DRAFT =
+    `bp.status = 'pending_approval' AND (bp.body_markdown IS NULL OR btrim(bp.body_markdown) = '')`;
+
+const INTERRUPTED_GIVE_UP =
+    'The draft was interrupted before it could be written, too many times to keep trying. '
+    + 'The next scheduled post will be written normally.';
 
 type BlogJobRow = {
     id: number; job_id: string; assistant_id: number; organisation_id: number;
     user_id: number; attempt: number; max_attempts: number;
-    context_prompt: string | null; target_publish_date: string | null;
+    context_prompt: string | null; target_publish_date: string | null; created_at: string;
     // Pre-set by generate-blog.ts to the post already open in Blog Studio. NULL for every
     // autopilot/campaign job, which ideate a topic and insert their own row. See the branch in
     // processBlogJob and src/utils/blog-interactive-brief.ts.
@@ -59,9 +95,26 @@ export async function drainBlogJobs(): Promise<number> {
            AND updated_at < now() - interval '10 minutes' AND attempt < max_attempts`
     );
 
+    // ...and settle the ones that were killed on their LAST attempt. The reset above skips them, so
+    // before this they sat in 'processing' forever — and the title-only post their final attempt
+    // inserted sat in the Blogs tab with them, looking like a real draft. A run killed mid-draft never
+    // reaches its catch, so failJob's cleanup cannot be what removes it; this is.
+    await db.execute(
+        `WITH dead AS (
+             UPDATE content_generation_jobs
+             SET status = 'failed', error_message = '${INTERRUPTED_GIVE_UP}', updated_at = now()
+             WHERE status = 'processing' AND content_type = 'blog'
+               AND updated_at < now() - interval '10 minutes' AND attempt >= max_attempts
+             RETURNING job_id, organisation_id
+         )
+         DELETE FROM blog_posts bp USING dead
+         WHERE bp.job_id = dead.job_id AND bp.organisation_id = dead.organisation_id
+           AND ${EMPTY_AUTOPILOT_DRAFT}`
+    );
+
     const jobs = await db.execute<BlogJobRow>(
         `SELECT id, job_id, assistant_id, organisation_id, user_id, attempt, max_attempts,
-                context_prompt, target_publish_date, result_blog_post_id
+                context_prompt, target_publish_date, result_blog_post_id, created_at
          FROM content_generation_jobs
          WHERE status = 'queued'
            AND content_type = 'blog'
@@ -193,6 +246,13 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
                 return;
             }
 
+            // Clear what an earlier attempt of THIS job left behind if it was killed mid-draft: it
+            // never reached failJob, so its title-only row is still there, and this attempt is about
+            // to insert another. Without this, one job killed three times left three empty posts.
+            await db.execute(sql`DELETE FROM blog_posts bp
+                WHERE bp.job_id = ${job.job_id} AND bp.organisation_id = ${job.organisation_id}
+                  AND ${sql.raw(EMPTY_AUTOPILOT_DRAFT)}`);
+
             const targetDate = job.target_publish_date ? new Date(job.target_publish_date) : null;
 
             const [post] = await db.insert(blogPosts).values({
@@ -294,9 +354,45 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
             console.error(`[process-blog-jobs] job ${job.job_id} completed but a follow-up threw — not re-queued`);
             return;
         }
+        // ── A failure at OUR end must not spend the customer's attempts ────────────────────────
+        //
+        // Asked BEFORE failJob, because below it the job is already on its way to terminal: three
+        // attempts against an API that cannot answer take minutes, and a failed blog job is as
+        // unrecoverable as a failed social one was — nothing requeues it.
+        //
+        // ⚠️ Routed through failJob rather than written here, so the half-built draft is cleaned up
+        // exactly as it is on an ordinary retry. Parking without that would leave an empty post row
+        // per attempt, and a 72-hour outage would fill the Blogs tab with them.
+        if (isUpstreamBlocked(err)) {
+            const ageHours = job.created_at
+                ? (Date.now() - new Date(job.created_at).getTime()) / 3_600_000
+                : 0;
+            if (ageHours < PARK_MAX_HOURS) {
+                console.error(`[process-blog-jobs] job ${job.job_id} PARKED (${ageHours.toFixed(1)}h old) — `
+                    + `the AI provider is refusing our calls, so this attempt does not count: ${message.slice(0, 200)}`);
+                await failJob(db, job, attempt, message, { orphanPostId: createdPostId, park: true });
+                return;
+            }
+            // Past the ceiling it gives up for real — and says whose fault it was, rather than
+            // blaming a business profile that was never the problem.
+            await failJob(db, job, attempt, UPSTREAM_GIVE_UP, { orphanPostId: createdPostId, terminal: true });
+            return;
+        }
         await failJob(db, job, attempt, message, { orphanPostId: createdPostId });
     }
 }
+
+/**
+ * What a customer is told when an outage at our end finally defeats a blog slot.
+ *
+ * ⚠️ Deliberately not "Could not ground a topic for this slot." That sentence names the one cause the
+ * reader can act on, so when it is wrong it sends them to edit a business profile that was never the
+ * problem. It was wrong 36 times in September.
+ */
+const UPSTREAM_GIVE_UP =
+    'Our writing service was unavailable for too long to draft this one — this is at our end, not '
+    + 'yours, and nothing about your setup needs changing. The next scheduled post will be written '
+    + 'normally.';
 
 /**
  * Record a failed attempt: schedule a backoff retry, or give up once attempts are exhausted.
@@ -308,9 +404,10 @@ async function failJob(
     job: BlogJobRow,
     attempt: number,
     message: string,
-    opts: { terminal?: boolean; orphanPostId?: number | null } = {},
+    opts: { terminal?: boolean; orphanPostId?: number | null; park?: boolean } = {},
 ): Promise<void> {
-    const exhausted = opts.terminal || attempt >= job.max_attempts;
+    // ⚠️ A park is never exhausted, whatever the attempt count says — that is the whole point of it.
+    const exhausted = !opts.park && (opts.terminal || attempt >= job.max_attempts);
 
     if (exhausted && opts.orphanPostId) {
         await db.delete(blogPosts)
@@ -339,12 +436,17 @@ async function failJob(
             .catch(err => console.error('[process-blog-jobs] retry cleanup failed', err));
     }
 
-    const backoff = BACKOFF_SECS[Math.min(attempt - 1, BACKOFF_SECS.length - 1)];
+    const backoff = opts.park
+        ? PARK_RETRY_MINS * 60
+        : BACKOFF_SECS[Math.min(attempt - 1, BACKOFF_SECS.length - 1)];
     await db.update(contentGenerationJobs)
         .set({
             status: 'queued',
             errorMessage: message.slice(0, 1000),
             nextRetryAt: new Date(Date.now() + backoff * 1000),
+            // ⚠️ A parked attempt is GIVEN BACK. A failure that is ours is not evidence that this job
+            // is bad, and the customer's three attempts exist for jobs that are.
+            ...(opts.park ? { attempt: Math.max(0, attempt - 1) } : {}),
             updatedAt: new Date(),
         })
         .where(eq(contentGenerationJobs.id, job.id));
