@@ -67,6 +67,11 @@ export const CONFIG_KEYS = {
     // signal was each workspace owner's own notification feed. Eleven days, four customers, no
     // alert. A failure that is only ever reported to the person it happened to is not reported.
     CONTENT_GEN_LAST_ALERT:    'content_generation.last_alert',
+    // ── Provider balances ──
+    // Per provider, when we last emailed about it and at what severity: { fal?: { at, severity },
+    // anthropic?: { at, severity } }. Written by check-provider-balances. Lets an escalation
+    // (low → down) alert at once while an unchanged incident waits out its cooldown.
+    PROVIDER_BALANCE_LAST_ALERT: 'provider_balance.last_alert',
 } as const;
 
 export type ConfigKey = typeof CONFIG_KEYS[keyof typeof CONFIG_KEYS];

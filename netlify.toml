@@ -850,6 +850,12 @@ node_bundler = "esbuild"
 [functions.check-content-generation-health]
   schedule = "50 7 * * *"
 
+# Are fal and Anthropic still funded? Every 6h, not daily: the fal lock of 2026-09-28 began at
+# 14:31, and a daily run would have left it for most of a day. The probes cost ~nothing (a free
+# billing read + one 1-token Haiku call). See src/utils/provider-balance.ts.
+[functions.check-provider-balances]
+  schedule = "15 */6 * * *"
+
 # US 5.2: resolve widget A/B hook tests (promote the winning variant) — hourly
 [functions.resolve-ab-tests]
   schedule = "0 * * * *"
