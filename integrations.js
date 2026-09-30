@@ -677,14 +677,21 @@ async function _loadConnections() {
         grid.innerHTML = covered.size ? '' : '<div class="col-span-full bg-white border border-gray-200 rounded-2xl p-10 text-center text-sm text-gray-500">No connectors are relevant to this assistant yet. As we add more integrations (CRM, calendar, reviews), the right ones will appear here.</div>';
         return;
     }
-    platforms.forEach(platform => {
+    const platformHtml = platforms.map(platform => {
         const conn = _userConnections.find(c => _serviceMatchesPlatform(c.serviceName, platform.id));
-        grid.insertAdjacentHTML('beforeend', _platformCard(platform, conn));
-    });
-    sources.forEach(source => {
+        return _platformCard(platform, conn);
+    }).join('');
+    const sourceHtml = sources.map(source => {
         const conn = _userConnections.find(c => String(c.serviceName).toLowerCase() === source.id);
-        grid.insertAdjacentHTML('beforeend', _sourceCard(source, conn));
-    });
+        return _sourceCard(source, conn);
+    }).join('');
+    // In the assistant panel those are ROWS (see _connRow) — one list spanning the grid, so they
+    // read as a list rather than as rows scattered through grid cells. The standalone page keeps tiles.
+    if (_assistantScoped && (platformHtml || sourceHtml)) {
+        grid.insertAdjacentHTML('beforeend', `<div data-conn-list class="col-span-full bg-white rounded-2xl border border-gray-200 shadow-sm divide-y divide-gray-100">${platformHtml}${sourceHtml}</div>`);
+    } else {
+        grid.insertAdjacentHTML('beforeend', platformHtml + sourceHtml);
+    }
     _blogDestinations.forEach(dest => grid.insertAdjacentHTML('beforeend', _blogDestCard(dest)));
     _mailboxProviders.forEach(m => grid.insertAdjacentHTML('beforeend', _mailboxCard(m)));
     if (_searchConsole) grid.insertAdjacentHTML('beforeend', _searchConsoleCard(_searchConsole));
@@ -1557,6 +1564,52 @@ function _healthBadge(health) {
     return `<span class="${pill} text-gray-500 bg-gray-100 border-gray-200"><span class="${dot} bg-gray-400"></span> ${health.label}</span>`;
 }
 
+// ── Assistant panel: connections as a LIST, not tiles ─────────────────────────────────────────
+// The assistant profile's Connections drawer is narrow, and the tile ("Publish approved posts to
+// Facebook" + tagline + a greyed-out Connect button + a boxed toggle) showed about two and a half
+// platforms per screen. Each connection is now one row: icon, name, account, and the ONE control
+// that matters in its state — the "Use for this assistant" switch when live, Reconnect when it
+// needs attention, Connect when absent. Everything else (reconnect, disconnect, sync, bio,
+// auto-responder, troubleshooting, the X usage gauge) moved behind the row's ⋮, unchanged.
+// The standalone Integrations page keeps its tiles.
+const _ROW_BTN = 'shrink-0 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
+
+/** The row's switch. Same input + handler the tile used, minus the box around it. */
+function _useSwitch(connId, checked, label) {
+    return `<label class="relative shrink-0 cursor-pointer" title="Use for this assistant">
+               <input type="checkbox" class="sr-only peer" aria-label="Use ${_esc(label)} for this assistant" ${checked ? 'checked' : ''} onchange="window._intToggleUseForAssistant(${connId}, this.checked)">
+               <span class="block w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-emerald-700 peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-200 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:shadow-sm after:transition-all peer-checked:after:translate-x-full peer-checked:after:border-white"></span>
+           </label>`;
+}
+
+/**
+ * One connection row. `manageHtml` (may be '') sits behind the ⋮ button, which toggles it with an
+ * inline handler — nothing to bind, so a re-render can never leave a dead button.
+ */
+function _connRow({ key, iconBg, iconText, emoji, label, sub, subTone, control, manageHtml }) {
+    const subCls = subTone === 'warn' ? 'text-amber-700' : 'text-gray-500';
+    const kebab = manageHtml
+        ? `<button type="button" aria-label="Manage ${_esc(label)} connection" aria-expanded="false"
+               onclick="var p=this.closest('[data-conn-row]').querySelector('[data-conn-manage]');var o=p.classList.toggle('hidden');this.setAttribute('aria-expanded',String(!o))"
+               class="shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition cursor-pointer">
+               <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z"/></svg>
+           </button>`
+        : '<span class="shrink-0 w-8"></span>';
+    return `
+        <div data-conn-row="${_esc(key)}" class="px-4 py-3">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg ${iconBg} ${iconText} flex items-center justify-center text-base shrink-0">${emoji}</div>
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-bold text-gray-900 truncate">${_esc(label)}</p>
+                    <p class="text-xs ${subCls} truncate">${sub}</p>
+                </div>
+                ${control}
+                ${kebab}
+            </div>
+            ${manageHtml ? `<div data-conn-manage class="hidden mt-2 pl-11">${manageHtml}</div>` : ''}
+        </div>`;
+}
+
 // Card for an inbound source (SOURCES). Mirrors _platformCard's shell — same grid cell size,
 // rounding and pill language — but drops the two things that only make sense for an outbound
 // publishing target: the Business-Information handle gate and the "Use for this assistant"
@@ -1590,37 +1643,22 @@ function _sourceCard(source, conn) {
            </div>`
         : `<div class="mt-auto pt-4 border-t border-gray-100">${connectBtn}</div>`;
 
-    // Assistant-scoped: match the capability-card language of the social cards beside it.
-    // There is no Enable step — an inbound source is either connected or not, and once it is,
-    // the useful next move is to open the picker.
+    // Assistant panel: a row, not a tile — see _connRow. There is no Enable step for an inbound
+    // source (it is connected or not), so the live row's one control opens the picker.
     if (_assistantScoped) {
-        const capPill = !isActive
-            ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">⚠ Connect ${_esc(source.label)}</span>`
-            : `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">✓ Connected</span>`;
-        const healthPill = (isConnected && health.problem) ? _healthBadge(health) : '';
-        const primary = !isActive
-            ? connectBtn
-            : `<button type="button" onclick="window._intBrowseCanvaDesigns()" class="w-full px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition cursor-pointer">Browse designs</button>`;
-        const manage = isConnected
-            ? `<details class="mt-1">
-                   <summary class="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 select-none">Manage connection</summary>
-                   <div>${action}</div>
-               </details>`
-            : '';
-        return `
-        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
-            <div class="flex items-start justify-between gap-2">
-                <div class="flex items-center gap-2 flex-wrap">${capPill}${healthPill}<span class="text-xs font-semibold text-gray-400">← in</span></div>
-                <span class="text-xs font-semibold text-gray-400">${_esc(source.label)}</span>
-            </div>
-            <div class="grow">
-                <p class="font-bold text-gray-900">${_esc(source.headline)}</p>
-                <p class="text-sm text-gray-500 mt-1">${_esc(source.tagline)}</p>
-                ${accountChip}
-            </div>
-            ${primary}
-            ${manage}
-        </div>`;
+        const control = !isConnected
+            ? `<button onclick="window._intConnectSource('${source.id}')" class="${_ROW_BTN} text-white bg-emerald-700 hover:bg-emerald-800 border-transparent" type="button">Connect</button>`
+            : health.problem
+            ? `<button onclick="window._intConnectSource('${source.id}')" class="${_ROW_BTN} text-amber-700 bg-amber-50 hover:bg-amber-100 border-amber-200" type="button">Reconnect</button>`
+            : `<button type="button" onclick="window._intBrowseCanvaDesigns()" class="${_ROW_BTN} text-gray-700 bg-white hover:bg-gray-50 border-gray-200">Browse designs</button>`;
+        const sub = !isConnected ? 'Not connected'
+            : health.problem ? _esc(health.label)
+            : (account ? `Connected as ${_esc(account)}` : 'Connected');
+        return _connRow({
+            key: source.id, iconBg: source.iconBg, iconText: source.iconText, emoji: source.emoji,
+            label: source.label, sub, subTone: isConnected && health.problem ? 'warn' : '',
+            control, manageHtml: isConnected ? action : '',
+        });
     }
 
     return `
@@ -1773,59 +1811,37 @@ function _platformCard(platform, conn) {
     // fire here. Rich management (reconnect/disconnect/sync/bio/auto-responder/troubleshooting)
     // is preserved behind a "Manage connection" disclosure. The standalone hub keeps the full
     // card below.
+    // Assistant panel: one row per platform — see _connRow for why it is not a tile. The control is
+    // whichever single action this connection needs; reconnect/disconnect/sync/bio/auto-responder,
+    // the troubleshooting checks and the X usage gauge sit behind ⋮, unchanged.
     if (_assistantScoped) {
         const isActive = isConnected && conn.status === 'active';
         const inUse = isActive && _assistantSelectedIds.has(conn.id);
-        // Recipe-vocabulary status pill: Connect → Not enabled → Enabled.
-        const capPill = !isActive
-            ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">⚠ Connect ${_esc(platform.label)}</span>`
-            : inUse
-            ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">✓ Enabled</span>`
-            : `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-500 border-gray-200">Not enabled</span>`;
-        // Keep a health pill visible only when the token needs attention (expiring/disconnected).
-        const healthPill = (isConnected && connProblem) ? statusBadge : '';
-        // Connect button is ALWAYS visible. When the connection is already active it's greyed out
-        // and disabled (nothing left to connect); when inactive it's the live connect CTA — which
-        // itself still gates on a missing Business-Information handle.
-        const connectControl = isActive
-            ? `<button disabled class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-gray-100 text-gray-400 text-sm font-bold rounded-xl cursor-not-allowed" type="button">${connectIcon} Connect ${_esc(platform.label)}</button>`
-            : connectBtn;
-        // Enabling this connection for the assistant is a toggle switch (was an Enable/Enabled
-        // button). Only meaningful once the connection is active.
-        const enableToggle = isActive
-            ? `<label class="flex items-center justify-between gap-3 rounded-xl bg-emerald-50 border border-emerald-100 px-3.5 py-3 cursor-pointer">
-                   <span class="min-w-0">
-                       <span class="block text-sm font-bold text-gray-800">Use for this assistant</span>
-                       <span class="block text-xs text-gray-500 mt-0.5 leading-snug">Let this assistant post to ${_esc(platform.label)}.</span>
-                   </span>
-                   <span class="relative shrink-0">
-                       <input type="checkbox" class="sr-only peer" ${inUse ? 'checked' : ''} onchange="window._intToggleUseForAssistant(${conn.id}, this.checked)">
-                       <span class="block w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-emerald-700 peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-200 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:shadow-sm after:transition-all peer-checked:after:translate-x-full peer-checked:after:border-white"></span>
-                   </span>
-               </label>`
-            : '';
-        const manage = isConnected
-            ? `<details class="mt-1">
-                   <summary class="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 select-none">Manage connection</summary>
-                   <div>${action}${troubleshootingHtml}</div>
-               </details>`
-            : '';
-        return `
-        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
-            <div class="flex items-start justify-between gap-2">
-                <div class="flex items-center gap-2 flex-wrap">${capPill}${healthPill}<span class="text-xs font-semibold text-gray-400">→ out</span></div>
-                <span class="text-xs font-semibold text-gray-400">${_esc(platform.label)}</span>
-            </div>
-            <div class="grow">
-                <p class="font-bold text-gray-900">Publish approved posts to ${_esc(platform.label)}</p>
-                <p class="text-sm text-gray-500 mt-1">${_esc(platform.tagline)}</p>
-                ${handleChip}
-                ${_xUsageGauge(platform)}
-            </div>
-            ${connectControl}
-            ${enableToggle}
-            ${manage}
-        </div>`;
+        const reconnectCall = platform.oauthPlatform ? `window._intStartOAuth('${platform.id}')` : `window._intOpenModal('${platform.id}')`;
+        let control, sub, subTone = '';
+        if (!isConnected && !hasHandle) {
+            // Same gate as the tile: a platform can only connect once its handle is on Business Information.
+            control = `<button onclick="window.loadView && window.loadView('assets')" class="${_ROW_BTN} text-gray-700 bg-white hover:bg-gray-50 border-gray-200" type="button">Add handle</button>`;
+            sub = 'Add your handle in Business Information first';
+        } else if (!isConnected) {
+            control = `<button onclick="${reconnectCall}" class="${_ROW_BTN} text-white bg-emerald-700 hover:bg-emerald-800 border-transparent" type="button">Connect</button>`;
+            sub = 'Not connected';
+        } else if (!isActive || connProblem) {
+            control = `<button onclick="${reconnectCall}" class="${_ROW_BTN} text-amber-700 bg-amber-50 hover:bg-amber-100 border-amber-200" type="button">Reconnect</button>`;
+            sub = _esc(health.label || 'Needs attention');
+            subTone = 'warn';
+        } else {
+            control = _useSwitch(conn.id, inUse, platform.label);
+            // The X allowance is the one number worth seeing without opening ⋮ — when it has run out.
+            const xSpent = platform.id === 'X' && _xCredits && _xCredits.allowance > 0 && (_xCredits.remaining ?? 1) <= 0;
+            sub = xSpent ? 'Monthly X limit reached — posts paused' : (handle ? _esc(handle) : 'Connected');
+            if (xSpent) subTone = 'warn';
+        }
+        return _connRow({
+            key: platform.id, iconBg: platform.iconBg, iconText: platform.iconText, emoji: platform.emoji,
+            label: platform.label, sub, subTone, control,
+            manageHtml: isConnected ? `${_xUsageGauge(platform)}${action}${troubleshootingHtml}` : '',
+        });
     }
 
     return `
