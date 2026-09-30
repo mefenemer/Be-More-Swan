@@ -31,8 +31,11 @@ import {
     isManualMetric,
     nextUpdateDue,
     pollCadenceHours,
+    staleStatusFor,
+    staleWindowHoursFor,
     tierAllows,
 } from '../../src/config/goal-metrics';
+import { computeGoalProgress } from '../../src/utils/goal-progress';
 import { assembleBlueprint } from '../../src/utils/blueprint';
 import { summariseGoals, pickHeadlineGoal } from '../../src/utils/goal-summary';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -177,6 +180,49 @@ async function assistantRoleKey(db: any, assistantId: number, orgId: number): Pr
         .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId)))
         .limit(1);
     return (row?.roleKey as string | null) ?? null;
+}
+
+/**
+ * The status this goal earns against its CURRENT target and date, from the values already recorded.
+ * Same rules as the two writers of goals.status — poll-goal-telemetry (polled metrics) and
+ * record-goal-value (manual ones, which need two entries and a longer stale window).
+ *
+ * The rate is measured AS OF THE LAST DATA POINT, for both kinds: that is when `latestValue` was
+ * true. Measuring to `now` would divide the same gain by extra days nobody has measured yet and read
+ * a goal as slowing down simply because the edit happened between polls.
+ *
+ * Returns null when there is nothing to grade on (no baseline yet), or when the verdict is about
+ * STALE data rather than pace — the caller then leaves status alone.
+ */
+async function regradeFromRecord(db: any, goal: any): Promise<string | null> {
+    if (goal.startValue == null || goal.latestValue == null) return null;
+    const manual = isManualMetric(goal.metricKey);
+    const [last] = await db
+        .select({ recordedAt: goalTelemetry.recordedAt, n: sql<number>`count(*) over ()::int` })
+        .from(goalTelemetry)
+        .where(eq(goalTelemetry.goalId, goal.id))
+        .orderBy(desc(goalTelemetry.recordedAt))
+        .limit(1);
+    const progress = computeGoalProgress({
+        startValue: Number(goal.startValue),
+        latestValue: Number(goal.latestValue),
+        targetValue: Number(goal.targetValue),
+        createdAt: goal.createdAt,
+        targetDate: goal.targetDate,
+        direction: getGoalMetric(goal.metricKey)?.direction ?? 'increase',
+        lastTelemetryAt: last?.recordedAt ?? null,
+        rateAsOfLastEntry: true,
+        ...(manual ? {
+            staleAfterHours: staleWindowHoursFor(goal.metricKey),
+            staleStatus: staleStatusFor(goal.metricKey),
+            dataPoints: Number(last?.n ?? 0),
+            minDataPoints: 2,
+        } : {}),
+    });
+    // Staleness is the poller's call, not an edit's: it owns the data_disconnected / awaiting_update
+    // transitions AND the notifications that go with them. An edit only re-grades the run-rate.
+    const RUN_RATE_STATUSES = ['on_track', 'at_risk', 'off_track', 'pending'];
+    return RUN_RATE_STATUSES.includes(progress.status) ? progress.status : null;
 }
 
 export default withLambda(async (event) => {
@@ -483,6 +529,19 @@ export default withLambda(async (event) => {
             updates.isPrimary = true;
         } else if (isPrimary === false) {
             updates.isPrimary = false;
+        }
+
+        // A new target or end date changes the run-rate the goal needs, so RE-GRADE NOW. The status
+        // used to move only when fresh telemetry arrived (poll-goal-telemetry, throttled per tier, or
+        // a manual entry) — so pushing the end date out left every goal reading "Off Track" against
+        // the OLD deadline until the next poll, and the recompile below baked that stale status into
+        // the drafting prompt too. Graded from what is already on record: no fetch, no new data point.
+        if (targetValue !== undefined || targetDate !== undefined) {
+            const regraded = await regradeFromRecord(db, { ...existing, ...updates });
+            if (regraded) {
+                updates.status = regraded;
+                updates.statusUpdatedAt = new Date();
+            }
         }
 
         const [updated] = await db.update(goals).set(updates).where(eq(goals.id, Number(id))).returning();
