@@ -1284,7 +1284,7 @@ async function _detailRqRenderGroups(statusKey) {
         { key: 'posts', label: 'Social media posts', empty: 'No social media posts here.', emptyReview: 'No social media posts awaiting review.' },
     ];
     const itemsByGroup = { posts: postGroups };
-    container.innerHTML = RQ_GROUPS.map(g => _detailRqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey)).join('')
+    container.innerHTML = RQ_GROUPS.map(g => _detailRqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey, _detailRqTotal ?? postGroups.length)).join('')
         + _detailRqMoreButton(statusKey);
 }
 
@@ -1338,14 +1338,20 @@ function _detailRqRepaintPostsGroup(statusKey) {
     const render = typeof rqRenderSocialCard === 'function' ? rqRenderSocialCard : () => '';
     if (body && groups.length) {
         body.innerHTML = `<div class="divide-y divide-gray-100">${groups.map(render).join('')}</div>`;
-        const count = body.closest('section')?.querySelector('button span:last-child');
-        if (count) count.textContent = groups.length;
+        const count = body.closest('section')?.querySelector('.rq-group-count');
+        if (count) count.textContent = _detailRqCountLabel(groups.length, _detailRqTotal);
     }
     const more = document.getElementById('detail-rq-more-btn')?.closest('div');
     if (more) more.outerHTML = _detailRqMoreButton(statusKey);
 }
 
-function _detailRqGroupSection(g, items, render, statusKey) {
+// "10 of 59" while paged — see rqGroupCountLabel in workspace.html, which owns the rule.
+function _detailRqCountLabel(shown, total) {
+    if (typeof rqGroupCountLabel === 'function') return rqGroupCountLabel(shown, total);
+    return (typeof total === 'number' && total > shown) ? `${shown} of ${total}` : String(shown);
+}
+
+function _detailRqGroupSection(g, items, render, statusKey, total) {
     const open = _detailRqGroupOpen[g.key] !== false;
     const emptyMsg = statusKey === 'review' ? g.emptyReview : g.empty;
     const body = items.length
@@ -1355,7 +1361,7 @@ function _detailRqGroupSection(g, items, render, statusKey) {
       <button onclick="_detailRqToggleGroup('${g.key}')" class="w-full flex items-center gap-2 py-3 text-left cursor-pointer group">
         <svg class="detail-rq-group-chevron-${g.key} w-4 h-4 text-gray-400 transition-transform ${open ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
         <span class="text-sm font-bold text-gray-900 group-hover:text-emerald-700">${g.label}</span>
-        <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">${items.length}</span>
+        <span class="rq-group-count text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">${_detailRqCountLabel(items.length, total)}</span>
       </button>
       <div class="detail-rq-group-body-${g.key} ${open ? '' : 'hidden'} pb-1">${body}</div>
     </section>`;

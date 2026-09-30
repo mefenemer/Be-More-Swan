@@ -5699,8 +5699,12 @@ async function rqRenderGroups(statusKey) {
         // The server's group total when paging, the rendered count otherwise — never the length of
         // the current page, which would report "10 awaiting review" on a queue of 24.
         const pending = _rqPostsTotal ?? postGroups.length;
+        // The TAB counts every group under it, blog drafts included, so the group pills add up to it.
+        // The sidebar pill below stays social-only: it is also written by the 60s poll, which counts
+        // social posts alone, and two writers disagreeing would make it flicker.
+        const tabCount = pending + (_rqBlogWriterActive ? blogPosts.length : 0);
         const badge = document.getElementById('rq-col-count-review');
-        if (badge) { badge.textContent = pending || ''; badge.classList.toggle('hidden', !pending); }
+        if (badge) { badge.textContent = tabCount || ''; badge.classList.toggle('hidden', !tabCount); }
         document.querySelectorAll('.pending-badge').forEach(el => {
             el.textContent = pending || '';
             el.classList.toggle('hidden', !pending);
@@ -5710,7 +5714,9 @@ async function rqRenderGroups(statusKey) {
     const groups = _rqBlogWriterActive ? [...RQ_GROUPS, RQ_BLOG_GROUP] : RQ_GROUPS;
     const itemsByGroup = { posts: postGroups, blog: blogPosts };
     const renderByGroup = { posts: rqRenderSocialCard, blog: rqRenderBlogCard };
-    container.innerHTML = groups.map(g => rqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey)).join('')
+    // Posts are paged by the server; blog posts arrive whole, so their loaded count IS their total.
+    const totalByGroup = { posts: _rqPostsTotal ?? postGroups.length, blog: blogPosts.length };
+    container.innerHTML = groups.map(g => rqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey, totalByGroup[g.key])).join('')
         + rqMoreButton(statusKey);
 }
 
@@ -5765,8 +5771,8 @@ function rqRepaintPostsGroup(statusKey) {
         body.innerHTML = groups.length
             ? `<div class="divide-y divide-gray-100">${groups.map(rqRenderSocialCard).join('')}</div>`
             : body.innerHTML;
-        const count = body.closest('section')?.querySelector('button span:last-child');
-        if (count) count.textContent = groups.length;
+        const count = body.closest('section')?.querySelector('.rq-group-count');
+        if (count) count.textContent = rqGroupCountLabel(groups.length, _rqPostsTotal);
     }
     const more = document.getElementById('rq-more-btn')?.closest('div');
     if (more) more.outerHTML = rqMoreButton(statusKey);
@@ -5817,7 +5823,17 @@ function _rqEsc(s) {
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function rqGroupSection(g, items, render, statusKey) {
+/**
+ * The count pill beside a group label. "10 of 59" while the group is paged, "59" once everything is
+ * on screen. It used to be `items.length` — the cards loaded SO FAR — beside a tab badge that counts
+ * the whole column, so page 1 of a 59-post queue read "10" under a "59" and the numbers never
+ * added up. Shared with assistants.js (the assistant's own review tab has the same pill).
+ */
+function rqGroupCountLabel(shown, total) {
+    return (typeof total === 'number' && total > shown) ? `${shown} of ${total}` : String(shown);
+}
+
+function rqGroupSection(g, items, render, statusKey, total) {
     const open = _rqGroupOpen[g.key] !== false;
     const emptyMsg = statusKey === 'review' ? g.emptyReview : g.empty;
     const body = items.length
@@ -5827,7 +5843,7 @@ function rqGroupSection(g, items, render, statusKey) {
       <button onclick="rqToggleGroup('${g.key}')" class="w-full flex items-center gap-2 py-3 text-left cursor-pointer group">
         <svg class="rq-group-chevron-${g.key} w-4 h-4 text-gray-400 transition-transform ${open ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
         <span class="text-sm font-bold text-gray-900 group-hover:text-emerald-700">${g.label}</span>
-        <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">${items.length}</span>
+        <span class="rq-group-count text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">${rqGroupCountLabel(items.length, total)}</span>
       </button>
       <div class="rq-group-body-${g.key} ${open ? '' : 'hidden'} pb-1">${body}</div>
     </section>`;
