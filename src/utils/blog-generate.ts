@@ -20,7 +20,7 @@ import { currentDatePromptBlock } from './current-date-prompt';
 import { resolvePostingSchedule } from '../config/posting-cadence';
 import { assembleBlueprint } from './blueprint';
 import { ASSISTANT_DRAFT_REASON } from './blog-ai-assisted';
-import { parseModelJson } from './model-json';
+import { parseModelJson, salvageArrayElements } from './model-json';
 import {
     groundLinks, groundMarkdownLinks, irToBlogMarkdown, layoutIrPromptBlock, mediaIntents,
     normaliseLayoutIr,
@@ -325,7 +325,22 @@ export async function generateBlogBody(
     //   2. no usable layout but plain Markdown → the draft it has always produced, unchanged;
     //   3. neither → an error, and specifically NOT a post whose body is JSON scaffolding.
     const parsed = parseModelJson<{ layout?: unknown }>(raw);
-    const layout = normaliseLayoutIr(parsed?.layout);
+    let layout = normaliseLayoutIr(parsed?.layout);
+
+    // ⚠️ A reply that IS the layout JSON but would not parse whole — truncated at max_tokens, or
+    // one malformed node — used to fall through to the plain-Markdown branch below and be saved
+    // verbatim, so a customer's post read `{"kind": "prose", "markdown": …` top to bottom
+    // (Restorative Futures, 2026-09-30). Keep every section that closed; if none did, fail the run
+    // rather than publish scaffolding. Detected by shape: plain Markdown never opens with `{` and
+    // never carries `"kind":` keys.
+    const looksLikeLayoutJson = /^\s*(```[a-z]*\s*)?\{/i.test(raw) || /"kind"\s*:\s*"(prose|heading|image)"/.test(raw);
+    if (!layout && !parsed && looksLikeLayoutJson) {
+        layout = normaliseLayoutIr(salvageArrayElements(raw, 'layout'));
+        console.warn('[blog-generate] layout reply did not parse whole', {
+            blogPostId, stopReason: response.stop_reason, salvagedNodes: layout?.nodes.length ?? 0,
+        });
+        if (!layout) throw new Error('The draft came back in a form we could not read. Try again.');
+    }
 
     let bodyMarkdown: string;
     let sourcedImages = 0;
