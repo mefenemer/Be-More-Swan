@@ -238,6 +238,7 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
                 assistantId: job.assistant_id,
                 organisationId: job.organisation_id,
                 userId: job.user_id,
+                slot: job.target_publish_date,
             });
             // Ideation returns null when it can't ground a topic (no business context, no Inspo) or
             // the model reply was unusable. Retry rather than fail: the user may fill in their

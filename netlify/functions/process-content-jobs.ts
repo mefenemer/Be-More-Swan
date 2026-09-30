@@ -19,6 +19,7 @@ import {
 import { createNotification } from '../../src/utils/notify';
 import { gatewayGenerate, isUpstreamBlocked } from '../../src/lib/ai-gateway';
 import { buildInspoBlock } from '../../src/utils/inspo-profile';
+import { pickInspoTopic } from '../../src/utils/inspo-topics';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmark';
 import { CONTENT_QUALITY_STANDARDS } from '../../src/constants/content-quality';
 import { creditLine } from '../../src/utils/pexels';
@@ -362,7 +363,25 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // same (strongest) pillar. Day-of-epoch % pillarCount walks the pillars across the calendar, so
         // consecutive scheduled posts land on different themes with no cross-job coordination needed.
         // On-demand jobs (no slot) keep the "choose exactly one" behaviour.
-        const rotatedPillar = (pillarList.length && job.target_publish_date)
+        // Inspo as a SUBJECT (src/utils/inspo-topics.ts). On a share of scheduled slots — the
+        // per-assistant "never / occasionally / often" on the Inspo tab — one active inspo item
+        // becomes what this post is about. Only when nothing more specific already drives the job:
+        // a queued "Suggest an idea" (claimed above into context_prompt) is the user asking for
+        // THIS post, and outranks a standing library item.
+        const inspoTopic = (!job.context_prompt && job.trigger_type === 'scheduled')
+            ? await pickInspoTopic(db, {
+                assistantId: job.assistant_id,
+                organisationId: job.organisation_id,
+                slot: job.target_publish_date,
+                configuration: asstCfg?.configuration ?? null,
+                artifact: 'post',
+            })
+            : null;
+        if (inspoTopic) console.log(`[process-content-jobs] job ${job.job_id} built around inspo item ${inspoTopic.itemId}`);
+
+        // An inspo slot sets its own subject, so it is not also pinned to the rotated pillar (the
+        // "Do NOT drift" line would fight the brief); it is still categorised under one pillar.
+        const rotatedPillar = (pillarList.length && job.target_publish_date && !inspoTopic)
             ? pillarList[Math.floor(new Date(job.target_publish_date).getTime() / 86_400_000) % pillarList.length]
             : null;
         const pillarLine = rotatedPillar
@@ -541,6 +560,9 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         if (job.context_prompt) {
             messages.push({ role: 'assistant', content: '{"status":"understood"}' });
             messages.push({ role: 'user', content: `Additional context from the user: ${job.context_prompt}` });
+        } else if (inspoTopic) {
+            messages.push({ role: 'assistant', content: '{"status":"understood"}' });
+            messages.push({ role: 'user', content: inspoTopic.brief });
         }
 
         // Rendered by the SHARED renderer (src/utils/blueprint-prompt.ts), which owns what is
@@ -577,11 +599,12 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // prod 2026-08-07: 7 of 7 scheduled jobs ran with no topic. Fall back to the pillar this
         // slot is themed on (already rotated per calendar day, so sibling slots retrieve against
         // DIFFERENT themes rather than all pulling the same chunks), then to the pillar list.
-        const inspoTopic = job.context_prompt || rotatedPillar || (pillarList.length ? pillarList.join(', ') : null);
+        const inspoRetrievalTopic = job.context_prompt || inspoTopic?.retrievalQuery || rotatedPillar
+            || (pillarList.length ? pillarList.join(', ') : null);
         const inspoBlock = await buildInspoBlock(db, {
             assistantId: job.assistant_id,
             organisationId: job.organisation_id,
-            topic: inspoTopic,
+            topic: inspoRetrievalTopic,
         });
         if (inspoBlock) systemPrompt += `\n\n${inspoBlock}`;
 
