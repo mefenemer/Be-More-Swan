@@ -10,15 +10,17 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts, scheduledPostAssets, contentAssets } from '../../db/schema';
+import { scheduledPosts, scheduledPostAssets, contentAssets, mediaGenerationJobs } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { generateAndPersistImage } from '../../src/lib/media-persist';
 import { holdCredits, settleHold, getBalance, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
 import { presignR2Get } from '../../src/utils/social-publish';
-import { FalContentPolicyError } from '../../src/lib/fal-gateway';
+import { FalContentPolicyError, FalError, FalServiceError } from '../../src/lib/fal-gateway';
 import { mediaTargetPostIds } from '../../src/utils/crosspost-media';
 import { withLambda } from '@netlify/aws-lambda-compat';
+
+const IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -59,8 +61,28 @@ export default withLambda(async (event) => {
         if (err instanceof FalContentPolicyError) {
             return { statusCode: 422, body: JSON.stringify({ error: 'Prompt flagged for policy violation. Please adjust your text and try again.', code: 'POLICY_FLAGGED' }) };
         }
+        // Record WHY. This path used to log only to the function console and answer every failure
+        // with the same "please try again", so a dead provider account, a timeout and an R2 fault
+        // were indistinguishable from the outside. generate-ai-image already writes failures here;
+        // now the post editor's button does too, and one query on media_generation_jobs says which.
+        const message = err instanceof Error ? err.message : String(err);
+        await db.insert(mediaGenerationJobs).values({
+            organisationId: orgId, userId, mediaType: 'image', prompt, aspectRatio: '4:5',
+            model: IMAGE_MODEL, creditCost: IMAGE_CREDIT_COST, status: 'failed',
+            errorMessage: `[regenerate-post-media] ${message}`.slice(0, 1000),
+        }).catch((e) => console.error('[regenerate-post-media] could not record the failure:', e));
+
+        // Provider account/billing (exhausted balance, locked, throttled): retrying cannot help, so
+        // don't tell the user to — same honest answer generate-ai-image gives.
+        if (err instanceof FalServiceError) {
+            console.error('[regenerate-post-media] FAL SERVICE UNAVAILABLE (operator action needed):', message);
+            return { statusCode: 503, body: JSON.stringify({ error: 'AI image generation is temporarily unavailable. Please try again later, or use Find a photo instead.', code: 'SERVICE_UNAVAILABLE' }) };
+        }
         console.error('[regenerate-post-media] error:', err);
-        return { statusCode: 502, body: JSON.stringify({ error: 'Could not regenerate the image. Please try again.' }) };
+        const timedOut = err instanceof FalError && err.status === 504;
+        return { statusCode: 502, body: JSON.stringify({ error: timedOut
+            ? 'The image took too long to generate. Please try again.'
+            : 'Could not regenerate the image. Please try again.' }) };
     }
 
     // One generated image covers the whole cross-post by default — the credit was charged once, and

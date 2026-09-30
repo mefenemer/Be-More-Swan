@@ -1006,6 +1006,12 @@ node_bundler = "esbuild"
 [functions.generate-ai-image]
   timeout = 26
 
+# The post editor's "Generate with AI" image button — the same synchronous Fal submit+poll as
+# generate-ai-image (22s poll budget), plus an R2 copy. On the 10s default a slow FLUX run was
+# killed mid-poll: a raw 502 and a refund that never happened.
+[functions.regenerate-post-media]
+  timeout = 26
+
 # Assistant chat. One turn is: resolve the tenant, read the assistant + org + history, persist
 # the user's message, call Claude, then persist the reply and any Data Hub records — and on the
 # FIRST turn of a conversation it also creates the session and often wakes a suspended Neon
