@@ -38,10 +38,11 @@ CREATE TABLE IF NOT EXISTS music_tracks (
   title                 text        NOT NULL,
   artist                text        NOT NULL,
 
-  -- OUR storage, never a third party's. storage_key is the object; url is what the browser and the
-  -- renderer fetch. Both, because a signed or moved bucket changes the url and not the object.
-  storage_key           text,
-  url                   text        NOT NULL,
+  -- OUR storage, never a third party's. The object IS the identity; R2 here is private, so the
+  -- browser and renderer get a URL presigned on demand and there is no durable url to store.
+  -- (This originally read `storage_key text, url text NOT NULL` — corrected in place so a FRESH
+  -- database gets the final shape; see the note at the foot of this file.)
+  storage_key           text        NOT NULL,
 
   -- ⚠️ STORED, not measured. A clip's length is measured in the browser because Pexels supplies
   -- none, and that measurement failing is what once removed the trim slider from a correct-looking
@@ -86,6 +87,14 @@ CREATE INDEX IF NOT EXISTS music_tracks_offerable_idx
 -- Filtering by mood is the one thing a person actually does in a music picker.
 CREATE INDEX IF NOT EXISTS music_tracks_tags_idx ON music_tracks USING GIN (tags);
 
--- A track is identified by where its bytes are. Two rows pointing at one object is a curation
--- mistake that would show the same bed twice in the picker under two names.
-CREATE UNIQUE INDEX IF NOT EXISTS music_tracks_url_key ON music_tracks (url);
+-- A track is identified by its object. Two rows pointing at one file is a curation mistake that
+-- would show the same bed twice in the picker under two names.
+CREATE UNIQUE INDEX IF NOT EXISTS music_tracks_storage_key_key ON music_tracks (storage_key);
+
+-- ⚠️ Edited after it was applied, deliberately. It used to finish with a unique index on `url`, and
+-- db/music-library-storage-key.sql then dropped that column — so a re-run on a migrated database
+-- FAILED (index on a column that no longer exists), and on a fresh one the runner, which sorts `-`
+-- before `.`, ran the storage-key file first against no table. Both files are now re-runnable and
+-- order-independent: this one creates the final shape, that one only corrects a table still in the
+-- old one. Staging + prod already held exactly this shape when the edit was made (verified
+-- 2026-09-29) and both ledgers were re-baselined to these checksums.
