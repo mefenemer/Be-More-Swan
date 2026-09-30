@@ -115,4 +115,44 @@ check('4. every control kept its id inside the right section', () => {
     inSec('widget', 'bs-editor', 'bs-snippet');
 });
 
+// ── 5 (follow-up, 2026-09-30): SEO, destinations and publishing move into the left pane ──
+check('5. SEO, "Where this post gets published" and "Approve & publish" are left-pane sections, in order', () => {
+    const order = ['media', 'feature', 'columns', 'seo', 'where', 'publish', 'search', 'widget'];
+    const at = order.map((k) => bs.indexOf(`<details class="bs-sec" data-bs-sec="${k}"`));
+    at.forEach((i, n) => assert.notStrictEqual(i, -1, `section ${order[n]} missing`));
+    assert.deepStrictEqual([...at].sort((a, b) => a - b), at, 'sections out of order');
+    assert.ok(at[at.length - 1] < bs.indexOf('id="bs-editor"'), 'all eight must sit in the LEFT column, before the editor');
+    for (let n = 1; n <= 8; n++) assert.ok(bs.includes(`<span class="bs-sec-num">${n}</span>`), `badge ${n} missing`);
+    assert.match(bs, /data-bs-sec="publish" open>/, 'the publishing controls start open');
+});
+
+check('5. each control moved with its section, and Generate SEO sits with the SEO fields', () => {
+    const sec = (k: string, next: string) => slice(bs, `data-bs-sec="${k}"`, next);
+    assert.ok(sec('seo', 'data-bs-sec="where"').includes('id="bs-meta-title"'));
+    assert.ok(sec('seo', 'data-bs-sec="where"').includes('id="bs-generate-seo"'));
+    assert.ok(sec('where', 'data-bs-sec="publish"').includes('id="bs-dist-list"'));
+    const pub = sec('publish', 'data-bs-sec="search"');
+    for (const id of ['bs-approve', 'bs-publish', 'bs-reject', 'bs-reject-form', 'bs-schedule-picker', 'bs-discard']) {
+        assert.ok(pub.includes(`id="${id}"`), `${id} is not in Approve & publish`);
+    }
+});
+
+check("5. the action status stays in the right column, visible when its section is collapsed", () => {
+    const right = bs.slice(bs.indexOf('id="bs-editor"'));
+    assert.ok(right.includes('id="bs-action-status"'));
+    assert.strictEqual(bs.split('id="bs-action-status"').length, 2, 'exactly one status banner');
+});
+
+check('5. on a narrow screen the two columns stack', () => {
+    assert.match(bs, /@media \(max-width:860px\)\{\.bs-grid\{grid-template-columns:minmax\(0,1fr\);\}\}/);
+});
+
+// ── 6: the Review page refreshes after a change in Blog Studio ──
+check('6. closing Blog Studio after a change refreshes the org-wide Review page list', () => {
+    const hook = slice(as, 'window._onBlogStudioChanged = function', '\n};');
+    assert.match(hook, /getElementById\('rq-groups'\)/);
+    assert.match(hook, /window\.rqLoadItems\(\)/);
+    assert.match(hook, /refreshPendingBadge/);
+});
+
 console.log(`\n${passed} checks passed`);

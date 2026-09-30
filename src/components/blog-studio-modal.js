@@ -163,7 +163,10 @@
     + '.bms-blog-close{position:absolute;top:16px;right:16px;background:#f3f4f6;border:0;border-radius:8px;'
     + 'width:32px;height:32px;font-size:18px;line-height:1;cursor:pointer;color:#374151;}'
     + '.bms-blog-close:hover{background:#e5e7eb;}'
-    + '.bs-grid{display:grid;grid-template-columns:260px 1fr;gap:24px;}'
+    + '.bs-grid{display:grid;grid-template-columns:320px minmax(0,1fr);gap:24px;align-items:start;}'
+    // Eight sections now live on the left (publishing controls included), so on a narrow screen the
+    // two columns stack rather than crushing the editor.
+    + '@media (max-width:860px){.bs-grid{grid-template-columns:minmax(0,1fr);}}'
     + '.bs-panel{border:1px solid #e5e7eb;border-radius:12px;padding:16px;background:#fff;}'
     + '.bs-panel h3{margin:0 0 12px;font-size:14px;font-weight:600;}'
     // The left pane's sections — titled and collapsible, in the same shape as the social post
@@ -386,8 +389,101 @@
     + '      </details>'
     // Syndication connectors moved to the assistant Connections tab; posts now auto-publish to
     // every connected blog on publish (no per-post panel here). See integrations.js / connection-map.
+    // Crawler-facing metadata (US 1.3). Generate SEO fills these in; the author can override before
+    // publishing. Saved via save-blog-draft; emitted server-side by the /b/:key/:slug permalink.
+    + '      <details class="bs-sec" data-bs-sec="seo">'
+    + '<summary class="bs-sec-head"><span class="bs-sec-num">4</span><span class="bs-sec-titles"><span class="bs-sec-title">SEO &amp; social preview</span><span class="bs-sec-sub">How the post looks in Google and when shared</span></span><svg class="bs-sec-chev" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></summary>'
+    + '        <div class="bs-sec-body">'
+    + '        <div class="bs-row" style="margin-bottom:10px;"><button id="bs-generate-seo" class="bs-btn bs-btn-ghost bs-btn-sm">Generate SEO</button></div>'
+    + '        <div class="bs-field"><label>Search title <span id="bs-meta-title-count" class="bs-status" style="font-weight:400;"></span></label>'
+    + '          <input id="bs-meta-title" maxlength="120" placeholder="Shown as the clickable headline in Google"></div>'
+    + '        <div class="bs-field"><label>Search description <span id="bs-meta-desc-count" class="bs-status" style="font-weight:400;"></span></label>'
+    + '          <textarea id="bs-meta-desc" maxlength="320" rows="3" placeholder="The summary beneath the title in search results"></textarea></div>'
+    + '        <div class="bs-field"><label>Search visibility</label>'
+    + '          <select id="bs-robots">'
+    + '            <option value="index,follow">Indexed — show in search results (default)</option>'
+    + '            <option value="noindex,follow">Hidden from search — live but not indexed</option>'
+    + '            <option value="index,nofollow">Indexed, don\'t follow links</option>'
+    + '            <option value="noindex,nofollow">Fully hidden from search engines</option>'
+    + '          </select></div>'
+    + '        <div class="bs-field"><label>Canonical URL</label>'
+    + '          <div id="bs-canonical" class="bs-status" style="word-break:break-all;">Set when the post is published.</div></div>'
+    + '        <span id="bs-seo-status" class="bs-status"></span>'
+    + '        </div>'
+    + '      </details>'
+    // Where the post is published, as a per-post choice. Connecting a blog in the assistant's
+    // Connections tab used to opt it in permanently and silently — every published post went to
+    // every connected platform with nothing on screen saying so, and no way to hold one back.
+    + '      <details class="bs-sec" data-bs-sec="where">'
+    + '<summary class="bs-sec-head"><span class="bs-sec-num">5</span><span class="bs-sec-titles"><span class="bs-sec-title">Where this post gets published</span><span class="bs-sec-sub">Your blog, plus any connected platforms</span></span><svg class="bs-sec-chev" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></summary>'
+    + '        <div class="bs-sec-body">'
+    + '        <p class="bs-help">Your own blog always gets it. Tick any other connected platform'
+    + ' you want this post sent to when it goes live.</p>'
+    // Filled per post by loadDistribution. The panel used to describe the mechanic and never
+    // the TIMING, so a scheduled post showed every destination ticked and read as though
+    // distribution had already been arranged — it has not, and will not be until the post
+    // publishes. That misread is what sent an author looking for their scheduled posts in a
+    // review queue nothing had submitted them to.
+    + '        <p id="bs-dist-when" class="bs-help" style="font-weight:600;"></p>'
+    + '        <label class="bs-dest" style="border-color:#fbcfe8;background:#fdf2f8;cursor:default;">'
+    + '          <input type="checkbox" checked disabled>'
+    + '          <span class="bs-dest-name">Your blog<span class="bs-dest-note">Your embedded widget and its public permalink \u2014 always included.</span></span>'
+    + '        </label>'
+    + '        <div id="bs-dist-list" class="bs-stack" style="margin-top:8px;"></div>'
+    + '        <div id="bs-dist-status" class="bs-status" style="margin-top:8px;">Checking connected platforms\u2026</div>'
+    + '        </div>'
+    + '      </details>'
+    // Scheduling mirrors the Create Post sheet: one guided question, not three loose button rows.
+    + '      <details class="bs-sec" data-bs-sec="publish" open>'
+    + '<summary class="bs-sec-head"><span class="bs-sec-num">6</span><span class="bs-sec-titles"><span class="bs-sec-title">Approve &amp; publish</span><span class="bs-sec-sub">Schedule it, publish it now, or reject it</span></span><svg class="bs-sec-chev" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></summary>'
+    + '        <div class="bs-sec-body">'
+    + '        <p class="bs-ready-q">Your post is ready. How should it go out?</p>'
+    // bs-row, NOT bs-stack. A column stack stretches its children to the panel width, so these
+    // three ran edge-to-edge while "Archive draft" — the one button that lives in a row below —
+    // sat at its natural size. Four buttons doing the same job at two different widths reads as
+    // two different kinds of control. All four are now natural-width in wrapping rows.
+    + '        <div class="bs-row">'
+    + '          <button id="bs-approve" class="bs-btn bs-btn-outline">Let <span id="bs-approve-name">your assistant</span> schedule it</button>'
+    + '          <button id="bs-pick-time" class="bs-btn bs-btn-ghost">Pick a time myself</button>'
+    + '          <button id="bs-publish" class="bs-btn bs-btn-primary">Publish now</button>'
+    // Only on an assistant-written draft that is still undecided (syncRejectButton). The social
+    // Review has had "reject, say why, and the assistant learns" since reject-post.ts; a blog draft
+    // could only be approved or archived, and archiving taught the Blog Writer nothing.
+    + '          <button id="bs-reject" class="bs-btn bs-btn-danger bs-hidden" type="button">Reject\u2026</button>'
+    + '        </div>'
+    + '        <div id="bs-reject-form" class="bs-hidden" style="margin-top:12px;">'
+    + '          <div class="bs-field"><label for="bs-reject-reason">What\u2019s wrong with this draft?</label>'
+    + '            <textarea id="bs-reject-reason" rows="3" maxlength="1000"'
+    + '              placeholder="e.g. Too generic \u2014 write for small care providers, and use our own experience rather than statistics"></textarea></div>'
+    + '          <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin-top:6px;">'
+    + '            <input id="bs-reject-rule" type="checkbox" checked style="margin-top:3px;">'
+    + '            <span>Teach <span id="bs-reject-name">your assistant</span> \u2014 apply this to future posts</span></label>'
+    + '          <label id="bs-reject-redraft-row" style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin-top:6px;">'
+    + '            <input id="bs-reject-redraft" type="checkbox" checked style="margin-top:3px;">'
+    + '            <span>Write a replacement for this slot</span></label>'
+    + '          <div class="bs-row" style="margin-top:10px;">'
+    + '            <button id="bs-reject-go" class="bs-btn bs-btn-danger" type="button">Reject draft</button>'
+    + '            <button id="bs-reject-cancel" class="bs-btn bs-btn-ghost" type="button">Cancel</button>'
+    + '          </div>'
+    + '        </div>'
+    + '        <div id="bs-schedule-picker" class="bs-hidden" style="margin-top:12px;">'
+    + '          <div class="bs-field"><label>Scheduled date &amp; time</label>'
+    + '            <input id="bs-schedule-at" type="datetime-local"></div>'
+    + '          <div class="bs-row">'
+    + '            <button id="bs-schedule" class="bs-btn bs-btn-primary">Confirm schedule</button>'
+    + '            <button id="bs-schedule-back" class="bs-btn bs-btn-ghost">Back</button>'
+    + '          </div>'
+    + '        </div>'
+    + '        <div class="bs-row" style="margin-top:12px;">'
+    + '          <button id="bs-unschedule" class="bs-btn bs-btn-ghost bs-hidden">Unschedule</button>'
+    + '          <button id="bs-repush" class="bs-btn bs-btn-ghost bs-hidden">Send to connected platforms</button>'
+    + '          <button id="bs-unpublish" class="bs-btn bs-btn-ghost bs-hidden">Unpublish</button>'
+    + '          <button id="bs-discard" class="bs-btn bs-btn-danger">Archive draft</button>'
+    + '        </div>'
+    + '        </div>'
+    + '      </details>'
     + '      <details class="bs-sec" data-bs-sec="search">'
-    + '<summary class="bs-sec-head"><span class="bs-sec-num">4</span><span class="bs-sec-titles"><span class="bs-sec-title">Search performance</span><span class="bs-sec-sub">Google Search Console, for spotting posts losing traffic</span></span><svg class="bs-sec-chev" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></summary>'
+    + '<summary class="bs-sec-head"><span class="bs-sec-num">7</span><span class="bs-sec-titles"><span class="bs-sec-title">Search performance</span><span class="bs-sec-sub">Google Search Console, for spotting posts losing traffic</span></span><svg class="bs-sec-chev" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></summary>'
     + '        <div class="bs-sec-body">'
     + '        <div id="bs-gsc-status" class="bs-status">Checking&hellip;</div>'
     + '        <div class="bs-row" style="margin-top:10px;">'
@@ -399,7 +495,7 @@
     + '        </div>'
     + '      </details>'
     + '      <details class="bs-sec" data-bs-sec="widget">'
-    + '<summary class="bs-sec-head"><span class="bs-sec-num">5</span><span class="bs-sec-titles"><span class="bs-sec-title">Blog widget</span><span class="bs-sec-sub">Look, embed code and RSS feed — set up once</span></span><svg class="bs-sec-chev" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></summary>'
+    + '<summary class="bs-sec-head"><span class="bs-sec-num">8</span><span class="bs-sec-titles"><span class="bs-sec-title">Blog widget</span><span class="bs-sec-sub">Look, embed code and RSS feed — set up once</span></span><svg class="bs-sec-chev" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></summary>'
     + '        <div class="bs-sec-body">'
     + '        <div class="bs-field"><label>Accent colour</label><input id="bs-accent" type="color" value="#ec4899"></div>'
     // Options are injected by populateFontPicker() from window.BlogFonts (generated from
@@ -476,100 +572,17 @@
     // feature left was a toast reading "3 hook variants ready" — three of WHAT, ready for what.
     + '        <button id="bs-generate-hooks" class="bs-btn bs-btn-ghost"'
     + '          title="Write three alternative headlines and openings, then let your readers pick the winner">Test 3 headlines</button>'
-    + '        <button id="bs-generate-seo" class="bs-btn bs-btn-ghost">Generate SEO</button>'
     + '      </div>'
+    // Every action's outcome is reported here ("Approved — scheduled for…", errors). It lives in the
+    // right column, not in the Approve & publish section, so it stays visible when that section is
+    // collapsed — a result nobody can see reads as a button that did nothing.
+    + '      <div id="bs-action-status" class="bs-banner bs-hidden" style="margin-top:12px;"></div>'
     // The A/B test, made visible. It was running invisibly: the variants were never shown, no state
     // was reported, and the winner was promoted by a cron the author had no way of observing.
     + '      <div id="bs-hooks-panel" class="bs-panel bs-hidden" style="margin-top:16px;">'
     + '        <h3>Headline test</h3>'
     + '        <p id="bs-hooks-explainer" class="bs-status" style="line-height:1.5;margin-bottom:10px;"></p>'
     + '        <div id="bs-hooks-list"></div>'
-    + '      </div>'
-    // Crawler-facing metadata (US 1.3). Generate SEO fills these in; the author can override before
-    // publishing. Saved via save-blog-draft; emitted server-side by the /b/:key/:slug permalink.
-    + '      <div class="bs-panel" style="margin-top:16px;">'
-    + '        <h3>SEO &amp; social preview</h3>'
-    + '        <div class="bs-field"><label>Search title <span id="bs-meta-title-count" class="bs-status" style="font-weight:400;"></span></label>'
-    + '          <input id="bs-meta-title" maxlength="120" placeholder="Shown as the clickable headline in Google"></div>'
-    + '        <div class="bs-field"><label>Search description <span id="bs-meta-desc-count" class="bs-status" style="font-weight:400;"></span></label>'
-    + '          <textarea id="bs-meta-desc" maxlength="320" rows="3" placeholder="The summary beneath the title in search results"></textarea></div>'
-    + '        <div class="bs-field"><label>Search visibility</label>'
-    + '          <select id="bs-robots">'
-    + '            <option value="index,follow">Indexed — show in search results (default)</option>'
-    + '            <option value="noindex,follow">Hidden from search — live but not indexed</option>'
-    + '            <option value="index,nofollow">Indexed, don\'t follow links</option>'
-    + '            <option value="noindex,nofollow">Fully hidden from search engines</option>'
-    + '          </select></div>'
-    + '        <div class="bs-field"><label>Canonical URL</label>'
-    + '          <div id="bs-canonical" class="bs-status" style="word-break:break-all;">Set when the post is published.</div></div>'
-    + '        <span id="bs-seo-status" class="bs-status"></span>'
-    + '      </div>'
-    // Where the post is published, as a per-post choice. Connecting a blog in the assistant's
-    // Connections tab used to opt it in permanently and silently — every published post went to
-    // every connected platform with nothing on screen saying so, and no way to hold one back.
-    + '      <div class="bs-panel" style="margin-top:16px;">'
-    + '        <h3>Where this post gets published</h3>'
-    + '        <p class="bs-help">Your own blog always gets it. Tick any other connected platform'
-    + ' you want this post sent to when it goes live.</p>'
-    // Filled per post by loadDistribution. The panel used to describe the mechanic and never
-    // the TIMING, so a scheduled post showed every destination ticked and read as though
-    // distribution had already been arranged — it has not, and will not be until the post
-    // publishes. That misread is what sent an author looking for their scheduled posts in a
-    // review queue nothing had submitted them to.
-    + '        <p id="bs-dist-when" class="bs-help" style="font-weight:600;"></p>'
-    + '        <label class="bs-dest" style="border-color:#fbcfe8;background:#fdf2f8;cursor:default;">'
-    + '          <input type="checkbox" checked disabled>'
-    + '          <span class="bs-dest-name">Your blog<span class="bs-dest-note">Your embedded widget and its public permalink \u2014 always included.</span></span>'
-    + '        </label>'
-    + '        <div id="bs-dist-list" class="bs-stack" style="margin-top:8px;"></div>'
-    + '        <div id="bs-dist-status" class="bs-status" style="margin-top:8px;">Checking connected platforms\u2026</div>'
-    + '      </div>'
-    // Scheduling mirrors the Create Post sheet: one guided question, not three loose button rows.
-    + '      <div class="bs-panel" style="margin-top:16px;">'
-    + '        <p class="bs-ready-q">Your post is ready. How should it go out?</p>'
-    // bs-row, NOT bs-stack. A column stack stretches its children to the panel width, so these
-    // three ran edge-to-edge while "Archive draft" — the one button that lives in a row below —
-    // sat at its natural size. Four buttons doing the same job at two different widths reads as
-    // two different kinds of control. All four are now natural-width in wrapping rows.
-    + '        <div class="bs-row">'
-    + '          <button id="bs-approve" class="bs-btn bs-btn-outline">Let <span id="bs-approve-name">your assistant</span> schedule it</button>'
-    + '          <button id="bs-pick-time" class="bs-btn bs-btn-ghost">Pick a time myself</button>'
-    + '          <button id="bs-publish" class="bs-btn bs-btn-primary">Publish now</button>'
-    // Only on an assistant-written draft that is still undecided (syncRejectButton). The social
-    // Review has had "reject, say why, and the assistant learns" since reject-post.ts; a blog draft
-    // could only be approved or archived, and archiving taught the Blog Writer nothing.
-    + '          <button id="bs-reject" class="bs-btn bs-btn-danger bs-hidden" type="button">Reject\u2026</button>'
-    + '        </div>'
-    + '        <div id="bs-reject-form" class="bs-hidden" style="margin-top:12px;">'
-    + '          <div class="bs-field"><label for="bs-reject-reason">What\u2019s wrong with this draft?</label>'
-    + '            <textarea id="bs-reject-reason" rows="3" maxlength="1000"'
-    + '              placeholder="e.g. Too generic \u2014 write for small care providers, and use our own experience rather than statistics"></textarea></div>'
-    + '          <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin-top:6px;">'
-    + '            <input id="bs-reject-rule" type="checkbox" checked style="margin-top:3px;">'
-    + '            <span>Teach <span id="bs-reject-name">your assistant</span> \u2014 apply this to future posts</span></label>'
-    + '          <label id="bs-reject-redraft-row" style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin-top:6px;">'
-    + '            <input id="bs-reject-redraft" type="checkbox" checked style="margin-top:3px;">'
-    + '            <span>Write a replacement for this slot</span></label>'
-    + '          <div class="bs-row" style="margin-top:10px;">'
-    + '            <button id="bs-reject-go" class="bs-btn bs-btn-danger" type="button">Reject draft</button>'
-    + '            <button id="bs-reject-cancel" class="bs-btn bs-btn-ghost" type="button">Cancel</button>'
-    + '          </div>'
-    + '        </div>'
-    + '        <div id="bs-schedule-picker" class="bs-hidden" style="margin-top:12px;">'
-    + '          <div class="bs-field"><label>Scheduled date &amp; time</label>'
-    + '            <input id="bs-schedule-at" type="datetime-local"></div>'
-    + '          <div class="bs-row">'
-    + '            <button id="bs-schedule" class="bs-btn bs-btn-primary">Confirm schedule</button>'
-    + '            <button id="bs-schedule-back" class="bs-btn bs-btn-ghost">Back</button>'
-    + '          </div>'
-    + '        </div>'
-    + '        <div class="bs-row" style="margin-top:12px;">'
-    + '          <button id="bs-unschedule" class="bs-btn bs-btn-ghost bs-hidden">Unschedule</button>'
-    + '          <button id="bs-repush" class="bs-btn bs-btn-ghost bs-hidden">Send to connected platforms</button>'
-    + '          <button id="bs-unpublish" class="bs-btn bs-btn-ghost bs-hidden">Unpublish</button>'
-    + '          <button id="bs-discard" class="bs-btn bs-btn-danger">Archive draft</button>'
-    + '        </div>'
-    + '        <div id="bs-action-status" class="bs-banner bs-hidden"></div>'
     + '      </div>'
     + '    </div>'
     + '  </div>'
