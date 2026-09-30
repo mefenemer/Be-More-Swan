@@ -71,6 +71,7 @@ type BlogJobRow = {
     id: number; job_id: string; assistant_id: number; organisation_id: number;
     user_id: number; attempt: number; max_attempts: number;
     context_prompt: string | null; target_publish_date: string | null; created_at: string;
+    trigger_type: string | null;
     // Pre-set by generate-blog.ts to the post already open in Blog Studio. NULL for every
     // autopilot/campaign job, which ideate a topic and insert their own row. See the branch in
     // processBlogJob and src/utils/blog-interactive-brief.ts.
@@ -115,7 +116,7 @@ export async function drainBlogJobs(): Promise<number> {
 
     const jobs = await db.execute<BlogJobRow>(
         `SELECT id, job_id, assistant_id, organisation_id, user_id, attempt, max_attempts,
-                context_prompt, target_publish_date, result_blog_post_id, created_at
+                context_prompt, target_publish_date, result_blog_post_id, created_at, trigger_type
          FROM content_generation_jobs
          WHERE status = 'queued'
            AND content_type = 'blog'
@@ -234,6 +235,40 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
             // DELETES the post it is given, which is right for a half-built autopilot draft and
             // catastrophic here — it is the post the author has open.
         } else {
+            // ── One post per SLOT (same rule as process-content-jobs.ts) ──────────────────────────
+            // A failed job does not cover its slot, so while drafting was down the daily horizon fill
+            // enqueued a fresh one every day; requeuing that backlog on 2026-09-30 drafted every one
+            // of them onto the same slots. A scheduled job whose slot already holds a live post
+            // completes without drafting — before ideation, so a skipped duplicate costs no model
+            // call. Scheduled jobs only: a campaign order ('on_demand') asked for THIS article, and
+            // an interactive job never reaches this branch. Fails OPEN: a lookup error drafts as
+            // before rather than stopping blog drafting for everyone. The slot is read back from the
+            // job row so no timestamp is re-serialised in JS.
+            if (job.trigger_type === 'scheduled' && job.target_publish_date) {
+                const occupied = await db.execute<{ id: number }>(sql`
+                    SELECT id FROM blog_posts
+                     WHERE assistant_id = ${job.assistant_id}
+                       AND publish_date = (SELECT target_publish_date FROM content_generation_jobs WHERE id = ${job.id})
+                       AND status IN ('draft','pending_approval','in_review','approved','scheduled','publishing')
+                       AND (job_id IS NULL OR job_id <> ${job.job_id})
+                     ORDER BY id LIMIT 1`).catch((err) => {
+                    console.error(`[process-blog-jobs] slot guard lookup failed for job ${job.job_id} — drafting anyway:`, err);
+                    return [] as { id: number }[];
+                });
+                if (occupied.length) {
+                    const existingId = Number(occupied[0].id);
+                    console.warn(`[process-blog-jobs] job ${job.job_id}: slot already holds blog post ${existingId} — completing without drafting a duplicate.`);
+                    await db.update(contentGenerationJobs)
+                        .set({
+                            status: 'completed', resultBlogPostId: existingId,
+                            errorMessage: `Superseded: this slot already has a blog post (${existingId}).`,
+                            updatedAt: new Date(),
+                        })
+                        .where(eq(contentGenerationJobs.id, job.id));
+                    return;
+                }
+            }
+
             const idea = await ideateBlogTopic(db, {
                 assistantId: job.assistant_id,
                 organisationId: job.organisation_id,

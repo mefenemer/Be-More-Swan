@@ -68,4 +68,27 @@ check('the requeue releases one job per slot, and none for a filled or already-q
         'batched runs must not queue a second job behind the first');
 });
 
+// ── Blog: the same rule in the separate blog worker ──────────────────────────────────────────
+const blog = readFileSync(join(root, 'netlify/functions/process-blog-jobs.ts'), 'utf8');
+const bStart = blog.indexOf('── One post per SLOT');
+const bGuard = blog.slice(bStart, blog.indexOf('const idea = await ideateBlogTopic', bStart));
+
+check('blog: a scheduled job whose slot already holds a live blog post completes without drafting', () => {
+    assert.notStrictEqual(bStart, -1, 'the blog slot guard is gone');
+    assert.match(bGuard, /FROM blog_posts[\s\S]*assistant_id = \$\{job\.assistant_id\}/);
+    assert.match(bGuard, /publish_date = \(SELECT target_publish_date FROM content_generation_jobs WHERE id = \$\{job\.id\}\)/);
+    assert.match(bGuard, /status: 'completed', resultBlogPostId: existingId/);
+    assert.match(bGuard, /\.catch\(/, 'must fail open');
+});
+
+check('blog: scheduled jobs only, own leftovers ignored, and it runs before ideation', () => {
+    assert.match(bGuard, /job\.trigger_type === 'scheduled' && job\.target_publish_date/,
+        'a campaign order (on_demand) asked for THIS article and must not be skipped');
+    assert.match(bGuard, /job_id IS NULL OR job_id <> \$\{job\.job_id\}/,
+        "this job's own half-written row from an earlier attempt must not count as the slot's post");
+    assert.ok(bStart < blog.indexOf('const idea = await ideateBlogTopic'), 'before the model call');
+    assert.match(blog, /context_prompt, target_publish_date, result_blog_post_id, created_at, trigger_type/,
+        'trigger_type must be SELECTed, or the guard never fires');
+});
+
 console.log(`\n${passed} checks passed`);
