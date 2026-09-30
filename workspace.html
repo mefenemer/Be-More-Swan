@@ -5778,15 +5778,19 @@ function rqRepaintPostsGroup(statusKey) {
     if (more) more.outerHTML = rqMoreButton(statusKey);
 }
 
-// A blog post row in the Review Queue. Open jumps into the Blog Studio modal; in the Review column
-// (draft / pending) the user can Approve & Schedule — the assistant picks the next cadence slot.
+// A blog post row in the Review Queue. The row opens the post in Blog Studio, which is where it is
+// reviewed and then approved, scheduled or rejected.
+//
+// ⚠️ There is deliberately NO approve button on the row. There used to be an "Approve & Schedule"
+// here, which scheduled a 1,000-word article for publication without anyone having read a word of
+// it. Review means opening the post; the decision buttons live in Blog Studio, next to the text.
 function rqRenderBlogCard(post) {
     const title = _rqEsc(post.title || 'Untitled draft');
     const when = post.publishedAt || post.publishDate;
     const meta = when ? new Date(when).toLocaleString() : (post.updatedAt ? 'Updated ' + rqTimeAgo(post.updatedAt) : '');
     const inReview = (RQ_BLOG_STATUSES.review || []).includes(post.status);
     const approveBtn = inReview
-        ? `<button onclick="event.stopPropagation();_rqApproveBlog(${post.id},this)" class="px-3 py-1.5 text-xs font-bold bg-pink-600 hover:bg-pink-700 text-white rounded-lg transition cursor-pointer">Approve &amp; Schedule</button>`
+        ? `<span class="px-3 py-1.5 text-xs font-bold border border-gray-200 text-gray-700 rounded-lg whitespace-nowrap">Review →</span>`
         : '';
     return `<div onclick="window.openBlogStudio&&window.openBlogStudio({postId:${post.id}})"
         class="flex items-center gap-3 py-3 cursor-pointer hover:bg-gray-50 -mx-2 px-2 rounded-lg">
@@ -5799,24 +5803,6 @@ function rqRenderBlogCard(post) {
         </div>
         ${approveBtn}
       </div>`;
-}
-
-// Approve & schedule a blog post from the queue → cadence slot, then refresh the current column.
-async function _rqApproveBlog(id, btn) {
-    if (btn) { btn.disabled = true; btn.textContent = 'Scheduling…'; }
-    try {
-        const res = await fetch('/.netlify/functions/schedule-blog', {
-            method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id, action: 'approve' }),
-        });
-        if (!res.ok) throw new Error('approve failed');
-        if (window.showToast) window.showToast('Blog post approved & scheduled.', { icon: '✅' });
-    } catch {
-        if (btn) { btn.disabled = false; btn.textContent = 'Approve & Schedule'; }
-        if (window.showToast) window.showToast('Could not schedule the post.', { icon: '⚠️' });
-        return;
-    }
-    rqRenderGroups(_rqCurrentStatus);
 }
 
 function _rqEsc(s) {

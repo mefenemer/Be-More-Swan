@@ -1018,6 +1018,12 @@ node_bundler = "esbuild"
 [functions.regenerate-post-media]
   timeout = 26
 
+# Blog Studio's "Generate SEO", which it now also runs by itself when an assistant-written post opens
+# without metadata. One Haiku call plus a write — usually a few seconds, but a slow reply on the
+# 10s default would surface as a raw 502 instead of the SEO the author was waiting for.
+[functions.generate-seo]
+  timeout = 26
+
 # Assistant chat. One turn is: resolve the tenant, read the assistant + org + history, persist
 # the user's message, call Claude, then persist the reply and any Data Hub records — and on the
 # FIRST turn of a conversation it also creates the session and often wakes a suspended Neon

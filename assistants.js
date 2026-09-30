@@ -3311,7 +3311,9 @@ const _RQ_BLOG_STATUS = {
     approved: ['approved'],
     scheduled: ['scheduled'],
     posted: ['published'],
-    archived: ['archived'],
+    // 'rejected' too: reject-blog-post.ts sets it, and without it here a rejected draft would be in
+    // the database and in no tab — the workspace Review page already lists it under Archive.
+    archived: ['archived', 'rejected'],
 };
 
 function _rqBlogActions(p, statusKey) {
@@ -3321,10 +3323,10 @@ function _rqBlogActions(p, statusKey) {
     const btn = (action, label, cls) => `<button type="button" onclick="_detailRqBlogAct(this,'${action}')" class="${cls}">${label}</button>`;
     const actions = [];
     if (statusKey === 'review') {
-        // Primary action in review is to approve; editing/reviewing happens in Blog Studio.
-        actions.push(btn('approveSchedule', 'Approve &amp; Schedule', primary));
-        actions.push(btn('open', 'Open in Blog Studio', secondary));
-        actions.push(btn('showSchedule', 'Pick a time…', secondary));
+        // Review means READING it. "Approve & Schedule" and "Pick a time…" used to sit here and
+        // scheduled an unread article for publication in one click; approving, scheduling and
+        // rejecting now happen in Blog Studio, next to the text being judged.
+        actions.push(btn('open', 'Review in Blog Studio', primary));
     } else if (statusKey === 'approved') {
         actions.push(btn('open', 'Open in Blog Studio', primary));
         actions.push(btn('showSchedule', 'Schedule', secondary));

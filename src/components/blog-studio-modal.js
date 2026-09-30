@@ -84,7 +84,7 @@
   }
 
   var BUSY_BUTTONS = ['bs-approve', 'bs-pick-time', 'bs-publish', 'bs-schedule',
-    'bs-unschedule', 'bs-unpublish', 'bs-repush', 'bs-discard'];
+    'bs-unschedule', 'bs-unpublish', 'bs-repush', 'bs-discard', 'bs-reject-go'];
 
   // Whole-modal busy state for the long-running lifecycle actions (publish). Shows the OS wait
   // cursor and disables every button in the footer, so a second click cannot fire a second publish
@@ -166,6 +166,23 @@
     + '.bs-grid{display:grid;grid-template-columns:260px 1fr;gap:24px;}'
     + '.bs-panel{border:1px solid #e5e7eb;border-radius:12px;padding:16px;background:#fff;}'
     + '.bs-panel h3{margin:0 0 12px;font-size:14px;font-weight:600;}'
+    // The left pane's sections — titled and collapsible, in the same shape as the social post
+    // editor's step rail (numbered badge, title + one-line subtitle, chevron; pink when open).
+    // Native <details>, so there is no handler to bind and nothing to go dead on a re-render.
+    + '.bs-sec{border:1px solid #e5e7eb;border-radius:12px;background:#fff;margin-bottom:10px;overflow:hidden;}'
+    + '.bs-sec[open]{border-color:#f9a8d4;}'
+    + '.bs-sec-head{list-style:none;display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;user-select:none;}'
+    + '.bs-sec-head::-webkit-details-marker{display:none;}'
+    + '.bs-sec-head:hover{background:#f9fafb;}'
+    + '.bs-sec-num{width:20px;height:20px;flex-shrink:0;border-radius:6px;background:#f3f4f6;color:#6b7280;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;}'
+    + '.bs-sec[open] .bs-sec-num{background:#db2777;color:#fff;}'
+    + '.bs-sec-titles{flex:1;min-width:0;display:flex;flex-direction:column;}'
+    + '.bs-sec-title{font-size:13px;font-weight:700;color:#374151;}'
+    + '.bs-sec[open] .bs-sec-title{color:#9d174d;}'
+    + '.bs-sec-sub{font-size:11px;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
+    + '.bs-sec-chev{width:12px;height:12px;flex-shrink:0;color:#d1d5db;transition:transform .15s;}'
+    + '.bs-sec[open] .bs-sec-chev{transform:rotate(90deg);color:#db2777;}'
+    + '.bs-sec-body{border-top:1px solid #f3f4f6;padding:12px;}'
     + '.bs-field{margin-bottom:12px;}'
     + '.bs-field label{display:block;font-size:12px;color:#6b7280;margin-bottom:4px;}'
     + '.bs-field input,.bs-field select,.bs-field textarea{width:100%;padding:8px;border:1px solid #d1d5db;border-radius:8px;font:inherit;}'
@@ -296,8 +313,94 @@
     // editor on a fresh draft. AI drafting from a topic now lives inline in the editor (bs-ai-draft).
     + '  <div id="bs-workspace" class="bs-grid bs-hidden">'
     + '    <div>'
-    + '      <div class="bs-panel" style="margin-bottom:16px;">'
-    + '        <h3>Widget</h3>'
+    // ONE media panel, not two. There used to be a "Feature image" row of five buttons and an
+    // "Inline body media" row of the same five, differing only in where the result landed — so the
+    // author had to decide the destination BEFORE seeing the media, and the same five sources were
+    // on screen twice. Now there is a single set of sources; every result lands in one picker, and
+    // each tile carries the two destinations it can go to (click → into the post, "Feature" → the
+    // hero). The hero slot is also a drop target, so a drag does the same job.
+    + '      <details class="bs-sec" data-bs-sec="media" open>'
+    + '<summary class="bs-sec-head"><span class="bs-sec-num">1</span><span class="bs-sec-titles"><span class="bs-sec-title">Images &amp; media</span><span class="bs-sec-sub">Add pictures, video or audio to the post</span></span><svg class="bs-sec-chev" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></summary>'
+    + '        <div class="bs-sec-body">'
+    + '        <p class="bs-help">Find something below, then <strong>click it to drop it into your post</strong>'
+    + ' — or drag it onto the feature image, or press <strong>Feature</strong> on the tile.</p>'
+    + '        <div class="bs-row">'
+    + '          <button id="bs-media-library" class="bs-btn bs-btn-ghost bs-btn-sm"><span class="bs-btn-ico">\uD83D\uDDC2</span>Library</button>'
+    + '          <button id="bs-media-upload" class="bs-btn bs-btn-ghost bs-btn-sm"><span class="bs-btn-ico">\u2B06\uFE0F</span>Upload</button>'
+    + '          <button id="bs-media-canva" class="bs-btn bs-btn-ghost bs-btn-sm"><span class="bs-btn-ico">\uD83C\uDFA8</span>Canva</button>'
+    // These two are the assistant doing the work, not an anonymous "AI" — the label is rewritten
+    // with the assistant's real name by applyAssistantNaming() as soon as one resolves.
+    + '          <button id="bs-media-pexels" class="bs-btn bs-btn-ghost bs-btn-sm"><span class="bs-btn-ico">\uD83D\uDD0D</span>'
+    + '<span data-bs-assistant-label="stock">Ask your assistant to search stock</span></button>'
+    + '          <button id="bs-media-ai" class="bs-btn bs-btn-ghost bs-btn-sm">'
+    + '<img src="/images/BeMoreSwan_SwanAI.png" alt="" style="width:15px;height:15px;object-fit:contain;">'
+    + '<span data-bs-assistant-label="generate">Ask your assistant to generate</span></button>'
+    // Images, video and audio all land in the body; the hero stays images-only (blog-media rejects
+    // anything else for the feature role). Audio is upload-only by decision (plan §7.4) — there is
+    // no stock provider and no AI generation for it. MIME list mirrors content-upload-url.ts's
+    // ALLOWED_MIME_TYPES — widening it here without widening that would just move the rejection to
+    // a worse place.
+    + '          <input type="file" id="bs-media-upload-input" class="bs-hidden" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm,audio/mpeg,audio/mp4,audio/wav,audio/webm,audio/ogg">'
+    + '        </div>'
+    // AI image generation is a capability an org may simply not have. The button above is
+    // disabled on open in that case and this line says why, so nobody writes a prompt only to
+    // meet generate-ai-image's 403 — see applyMediaCapabilities().
+    + '        <p id="bs-ai-unavailable" class="bs-help bs-hidden" style="margin-top:10px;"></p>'
+    + '        <div id="bs-ai-form" class="bs-field bs-hidden" style="margin-top:12px;">'
+    + '          <input id="bs-ai-prompt" placeholder="Describe the image\u2026">'
+    + '          <button id="bs-ai-go" class="bs-btn bs-btn-ghost bs-btn-sm" style="margin-top:8px;">Generate</button></div>'
+    + '        <div id="bs-pexels-form" class="bs-field bs-hidden" style="margin-top:12px;">'
+    + '          <input id="bs-pexels-query" placeholder="Search stock photos\u2026">'
+    + '          <button id="bs-pexels-go" class="bs-btn bs-btn-ghost bs-btn-sm" style="margin-top:8px;">Search</button></div>'
+    + '        <div id="bs-media-picker" class="bs-media-picker bs-hidden"></div>'
+    + '        <span id="bs-media-status" class="bs-status"></span>'
+    // The hero. It was previously an unexplained empty box above a row of buttons, with no hint
+    // that it was fillable, and a "Remove" that hid among five identical grey buttons.
+    + '        </div>'
+    + '      </details>'
+    + '      <details class="bs-sec" data-bs-sec="feature">'
+    + '<summary class="bs-sec-head"><span class="bs-sec-num">2</span><span class="bs-sec-titles"><span class="bs-sec-title">Feature image</span><span class="bs-sec-sub">The banner at the top of the post</span></span><svg class="bs-sec-chev" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></summary>'
+    + '        <div class="bs-sec-body">'
+    + '        <p class="bs-help">The banner shown at the top of the published post and on your blog'
+    + ' index. Drag an image onto the box below, or press <strong>Feature</strong> on any tile above.</p>'
+    + '        <div id="bs-feature-drop" class="bs-feature-drop">'
+    + '          <div id="bs-feature-preview" class="bs-feature-empty">Drop an image here to make it the feature image.</div>'
+    + '          <button type="button" id="bs-feature-remove" class="bs-feature-remove bs-hidden">\u2715 Remove feature image</button>'
+    + '        </div>'
+    // Column layouts. Media and text blocks are then dragged in by their handles; the row stacks
+    // on a phone.
+    + '        </div>'
+    + '      </details>'
+    + '      <details class="bs-sec" data-bs-sec="columns">'
+    + '<summary class="bs-sec-head"><span class="bs-sec-num">3</span><span class="bs-sec-titles"><span class="bs-sec-title">Side-by-side layout</span><span class="bs-sec-sub">Put text and images in columns</span></span><svg class="bs-sec-chev" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></summary>'
+    + '        <div class="bs-sec-body">'
+    + '        <p class="bs-help">Adds an empty row of columns after the section you last clicked in.'
+    + ' Fill it by dragging paragraphs or images into a column using the <strong>\u22EE\u22EE</strong> handle'
+    + ' that appears to the left of each section. To take a row out again, hover it in the draft and'
+    + ' press the <strong>\u2715</strong> on its right.</p>'
+    + '        <div class="bs-row">'
+    + '          <button id="bs-cols-2" class="bs-btn bs-btn-ghost bs-btn-sm"><span class="bs-btn-ico">\u25A5</span>Add 2 columns</button>'
+    + '          <button id="bs-cols-3" class="bs-btn bs-btn-ghost bs-btn-sm"><span class="bs-btn-ico">\u25A4</span>Add 3 columns</button>'
+    + '        </div>'
+    + '        </div>'
+    + '      </details>'
+    // Syndication connectors moved to the assistant Connections tab; posts now auto-publish to
+    // every connected blog on publish (no per-post panel here). See integrations.js / connection-map.
+    + '      <details class="bs-sec" data-bs-sec="search">'
+    + '<summary class="bs-sec-head"><span class="bs-sec-num">4</span><span class="bs-sec-titles"><span class="bs-sec-title">Search performance</span><span class="bs-sec-sub">Google Search Console, for spotting posts losing traffic</span></span><svg class="bs-sec-chev" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></summary>'
+    + '        <div class="bs-sec-body">'
+    + '        <div id="bs-gsc-status" class="bs-status">Checking&hellip;</div>'
+    + '        <div class="bs-row" style="margin-top:10px;">'
+    + '          <button id="bs-gsc-connect" class="bs-btn bs-btn-ghost bs-btn-sm bs-hidden" type="button">'
+    + '<span class="bs-btn-ico">\uD83D\uDD17</span>Connect Google Search Console</button>'
+    + '          <button id="bs-gsc-disconnect" class="bs-linkbtn bs-hidden" type="button">Disconnect</button>'
+    + '        </div>'
+    + '        <div class="bs-status" style="font-size:11px;margin-top:4px;">Lets your Blog Writer spot posts losing search traffic and flag them for a refresh.</div>'
+    + '        </div>'
+    + '      </details>'
+    + '      <details class="bs-sec" data-bs-sec="widget">'
+    + '<summary class="bs-sec-head"><span class="bs-sec-num">5</span><span class="bs-sec-titles"><span class="bs-sec-title">Blog widget</span><span class="bs-sec-sub">Look, embed code and RSS feed — set up once</span></span><svg class="bs-sec-chev" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></summary>'
+    + '        <div class="bs-sec-body">'
     + '        <div class="bs-field"><label>Accent colour</label><input id="bs-accent" type="color" value="#ec4899"></div>'
     // Options are injected by populateFontPicker() from window.BlogFonts (generated from
     // src/config/blog-fonts.ts). Hand-writing them here is what left the picker at three choices —
@@ -334,80 +437,8 @@
     + '            <button id="bs-rss-copy" class="bs-linkbtn" type="button">Copy</button></div>'
     + '          <div id="bs-rss" class="bs-snippet">Create a widget to get your feed URL.</div>'
     + '          <span class="bs-status" style="font-size:11px;">Published posts only. Media is left out and AI-assisted posts carry the disclosure notice.</span></div>'
-    + '      </div>'
-    // ONE media panel, not two. There used to be a "Feature image" row of five buttons and an
-    // "Inline body media" row of the same five, differing only in where the result landed — so the
-    // author had to decide the destination BEFORE seeing the media, and the same five sources were
-    // on screen twice. Now there is a single set of sources; every result lands in one picker, and
-    // each tile carries the two destinations it can go to (click → into the post, "Feature" → the
-    // hero). The hero slot is also a drop target, so a drag does the same job.
-    + '      <div class="bs-panel">'
-    + '        <h3>Images &amp; media</h3>'
-    + '        <p class="bs-help">Find something below, then <strong>click it to drop it into your post</strong>'
-    + ' — or drag it onto the feature image, or press <strong>Feature</strong> on the tile.</p>'
-    + '        <div class="bs-row">'
-    + '          <button id="bs-media-library" class="bs-btn bs-btn-ghost bs-btn-sm"><span class="bs-btn-ico">\uD83D\uDDC2</span>Library</button>'
-    + '          <button id="bs-media-upload" class="bs-btn bs-btn-ghost bs-btn-sm"><span class="bs-btn-ico">\u2B06\uFE0F</span>Upload</button>'
-    + '          <button id="bs-media-canva" class="bs-btn bs-btn-ghost bs-btn-sm"><span class="bs-btn-ico">\uD83C\uDFA8</span>Canva</button>'
-    // These two are the assistant doing the work, not an anonymous "AI" — the label is rewritten
-    // with the assistant's real name by applyAssistantNaming() as soon as one resolves.
-    + '          <button id="bs-media-pexels" class="bs-btn bs-btn-ghost bs-btn-sm"><span class="bs-btn-ico">\uD83D\uDD0D</span>'
-    + '<span data-bs-assistant-label="stock">Ask your assistant to search stock</span></button>'
-    + '          <button id="bs-media-ai" class="bs-btn bs-btn-ghost bs-btn-sm">'
-    + '<img src="/images/BeMoreSwan_SwanAI.png" alt="" style="width:15px;height:15px;object-fit:contain;">'
-    + '<span data-bs-assistant-label="generate">Ask your assistant to generate</span></button>'
-    // Images, video and audio all land in the body; the hero stays images-only (blog-media rejects
-    // anything else for the feature role). Audio is upload-only by decision (plan §7.4) — there is
-    // no stock provider and no AI generation for it. MIME list mirrors content-upload-url.ts's
-    // ALLOWED_MIME_TYPES — widening it here without widening that would just move the rejection to
-    // a worse place.
-    + '          <input type="file" id="bs-media-upload-input" class="bs-hidden" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm,audio/mpeg,audio/mp4,audio/wav,audio/webm,audio/ogg">'
     + '        </div>'
-    // AI image generation is a capability an org may simply not have. The button above is
-    // disabled on open in that case and this line says why, so nobody writes a prompt only to
-    // meet generate-ai-image's 403 — see applyMediaCapabilities().
-    + '        <p id="bs-ai-unavailable" class="bs-help bs-hidden" style="margin-top:10px;"></p>'
-    + '        <div id="bs-ai-form" class="bs-field bs-hidden" style="margin-top:12px;">'
-    + '          <input id="bs-ai-prompt" placeholder="Describe the image\u2026">'
-    + '          <button id="bs-ai-go" class="bs-btn bs-btn-ghost bs-btn-sm" style="margin-top:8px;">Generate</button></div>'
-    + '        <div id="bs-pexels-form" class="bs-field bs-hidden" style="margin-top:12px;">'
-    + '          <input id="bs-pexels-query" placeholder="Search stock photos\u2026">'
-    + '          <button id="bs-pexels-go" class="bs-btn bs-btn-ghost bs-btn-sm" style="margin-top:8px;">Search</button></div>'
-    + '        <div id="bs-media-picker" class="bs-media-picker bs-hidden"></div>'
-    + '        <span id="bs-media-status" class="bs-status"></span>'
-    // The hero. It was previously an unexplained empty box above a row of buttons, with no hint
-    // that it was fillable, and a "Remove" that hid among five identical grey buttons.
-    + '        <div class="bs-subhead">Feature image</div>'
-    + '        <p class="bs-help">The banner shown at the top of the published post and on your blog'
-    + ' index. Drag an image onto the box below, or press <strong>Feature</strong> on any tile above.</p>'
-    + '        <div id="bs-feature-drop" class="bs-feature-drop">'
-    + '          <div id="bs-feature-preview" class="bs-feature-empty">Drop an image here to make it the feature image.</div>'
-    + '          <button type="button" id="bs-feature-remove" class="bs-feature-remove bs-hidden">\u2715 Remove feature image</button>'
-    + '        </div>'
-    // Column layouts. Media and text blocks are then dragged in by their handles; the row stacks
-    // on a phone.
-    + '        <div class="bs-subhead">Side-by-side layout</div>'
-    + '        <p class="bs-help">Adds an empty row of columns after the section you last clicked in.'
-    + ' Fill it by dragging paragraphs or images into a column using the <strong>\u22EE\u22EE</strong> handle'
-    + ' that appears to the left of each section. To take a row out again, hover it in the draft and'
-    + ' press the <strong>\u2715</strong> on its right.</p>'
-    + '        <div class="bs-row">'
-    + '          <button id="bs-cols-2" class="bs-btn bs-btn-ghost bs-btn-sm"><span class="bs-btn-ico">\u25A5</span>Add 2 columns</button>'
-    + '          <button id="bs-cols-3" class="bs-btn bs-btn-ghost bs-btn-sm"><span class="bs-btn-ico">\u25A4</span>Add 3 columns</button>'
-    + '        </div>'
-    + '      </div>'
-    // Syndication connectors moved to the assistant Connections tab; posts now auto-publish to
-    // every connected blog on publish (no per-post panel here). See integrations.js / connection-map.
-    + '      <div class="bs-panel" style="margin-top:16px;">'
-    + '        <h3>Search performance</h3>'
-    + '        <div id="bs-gsc-status" class="bs-status">Checking&hellip;</div>'
-    + '        <div class="bs-row" style="margin-top:10px;">'
-    + '          <button id="bs-gsc-connect" class="bs-btn bs-btn-ghost bs-btn-sm bs-hidden" type="button">'
-    + '<span class="bs-btn-ico">\uD83D\uDD17</span>Connect Google Search Console</button>'
-    + '          <button id="bs-gsc-disconnect" class="bs-linkbtn bs-hidden" type="button">Disconnect</button>'
-    + '        </div>'
-    + '        <div class="bs-status" style="font-size:11px;margin-top:4px;">Lets your Blog Writer spot posts losing search traffic and flag them for a refresh.</div>'
-    + '      </div>'
+    + '      </details>'
     + '    </div>'
     + '    <div>'
     + '      <div class="bs-row" style="justify-content:space-between;margin-bottom:4px;">'
@@ -504,6 +535,25 @@
     + '          <button id="bs-approve" class="bs-btn bs-btn-outline">Let <span id="bs-approve-name">your assistant</span> schedule it</button>'
     + '          <button id="bs-pick-time" class="bs-btn bs-btn-ghost">Pick a time myself</button>'
     + '          <button id="bs-publish" class="bs-btn bs-btn-primary">Publish now</button>'
+    // Only on an assistant-written draft that is still undecided (syncRejectButton). The social
+    // Review has had "reject, say why, and the assistant learns" since reject-post.ts; a blog draft
+    // could only be approved or archived, and archiving taught the Blog Writer nothing.
+    + '          <button id="bs-reject" class="bs-btn bs-btn-danger bs-hidden" type="button">Reject\u2026</button>'
+    + '        </div>'
+    + '        <div id="bs-reject-form" class="bs-hidden" style="margin-top:12px;">'
+    + '          <div class="bs-field"><label for="bs-reject-reason">What\u2019s wrong with this draft?</label>'
+    + '            <textarea id="bs-reject-reason" rows="3" maxlength="1000"'
+    + '              placeholder="e.g. Too generic \u2014 write for small care providers, and use our own experience rather than statistics"></textarea></div>'
+    + '          <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin-top:6px;">'
+    + '            <input id="bs-reject-rule" type="checkbox" checked style="margin-top:3px;">'
+    + '            <span>Teach <span id="bs-reject-name">your assistant</span> \u2014 apply this to future posts</span></label>'
+    + '          <label id="bs-reject-redraft-row" style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin-top:6px;">'
+    + '            <input id="bs-reject-redraft" type="checkbox" checked style="margin-top:3px;">'
+    + '            <span>Write a replacement for this slot</span></label>'
+    + '          <div class="bs-row" style="margin-top:10px;">'
+    + '            <button id="bs-reject-go" class="bs-btn bs-btn-danger" type="button">Reject draft</button>'
+    + '            <button id="bs-reject-cancel" class="bs-btn bs-btn-ghost" type="button">Cancel</button>'
+    + '          </div>'
     + '        </div>'
     + '        <div id="bs-schedule-picker" class="bs-hidden" style="margin-top:12px;">'
     + '          <div class="bs-field"><label>Scheduled date &amp; time</label>'
@@ -680,6 +730,7 @@
     el('bs-repush').classList.add('bs-hidden');
     el('bs-schedule-picker').classList.add('bs-hidden');
     el('bs-schedule-at').value = '';
+    syncRejectButton(null);
     setStatus('bs-save-status', 'Creating…');
     api('blog-posts', { method: 'POST', body: JSON.stringify({ title: 'Untitled draft', assistantId: state.assistantId }) }).then(function (res) {
       if (!res.ok) { setBanner('bs-action-status', 'Could not create a draft: ' + ((res.body && res.body.error) || 'please try again.'), 'error'); return; }
@@ -828,6 +879,10 @@
       }
       state.editor.setMarkdown(md);
       refreshReadout(md);                      // setMarkdown doesn't fire onChange
+      // The worker writes SEO alongside the body now (process-blog-jobs). Show it — unless the
+      // author has already typed their own while waiting.
+      var drafted = res.body.post;
+      if (!el('bs-meta-title').value.trim() && !el('bs-meta-desc').value.trim()) populateSeo(drafted);
       setStatus('bs-ai-draft-status', '');
       el('bs-ai-draft-form').classList.add('bs-hidden');
 
@@ -841,6 +896,42 @@
     });
   }
 
+  // Statuses a human can still reject (mirrors REJECTABLE in reject-blog-post.ts).
+  var REJECTABLE = ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled'];
+
+  // Reject is for judging something the ASSISTANT wrote. The author's own draft has nobody to teach,
+  // so it gets Archive, as before.
+  function syncRejectButton(post) {
+    var show = !!(post && post.assistantId != null && post.generationReason && REJECTABLE.indexOf(post.status) !== -1);
+    el('bs-reject').classList.toggle('bs-hidden', !show);
+    el('bs-reject-form').classList.add('bs-hidden');
+    // A replacement can only be written for a slot still ahead of us (reject-blog-post.ts).
+    var future = !!(post && post.publishDate && new Date(post.publishDate).getTime() > Date.now() + 3600000);
+    el('bs-reject-redraft-row').classList.toggle('bs-hidden', !future);
+    el('bs-reject-redraft').checked = future;
+  }
+
+  // An assistant-written post that arrives without search metadata gets it now, once, on open —
+  // chat-saved drafts and anything drafted before every path generated SEO. Only fills fields that
+  // are still empty, so nothing the author typed is overwritten.
+  function autoGenerateSeo(post) {
+    if (!post || !post.bodyMarkdown || !post.generationReason || post.status === 'published') return;
+    if ((post.metaTitle || '').trim() || (post.metaDescription || '').trim()) return;
+    var id = post.id;
+    setStatus('bs-seo-status', 'Writing the search title and description\u2026');
+    api('generate-seo', { method: 'POST', body: JSON.stringify({ blogPostId: id }) }).then(function (res) {
+      if (state.postId !== id) return;
+      if (!res.ok) { setStatus('bs-seo-status', 'SEO not written yet \u2014 press Generate SEO to try again.'); return; }
+      if (res.body.metaTitle && !el('bs-meta-title').value.trim()) el('bs-meta-title').value = res.body.metaTitle;
+      if (res.body.metaDescription && !el('bs-meta-desc').value.trim()) el('bs-meta-desc').value = res.body.metaDescription;
+      refreshSeoCounts();
+      syncSeoButton();
+      setStatus('bs-seo-status', 'SEO written by your assistant \u2014 edit it if you like.');
+    }).catch(function () {
+      setStatus('bs-seo-status', '');
+    });
+  }
+
   function loadExistingPost(id) {
     setStatus('bs-save-status', 'Loading…');
     api('blog-posts?id=' + encodeURIComponent(id), { method: 'GET' }).then(function (res) {
@@ -849,6 +940,8 @@
       if (post.assistantId != null) state.assistantId = post.assistantId;
       openWorkspace(post.id, post.title || 'Untitled draft', post.bodyMarkdown || '', post);
       setStatus('bs-save-status', 'Saved');
+      syncRejectButton(post);
+      autoGenerateSeo(post);
       if (post.status) setBanner('bs-action-status', 'Status: ' + post.status);
       // A post already on the calendar can be pulled back off it.
       if (post.status === 'scheduled') el('bs-unschedule').classList.remove('bs-hidden');
@@ -1739,6 +1832,44 @@
       api('blog-posts?id=' + encodeURIComponent(state.postId), { method: 'DELETE' }).then(function (res) {
         if (res.ok) { notifyChanged(); closeBlogStudio(); }
         else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not archive this draft.', 'error');
+      });
+    });
+
+    // ── Reject, say why, and the assistant learns (reject-blog-post.ts) ──────────────────────
+    el('bs-reject').addEventListener('click', function () {
+      el('bs-schedule-picker').classList.add('bs-hidden');
+      el('bs-reject-name').textContent = assistantName() || 'your assistant';
+      el('bs-reject-form').classList.remove('bs-hidden');
+      el('bs-reject-reason').focus();
+    });
+    el('bs-reject-cancel').addEventListener('click', function () {
+      el('bs-reject-form').classList.add('bs-hidden');
+      setBanner('bs-action-status', '');
+    });
+    el('bs-reject-reason').addEventListener('input', function () { setBanner('bs-action-status', ''); });
+    el('bs-reject-go').addEventListener('click', function () {
+      if (!state.postId) return;
+      var reason = el('bs-reject-reason').value.trim();
+      if (!reason) {
+        setBanner('bs-action-status', 'Say what is wrong with this draft first \u2014 that is what your assistant learns from.', 'error');
+        el('bs-reject-reason').focus();
+        return;
+      }
+      var name = assistantName() || 'Your assistant';
+      setBanner('bs-action-status', 'Rejecting\u2026');
+      api('reject-blog-post', { method: 'POST', body: JSON.stringify({
+        id: state.postId,
+        feedbackText: reason,
+        applyAsRule: el('bs-reject-rule').checked,
+        redraft: el('bs-reject-redraft').checked && !el('bs-reject-redraft-row').classList.contains('bs-hidden'),
+      }) }).then(function (res) {
+        if (!res.ok) { setBanner('bs-action-status', (res.body && res.body.error) || 'Could not reject this draft.', 'error'); return; }
+        var msg = 'Draft rejected.'
+          + (res.body.ruleId ? ' ' + name + ' will remember your feedback.' : '')
+          + (res.body.redraftQueued ? ' A replacement is being written for this slot.' : '');
+        if (window.showToast) window.showToast(msg, { icon: '\u2713' });
+        notifyChanged();
+        closeBlogStudio();
       });
     });
 
