@@ -15,9 +15,10 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { and, desc, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { blogPosts, organisations } from '../../db/schema';
+import { aiAssistants, blogPosts, organisations } from '../../db/schema';
 import { logAiUsage } from './ai-usage';
 import { buildInspoBlock } from './inspo-profile';
+import { pickInspoTopic } from './inspo-topics';
 import { currentDatePromptBlock } from './current-date-prompt';
 import { parseModelJson } from './model-json';
 
@@ -43,6 +44,9 @@ export interface IdeateBlogTopicOptions {
     organisationId: number;
     /** Whose AI usage this run is billed to — the assistant's owner. */
     userId: number;
+    /** The slot being filled. Decides whether this draft is built around an Inspo item
+     *  (src/utils/inspo-topics.ts); omitted = never. */
+    slot?: Date | string | null;
 }
 
 
@@ -72,7 +76,7 @@ export async function ideateBlogTopic(
     db: Db,
     opts: IdeateBlogTopicOptions,
 ): Promise<BlogTopicIdea | null> {
-    const { assistantId, organisationId, userId } = opts;
+    const { assistantId, organisationId, userId, slot } = opts;
 
     const [org] = await db
         .select({
@@ -88,7 +92,19 @@ export async function ideateBlogTopic(
     // nothing when nobody is watching. Inspo alone is enough to proceed — it's user-authored signal.
     const hasOrgContext = !!(org?.businessDescription || org?.targetAudience);
 
-    const inspoBlock = await buildInspoBlock(db, { assistantId, organisationId });
+    // Inspo as a SUBJECT on a share of slots — see inspo-topics.ts. The style block below is
+    // unchanged; this is the part of the library that says what to write ABOUT.
+    const [asst] = await db
+        .select({ configuration: aiAssistants.configuration })
+        .from(aiAssistants)
+        .where(eq(aiAssistants.id, assistantId))
+        .limit(1);
+    const inspoTopic = await pickInspoTopic(db, {
+        assistantId, organisationId, slot, configuration: asst?.configuration ?? null, artifact: 'blog post',
+    });
+    if (inspoTopic) console.log(`ideateBlogTopic: assistant ${assistantId} slot built around inspo item ${inspoTopic.itemId}`);
+
+    const inspoBlock = await buildInspoBlock(db, { assistantId, organisationId, topic: inspoTopic?.retrievalQuery ?? null });
     if (!hasOrgContext && !inspoBlock) return null;
 
     // Recent titles across the whole org, not just this assistant: a duplicate is a duplicate to the
@@ -107,6 +123,7 @@ export async function ideateBlogTopic(
         recent.length
             ? `Already written (choose something genuinely different):\n${recent.map(r => `- ${r.title}`).join('\n')}`
             : 'Nothing has been published yet — a strong foundational post is a good choice.',
+        inspoTopic?.brief ?? '',
     ].filter(Boolean).join('\n\n');
 
     try {

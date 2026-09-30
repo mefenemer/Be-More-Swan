@@ -11,6 +11,7 @@ import { enqueueBlogGapFill } from '../../src/utils/blog-gap-fill';
 import { BLOG_WRITER_ROLE_KEYS, SMM_ROLE_KEYS } from '../../src/constants/roles';
 import { MIN_HORIZON_DAYS, MAX_HORIZON_DAYS } from '../../src/config/posting-cadence';
 import { normaliseAssistantColor } from '../../src/config/assistant-colors';
+import { INSPO_TOPIC_CONFIG_KEY } from '../../src/utils/inspo-topics';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /** Everything the post-save gap-fill needs, captured from inside the write transaction. */
@@ -139,6 +140,19 @@ export default withLambda(async (event) => {
                 updatePayload.configuration = {
                     ...updatePayload.configuration,
                     avatarColor: existingConfig.avatarColor,
+                };
+            }
+            // Same fate, same fix: the Inspo tab's topic frequency is written only by inspo-items.ts
+            // (PATCH), and no form here knows about it. Dropping it would silently reset a user's
+            // "Never" to the default, which turns inspo topics back ON.
+            if (
+                Object.prototype.hasOwnProperty.call(existingConfig, INSPO_TOPIC_CONFIG_KEY)
+                && updatePayload.configuration
+                && !Object.prototype.hasOwnProperty.call(updatePayload.configuration, INSPO_TOPIC_CONFIG_KEY)
+            ) {
+                updatePayload.configuration = {
+                    ...updatePayload.configuration,
+                    [INSPO_TOPIC_CONFIG_KEY]: existingConfig[INSPO_TOPIC_CONFIG_KEY],
                 };
             }
             await tx.update(aiAssistants)

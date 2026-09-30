@@ -61,7 +61,18 @@
   const state = {
     inspo: null, assistantId: null, roleKey: null, assistantName: null, assistantRole: null,
     items: [], embeddingsConfigured: false, editingId: null,
+    // How often an item becomes what a scheduled draft is ABOUT (src/utils/inspo-topics.ts).
+    // Mirrors DEFAULT_INSPO_TOPIC_FREQUENCY until the server says otherwise.
+    topicFrequency: 'occasionally',
   };
+
+  // Labels for the per-assistant topic frequency. Keys match INSPO_TOPIC_FREQUENCIES in
+  // src/utils/inspo-topics.ts; the shares quoted match INSPO_TOPIC_SHARE there.
+  const TOPIC_FREQUENCY_OPTIONS = [
+    { value: 'never', label: 'Never — style only' },
+    { value: 'occasionally', label: 'Occasionally — about 1 in 3 scheduled drafts' },
+    { value: 'often', label: 'Often — about 1 in 2 scheduled drafts' },
+  ];
 
   // ── "Draft one from this": hand an inspo item to the assistant in chat ───────────────────────
   // The tab collected taste and then did nothing with it on demand: inspo steered the NEXT
@@ -152,6 +163,7 @@
     if (!res.ok) throw new Error(data.error || 'Could not load your Inspo.');
     state.items = data.items || [];
     state.embeddingsConfigured = !!data.embeddingsConfigured;
+    if (TOPIC_FREQUENCY_OPTIONS.some((o) => o.value === data.topicFrequency)) state.topicFrequency = data.topicFrequency;
   }
 
   // ── Dictation (AC4) ─────────────────────────────────────────────────────────
@@ -490,6 +502,19 @@
           Add inspo
         </button>
       </div>
+      <div class="-mt-2 mb-6 bg-white rounded-2xl border border-gray-200 shadow-sm p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+        <div class="min-w-0 flex-1">
+          <label class="block text-sm font-bold text-gray-900" for="inspo-topic-frequency">Build scheduled drafts around my inspo</label>
+          <p class="text-xs text-gray-500 mt-0.5">Every draft follows your inspo's style. This decides how often one of your active items also becomes what a draft is <em>about</em> — the item's note is treated as your brief.</p>
+        </div>
+        <div class="shrink-0">
+          <select id="inspo-topic-frequency" data-inspo-topic-frequency
+            class="w-full sm:w-auto px-3 py-2 border border-gray-200 rounded-lg text-sm font-semibold text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-300">
+            ${TOPIC_FREQUENCY_OPTIONS.map((o) => `<option value="${o.value}"${o.value === state.topicFrequency ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}
+          </select>
+          <p class="hidden mt-1 text-xs font-semibold" data-inspo-topic-status></p>
+        </div>
+      </div>
       ${state.embeddingsConfigured ? '' : `
       <p class="-mt-3 mb-5 text-xs text-gray-400">Semantic matching isn't configured on this workspace yet, so your inspo is matched by keyword — your assistant still studies all of it.</p>`}
     `;
@@ -498,6 +523,27 @@
       document.getElementById('inspo-composer-host')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   }
+
+  // Bound once at load, on document — the toolbar is re-rendered, so a listener bound in
+  // renderToolbar would depend on every render path reaching it. Saves on change: no Save button.
+  // (Guarded: tests/inspo-draft-from-item.test.ts loads this file with a stub document.)
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') document.addEventListener('change', async (e) => {
+    const select = e.target && e.target.closest && e.target.closest('[data-inspo-topic-frequency]');
+    if (!select || !state.assistantId) return;
+    const status = select.parentElement.querySelector('[data-inspo-topic-status]');
+    const previous = state.topicFrequency;
+    select.disabled = true;
+    try {
+      const data = await api('PATCH', { assistantId: state.assistantId, topicFrequency: select.value });
+      state.topicFrequency = data.topicFrequency;
+      if (status) { status.textContent = 'Saved'; status.className = 'block mt-1 text-xs font-semibold text-emerald-700'; }
+    } catch (err) {
+      select.value = previous;
+      if (status) { status.textContent = err.message; status.className = 'block mt-1 text-xs font-semibold text-red-600'; }
+    } finally {
+      select.disabled = false;
+    }
+  });
 
   async function init({ inspo, assistantId, roleKey, assistantName, assistantRole }) {
     if (!inspo || !assistantId) return;
@@ -510,6 +556,7 @@
     state.assistantRole = assistantRole || null;
     state.items = [];
     state.editingId = null;
+    state.topicFrequency = 'occasionally';
     closeComposer();
     const host = document.getElementById('inspo-list-host');
     if (host) host.innerHTML = '<p class="text-sm text-gray-400">Loading…</p>';

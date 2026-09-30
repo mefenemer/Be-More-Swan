@@ -500,7 +500,13 @@ window.showComplianceModals = function showComplianceModals(force) {
           <button type="button" id="gp-ai-find-go" onclick="gpAiRunFind()"
             class="px-3 py-1.5 text-xs font-bold rounded-lg bg-sky-500 text-white hover:opacity-80 transition">Search</button>
         </div>
-        <p class="text-[11px] text-gray-400 mt-1">Leave blank to search on the post's own topic.</p>
+        <div class="flex items-center justify-between gap-2 mt-1">
+          <p class="text-[11px] text-gray-400">Leave blank to search on the post's own topic.</p>
+          <!-- Shown once a search has results. Same words, different results: it skips everything
+               already shown and pages deeper (see collectCandidates in src/utils/pexels.ts). -->
+          <button type="button" id="gp-ai-find-more" onclick="gpAiRunFind(true)"
+            class="hidden shrink-0 px-2.5 py-1 text-[11px] font-bold border border-sky-300 text-sky-700 hover:bg-sky-50 rounded-lg transition cursor-pointer">↻ Show different <span id="gp-ai-find-more-noun">photos</span></button>
+        </div>
       </div>
       <!-- Library picker (shown after "Use my own") — already-uploaded content-assets -->
       <!-- Asked BEFORE a search or a generation: both cost time (and credits), and there is no undo
@@ -19129,31 +19135,65 @@ function _gpAiFindAfterIntent() {
         : 'e.g. barista pouring latte art, warm tones';
 
     box.classList.remove('hidden');
+    // The "different photos" offer belongs to results on screen — none showing, no offer.
+    const more = document.getElementById('gp-ai-find-more');
+    if (more && document.getElementById('gp-ai-pexels')?.classList.contains('hidden')) more.classList.add('hidden');
     input.focus();
     input.select();
 }
 
-/** Run the stock search using whatever is in the box. Blank falls back to the post's own topic. */
-async function gpAiRunFind() {
+// The search behind the results on screen, so "Show different photos" can ask for the same thing
+// minus what was already offered. Keyed by post + media type + terms: change any of them and it is
+// a new search, not "more of the last one".
+let _gpAiFindState = null;
+
+/** Run the stock search using whatever is in the box. Blank falls back to the post's own topic.
+ *  more=true → same terms, different results (everything already shown is excluded). */
+async function gpAiRunFind(more = false) {
     if (!_gpCurrentPostId) return;
     const noun = _gpAiMediaType === 'video' ? 'video' : 'photo';
     const topic = (document.getElementById('gp-ai-find-query')?.value || '').trim();
+    const key = `${_gpCurrentPostId}|${_gpAiMediaType}|${topic.toLowerCase()}`;
+    if (!more || !_gpAiFindState || _gpAiFindState.key !== key) {
+        more = false;
+        _gpAiFindState = { key, keywords: '', shown: [] };
+    }
+    const moreBtn = document.getElementById('gp-ai-find-more');
+    const moreNoun = document.getElementById('gp-ai-find-more-noun');
+    if (moreNoun) moreNoun.textContent = `${noun}s`;
+    if (moreBtn) moreBtn.disabled = true;
 
     gpAiMediaBusy(true);
-    gpAiMediaStatus(topic ? `Searching for “${topic}”…` : `Searching for a ${noun}…`);
+    gpAiMediaStatus(more
+        ? `Finding different ${noun}s…`
+        : (topic ? `Searching for “${topic}”…` : `Searching for a ${noun}…`));
     try {
         const res = await fetch('/.netlify/functions/pexels-search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             // topic omitted when blank so the server falls back to the post's own content —
             // sending an empty string would trip its "topic or postId required" guard.
-            body: JSON.stringify({ postId: _gpCurrentPostId, mediaType: _gpAiMediaType, ...(topic ? { topic } : {}) }),
+            body: JSON.stringify({
+                postId: _gpCurrentPostId, mediaType: _gpAiMediaType, ...(topic ? { topic } : {}),
+                // Resend the keywords the first search used: re-deriving them from the topic is a
+                // model call that can land on different words, which is a new search, not "more".
+                ...(more ? { exclude: _gpAiFindState.shown, ...(_gpAiFindState.keywords ? { keywords: _gpAiFindState.keywords } : {}) } : {}),
+            }),
         });
         const d = await res.json().catch(() => ({}));
+        if (moreBtn) moreBtn.disabled = false;
         if (res.status === 429) { gpAiMediaStatus(d.error || 'Stock search is resting — try again shortly.', 'error'); gpAiMediaBusy(false); return; }
         if (!res.ok) { gpAiMediaStatus(d.error || `Could not search for a ${noun}.`, 'error'); gpAiMediaBusy(false); return; }
         const candidates = d.candidates || [];
+        if (!candidates.length && more) {
+            // Keep the current results on screen — they are still pickable.
+            gpAiMediaStatus(`That's every ${noun} we can offer for these words — try describing it differently above.`, 'error');
+            moreBtn?.classList.add('hidden');
+            gpAiMediaBusy(false);
+            return;
+        }
         if (!candidates.length) {
+            moreBtn?.classList.add('hidden');
             // Name the terms that found nothing — "no results for this topic" gives no clue what to
             // change, and the whole point of the box is that the terms are now yours to fix.
             gpAiMediaStatus(topic
@@ -19162,10 +19202,14 @@ async function gpAiRunFind() {
             gpAiMediaBusy(false);
             return;
         }
+        _gpAiFindState.keywords = d.keywords || _gpAiFindState.keywords;
+        _gpAiFindState.shown.push(...candidates.map(c => c.providerAssetId).filter(Boolean));
         gpAiRenderPexels(candidates);
+        moreBtn?.classList.remove('hidden');
         gpAiMediaStatus(`Pick a ${noun} to attach it to your post, or refine your search above.`);
         gpAiMediaBusy(false);
     } catch {
+        if (moreBtn) moreBtn.disabled = false;
         gpAiMediaStatus('Network error — please try again.', 'error');
         gpAiMediaBusy(false);
     }

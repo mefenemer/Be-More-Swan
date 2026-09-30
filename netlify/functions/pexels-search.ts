@@ -1,6 +1,8 @@
 // pexels-search.ts — interactive Pexels image sourcing for the post-creation UI (US1/US2/US3).
 //
-// POST { topic?, postId?, page? }                  → top-5 unique candidates for the picker.
+// POST { topic?, postId?, keywords?, exclude? }   → top-5 unique candidates for the picker.
+//                                                     "Show different photos" resends the returned
+//                                                     `keywords` plus every id already shown in `exclude`.
 // POST { action:'select', postId, candidate }      → attach the chosen image to the post draft,
 //                                                     appending a Pexels credit line iff the org opts in.
 //
@@ -48,7 +50,7 @@ export default withLambda(async (event) => {
     if (!user) return { statusCode: 403, body: JSON.stringify({ error: 'User not found.' }) };
     const orgId = user.organisationId;
 
-    let body: { action?: string; topic?: string; postId?: number; candidate?: PexelsCandidate | PexelsVideoCandidate; mediaType?: string; dedup?: boolean; applyToGroup?: boolean; append?: boolean };
+    let body: { action?: string; topic?: string; postId?: number; candidate?: PexelsCandidate | PexelsVideoCandidate; mediaType?: string; dedup?: boolean; applyToGroup?: boolean; append?: boolean; keywords?: string; exclude?: unknown };
     try { body = JSON.parse(event.body || '{}'); } catch { body = {}; }
 
     const mediaType: 'image' | 'video' = body.mediaType === 'video' ? 'video' : 'image';
@@ -136,9 +138,16 @@ export default withLambda(async (event) => {
         }
         if (!context) return { statusCode: 400, body: JSON.stringify({ error: 'A topic or postId with content is required.' }) };
 
+        // "Show different photos": the SAME keywords as the first search (re-deriving them with the
+        // model could drift to different words), minus everything already on screen.
+        const keywordsGiven = typeof body.keywords === 'string' ? body.keywords.trim().slice(0, 120) : '';
+        const exclude = Array.isArray(body.exclude)
+            ? body.exclude.filter((x): x is string => typeof x === 'string' && x.length <= 40).slice(0, 200)
+            : [];
+        const opts = { dedup, exclude, ...(keywordsGiven ? { keywords: keywordsGiven } : {}) };
         const { keywords, candidates } = mediaType === 'video'
-            ? await searchUniqueVideos(db, orgId, context, { dedup })
-            : await searchUniqueImages(db, orgId, context, { dedup });
+            ? await searchUniqueVideos(db, orgId, context, opts)
+            : await searchUniqueImages(db, orgId, context, opts);
         return { statusCode: 200, body: JSON.stringify({ keywords, candidates, mediaType }) };
 
     } catch (err) {

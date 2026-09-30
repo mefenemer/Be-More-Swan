@@ -850,6 +850,12 @@ node_bundler = "esbuild"
 [functions.check-content-generation-health]
   schedule = "50 7 * * *"
 
+# Are fal and Anthropic still funded? Every 6h, not daily: the fal lock of 2026-09-28 began at
+# 14:31, and a daily run would have left it for most of a day. The probes cost ~nothing (a free
+# billing read + one 1-token Haiku call). See src/utils/provider-balance.ts.
+[functions.check-provider-balances]
+  schedule = "15 */6 * * *"
+
 # US 5.2: resolve widget A/B hook tests (promote the winning variant) — hourly
 [functions.resolve-ab-tests]
   schedule = "0 * * * *"
@@ -1004,6 +1010,12 @@ node_bundler = "esbuild"
 # are ready. Raise the timeout to Netlify's synchronous max so a slow Flux-2 run completes
 # instead of being killed mid-poll (raw 502). The poll budget in fal-gateway stays under this.
 [functions.generate-ai-image]
+  timeout = 26
+
+# The post editor's "Generate with AI" image button — the same synchronous Fal submit+poll as
+# generate-ai-image (22s poll budget), plus an R2 copy. On the 10s default a slow FLUX run was
+# killed mid-poll: a raw 502 and a refund that never happened.
+[functions.regenerate-post-media]
   timeout = 26
 
 # Assistant chat. One turn is: resolve the tenant, read the assistant + org + history, persist

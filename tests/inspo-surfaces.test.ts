@@ -95,7 +95,7 @@ check('every copy-writing seam calls buildInspoBlock', () => {
 
 check('scheduled jobs fall back to a real topic when there is no context prompt', () => {
     const src = stripComments(read('netlify/functions/process-content-jobs.ts'));
-    const call = span(src, 'const inspoTopic', 'buildInspoBlock', 'the inspo topic resolution');
+    const call = span(src, 'const inspoRetrievalTopic', 'buildInspoBlock', 'the inspo retrieval topic resolution');
 
     assert.match(call, /job\.context_prompt/,
         'The user\'s own context prompt must still win when there is one.');

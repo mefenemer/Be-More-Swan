@@ -205,6 +205,39 @@ export interface SearchOptions {
      * one draft is three extra calls to re-derive words we were already given.
      */
     keywords?: string;
+    /**
+     * Provider ids the user has already been shown for these keywords — "Show different photos".
+     * They are skipped, and the search pages deeper (up to MAX_MORE_PAGES) to find replacements.
+     * Without this the picker could only ever offer page 1's top five: the query is cached, so
+     * searching again returned the identical set.
+     */
+    exclude?: string[];
+}
+
+/** How deep "Show different photos" may page (15 results a page) before saying there are no more. */
+const MAX_MORE_PAGES = 5;
+
+/**
+ * Walk result pages collecting candidates the user may be offered. With no `exclude` this is the
+ * original rule exactly: page 1, and page 2 only when dedup emptied page 1 (US2 AC2.4).
+ */
+async function collectCandidates<T extends { providerAssetId: string }>(
+    db: Db, orgId: number, kind: 'photo' | 'video', keywords: string,
+    { limit, dedup, exclude }: { limit: number; dedup: boolean; exclude: string[] },
+): Promise<T[]> {
+    const skip = new Set(exclude);
+    const out: T[] = [];
+    const maxPages = skip.size ? MAX_MORE_PAGES : (dedup ? 2 : 1);
+    for (let page = 1; page <= maxPages && out.length < limit; page++) {
+        const raw = await cachedSearch<T>(db, kind, keywords, page);
+        if (raw.length === 0) break;   // past the last page
+        const seen = new Set(out.map(c => c.providerAssetId));
+        let fresh = raw.filter(c => !skip.has(c.providerAssetId) && !seen.has(c.providerAssetId));
+        if (dedup) fresh = await filterUnique(db, orgId, fresh);
+        out.push(...fresh);
+        if (!skip.size && out.length > 0) break;
+    }
+    return out.slice(0, limit);
 }
 
 export interface SearchResult { keywords: string; candidates: PexelsCandidate[]; }
@@ -216,22 +249,15 @@ export async function searchUniqueImages(
     db: Db,
     orgId: number,
     context: string,
-    { limit = 5, dedup = true, keywords: given }: SearchOptions = {},
+    { limit = 5, dedup = true, keywords: given, exclude = [] }: SearchOptions = {},
 ): Promise<SearchResult> {
     const keywords = given?.trim() || await generateImageKeywords(context);
     if (!keywords) return { keywords, candidates: [] };
-
-    const page1 = await cachedSearch<PexelsCandidate>(db, 'photo', keywords, 1);
     // The never-reuse rule is a social-feed guarantee (posted_assets). Callers that don't share
-    // that feed — e.g. blog hero images — opt out and draw from the full stock pool.
-    if (!dedup) return { keywords, candidates: page1.slice(0, limit) };
-
-    let unique = await filterUnique(db, orgId, page1);
-    if (unique.length === 0) {
-        // US2 AC2.4: first page was all duplicates — automatically request page 2.
-        unique = await filterUnique(db, orgId, await cachedSearch<PexelsCandidate>(db, 'photo', keywords, 2));
-    }
-    return { keywords, candidates: unique.slice(0, limit) };
+    // that feed — e.g. blog hero images — opt out (dedup:false) and draw from the full stock pool.
+    // US2 AC2.4 (page 2 when page 1 is all duplicates) lives in collectCandidates.
+    const candidates = await collectCandidates<PexelsCandidate>(db, orgId, 'photo', keywords, { limit, dedup, exclude });
+    return { keywords, candidates };
 }
 
 // Video equivalent — same keyword extraction + cache + per-org dedup, against the Pexels video API.
@@ -239,19 +265,12 @@ export async function searchUniqueVideos(
     db: Db,
     orgId: number,
     context: string,
-    { limit = 5, dedup = true, keywords: given }: SearchOptions = {},
+    { limit = 5, dedup = true, keywords: given, exclude = [] }: SearchOptions = {},
 ): Promise<VideoSearchResult> {
     const keywords = given?.trim() || await generateImageKeywords(context);
     if (!keywords) return { keywords, candidates: [] };
-
-    const page1 = await cachedSearch<PexelsVideoCandidate>(db, 'video', keywords, 1);
-    if (!dedup) return { keywords, candidates: page1.slice(0, limit) };
-
-    let unique = await filterUnique(db, orgId, page1);
-    if (unique.length === 0) {
-        unique = await filterUnique(db, orgId, await cachedSearch<PexelsVideoCandidate>(db, 'video', keywords, 2));
-    }
-    return { keywords, candidates: unique.slice(0, limit) };
+    const candidates = await collectCandidates<PexelsVideoCandidate>(db, orgId, 'video', keywords, { limit, dedup, exclude });
+    return { keywords, candidates };
 }
 
 // US3 AC3.3: subtle, non-intrusive attribution line appended to the draft.

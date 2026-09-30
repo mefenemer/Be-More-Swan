@@ -8,6 +8,8 @@
 //  POST   { assistantId, kind, body, title?, userNote? }  → create + chunk + embed
 //  PUT    { id, title?, body?, userNote?, isActive? }     → update; body changes re-ingest
 //  DELETE { id }              → remove item, its chunks and GDPR map rows
+//  PATCH  { assistantId, topicFrequency }  → how often inspo becomes a post's SUBJECT
+//                              ('never' | 'occasionally' | 'often'; see src/utils/inspo-topics.ts)
 //
 // Kinds:
 //   'text'/'voice' → the body IS the input (voice is transcribed client-side by the Web
@@ -25,13 +27,14 @@
 // Auth: aura_session + requireTenant; every query is tenant-scoped and the assistant
 // is ownership-checked (IDOR guard), mirroring kb-articles.ts.
 
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, inspoItems, inspoChunks, inspoStyleProfiles, vectorEmbeddings, workspaceAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { chunkArticle, embedTexts, embeddingsConfigured } from '../../src/utils/kb-embeddings';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { INSPO_TOPIC_CONFIG_KEY, isInspoTopicFrequency, readInspoTopicFrequency } from '../../src/utils/inspo-topics';
 
 const WRITABLE_KINDS = new Set(['text', 'voice', 'url', 'file']);
 // Kinds whose text is already in hand — everything else needs the extraction worker.
@@ -240,8 +243,15 @@ export default withLambda(async (event) => {
                 .where(and(eq(inspoItems.organisationId, orgId), eq(inspoItems.aiAssistantId, assistantId)))
                 .orderBy(desc(inspoItems.updatedAt), asc(inspoItems.id));
 
+            const [asst] = await db
+                .select({ configuration: aiAssistants.configuration })
+                .from(aiAssistants)
+                .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId)))
+                .limit(1);
+
             return json(200, {
                 embeddingsConfigured: embeddingsConfigured(),
+                topicFrequency: readInspoTopicFrequency(asst?.configuration),
                 items: rows.map((i) => ({
                     id: i.id,
                     kind: i.kind,
@@ -393,6 +403,26 @@ export default withLambda(async (event) => {
                     ...result,
                 },
             });
+        }
+
+        if (event.httpMethod === 'PATCH') {
+            let body: { assistantId?: number; topicFrequency?: unknown };
+            try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
+
+            const assistantId = Number(body.assistantId);
+            if (!isInspoTopicFrequency(body.topicFrequency)) return json(400, { error: 'Unknown frequency.' });
+            if (!(await ownsAssistant(assistantId))) return json(404, { error: 'Assistant not found.' });
+
+            // Merged in SQL, never read-modify-write: configuration is shared with every other
+            // assistant setting, and replacing it from a copy read here would race them.
+            await db.update(aiAssistants)
+                .set({
+                    configuration: sql`COALESCE(${aiAssistants.configuration}, '{}'::jsonb) || ${JSON.stringify({ [INSPO_TOPIC_CONFIG_KEY]: body.topicFrequency })}::jsonb`,
+                    updatedAt: new Date(),
+                })
+                .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId)));
+
+            return json(200, { topicFrequency: body.topicFrequency });
         }
 
         if (event.httpMethod === 'DELETE') {
