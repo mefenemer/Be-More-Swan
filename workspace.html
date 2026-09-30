@@ -5558,7 +5558,7 @@ function _rqSetAttentionBadge(count) {
 // ── Review Queue ─────────────────────────────────────────────────────────────
 // Simple lifecycle: top columns (Review → Approved → Scheduled → Posted → Archived),
 // each showing collapsible content groups. For the Social Media Assistant the only group
-// is "Posts"; other assistant types can define their own groups later.
+// is "Social media posts"; other assistant types can define their own groups later.
 
 // Column = a lifecycle stage. postStatus filters scheduled_posts.
 // Kept in step with _DETAIL_RQ_COLUMNS in assistants.js — the same queue, scoped to one assistant
@@ -5584,7 +5584,7 @@ const RQ_COLUMNS = {
 
 // Content groups for this assistant type. Each: how to fetch its items for a column + how to render.
 const RQ_GROUPS = [
-    { key: 'posts', label: 'Posts', empty: 'No posts here.',  emptyReview: 'No posts awaiting review.' },
+    { key: 'posts', label: 'Social media posts', empty: 'No social media posts here.',  emptyReview: 'No social media posts awaiting review.' },
 ];
 
 // Content Engine — blog posts share the same lifecycle columns, shown as their own group only when

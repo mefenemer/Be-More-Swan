@@ -19,9 +19,16 @@
 // JSON for one awkward prompt, is a real failure and must stay failed — requeuing those would run
 // them three more times to reach the same answer, and bury the genuine problem in the noise.
 //
-// A job that already produced a post is skipped outright (result_post_id IS NOT NULL). The drain has
-// its own idempotency guard, but this script must not depend on it: a job requeued after it had
-// already written a post is exactly how one job came to write two posts into one cross-post group.
+// A job that already produced a post is skipped outright. The drain has its own idempotency guard,
+// but this script must not depend on it: a job requeued after it had already written a post is
+// exactly how one job came to write two posts into one cross-post group.
+//
+// ⚠️ BOTH result columns. The first version checked only `result_post_id`, which is the SOCIAL one —
+// a blog job records its draft in `result_blog_post_id`, so for every blog job the guard was
+// inert: it read NULL and waved them through regardless of what they had already written. Found
+// 2026-09-30 while recovering 36 blog jobs the September outage had failed. It happened not to
+// matter for those (all 36 died at ideation, before a post existed), but a guard that is true by
+// accident is not a guard.
 //
 // ── ⚠️ THE DATES, WHICH ARE THE DANGEROUS PART ──────────────────────────────────────────────────
 // A job carries the slot it was meant to publish in, and for this backlog that slot is up to eleven
@@ -109,6 +116,7 @@ async function main() {
     const where =
         `WHERE status = 'failed'
            AND result_post_id IS NULL
+           AND result_blog_post_id IS NULL
            AND updated_at > now() - interval '${sinceDays} days'
            AND error_message LIKE '%${safeMatch}%' ESCAPE '\\'
            ${orgClause}`;

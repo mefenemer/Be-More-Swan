@@ -181,6 +181,11 @@ check('the requeue only touches jobs the outage failed', () => {
     assert.ok(requeue.includes('credit balance is too low'), 'the default scope is not this outage');
     assert.ok(requeue.includes('result_post_id IS NULL'),
         'a job that already wrote a post could be run again — which is how one job wrote two');
+    // ⚠️ BOTH columns. `result_post_id` is the social one; a blog job records its draft in
+    // `result_blog_post_id`, so checking only the first made the guard INERT for every blog job —
+    // it read NULL and waved them through whatever they had already written.
+    assert.ok(requeue.includes('result_blog_post_id IS NULL'),
+        'the guard is inert for blog jobs, which use a different result column');
 });
 
 check('it is a dry run by default and released in batches', () => {
