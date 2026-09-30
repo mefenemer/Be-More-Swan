@@ -276,8 +276,15 @@ window.NotifKit = (function () {
                 window.routeToAssistantDetail?.(meta.assistantId);
             } };
         }
+        // Opens the post editor modal in place — no detour through the Review page, which cost a
+        // full view load before the modal even started. openPostReview (workspace.html) shows the
+        // busy cursor itself and fetches the post from a cold cache, so it works from any view.
+        // The review-queue route is only the fallback for a page without the workspace shell.
         if ((notif.type === 'post_draft_ready' || notif.type === 'ai_review') && meta.postId) {
-            return { label: 'Review draft', run: () => window.loadView?.('review-queue', { postId: meta.postId }) };
+            return { label: 'Review draft', run: () => {
+                if (typeof window.openPostReview === 'function') return window.openPostReview(meta.postId);
+                return window.loadView?.('review-queue', { postId: meta.postId });
+            } };
         }
         // Issue #87 — issue status updates need a link back to the reported issue itself,
         // not just a passive FYI. Opens the "Report an Issue" modal on the specific issue.
@@ -1042,6 +1049,9 @@ window.NotificationPopover = (function () {
         });
         li.querySelector('.pop-cta')?.addEventListener('click', (e) => {
             e.stopPropagation();
+            // Flip locally too — the PATCH only refreshes the badge, so reopening the popover
+            // before its next fetch would still show this item as unread.
+            n.isRead = true;
             if (isAction) {
                 if (K.resolvesClick(n)) patch(n.id, { resolved: true }); else patch(n.id, { isRead: true });
             } else {
