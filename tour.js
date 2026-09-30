@@ -116,7 +116,7 @@
       targets: ['.rq-col', '#workspace-content h1'],
       closest: '.overflow-x-auto',
       title: 'You Have the Final Say',
-      copy: 'Nothing goes out without your approval. Review gathers drafts from every assistant in one place, so you can approve, amend or decline each one — and follow it from review through to posted.',
+      copy: 'Nothing goes out without your approval. Review gathers drafts from every assistant in one place, so you can approve, amend or decline each one, and fix anything that needs attention.',
       placement: 'bottom',
     },
     {
