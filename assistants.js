@@ -1281,7 +1281,7 @@ async function _detailRqRenderGroups(statusKey) {
     // Reuse the global render helper from workspace.html (rqRenderSocialCard).
     const renderByGroup = { posts: typeof rqRenderSocialCard === 'function' ? rqRenderSocialCard : () => '' };
     const RQ_GROUPS = [
-        { key: 'posts', label: 'Posts', empty: 'No posts here.', emptyReview: 'No posts awaiting review.' },
+        { key: 'posts', label: 'Social media posts', empty: 'No social media posts here.', emptyReview: 'No social media posts awaiting review.' },
     ];
     const itemsByGroup = { posts: postGroups };
     container.innerHTML = RQ_GROUPS.map(g => _detailRqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey)).join('')
