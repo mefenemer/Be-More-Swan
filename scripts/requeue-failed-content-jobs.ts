@@ -210,11 +210,37 @@ async function main() {
         `UPDATE content_generation_jobs
             SET status = 'queued', attempt = 0, next_retry_at = now(),
                 error_message = NULL, updated_at = now()${shiftSql}
-          WHERE id IN (SELECT id FROM content_generation_jobs ${where} ORDER BY created_at LIMIT ${limit})
+          WHERE id IN (
+                SELECT id FROM (
+                    -- ⚠️ ONE job per slot. A failed job does not cover its slot, so while drafting was
+                    -- down gap-fill enqueued a fresh one EVERY HOUR — ~30 per slot by the end of the
+                    -- 2026-09 outage — and requeuing them all drafted ~30 posts per slot on
+                    -- 2026-09-30. The weekly Short is its own stream (same slot time, on purpose), so
+                    -- it is kept apart in the key. The newest job per slot is kept.
+                    SELECT DISTINCT ON (assistant_id, target_publish_date,
+                                        (platform = 'youtube' AND crosspost_group_id IS NULL))
+                           id, created_at
+                      FROM content_generation_jobs ${where}
+                       -- And none at all for a slot that already holds a live post.
+                       AND NOT EXISTS (
+                           SELECT 1 FROM scheduled_posts sp
+                            WHERE sp.assistant_id = content_generation_jobs.assistant_id
+                              AND sp.publish_date = content_generation_jobs.target_publish_date
+                              AND sp.status IN ('draft','pending_approval','in_review','approved','scheduled'))
+                       -- …or already has a job waiting for it (a previous batch of this script).
+                       AND NOT EXISTS (
+                           SELECT 1 FROM content_generation_jobs q
+                            WHERE q.assistant_id = content_generation_jobs.assistant_id
+                              AND q.target_publish_date = content_generation_jobs.target_publish_date
+                              AND q.status IN ('queued','processing'))
+                     ORDER BY assistant_id, target_publish_date,
+                              (platform = 'youtube' AND crosspost_group_id IS NULL), created_at DESC
+                ) one_per_slot
+                ORDER BY created_at LIMIT ${limit})
       RETURNING id, organisation_id`
     );
-    console.log(`  Requeued ${updated.length} job${updated.length === 1 ? '' : 's'}.`);
-    console.log(`  ${eligible - updated.length} still waiting — re-run when this batch has drained.\n`);
+    console.log(`  Requeued ${updated.length} job${updated.length === 1 ? '' : 's'} (at most one per slot).`);
+    console.log('  The rest are duplicates of a slot now queued or already filled, and stay failed on purpose.\n');
 }
 
 main().catch((err) => { console.error(err); process.exit(1); });
