@@ -286,6 +286,33 @@ window.NotifKit = (function () {
                 return window.loadView?.('review-queue', { postId: meta.postId });
             } };
         }
+        // The long-form twin of the above. process-blog-jobs stamps blogPostId (not postId — a blog
+        // lives in blog_posts, not scheduled_posts), so the check above never matched and the card
+        // rendered with no button at all. Opens the draft in the Blog Studio modal in place, with
+        // the standalone page as the fallback outside the workspace shell — as calendar.js does.
+        if (notif.type === 'blog_draft_ready' && meta.blogPostId) {
+            return { label: 'Review draft', run: () => {
+                if (typeof window.openBlogStudio === 'function') {
+                    return window.openBlogStudio({ assistantId: meta.assistantId, postId: meta.blogPostId });
+                }
+                window.location.href = '/blog-studio.html?postId=' + encodeURIComponent(meta.blogPostId);
+            } };
+        }
+        // The newsletter twin. The Studio is a VIEW, not a modal, so this routes through the same
+        // deep-link hook the calendar chip and the detail Review Queue use (newsletter.js consumes
+        // _newsletterInitialIssueId on read). _newsletterAssistantId lets the Studio name the
+        // assistant on its buttons — it has no other way to learn who wrote the issue.
+        // ⚠️ No standalone fallback, unlike the blog above: newsletter.html is a view FRAGMENT, so
+        // outside the workspace router (admin.html) there is nowhere to send the user, and no
+        // button beats one that lands on a bare, unstyled half-page.
+        if (notif.type === 'newsletter_issue_ready' && meta.newsletterIssueId
+            && typeof window.loadView === 'function') {
+            return { label: 'Review issue', run: () => {
+                window._newsletterInitialIssueId = meta.newsletterIssueId;
+                window._newsletterAssistantId = meta.assistantId || null;
+                window.loadView('newsletter');
+            } };
+        }
         // Issue #87 — issue status updates need a link back to the reported issue itself,
         // not just a passive FYI. Opens the "Report an Issue" modal on the specific issue.
         if (notif.type === 'issue_update') {

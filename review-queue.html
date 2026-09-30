@@ -9,8 +9,8 @@
     <div class="flex items-center gap-2">
       <!-- Blog Studio entry — shown only when an active Blog Writer assistant exists (gated below). -->
       <button id="rq-blog-btn" onclick="_rqOpenBlogStudio()" class="hidden px-4 py-2 text-sm font-bold bg-pink-600 hover:bg-pink-700 text-white rounded-lg transition cursor-pointer items-center gap-1.5">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-        Write Blog Post
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        Blog Post
       </button>
       <!-- Who the post gets created under. This view is org-wide, so unlike the assistant workspace
            it has no assistant in context — revealed below only when there's a genuine choice. -->
@@ -18,8 +18,8 @@
         class="hidden px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-400"></select>
       <!-- Hidden until an assistant that can post is resolved (gated below), same as the blog entry. -->
       <button id="rq-create-post-btn" onclick="_rqCreatePost()" class="hidden px-4 py-2 text-sm font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg transition cursor-pointer items-center gap-1.5">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-        Create a Post
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        Social Media Post
       </button>
     </div>
   </div>
@@ -72,7 +72,7 @@
   };
   window._rqSafeOpenStatus('review', document.querySelector('.rq-col[data-status="review"]'));
 
-  // "Create a Post" — resolve the assistant here rather than inheriting one.
+  // "+ Social Media Post" — resolve the assistant here rather than inheriting one.
   //
   // A post row belongs to an assistant, but this view is org-wide (it fetches every assistant's
   // drafts), so there is nothing to inherit. The button used to call openGeneratePostSheet() with
