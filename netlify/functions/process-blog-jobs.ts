@@ -274,6 +274,7 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
                 organisationId: job.organisation_id,
                 userId: job.user_id,
                 slot: job.target_publish_date,
+                guidance: job.context_prompt,
             });
             // Ideation returns null when it can't ground a topic (no business context, no Inspo) or
             // the model reply was unusable. Retry rather than fail: the user may fill in their
@@ -336,20 +337,20 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
         // fix a title tag. The button stays as "Regenerate SEO" for exactly this case, and for
         // re-running after an edit.
         //
-        // ⚠️ Autopilot only. An interactive draft skips it: the author is sitting in Blog Studio
-        // waiting, SEO is another model round trip on top of the one they are already waiting
-        // through, and that surface has its own "Generate SEO" button for when they want it.
-        if (!interactive) {
-            try {
-                await generateBlogSeo(db, {
-                    blogPostId: targetPostId,
-                    organisationId: job.organisation_id,
-                    userId: job.user_id,
-                });
-            } catch (err) {
-                console.warn(`[process-blog-jobs] SEO generation failed for post ${targetPostId} (draft kept)`,
-                    err instanceof Error ? err.message : err);
-            }
+        // Every assistant-written draft, interactive ones included. They used to skip it — the author
+        // was waiting in Blog Studio — which meant a post the assistant wrote arrived without the
+        // search title and description, and the author had to know to press "Generate SEO". It is
+        // one fast (Haiku) call in a background worker the Studio is already polling, and Blog
+        // Studio shows the result as soon as the draft lands (applyAiDraft → populateSeo).
+        try {
+            await generateBlogSeo(db, {
+                blogPostId: targetPostId,
+                organisationId: job.organisation_id,
+                userId: job.user_id,
+            });
+        } catch (err) {
+            console.warn(`[process-blog-jobs] SEO generation failed for post ${targetPostId} (draft kept)`,
+                err instanceof Error ? err.message : err);
         }
 
         await db.update(contentGenerationJobs)

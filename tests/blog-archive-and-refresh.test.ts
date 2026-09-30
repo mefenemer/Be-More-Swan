@@ -64,7 +64,8 @@ console.log('\nThe Archive tab can actually show them\n');
 check('_RQ_BLOG_STATUS.archived is wired to the archived status', () => {
     const start = landmark(js, 'const _RQ_BLOG_STATUS = {');
     const slice = js.slice(start, start + 400);
-    assert.ok(/archived:\s*\['archived'\]/.test(slice),
+    // 'rejected' may follow: reject-blog-post.ts sets it, and it belongs in the same tab.
+    assert.ok(/archived:\s*\['archived'(,\s*'rejected')?\]/.test(slice),
         'the Archive tab is still an empty list — archived posts remain unreachable');
 });
 

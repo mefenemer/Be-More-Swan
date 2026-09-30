@@ -19,6 +19,7 @@ import { aiAssistants, blogPosts, organisations } from '../../db/schema';
 import { logAiUsage } from './ai-usage';
 import { buildInspoBlock } from './inspo-profile';
 import { pickInspoTopic } from './inspo-topics';
+import { buildBlueprintGuardrailsBlock } from './blog-generate';
 import { currentDatePromptBlock } from './current-date-prompt';
 import { parseModelJson } from './model-json';
 
@@ -47,6 +48,9 @@ export interface IdeateBlogTopicOptions {
     /** The slot being filled. Decides whether this draft is built around an Inspo item
      *  (src/utils/inspo-topics.ts); omitted = never. */
     slot?: Date | string | null;
+    /** Direction carried by the job (context_prompt): a reviewer's reason for rejecting the last
+     *  draft for this slot, or a campaign order's brief. Outranks an Inspo topic. */
+    guidance?: string | null;
 }
 
 
@@ -77,6 +81,7 @@ export async function ideateBlogTopic(
     opts: IdeateBlogTopicOptions,
 ): Promise<BlogTopicIdea | null> {
     const { assistantId, organisationId, userId, slot } = opts;
+    const guidance = (opts.guidance || '').trim().slice(0, 1000);
 
     const [org] = await db
         .select({
@@ -99,7 +104,9 @@ export async function ideateBlogTopic(
         .from(aiAssistants)
         .where(eq(aiAssistants.id, assistantId))
         .limit(1);
-    const inspoTopic = await pickInspoTopic(db, {
+    // A job that carries its own direction (a rejection's reason, a campaign brief) is ABOUT that;
+    // an Inspo topic would compete with it, so it only applies to an undirected slot.
+    const inspoTopic = guidance ? null : await pickInspoTopic(db, {
         assistantId, organisationId, slot, configuration: asst?.configuration ?? null, artifact: 'blog post',
     });
     if (inspoTopic) console.log(`ideateBlogTopic: assistant ${assistantId} slot built around inspo item ${inspoTopic.itemId}`);
@@ -124,7 +131,16 @@ export async function ideateBlogTopic(
             ? `Already written (choose something genuinely different):\n${recent.map(r => `- ${r.title}`).join('\n')}`
             : 'Nothing has been published yet — a strong foundational post is a good choice.',
         inspoTopic?.brief ?? '',
+        guidance ? `Direction for THIS post — follow it: ${guidance}` : '',
     ].filter(Boolean).join('\n\n');
+
+    // The workspace's content rules — including every reason a reviewer gave for rejecting a draft —
+    // and its business facts. Ideation picks the SUBJECT, so a rule like "stop writing about pricing"
+    // has to reach it here: blog-generate applies the same block to the body, but by then the topic
+    // is already chosen. Never throws (returns null on failure).
+    const guardrailsBlock = await buildBlueprintGuardrailsBlock(db, {
+        assistantId, organisationId, compiledBy: String(userId),
+    });
 
     try {
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -143,6 +159,7 @@ export async function ideateBlogTopic(
                 '{"title": string, "topic": string, "keywords": string}. ' +
                 '"title" is a compelling H1 under 70 characters. "topic" is one sentence on the angle ' +
                 'to take. "keywords" is 2-4 comma-separated search terms.' +
+                (guardrailsBlock ? `\n\n${guardrailsBlock}` : '') +
                 (inspoBlock ? `\n\n${inspoBlock}` : ''),
             messages: [{ role: 'user', content: brief }],
         });
