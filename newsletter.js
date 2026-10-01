@@ -2141,6 +2141,10 @@
           <span id="nl-seq-status" class="mr-auto"></span>
           <button type="button" id="nl-seq-cancel" class="hidden px-4 py-2 text-sm font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer" style="display:none">Add another email</button>
         </div>
+      </div>
+      <div class="flex justify-end mt-4">
+        <button type="button" data-seq-delete-all
+          class="px-3 py-1.5 text-xs font-bold text-red-600 bg-white border border-red-200 rounded-lg hover:bg-red-50 cursor-pointer">Delete this ${seq.triggerEvent === 'form' ? 'campaign' : 'welcome sequence'}</button>
       </div>`;
 
     // Every label that names the assistant, including the two just rendered into this modal.
@@ -2743,6 +2747,36 @@
     }
   }
 
+
+  /**
+   * Delete the series the dialog is showing. Refused by the server while it is switched on — the
+   * person is told to switch it off first, which is where the app explains who is part way through.
+   */
+  async function deleteSequence() {
+    const seq = seqState.sequence;
+    if (!seq) return;
+    const isForm = seq.triggerEvent === 'form';
+    const label = isForm ? `"${seq.name}"` : 'your welcome sequence';
+    if (seq.isEnabled) {
+      window.showToast(`Switch ${isForm ? 'this campaign' : 'the welcome sequence'} off first — then you can delete it.`);
+      return;
+    }
+    const ok = await window.confirmModal(
+      `Delete ${label} and its ${seqState.steps.length} ${seqState.steps.length === 1 ? 'email' : 'emails'}? This cannot be undone.${isForm ? ' Any sign-up form linked to it will send new sign-ups your welcome sequence instead.' : ''}`,
+      { title: `Delete ${isForm ? 'this campaign' : 'the welcome sequence'}?`, confirmLabel: 'Delete', confirmColor: '#dc2626' });
+    if (!ok) return;
+    if (seqSaver) seqSaver.cancel();
+    try {
+      await seqApi({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'deleteSequence' }) });
+      seqState.selectedId = null;
+      hide($('nl-welcome-modal'));
+      window.showToast(isForm ? 'Campaign deleted.' : 'Welcome sequence deleted.');
+      loadAutoList();
+    } catch (err) {
+      window.showToast(err.message);
+    }
+  }
+
   function wire() {
     $('nl-seq-picker')?.addEventListener('change', async (e) => {
       if (e.target.id !== 'nl-seq-pick') return;
@@ -2826,6 +2860,8 @@
     };
     ['focusin', 'pointerdown', 'keyup', 'input'].forEach((ev) => $('nl-editor')?.addEventListener(ev, rememberText));
     $('nl-delete')?.addEventListener('click', deleteCurrent);
+    // Delegated, bound once: the dialog's body is re-rendered on every open and save.
+    $('nl-welcome-body')?.addEventListener('click', (e) => { if (e.target.closest('[data-seq-delete-all]')) deleteSequence(); });
     $('nl-auto-list')?.addEventListener('click', (e) => {
       const b = e.target.closest('[data-auto-seq]');
       if (!b) return;

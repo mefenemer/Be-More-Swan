@@ -178,4 +178,15 @@ check('a preview-only logo is never honoured on a live form', () => {
     assert.match(RENDERER, /var logo = opts\.preview && opts\.previewLogoUrl \?/);
 });
 
+check('an email campaign can be deleted — never while it is on, and only by an owner or admin', () => {
+    const del = SEQ_API.slice(landmark(SEQ_API, "if (action === 'deleteSequence')"), landmark(SEQ_API, "if (action === 'deleteStep')"));
+    assert.ok(landmark(del, 'ENABLE_ROLES.includes(ctx.role)') < landmark(del, 'tx.delete(newsletterSequences)'));
+    assert.ok(landmark(del, 'if (sequence.isEnabled)') < landmark(del, 'tx.delete(newsletterSequences)'), 'refused while switched on');
+    assert.match(del, /eq\(newsletterSequences\.organisationId, orgId\)/);
+    assert.match(del, /jsonb_set\(definition, '\{campaign\}'/, 'linked forms are unlinked in their definition too');
+    const studio = read('newsletter.js');
+    assert.match(studio, /\$\('nl-welcome-body'\)\?\.addEventListener\('click', \(e\) => \{ if \(e\.target\.closest\('\[data-seq-delete-all\]'\)\) deleteSequence\(\); \}\);/,
+        'bound once by delegation, not from the render path');
+});
+
 console.log(`\n${passed} checks passed.`);
