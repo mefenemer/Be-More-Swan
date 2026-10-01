@@ -104,6 +104,22 @@ check('it alerts on the SPREAD across organisations, not a job count', () => {
     assert.ok(health.includes('GROUP BY organisation_id'), 'it cannot see across workspaces');
 });
 
+check('jobs an operator retired on purpose are not counted as failures', () => {
+    // 2026-10-01: the 94 duplicates the outage clean-up marked `Superseded:` raised a four-workspace
+    // alert while generation was working everywhere.
+    assert.ok(/const DELIBERATE_FAILURE_PREFIX = 'Superseded:';/.test(health), 'the prefix is not stated');
+    assert.ok(health.includes(`NOT LIKE '\${DELIBERATE_FAILURE_PREFIX}%'`),
+        'the failure query still counts deliberate clean-ups');
+});
+
+check('the reported error is the most frequent one, not the alphabetically first', () => {
+    // min(error_message) picked the alphabetically first message of the busiest organisation.
+    assert.ok(!health.includes('min(error_message) AS'), 'it still reports min(error_message)');
+    assert.ok(health.includes('GROUP BY organisation_id, error'), 'errors are not counted');
+    assert.ok(/left\(error_message, \d+\)/.test(health),
+        'grouped on the whole message, every upstream failure is unique by its request id');
+});
+
 check('it reads the success log too, and never reads it alone', () => {
     // ai_usage_log is written only on success, which makes it the cheapest liveness check there is.
     // ⚠️ But 10 of the platform's 13 successful calls that week landed in the final 24 hours WHILE

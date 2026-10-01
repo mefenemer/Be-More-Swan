@@ -59,6 +59,18 @@ const ALERT_COOLDOWN_HOURS = 6;
  */
 const ORGS_THAT_MEAN_PLATFORM = 2;
 
+/**
+ * ⚠️ Failures WE made on purpose are not failures.
+ *
+ * On 2026-09-30 the outage clean-up set 94 duplicate backlog jobs to `failed` with a message starting
+ * `Superseded:`, and the next morning this check emailed that generation was failing for four
+ * workspaces — while it was working everywhere. A job an operator retires is not one the platform
+ * failed to draft. Any manual clean-up that marks jobs failed should start its message with this
+ * prefix, and this check will step over them. (The drain's own slot guard says `Superseded:` too, but
+ * it marks those jobs `completed`, so they were never counted.)
+ */
+const DELIBERATE_FAILURE_PREFIX = 'Superseded:';
+
 export interface ContentHealthResult {
     failedJobs24h: number;
     organisationsAffected: number;
@@ -73,19 +85,31 @@ export async function runContentGenerationHealthCheck(): Promise<ContentHealthRe
     const db = getDb();
     const now = new Date();
 
-    const failures = await db.execute<{ organisation_id: number; jobs: number; error: string | null }>(
-        `SELECT organisation_id, count(*)::int AS jobs, min(error_message) AS error
+    // Grouped by organisation AND error, so the error reported is the one that occurred MOST. It used
+    // to be min(error_message) of the busiest organisation — the alphabetically first message, which
+    // can be a minor one sitting in front of the real fault. Grouped on the first 180 characters,
+    // because the stored message is the upstream body verbatim and ends in a per-request id: grouped
+    // whole, every credit failure would be its own error of one.
+    const rows = await db.execute<{ organisation_id: number; error: string | null; jobs: number }>(
+        `SELECT organisation_id, left(error_message, 180) AS error, count(*)::int AS jobs
            FROM content_generation_jobs
           WHERE status = 'failed'
             AND updated_at > now() - interval '24 hours'
-          GROUP BY organisation_id
-          ORDER BY jobs DESC`
+            AND coalesce(error_message, '') NOT LIKE '${DELIBERATE_FAILURE_PREFIX}%'
+          GROUP BY organisation_id, error`
     );
+    const byOrg = new Map<number, number>();
+    const byError = new Map<string, number>();
+    for (const r of rows) {
+        const n = Number(r.jobs || 0);
+        byOrg.set(r.organisation_id, (byOrg.get(r.organisation_id) ?? 0) + n);
+        if (r.error) byError.set(r.error, (byError.get(r.error) ?? 0) + n);
+    }
+    const failures = [...byOrg].map(([organisation_id, jobs]) => ({ organisation_id, jobs }))
+        .sort((a, b) => b.jobs - a.jobs);
     const organisationsAffected = failures.length;
-    const failedJobs24h = failures.reduce((n, r) => n + Number(r.jobs || 0), 0);
-    // Trimmed hard. The stored message is the upstream body verbatim, which is a wall of JSON
-    // carrying our billing state and a request id — the first line is the part a human reads.
-    const topError = failures[0]?.error ? String(failures[0].error).slice(0, 180) : null;
+    const failedJobs24h = failures.reduce((n, r) => n + r.jobs, 0);
+    const topError = [...byError].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 
     const [usage] = await db.execute<{ last_at: string | null; n24: number }>(
         `SELECT max(created_at) AS last_at,
