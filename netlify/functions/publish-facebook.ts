@@ -15,6 +15,7 @@
 // The Graph API driver + Page-credential resolution live in src/utils/social-publish.ts, shared
 // with the self-test harness (social-publish-selftest.ts) so a green self-test proves this path.
 
+import { livePostUrl } from '../../src/utils/post-live-url';
 import { Handler } from '@netlify/functions';
 import { getDb } from '../../db/client';
 import { scheduledPosts, publishCronLog } from '../../db/schema';
@@ -140,8 +141,9 @@ export default withLambda(async () => {
                 return;
             }
 
+            const liveUrl = livePostUrl('facebook', result.id);
             await db.execute(
-                `UPDATE scheduled_posts SET status = 'published', platform_post_id = '${esc(result.id)}', published_at = now(), updated_at = now() WHERE id = ${post.id}`
+                `UPDATE scheduled_posts SET status = 'published', platform_post_id = '${esc(result.id)}', published_at = now(), updated_at = now()${liveUrl ? `, platform_post_url = '${esc(liveUrl)}'` : ''} WHERE id = ${post.id}`
             );
             await recordPostedAssets(db, { orgId: post.organisation_id, userId: post.user_id, scheduledPostId: post.id })
                 .catch(e => console.warn(`[publish-facebook] recordPostedAssets failed for post ${post.id}:`, e?.message || e));
@@ -151,7 +153,7 @@ export default withLambda(async () => {
             await createNotification(db, 'post_published', {
                 userId: post.user_id,
                 context: { platform: { label: 'Facebook' } },
-                metadata: { postId: post.id, platform: 'facebook', platformPostId: result.id, assistantId: post.assistant_id },
+                metadata: { postId: post.id, platform: 'facebook', platformPostId: result.id, postUrl: liveUrl, assistantId: post.assistant_id },
             });
             succeeded++;
         } catch (err) {

@@ -2629,9 +2629,9 @@
     const isForm = d.trigger && d.trigger.event === 'form';
     const n = d.newsletters.length;
     $('nl-cmp-review-note').textContent = isForm
-      ? `${n} emails over ${d.newsletters[n - 1].sendDay} days. Edit anything, then save — it becomes an email campaign under Automatic emails, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on. Nobody is emailed by saving.`
+      ? `${n} emails over ${d.newsletters[n - 1].sendDay} days. Edit anything, then save — it becomes an email campaign under Email Campaigns, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on. Nobody is emailed by saving.`
       : automatic
-      ? `${n} emails over ${d.newsletters[n - 1].sendDay} days. Edit anything, then save — it becomes your welcome sequence, switched off until you turn it on under Automatic emails. Nobody is emailed by saving.`
+      ? `${n} emails over ${d.newsletters[n - 1].sendDay} days. Edit anything, then save — it becomes your welcome sequence, switched off until you turn it on under Email Campaigns. Nobody is emailed by saving.`
       : `${n} emails over ${d.newsletters[n - 1].sendDay} days. Edit anything, then save — each email becomes a draft you send to the right people on its day. Nothing is sent by saving.`;
     const warn = $('nl-cmp-warnings');
     if (d.warnings && d.warnings.length) {
@@ -2690,9 +2690,9 @@
       state.campaign = null;
       loadAutoList();
       if (d.trigger.event === 'form') {
-        window.showToast(data.deduped ? 'Already saved — it is under Automatic emails.' : 'Saved as an email campaign, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on under Automatic emails.');
+        window.showToast(data.deduped ? 'Already saved — it is under Email Campaigns.' : 'Saved as an email campaign, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on under Email Campaigns.');
       } else if (automatic) {
-        window.showToast(data.deduped ? 'Already saved — it is your welcome sequence.' : 'Saved as your welcome sequence, switched off. Turn it on under Automatic emails when you are ready.');
+        window.showToast(data.deduped ? 'Already saved — it is your welcome sequence.' : 'Saved as your welcome sequence, switched off. Turn it on under Email Campaigns when you are ready.');
       } else {
         window.showToast(data.deduped ? 'Already saved — these are in your list.' : `Saved ${data.created} draft ${data.created === 1 ? 'email' : 'emails'}. Send each one on its day.`);
         await refreshList();

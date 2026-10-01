@@ -466,8 +466,18 @@ export default withLambda(async () => {
 
             // Success
             const instagramPostId = publishData.id;
+            // The post's public address. An Instagram media id is opaque — the permalink has to be
+            // asked for. Best effort and bounded: a published post must never be reported as failed,
+            // or held up, because we could not learn its URL (the notification then opens it in the app).
+            let liveUrl: string | null = null;
+            try {
+                const pr = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${instagramPostId}?fields=permalink&access_token=${encodeURIComponent(token)}`,
+                    { signal: AbortSignal.timeout(4000) });
+                const pj = pr.ok ? await pr.json() : null;
+                if (pj && typeof pj.permalink === 'string' && /^https:\/\/(www\.)?instagram\.com\//.test(pj.permalink)) liveUrl = pj.permalink;
+            } catch { /* no URL — the notification falls back to opening the post in the app */ }
             await db.execute(
-                `UPDATE scheduled_posts SET status = 'published', platform_post_id = '${instagramPostId}', published_at = now(), updated_at = now() WHERE id = ${post.id}`
+                `UPDATE scheduled_posts SET status = 'published', platform_post_id = '${instagramPostId}', published_at = now(), updated_at = now()${liveUrl ? `, platform_post_url = '${liveUrl.replace(/'/g, "''")}'` : ''} WHERE id = ${post.id}`
             );
 
             // US2 AC2.5: burn any Pexels asset on this post so it is never reused (idempotent).
@@ -482,7 +492,7 @@ export default withLambda(async () => {
 
             await createNotification(db, 'post_published_instagram', {
                 userId: post.user_id,
-                metadata: { postId: post.id, instagramPostId, assistantId: post.assistant_id },
+                metadata: { postId: post.id, platform: 'instagram', instagramPostId, postUrl: liveUrl, assistantId: post.assistant_id },
             });
 
             succeeded++;

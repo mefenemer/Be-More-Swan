@@ -153,6 +153,22 @@ window.NotifKit = (function () {
 
     // type → primary call-to-action. Action-kind types should all resolve to a CTA so
     // every action card has one clear next step; info types are mostly passive.
+
+    // Only ever open an https link on a platform we publish to — the value comes from notification
+    // metadata, and a notification is not a place to hand a stranger an open redirect.
+    const POST_HOSTS = /^https:\/\/(www\.)?(linkedin\.com|facebook\.com|instagram\.com|x\.com|twitter\.com|youtube\.com|threads\.net)\//;
+    function safeLiveUrl(u) { return typeof u === 'string' && POST_HOSTS.test(u) ? u : null; }
+    // Mirror of src/utils/post-live-url.ts for notifications written before postUrl was stamped.
+    function derivePostUrl(platform, id) {
+        id = String(id || '').trim();
+        if (!id) return null;
+        if (platform === 'linkedin' && id.indexOf('urn:li:') === 0) return 'https://www.linkedin.com/feed/update/' + id + '/';
+        if (platform === 'facebook' && /^[\d_]+$/.test(id)) return 'https://www.facebook.com/' + id;
+        if ((platform === 'x' || platform === 'twitter') && /^\d+$/.test(id)) return 'https://x.com/i/web/status/' + id;
+        if (platform === 'youtube' && /^[\w-]{6,20}$/.test(id)) return 'https://www.youtube.com/watch?v=' + id;
+        return null;
+    }
+
     const ACTIONS_BY_TYPE = {
         invoice_ready:                 { label: 'View invoice',        run: routeToBilling },
         ticket_created:                { label: 'View ticket',         run: () => window.routeToSupportTicket?.() },
@@ -275,6 +291,20 @@ window.NotifKit = (function () {
                 window._assistantDetailInitialTab = 'operation';
                 window.routeToAssistantDetail?.(meta.assistantId);
             } };
+        }
+        // "Post published to LinkedIn — tap to view" offered nothing to tap. The publishers now stamp
+        // postUrl (src/utils/post-live-url.ts, and Instagram's permalink); for notifications written
+        // before that, the URL is rebuilt here for the platforms whose address is a pure function of
+        // the id, and anything else opens the published post in the app (read-only) instead.
+        if (notif.type === 'post_published' && (meta.postUrl || meta.platformPostId || meta.postId)) {
+            const live = safeLiveUrl(meta.postUrl) || derivePostUrl(meta.platform, meta.platformPostId);
+            if (live) return { label: 'View post', run: () => window.open(live, '_blank', 'noopener') };
+            if (meta.postId) {
+                return { label: 'View post', run: () => {
+                    if (typeof window.openPostReview === 'function') return window.openPostReview(meta.postId);
+                    return window.loadView?.('calendar');
+                } };
+            }
         }
         // Opens the post editor modal in place — no detour through the Review page, which cost a
         // full view load before the modal even started. openPostReview (workspace.html) shows the

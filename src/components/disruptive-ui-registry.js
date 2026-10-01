@@ -1808,9 +1808,9 @@
       <p class="mt-2 text-xs font-semibold text-indigo-700" data-ncd-status>${!isDraft
         ? 'This is the plan, not the emails yet. Tell me what to change — more or fewer emails, different days — or say “write it” and I’ll draft every one.'
         : isForm
-          ? 'Saving creates this email campaign under Automatic emails in the Email Studio, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on — nobody is emailed by saving.'
+          ? 'Saving creates this email campaign under Email Campaigns in the Email Studio, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on — nobody is emailed by saving.'
         : automatic
-          ? 'Saving makes this your welcome sequence, under Automatic emails in the Email Studio. It stays switched off until you turn it on there — nobody is emailed by saving.'
+          ? 'Saving makes this your welcome sequence, under Email Campaigns in the Email Studio. It stays switched off until you turn it on there — nobody is emailed by saving.'
           : 'Saving puts each email in your Emails tab as a draft. Nothing is sent to anyone: you send each one to the right people on the right day from the Email Studio.'}</p>
     `;
     if (!isDraft) return el;
@@ -1847,12 +1847,12 @@
               setEyebrow('Saved');
               if (isForm) {
                 say(deduped
-                  ? 'Already saved — it is under Automatic emails in the Email Studio.'
-                  : `Saved as an email campaign — ${stepCount || n} emails, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on under Automatic emails.`);
+                  ? 'Already saved — it is under Email Campaigns in the Email Studio.'
+                  : `Saved as an email campaign — ${stepCount || n} emails, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on under Email Campaigns.`);
               } else if (automatic) {
                 say(deduped
-                  ? 'Already saved — it is your welcome sequence, under Automatic emails in the Email Studio.'
-                  : `${replaced ? 'Replaced your welcome sequence' : 'Saved as your welcome sequence'} — ${stepCount || n} emails, switched off. Turn it on under Automatic emails in the Email Studio when you are ready.`);
+                  ? 'Already saved — it is your welcome sequence, under Email Campaigns in the Email Studio.'
+                  : `${replaced ? 'Replaced your welcome sequence' : 'Saved as your welcome sequence'} — ${stepCount || n} emails, switched off. Turn it on under Email Campaigns in the Email Studio when you are ready.`);
               } else {
                 say(deduped
                   ? 'Already saved — these are in your Emails tab.'

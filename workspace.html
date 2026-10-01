@@ -2042,12 +2042,22 @@ window.showComplianceModals = function showComplianceModals(force) {
       <span id="sidebar-nav-badge" class="absolute top-0.5 right-0.5 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full hidden">0</span>
     </button>
 
-    <div class="block text-right" data-no-i18n>
-      <p id="header-user-name" class="text-sm font-bold text-gray-900 truncate max-w-[160px]"></p>
-      <p id="header-user-email" class="hidden sm:block text-xs text-gray-500 truncate max-w-[160px]"></p>
-      <div id="header-role-badges" class="flex gap-1 justify-end mt-0.5 flex-wrap"></div>
-    </div>
-    <div id="header-user-initials" class="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold shrink-0 text-sm">
+    <!-- Who is signed in: only the avatar is in the header. Name, email, role and plan sit in a panel
+         that opens from it — four lines of identity next to every page title was clutter. The ids
+         are unchanged, so loadHeaderProfile() and refreshPlanPill() fill the panel as before. -->
+    <div class="relative" id="header-user-menu">
+      <button type="button" id="header-user-initials" aria-haspopup="true" aria-expanded="false" aria-controls="header-user-panel" aria-label="Your account"
+        class="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold shrink-0 text-sm cursor-pointer hover:ring-2 hover:ring-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400">
+      </button>
+      <div id="header-user-panel" role="menu" class="hidden absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-xl border border-gray-200 p-4 z-50" style="display:none" data-no-i18n>
+        <p id="header-user-name" class="text-sm font-bold text-gray-900 truncate"></p>
+        <p id="header-user-email" class="text-xs text-gray-500 truncate"></p>
+        <div id="header-role-badges" class="flex gap-1 mt-2 flex-wrap"></div>
+        <div class="border-t border-gray-100 mt-3 pt-3 flex flex-col gap-1">
+          <a href="#" id="header-user-settings" role="menuitem" class="px-2 py-1.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">Account settings</a>
+          <a href="/logout.html" role="menuitem" class="px-2 py-1.5 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50">Log out</a>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -2365,6 +2375,26 @@ function formatCurrency(amount, currency) {
     setInterval(() => {
       if (typeof window.updateNotificationBadge === 'function') window.updateNotificationBadge();
     }, 60_000);
+// --- ACCOUNT PANEL (the avatar menu) ---
+    // Bound once at load to elements that live in the shell, not in a swapped view.
+    (function () {
+      const btn = document.getElementById('header-user-initials');
+      const panel = document.getElementById('header-user-panel');
+      if (!btn || !panel) return;
+      const setOpen = (open) => {
+        panel.classList.toggle('hidden', !open);
+        panel.style.display = open ? 'block' : 'none';
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      };
+      btn.addEventListener('click', (e) => { e.stopPropagation(); setOpen(panel.classList.contains('hidden')); });
+      document.addEventListener('click', (e) => { if (!panel.classList.contains('hidden') && !e.target.closest('#header-user-menu')) setOpen(false); });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !panel.classList.contains('hidden')) { setOpen(false); btn.focus(); } });
+      document.getElementById('header-user-settings')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        setOpen(false);
+        if (typeof window.loadView === 'function') window.loadView('settings');
+      });
+    })();
 // --- DYNAMIC HEADER HYDRATION ---
     async function loadHeaderProfile() {
       const nameEl = document.getElementById('header-user-name');
