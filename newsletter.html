@@ -5,6 +5,12 @@
      detail page in Phase 5, when the role goes live — deliberately NOT a sidebar item: the sidebar
      was decluttered on purpose, and a link every org sees for an assistant most have not hired is
      exactly the clutter that was removed. -->
+<style>
+  /* The Swan "ask your assistant" icon — same image and cast animation as .ai-wand-img on the detail page. */
+  .nl-wand { height: 20px; width: auto; display: inline-block; }
+  .nl-wand.is-casting { animation: nlWandCast 0.7s ease-in-out infinite; transform-origin: bottom center; }
+  @keyframes nlWandCast { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-14deg); } }
+</style>
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full pb-20">
 
   <!-- The way back. The Studio is a full view, not a modal like Blog Studio, so there is no ✕ to
@@ -94,18 +100,33 @@
              its own has to say why it exists before the reviewer reads a word of it. -->
         <div id="nl-source" class="hidden mb-4 px-4 py-3 rounded-xl bg-sky-50 border border-sky-200 text-sm text-sky-900" style="display:none"></div>
 
-        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Subject line</label>
+        <!-- The Swan icon = "ask your assistant to suggest", the same image as the Magic Wand elsewhere.
+             Three options appear under the field; nothing changes until one is picked. -->
+        <div class="flex items-center justify-between gap-2 mb-1">
+          <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide" data-explain="email-subject">Subject line</label>
+          <button type="button" data-nl-suggest="subject" title="Ask your assistant to suggest a subject line" class="p-1 rounded-lg hover:bg-emerald-50 transition-colors cursor-pointer">
+            <img src="/images/BeMoreSwan_SwanAI.png" alt="Ask your assistant to suggest a subject line" class="nl-wand">
+          </button>
+        </div>
         <input type="text" id="nl-subject" maxlength="200"
           class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm font-bold mb-1">
+        <div id="nl-suggest-subject" class="hidden mb-2" style="display:none"></div>
         <p class="text-[11px] text-gray-400 mb-4">Under about 60 characters stays readable on a phone.</p>
 
         <!-- Two subject lines, a sample, and the winner to everyone else. Rendered from the issue's
              own ab_state, so a sent test shows its result where the setup used to be. -->
         <div id="nl-ab" class="mb-4"></div>
 
-        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Preview line</label>
+        <div class="flex items-center justify-between gap-2 mb-1">
+          <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide" data-explain="email-preheader">Preview line</label>
+          <button type="button" data-nl-suggest="preheader" title="Ask your assistant to suggest a preview line" class="p-1 rounded-lg hover:bg-emerald-50 transition-colors cursor-pointer">
+            <img src="/images/BeMoreSwan_SwanAI.png" alt="Ask your assistant to suggest a preview line" class="nl-wand">
+          </button>
+        </div>
         <input type="text" id="nl-preheader" maxlength="200" placeholder="The line the inbox shows next to the subject"
-          class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-4">
+          class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-2">
+        <div id="nl-suggest-preheader" class="hidden mb-2" style="display:none"></div>
+        <div class="mb-2"></div>
 
         <div class="flex items-center justify-between gap-2 mb-1">
           <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide">Body</label>

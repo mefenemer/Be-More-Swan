@@ -6,6 +6,7 @@
 //   POST { action: 'importCampaign' } → save a whole chat-drafted campaign as its steps (stays off)
 //   POST { action: 'saveStep' }    → add or edit a step; re-renders its snapshot
 //   POST { action: 'deleteStep' }  → remove a step
+//   POST { action: 'deleteSequence' } → delete the whole series (must be switched off; owner/admin)
 //   POST { action: 'enable' }      → turn it on / off
 //   POST { action: 'generate' }    → draft a step with the assistant
 //   POST { action: 'refine' }      → revise a step's copy. RETURNS ONLY; the author accepts it.
@@ -454,6 +455,34 @@ export default withLambda(async (event: HandlerEvent) => {
         // the author presses Save, so abandoning a template does not leave one behind.
         const design = designFromTemplate(body.template, await loadBrandNewsletterTheme(db, orgId));
         return json(200, { design, bodyMarkdown: designToMarkdown(design) });
+    }
+
+    // Delete a whole email campaign (or the welcome sequence).
+    //
+    // ⚠️ REFUSED WHILE IT IS ON. Switching it off is the step that tells the person how many people
+    // are part way through and stops them (newsletter.js asks, the worker halts them) — deleting a
+    // live series would skip that conversation and take the record of those people with it.
+    // Owner/admin only, like switching on: it is the consequential action, not a draft edit.
+    // Steps and enrolments cascade; a sign-up form linked to it falls back to the welcome sequence
+    // (audience_forms.sequence_id ON DELETE SET NULL), and the forms' stored definitions are
+    // cleared to match so the builder does not show a link to nothing.
+    if (action === 'deleteSequence') {
+        if (!ENABLE_ROLES.includes(ctx.role)) {
+            return json(403, { error: 'Only an owner or admin can delete an email campaign.' });
+        }
+        if (sequence.isEnabled) {
+            return json(409, { code: 'SEQUENCE_ENABLED', error: 'Switch this campaign off before deleting it.' });
+        }
+        await db.transaction(async (tx) => {
+            await tx.execute(sql`
+                UPDATE audience_forms
+                   SET definition = jsonb_set(definition, '{campaign}', '{"sequenceId": null, "skipWelcome": false}'::jsonb),
+                       updated_at = now()
+                 WHERE organisation_id = ${orgId} AND sequence_id = ${sequence.id} AND definition IS NOT NULL`);
+            await tx.delete(newsletterSequences)
+                .where(and(eq(newsletterSequences.id, sequence.id), eq(newsletterSequences.organisationId, orgId)));
+        });
+        return json(200, { deleted: true });
     }
 
     if (action === 'deleteStep') {

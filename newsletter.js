@@ -385,6 +385,7 @@
       hide($('nl-empty'));
       show($('nl-editor'), 'block');
 
+      hide($('nl-suggest-subject')); hide($('nl-suggest-preheader'));
       $('nl-subject').value = issue.subject || '';
       $('nl-preheader').value = issue.preheader || '';
       $('nl-body').value = issue.bodyMarkdown || '';
@@ -2141,6 +2142,10 @@
           <span id="nl-seq-status" class="mr-auto"></span>
           <button type="button" id="nl-seq-cancel" class="hidden px-4 py-2 text-sm font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer" style="display:none">Add another email</button>
         </div>
+      </div>
+      <div class="flex justify-end mt-4">
+        <button type="button" data-seq-delete-all
+          class="px-3 py-1.5 text-xs font-bold text-red-600 bg-white border border-red-200 rounded-lg hover:bg-red-50 cursor-pointer">Delete this ${seq.triggerEvent === 'form' ? 'campaign' : 'welcome sequence'}</button>
       </div>`;
 
     // Every label that names the assistant, including the two just rendered into this modal.
@@ -2743,6 +2748,69 @@
     }
   }
 
+
+  /**
+   * Delete the series the dialog is showing. Refused by the server while it is switched on — the
+   * person is told to switch it off first, which is where the app explains who is part way through.
+   */
+  async function deleteSequence() {
+    const seq = seqState.sequence;
+    if (!seq) return;
+    const isForm = seq.triggerEvent === 'form';
+    const label = isForm ? `"${seq.name}"` : 'your welcome sequence';
+    if (seq.isEnabled) {
+      window.showToast(`Switch ${isForm ? 'this campaign' : 'the welcome sequence'} off first — then you can delete it.`);
+      return;
+    }
+    const ok = await window.confirmModal(
+      `Delete ${label} and its ${seqState.steps.length} ${seqState.steps.length === 1 ? 'email' : 'emails'}? This cannot be undone.${isForm ? ' Any sign-up form linked to it will send new sign-ups your welcome sequence instead.' : ''}`,
+      { title: `Delete ${isForm ? 'this campaign' : 'the welcome sequence'}?`, confirmLabel: 'Delete', confirmColor: '#dc2626' });
+    if (!ok) return;
+    if (seqSaver) seqSaver.cancel();
+    try {
+      await seqApi({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'deleteSequence' }) });
+      seqState.selectedId = null;
+      hide($('nl-welcome-modal'));
+      window.showToast(isForm ? 'Campaign deleted.' : 'Welcome sequence deleted.');
+      loadAutoList();
+    } catch (err) {
+      window.showToast(err.message);
+    }
+  }
+
+
+  // ── "Ask your assistant to suggest" — subject and preview line ─────────────
+  async function suggestLine(field, btn) {
+    const issue = state.current;
+    if (!issue) return;
+    const host = $(field === 'subject' ? 'nl-suggest-subject' : 'nl-suggest-preheader');
+    const img = btn && btn.querySelector('img');
+    if (btn) btn.disabled = true;
+    img?.classList.add('is-casting');
+    try {
+      // What is on screen, not what was last saved — and the designed body's prose when there is one.
+      const bodyText = state.designer ? designProse(state.designer.getDesign ? state.designer.getDesign() : issue.design) : $('nl-body').value;
+      const { suggestions } = await api(ISSUES_API, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'suggest', id: issue.id, field,
+          subject: $('nl-subject').value, preheader: $('nl-preheader').value, bodyMarkdown: bodyText,
+        }),
+      });
+      host.innerHTML = `<div class="rounded-xl border border-emerald-200 bg-emerald-50/60 p-2">
+          <p class="text-[11px] font-bold text-emerald-800 px-1 mb-1">Pick one — or keep yours</p>
+          ${suggestions.map((t) => `<button type="button" data-nl-pick="${field}" data-value="${esc(t)}" class="block w-full text-left px-2 py-1.5 rounded-lg text-sm text-gray-900 hover:bg-gray-50 cursor-pointer">${esc(t)}</button>`).join('')}
+          <button type="button" data-nl-pick-close="${field}" class="text-[11px] font-bold text-gray-500 hover:text-gray-800 px-2 py-1 cursor-pointer">Close</button>
+        </div>`;
+      show(host, 'block');
+    } catch (err) {
+      window.showToast(err.message);
+    } finally {
+      if (btn) btn.disabled = false;
+      img?.classList.remove('is-casting');
+    }
+  }
+
   function wire() {
     $('nl-seq-picker')?.addEventListener('change', async (e) => {
       if (e.target.id !== 'nl-seq-pick') return;
@@ -2826,6 +2894,25 @@
     };
     ['focusin', 'pointerdown', 'keyup', 'input'].forEach((ev) => $('nl-editor')?.addEventListener(ev, rememberText));
     $('nl-delete')?.addEventListener('click', deleteCurrent);
+    // The Swan icons and the options they produce — delegated on the editor, bound once.
+    $('nl-editor')?.addEventListener('click', (e) => {
+      const ask = e.target.closest('[data-nl-suggest]');
+      if (ask) { suggestLine(ask.getAttribute('data-nl-suggest'), ask); return; }
+      const pick = e.target.closest('[data-nl-pick]');
+      if (pick) {
+        const field = pick.getAttribute('data-nl-pick');
+        const input = $(field === 'subject' ? 'nl-subject' : 'nl-preheader');
+        input.value = pick.getAttribute('data-value');
+        // The fields autosave on input — fire it so the choice is saved like anything typed.
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        hide($(field === 'subject' ? 'nl-suggest-subject' : 'nl-suggest-preheader'));
+        return;
+      }
+      const shut = e.target.closest('[data-nl-pick-close]');
+      if (shut) hide($(shut.getAttribute('data-nl-pick-close') === 'subject' ? 'nl-suggest-subject' : 'nl-suggest-preheader'));
+    });
+    // Delegated, bound once: the dialog's body is re-rendered on every open and save.
+    $('nl-welcome-body')?.addEventListener('click', (e) => { if (e.target.closest('[data-seq-delete-all]')) deleteSequence(); });
     $('nl-auto-list')?.addEventListener('click', (e) => {
       const b = e.target.closest('[data-auto-seq]');
       if (!b) return;

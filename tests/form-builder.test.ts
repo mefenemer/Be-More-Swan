@@ -178,4 +178,44 @@ check('a preview-only logo is never honoured on a live form', () => {
     assert.match(RENDERER, /var logo = opts\.preview && opts\.previewLogoUrl \?/);
 });
 
+check('an email campaign can be deleted — never while it is on, and only by an owner or admin', () => {
+    const del = SEQ_API.slice(landmark(SEQ_API, "if (action === 'deleteSequence')"), landmark(SEQ_API, "if (action === 'deleteStep')"));
+    assert.ok(landmark(del, 'ENABLE_ROLES.includes(ctx.role)') < landmark(del, 'tx.delete(newsletterSequences)'));
+    assert.ok(landmark(del, 'if (sequence.isEnabled)') < landmark(del, 'tx.delete(newsletterSequences)'), 'refused while switched on');
+    assert.match(del, /eq\(newsletterSequences\.organisationId, orgId\)/);
+    assert.match(del, /jsonb_set\(definition, '\{campaign\}'/, 'linked forms are unlinked in their definition too');
+    const studio = read('newsletter.js');
+    assert.match(studio, /\$\('nl-welcome-body'\)\?\.addEventListener\('click', \(e\) => \{ if \(e\.target\.closest\('\[data-seq-delete-all\]'\)\) deleteSequence\(\); \}\);/,
+        'bound once by delegation, not from the render path');
+});
+
+check('every builder setting has an info icon with a glossary entry', () => {
+    const ex = read('explainers.js');
+    // Tagged three ways: data-explain="…", label('…', '…'), and the colour pickers' slug map ('form-colour-…').
+    const slugs = [...new Set([...BUILDER.matchAll(/["'](form-[a-z-]+)["']/g)].map((m) => m[1]))];
+    assert.ok(slugs.length >= 30, `expected ~33 tagged settings, found ${slugs.length}`);
+    for (const slug of slugs) assert.ok(ex.includes(`'${slug}': {`), `${slug} has no glossary entry — its icon would never appear`);
+});
+
+check('the two previews are drawn as the place they will appear', () => {
+    assert.match(RENDERER, /var face = surface === 'preview' \? \(opts\.previewAs === 'embed' \? 'embed' : 'hosted'\) : surface;/);
+    assert.match(RENDERER, /face === 'hosted' \? '<p class="bms-foot">/, 'the hosted footer follows the PREVIEWED surface');
+    assert.match(BUILDER, /www\.your-website\.com/);
+    assert.match(BUILDER, /id="fb-preview-above"/);
+});
+
+check('the builder can be closed from its top-right X', () => {
+    assert.match(BUILDER, /data-fb-close aria-label="Close"/);
+});
+
+check('subject and preview line have the Swan "suggest" icon, and suggesting saves nothing', () => {
+    const html = read('newsletter.html');
+    assert.match(html, /data-nl-suggest="subject"[\s\S]{0,250}BeMoreSwan_SwanAI\.png/);
+    assert.match(html, /data-nl-suggest="preheader"[\s\S]{0,250}BeMoreSwan_SwanAI\.png/);
+    const issues = read('netlify/functions/newsletter-issues.ts');
+    const a = issues.slice(landmark(issues, "if (action === 'suggest')"), landmark(issues, "if (action === 'refine')"));
+    assert.ok(!/db\.update|db\.insert/.test(a), 'returns options only');
+    assert.match(read('newsletter.js'), /input\.dispatchEvent\(new Event\('input', \{ bubbles: true \}\)\)/, 'a pick saves like typing');
+});
+
 console.log(`\n${passed} checks passed.`);

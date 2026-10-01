@@ -9,6 +9,7 @@
 //   POST   { action: 'createCampaign' } → one draft per email of a chat-drafted campaign, all or none
 //   POST   { action: 'update' }    → subject / preheader / body / segment
 //   POST   { action: 'generate' }  → draft it with the assistant (src/utils/newsletter-generate.ts)
+//   POST   { action: 'suggest' }   → three subject / preview-line options. RETURNS ONLY
 //   POST   { action: 'refine' }    → rewrite the existing draft to an instruction. RETURNS ONLY —
 //                                    the author accepts it with an ordinary 'update'.
 //   POST   { action: 'design' }    → start a layout from a template, or drop back to plain Markdown
@@ -54,6 +55,7 @@ import { contentFindings, severityRank, warmupFinding } from '../../src/utils/de
 import { sampleMergeContext } from '../../src/config/newsletter-merge-vars';
 import { MAX_CAMPAIGN_EMAILS } from '../../src/utils/newsletter-campaign-chat-draft';
 import { draftCampaignEmails } from '../../src/utils/newsletter-campaign-generate';
+import { suggestEmailLine } from '../../src/utils/newsletter-suggest';
 import { CAMPAIGN_CADENCES } from '../../src/config/email-campaign-cadences';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -828,6 +830,28 @@ export default withLambda(async (event: HandlerEvent) => {
             if (err instanceof IssueNotFoundError) return json(404, { error: err.message });
             console.error('[newsletter-issues] draft failed', { orgId, id }, err);
             return json(502, { error: 'The assistant could not draft this email. Try again in a moment.' });
+        }
+    }
+
+    // The Swan icon beside the subject and preview lines: three options to choose from. RETURNS ONLY —
+    // the field changes when the person picks one (src/utils/newsletter-suggest.ts).
+    if (action === 'suggest') {
+        const field = body.field === 'preheader' ? 'preheader' : 'subject';
+        try {
+            const suggestions = await suggestEmailLine(db, {
+                issueId: id, organisationId: orgId, userId: ctx.userId, field,
+                current: {
+                    subject: typeof body.subject === 'string' ? body.subject : undefined,
+                    preheader: typeof body.preheader === 'string' ? body.preheader : undefined,
+                    body: typeof body.bodyMarkdown === 'string' ? body.bodyMarkdown : undefined,
+                },
+            });
+            return json(200, { suggestions });
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : '';
+            if (/^Write the email first|did not come back/.test(msg)) return json(422, { error: msg });
+            console.error('[newsletter-issues] suggest failed', { orgId, id }, err);
+            return json(502, { error: 'The assistant could not suggest anything just now. Try again in a moment.' });
         }
     }
 
