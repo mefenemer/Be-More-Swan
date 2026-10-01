@@ -103,7 +103,7 @@ await check('every live role has its own dashboard entry', () => {
 function liveRoles(): string[] {
     // Parsed from the source rather than imported: importing the seed pulls in the db client.
     const out: string[] = [];
-    const re = /roleKey: '([a-z0-9_]+)',[\s\S]{0,700}?comingSoon: (true|false)/g;
+    const re = /roleKey: '([a-z0-9_]+)',[\s\S]{0,1200}?comingSoon: (true|false)/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(CATALOG))) {
         if (m[2] === 'false') out.push(m[1]);
@@ -251,14 +251,10 @@ await check('the copy migration and the content seed do not disagree', () => {
     // db/seed-assistant-content.ts (what a full seed would write). If they drift, the next seed run
     // silently reverts production to the older wording — the failure mode that made a targeted
     // migration the right call in the first place.
-    // ⚠️ Production ran newsletter-role-copy.sql AND THEN db/email-marketing-rename.sql, which
-    // REPLACEs phrases in the same columns ("issue" → "email"). An applied migration cannot be
-    // edited (the runner re-runs a drifted file), so what production holds is the first file with
-    // the second's replacements applied — compare the seed against THAT.
-    let sql = read('db/newsletter-role-copy.sql');
-    for (const [, from, to] of read('db/email-marketing-rename.sql').matchAll(/REPLACE\([^,]+, '([^']+)', '([^']+)'\)/g)) {
-        sql = sql.split(from).join(to);
-    }
+    // Production ran newsletter-role-copy.sql, then email-marketing-rename.sql, then
+    // db/email-marketing-copy.sql — which sets every column this compares. The LATEST copy migration
+    // is what production holds. (Applied migrations are never edited: the runner re-runs them.)
+    const sql = read('db/email-marketing-copy.sql');
     const seed = withoutComments(read('db/seed-assistant-content.ts'));
     const start = landmark(seed, `roleKey: '${ROLE}'`);
     const block = seed.slice(start, landmark(seed, 'roleKey:', start + 10));
@@ -267,10 +263,11 @@ await check('the copy migration and the content seed do not disagree', () => {
     assert.ok(tagline, 'the seed entry should carry a tagline');
     assert.ok(sql.includes(tagline!), 'the migration and the seed must state the SAME tagline');
 
-    for (const feature of block.match(/keyFeatures: \[([^\]]+)\]/)?.[1].split(',') ?? []) {
-        const text = feature.trim().replace(/^'|'$/g, '');
-        if (text) assert.ok(sql.includes(text), `key feature "${text}" is in the seed but not the migration`);
-    }
+    // Quoted strings, not a split on commas — a feature may contain one.
+    const features = [...(block.match(/keyFeatures: \[([\s\S]*?)\]/)?.[1] ?? '').matchAll(/'((?:[^'\\]|\\.)*)'/g)]
+        .map((m) => m[1].replace(/\\'/g, "'"));
+    assert.ok(features.length, 'the seed entry should carry key features');
+    for (const text of features) assert.ok(sql.includes(text.replace(/'/g, "''")), `key feature "${text}" is in the seed but not the migration`);
 });
 
 await check('the metrics loader is actually routed, not just written', () => {

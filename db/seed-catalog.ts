@@ -156,7 +156,7 @@ const CATALOG = [
     {
         roleKey: 'newsletter_editor',
         name: 'Email Marketing Assistant',
-        description: 'Drafts your newsletter in your brand voice, personalises it for each subscriber, and sends it to the audience you choose — you review and approve every email before it goes.',
+        description: 'Writes your regular emails and short email campaigns — from a welcome series for new subscribers to renewal reminders and win-backs — in your brand voice, personalised for each subscriber. A sign-up form for your website, or a shareable sign-up page if you don\'t have one, grows your list. You review and approve every email before it sends.',
         category: 'Marketing & Sales',
         iconKey: 'mail',
         iconColor: 'teal',
