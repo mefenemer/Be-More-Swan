@@ -310,7 +310,8 @@ window.NotifKit = (function () {
         // full view load before the modal even started. openPostReview (workspace.html) shows the
         // busy cursor itself and fetches the post from a cold cache, so it works from any view.
         // The review-queue route is only the fallback for a page without the workspace shell.
-        if ((notif.type === 'post_draft_ready' || notif.type === 'ai_review') && meta.postId) {
+        // post_revised: the redraft of a post the user sent back — the same review, of the new version.
+        if ((notif.type === 'post_draft_ready' || notif.type === 'post_revised' || notif.type === 'ai_review') && meta.postId) {
             return { label: 'Review draft', run: () => {
                 if (typeof window.openPostReview === 'function') return window.openPostReview(meta.postId);
                 return window.loadView?.('review-queue', { postId: meta.postId });

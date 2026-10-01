@@ -51,6 +51,7 @@
 // surface that renders a thread. Outreach could be sent, replied to, classified and halted and a
 // user could see none of it. That is what this reads back.
 
+import { appendSignature, signatureFromContext } from '../../src/utils/outreach-signature';
 import { and, desc, eq, gte, inArray, lt, lte, or, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
@@ -889,7 +890,8 @@ export default withLambda(async (event) => {
                 organisationId: orgId,
                 aiAssistantId: assistantId,
                 subject,
-                body: replyBody,
+                // A reply typed in the Conversations tab carries the same signature as the first email.
+                body: appendSignature(replyBody, signatureFromContext(assistant.onboardingContext)),
                 senderName: orgRow?.name ?? assistant.name ?? '',
                 postalAddress: orgRow?.postalAddress,
             });

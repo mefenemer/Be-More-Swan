@@ -34,6 +34,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { aiAssistants, assistantRecords, leadMessages, leadThreads, organisations, sequenceEnrolments } from '../../db/schema';
 import { appendOutreachFooter, buildOutreachFooter, isUsablePostalAddress } from '../../src/config/outreach-footer';
+import { appendSignature } from '../../src/utils/outreach-signature';
 import { SENDER_IDENTITY_RULE, senderIdentityBlock, type SenderIdentity } from '../../src/config/sender-identity';
 import { loadSenderIdentity } from '../../src/utils/sender-identity';
 import { sendGmailMessage } from '../../src/utils/gmail';
@@ -404,7 +405,7 @@ async function processEnrolment(
         .from(organisations)
         .where(eq(organisations.id, row.organisation_id))
         .limit(1);
-    const sender = await loadSenderIdentity(db, row.organisation_id);
+    const sender = await loadSenderIdentity(db, row.organisation_id, row.ai_assistant_id);
 
     let draft: { subject: string; body: string } | null;
     try {
@@ -450,7 +451,8 @@ async function processEnrolment(
             subject: draft.subject,
             // As in lead-generation.ts, the STORED message below keeps the un-footered body — the
             // transcript is what the assistant wrote, not the boilerplate wrapped around it.
-            body: appendOutreachFooter(draft.body, footer),
+            // Message → the assistant's signature (already read into `sender`) → the compliance footer.
+            body: appendOutreachFooter(appendSignature(draft.body, sender.signature || ''), footer),
             ...(thread ? { replyTo: replyAddress(thread.replyToken) } : {}),
             ...(footer.listUnsubscribe ? { listUnsubscribe: footer.listUnsubscribe } : {}),
         };

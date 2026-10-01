@@ -380,6 +380,21 @@
               { value: 'none', label: 'No — one email only', description: 'Approving a lead sends exactly one email. You can still send follow-ups yourself from the Conversations tab.' },
             ],
           },
+          {
+            // Read by src/utils/outreach-signature.ts at all three send sites (first email,
+            // follow-ups, Conversations replies) and by sender-identity, which tells the drafting
+            // prompts NOT to sign off while one is set. Blank = no signature, as before.
+            //
+            // ⚠️ PLAIN TEXT on purpose — outreach is sent text/plain for deliverability, so there are
+            // no fonts or images: the recipient's email app picks the typeface. Said in the help text
+            // so nobody expects a styled or handwritten signature to survive.
+            key: 'outreachSignature',
+            label: 'Email signature',
+            type: 'textarea',
+            required: false,
+            placeholder: 'Mark Fenemer\nFounder, Be More Swan\n07700 900123 · bemoreswan.com',
+            helpText: 'Added under every outreach email — first emails, follow-ups and replies. Plain text, exactly as you type it (your recipient\'s email app chooses the font). When this is set, your Lead Generator stops signing off its drafts so the email is not signed twice. Leave blank for no signature.',
+          },
         ],
       },
     ],

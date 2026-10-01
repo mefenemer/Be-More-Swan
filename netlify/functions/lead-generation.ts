@@ -56,6 +56,7 @@ import {
 import { EDIT_REASONS, isEditReason } from '../../src/config/template-feedback';
 import { isEnrichEligible } from '../../src/config/lead-contact-state';
 import { appendOutreachFooter, buildOutreachFooter, isUsablePostalAddress } from '../../src/config/outreach-footer';
+import { appendSignature, signatureFromContext } from '../../src/utils/outreach-signature';
 import { SENDER_IDENTITY_RULE, senderIdentityBlock, type SenderIdentity } from '../../src/config/sender-identity';
 import { parseModelJson, parseModelJsonArray } from '../../src/utils/model-json';
 import { loadSenderIdentity } from '../../src/utils/sender-identity';
@@ -237,7 +238,7 @@ export default withLambda(async (event) => {
      */
     let _sender: SenderIdentity | undefined;
     async function sender(): Promise<SenderIdentity> {
-        if (_sender === undefined) _sender = await loadSenderIdentity(db, orgId);
+        if (_sender === undefined) _sender = await loadSenderIdentity(db, orgId, assistant.id);
         return _sender;
     }
 
@@ -1343,7 +1344,8 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
                 const outgoing = {
                     to: recipient,
                     subject,
-                    body: appendOutreachFooter(bodyText, footer),
+                    // Message → the assistant's signature (if set) → the compliance footer.
+                    body: appendOutreachFooter(appendSignature(bodyText, signatureFromContext(assistant.onboardingContext)), footer),
                     ...(thread ? { replyTo: replyAddress(thread.replyToken) } : {}),
                     ...(footer.listUnsubscribe ? { listUnsubscribe: footer.listUnsubscribe } : {}),
                 };
@@ -1482,6 +1484,9 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
                 // Reported so the tab can state what approving will actually set off, from the same
                 // answer enrolInSequence reads rather than from a second guess about the default.
                 followUps: String(onboarding.outreachFollowUps ?? '') === 'none' ? 'none' : 'automatic',
+                // The signature added under every email, so the review card can show it beneath the
+                // draft — and the reviewer can see a sign-off in an older draft would print twice.
+                signature: signatureFromContext(assistant.onboardingContext) || null,
             });
         }
 
