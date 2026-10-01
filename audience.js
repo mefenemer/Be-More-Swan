@@ -1041,6 +1041,41 @@
     return `<div id="bms-subscribe"></div>\n<script async src="${origin}/subscribe.js"\n        data-bms-form="${form.publicKey}" data-bms-mount="#bms-subscribe"><\/script>`;
   }
 
+  let allForms = [];
+
+  /** Every form, each with the builder one click away. Bound by delegation in the wiring below. */
+  function renderFormList() {
+    const host = $('aud-form-list');
+    if (!host) return;
+    const rows = allForms.map((f) => {
+      const def = f.definition || {};
+      const page = def.delivery && def.delivery.hosted && def.delivery.hosted.enabled
+        ? (def.delivery.hosted.slug ? `${location.host}/f/${def.delivery.hosted.slug}` : 'Own page on')
+        : 'Website only';
+      return `
+      <div class="flex items-center gap-3 rounded-xl border ${currentForm && currentForm.id === f.id ? 'border-emerald-400' : 'border-gray-200'} p-3">
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-bold text-gray-900 truncate">${esc(f.name)}${f.status === 'disabled' ? ' <span class="text-[11px] font-bold text-gray-400">· off</span>' : ''}</p>
+          <p class="text-[11px] text-gray-500 truncate">${esc(String((def.fields || []).length || 1))} question${(def.fields || []).length === 1 ? '' : 's'} · ${esc(page)}</p>
+          ${f.stats ? `<p class="text-[11px] text-gray-500">${esc(String(f.stats.submissions))} sign-up${f.stats.submissions === 1 ? '' : 's'} · ${esc(String(f.stats.subscribed))} subscribed now · ${esc(String(f.stats.last30))} in the last 30 days</p>` : ''}
+        </div>
+        <button type="button" data-aud-form-build="${f.id}" class="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Open builder</button>
+        <button type="button" data-aud-form-pick="${f.id}" class="px-3 py-1.5 text-xs font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Settings</button>
+      </div>`;
+    }).join('');
+    host.innerHTML = `
+      <div class="space-y-2 mb-2">${rows}</div>
+      <button type="button" data-aud-form-build="new" class="text-xs font-bold text-emerald-700 hover:underline cursor-pointer">+ New form</button>`;
+  }
+
+  function openBuilder(form) {
+    if (!window.FormBuilder) { window.showToast('The form builder did not load — refresh the page and try again.'); return; }
+    window.FormBuilder.open({
+      form,
+      onSaved: (saved) => { currentForm = saved; openFormModal(); },
+    });
+  }
+
   async function openFormModal() {
     const modal = $('aud-form-modal');
     const body = $('aud-form-body');
@@ -1057,7 +1092,10 @@
         return;
       }
       const forms = data.forms || [];
-      currentForm = forms.find((f) => f.status === 'active') || forms[0] || null;
+      allForms = forms;
+      const keep = currentForm && forms.find((f) => f.id === currentForm.id);
+      currentForm = keep || forms.find((f) => f.status === 'active') || forms[0] || null;
+      renderFormList();
     } catch (err) {
       body.innerHTML = `<p class="text-sm text-red-600">${esc(err.message)}</p>`;
       return;
@@ -1536,6 +1574,21 @@
     }
 
     $('aud-form-btn')?.addEventListener('click', openFormModal);
+    // Delegated, bound once: the list repaints on every open and on every save.
+    $('aud-form-list')?.addEventListener('click', (e) => {
+      const build = e.target.closest('[data-aud-form-build]');
+      if (build) {
+        const id = build.getAttribute('data-aud-form-build');
+        openBuilder(id === 'new' ? null : allForms.find((f) => String(f.id) === id) || null);
+        return;
+      }
+      const pick = e.target.closest('[data-aud-form-pick]');
+      if (pick) {
+        currentForm = allForms.find((f) => String(f.id) === pick.getAttribute('data-aud-form-pick')) || currentForm;
+        renderFormList();
+        renderFormSettings();
+      }
+    });
     document.querySelectorAll('[data-aud-form-close]').forEach((el) => el.addEventListener('click', () => hide($('aud-form-modal'))));
 
     // Add-contact modal
@@ -1596,6 +1649,9 @@
     state.selected.clear();
     state.filters = { q: '', status: '', segmentId: '' };
     wire();
+    // Arrived from the Email Studio's "Sign-up forms" button — open the forms straight away.
+    // Consumed on read, so a later visit to Audience does not reopen it.
+    if (window._audienceOpenForms) { window._audienceOpenForms = false; openFormModal(); }
     await loadCustomFields();
     await loadApiKeys();
     await loadSegments();

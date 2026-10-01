@@ -1737,15 +1737,18 @@
     if (!emails.length) return null;
     const isDraft = ui.stage === 'draft' && emails.every((n) => typeof n.bodyMarkdown === 'string' && n.bodyMarkdown.trim());
     const trigger = ui.trigger && typeof ui.trigger === 'object' ? ui.trigger : {};
-    // Re-derived rather than trusted, same as the server: only 'subscribed' can start by itself.
-    const automatic = trigger.event === 'subscribed';
+    // Re-derived rather than trusted, same as the server: 'subscribed' (the welcome sequence) and
+    // 'form' (an email campaign a sign-up form starts) start by themselves; anything else does not.
+    const event = trigger.event === 'subscribed' || trigger.event === 'form' ? trigger.event : 'custom';
+    const automatic = event !== 'custom';
+    const isForm = event === 'form';
     const name = typeof ui.name === 'string' && ui.name.trim() ? ui.name.trim() : 'Email sequence';
     const goal = typeof ui.goal === 'string' ? ui.goal.trim() : '';
     const warnings = (Array.isArray(ui.warnings) ? ui.warnings : []).filter((w) => typeof w === 'string' && w.trim());
     const lastDay = Number(emails[emails.length - 1].sendDay) || 1;
     const typeLabel = CAMPAIGN_TYPE_LABELS[ui.campaignType] || 'Custom';
     const n = emails.length;
-    const saveLabel = automatic ? 'Save as welcome sequence' : `Save as ${n} draft ${n === 1 ? 'email' : 'emails'}`;
+    const saveLabel = isForm ? 'Save as form email campaign' : automatic ? 'Save as welcome sequence' : `Save as ${n} draft ${n === 1 ? 'email' : 'emails'}`;
     const eyebrow = (s) => `${isDraft ? 'Email campaign draft' : 'Email campaign plan'} · ${s}`;
 
     const el = document.createElement('div');
@@ -1764,7 +1767,7 @@
         <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-white border border-indigo-200 text-indigo-700">${esc(typeLabel)}</span>
         <span class="text-[11px] font-semibold text-gray-500">${esc(`${n} ${n === 1 ? 'email' : 'emails'} over ${lastDay} ${lastDay === 1 ? 'day' : 'days'}`)}</span>
         ${automatic
-          ? '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 border-emerald-200 text-emerald-800">Starts when someone subscribes</span>'
+          ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 border-emerald-200 text-emerald-800">${isForm ? 'Starts when someone fills in a form' : 'Starts when someone subscribes'}</span>`
           : '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-amber-50 border-amber-200 text-amber-900">Won’t start by itself</span>'}
       </div>
       ${trigger.description ? `<p class="text-xs text-gray-600 mb-3 break-words">Who it’s for: ${esc(trigger.description)}</p>` : ''}
@@ -1804,6 +1807,8 @@
       </div>` : ''}
       <p class="mt-2 text-xs font-semibold text-indigo-700" data-ncd-status>${!isDraft
         ? 'This is the plan, not the emails yet. Tell me what to change — more or fewer emails, different days — or say “write it” and I’ll draft every one.'
+        : isForm
+          ? 'Saving creates this email campaign under Automatic emails in the Email Studio, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on — nobody is emailed by saving.'
         : automatic
           ? 'Saving makes this your welcome sequence, under Automatic emails in the Email Studio. It stays switched off until you turn it on there — nobody is emailed by saving.'
           : 'Saving puts each email in your Emails tab as a draft. Nothing is sent to anyone: you send each one to the right people on the right day from the Email Studio.'}</p>
@@ -1830,7 +1835,7 @@
         bubbles: true,
         detail: {
           name,
-          trigger: { event: automatic ? 'subscribed' : 'custom' },
+          trigger: { event },
           newsletters: emails.map((e) => ({
             subject: e.subject, preheader: e.preheader || '', bodyMarkdown: e.bodyMarkdown,
             delayDaysAfterPrevious: Number(e.delayDaysAfterPrevious) || 0,
@@ -1840,7 +1845,11 @@
           async respond({ ok, deduped, error, code, stepCount, created, replaced }) {
             if (ok) {
               setEyebrow('Saved');
-              if (automatic) {
+              if (isForm) {
+                say(deduped
+                  ? 'Already saved — it is under Automatic emails in the Email Studio.'
+                  : `Saved as an email campaign — ${stepCount || n} emails, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on under Automatic emails.`);
+              } else if (automatic) {
                 say(deduped
                   ? 'Already saved — it is your welcome sequence, under Automatic emails in the Email Studio.'
                   : `${replaced ? 'Replaced your welcome sequence' : 'Saved as your welcome sequence'} — ${stepCount || n} emails, switched off. Turn it on under Automatic emails in the Email Studio when you are ready.`);
@@ -1885,6 +1894,102 @@
 
     return el;
   }
+
+  // ── Built-in: Sign-up Form Draft Card ───────────────────────────────────────
+  // Renderer for a sign-up form the Email Marketing Assistant designed in chat (Mode A of
+  // docs/form-builder-plan.md), normalised by src/utils/form-chat-draft.ts:
+  //   { type: 'audience_form_draft', form: FormDefinition, warnings }
+  //
+  // A LIVE PREVIEW drawn by window.BmsForm — the same renderer the customer's website and the hosted
+  // page use — then where each answer goes, then Save / Discard. Save creates the form SWITCHED OFF:
+  // it is published from the form builder, by someone who has seen it there.
+  const TARGET_LABELS = { first_name: 'First name', last_name: 'Last name', company: 'Company', phone: 'Phone', email: 'Email' };
+
+  function renderAudienceFormDraftCard(ui, esc) {
+    const def = ui.form && typeof ui.form === 'object' ? ui.form : null;
+    if (!def || !Array.isArray(def.fields) || !def.fields.length) return null;
+    const warnings = (Array.isArray(ui.warnings) ? ui.warnings : []).filter((w) => typeof w === 'string' && w.trim());
+    const where = (f) => {
+      const t = f.target || {};
+      if (t.kind === 'contact') return TARGET_LABELS[t.column] || t.column;
+      if (t.kind === 'tag') return 'tags';
+      return `your field "${t.key || ''}"`;
+    };
+    const hosted = def.delivery && def.delivery.hosted && def.delivery.hosted.enabled;
+    const slug = hosted && def.delivery.hosted.slug;
+
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-lg';
+    el.innerHTML = `
+      <div class="flex items-start gap-3 mb-3">
+        <div class="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-xl shrink-0">📝</div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase" data-afd-eyebrow>Sign-up form · Not saved yet</p>
+          <p class="font-bold text-gray-900 break-words">${esc(def.name || 'Sign-up form')}</p>
+          <p class="text-xs text-gray-500">${esc(def.fields.length === 1 ? '1 question' : `${def.fields.length} questions`)} · ${hosted ? esc(slug ? `its own page at /f/${slug}` : 'its own page') : 'for your website'}</p>
+        </div>
+      </div>
+      <div class="bg-white border border-indigo-100 rounded-lg p-3 mb-3" data-afd-preview></div>
+      <ul class="text-[11px] text-gray-600 mb-3 space-y-0.5">
+        ${def.fields.map((f) => `<li><span class="font-bold">${esc(f.label)}</span>${f.required ? ' (required)' : ''} → ${esc(where(f))}</li>`).join('')}
+      </ul>
+      ${warnings.length ? `<div class="bg-amber-50 border border-amber-200 rounded-lg p-2.5 mb-3">
+        <p class="text-[11px] font-bold text-amber-900 mb-0.5">We tidied this before showing it</p>
+        <ul class="text-[11px] text-amber-900 list-disc pl-4">${warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>
+      </div>` : ''}
+      <div class="flex flex-wrap items-center gap-2" data-afd-actions>
+        <button type="button" data-afd-save class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save form</button>
+        <button type="button" data-afd-discard class="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Discard</button>
+      </div>
+      <p class="mt-2 text-xs font-semibold text-indigo-700" data-afd-status>Saving keeps it switched off. Open it in the form builder to link an email campaign, check it, and publish it — nobody can sign up until you do.</p>
+    `;
+
+    // The preview — only when the renderer is on this page (the workspace loads it; a standalone
+    // chat page may not, and the summary above still says everything).
+    const pv = el.querySelector('[data-afd-preview]');
+    if (window.BmsForm && pv) {
+      window.BmsForm.render({ content: def.content || {}, fields: def.fields, consent: def.consent || {}, style: Object.assign({}, def.style || {}, { logoUrl: null }), senderName: '' },
+        pv, { surface: 'preview', previewAs: 'embed', preview: true });
+    } else if (pv) {
+      pv.remove();
+    }
+
+    const status = el.querySelector('[data-afd-status]');
+    const say = (text, tone) => { status.textContent = text; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-afd-save], [data-afd-discard]').forEach((x) => { x.disabled = b; });
+    const eyebrow = (t) => { const n = el.querySelector('[data-afd-eyebrow]'); if (n) n.textContent = `Sign-up form · ${t}`; };
+
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-afd-discard]')) { setBusy(true); eyebrow('Discarded'); say('Discarded — nothing was saved.'); return; }
+      const openBtn = e.target.closest('[data-afd-open]');
+      if (openBtn && el._savedForm && window.FormBuilder) { window.FormBuilder.open({ form: el._savedForm }); return; }
+      if (!e.target.closest('[data-afd-save]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('audience:createForm', {
+        bubbles: true,
+        detail: {
+          definition: def,
+          respond({ ok, form, warnings: more, error }) {
+            if (!ok) { setBusy(false); eyebrow('Not saved yet'); say(error || 'Could not save this form — please try again.', 'error'); return; }
+            eyebrow('Saved · switched off');
+            el._savedForm = form;
+            const extra = (more || []).length ? ` (${more.join(' ')})` : '';
+            say(`Saved, switched off. Open it in the form builder to link an email campaign and publish it.${extra}`);
+            const actions = el.querySelector('[data-afd-actions]');
+            if (actions && window.FormBuilder) {
+              actions.innerHTML = '<button type="button" data-afd-open class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition">Open in the form builder</button>';
+            }
+          },
+        },
+      }));
+    });
+
+    return el;
+  }
+
+  register('audience_form_draft', renderAudienceFormDraftCard);
+  register('AudienceFormDraftCard', renderAudienceFormDraftCard);
 
   register('newsletter_campaign_draft', renderNewsletterCampaignDraftCard);
   register('NewsletterCampaignDraftCard', renderNewsletterCampaignDraftCard);

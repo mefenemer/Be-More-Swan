@@ -53,13 +53,30 @@ export async function enrolInWelcomeSequence(
     db: Db,
     args: { organisationId: number; contactId: number; email: string },
 ): Promise<{ enrolled: boolean; reason?: string }> {
+    return enrolInSequence(db, { ...args, sequenceId: null });
+}
+
+/**
+ * Put a contact into ONE sequence — the welcome sequence (sequenceId null) or a specific email
+ * campaign a sign-up form starts (db/form-builder.sql, trigger 'form'). Same rules for both: every
+ * failure is swallowed and logged, nothing is enrolled into a disabled or empty sequence, and a
+ * repeat is a no-op.
+ */
+export async function enrolInSequence(
+    db: Db,
+    args: { organisationId: number; contactId: number; email: string; sequenceId: number | null },
+): Promise<{ enrolled: boolean; reason?: string }> {
     try {
         const [seq] = await db
             .select({ id: newsletterSequences.id, isEnabled: newsletterSequences.isEnabled })
             .from(newsletterSequences)
             .where(and(
                 eq(newsletterSequences.organisationId, args.organisationId),
-                eq(newsletterSequences.triggerEvent, 'subscribed'),
+                // ⚠️ Scoped to the org even with an id: a form row carries the id, and a form must
+                // never enrol anybody into another tenant's sequence.
+                args.sequenceId
+                    ? eq(newsletterSequences.id, args.sequenceId)
+                    : eq(newsletterSequences.triggerEvent, 'subscribed'),
             ))
             .limit(1);
 
@@ -101,6 +118,23 @@ export async function enrolInWelcomeSequence(
         console.error('[newsletter-sequence] enrolment failed', { orgId: args.organisationId, contactId: args.contactId }, err);
         return { enrolled: false, reason: 'error' };
     }
+}
+
+/**
+ * Everything a fresh sign-up is enrolled into, in one place — called at the moment somebody became
+ * subscribed: the confirmation click, or the submission itself on a single opt-in form.
+ *
+ * A form linked to an email campaign starts THAT campaign, and by default it REPLACES the welcome
+ * sequence rather than running beside it (skipWelcome) — two series starting on the same day reads
+ * as spam. An unlinked form gets the welcome sequence, as every form always has.
+ */
+export async function enrolAfterSignup(
+    db: Db,
+    args: { organisationId: number; contactId: number; email: string; formSequenceId: number | null; skipWelcome: boolean },
+): Promise<void> {
+    const base = { organisationId: args.organisationId, contactId: args.contactId, email: args.email };
+    if (args.formSequenceId) await enrolInSequence(db, { ...base, sequenceId: args.formSequenceId });
+    if (!args.formSequenceId || !args.skipWelcome) await enrolInWelcomeSequence(db, base);
 }
 
 /**

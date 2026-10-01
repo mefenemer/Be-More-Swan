@@ -19,7 +19,8 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { landmark } from './landmark';
-import { hostedMissing, hostedPage } from '../netlify/functions/audience-public';
+import { hostedMissing, hostedPage, inlineJson } from '../netlify/functions/audience-public';
+import { normaliseFormDefinition, publicDefinition } from '../src/utils/form-definition';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -38,6 +39,7 @@ const FORMS = read('netlify/functions/audience-forms.ts');
 const SQL = read('db/audience-hosted-pages.sql');
 const TOML = read('netlify.toml');
 const UI = read('audience.js');
+const RENDERER = read('subscribe.js');
 
 console.log('\nThe hosted sign-up page\n');
 
@@ -80,18 +82,23 @@ check('a switched-off page answers exactly like a key that never existed', () =>
 
 // ── 3. It is the same form, reached another way ─────────────────────────────
 
-check('the page reads the form\'s own consent text and opt-in setting', () => {
+check('the page reads the form\'s own definition — the same one the embed and the API use', () => {
+    // Since the form builder: ONE definition (src/utils/form-definition.ts) per form, resolved the
+    // same way for the embed config, the hosted page and the submission check.
     const fn = PUBLIC.slice(landmark(PUBLIC, 'const hostedMatch'), landmark(PUBLIC, '// ── Confirmation'));
-    assert.match(fn, /consentText: form\.consentText \|\| DEFAULT_CONSENT_TEXT/);
-    assert.match(fn, /doubleOptIn: form\.doubleOptIn/);
-    // The reasoning sits in the comment ABOVE the branch, so it is asserted against the file.
+    assert.match(fn, /const def = resolveDefinition\(form\)/);
+    assert.match(fn, /publicDefinition\(def,/);
     assert.match(PUBLIC, /a second description of what somebody agreed to/);
+    // A form saved before definitions existed still says what its columns say.
+    const legacy = read('src/utils/form-definition.ts');
+    assert.match(legacy.slice(landmark(legacy, 'export function legacyToDefinition')), /consent: \{ text: row\.consentText \}/);
 });
 
-check('it posts to the SAME endpoint as the embeddable widget', () => {
-    // Two callers of one contract, rather than two contracts.
-    assert.match(PUBLIC, /fetch\('\/api\/audience\/subscribe'/);
-    assert.match(PUBLIC, /two callers of[\s\S]{0,20}one endpoint/);
+check('it is drawn by the SAME renderer, posting to the SAME endpoint, as the embeddable widget', () => {
+    // Two callers of one contract and one renderer, rather than two of each.
+    const fn = PUBLIC.slice(landmark(PUBLIC, 'export function hostedPage'), landmark(PUBLIC, 'function corsHeaders'));
+    assert.match(fn, /<script src="\/subscribe\.js" data-bms-hosted/);
+    assert.match(RENDERER, /'\/api\/audience\/subscribe'/);
 });
 
 check('it is served by a rewrite so the shareable url survives', () => {
@@ -104,10 +111,10 @@ check('it is served by a rewrite so the shareable url survives', () => {
 // ── 4. The protections the embed has ────────────────────────────────────────
 
 check('the honeypot and the fill-time check are both on the page', () => {
-    // ⚠️ A public url on our own domain is a MORE attractive target, not a less attractive one.
-    const fn = PUBLIC.slice(landmark(PUBLIC, 'function hostedPage'), landmark(PUBLIC, 'function corsHeaders'));
-    assert.match(fn, /name="hp"/, 'the honeypot field');
-    assert.match(fn, /ms: Date\.now\(\) - started/, 'the fill-time the server checks against MIN_FILL_MS');
+    // ⚠️ A public url on our own domain is a MORE attractive target, not a less attractive one. Both
+    // now live in the ONE renderer, which the hosted page loads — so it cannot have fewer than the embed.
+    assert.match(RENDERER, /name="bms-website"/, 'the honeypot field');
+    assert.match(RENDERER, /ms: Date\.now\(\) - shownAt/, 'the fill-time the server checks against MIN_FILL_MS');
     assert.match(PUBLIC, /SAME anti-bot pair/);
 });
 
@@ -130,7 +137,7 @@ check('the page loads nothing from anywhere else', () => {
 check('the form key reaching the inline script is validated first', () => {
     const fn = PUBLIC.slice(landmark(PUBLIC, 'const hostedMatch'), landmark(PUBLIC, '// ── Confirmation'));
     assert.ok(landmark(fn, 'FORM_KEY_RE.test(key)') < landmark(fn, 'return hostedPage('));
-    assert.match(PUBLIC, /JSON\.stringify\(key\)/, 'and it is embedded as JSON, not interpolated raw');
+    assert.ok(landmark(fn, 'SLUG_RE.test(slug)') < landmark(fn, 'return hostedPage('), 'and so is a slug');
 });
 
 // ── 5. What the tenant sees ─────────────────────────────────────────────────
@@ -154,14 +161,18 @@ check('a headline is only sent when the field is on screen', () => {
 // Source scans above; these run the renderer and read its output, which is the thing a stranger
 // will see.
 
-const rendered = hostedPage('aud_0123456789abcdef01234567', {
-    orgName: 'Acme & Sons',
-    headline: 'The <weekly> letter',
-    intro: 'One email a month.\nNothing else.',
-    fields: ['email', 'first_name'],
-    consentText: 'We will email you about "offers".',
-    doubleOptIn: true,
-});
+const def = normaliseFormDefinition({
+    name: 'Weekly',
+    content: { headline: 'The <weekly> letter', intro: 'One email a month.\nNothing else.' },
+    fields: [
+        { type: 'email', label: 'Email' },
+        { type: 'text', label: 'First name', target: { kind: 'contact', column: 'first_name' } },
+    ],
+    consent: { text: 'We will email you about "offers". </script><script>alert(1)</script>' },
+    delivery: { hosted: { enabled: true } },
+}).definition;
+const pub = publicDefinition(def, { logoUrl: null, senderName: 'Acme & Sons' });
+const rendered = hostedPage({ key: 'aud_0123456789abcdef01234567' }, pub, 'Acme & Sons');
 
 check('the page renders as a whole document with the right headers', () => {
     assert.strictEqual(rendered.statusCode, 200);
@@ -172,30 +183,28 @@ check('the page renders as a whole document with the right headers', () => {
 });
 
 check('every tenant-supplied string is escaped in the output', () => {
-    // ⚠️ The org name, the headline, the intro and the consent text are all tenant-written and all
-    // land in a page served from OUR domain. One unescaped angle bracket is stored XSS on it.
+    // ⚠️ The org name, headline and consent text are tenant-written and land in a page served from
+    // OUR domain. In the title they are HTML-escaped; in the inlined definition they are JSON with
+    // every angle bracket escaped, so nothing can close the <script> it sits in.
     assert.ok(rendered.body.includes('Acme &amp; Sons'));
     assert.ok(rendered.body.includes('The &lt;weekly&gt; letter'));
-    assert.ok(rendered.body.includes('about &quot;offers&quot;'));
     assert.ok(!rendered.body.includes('<weekly>'), 'no raw tenant markup may survive');
+    assert.ok(!rendered.body.includes('</script><script>alert'), 'a </script> in tenant copy must not break out');
+    assert.strictEqual((rendered.body.match(/<\/script>/g) || []).length, 2, 'exactly the page\'s own two script elements');
+    assert.strictEqual(inlineJson('</script>'), '"\\u003c/script\\u003e"');
 });
 
-check('the requested fields are rendered, and nothing else is', () => {
-    assert.match(rendered.body, /name="email"/);
-    assert.match(rendered.body, /name="first_name"/);
-    assert.ok(!rendered.body.includes('name="last_name"'), 'a field the form does not ask for must not appear');
-    assert.ok(!rendered.body.includes('name="company"'));
+check('the definition reaches the page, and only the public part of it', () => {
+    const json = rendered.body.slice(rendered.body.indexOf('id="bms-def">') + 13, rendered.body.indexOf('</script>'));
+    const parsed = JSON.parse(json);
+    assert.deepStrictEqual(parsed.fields.map((f: { type: string }) => f.type), ['email', 'text']);
+    assert.ok(!('audience' in parsed) && !('campaign' in parsed) && !('delivery' in parsed),
+        'segments, campaigns and allowed websites are nobody else\'s business');
 });
 
-check('email is required and the honeypot is not', () => {
-    const emailInput = rendered.body.slice(rendered.body.indexOf('name="email"') - 60, rendered.body.indexOf('name="email"') + 80);
-    assert.match(emailInput, /required/);
-    assert.match(rendered.body, /class="hp"[\s\S]{0,220}name="hp"/);
-    assert.match(rendered.body, /tabindex="-1"/, 'and it is out of the tab order for anyone using a keyboard');
-});
-
-check('the key in the script is the validated one, as a JSON string', () => {
-    assert.match(rendered.body, /key: "aud_0123456789abcdef01234567"/);
+check('the page loads the renderer as the hosted surface, with its validated key', () => {
+    assert.match(rendered.body, /<script src="\/subscribe\.js" data-bms-hosted data-bms-key="aud_0123456789abcdef01234567">/);
+    assert.match(rendered.headers['Content-Security-Policy'], /script-src 'self'/);
 });
 
 check('a missing page renders a page, not a stack trace', () => {

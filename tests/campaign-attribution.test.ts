@@ -506,7 +506,8 @@ check('the form callers still send the page URL the binding depends on', () => {
     // The delivery mechanism is `url: location.href` in two independent callers. If either stops
     // sending it, click_ref binding goes dark for that surface and only the cookie path survives.
     assert.match(read('subscribe.js'), /url: location\.href/, 'the embeddable widget stopped sending the page URL');
-    assert.match(subscribe, /url: location\.href/, 'the hosted sign-up page stopped sending the page URL');
+    // The hosted page is drawn by that same renderer since the form builder, so it sends it too.
+    assert.match(subscribe, /<script src="\/subscribe\.js" data-bms-hosted/, 'the hosted sign-up page stopped loading the renderer that sends the page URL');
 });
 
 console.log('\n──── minting a link cannot mint an open redirector ────');

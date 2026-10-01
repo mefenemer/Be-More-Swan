@@ -28,10 +28,10 @@ export type CampaignType = typeof CAMPAIGN_TYPES[number];
 
 /**
  * The events that can put somebody into a campaign BY THEMSELVES. Must match
- * newsletter_sequences_trigger_check (db/schema.ts) — a test holds the two together, and the prompt's
+ * newsletter_sequences_trigger_check (db/schema.ts, db/form-builder.sql) — a test holds them together, and the prompt's
  * "TRIGGERS THAT START BY THEMSELVES" line is held to this list.
  */
-export const AUTOMATIC_TRIGGERS = ['subscribed'] as const;
+export const AUTOMATIC_TRIGGERS = ['subscribed', 'form'] as const;
 
 /** The prompt caps a campaign at 7; the welcome sequence holds 8 (MAX_STEPS). Below both. */
 export const MAX_CAMPAIGN_EMAILS = 7;
@@ -64,7 +64,7 @@ export interface NewsletterCampaignDraft {
     campaignType: CampaignType;
     goal: string;
     audience: string;
-    trigger: { event: 'subscribed' | 'custom'; description: string; startsAutomatically: boolean };
+    trigger: { event: 'subscribed' | 'form' | 'custom'; description: string; startsAutomatically: boolean };
     tone: string;
     newsletters: CampaignEmail[];
     /** What was changed on the way in, so the card can say so rather than silently editing. */
@@ -174,7 +174,7 @@ export function campaignDraftFromUiElement(uiElement: unknown, suppliedText = ''
     const campaignType: CampaignType = (CAMPAIGN_TYPES as readonly string[]).includes(String(c.campaignType))
         ? c.campaignType as CampaignType : 'custom';
     const trig = c.trigger && typeof c.trigger === 'object' ? c.trigger as Record<string, unknown> : {};
-    const event: 'subscribed' | 'custom' = trig.event === 'subscribed' ? 'subscribed' : 'custom';
+    const event: 'subscribed' | 'form' | 'custom' = trig.event === 'subscribed' ? 'subscribed' : trig.event === 'form' ? 'form' : 'custom';
 
     return {
         stage,

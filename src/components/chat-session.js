@@ -641,10 +641,13 @@
         return;
       }
       const emails = Array.isArray(d.newsletters) ? d.newsletters : [];
-      const toSequence = d.trigger && d.trigger.event === 'subscribed';
+      // The welcome sequence ('subscribed') and form-started email campaigns ('form') are both
+      // automatic series; anything else becomes draft emails.
+      const trigger = d.trigger && (d.trigger.event === 'subscribed' || d.trigger.event === 'form') ? d.trigger.event : null;
+      const toSequence = !!trigger;
       const request = toSequence
         ? { url: '/.netlify/functions/newsletter-sequences', body: {
-            action: 'importCampaign', assistantId, name: d.name, replace: d.replace === true,
+            action: 'importCampaign', assistantId, name: d.name, replace: d.replace === true, trigger,
             steps: emails.map((m) => ({
               subject: m.subject, preheader: m.preheader, bodyMarkdown: m.bodyMarkdown,
               // Days since the PREVIOUS email — what delay_days stores. The normaliser recomputed it.
@@ -687,6 +690,28 @@
         });
     }
 
+    // A sign-up form from the form card. Saved SWITCHED OFF through the same endpoint the form
+    // builder uses (normalised and checked again there); the card then offers the builder.
+    function onAudienceFormCreate(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      fetch('/.netlify/functions/audience-forms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ action: 'create', definition: d.definition, assistantId, status: 'disabled' }),
+      })
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || (res.status === 403 ? 'Only an owner or admin can create sign-up forms.' : `Save failed (HTTP ${res.status}).`));
+          respond({ ok: true, form: data.form, warnings: data.warnings || [] });
+        })
+        .catch((err) => {
+          console.error('[ChatSession] sign-up form save failed:', err);
+          respond({ ok: false, error: err.message });
+        });
+    }
+
     // The composer does not exist in read-only mode, so its listeners are conditional. The
     // container-level ones stay: a hydrated transcript can still contain Disruptive UI cards.
     if (!readOnly) {
@@ -700,6 +725,7 @@
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
     container.addEventListener('newsletter:createDraft', onNewsletterDraftCreate);
     container.addEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
+    container.addEventListener('audience:createForm', onAudienceFormCreate);
 
     // Starter pills send their prompt verbatim; the first appendMessage removes the
     // zero-state (and the pills with it), so no explicit teardown is needed.
@@ -730,6 +756,7 @@
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
         container.removeEventListener('newsletter:createDraft', onNewsletterDraftCreate);
         container.removeEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
+        container.removeEventListener('audience:createForm', onAudienceFormCreate);
         container.innerHTML = '';
       },
     };

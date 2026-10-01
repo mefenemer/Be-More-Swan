@@ -37,7 +37,7 @@ export interface CampaignPlanInput {
     goal: string;
     audience: string;
     /** 'subscribed' → the welcome sequence; anything else → draft emails the user sends. */
-    triggerEvent: 'subscribed' | 'custom';
+    triggerEvent: 'subscribed' | 'form' | 'custom';
     /** Links and facts the person supplied. The ONLY source a URL may come from. */
     facts: string;
     avoid: string;
@@ -67,7 +67,7 @@ export async function draftCampaignEmails(db: Db, input: CampaignPlanInput): Pro
         `THE CAMPAIGN — "${input.name}" (${kind.label}).
 Goal — what the reader has done when it worked: ${input.goal || '(not stated — infer it from the plan)'}
 Who is in it: ${input.audience || org?.targetAudience || 'their subscribers'}
-${input.triggerEvent === 'subscribed' ? 'They enter the moment they subscribe.' : 'The business sends each email to this group by hand on its day.'}
+${input.triggerEvent === 'subscribed' ? 'They enter the moment they subscribe.' : input.triggerEvent === 'form' ? 'They enter the moment they fill in a sign-up form (and confirm their email).' : 'The business sends each email to this group by hand on its day.'}
 The whole plan (you write ONE of these; the others are written separately, in the same voice):
 ${plan}`,
         input.facts ? `Facts and links the business gave you — the ONLY facts and URLs you may use:\n${input.facts}` : 'The business gave no links. Write no URLs at all.',

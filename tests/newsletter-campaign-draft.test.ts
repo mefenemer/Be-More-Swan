@@ -42,7 +42,8 @@ const SESSION = read('src/components/chat-session.js');
 const ISSUES = read('netlify/functions/newsletter-issues.ts');
 const SEQUENCES = read('netlify/functions/newsletter-sequences.ts');
 const SCHEMA = read('db/schema.ts');
-const SEQ_SQL = read('db/newsletter-sequences.sql');
+// The LATEST migration to define the trigger check (db/newsletter-sequences.sql's is superseded).
+const SEQ_SQL = read('db/form-builder.sql');
 
 const email = (over: Record<string, unknown> = {}) => ({
     subject: 'Welcome', preheader: 'Glad you are here', role: 'welcome',
@@ -186,7 +187,7 @@ await check('the campaign is normalised before it is persisted, with links groun
 });
 
 await check('a reply that carries a campaign is not mistaken for an unbacked claim', () => {
-    assert.match(ORCH, /route === ROUTES\.newsletter_editor && !newsletterDraft && !campaignDraft && replyClaimsPostSaved/);
+    assert.match(ORCH, /route === ROUTES\.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved/);
 });
 
 await check('the model can see the plan it proposed — the latest newsletter card is restated in history', () => {
@@ -242,7 +243,8 @@ await check('the client routes by trigger and keeps the 409 question intact', ()
     const h = SESSION.slice(landmark(SESSION, 'function onNewsletterCampaignCreate'), landmark(SESSION, 'The composer does not exist in read-only mode'));
     assert.match(h, /action: 'importCampaign'/);
     assert.match(h, /action: 'createCampaign'/);
-    assert.match(h, /d\.trigger && d\.trigger\.event === 'subscribed'/);
+    assert.match(h, /d\.trigger\.event === 'subscribed' \|\| d\.trigger\.event === 'form'/, 'both automatic series go to the sequence endpoint');
+    assert.match(h, /trigger,\n/, 'and say which kind they are');
     assert.match(h, /res\.status === 409 && data\.code/);
     assert.match(h, /if \(!assistantId\)/);
     assert.match(SESSION, /addEventListener\('newsletter:createCampaign'/);
