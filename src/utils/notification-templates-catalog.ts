@@ -525,7 +525,9 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         category: 'Content',
         type: 'post_revised',
         title: '{{assistant.name}}: Your revised post is ready to review',
-        message: 'Your voice feedback has been applied. The revised draft is ready for your review.',
+        // Sent when the redraft of a post the user SENT BACK lands (process-content-jobs). The
+        // feedback may have been typed or spoken — it said "voice feedback" for both until 2026-10-01.
+        message: '{{assistant.name}} has rewritten the post you sent back, using your feedback. Open it to review the new version.',
         variables: [ASSISTANT_NAME],
     },
     {

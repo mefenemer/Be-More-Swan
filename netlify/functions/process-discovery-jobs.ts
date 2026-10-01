@@ -283,7 +283,7 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
         // identity that ends up in the sign-off of every email approved out of this run — it must be
         // the tenant's business, never the assistant's name and never ours. See
         // src/config/sender-identity.ts for what went out before this was passed.
-        const sender = await loadSenderIdentity(db, job.organisation_id);
+        const sender = await loadSenderIdentity(db, job.organisation_id, campaign.aiAssistantId);
         const icp = (campaign.icpSnapshot && typeof campaign.icpSnapshot === 'object' ? campaign.icpSnapshot : {}) as Record<string, unknown>;
         // The other half of the attribution key (§7.2). Read ONCE per job rather than per lead:
         // one job is one campaign is one assistant, and a recompile mid-run should not split a

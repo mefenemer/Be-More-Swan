@@ -9,6 +9,7 @@
 // (social-publish-selftest.ts) runs the exact same code. Facebook is excluded here: it has its own
 // publisher (publish-facebook.ts) sharing the same driver module.
 
+import { livePostUrl } from '../../src/utils/post-live-url';
 import { Handler } from '@netlify/functions';
 import { inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
@@ -261,8 +262,10 @@ export default withLambda(async () => {
                 return;
             }
 
+            // The public address, so the "published" notification has something to open.
+            const liveUrl = livePostUrl(post.platform, result.id);
             await db.execute(
-                `UPDATE scheduled_posts SET status = 'published', platform_post_id = '${esc(result.id)}', published_at = now(), updated_at = now() WHERE id = ${post.id}`
+                `UPDATE scheduled_posts SET status = 'published', platform_post_id = '${esc(result.id)}', published_at = now(), updated_at = now()${liveUrl ? `, platform_post_url = '${esc(liveUrl)}'` : ''} WHERE id = ${post.id}`
             );
             // US2 AC2.5: burn any Pexels asset on this post so it is never reused (idempotent;
             // covers autonomous posts that bypass manual approval). Never blocks publish success.
@@ -277,7 +280,7 @@ export default withLambda(async () => {
             await createNotification(db, 'post_published', {
                 userId: post.user_id,
                 context: { platform: { label: LABEL[post.platform] } },
-                metadata: { postId: post.id, platform: post.platform, platformPostId: result.id, assistantId: post.assistant_id },
+                metadata: { postId: post.id, platform: post.platform, platformPostId: result.id, postUrl: liveUrl, assistantId: post.assistant_id },
             });
             // Orchestration (Phase 5): this assistant just published — hand off to any linked
             // assistants. Best-effort; never throws. Each downstream draft still needs approval.

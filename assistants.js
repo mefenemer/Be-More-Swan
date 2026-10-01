@@ -1672,12 +1672,14 @@ function _rqOutreachPreview(r, statusKey) {
         <div class="rq-mail-view">
           ${subjectView}
           <pre class="text-xs text-gray-700 whitespace-pre-wrap font-sans max-h-56 overflow-y-auto mt-0.5">${_rqEsc(draft.body)}</pre>
+          ${_rqSignatureNote()}
         </div>
         <div class="rq-mail-edit hidden">
           ${subjectEdit}
           <label class="block text-[11px] text-gray-500 mt-2">Message
             <textarea rows="10" class="rq-mail-body ${input} mt-0.5 font-sans">${_rqEsc(draft.body)}</textarea>
           </label>
+          ${_rqSignatureNote()}
           <div class="flex items-center gap-2 mt-2">
             <button type="button" onclick="_detailRqRecordAct(this,'saveEmail')" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white transition cursor-pointer">Save changes</button>
             <button type="button" onclick="_detailRqRecordAct(this,'cancelEmail')" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-gray-300 transition cursor-pointer">Cancel</button>
@@ -1685,6 +1687,21 @@ function _rqOutreachPreview(r, statusKey) {
         </div>
       </div>
     </details>`;
+}
+
+/**
+ * The Lead Generator's email signature, shown under a draft exactly as it will be added when it sends
+ * (src/utils/outreach-signature.ts). Drafts written before the signature was set still end with a
+ * sign-off of their own — seeing both, one under the other, is what tells the reviewer to trim it.
+ */
+function _rqSignatureNote() {
+    const sig = _rqReadiness && _rqReadiness.signature;
+    if (!sig) return '';
+    return `<div class="mt-2 rounded-lg border border-dashed border-gray-200 px-2.5 py-2">
+        <p class="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-0.5">Added when it sends — your signature</p>
+        <pre class="text-xs text-gray-500 whitespace-pre-wrap font-sans">${_rqEsc(sig)}</pre>
+        <p class="text-[10px] text-gray-400 mt-1">If the message above already signs off, remove that line so it is not signed twice.</p>
+      </div>`;
 }
 
 // ── Review-time edit feedback (plan §2.6, the ⭐ option) ──────────────────────
@@ -6269,6 +6286,9 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
             if (res.ok) {
                 currentData.context = newContext;
                 currentData.configuration = newConfiguration;
+                // The Outreach tab's send-readiness (mailbox, chasers, signature) is read from these
+                // answers and cached per assistant — drop it so the next paint re-reads what was saved.
+                _rqReadinessFor = null;
                 // Reflect any posting-schedule change (frequency/days/times/timezone) on the Autopilot card.
                 window._renderAutopilotCard(currentData);
                 if (disclosureText !== undefined) currentData.disclosureText = disclosureText;

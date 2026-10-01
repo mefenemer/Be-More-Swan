@@ -33,6 +33,12 @@ export interface SenderIdentity {
     businessDescription?: string | null;
     industry?: string | null;
     websiteUrl?: string | null;
+    /**
+     * The sending assistant's email signature (src/utils/outreach-signature.ts), when one is set.
+     * Its presence changes ONE instruction: the draft must not sign off, because the signature is
+     * appended in code after the last sentence and a model sign-off would print twice.
+     */
+    signature?: string | null;
 }
 
 /**
@@ -47,7 +53,11 @@ export function senderIdentityBlock(sender: SenderIdentity): string {
     const name = (sender.businessName || '').trim();
     const lines: string[] = [];
 
-    if (name) {
+    const signature = (sender.signature || '').trim();
+    if (signature) {
+        // ⚠️ Checked FIRST: with a signature set, every sign-off instruction below would double it.
+        lines.push(`${name ? `You are writing on behalf of ${name}. Every email here comes FROM ${name}. ` : ''}END THE EMAIL WITH ITS LAST SENTENCE — do NOT add a sign-off ("Best", "Kind regards", "Thanks"), a name, a job title or a company name. The sender's email signature is added automatically below your last line, and a second sign-off would print twice. For reference, it reads:\n${signature}`);
+    } else if (name) {
         lines.push(`You are writing on behalf of ${name}. Every email here comes FROM ${name} — sign off as ${name} and no one else.`);
     } else {
         lines.push('The sender business has not been named in this workspace. Do NOT guess a name, do NOT borrow one from anywhere in these instructions, and do NOT invent a sign-off — end the email with the sender\'s first name only, or with no company name at all.');
