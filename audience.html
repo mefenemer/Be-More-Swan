@@ -16,7 +16,7 @@
       <button type="button" id="aud-form-btn"
         class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-gray-700 bg-white hover:bg-gray-50 rounded-lg transition-colors border border-gray-300 cursor-pointer">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
-        Sign-up form
+        Sign-up forms
       </button>
       <button type="button" id="aud-import-btn"
         class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-gray-700 bg-white hover:bg-gray-50 rounded-lg transition-colors border border-gray-300 cursor-pointer">
@@ -242,25 +242,9 @@
     </div>
   </div>
 
-  <!-- Sign-up form settings. Lives on the Audience page rather than inside an assistant: the form
-       writes into the shared audience, and a tenant with no Email Marketing Assistant yet can still
-       start collecting subscribers. -->
-  <div id="aud-form-modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4" style="display:none">
-    <div class="absolute inset-0 bg-black/40" data-aud-form-close></div>
-    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
-      <div class="flex items-start justify-between mb-1">
-        <h2 class="text-lg font-extrabold text-gray-900">Sign-up forms</h2>
-        <button type="button" data-aud-form-close class="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 cursor-pointer">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-        </button>
-      </div>
-      <p class="text-sm text-gray-500 mb-5">Paste this on your own website. Anyone who signs up lands in the audience above.</p>
-      <!-- Every form, with the visual builder one click away. The settings below are for the form
-           picked here (the first active one by default, as before). -->
-      <div id="aud-form-list" class="mb-5"></div>
-      <div id="aud-form-body"></div>
-    </div>
-  </div>
+  <!-- Sign-up forms: a shared dialog (src/components/signup-forms.js), opened from the toolbar button.
+       Forms write into the shared audience, so a tenant with no Email Marketing Assistant can still
+       collect subscribers. -->
 
   <!-- Contact detail slide-over -->
   <div id="aud-detail" class="hidden fixed inset-0 z-50" style="display:none">

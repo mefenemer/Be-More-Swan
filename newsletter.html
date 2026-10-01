@@ -17,7 +17,9 @@
       <h1 class="text-3xl font-extrabold text-gray-900">Email Studio</h1>
       <p class="text-gray-500 mt-1">Draft an email or a whole email campaign, see exactly what lands in the inbox, then approve it for sending.</p>
     </div>
-    <button type="button" id="nl-welcome"
+    <!-- Grouped so five buttons wrap as a row on narrower screens instead of squeezing each label onto three lines. -->
+    <div class="flex flex-wrap gap-2 justify-end">
+    <button type="button" id="nl-welcome" title="Email campaigns that send by themselves — your welcome sequence for new subscribers, and any campaign a sign-up form starts"
       class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-gray-700 bg-white hover:bg-gray-50 rounded-lg transition-colors border border-gray-300 cursor-pointer">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>
       Automatic emails
@@ -46,6 +48,7 @@
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
       New email
     </button>
+    </div>
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -59,6 +62,17 @@
         <ul id="nl-list" class="divide-y divide-gray-100 max-h-[60vh] overflow-auto">
           <li class="p-6 text-center text-sm text-gray-500">Loading…</li>
         </ul>
+      </div>
+
+      <!-- The series that send BY THEMSELVES — the welcome sequence and every email campaign a sign-up
+           form starts. They are not one-off emails, so they are not in the list above; without this
+           card an email campaign saved as one of them was invisible from the Studio. -->
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden mt-4">
+        <div class="px-4 py-3 border-b border-gray-100">
+          <p class="text-sm font-bold text-gray-900">Automatic emails</p>
+          <p class="text-[11px] text-gray-500">Email campaigns that send by themselves when someone subscribes or fills in a form.</p>
+        </div>
+        <ul id="nl-auto-list" class="divide-y divide-gray-100"></ul>
       </div>
     </div>
 
@@ -187,6 +201,10 @@
             class="px-4 py-2 text-sm font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 cursor-pointer">Ask your assistant to improve</button>
           <button type="button" id="nl-preview"
             class="px-4 py-2 text-sm font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Preview email</button>
+          <!-- Removes an UNSENT email from the list (the server archives it — a sent email is the record
+               of what people received and cannot be deleted). Hidden once an email has sent. -->
+          <button type="button" id="nl-delete"
+            class="px-4 py-2 text-sm font-bold text-red-600 bg-white border border-red-200 rounded-lg hover:bg-red-50 cursor-pointer">Delete</button>
           <div class="flex-1"></div>
           <!-- ⚠️ NO SAVE BUTTON, and do not reinstate one. Every field here writes itself back —
                see the auto-save block in newsletter.js. The state of that is reported by
