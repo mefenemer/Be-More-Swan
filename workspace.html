@@ -2530,6 +2530,18 @@ function formatCurrency(amount, currency) {
         // answered by whichever workspace happened to be opened earlier in the session, and a post
         // created there was filed under it — a Lead Generator, if that was the last one visited.
         // Cleared BEFORE the swap so the incoming view's own script can set it afresh.
+        // Where the user is coming FROM, for views that offer a way back (the Newsletter Studio's
+        // breadcrumb). Captured before the clear below and before the swap: the assistant id is
+        // about to be nulled, and the detail page's active tab only exists in the DOM being replaced.
+        if (routeKey !== window._currentViewKey) {
+          window._previousView = {
+            key: window._currentViewKey || null,
+            title: window._currentViewTitle || '',
+            assistantId: window._currentAssistantId || null,
+            tab: window._currentViewKey === 'assistant-detail'
+              ? (contentContainer.querySelector('.main-tab-btn.active-tab')?.dataset.maintab || null) : null,
+          };
+        }
         if (routeKey !== 'assistant-detail') window._currentAssistantId = null;
 
         contentContainer.innerHTML = await response.text();
