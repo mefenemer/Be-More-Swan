@@ -437,7 +437,7 @@ await check('a member who cannot approve still ends up with their draft', () => 
     assert.match(cs, /TWO CALLS, DELIBERATELY/);
     assert.match(cs, /respond\(\{ ok: true, deduped: data\.deduped === true, scheduleError: err\.message \}\)/);
     const reg = read('src/components/disruptive-ui-registry.js');
-    assert.match(reg, /Saved to your Issues tab, but not scheduled/);
+    assert.match(reg, /Saved to your Emails tab, but not scheduled/);
 });
 
 // ── 9. The Studio's promises ────────────────────────────────────────────────
@@ -462,7 +462,7 @@ await check('the assistant is called by its name everywhere it is asked to do so
     assert.match(UI, /assistantId: state\.assistant\.id \|\| undefined/);
 });
 
-await check('the Newsletter Assistant\'s Overview shows its list, not a follower chart', () => {
+await check('the Email Marketing Assistant\'s Overview shows its list, not a follower chart', () => {
     const reg = read('src/components/assistant-dashboard-registry.js');
     const entry = reg.slice(landmark(reg, 'newsletter_editor: {'), landmark(reg, 'blog_writer: {'));
     assert.match(entry, /audienceSource: 'newsletter_list'/);

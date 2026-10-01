@@ -134,7 +134,7 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     // Blog Autopilot's long-form draft, mirroring post_draft_ready above. Uncategorised types fall
     // back to 'informational', which would have put a "review this draft" alert in the wrong bucket.
     blog_draft_ready: 'state_change',
-    // The Newsletter Assistant's pair, mirroring blog_draft_ready and post_published exactly.
+    // The Email Marketing Assistant's pair, mirroring blog_draft_ready and post_published exactly.
     // ⚠️ Both are state_change, NOT suggested_action, even though an unapproved issue is arguably
     // "parked": the drafting cron refuses to write a second issue while one is still waiting
     // (draft-newsletter-issues.ts rule 1), so nothing degrades and nothing expires if it is read

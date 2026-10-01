@@ -3,7 +3,7 @@
 // prompt, the starting template and the label on the list row.
 //
 // ── Why this exists ─────────────────────────────────────────────────────────────────────────────
-// The Newsletter Assistant could write exactly one kind of email: a newsletter. But the emails a
+// The Email Marketing Assistant could write exactly one kind of email: a newsletter. But the emails a
 // small business actually needs to send are mostly NOT newsletters — "we're changing our terms on
 // the 1st", "the thing that was broken this morning is fixed", "here's what shipped this month",
 // "we're closed on Monday". Those are different in register, in length, in who they go to and in
@@ -40,11 +40,11 @@ export const NEWSLETTER_PURPOSES: NewsletterPurpose[] = [
     {
         key: 'newsletter',
         label: 'Newsletter',
-        description: 'Your regular issue — news, stories and whatever is worth sharing this time.',
+        description: 'Your regular email — news, stories and whatever is worth sharing this time.',
         chipClass: 'bg-gray-100 text-gray-600 border-gray-200',
         defaultTemplate: 'classic',
         promptGuidance:
-            'This is a regular newsletter issue. Two to four short sections, each worth reading on '
+            'This is a regular newsletter email. Two to four short sections, each worth reading on '
             + 'its own, in a warm and unhurried voice.',
     },
     {

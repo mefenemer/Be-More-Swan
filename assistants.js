@@ -328,10 +328,10 @@ window.generateAssistantCardHTML = function(assistant) {
                     </span>
                 </div>` : '';
 
-    // ── The activity strip, for the LONG-FORM roles (Blog Writer, Newsletter Assistant) ─────
+    // ── The activity strip, for the LONG-FORM roles (Blog Writer, Email Marketing Assistant) ─────
     //
     // ⚠️ The third table this card has to know about, and the reason it was added: a Blog Writer
-    // writes to blog_posts and a Newsletter Assistant to newsletter_issues — never to
+    // writes to blog_posts and an Email Marketing Assistant to newsletter_issues — never to
     // scheduled_posts, never to assistant_records. So BOTH strips above stayed empty for them, and
     // because the "~Xh saved / £Y ROI" footer is rendered inside the strip, their cards carried no
     // ROI line either, while the Social Media Assistant and Lead Generator beside them carried
@@ -346,7 +346,7 @@ window.generateAssistantCardHTML = function(assistant) {
 
     const _LONGFORM_WORDS = {
         blog:       { total: 'written', inFlight: 'scheduled', delivered: 'published', totalTitle: 'Blog posts drafted by this assistant', deliveredTitle: 'Blog posts live on your site' },
-        newsletter: { total: 'written', inFlight: 'scheduled', delivered: 'sent',      totalTitle: 'Newsletter issues drafted by this assistant', deliveredTitle: 'Issues delivered to your subscribers' },
+        newsletter: { total: 'written', inFlight: 'scheduled', delivered: 'sent',      totalTitle: 'Emails drafted by this assistant', deliveredTitle: 'Emails delivered to your subscribers' },
     };
     const lWords = (lm && _LONGFORM_WORDS[lm.kind]) || _LONGFORM_WORDS.blog;
 
@@ -3386,7 +3386,7 @@ function _detailRqBlogCard(p, statusKey) {
 // ── Newsletter issues in the Review Queue ───────────────────────────────────
 //
 // ⚠️ WHY THIS EXISTS. The dispatch below tests `kind === 'records'`, then `source === 'blog_posts'`,
-// and falls through to the SOCIAL posts renderer. A Newsletter Assistant registered with a kind the
+// and falls through to the SOCIAL posts renderer. An Email Marketing Assistant registered with a kind the
 // dispatch does not know would therefore have called get-social-drafts and shown an empty queue
 // under a "Review" tab that looked like it worked — the same silent-fallback failure the dashboard
 // registry warns about, one layer down.
@@ -3416,7 +3416,7 @@ function _detailRqNewsletterCard(issue, statusKey) {
             : (issue.updatedAt ? `updated ${new Date(issue.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : '');
     return `<div class="py-4" data-rq-newsletter="${issue.id}">
       <div class="min-w-0">
-        <p class="text-sm font-bold text-gray-900 truncate">${_rqEsc(issue.subject || '(untitled issue)')}</p>
+        <p class="text-sm font-bold text-gray-900 truncate">${_rqEsc(issue.subject || '(untitled email)')}</p>
         <div class="flex items-center gap-2 mt-2">
           <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">${_rqEsc(issue.status)}</span>
           ${when ? `<span class="text-[11px] font-semibold text-gray-400">${_rqEsc(when)}</span>` : ''}
@@ -3443,7 +3443,7 @@ async function _detailRqRenderNewsletter(statusKey) {
 
     container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Loading…</p>';
     if (!aid) { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">No assistant selected.</p>'; return; }
-    if (!wanted.length) { container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Newsletter issues don’t have this state.</p>'; return; }
+    if (!wanted.length) { container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Emails don’t have this state.</p>'; return; }
 
     let issues = [];
     try {
@@ -3462,7 +3462,7 @@ async function _detailRqRenderNewsletter(statusKey) {
 
     container.innerHTML = issues.length
         ? `<div class="divide-y divide-gray-100">${issues.map((i) => _detailRqNewsletterCard(i, statusKey)).join('')}</div>`
-        : `<p class="text-sm text-gray-400 py-10 text-center">${statusKey === 'review' ? 'No issues awaiting review.' : 'Nothing here yet.'}</p>`;
+        : `<p class="text-sm text-gray-400 py-10 text-center">${statusKey === 'review' ? 'No emails awaiting review.' : 'Nothing here yet.'}</p>`;
 }
 
 /**
@@ -4083,7 +4083,7 @@ window._syncManageConnectionsPlacement = function() {
     const hasConnectors = strip?.dataset.hasConnectors === '1';
     // The audience block is a child of the Autopilot card, so a role without one never shows it.
     const audienceShown = !!autopilot && !autopilot.classList.contains('hidden');
-    // ⚠️ Not every audience block is a connections list. The Newsletter Assistant's is "Your list"
+    // ⚠️ Not every audience block is a connections list. The Email Marketing Assistant's is "Your list"
     // — subscriber counts for a mailing list that lives in this product, with nothing connected to
     // manage — so that role keeps the hero button.
     const audienceSource = window.AssistantDashboardRegistry?.get?.(window._detailCurrentData?.roleKey)?.audienceSource;
@@ -5229,7 +5229,7 @@ function _applyDashboardRegistry(data) {
             // Says "sent to your subscribers", not "scheduled": approving an issue is the decision
             // to email real people, and the copy over the Approve button should say so.
             : rqIsNewsletter
-                ? 'Issues awaiting your review — open in the Newsletter Studio to edit and approve before anything is sent to your subscribers.'
+                ? 'Emails awaiting your review — open in the Email Studio to edit and approve before anything is sent to your subscribers.'
                 : 'Items awaiting your review — approve, edit or reject before anything is scheduled.');
     // Records queues have no post-generation button; blog re-points it at Blog Studio.
     toggleBtn('detail-rq-primary-btn', !rqIsRecords);
@@ -5253,7 +5253,7 @@ function _applyDashboardRegistry(data) {
         const rqBtn = document.getElementById('detail-rq-primary-btn');
         if (rqBtn) rqBtn.onclick = () => { window.openBlogStudio?.({ assistantId: data.id }); };
     } else if (rqIsNewsletter) {
-        setText('detail-rq-primary-label', 'Write Newsletter');
+        setText('detail-rq-primary-label', 'Write Email');
         const rqBtn = document.getElementById('detail-rq-primary-btn');
         if (rqBtn) rqBtn.onclick = () => { window._newsletterAssistantId = window._currentAssistantId || null; window.loadView?.('newsletter'); };
     } else if (!rqIsRecords) {
@@ -5362,10 +5362,10 @@ function _applyDashboardRegistry(data) {
         if (paLabel) paLabel.textContent = 'Write Blog Post';
         if (paBtn) paBtn.onclick = () => { if (window.openBlogStudio) window.openBlogStudio({ assistantId: data.id }); };
     } else if (data.roleKey === 'newsletter_editor') {
-        // The Newsletter Studio is a VIEW rather than a modal (unlike Blog Studio): an issue is
+        // The Email Studio is a VIEW rather than a modal (unlike Blog Studio): an issue is
         // edited alongside its list and its audience, which does not fit a dialog. Routed through
         // the workspace router so it is a view swap, not a page reload that drops app state.
-        if (paLabel) paLabel.textContent = 'Write Newsletter';
+        if (paLabel) paLabel.textContent = 'Write Email';
         // ⚠️ Hand the Studio the assistant on the way in. Without it the Studio has no name to put
         // on its buttons ("the assistant" about somebody the user named themselves) AND every issue
         // it creates has a null assistant_id — invisible on the Issues tab of the very page the
@@ -7482,7 +7482,7 @@ async function _fetchAndRenderBlogDestinations() {
 }
 
 /**
- * Your list — the Audience block's Newsletter Assistant variant.
+ * Your list — the Audience block's Email Marketing Assistant variant.
  *
  * Reuses the same panel (heading, list, footer note) because it answers the same question for this
  * role: how many people does this assistant's work actually reach, and is that growing. What it
@@ -7544,7 +7544,7 @@ async function _fetchAndRenderNewsletterList() {
         const c = data.counts || {};
         const rows = [
             { key: 'subscribed', label: 'Subscribed', n: Number(c.subscribed || 0), bar: 'bg-emerald-500',
-              note: 'People who confirmed they want to hear from you. This is who an issue goes to.' },
+              note: 'People who confirmed they want to hear from you. This is who an email goes to.' },
             { key: 'pending', label: 'Not confirmed', n: Number(c.pending || 0), bar: 'bg-amber-400',
               note: 'They signed up but never clicked the confirmation link, so nothing can be sent to them. A reminder from the Audience page usually recovers some.' },
             { key: 'unsubscribed', label: 'Unsubscribed', n: Number(c.unsubscribed || 0), bar: 'bg-gray-300',
@@ -8304,7 +8304,7 @@ function _setMetricsEmptyState(mode) {
 
 // ── Blog Writer KPI cards ────────────────────────────────────────────────────
 // Four cards, same markup as every other role, fed by get-blog-performance.ts instead of the
-// The Newsletter Assistant's four Overview cards, from get-newsletter-performance.ts. Routed here
+// The Email Marketing Assistant's four Overview cards, from get-newsletter-performance.ts. Routed here
 // by `metricsSource: 'newsletter'` in the dashboard registry.
 //
 // ⚠️ Two figures are deliberately allowed to render as "—" rather than as a number:
@@ -8373,7 +8373,7 @@ async function _loadNewsletterMetrics(assistantId) {
         if (trendEl('ctr')) {
             trendEl('ctr').textContent = d.openRate !== null
                 ? 'Indicative — Apple Mail inflates this'
-                : d.issuesSent > 0 ? 'Not measurable on these sends' : 'After your first issue';
+                : d.issuesSent > 0 ? 'Not measurable on these sends' : 'After your first email';
         }
         setDot('ctr', d.openRate === null ? 'flat' : d.openRate >= 0.2 ? 'up' : 'down');
         _setKpiCard('ctr', { empty: d.openRate === null });
@@ -8383,7 +8383,7 @@ async function _loadNewsletterMetrics(assistantId) {
         if (trendEl('value')) {
             trendEl('value').textContent = d.clickRate !== null
                 ? 'Readers who followed a link'
-                : d.issuesSent > 0 ? 'Not measurable on these sends' : 'After your first issue';
+                : d.issuesSent > 0 ? 'Not measurable on these sends' : 'After your first email';
         }
         setDot('value', d.clickRate === null ? 'flat' : d.clickRate >= 0.02 ? 'up' : 'down');
         _setKpiCard('value', { empty: d.clickRate === null });

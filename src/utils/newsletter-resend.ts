@@ -128,16 +128,16 @@ export async function resendEligibility(db: Db, issue: ResendCandidate): Promise
     if (issue.resendOfIssueId) {
         // A third email about the same content, to people who ignored it twice, is not a reach
         // increase — it is the point at which a subscriber marks you as spam.
-        return no('is_resend', 'This issue is itself a resend. Write a new issue rather than sending the same one a third time.');
+        return no('is_resend', 'This email is itself a resend. Write a new email rather than sending the same one a third time.');
     }
     if (issue.status !== 'sent' || !issue.sentAt) {
-        return no('not_sent', 'You can resend an issue once it has finished sending.');
+        return no('not_sent', 'You can resend an email once it has finished sending.');
     }
     if (!issue.engagementTracked) {
         // ⚠️ The incident guard. "Nobody opened it" and "we could not see opens" are the same 0%.
         return no('not_tracked',
-            'This issue was sent from your connected mailbox, which cannot report opens — so we do not know who read it. '
-            + 'Resending would email everyone who received it a second time. Verify a sending domain to measure opens on future issues.');
+            'This email was sent from your connected mailbox, which cannot report opens — so we do not know who read it. '
+            + 'Resending would email everyone who received it a second time. Verify a sending domain to measure opens on future emails.');
     }
 
     const readyAt = new Date(issue.sentAt.getTime() + MIN_RESEND_WAIT_HOURS * 60 * 60 * 1000);
@@ -169,10 +169,10 @@ export async function resendEligibility(db: Db, issue: ResendCandidate): Promise
         // Loud in the log, because the fix is ours and not the tenant's — they cannot see our
         // provider configuration, so the copy must not send them looking for it.
         console.error('[newsletter-resend] refused: no open has EVER been recorded for this organisation, '
-            + 'though the issue reports engagement_tracked. Check the provider webhook subscribes to '
+            + 'though the email reports engagement_tracked. Check the provider webhook subscribes to '
             + 'email.opened and email.clicked.', { organisationId: issue.organisationId, issueId: issue.id });
         return no('no_opens_recorded',
-            'We have never recorded an open on this account, even though tracking is switched on for this issue. '
+            'We have never recorded an open on this account, even though tracking is switched on for this email. '
             + 'That usually means open reporting is not working rather than that nobody read it — so we have not '
             + 'sent anything again on that basis. Get in touch and we will check the tracking setup.');
     }
@@ -186,12 +186,12 @@ export async function resendEligibility(db: Db, issue: ResendCandidate): Promise
         ))
         .limit(1);
     if (existing) {
-        return no('already_resent', 'This issue has already been resent once. Sending it a third time is not a reach increase.');
+        return no('already_resent', 'This email has already been resent once. Sending it a third time is not a reach increase.');
     }
 
     const unopened = await countUnopened(db, issue.id, issue.organisationId);
     if (!unopened) {
-        return no('nobody_left', 'Everyone who is still subscribed and received this issue has opened it. There is nobody left to resend to.');
+        return no('nobody_left', 'Everyone who is still subscribed and received this email has opened it. There is nobody left to resend to.');
     }
 
     return { canResend: true, unopened };

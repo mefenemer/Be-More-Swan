@@ -4562,7 +4562,7 @@ export const audienceConfirmations = pgTable("audience_confirmations", {
   index("audience_confirmations_contact_idx").on(t.contactId, t.createdAt),
 ]);
 
-// ── Newsletter Assistant (db/newsletter.sql) ────────────────────────────────────────────────────
+// ── Email Marketing Assistant (db/newsletter.sql) ────────────────────────────────────────────────────
 // Mirrors blogPosts deliberately: same status vocabulary, same reuse of content_generation_jobs /
 // ai_blueprints / content_provenance. An issue is a blog post that is mailed instead of published.
 export const newsletterIssues = pgTable("newsletter_issues", {

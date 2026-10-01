@@ -32,7 +32,7 @@
     newsletter_editor: [
       {
         title: 'What is your newsletter about?',
-        description: 'Your Newsletter Assistant drafts each issue in your brand voice from your own business information — you read and approve every one before it sends.',
+        description: 'Your Email Marketing Assistant drafts each email in your brand voice from your own business information — you read and approve every one before it sends.',
         fields: [
           {
             key: 'newsletterTopics',
@@ -61,7 +61,7 @@
       },
       {
         title: 'How often should it write one?',
-        description: 'The assistant drafts on this cadence and leaves each issue waiting for you. Nothing is ever sent without your approval.',
+        description: 'The assistant drafts on this cadence and leaves each email waiting for you. Nothing is ever sent without your approval.',
         operational: true,
         fields: [
           {
@@ -76,7 +76,7 @@
               { value: 'Weekly', label: 'Weekly' },
               { value: '2 times a week', label: 'Twice a week' },
               { value: 'Monthly', label: 'Monthly' },
-              { value: 'On demand', label: 'On demand (I start each issue)' },
+              { value: 'On demand', label: 'On demand (I start each email)' },
             ],
           },
           {
@@ -104,7 +104,7 @@
             type: 'textarea',
             required: false,
             placeholder: 'e.g. existing customers who have bought in the last year, plus people who signed up in the shop',
-            helpText: 'Helps the assistant pitch each issue at the right reader.',
+            helpText: 'Helps the assistant pitch each email at the right reader.',
           },
         ],
       },

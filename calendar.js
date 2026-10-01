@@ -27,7 +27,7 @@ const PLATFORM_META = {
     blog:      { label: 'Blog',        bg: '#7c3aed', text: 'text-white' },
     // ⚠️ Not a social platform, and neither is 'blog' — this map is the calendar's vocabulary for
     // "where a piece of content goes", which is what the platform filter actually filters on.
-    newsletter:{ label: 'Newsletter',  bg: '#0d9488', text: 'text-white' },
+    newsletter:{ label: 'Email',       bg: '#0d9488', text: 'text-white' },
 };
 
 // Returns a circular platform avatar (logo on brand bg) for list/panel use.
@@ -1512,7 +1512,7 @@ function _newsletterIssuesOnDate(date) {
 }
 
 // Read-only newsletter chip. Same treatment as the blog chip below and for the same reason: issues
-// are managed in the Newsletter Studio, so this is not draggable and does not open the social
+// are managed in the Email Studio, so this is not draggable and does not open the social
 // governance panel — clicking opens the Studio on that issue.
 function _issueChip(issue) {
     const sm = STATUS_META[issue.status] || STATUS_META.draft;
@@ -1526,13 +1526,13 @@ function _issueChip(issue) {
     const marker = sent
         ? `<span class="text-emerald-600 text-xs font-extrabold shrink-0" title="Sent ${time}${issue.recipientCount ? ` to ${issue.recipientCount}` : ''}">✓</span>`
         : `<span class="w-1.5 h-1.5 rounded-full ${sm.dot} shrink-0" title="${sm.label}"></span>`;
-    const subject = issue.subject || 'Untitled issue';
+    const subject = issue.subject || 'Untitled email';
     return `<div
         onclick="window._calOpenIssue(${issue.id})"
         data-issue-id="${issue.id}"
         class="group flex items-center gap-1.5 px-2 py-1 rounded-lg ${chipBg} shadow-sm cursor-pointer transition select-none text-left w-full"
         style="border-left:3px solid #0d9488"
-        aria-label="Newsletter · ${_escHtml(subject)}">
+        aria-label="Email · ${_escHtml(subject)}">
         ${_platAvatar('newsletter', 16)}
         <div class="flex-1 min-w-0">
             <p class="text-[11px] font-bold ${timeColor} truncate">${time}</p>
@@ -1542,7 +1542,7 @@ function _issueChip(issue) {
     </div>`;
 }
 
-// Open the clicked issue in the Newsletter Studio. _newsletterInitialIssueId is the existing
+// Open the clicked issue in the Email Studio. _newsletterInitialIssueId is the existing
 // deep-link hook the Review Queue's "Open in Studio" already uses, and newsletter.js consumes it
 // on read so a later visit does not silently reopen an issue the user has moved on from.
 window._calOpenIssue = function (id) {

@@ -129,7 +129,7 @@ export async function resolveSendRoute(
         // Named numbers, and the fix. "Sending failed" here would send the tenant hunting through
         // their own list for a problem that is entirely on our side of the line.
         return {
-            error: `This issue would go to ${opts.recipientCount.toLocaleString()} people, and sending from a connected mailbox is capped at ${MAILBOX_MAX_RECIPIENTS}. `
+            error: `This email would go to ${opts.recipientCount.toLocaleString()} people, and sending from a connected mailbox is capped at ${MAILBOX_MAX_RECIPIENTS}. `
                 + 'Verify a sending domain to send to your whole list — it takes a few DNS records.',
         };
     }
@@ -178,12 +178,12 @@ export async function materialiseRecipients(
         // ⚠️ A missing segment is a hard stop, not "send to everyone". The tenant chose an audience
         // narrower than their whole list; losing that choice must never widen it silently.
         if (!row) {
-            throw new Error('The segment this issue was targeted at no longer exists. Choose an audience and approve it again — nothing was sent.');
+            throw new Error('The segment this email was targeted at no longer exists. Choose an audience and approve it again — nothing was sent.');
         }
         segment = row;
         if (row.kind === 'dynamic' && !buildSegmentCondition(issue.organisationId, row.rules)) {
             const why = parseRules(row.rules);
-            throw new Error(`The rules for the segment "${row.name}" could not be read: ${why.ok ? 'unknown problem' : why.error} Fix the segment and approve this issue again — nothing was sent.`);
+            throw new Error(`The rules for the segment "${row.name}" could not be read: ${why.ok ? 'unknown problem' : why.error} Fix the segment and approve this email again — nothing was sent.`);
         }
     }
 
@@ -370,7 +370,7 @@ export async function processIssueBatch(
 ): Promise<IssueTickResult> {
     const snapshot = issue.renderedPayload as IssueSnapshot | null;
     if (!snapshot || !snapshot.html) {
-        throw new Error('This issue has no approved content to send. Approve it again to rebuild the email.');
+        throw new Error('This email has no approved content to send. Approve it again to rebuild the email.');
     }
 
     const queued = await db
@@ -711,7 +711,7 @@ export async function sendDueIssues(db: Db, opts: { baseUrl: string; now?: Date;
             }
         } catch (err) {
             const message = String((err as Error)?.message ?? err).slice(0, 500);
-            console.error('[newsletter-send] issue failed', { issueId: id }, err);
+            console.error('[newsletter-send] email failed', { issueId: id }, err);
             await db.update(newsletterIssues).set({
                 status: 'failed',
                 failureReason: message,

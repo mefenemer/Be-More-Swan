@@ -1,7 +1,7 @@
-<!-- newsletter.html — the Newsletter Studio (view fragment, loaded by workspace.html's router).
+<!-- newsletter.html — the Email Studio (view fragment, loaded by workspace.html's router).
      Controller: newsletter.js (window.initNewsletter).
 
-     Reached today at ?view=newsletter. It gets its entry point from the Newsletter Assistant's
+     Reached today at ?view=newsletter. It gets its entry point from the Email Marketing Assistant's
      detail page in Phase 5, when the role goes live — deliberately NOT a sidebar item: the sidebar
      was decluttered on purpose, and a link every org sees for an assistant most have not hired is
      exactly the clutter that was removed. -->
@@ -14,8 +14,8 @@
 
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
     <div>
-      <h1 class="text-3xl font-extrabold text-gray-900">Newsletter</h1>
-      <p class="text-gray-500 mt-1">Draft an issue, see exactly what lands in the inbox, then approve it for sending.</p>
+      <h1 class="text-3xl font-extrabold text-gray-900">Email Studio</h1>
+      <p class="text-gray-500 mt-1">Draft an email or a whole email campaign, see exactly what lands in the inbox, then approve it for sending.</p>
     </div>
     <button type="button" id="nl-welcome"
       class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-gray-700 bg-white hover:bg-gray-50 rounded-lg transition-colors border border-gray-300 cursor-pointer">
@@ -27,10 +27,17 @@
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
       Sending setup
     </button>
+    <!-- A whole series, without the chat: plan it, have the assistant write every email, read them,
+         save. The chat card does the same job in conversation; both save through the same endpoints. -->
+    <button type="button" id="nl-campaign"
+      class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-gray-700 bg-white hover:bg-gray-50 rounded-lg transition-colors border border-gray-300 cursor-pointer">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h10"/></svg>
+      New email campaign
+    </button>
     <button type="button" id="nl-new"
       class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors cursor-pointer">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-      New issue
+      New email
     </button>
   </div>
 
@@ -40,7 +47,7 @@
     <div class="lg:col-span-1">
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
         <div class="px-4 py-3 border-b border-gray-100">
-          <p class="text-sm font-bold text-gray-900">Issues</p>
+          <p class="text-sm font-bold text-gray-900">Emails</p>
         </div>
         <ul id="nl-list" class="divide-y divide-gray-100 max-h-[60vh] overflow-auto">
           <li class="p-6 text-center text-sm text-gray-500">Loading…</li>
@@ -51,8 +58,8 @@
     <!-- Editor -->
     <div class="lg:col-span-2">
       <div id="nl-empty" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-10 text-center">
-        <p class="text-sm font-bold text-gray-900">No issue selected</p>
-        <p class="text-sm text-gray-500 mt-1">Pick an issue on the left, or start a new one.</p>
+        <p class="text-sm font-bold text-gray-900">No email selected</p>
+        <p class="text-sm text-gray-500 mt-1">Pick an email on the left, or start a new one.</p>
       </div>
 
       <div id="nl-editor" class="hidden bg-white rounded-2xl border border-gray-200 shadow-sm p-6" style="display:none">
@@ -203,7 +210,7 @@
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
-      <p class="text-sm text-gray-500 mb-5">The welcome sequence goes out on its own after someone confirms their subscription — the moment they are most interested. Everything else you might want to send — a product update, a notice that something is fixed, a change to your terms — is a one-off, and you write it as a new issue and pick what kind of email it is.</p>
+      <p class="text-sm text-gray-500 mb-5">The welcome sequence goes out on its own after someone confirms their subscription — the moment they are most interested. Everything else you might want to send — a product update, a notice that something is fixed, a change to your terms — is a one-off: you write it as a new email and pick what kind of email it is.</p>
       <div id="nl-welcome-body"></div>
     </div>
   </div>
@@ -213,7 +220,7 @@
     <div class="absolute inset-0 bg-black/40" data-nl-newissue-close></div>
     <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
       <div class="flex items-start justify-between mb-1">
-        <h2 class="text-lg font-extrabold text-gray-900">New issue</h2>
+        <h2 class="text-lg font-extrabold text-gray-900">New email</h2>
         <button type="button" data-nl-newissue-close class="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 cursor-pointer">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
@@ -233,6 +240,85 @@
       <div class="flex justify-end gap-2 mt-6">
         <button type="button" data-nl-newissue-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
         <button type="button" id="nl-new-go" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- New email campaign: a series of emails with one goal. Two panes in one dialog — the PLAN
+       (kind, goal, who is in it, and the day + job of each email) and the REVIEW (every email,
+       written by the assistant, editable). Nothing is saved until Save is pressed on the review. -->
+  <div id="nl-campaign-modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4" style="display:none">
+    <div class="absolute inset-0 bg-black/40" data-nl-campaign-close></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl p-6 max-h-[90vh] overflow-auto">
+      <div class="flex items-start justify-between mb-1">
+        <h2 class="text-lg font-extrabold text-gray-900" id="nl-cmp-title">New email campaign</h2>
+        <button type="button" data-nl-campaign-close class="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 cursor-pointer">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Pane 1: the plan -->
+      <div id="nl-cmp-plan">
+        <p class="text-sm text-gray-500 mb-5">A short series of emails that walks one group of people towards one goal. Start from a suggested shape and change anything — <span data-nl-assistant="name">your assistant</span> writes every email once the plan looks right.</p>
+
+        <p class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">What is it for?</p>
+        <div id="nl-cmp-kinds" class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-5"></div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+          <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1" for="nl-cmp-name">Name</label>
+            <input type="text" id="nl-cmp-name" maxlength="80" class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1" for="nl-cmp-goal">Goal — what they have done when it worked</label>
+            <input type="text" id="nl-cmp-goal" maxlength="300" class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
+          </div>
+        </div>
+
+        <p class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Who is in it?</p>
+        <div id="nl-cmp-who" class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2"></div>
+        <input type="text" id="nl-cmp-audience" maxlength="300" placeholder="e.g. customers whose renewal is next month"
+          class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-5">
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+          <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1" for="nl-cmp-facts">Links and facts to use</label>
+            <textarea id="nl-cmp-facts" rows="3" maxlength="4000" placeholder="https://… — your setup guide, the offer and its end date, anything the emails should point to"
+              class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm"></textarea>
+            <p class="text-[11px] text-gray-400 mt-1">The emails only link to addresses you put here.</p>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1" for="nl-cmp-avoid">Anything to avoid</label>
+            <textarea id="nl-cmp-avoid" rows="3" maxlength="500" placeholder="e.g. no discounts, don't mention the beta"
+              class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm"></textarea>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">The emails</p>
+          <p class="text-[11px] text-gray-400">Day 1 is the day someone enters the campaign.</p>
+        </div>
+        <div id="nl-cmp-steps" class="space-y-2 mb-2"></div>
+        <button type="button" id="nl-cmp-add" class="text-xs font-bold text-emerald-700 hover:underline cursor-pointer mb-6">+ Add an email</button>
+
+        <div class="flex justify-end gap-2">
+          <button type="button" data-nl-campaign-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
+          <button type="button" id="nl-cmp-write" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Write the emails</button>
+        </div>
+      </div>
+
+      <!-- Pane 2: the review -->
+      <div id="nl-cmp-review" class="hidden" style="display:none">
+        <p class="text-sm text-gray-500 mb-4" id="nl-cmp-review-note"></p>
+        <div id="nl-cmp-warnings" class="hidden mb-4 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-900" style="display:none"></div>
+        <div id="nl-cmp-emails" class="space-y-4 mb-6"></div>
+        <div class="flex flex-wrap justify-between gap-2">
+          <button type="button" id="nl-cmp-back" class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">← Back to the plan</button>
+          <div class="flex gap-2">
+            <button type="button" data-nl-campaign-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Discard</button>
+            <button type="button" id="nl-cmp-save" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Save</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -288,7 +374,7 @@
   <div id="nl-brief-modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4" style="display:none">
     <div class="absolute inset-0 bg-black/40" data-nl-brief-close></div>
     <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
-      <h2 class="text-lg font-extrabold text-gray-900 mb-1">What is this issue about?</h2>
+      <h2 class="text-lg font-extrabold text-gray-900 mb-1">What is this email about?</h2>
       <p class="text-sm text-gray-500 mb-5"><span data-nl-assistant="name">Your assistant</span> writes in your voice using your business information. The more you give it, the less you'll edit.</p>
       <input type="text" id="nl-brief-topic" placeholder="Topic, e.g. our new opening hours and the autumn range"
         class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-3">

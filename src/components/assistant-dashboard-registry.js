@@ -168,8 +168,8 @@
         },
         {
           label: 'Publishing Consistency',
-          title: 'Issues Sent',
-          desc: 'Newsletter issues drafted, approved by you, and delivered.',
+          title: 'Emails Sent',
+          desc: 'Emails drafted, approved by you, and delivered.',
         },
         {
           // ⚠️ INDICATIVE, and the description says so on purpose. An open is a 1×1 image, and Apple
@@ -178,7 +178,7 @@
           // worth watching and not a measurement, and the card must never imply otherwise.
           label: 'Engagement',
           title: 'Open Rate',
-          desc: 'Share of recipients whose mail client loaded the issue. Indicative only — Apple Mail and image blockers both distort it, so watch the trend rather than the number.',
+          desc: 'Share of recipients whose mail client loaded the email. Indicative only — Apple Mail and image blockers both distort it, so watch the trend rather than the number.',
         },
         {
           // The honest half of the pair: a click is a deliberate act by a person, so this is the
@@ -190,7 +190,7 @@
       ],
       // ⚠️ Delivery rate, unsubscribes and spam complaints are NOT on these four cards — the grid is
       // exactly four and opens/clicks earned two of the slots. They are not lost: every issue's own
-      // Results line in the Newsletter Studio carries sent / delivered / bounced / marked-as-spam /
+      // Results line in the Email Studio carries sent / delivered / bounced / marked-as-spam /
       // unsubscribed, which is the per-issue grain where those figures are actually actionable.
       // Routes _loadAssistantMetrics to _loadNewsletterMetrics / get-newsletter-performance.
       // Without it this role falls through to the social post_insights endpoint, which holds
@@ -223,9 +223,9 @@
       // no posts; roiSource re-reveals the strip alone, now that src/utils/roi-activity.ts prices
       // newsletter issues (it did not until 2026-08-20, so the strip would have read a flat zero).
       roiSource: 'newsletter',
-      // Opens the Newsletter Studio, the same way the Blog Writer opens Blog Studio — special-cased
+      // Opens the Email Studio, the same way the Blog Writer opens Blog Studio — special-cased
       // in assistants.js because both are bespoke pipelines rather than a chat intake.
-      primaryAction: { kind: 'newsletter_studio', label: 'Write Newsletter' },
+      primaryAction: { kind: 'newsletter_studio', label: 'Write Email' },
       defaultMainTab: 'review-queue',
       reviewQueue: { kind: 'newsletter', source: 'newsletter_issues' },
       hideDataHub: true,
@@ -233,11 +233,11 @@
         id: 'datahub',
         kind: 'content_library',
         source: 'newsletter_issues',
-        label: 'Issues',
+        label: 'Emails',
         recordType: null,
-        description: 'Every issue this assistant has written — drafts, scheduled and sent.',
+        description: 'Every email this assistant has written — drafts, scheduled and sent.',
         columns: [
-          { key: 'subject', label: 'Issue' },
+          { key: 'subject', label: 'Email' },
           { key: 'status', label: 'Status' },
           { key: 'updatedAt', label: 'Updated' },
         ],

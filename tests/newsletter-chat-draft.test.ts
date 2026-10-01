@@ -126,9 +126,9 @@ await check('the card asks the client to write, and reports the outcome back', (
     // The two surface names it promises have to be the real ones.
     const reg = read('src/components/assistant-dashboard-registry.js');
     const entry = reg.slice(landmark(reg, 'newsletter_editor: {'), landmark(reg, 'blog_writer: {'));
-    assert.match(entry, /label: 'Issues'/, 'the card says "Issues tab" — the registry has to agree');
-    assert.match(card, /Issues tab/);
-    assert.match(card, /Newsletter Studio/);
+    assert.match(entry, /label: 'Emails'/, 'the card says "Emails tab" — the registry has to agree');
+    assert.match(card, /Emails tab/);
+    assert.match(card, /Email Studio/);
 });
 
 await check('nothing is sent by saving, and the card says so', () => {

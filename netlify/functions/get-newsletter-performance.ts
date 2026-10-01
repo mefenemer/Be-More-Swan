@@ -1,9 +1,9 @@
 // netlify/functions/get-newsletter-performance.ts
-// The four Overview KPI cards for a Newsletter Assistant. Routed here by
+// The four Overview KPI cards for an Email Marketing Assistant. Routed here by
 // `metricsSource: 'newsletter'` in src/components/assistant-dashboard-registry.js.
 //
 // ⚠️ WHY THIS EXISTS AT ALL. Without a metricsSource the role falls through to
-// get-assistant-performance, which reads Instagram post_insights — a table a Newsletter Assistant
+// get-assistant-performance, which reads Instagram post_insights — a table an Email Marketing Assistant
 // never writes to. The cards would sit at "no data" for ever while the labels above them promised
 // figures from a completely different product surface. The Blog Writer shipped in exactly that
 // state for months.

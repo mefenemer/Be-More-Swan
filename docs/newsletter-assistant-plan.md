@@ -1,4 +1,4 @@
-# Newsletter Assistant + shared Audience layer — implementation brief
+# Email Marketing Assistant + shared Audience layer — implementation brief
 
 Status: **Phases 0–5 built — the plan is complete.** All dispatch SQL applied to staging + prod
 2026-08-20. ⚠️ Remaining before customers see it: `db/newsletter-role-live.sql` + the content seed
@@ -29,7 +29,7 @@ migrated into the new contacts table. Four of those five assumptions are wrong h
 
 Also already in the tree, and easy to miss:
 
-- `newsletter_editor` **is already a catalogue role** — `db/seed-catalog.ts:154` ("Newsletter Assistant", `iconKey: 'mail'`, teal, `comingSoon: true`), with marketing content already seeded in `db/seed-assistant-content.ts:213` and a title in `db/assistant-role-titles-rename.sql:29`. `src/utils/connection-map.ts:65` maps it to the `['email','cms']` capability categories.
+- `newsletter_editor` **is already a catalogue role** — `db/seed-catalog.ts:154` ("Email Marketing Assistant", `iconKey: 'mail'`, teal, `comingSoon: true`), with marketing content already seeded in `db/seed-assistant-content.ts:213` and a title in `db/assistant-role-titles-rename.sql:29`. `src/utils/connection-map.ts:65` maps it to the `['email','cms']` capability categories.
   ⚠️ **`db/seed-catalog.ts` is INSERT-ONLY** (`onConflictDoNothing({ target: masterAssistants.roleKey })`). Editing `comingSoon: false` on that line does **nothing** to a database where the row already exists. Ship an `UPDATE` migration, in the style of `db/assistant-role-titles-rename.sql`.
 - Consent/opt-out primitives exist, but all of them are **Lead Generator-grained** — see §2.
 
@@ -40,9 +40,9 @@ Also already in the tree, and easy to miss:
 Two things, in this order:
 
 1. **A shared Audience layer** owned by the *organisation*, not by any assistant. One contact
-   record per address per org, reusable by the Newsletter Assistant today and the Campaign, Ad
+   record per address per org, reusable by the Email Marketing Assistant today and the Campaign, Ad
    Buyer and Customer Onboarding assistants later.
-2. **The Newsletter Assistant** — a `newsletter_editor` role that drafts issues (reusing the Blog
+2. **The Email Marketing Assistant** — a `newsletter_editor` role that drafts issues (reusing the Blog
    Writer's generation pipeline almost wholesale), sends them to a segment of that audience, and
    captures new subscribers through an embeddable form on the customer's own website.
 
@@ -313,7 +313,7 @@ Abuse controls, all of which are required, none of which are optional:
 | No CAPTCHA in v1 | It costs conversion and a third-party dependency; revisit only if the controls above measurably fail. |
 | IP handling | Store a **hash**, never the raw address; follow `db/ip-pseudonymise-migration.sql`. |
 
-The Newsletter Assistant's settings tab shows the snippet, the allowlisted-origin editor, a live
+The Email Marketing Assistant's settings tab shows the snippet, the allowlisted-origin editor, a live
 preview, and a "test submission" button that writes a contact tagged `source_detail.test: true`.
 
 ---
@@ -402,7 +402,7 @@ variants) and would make the provenance record meaningless. Every merge var need
 
 Prompt inputs come from the org's own material: business profile, brand kit, knowledge base
 articles, recent blog posts. ⚠️ The Blog Writer originally shipped fed with Instagram insights and
-follower counts on a blog role; do not hand the Newsletter Assistant social surfaces it has no use
+follower counts on a blog role; do not hand the Email Marketing Assistant social surfaces it has no use
 for. Its `connection-map.ts` categories are already `['email','cms']` — respect that.
 
 ---
@@ -460,7 +460,7 @@ text, live preview, test submission.
 | **4 ✅** | `newsletter-send.ts` (claim, materialise, batch), `sending-domain.ts`, `process-newsletter-sends.ts` (cron `*/5`), `newsletter-unsubscribe.ts`, `newsletter-webhook.ts`, `newsletter-sending-domain.ts`, HTML/header support on all three senders, Studio sending setup + Send now; `db/newsletter-dispatch.sql`; `tests/newsletter-dispatch.test.ts` (27 checks) | ⚠️ **Not yet proven against a real send** — see §11c |
 
 ⚠️ **Phase 5 still owes the Studio its real entry point.** It is routed at `?view=newsletter` with no
-nav item; it belongs on the Newsletter Assistant's detail page when the role goes live.
+nav item; it belongs on the Email Marketing Assistant's detail page when the role goes live.
 | **5 ✅** | Catalogue flip (`db/newsletter-role-live.sql` + seed), onboarding schema, dashboard registry + `get-newsletter-performance.ts`, goal metrics, starter prompts, mandate chips, notification categories, Studio entry point, autopilot cron `draft-newsletter-issues.ts`; `tests/newsletter-role-live.test.ts` (17 checks) | The role is hireable and its Overview cards read from real counts. ⚠️ Needs `db/newsletter-role-live.sql` applied + the content seed re-run |
 
 ⚠️ **KPIs are four cards, not five.** Opens and clicks are deliberately absent: measuring either
@@ -1164,17 +1164,17 @@ only ever discovered by the recipients.
    triggers it.
 
 **How a tenant switches it on.** Orchestrations → *New workflow*: "When **Blog Writer** publishes a
-post, send to **Newsletter Assistant** to *write a short issue about it*". The freeform action is
+post, send to **Email Marketing Assistant** to *write a short issue about it*". The freeform action is
 passed into the brief, so it is the tenant's own instruction that steers the draft.
 
-⚠️ **A Newsletter Assistant target only accepts "publishes a post".** An issue drafted at
+⚠️ **An Email Marketing Assistant target only accepts "publishes a post".** An issue drafted at
 *drafts_a_post* would point at a URL that does not exist yet. The API refuses to create such a link
 (the hub disables the other two events when the target is a newsletter role), and the runtime
 refuses it again for links built before that rule existed.
 
 ⚠️ **The target's ROLE decides what a hand-off produces.** Every other target enqueues a
 `content_generation_jobs` row, which drafts a SOCIAL post. The hub has always offered every
-assistant as a target, so a Blog Writer → Newsletter Assistant link could already be built — and
+assistant as a target, so a Blog Writer → Email Marketing Assistant link could already be built — and
 until now it produced a social draft in a newsletter assistant's queue, which is not a thing that
 surface even shows.
 
@@ -1334,7 +1334,7 @@ ledger row to `delivered`.
 Written 2026-08-20. ⚠️ Vendor specifics move; this describes Kit's *model* — the shape of what it
 does — rather than a feature list captured on a date. Re-check before quoting any of it publicly.
 
-Kit is the closest comparator to what the Newsletter Assistant is becoming: not a campaign blaster
+Kit is the closest comparator to what the Email Marketing Assistant is becoming: not a campaign blaster
 like Mailchimp, but a subscriber-centric tool where the list, the automations and the content are
 one product. Its model has four parts worth naming, because three of them we do not have.
 
@@ -1441,7 +1441,7 @@ are deliberately *not* shipping, so the marketing copy doesn't promise it.
 | **One audience, with consent that binds the assistants that send** | **BMS's actual edge** | ✅ and now genuinely **two-way** (2026-08-21). A Lead Generator opt-out already blocked a newsletter; `src/utils/audience-objection.ts`, reached through `checkSuppression`, closes the return leg so a plain unsubscribe or a 30/90-day pause also stops cold outreach. ⚠️ Worded "the assistants that send" on purpose — see the note below |
 
 ⚠️ **"Shared across *every* assistant" is the overclaim to avoid.** Two assistants consult the
-Audience, in opposite directions: the Newsletter Assistant asks *may I send to this person*
+Audience, in opposite directions: the Email Marketing Assistant asks *may I send to this person*
 (`checkAudienceConsent`, a positive gate — no contact row means refuse), and the Lead Generator
 asks the narrower *has this person told us to stop* (`audienceObjection` — no contact row means no
 objection, or every cold email in the product would be blocked). The other live roles do not send

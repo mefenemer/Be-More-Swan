@@ -69,7 +69,7 @@ export interface FireOrchestrationsOpts {
     sourcePostKind?: 'blog_post' | 'social_post' | null;
 }
 
-/** ai_assistants.configuration.type for the Newsletter Assistant — see db/seed-catalog.ts. */
+/** ai_assistants.configuration.type for the Email Marketing Assistant — see db/seed-catalog.ts. */
 const NEWSLETTER_ROLE = 'newsletter_editor';
 
 export async function fireOrchestrations(db: Db, opts: FireOrchestrationsOpts): Promise<void> {
@@ -94,7 +94,7 @@ export async function fireOrchestrations(db: Db, opts: FireOrchestrationsOpts): 
             name: aiAssistants.name,
             // The TARGET'S ROLE DECIDES WHAT A HAND-OFF PRODUCES. Every other target here gets a
             // content_generation_job, which drafts a social post — the wrong artifact entirely for
-            // a Newsletter Assistant, which produces newsletter_issues. The hub has always offered
+            // an Email Marketing Assistant, which produces newsletter_issues. The hub has always offered
             // every assistant as a target, so this link could already be built and quietly made a
             // social draft nobody would ever look for.
             roleType: sql<string | null>`${aiAssistants.configuration} ->> 'type'`,

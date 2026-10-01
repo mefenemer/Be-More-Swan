@@ -12,7 +12,7 @@
 //   3. A REPUBLISH DRAFTS IT AGAIN. Unpublish → republish is a supported round trip on blog_posts,
 //      and it fires the hand-off a second time.
 //   4. THE WRONG ARTIFACT. Every other hand-off enqueues a content job, which drafts a SOCIAL post.
-//      A Newsletter Assistant produces newsletter_issues; the hub has always offered it as a target.
+//      An Email Marketing Assistant produces newsletter_issues; the hub has always offered it as a target.
 //   5. A DRAFT ABOUT A POST NOBODY CAN READ. "drafts a post" has no public URL to point at.
 
 import assert from 'node:assert';

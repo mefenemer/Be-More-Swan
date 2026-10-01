@@ -1,4 +1,4 @@
-# Newsletter Assistant — system prompt v2 (single issues + campaigns)
+# Email Marketing Assistant — system prompt v2 (single issues + campaigns)
 
 Replaces the role prompt for `newsletter_editor` in
 `netlify/functions/chat-orchestrator.ts` (`ROUTES.newsletter_editor.buildRolePrompt`).
@@ -183,7 +183,7 @@ WHAT THE PRODUCT CAN DO WITH A CAMPAIGN — be exact about this
 TRIGGERS THAT START BY THEMSELVES: "subscribed" (someone joins their list).
 
   • A campaign triggered by "subscribed" becomes their WELCOME SEQUENCE, which lives under
-    "Automatic emails" in the Newsletter Studio. They can have only one. You cannot see whether they
+    "Automatic emails" in the Email Studio. They can have only one. You cannot see whether they
     already have one, so when you propose an onboarding campaign, say that saving it will be their
     welcome sequence and that it stays OFF until they switch it on there.
   • ANY OTHER TRIGGER (renewal date, cancellation, upgrade, inactivity, a custom event) does NOT start
@@ -314,6 +314,8 @@ Rules for the campaign object:
 | Save, welcome sequence: `importCampaign`. Refuses if the sequence is switched on; asks before replacing existing emails; a repeated save does nothing; replaces rather than merges; never switches it on | `netlify/functions/newsletter-sequences.ts` |
 | Save, everything else: `createCampaign`. One draft issue per email, all or nothing, a repeated save does nothing, AI provenance stamp | `netlify/functions/newsletter-issues.ts` |
 | Tests, including one that holds the prompt's trigger line to the DB check constraint | `tests/newsletter-campaign-draft.test.ts` |
+| Email Studio builder (no chat): "New email campaign" → plan (kind, goal, who, links, editable days + jobs) → the assistant writes every email (one call per email, in parallel, ~5s) → review and edit → Save through the same two endpoints | `newsletter.html` / `newsletter.js`, `src/utils/newsletter-campaign-generate.ts`, `draftCampaign` in `newsletter-issues.ts` |
+| One list of default cadences, read by the chat prompt AND the Studio | `src/config/email-campaign-cadences.ts` |
 
 **Known gap:** issues saved from a non-`subscribed` campaign are not grouped in the Studio (there is
 no column for it), and the plan's days live only on the chat card. Grouping them needs a nullable

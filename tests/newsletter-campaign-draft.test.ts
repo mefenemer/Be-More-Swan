@@ -1,5 +1,5 @@
 // tests/newsletter-campaign-draft.test.ts
-// Saving a campaign — an ordered series of emails — written in the Newsletter Assistant's chat.
+// Saving a campaign — an ordered series of emails — written in the Email Marketing Assistant's chat.
 //
 // The single-issue card's failure modes all apply (tests/newsletter-chat-draft.test.ts), and a
 // campaign adds four of its own:
@@ -223,7 +223,7 @@ await check('a plan has no Save button', () => {
 
 await check('the card says where Save goes before it is pressed, and that nothing is sent', () => {
     assert.match(CARD, /Save as welcome sequence/);
-    assert.match(CARD, /draft \$\{n === 1 \? 'issue' : 'issues'\}/);
+    assert.match(CARD, /draft \$\{n === 1 \? 'email' : 'emails'\}/);
     assert.match(CARD, /stays switched off until you turn it on/);
     assert.match(CARD, /Nothing is sent to anyone/);
     assert.match(CARD, /Won’t start by itself/);

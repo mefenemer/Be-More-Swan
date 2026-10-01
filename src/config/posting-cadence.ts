@@ -59,7 +59,7 @@ export function postsPerWeekFor(value: unknown): number {
     if (/fortnight|every (two|2) weeks|bi[\s-]?weekly/.test(raw)) return 0.5;
     if (/\bdaily\b|every ?day/.test(raw)) return 7;
     if (/\bweekly\b|every ?week/.test(raw)) return 1;
-    // Monthly is a first-class choice in the Newsletter Assistant's own drafting-cadence dropdown
+    // Monthly is a first-class choice in the Email Marketing Assistant's own drafting-cadence dropdown
     // (src/public/assistant-onboarding-schemas.js), so it is NOT free text we failed to understand —
     // yet it resolved to 0 here, which made draft-newsletter-issues treat it as "on demand" and
     // never draft an issue, AND made readCadence call it 'unrecognised', which fired the

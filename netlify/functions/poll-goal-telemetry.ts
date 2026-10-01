@@ -469,7 +469,7 @@ async function fetchMetric(
             return { value: Number(row?.v ?? 0), disconnected: false };
         }
 
-        // ── Newsletter Assistant outcomes ──
+        // ── Email Marketing Assistant outcomes ──
         //
         // ⚠️ These two were declared in goal-metrics.ts when the role went live and NEVER given a
         // case here, so both fell to `default: { value: null }`. That is the quietest failure this

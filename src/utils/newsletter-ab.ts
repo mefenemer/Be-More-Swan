@@ -61,7 +61,7 @@ export function decideWinner(args: {
         return {
             ...base,
             winner: 'A',
-            note: 'This issue was sent from a connected mailbox, which cannot report opens, so there was nothing to compare. Everyone else was sent the first subject line.',
+            note: 'This email was sent from a connected mailbox, which cannot report opens, so there was nothing to compare. Everyone else was sent the first subject line.',
         };
     }
     if (!openedA && !openedB) {

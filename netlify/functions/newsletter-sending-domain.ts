@@ -196,7 +196,7 @@ export default withLambda(async (event: HandlerEvent) => {
             eq(newsletterSendingDomains.organisationId, orgId),
         ));
         // Says what it costs them: without a verified domain the org drops to the mailbox route.
-        return json(200, { removed: true, note: 'Removed. New issues will fall back to sending from your connected mailbox, which is capped at a small list.' });
+        return json(200, { removed: true, note: 'Removed. New emails will fall back to sending from your connected mailbox, which is capped at a small list.' });
     }
 
     return json(400, { error: `Unknown action: ${action}` });

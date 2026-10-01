@@ -83,7 +83,7 @@ check('readCadence separates a real cadence, a deliberate on-demand, and an unre
 });
 
 // ── Monthly ───────────────────────────────────────────────────────────────────────────────────
-// The Newsletter Assistant's drafting-cadence dropdown offers Weekly / Twice a week / MONTHLY /
+// The Email Marketing Assistant's drafting-cadence dropdown offers Weekly / Twice a week / MONTHLY /
 // On demand (src/public/assistant-onboarding-schemas.js). "Monthly" is not in POSTING_CADENCES —
 // that array feeds the social and blog pickers, which have never offered it — so the parser has to
 // read it as free text. It did not, and the consequences were both halves of the same bug:
