@@ -74,6 +74,14 @@ export default withLambda(async (event) => {
         .limit(1);
     if (!membership) return { statusCode: 403, body: JSON.stringify({ error: 'Forbidden.' }) };
 
+    // ⚠️ NOTHING TO REVIEW YET. A brand-new post opens with an empty caption, and the editor asks for
+    // its verdict the moment it opens — which sent an empty string to the model, failed, and greeted
+    // the person with "The quality review could not be completed" before they had typed a word.
+    // An empty post is not a failed review; it is one that has not started.
+    if (!String(post.caption ?? '').trim()) {
+        return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ empty: true }) };
+    }
+
     // SC7: plan gate — the plan must include The Quality Reviewer.
     if (!await hasFeatureByOrg(db, post.organisationId!, QUALITY_REVIEW_FEATURE)) {
         return { statusCode: 403, body: JSON.stringify({ error: 'tier_required', feature: QUALITY_REVIEW_FEATURE }) };
