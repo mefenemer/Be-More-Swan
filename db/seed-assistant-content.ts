@@ -218,15 +218,20 @@ const AUTHORED: RoleContent[] = [
     },
     {
         roleKey: 'newsletter_editor',
-        tagline: 'A newsletter worth opening — without the weekly scramble.',
-        // ⚠️ Rewritten 2026-08-20 when the role went live. The previous copy promised "Curated
-        // Industry Round-Ups", which is a research capability nothing in the pipeline performs —
-        // the assistant writes from the tenant's own brief and business context, and inventing
-        // industry news is exactly what its prompt forbids. Claim the shipped behaviour only.
-        keyFeatures: ['Drafts in Your Brand Voice', 'Personalised Per Subscriber', 'Sign-Up Form for Your Website', 'You Approve Every Email'],
+        // Rewritten 2026-10-01 for the Email Marketing Assistant (db/email-marketing-copy.sql — keep
+        // the two in step). Earlier: "Curated Industry Round-Ups" was removed at go-live because
+        // nothing in the pipeline performs it, and Mailchimp is not built.
+        tagline: 'Newsletters and email campaigns worth opening — without the weekly scramble.',
+        keyFeatures: [
+            'Automated Campaigns & Sequences: Easily set up structured email flows for client onboarding, product purchases, or subscription renewals.',
+            'Drafts in Your Brand Voice: Understands your style to ensure every broadcast and automated email sounds exactly like you.',
+            'Sign-Up Form or Shareable Page',
+            'You Approve Every Email',
+        ],
         // Mailchimp is NOT built and was never built. What exists: sending from a domain the
-        // customer verifies, or from their connected Gmail/Outlook for a small list.
-        integrations: ['Your own sending domain', 'Gmail', 'Outlook']
+        // customer verifies, or from their connected Gmail/Outlook for a small list — and the
+        // sign-up form, which is an embed code (subscribe.js), not an integration with any builder.
+        integrations: ['Your own sending domain', 'Gmail', 'Outlook', 'Any website, via embed code']
     },
     {
         roleKey: 'rfp_proposal_responder',
