@@ -49,7 +49,9 @@ check('the notification offers "View post", only to an allow-listed platform URL
 
 check('the header shows only the avatar; identity lives in its menu', () => {
     const w = read('workspace.html');
-    const menu = w.slice(landmark(w, 'id="header-user-menu"'), landmark(w, '</nav>'));
+    // The </nav> AFTER the menu — the post editor's breadcrumb <nav> comes earlier in the file.
+    const start = landmark(w, 'id="header-user-menu"');
+    const menu = w.slice(start, w.indexOf('</nav>', start));
     assert.match(menu, /<button type="button" id="header-user-initials"/);
     assert.match(menu, /id="header-user-panel" role="menu" class="hidden /, 'closed until clicked');
     for (const id of ['header-user-name', 'header-user-email', 'header-role-badges']) {
