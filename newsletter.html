@@ -7,6 +7,11 @@
      exactly the clutter that was removed. -->
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full pb-20">
 
+  <!-- The way back. The Studio is a full view, not a modal like Blog Studio, so there is no ✕ to
+       close — without this the only exit is the sidebar. Filled by renderCrumbs() in newsletter.js
+       from where the user came in (window._previousView, recorded by the workspace router). -->
+  <nav id="nl-crumbs" aria-label="Breadcrumb" class="flex flex-wrap items-center gap-1.5 text-sm text-gray-500 mb-4"></nav>
+
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
     <div>
       <h1 class="text-3xl font-extrabold text-gray-900">Newsletter</h1>

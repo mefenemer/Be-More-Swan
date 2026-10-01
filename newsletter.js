@@ -33,6 +33,9 @@
     // Who this Studio speaks for. ⚠️ Resolved once; '' records "we looked and there is no
     // Newsletter Assistant", so an org without one does not refetch on every issue.
     assistant: { id: null, name: null },
+    // Where the user came in from (window._previousView, set by the workspace router) and the
+    // breadcrumb trail built from it — the Studio is a full view with no close button of its own.
+    origin: null, crumbs: [],
     // The design currently mounted, and its controller. Null = this issue is plain Markdown.
     designer: null,
     // A revision the assistant has offered and nobody has accepted. Never written to the server.
@@ -112,6 +115,52 @@
       const make = ASSISTANT_LABELS[el.getAttribute('data-nl-assistant')];
       if (make) el.textContent = make(name);
     });
+    renderCrumbs();
+  }
+
+  /**
+   * The way back to wherever the user opened the Studio from. Usually the Newsletter Assistant's
+   * page — and back to the TAB they were on, not the page's default — but the calendar and the
+   * notifications open it too, and those should return there. A direct visit (?view=newsletter, a
+   * reload) has no origin, so it falls back to the assistant this Studio speaks for.
+   */
+  function renderCrumbs() {
+    const nav = $('nl-crumbs');
+    if (!nav) return;
+    const o = state.origin;
+    const a = state.assistant;
+    const named = (id) => (a.id && Number(a.id) === Number(id) && a.name) ? a.name : 'Newsletter Assistant';
+    let trail;
+    if (o && o.key === 'assistant-detail' && o.assistantId) {
+      trail = [{ label: 'Assistants', view: 'assistants' },
+        { label: named(o.assistantId), assistantId: o.assistantId, tab: o.tab }];
+    } else if (o && o.key && o.key !== 'newsletter') {
+      trail = [{ label: o.title || o.key, view: o.key }];
+    } else if (a.id) {
+      trail = [{ label: 'Assistants', view: 'assistants' },
+        { label: named(a.id), assistantId: a.id, tab: 'review-queue' }];
+    } else {
+      trail = [{ label: 'Assistants', view: 'assistants' }];
+    }
+    state.crumbs = trail;
+    const sep = '<svg class="w-3.5 h-3.5 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>';
+    nav.innerHTML = trail.map((c, i) => `<button type="button" data-nl-crumb="${i}"
+        class="font-semibold text-gray-500 hover:text-gray-900 hover:underline cursor-pointer">${esc(c.label)}</button>${sep}`).join('')
+      + '<span class="font-semibold text-gray-900" aria-current="page">Newsletter</span>';
+  }
+
+  /** Leave the Studio by a breadcrumb. Same rule as switching issues: a pending edit lands first,
+   *  and a write that failed keeps the user here rather than losing it on the way out. */
+  async function followCrumb(c) {
+    try { await flushPending(); }
+    catch (err) { window.showToast(err.message); return; }
+    [abSaver, localTimeSaver, domainSaver, seqSaver].forEach((sv) => { if (sv) sv.flush(); });
+    if (c.assistantId && typeof window.routeToAssistantDetail === 'function') {
+      if (c.tab) window._assistantDetailInitialTab = c.tab;
+      window.routeToAssistantDetail(c.assistantId);
+    } else {
+      window.loadView?.(c.view || 'assistants');
+    }
   }
 
   /**
@@ -2364,6 +2413,12 @@
   // ── Wiring ─────────────────────────────────────────────────────────────────
 
   function wire() {
+    $('nl-crumbs')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-nl-crumb]');
+      const c = btn && state.crumbs[Number(btn.getAttribute('data-nl-crumb'))];
+      if (c) followCrumb(c);
+    });
+
     // ⚠️ A dialog rather than a one-line prompt. Two decisions belong at creation because both get
     // harder afterwards: what KIND of email this is (it changes how the assistant is briefed) and
     // whether it has a layout (adding one later means re-flowing the copy).
@@ -2500,7 +2555,9 @@
     state.dirty = false;
     state.revision = null;
     if (state.designer) { state.designer.destroy(); state.designer = null; }
+    state.origin = window._previousView || null;
     wire();
+    renderCrumbs();
     renderVarChips();
     // Not awaited before the list loads — the labels read "your assistant" for a fraction of a
     // second rather than the whole page waiting on a lookup that only changes wording.

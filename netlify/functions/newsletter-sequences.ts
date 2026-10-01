@@ -3,6 +3,7 @@
 //
 //   GET                            → the org's sequence, its steps, and live enrolment counts
 //   POST { action: 'create' }      → start one (disabled, with no steps)
+//   POST { action: 'importCampaign' } → save a whole chat-drafted campaign as its steps (stays off)
 //   POST { action: 'saveStep' }    → add or edit a step; re-renders its snapshot
 //   POST { action: 'deleteStep' }  → remove a step
 //   POST { action: 'enable' }      → turn it on / off
@@ -123,6 +124,110 @@ export default withLambda(async (event: HandlerEvent) => {
             createdBy: ctx.userId,
         }).returning();
         return json(200, { sequence });
+    }
+
+    // A whole campaign from the chat card (src/utils/newsletter-campaign-chat-draft.ts), saved as
+    // the welcome sequence in one go. Above the "no sequence yet" lookup because it may create one.
+    //
+    // ⚠️ THREE OUTCOMES BEFORE ANYTHING IS WRITTEN, each a decision that belongs to a person:
+    //  • The sequence is ON → refused. Replacing live steps changes what everyone part way through
+    //    receives next, with nobody reading it. Switching it off is the place that already asks
+    //    about those people (newsletter.js), so the user is sent there rather than past it.
+    //  • It is off but HAS steps → 409 SEQUENCE_HAS_STEPS, and the card asks before resending with
+    //    `replace: true`. There is only one welcome sequence; somebody's hand-written welcome email
+    //    must not vanish because they pressed Save on a chat card.
+    //  • The same campaign is already there → deduped. A stored card re-renders its Save button on
+    //    every reload of the conversation, so it WILL be pressed twice.
+    // The sequence is never switched on here. Enabling stays owner/admin only, in the Studio.
+    if (action === 'importCampaign') {
+        const raw = Array.isArray(body.steps) ? body.steps : [];
+        if (!raw.length) return json(400, { error: 'There are no emails in this campaign to save.' });
+        if (raw.length > MAX_STEPS) return json(400, { error: `A sequence can have at most ${MAX_STEPS} emails.` });
+
+        const customKeys = await loadCustomFieldKeys(db, orgId);
+        const steps = raw.map((st: any, i: number) => ({
+            stepNumber: i + 1,
+            delayDays: Math.max(0, Math.min(90, Number(st?.delayDays ?? 0) || 0)),
+            subject: String(st?.subject || '').trim().slice(0, 200),
+            preheader: String(st?.preheader || '').trim().slice(0, 200) || null,
+            bodyMarkdown: scrubMergeTags(String(st?.bodyMarkdown || '').slice(0, MAX_BODY), customKeys).text,
+        }));
+        const blank = steps.findIndex((st: { subject: string; bodyMarkdown: string }) => !st.subject || !st.bodyMarkdown.trim());
+        if (blank !== -1) return json(400, { error: `Email ${blank + 1} has no subject or no copy yet.` });
+
+        const assistantId = Number(body.assistantId || '') || null;
+        if (assistantId) {
+            const [a] = await db.select({ id: aiAssistants.id }).from(aiAssistants)
+                .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId))).limit(1);
+            if (!a) return json(404, { error: 'Assistant not found.' });
+        }
+
+        const [existing] = await db.select().from(newsletterSequences)
+            .where(and(
+                eq(newsletterSequences.organisationId, orgId),
+                eq(newsletterSequences.triggerEvent, 'subscribed'),
+            )).limit(1);
+        const current = existing
+            ? await db.select({
+                stepNumber: newsletterSequenceSteps.stepNumber, delayDays: newsletterSequenceSteps.delayDays,
+                subject: newsletterSequenceSteps.subject, bodyMarkdown: newsletterSequenceSteps.bodyMarkdown,
+            }).from(newsletterSequenceSteps)
+                .where(eq(newsletterSequenceSteps.sequenceId, existing.id))
+                .orderBy(asc(newsletterSequenceSteps.stepNumber))
+            : [];
+
+        const same = current.length === steps.length && current.every((cur, i) =>
+            cur.subject === steps[i].subject && cur.bodyMarkdown === steps[i].bodyMarkdown && cur.delayDays === steps[i].delayDays);
+        if (existing && same) return json(200, { sequence: existing, deduped: true, stepCount: steps.length });
+
+        if (existing?.isEnabled) {
+            return json(409, {
+                code: 'SEQUENCE_ENABLED',
+                error: 'Your welcome sequence is switched on, so it cannot be replaced from here — people part way through it would get the new emails. Switch it off under Automatic emails in the Newsletter Studio first, then save this again.',
+            });
+        }
+        if (current.length && body.replace !== true) {
+            return json(409, { code: 'SEQUENCE_HAS_STEPS', stepCount: current.length });
+        }
+
+        const [org] = await db.select({ name: organisations.name }).from(organisations)
+            .where(eq(organisations.id, orgId)).limit(1);
+        const baseUrl = resolveBaseUrl(event.headers as Record<string, string | undefined>);
+        // Snapshotted at save, exactly as saveStep does — the worker never renders from the body.
+        // Plain Markdown only: a chat campaign carries no design, so there are no images to resolve.
+        const rendered = await Promise.all(steps.map((st: { bodyMarkdown: string; preheader: string | null }) => renderIssueSnapshot({
+            bodyMarkdown: st.bodyMarkdown,
+            design: null,
+            preheader: st.preheader,
+            senderName: org?.name || 'Your business',
+            baseUrl,
+        })));
+
+        const sequence = await db.transaction(async (tx) => {
+            const seq = existing ?? (await tx.insert(newsletterSequences).values({
+                organisationId: orgId,
+                assistantId,
+                name: String(body.name || 'Welcome sequence').trim().slice(0, 80) || 'Welcome sequence',
+                createdBy: ctx.userId,
+            }).returning())[0];
+            // Replace, not merge: a 3-email campaign over an old 5-step sequence must not leave
+            // steps 4 and 5 trailing after it.
+            await tx.delete(newsletterSequenceSteps).where(eq(newsletterSequenceSteps.sequenceId, seq.id));
+            await tx.insert(newsletterSequenceSteps).values(steps.map((st: any, i: number) => ({
+                organisationId: orgId,
+                sequenceId: seq.id,
+                stepNumber: st.stepNumber,
+                delayDays: st.delayDays,
+                subject: st.subject,
+                preheader: st.preheader,
+                bodyMarkdown: st.bodyMarkdown,
+                design: null,
+                renderedPayload: rendered[i],
+            })));
+            await tx.update(newsletterSequences).set({ updatedAt: new Date() }).where(eq(newsletterSequences.id, seq.id));
+            return seq;
+        });
+        return json(200, { sequence, deduped: false, replaced: current.length > 0, stepCount: steps.length });
     }
 
     const [sequence] = await db.select().from(newsletterSequences)

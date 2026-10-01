@@ -626,6 +626,67 @@
         });
     }
 
+    // A whole campaign from the campaign card. Two destinations, chosen by the trigger exactly as
+    // the card told the user before they pressed Save (disruptive-ui-registry.js): 'subscribed'
+    // becomes the welcome sequence, anything else becomes one draft issue per email.
+    //
+    // ⚠️ A 409 is not a failure here. SEQUENCE_HAS_STEPS is the server asking a question — "there
+    // is already a welcome sequence, replace it?" — and the card asks it. It is passed back with
+    // its code intact, not flattened into an error string.
+    function onNewsletterCampaignCreate(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      if (!assistantId) {
+        respond({ ok: false, error: 'This chat is not attached to an assistant, so the campaign cannot be saved.' });
+        return;
+      }
+      const emails = Array.isArray(d.newsletters) ? d.newsletters : [];
+      const toSequence = d.trigger && d.trigger.event === 'subscribed';
+      const request = toSequence
+        ? { url: '/.netlify/functions/newsletter-sequences', body: {
+            action: 'importCampaign', assistantId, name: d.name, replace: d.replace === true,
+            steps: emails.map((m) => ({
+              subject: m.subject, preheader: m.preheader, bodyMarkdown: m.bodyMarkdown,
+              // Days since the PREVIOUS email — what delay_days stores. The normaliser recomputed it.
+              delayDays: m.delayDaysAfterPrevious,
+            })),
+          } }
+        : { url: '/.netlify/functions/newsletter-issues', body: {
+            action: 'createCampaign', assistantId,
+            emails: emails.map((m) => ({ subject: m.subject, preheader: m.preheader, bodyMarkdown: m.bodyMarkdown })),
+          } };
+
+      fetch(request.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(request.body),
+      })
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (res.status === 409 && data.code) {
+            respond({ ok: false, code: data.code, stepCount: data.stepCount, error: data.error });
+            return;
+          }
+          if (!res.ok) throw new Error(data.error || `Save failed (HTTP ${res.status}).`);
+          respond({
+            ok: true, deduped: data.deduped === true, stepCount: data.stepCount,
+            created: data.created, replaced: data.replaced === true,
+          });
+          // Same reason as newsletter:created below — the Issues tab behind this modal is already
+          // rendered and has no other way to learn about a write made from in here.
+          if (!toSequence) {
+            document.dispatchEvent(new CustomEvent('newsletter:created', {
+              detail: { assistantId, issueId: (data.issueIds || [])[0] || null, deduped: data.deduped === true },
+            }));
+          }
+        })
+        .catch((err) => {
+          console.error('[ChatSession] newsletter campaign save failed:', err);
+          respond({ ok: false, error: err.message });
+        });
+    }
+
     // The composer does not exist in read-only mode, so its listeners are conditional. The
     // container-level ones stay: a hydrated transcript can still contain Disruptive UI cards.
     if (!readOnly) {
@@ -638,6 +699,7 @@
     container.addEventListener('campaign:create', onCampaignCreate);
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
     container.addEventListener('newsletter:createDraft', onNewsletterDraftCreate);
+    container.addEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
 
     // Starter pills send their prompt verbatim; the first appendMessage removes the
     // zero-state (and the pills with it), so no explicit teardown is needed.
@@ -667,6 +729,7 @@
         container.removeEventListener('campaign:create', onCampaignCreate);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
         container.removeEventListener('newsletter:createDraft', onNewsletterDraftCreate);
+        container.removeEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
         container.innerHTML = '';
       },
     };

@@ -1714,6 +1714,181 @@
   register('newsletter_issue_draft', renderNewsletterIssueDraftCard);
   register('NewsletterIssueDraftCard', renderNewsletterIssueDraftCard);
 
+  // ── Built-in: Newsletter Campaign Draft Card ────────────────────────────────
+  // Renderer for a campaign — an ordered series of emails — from the same route, normalised by
+  // src/utils/newsletter-campaign-chat-draft.ts: { type: 'newsletter_campaign_draft', stage, name,
+  // campaignType, goal, audience, trigger, tone, newsletters[], warnings }.
+  //
+  // TWO STAGES, ONE CARD. A 'plan' is the outline the assistant proposes before writing anything,
+  // and it has NO buttons: there is nothing to keep yet, and a Save on an outline would file five
+  // empty emails. A 'draft' has every email written and offers Save / Discard.
+  //
+  // WHERE SAVE GOES depends on the trigger, and the card says which before it is pressed:
+  //  • 'subscribed' → the welcome sequence (newsletter-sequences importCampaign). Stays OFF.
+  //  • anything else → one draft issue per email (newsletter-issues createCampaign), because the
+  //    platform cannot see a renewal date or a cancellation, so nothing could start it.
+  const CAMPAIGN_TYPE_LABELS = {
+    onboarding: 'Onboarding', renewal: 'Renewal', upgrade: 'Upgrade', winback: 'Win-back',
+    reengagement: 'Re-engagement', launch: 'Launch', custom: 'Custom',
+  };
+
+  function renderNewsletterCampaignDraftCard(ui, esc) {
+    const emails = (Array.isArray(ui.newsletters) ? ui.newsletters : []).filter((n) => n && typeof n === 'object');
+    if (!emails.length) return null;
+    const isDraft = ui.stage === 'draft' && emails.every((n) => typeof n.bodyMarkdown === 'string' && n.bodyMarkdown.trim());
+    const trigger = ui.trigger && typeof ui.trigger === 'object' ? ui.trigger : {};
+    // Re-derived rather than trusted, same as the server: only 'subscribed' can start by itself.
+    const automatic = trigger.event === 'subscribed';
+    const name = typeof ui.name === 'string' && ui.name.trim() ? ui.name.trim() : 'Email sequence';
+    const goal = typeof ui.goal === 'string' ? ui.goal.trim() : '';
+    const warnings = (Array.isArray(ui.warnings) ? ui.warnings : []).filter((w) => typeof w === 'string' && w.trim());
+    const lastDay = Number(emails[emails.length - 1].sendDay) || 1;
+    const typeLabel = CAMPAIGN_TYPE_LABELS[ui.campaignType] || 'Custom';
+    const n = emails.length;
+    const saveLabel = automatic ? 'Save as welcome sequence' : `Save as ${n} draft ${n === 1 ? 'issue' : 'issues'}`;
+    const eyebrow = (s) => `${isDraft ? 'Campaign draft' : 'Campaign plan'} · ${s}`;
+
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-lg';
+    el.innerHTML = `
+      <div class="flex items-start gap-3 mb-3">
+        <div class="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-xl shrink-0">📬</div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase" data-ncd-eyebrow>${esc(eyebrow(isDraft ? 'Not saved yet' : 'Not written yet'))}</p>
+          <p class="font-bold text-gray-900 break-words">${esc(name)}</p>
+          ${goal ? `<p class="text-xs text-gray-500 break-words">Goal: ${esc(goal)}</p>` : ''}
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-1.5 mb-3">
+        <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-white border border-indigo-200 text-indigo-700">${esc(typeLabel)}</span>
+        <span class="text-[11px] font-semibold text-gray-500">${esc(`${n} ${n === 1 ? 'email' : 'emails'} over ${lastDay} ${lastDay === 1 ? 'day' : 'days'}`)}</span>
+        ${automatic
+          ? '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 border-emerald-200 text-emerald-800">Starts when someone subscribes</span>'
+          : '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-amber-50 border-amber-200 text-amber-900">Won’t start by itself</span>'}
+      </div>
+      ${trigger.description ? `<p class="text-xs text-gray-600 mb-3 break-words">Who it’s for: ${esc(trigger.description)}</p>` : ''}
+
+      <ol class="space-y-2 mb-3">
+        ${emails.map((e, i) => {
+          const cta = e.callToAction && typeof e.callToAction === 'object' && e.callToAction.label ? e.callToAction : null;
+          const body = typeof e.bodyMarkdown === 'string' ? e.bodyMarkdown.trim() : '';
+          return `<li class="bg-white border border-indigo-100 rounded-lg p-3">
+            <div class="flex items-start gap-2">
+              <span class="shrink-0 text-[11px] font-black px-2 py-0.5 rounded bg-indigo-600 text-white">Day ${esc(String(Number(e.sendDay) || i + 1))}</span>
+              <div class="min-w-0">
+                <p class="text-[11px] font-bold text-indigo-700 uppercase tracking-wider">Email ${i + 1}${e.role ? ` · ${esc(e.role)}` : ''}</p>
+                <p class="text-sm font-bold text-gray-900 break-words">${esc(e.subject || `Email ${i + 1}`)}</p>
+                ${e.preheader ? `<p class="text-xs text-gray-500 break-words">${esc(e.preheader)}</p>` : ''}
+                ${cta ? `<p class="text-[11px] text-gray-600 mt-1">Asks them to: <span class="font-bold">${esc(cta.label)}</span>${cta.url ? '' : ' <span class="text-amber-700 font-bold">· needs a link</span>'}</p>` : ''}
+              </div>
+            </div>
+            ${body ? `<details class="mt-2">
+              <summary class="text-xs font-bold text-indigo-700 cursor-pointer">Read email ${i + 1}</summary>
+              <p class="mt-2 text-sm text-gray-700 whitespace-pre-wrap break-words max-h-64 overflow-y-auto">${esc(body)}</p>
+            </details>` : ''}
+          </li>`;
+        }).join('')}
+      </ol>
+
+      ${warnings.length ? `<div class="bg-amber-50 border border-amber-200 rounded-lg p-2.5 mb-3">
+        <p class="text-[11px] font-bold text-amber-900 mb-0.5">We tidied this before showing it</p>
+        <ul class="text-[11px] text-amber-900 list-disc pl-4">${warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>
+      </div>` : ''}
+
+      ${isDraft ? `<div class="flex flex-wrap items-center gap-2" data-ncd-actions>
+        <button type="button" data-ncd-save
+          class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(saveLabel)}</button>
+        <button type="button" data-ncd-discard
+          class="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Discard</button>
+      </div>` : ''}
+      <p class="mt-2 text-xs font-semibold text-indigo-700" data-ncd-status>${!isDraft
+        ? 'This is the plan, not the emails yet. Tell me what to change — more or fewer emails, different days — or say “write it” and I’ll draft every one.'
+        : automatic
+          ? 'Saving makes this your welcome sequence, under Automatic emails in the Newsletter Studio. It stays switched off until you turn it on there — nobody is emailed by saving.'
+          : 'Saving puts each email in your Issues tab as a draft. Nothing is sent to anyone: you send each one to the right people on the right day from the Newsletter Studio.'}</p>
+    `;
+    if (!isDraft) return el;
+
+    const status = el.querySelector('[data-ncd-status]');
+    function say(text, tone) {
+      status.textContent = text;
+      status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`;
+    }
+    function setBusy(busy) {
+      el.querySelectorAll('[data-ncd-save], [data-ncd-discard]').forEach((b) => { b.disabled = busy; });
+    }
+    function setEyebrow(text) {
+      const node = el.querySelector('[data-ncd-eyebrow]');
+      if (node) node.textContent = eyebrow(text);
+    }
+
+    function dispatchSave(replace) {
+      setBusy(true);
+      say(replace ? 'Replacing your welcome sequence…' : 'Saving…');
+      el.dispatchEvent(new CustomEvent('newsletter:createCampaign', {
+        bubbles: true,
+        detail: {
+          name,
+          trigger: { event: automatic ? 'subscribed' : 'custom' },
+          newsletters: emails.map((e) => ({
+            subject: e.subject, preheader: e.preheader || '', bodyMarkdown: e.bodyMarkdown,
+            delayDaysAfterPrevious: Number(e.delayDaysAfterPrevious) || 0,
+          })),
+          replace,
+          // Re-enabling on every failure is the point: this card holds the only copy.
+          async respond({ ok, deduped, error, code, stepCount, created, replaced }) {
+            if (ok) {
+              setEyebrow('Saved');
+              if (automatic) {
+                say(deduped
+                  ? 'Already saved — it is your welcome sequence, under Automatic emails in the Newsletter Studio.'
+                  : `${replaced ? 'Replaced your welcome sequence' : 'Saved as your welcome sequence'} — ${stepCount || n} emails, switched off. Turn it on under Automatic emails in the Newsletter Studio when you are ready.`);
+              } else {
+                say(deduped
+                  ? 'Already saved — these are in your Issues tab.'
+                  : `Saved ${created || n} draft ${(created || n) === 1 ? 'issue' : 'issues'} to your Issues tab. Send each one from the Newsletter Studio on its day.`);
+              }
+              return;
+            }
+            // There is only one welcome sequence. One that already has emails is replaced only on
+            // an explicit yes — somebody's hand-written welcome must not vanish behind a chat card.
+            if (code === 'SEQUENCE_HAS_STEPS' && !replace) {
+              const ok2 = typeof window.confirmModal === 'function'
+                ? await window.confirmModal(
+                  `Your welcome sequence already has ${stepCount} ${stepCount === 1 ? 'email' : 'emails'}. Replace ${stepCount === 1 ? 'it' : 'them'} with these ${n}? The current ${stepCount === 1 ? 'one is' : 'ones are'} deleted. It stays switched off either way.`,
+                  { title: 'Replace your welcome sequence?', confirmLabel: 'Replace', confirmColor: '#dc2626' })
+                : false;
+              if (ok2) { dispatchSave(true); return; }
+              setBusy(false);
+              setEyebrow('Not saved yet');
+              say('Not saved — your existing welcome sequence is unchanged.');
+              return;
+            }
+            setBusy(false);
+            setEyebrow('Not saved yet');
+            say(error || 'Could not save this campaign — please try again.', 'error');
+          },
+        },
+      }));
+    }
+
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-ncd-discard]')) {
+        setBusy(true);
+        setEyebrow('Discarded');
+        say('Discarded — nothing was saved. Ask me for a different shape any time.');
+        return;
+      }
+      if (e.target.closest('[data-ncd-save]')) dispatchSave(false);
+    });
+
+    return el;
+  }
+
+  register('newsletter_campaign_draft', renderNewsletterCampaignDraftCard);
+  register('NewsletterCampaignDraftCard', renderNewsletterCampaignDraftCard);
+
   register('blog_post_draft', renderBlogPostDraftCard);
   register('BlogPostDraftCard', renderBlogPostDraftCard);
 
