@@ -136,10 +136,13 @@
           <input id="fb-name" maxlength="80" aria-label="Form name"
             class="flex-1 min-w-0 text-lg font-extrabold text-gray-900 px-2 py-1 rounded-lg border border-transparent hover:border-gray-200 focus:border-gray-300 outline-none">
           <label class="flex items-center gap-2 text-sm font-bold text-gray-700 cursor-pointer" title="A form that is off shows nothing on your website or its page">
-            <input type="checkbox" id="fb-live"> Live
+            <input type="checkbox" id="fb-live"> <span data-explain="form-live">Live</span>
           </label>
           <button type="button" data-fb-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
           <button type="button" id="fb-save" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Save form</button>
+          <button type="button" data-fb-close aria-label="Close" class="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 cursor-pointer">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
         </div>
         <div id="fb-warnings"></div>
         <div class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2">
@@ -152,8 +155,17 @@
               <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">Preview</p>
               <div class="flex gap-1" id="fb-preview-as"></div>
             </div>
-            <div id="fb-preview-frame" class="rounded-xl p-6"><div id="fb-preview"></div></div>
-            <p class="text-[11px] text-gray-400 mt-3">This is the real form, drawn by the same code your website and your sign-up page use. Submitting here sends nothing.</p>
+            <!-- The form IN CONTEXT, so the two previews look as different as the two places are: our
+                 hosted page in a browser window, or the form sitting inside a page of their website. -->
+            <div class="rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm">
+              <div id="fb-preview-bar" class="flex items-center gap-2 px-3 py-2 bg-gray-100 border-b border-gray-200"></div>
+              <div id="fb-preview-frame" class="p-6">
+                <div id="fb-preview-above"></div>
+                <div id="fb-preview"></div>
+                <div id="fb-preview-below"></div>
+              </div>
+            </div>
+            <p id="fb-preview-note" class="text-[11px] text-gray-400 mt-3"></p>
           </div>
         </div>
       </div>`;
@@ -188,7 +200,9 @@
       : panelAfter();
   }
 
-  const label = (t) => `<label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">${t}</label>`;
+  // `slug` = an explainers.js glossary key: the 🦢 info icon beside the label, with plain-English help
+  // on hover or tap. Every setting in the builder carries one.
+  const label = (t, slug) => `<label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1"${slug ? ` data-explain="${slug}"` : ''}>${t}</label>`;
   const input = (attrs, value) => `<input ${attrs} value="${esc(value ?? '')}" class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-4">`;
 
   function targetLabel(f) {
@@ -222,7 +236,7 @@
     return `
       <p class="text-sm text-gray-500 mb-4">Ask only what you need — every extra question costs sign-ups. Email is always included.</p>
       <div id="fb-rows">${rows}</div>
-      <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mt-5 mb-2">Add a question ${full ? `<span class="normal-case font-normal">— a form holds at most ${MAX_FIELDS}</span>` : ''}</p>
+      <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mt-5 mb-2"><span data-explain="form-add-question">Add a question</span> ${full ? `<span class="normal-case font-normal">— a form holds at most ${MAX_FIELDS}</span>` : ''}</p>
       <div class="flex flex-wrap gap-2">${PALETTE.map((p) => {
         const off = full || (CONTACT_LABELS[p.key] && usedCols.has(p.key));
         return `<button type="button" data-fb-add="${p.key}" ${off ? 'disabled' : ''} class="px-3 py-1.5 text-xs font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">+ ${p.label}</button>`;
@@ -235,13 +249,13 @@
     const where = t.kind === 'contact' ? 'contact' : t.kind === 'tag' ? 'tag' : 'custom';
     return `
       <div class="px-3 pb-3 pt-1 border-t border-gray-100">
-        ${label('Question')}${input(`data-fb-f="${i}" data-k="label" maxlength="80"`, f.label)}
-        ${f.type === 'checkbox' && (f.options || []).length <= 1 ? '' : `${label('Placeholder')}${input(`data-fb-f="${i}" data-k="placeholder" maxlength="120"`, f.placeholder)}`}
-        ${label('Help text')}${input(`data-fb-f="${i}" data-k="help" maxlength="200"`, f.help)}
-        ${f.type === 'email' ? '' : `<label class="flex items-center gap-2 text-sm text-gray-700 mb-4 cursor-pointer"><input type="checkbox" data-fb-f="${i}" data-k="required" ${f.required ? 'checked' : ''}> Required</label>`}
-        ${isChoice ? `${label('Choices — one per line')}<textarea data-fb-f="${i}" data-k="options" rows="4" class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-4">${esc((f.options || []).map((o) => o.label).join('\n'))}</textarea>` : ''}
+        ${label('Question', 'form-q-label')}${input(`data-fb-f="${i}" data-k="label" maxlength="80"`, f.label)}
+        ${f.type === 'checkbox' && (f.options || []).length <= 1 ? '' : `${label('Placeholder', 'form-q-placeholder')}${input(`data-fb-f="${i}" data-k="placeholder" maxlength="120"`, f.placeholder)}`}
+        ${label('Help text', 'form-q-help')}${input(`data-fb-f="${i}" data-k="help" maxlength="200"`, f.help)}
+        ${f.type === 'email' ? '' : `<label class="flex items-center gap-2 text-sm text-gray-700 mb-4 cursor-pointer"><input type="checkbox" data-fb-f="${i}" data-k="required" ${f.required ? 'checked' : ''}> <span data-explain="form-q-required">Required</span></label>`}
+        ${isChoice ? `${label('Choices — one per line', 'form-q-choices')}<textarea data-fb-f="${i}" data-k="options" rows="4" class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-4">${esc((f.options || []).map((o) => o.label).join('\n'))}</textarea>` : ''}
         ${f.type === 'email' || where === 'contact' ? '' : `
-          ${label('Save the answer as')}
+          ${label('Save the answer as', 'form-q-saves-to')}
           <select data-fb-f="${i}" data-k="where" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm mb-2">
             <option value="custom" ${where === 'custom' ? 'selected' : ''}>A field on the contact</option>
             ${isChoice ? `<option value="tag" ${where === 'tag' ? 'selected' : ''}>Tags on the contact (each choice becomes a tag)</option>` : ''}
@@ -251,7 +265,8 @@
   }
 
   function colour(k, v, title) {
-    return `<label class="flex items-center gap-2 text-sm text-gray-700 mb-3"><input type="color" data-fb-style="${k}" value="${esc(v)}" class="w-9 h-9 rounded border border-gray-300 cursor-pointer"> ${title}</label>`;
+    const slug = { accent: 'form-colour-button', text: 'form-colour-text', background: 'form-colour-background', pageBackground: 'form-colour-page' }[k];
+    return `<label class="flex items-center gap-2 text-sm text-gray-700 mb-3"><input type="color" data-fb-style="${k}" value="${esc(v)}" class="w-9 h-9 rounded border border-gray-300 cursor-pointer"> <span${slug ? ` data-explain="${slug}"` : ''}>${title}</span></label>`;
   }
   function choice(k, value, options) {
     return `<select data-fb-style="${k}" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm mb-4">${options.map(([v, l]) => `<option value="${v}" ${value === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
@@ -263,7 +278,7 @@
     return `
       <label class="flex items-start gap-2 text-sm text-gray-700 mb-4 cursor-pointer">
         <input type="checkbox" data-fb-style="useBrandKit" ${s.useBrandKit ? 'checked' : ''} class="mt-0.5">
-        <span><span class="font-bold">Match my brand</span><span class="block text-[11px] text-gray-500">The button colour follows your brand kit. Pick a colour below to override it.</span></span>
+        <span><span class="font-bold" data-explain="form-match-brand">Match my brand</span><span class="block text-[11px] text-gray-500">The button colour follows your brand kit. Pick a colour below to override it.</span></span>
       </label>
       <div class="grid grid-cols-2 gap-x-4">
         ${colour('accent', s.accent, 'Button')}
@@ -272,11 +287,11 @@
         ${colour('pageBackground', s.pageBackground, 'Page background')}
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-x-3 mt-2">
-        <div>${label('Font')}${choice('font', s.font, [['system', 'Clean'], ['serif', 'Classic'], ['rounded', 'Rounded'], ['mono', 'Typewriter'], ['inherit', 'My website\'s font']])}</div>
-        <div>${label('Corners')}${choice('radius', s.radius, [['none', 'Square'], ['small', 'Rounded'], ['large', 'Very rounded']])}</div>
-        <div>${label('Layout')}${choice('layout', s.layout, [['stacked', 'Stacked'], ['inline', 'One line (email only)']])}</div>
+        <div>${label('Font', 'form-font')}${choice('font', s.font, [['system', 'Clean'], ['serif', 'Classic'], ['rounded', 'Rounded'], ['mono', 'Typewriter'], ['inherit', 'My website\'s font']])}</div>
+        <div>${label('Corners', 'form-corners')}${choice('radius', s.radius, [['none', 'Square'], ['small', 'Rounded'], ['large', 'Very rounded']])}</div>
+        <div>${label('Layout', 'form-layout')}${choice('layout', s.layout, [['stacked', 'Stacked'], ['inline', 'One line (email only)']])}</div>
       </div>
-      ${label('Logo')}
+      ${label('Logo', 'form-logo')}
       ${logo ? `<div class="flex items-center gap-3 mb-3"><img src="${esc(logo.url)}" alt="" class="h-10 max-w-[10rem] object-contain rounded border border-gray-200 bg-white"><button type="button" data-fb-logo="" class="text-xs font-bold text-red-600 cursor-pointer">Remove</button></div>`
         : s.logo ? '<p class="text-xs text-gray-500 mb-3">Logo chosen. <button type="button" data-fb-logo="" class="font-bold text-red-600 cursor-pointer">Remove</button></p>' : ''}
       ${S.images.length
@@ -287,14 +302,14 @@
   function panelWords() {
     const c = S.def.content;
     return `
-      ${label('Headline')}${input('data-fb-content="headline" maxlength="120" placeholder="Get the monthly guide"', c.headline)}
-      ${label('A line or two about what people get')}<textarea data-fb-content="intro" rows="3" maxlength="600" class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-4">${esc(c.intro)}</textarea>
-      ${label('Button')}${input('data-fb-content="buttonLabel" maxlength="40"', c.buttonLabel)}
-      ${label('Consent sentence')}<textarea data-fb-consent="text" rows="2" maxlength="500" class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-2">${esc(S.def.consent.text)}</textarea>
+      ${label('Headline', 'form-headline')}${input('data-fb-content="headline" maxlength="120" placeholder="Get the monthly guide"', c.headline)}
+      ${label('A line or two about what people get', 'form-intro')}<textarea data-fb-content="intro" rows="3" maxlength="600" class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-4">${esc(c.intro)}</textarea>
+      ${label('Button', 'form-button-label')}${input('data-fb-content="buttonLabel" maxlength="40"', c.buttonLabel)}
+      ${label('Consent sentence', 'form-consent')}<textarea data-fb-consent="text" rows="2" maxlength="500" class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-2">${esc(S.def.consent.text)}</textarea>
       <p class="text-[11px] text-gray-400 -mt-1 mb-2">Shown beside the button, and kept with every sign-up as the record of what they agreed to.</p>
-      <label class="flex items-center gap-2 text-sm text-gray-700 mb-4 cursor-pointer"><input type="checkbox" data-fb-consent="requireCheckbox" ${S.def.consent.requireCheckbox ? 'checked' : ''}> They must tick a box to agree</label>
-      ${label('Message after signing up')}${input('data-fb-content="successMessage" maxlength="300" placeholder="Leave blank for the standard message"', c.successMessage)}
-      ${label('Or send them to a page (optional)')}${input('data-fb-content="redirectUrl" maxlength="500" placeholder="https://…"', c.redirectUrl || '')}`;
+      <label class="flex items-center gap-2 text-sm text-gray-700 mb-4 cursor-pointer"><input type="checkbox" data-fb-consent="requireCheckbox" ${S.def.consent.requireCheckbox ? 'checked' : ''}> <span data-explain="form-consent-checkbox">They must tick a box to agree</span></label>
+      ${label('Message after signing up', 'form-success')}${input('data-fb-content="successMessage" maxlength="300" placeholder="Leave blank for the standard message"', c.successMessage)}
+      ${label('Or send them to a page (optional)', 'form-redirect')}${input('data-fb-content="redirectUrl" maxlength="500" placeholder="https://…"', c.redirectUrl || '')}`;
   }
 
   function panelShare() {
@@ -307,19 +322,19 @@
     return `
       <label class="flex items-start gap-2 text-sm text-gray-700 mb-2 cursor-pointer">
         <input type="checkbox" data-fb-delivery="embed" ${d.embed.enabled ? 'checked' : ''} class="mt-0.5">
-        <span><span class="font-bold">On my website</span><span class="block text-[11px] text-gray-500">You get a short piece of code to paste into your website (Squarespace, WordPress, Wix or any site that accepts an embed code) — the form appears wherever you paste it.</span></span>
+        <span><span class="font-bold" data-explain="form-on-website">On my website</span><span class="block text-[11px] text-gray-500">You get a short piece of code to paste into your website (Squarespace, WordPress, Wix or any site that accepts an embed code) — the form appears wherever you paste it.</span></span>
       </label>
       ${d.embed.enabled ? (snippet
         ? `<textarea readonly rows="3" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-xs font-mono bg-gray-50 mb-2">${esc(snippet)}</textarea>
            <button type="button" data-fb-copy="snippet" class="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer mb-3">Copy website code</button>`
         : '<p class="text-[11px] text-gray-500 mb-3">Save the form to get the code for your website.</p>')
-        + `${label('Only these websites may use it (one per line — blank for any)')}<textarea data-fb-origins rows="2" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm mb-5" placeholder="https://www.example.com">${esc((d.embed.allowedOrigins || []).join('\n'))}</textarea>` : '<div class="mb-5"></div>'}
+        + `${label('Only these websites may use it (one per line — blank for any)', 'form-allowed-websites')}<textarea data-fb-origins rows="2" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm mb-5" placeholder="https://www.example.com">${esc((d.embed.allowedOrigins || []).join('\n'))}</textarea>` : '<div class="mb-5"></div>'}
       <label class="flex items-start gap-2 text-sm text-gray-700 mb-2 cursor-pointer">
         <input type="checkbox" data-fb-delivery="hosted" ${d.hosted.enabled ? 'checked' : ''} class="mt-0.5">
-        <span><span class="font-bold">Its own page on Be More Swan</span><span class="block text-[11px] text-gray-500">For when you have no website, or want a link to share: we host a page with just this form on it. Put the link in your Instagram bio, a link tree, an email signature, or behind a QR code on a poster.</span></span>
+        <span><span class="font-bold" data-explain="form-own-page">Its own page on Be More Swan</span><span class="block text-[11px] text-gray-500">For when you have no website, or want a link to share: we host a page with just this form on it. Put the link in your Instagram bio, a link tree, an email signature, or behind a QR code on a poster.</span></span>
       </label>
       ${d.hosted.enabled ? `
-        ${label('Page address')}
+        ${label('Page address', 'form-page-address')}
         <div class="flex items-center gap-1 mb-1"><span class="text-sm text-gray-500 shrink-0">${esc(location.host)}/f/</span>
           <input data-fb-slug maxlength="48" value="${esc(d.hosted.slug || '')}" placeholder="your-form" class="flex-1 min-w-0 px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm"></div>
         ${slugNote}
@@ -339,20 +354,20 @@
     return `
       <label class="flex items-start gap-2 text-sm text-gray-700 mb-4 cursor-pointer">
         <input type="checkbox" data-fb-aud="doubleOptIn" ${a.doubleOptIn ? 'checked' : ''} class="mt-0.5">
-        <span><span class="font-bold">Ask them to confirm by email</span><span class="block text-[11px] text-gray-500">Recommended. Only people who click the link are subscribed — it keeps typos and fake sign-ups off your list.</span></span>
+        <span><span class="font-bold" data-explain="form-double-opt-in">Ask them to confirm by email</span><span class="block text-[11px] text-gray-500">Recommended. Only people who click the link are subscribed — it keeps typos and fake sign-ups off your list.</span></span>
       </label>
-      ${label('Add them to a segment')}
+      ${label('Add them to a segment', 'form-segment')}
       <select data-fb-aud="segmentId" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm mb-4">
         <option value="">None</option>
         ${S.segments.map((x) => `<option value="${x.id}" ${Number(a.segmentId) === Number(x.id) ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}
       </select>
-      ${label('Tag everyone who signs up (comma-separated)')}${input('data-fb-aud="tags" maxlength="400" placeholder="e.g. pricing-guide, spring-event"', (a.tags || []).join(', '))}
-      ${label('Start an email campaign')}
+      ${label('Tag everyone who signs up (comma-separated)', 'form-tags')}${input('data-fb-aud="tags" maxlength="400" placeholder="e.g. pricing-guide, spring-event"', (a.tags || []).join(', '))}
+      ${label('Start an email campaign', 'form-campaign')}
       <select data-fb-campaign="sequenceId" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm mb-2">
         <option value="">None — new sign-ups get your welcome sequence</option>
         ${S.sequences.map((x) => `<option value="${x.id}" ${Number(c.sequenceId) === Number(x.id) ? 'selected' : ''}>${esc(x.name)}${x.isEnabled ? '' : ' (switched off)'}</option>`).join('')}
       </select>
-      ${c.sequenceId ? `<label class="flex items-center gap-2 text-sm text-gray-700 mb-2 cursor-pointer"><input type="checkbox" data-fb-campaign="skipWelcome" ${c.skipWelcome ? 'checked' : ''}> Send this INSTEAD of the welcome sequence</label>` : ''}
+      ${c.sequenceId ? `<label class="flex items-center gap-2 text-sm text-gray-700 mb-2 cursor-pointer"><input type="checkbox" data-fb-campaign="skipWelcome" ${c.skipWelcome ? 'checked' : ''}> <span data-explain="form-skip-welcome">Send this INSTEAD of the welcome sequence</span></label>` : ''}
       <p class="text-[11px] text-gray-400">${S.sequences.length
         ? 'Campaigns listed here start when someone fills in a form. Create one in the Email Studio with “New email campaign” → “People who fill in a form”.'
         : 'No form campaigns yet. Create one in the Email Studio: “New email campaign” → “People who fill in a form”.'}</p>`;
@@ -369,7 +384,19 @@
       const d = S.def;
       const img = d.style.logo && S.images.find((x) => Number(x.id) === Number(d.style.logo.assetId));
       const frame = $('fb-preview-frame');
-      frame.style.background = S.previewAs === 'hosted' ? (/^#[0-9a-f]{6}$/i.test(d.style.pageBackground) ? d.style.pageBackground : '#f9fafb') : '#ffffff';
+      const hosted = S.previewAs === 'hosted';
+      frame.style.background = hosted ? (/^#[0-9a-f]{6}$/i.test(d.style.pageBackground) ? d.style.pageBackground : '#f9fafb') : '#ffffff';
+      const dot = (c) => `<span class="w-2.5 h-2.5 rounded-full" style="background:${c}"></span>`;
+      const dots = dot('#fca5a5') + dot('#fcd34d') + dot('#86efac');
+      const pageAddr = d.delivery.hosted.slug ? `${location.host}/f/${d.delivery.hosted.slug}` : (S.publicKey ? `${location.host}/s/${S.publicKey}` : `${location.host}/f/your-form`);
+      $('fb-preview-bar').innerHTML = dots + `<span class="flex-1 min-w-0 truncate text-[11px] text-gray-500 bg-white border border-gray-200 rounded px-2 py-0.5">${esc(hosted ? pageAddr : 'www.your-website.com')}</span>`;
+      // On a website the form is one block among others — grey stand-ins for their own page show that.
+      const lines = (n) => Array.from({ length: n }, (_, i) => `<div class="h-2 rounded bg-gray-100 mb-2" style="width:${[92, 78, 85, 60][i % 4]}%"></div>`).join('');
+      $('fb-preview-above').innerHTML = hosted ? '' : `<div class="h-4 w-1/3 rounded bg-gray-200 mb-3"></div>${lines(3)}<div class="mb-4"></div>`;
+      $('fb-preview-below').innerHTML = hosted ? '' : `<div class="mt-4">${lines(2)}</div>`;
+      $('fb-preview-note').textContent = hosted
+        ? 'Your sign-up page — the page we host for this form, with its own address. Submitting here sends nothing.'
+        : 'On your website — the form appears wherever you paste the code, in your page\'s own font if you choose "My website\'s font". Submitting here sends nothing.';
       window.BmsForm.render({
         content: d.content, fields: d.fields, consent: d.consent,
         style: { ...d.style, logoUrl: null }, senderName: 'Your business',

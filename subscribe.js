@@ -154,7 +154,11 @@
     var fields = (def.fields && def.fields.length) ? def.fields : [{ id: 'f_email', type: 'email', label: 'Email', required: true, options: [] }];
     var consent = def.consent || {};
     var inline = st.layout === 'inline' && fields.length === 1;
-    var showHeader = surface !== 'embed' || content.headline || content.intro;
+    // What the form LOOKS like it is on. A preview is drawn as whichever surface the builder is
+    // previewing — otherwise "On your website" and "Sign-up page" previewed identically, because every
+    // decision below asked "is this the embed?" and a preview never was.
+    var face = surface === 'preview' ? (opts.previewAs === 'embed' ? 'embed' : 'hosted') : surface;
+    var showHeader = face !== 'embed' || content.headline || content.intro;
     // A preview (the form builder, on our own page) may pass a library thumbnail for a logo that has
     // not been saved yet. Never honoured outside preview mode — a live form only draws our own path.
     var logo = opts.preview && opts.previewLogoUrl ? String(opts.previewLogoUrl) : safeLogo(st.logoUrl, opts.apiBase);
@@ -164,12 +168,12 @@
     for (var i = 0; i < fields.length; i++) qs += fieldHtml(fields[i]);
 
     shadow.innerHTML =
-      '<style>' + styleSheet(st, surface === 'preview' ? (opts.previewAs || 'hosted') : surface) + '</style>' +
+      '<style>' + styleSheet(st, face) + '</style>' +
       '<div class="bms-w">' +
         (showHeader ? (
           (logo ? '<img class="bms-logo" src="' + esc(logo) + '" alt="' + esc(def.senderName || '') + '">' : '') +
           (content.headline ? '<p class="bms-h">' + esc(content.headline) + '</p>' : '') +
-          (surface !== 'embed' && def.senderName ? '<p class="bms-who">from ' + esc(def.senderName) + '</p>' : '') +
+          (face !== 'embed' && def.senderName ? '<p class="bms-who">from ' + esc(def.senderName) + '</p>' : '') +
           (content.intro ? '<p class="bms-intro">' + esc(content.intro) + '</p>' : '')
         ) : '') +
         '<form class="bms-f' + (inline ? ' bms-inline' : '') + '" novalidate>' +
@@ -182,7 +186,7 @@
         '</form>' +
         (consent.requireCheckbox ? '' : '<p class="bms-c">' + esc(consent.text || '') + '</p>') +
         '<p class="bms-m" role="status" aria-live="polite"></p>' +
-        (surface === 'hosted' ? '<p class="bms-foot">Powered by Be More Swan</p>' : '') +
+        (face === 'hosted' ? '<p class="bms-foot">Powered by Be More Swan</p>' : '') +
       '</div>';
 
     var shownAt = Date.now();
