@@ -19,7 +19,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 
 const SOURCE_EVENTS = ['drafts_a_post', 'publishes_a_post', 'completes_a_task'];
 
-/** ai_assistants.configuration.type for the Newsletter Assistant — see db/seed-catalog.ts. */
+/** ai_assistants.configuration.type for the Email Marketing Assistant — see db/seed-catalog.ts. */
 const NEWSLETTER_ROLE = 'newsletter_editor';
 
 export default withLambda(async (event) => {
@@ -110,7 +110,7 @@ export default withLambda(async (event) => {
             return { statusCode: 404, body: JSON.stringify({ error: 'Assistant not found.' }) };
         }
 
-        // ⚠️ A Newsletter Assistant drafts an issue ABOUT the post and links to it, so the post has
+        // ⚠️ An Email Marketing Assistant drafts an issue ABOUT the post and links to it, so the post has
         // to be live. Refused at creation rather than skipped at runtime: a link the hub lists as
         // active and that can never do anything is worse than an error the user reads while they
         // are still looking at the form.
@@ -120,7 +120,7 @@ export default withLambda(async (event) => {
                 statusCode: 400,
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    error: 'A Newsletter Assistant writes an issue about a post and links to it, so it can only pick one up once it is published. Choose "publishes a post".',
+                    error: 'An Email Marketing Assistant writes an email about a post and links to it, so it can only pick one up once it is published. Choose "publishes a post".',
                 }),
             };
         }

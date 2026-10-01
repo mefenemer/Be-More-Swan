@@ -158,7 +158,7 @@ check('the two buttons are mutually exclusive', () => {
         + 'lone "Connections" heading restating the list below it');
 });
 
-check('the Newsletter Assistant keeps the hero button', () => {
+check('the Email Marketing Assistant keeps the hero button', () => {
     // Its audience block is "Your list" — subscriber counts for a mailing list that lives in this
     // product. There is nothing connected in it to manage, so the button must not move there.
     assert.match(PLACEMENT, /audienceSource !== 'newsletter_list'/);

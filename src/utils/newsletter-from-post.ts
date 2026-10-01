@@ -43,7 +43,7 @@ export interface DraftIssueFromPostArgs {
     organisationId: number;
     /** Whose AI usage this run is billed to — the person whose publish triggered the hand-off. */
     userId: number;
-    /** The Newsletter Assistant the link hands off to. Named by the link, never guessed. */
+    /** The Email Marketing Assistant the link hands off to. Named by the link, never guessed. */
     assistantId: number;
     sourcePostId?: number | null;
     /** Only a blog post has a body we can read; a social post gives us its caption and no more. */
@@ -123,7 +123,7 @@ export async function draftIssueFromPost(
     const excerpt = post ? excerptForPrompt(post.bodyMarkdown || '') : '';
     const instruction = String(args.targetAction || '').trim().slice(0, 300);
     const notes = [
-        post ? 'This issue tells subscribers about a post that has just gone up on the blog.' : '',
+        post ? 'This email tells subscribers about a post that has just gone up on the blog.' : '',
         instruction ? `What the business asked for when they set this up: ${instruction}` : '',
         post?.metaDescription ? `The post's summary: ${post.metaDescription}` : '',
         excerpt ? `The post itself:\n${excerpt}` : (caption ? `What was posted: ${caption}` : ''),

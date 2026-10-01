@@ -1,4 +1,4 @@
-// newsletter.js — the Newsletter Studio view controller (newsletter.html).
+// newsletter.js — the Email Studio view controller (newsletter.html).
 // IIFE like every other view controller: the router re-runs inline scripts on each view swap.
 //
 // TWO editors, one at a time, and plain Markdown is still the default. An email is not a web page:
@@ -26,12 +26,15 @@
     issues: [], segments: [], customFields: [], sendTimezone: '', current: null, dirty: false,
     // Config the server owns — purposes and templates are not duplicated in the browser.
     purposes: [], templates: [],
+    // The email campaign builder's starting shapes (src/config/email-campaign-cadences.ts), and the
+    // campaign being built: its plan, then the emails the assistant wrote for it.
+    campaignCadences: [], campaign: null,
     // The organisation's colours, resolved server-side from its brand kit (src/utils/brand-theme.ts)
     // and returned by the list GET. Null until the first load; the designer falls back to its own
     // default, which is what an org that has never set a brand gets anyway.
     brandTheme: null,
     // Who this Studio speaks for. ⚠️ Resolved once; '' records "we looked and there is no
-    // Newsletter Assistant", so an org without one does not refetch on every issue.
+    // Email Marketing Assistant", so an org without one does not refetch on every issue.
     assistant: { id: null, name: null },
     // Where the user came in from (window._previousView, set by the workspace router) and the
     // breadcrumb trail built from it — the Studio is a full view with no close button of its own.
@@ -119,7 +122,7 @@
   }
 
   /**
-   * The way back to wherever the user opened the Studio from. Usually the Newsletter Assistant's
+   * The way back to wherever the user opened the Studio from. Usually the Email Marketing Assistant's
    * page — and back to the TAB they were on, not the page's default — but the calendar and the
    * notifications open it too, and those should return there. A direct visit (?view=newsletter, a
    * reload) has no origin, so it falls back to the assistant this Studio speaks for.
@@ -129,7 +132,7 @@
     if (!nav) return;
     const o = state.origin;
     const a = state.assistant;
-    const named = (id) => (a.id && Number(a.id) === Number(id) && a.name) ? a.name : 'Newsletter Assistant';
+    const named = (id) => (a.id && Number(a.id) === Number(id) && a.name) ? a.name : 'Email Marketing Assistant';
     let trail;
     if (o && o.key === 'assistant-detail' && o.assistantId) {
       trail = [{ label: 'Assistants', view: 'assistants' },
@@ -146,7 +149,7 @@
     const sep = '<svg class="w-3.5 h-3.5 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>';
     nav.innerHTML = trail.map((c, i) => `<button type="button" data-nl-crumb="${i}"
         class="font-semibold text-gray-500 hover:text-gray-900 hover:underline cursor-pointer">${esc(c.label)}</button>${sep}`).join('')
-      + '<span class="font-semibold text-gray-900" aria-current="page">Newsletter</span>';
+      + '<span class="font-semibold text-gray-900" aria-current="page">Email Studio</span>';
   }
 
   /** Leave the Studio by a breadcrumb. Same rule as switching issues: a pending edit lands first,
@@ -195,12 +198,13 @@
 
   async function loadIssues(selectId) {
     try {
-      const { issues, segments, customFields, purposes, templates, brandTheme } = await api(ISSUES_API);
+      const { issues, segments, customFields, purposes, templates, brandTheme, campaignCadences } = await api(ISSUES_API);
       state.issues = issues || [];
       state.segments = segments || [];
       state.customFields = customFields || [];
       state.purposes = purposes || [];
       state.templates = templates || [];
+      state.campaignCadences = campaignCadences || [];
       // ⚠️ The organisation's colours, resolved by the server from its brand kit — the same answer
       // the server uses when IT mints a design. The browser must not compute its own: it used to
       // fall back to the designer's hardcoded default green, so a layout started here and a layout
@@ -228,12 +232,13 @@
    */
   async function refreshList() {
     try {
-      const { issues, segments, customFields, purposes, templates, brandTheme } = await api(ISSUES_API);
+      const { issues, segments, customFields, purposes, templates, brandTheme, campaignCadences } = await api(ISSUES_API);
       state.issues = issues || [];
       state.segments = segments || [];
       state.customFields = customFields || [];
       if (purposes) state.purposes = purposes;
       if (templates) state.templates = templates;
+      if (campaignCadences) state.campaignCadences = campaignCadences;
       if (brandTheme) state.brandTheme = brandTheme;
       renderList();
     } catch { /* the list is context, not the work — a failure here must not disturb the editor */ }
@@ -256,7 +261,7 @@
     if (!list) return;
     const live = state.issues.filter((i) => i.status !== 'archived');
     if (!live.length) {
-      list.innerHTML = `<li class="p-6 text-center text-sm text-gray-500">No issues yet. Start one and ${esc(assistantName())} can draft it for you.</li>`;
+      list.innerHTML = `<li class="p-6 text-center text-sm text-gray-500">No emails yet. Start one and ${esc(assistantName())} can draft it for you.</li>`;
       return;
     }
     list.innerHTML = live.map((i) => {
@@ -265,7 +270,7 @@
       return `<li>
         <button type="button" data-issue="${i.id}" class="w-full text-left px-4 py-3 hover:bg-gray-50 cursor-pointer ${active ? 'bg-emerald-50' : ''}">
           <div class="flex items-start justify-between gap-2">
-            <p class="text-sm font-bold text-gray-900 truncate">${esc(i.subject || 'Untitled issue')}</p>
+            <p class="text-sm font-bold text-gray-900 truncate">${esc(i.subject || 'Untitled email')}</p>
             <span class="shrink-0 inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border ${st.cls}">${esc(st.label)}</span>
           </div>
           ${purposeChip(i.purpose)}
@@ -384,7 +389,7 @@
       if (locked && state.designer) { state.designer.destroy(); state.designer = null; hide($('nl-design-host')); show($('nl-body'), 'block'); $('nl-body').disabled = true; }
       // The same line carries both answers to "is my work safe?" — it cannot be edited, or it is
       // saved. Blank while nothing has been typed yet: "Saved" on an untouched issue is noise.
-      if (locked) setSavedNote('This issue has been sent and can no longer be edited.');
+      if (locked) setSavedNote('This email has been sent and can no longer be edited.');
       else setSavedNote('');
 
       renderList();
@@ -591,7 +596,7 @@
     if (!el) return;
     if (issue.status !== 'failed' || !issue.failureReason) { hide(el); return; }
     // The reason verbatim: it is written for the tenant and usually names the fix.
-    el.innerHTML = `<p class="font-bold mb-1">This issue did not send</p><p>${esc(issue.failureReason)}</p>`;
+    el.innerHTML = `<p class="font-bold mb-1">This email did not send</p><p>${esc(issue.failureReason)}</p>`;
     show(el, 'block');
   }
 
@@ -637,8 +642,8 @@
       const subject = $('nl-resend-subject').value.trim();
       if (!subject) { window.showToast('Give the resend a subject line.'); return; }
       const ok = await window.confirmModal(
-        `This sends to ${n.toLocaleString()} ${n === 1 ? 'person' : 'people'} who did not open the original. It goes out straight away, and an issue can only be resent once.`,
-        { title: 'Resend this issue?', confirmLabel: 'Resend now', confirmColor: '#059669' });
+        `This sends to ${n.toLocaleString()} ${n === 1 ? 'person' : 'people'} who did not open the original. It goes out straight away, and an email can only be resent once.`,
+        { title: 'Resend this email?', confirmLabel: 'Resend now', confirmColor: '#059669' });
       if (!ok) return;
       const btn = $('nl-resend-go');
       btn.disabled = true;
@@ -936,7 +941,7 @@
       // The same distinction the numbers above make: no clicks recorded and no clicks MEASURABLE
       // are different facts, and only one of them is about the reader.
       el.innerHTML = '<p class="font-bold mb-1">Which link worked</p>'
-        + '<p class="text-gray-500">This issue was sent from your connected mailbox, which does not rewrite links — so clicks could not be measured.</p>';
+        + '<p class="text-gray-500">This email was sent from your connected mailbox, which does not rewrite links — so clicks could not be measured.</p>';
       show(el, 'block');
       return;
     }
@@ -948,8 +953,8 @@
       const clicked = Number(issue.clickedCount || 0);
       el.innerHTML = '<p class="font-bold mb-1">Which link worked</p>'
         + (clicked
-          ? `<p class="text-gray-500">${clicked.toLocaleString()} ${clicked === 1 ? 'person' : 'people'} clicked something in this issue, but it was sent before we started recording which link. Issues from now on will show it.</p>`
-          : '<p class="text-gray-500">Nobody has clicked a link in this issue.</p>');
+          ? `<p class="text-gray-500">${clicked.toLocaleString()} ${clicked === 1 ? 'person' : 'people'} clicked something in this email, but it was sent before we started recording which link. Emails from now on will show it.</p>`
+          : '<p class="text-gray-500">Nobody has clicked a link in this email.</p>');
       show(el, 'block');
       return;
     }
@@ -1520,7 +1525,7 @@
 
   async function createIssue() {
     const subject = ($('nl-new-subject').value || '').trim();
-    if (!subject) { window.showToast('Give this issue a working subject line — it can be rewritten later.'); return; }
+    if (!subject) { window.showToast('Give this email a working subject line — it can be rewritten later.'); return; }
     const go = $('nl-new-go');
     if (go) { go.disabled = true; go.textContent = 'Creating…'; }
     try {
@@ -1566,7 +1571,7 @@
       // are all still empty has nothing to show, and the modal should say so.
       const doc = (html && html.trim())
         ? html
-        : `<!DOCTYPE html><html><body style="margin:0;padding:32px;font:15px/1.6 -apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#6b7280;background:#f6f7f9;text-align:center;">There is nothing to preview yet \u2014 this issue has no words in it.</body></html>`;
+        : `<!DOCTYPE html><html><body style="margin:0;padding:32px;font:15px/1.6 -apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#6b7280;background:#f6f7f9;text-align:center;">There is nothing to preview yet \u2014 this email has no words in it.</body></html>`;
       frame.src = `data:text/html;charset=utf-8,${encodeURIComponent(doc)}`;
     }
     show($('nl-preview-modal'), 'flex');
@@ -1590,7 +1595,7 @@
     const audience = $('nl-audience').textContent || '';
     const ok = await window.confirmModal(
       `${audience ? esc(audience) + ' ' : ''}${when ? 'It will send at the time you set.' : 'It will be ready to send.'} Approving records that you have read it.`,
-      { title: when ? 'Approve and schedule?' : 'Approve this issue?', confirmLabel: 'Approve', confirmColor: '#059669' },
+      { title: when ? 'Approve and schedule?' : 'Approve this email?', confirmLabel: 'Approve', confirmColor: '#059669' },
     );
     if (!ok) return;
     try {
@@ -1613,7 +1618,7 @@
     const audience = $('nl-audience').textContent || '';
     const ok = await window.confirmModal(
       `${audience ? esc(audience) + ' ' : ''}This cannot be undone once it starts — emails that have gone out cannot be recalled.`,
-      { title: 'Send this issue now?', confirmLabel: 'Send now', confirmColor: '#059669' },
+      { title: 'Send this email now?', confirmLabel: 'Send now', confirmColor: '#059669' },
     );
     if (!ok) return;
     try {
@@ -1697,7 +1702,7 @@
       body.innerHTML = `
         <div class="rounded-xl border border-gray-200 p-4 mb-4">
           <p class="text-sm font-bold text-gray-900 mb-1">Right now: your connected mailbox</p>
-          <p class="text-sm text-gray-600">Issues send from the mailbox you connected, and are capped at a small list — a personal mailbox has daily limits and gives no delivery feedback.</p>
+          <p class="text-sm text-gray-600">Emails send from the mailbox you connected, and are capped at a small list — a personal mailbox has daily limits and gives no delivery feedback.</p>
         </div>
         <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Send from your own domain</label>
         <input type="text" id="nl-domain-input" placeholder="mail.yourbusiness.com"
@@ -1819,7 +1824,7 @@
     $('nl-domain-remove')?.addEventListener('click', async () => {
       domainSaver?.cancel();
       const ok = await window.confirmModal(
-        'Remove this sending domain? New issues will fall back to your connected mailbox, which is capped at a small list.',
+        'Remove this sending domain? New emails will fall back to your connected mailbox, which is capped at a small list.',
         { title: 'Remove the domain?', confirmLabel: 'Remove' });
       if (!ok) return;
       try {
@@ -1952,7 +1957,7 @@
       body.innerHTML = `
         <div class="text-center py-8">
           <p class="text-sm text-gray-600 mb-1">You do not have a welcome sequence yet.</p>
-          <p class="text-xs text-gray-400 mb-4">Right now a new subscriber hears nothing until your next issue.</p>
+          <p class="text-xs text-gray-400 mb-4">Right now a new subscriber hears nothing until your next email.</p>
           <button type="button" id="nl-seq-create"
             class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Create a welcome sequence</button>
         </div>`;
@@ -2029,7 +2034,7 @@
           <p id="nl-seq-wordcount" class="text-[11px] text-gray-400 shrink-0"></p>
         </div>
 
-        <!-- ⚠️ The same findings an issue gets, on the email nobody will be watching when it sends. -->
+        <!-- ⚠️ The same findings an email gets, on the email nobody will be watching when it sends. -->
         <div id="nl-seq-deliver" class="hidden mt-3 px-4 py-3 rounded-xl border text-sm" style="display:none"></div>
         <div id="nl-seq-revision" class="hidden mt-3 px-4 py-3 rounded-xl bg-sky-50 border border-sky-200 text-sm text-sky-900" style="display:none"></div>
 
@@ -2412,7 +2417,251 @@
 
   // ── Wiring ─────────────────────────────────────────────────────────────────
 
+
+  // ── New email campaign ─────────────────────────────────────────────────────
+  //
+  // The chat card's job, for people who do not use the chat: plan a series, have the assistant
+  // write every email, read them, save. It saves through the SAME two endpoints the card does —
+  // the welcome sequence for "everyone who subscribes" (the one trigger that can start a series by
+  // itself), one draft email each otherwise — so there is one save behaviour to reason about.
+  //
+  // ⚠️ Handlers are bound ONCE in wire() with delegation on the containers. The rows and tiles are
+  // re-rendered on every change, and a handler bound from a render path is how a button ends up
+  // rendering and doing nothing.
+
+  const MAX_CAMPAIGN_STEPS = 7;
+
+  function openCampaignModal() {
+    const first = state.campaignCadences[0];
+    if (!first) { window.showToast('Could not load the campaign shapes — refresh the page and try again.'); return; }
+    state.campaign = { stage: 'plan', type: '', who: 'subscribed', steps: [], draft: null };
+    $('nl-cmp-facts').value = '';
+    $('nl-cmp-avoid').value = '';
+    $('nl-cmp-audience').value = '';
+    pickCampaignKind(first.type);
+    showCampaignPane('plan');
+    show($('nl-campaign-modal'), 'flex');
+  }
+
+  function pickCampaignKind(type) {
+    const c = state.campaignCadences.find((x) => x.type === type);
+    if (!c) return;
+    state.campaign.type = type;
+    state.campaign.steps = c.steps.map((st) => ({ day: st.day, role: st.role }));
+    state.campaign.who = c.suggestsSubscribed ? 'subscribed' : 'custom';
+    $('nl-cmp-name').value = c.type === 'custom' ? '' : c.label.replace(/ \/.*$/, '');
+    $('nl-cmp-goal').value = c.goal || '';
+    renderCampaignPlan();
+  }
+
+  function renderCampaignPlan() {
+    const cmp = state.campaign;
+    const tile = (active, title, sub, attr) => `
+      <button type="button" ${attr}
+        class="text-left px-3 py-2.5 rounded-xl border cursor-pointer ${active ? 'border-emerald-500 bg-emerald-50' : 'border-gray-200 hover:bg-gray-50'}">
+        <p class="text-sm font-bold text-gray-900">${esc(title)}</p>
+        <p class="text-xs text-gray-500 mt-0.5">${esc(sub)}</p>
+      </button>`;
+    $('nl-cmp-kinds').innerHTML = state.campaignCadences
+      .map((c) => tile(cmp.type === c.type, c.label, c.description, `data-cmp-kind="${esc(c.type)}"`)).join('');
+    $('nl-cmp-who').innerHTML =
+      tile(cmp.who === 'subscribed', 'Everyone who subscribes',
+        'Starts by itself the moment someone joins your list. Saved as your welcome sequence, switched off until you turn it on.', 'data-cmp-who="subscribed"')
+      + tile(cmp.who === 'custom', 'A group I choose',
+        'Does not start by itself — each email is saved as a draft, and you send it to the right people on its day.', 'data-cmp-who="custom"');
+    const aud = $('nl-cmp-audience');
+    if (cmp.who === 'subscribed') hide(aud); else show(aud, 'block');
+
+    $('nl-cmp-steps').innerHTML = cmp.steps.map((st, i) => `
+      <div class="flex items-center gap-2">
+        <span class="shrink-0 text-xs font-bold text-gray-500 w-14">Email ${i + 1}</span>
+        <label class="shrink-0 flex items-center gap-1 text-xs font-bold text-gray-500">Day
+          <input type="number" min="1" max="365" value="${esc(String(st.day))}" data-cmp-day="${i}"
+            class="w-16 px-2 py-1.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
+        </label>
+        <input type="text" maxlength="120" value="${esc(st.role)}" data-cmp-role="${i}" placeholder="What this email does"
+          class="flex-1 min-w-0 px-3 py-1.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
+        <button type="button" data-cmp-remove="${i}" aria-label="Remove email ${i + 1}" ${cmp.steps.length <= 1 ? 'disabled' : ''}
+          class="shrink-0 p-1.5 text-gray-400 hover:text-red-600 rounded-lg hover:bg-gray-100 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>`).join('');
+    const add = $('nl-cmp-add');
+    if (cmp.steps.length >= MAX_CAMPAIGN_STEPS) hide(add); else show(add, 'inline');
+    applyAssistantNaming();
+  }
+
+  function showCampaignPane(which) {
+    if (which === 'plan') { show($('nl-cmp-plan'), 'block'); hide($('nl-cmp-review')); }
+    else { hide($('nl-cmp-plan')); show($('nl-cmp-review'), 'block'); }
+    $('nl-cmp-title').textContent = which === 'plan' ? 'New email campaign' : 'Read your emails';
+  }
+
+  async function writeCampaign() {
+    const cmp = state.campaign;
+    // Days are taken as typed but sorted, so "Email 3" is always the third to arrive — the server's
+    // normaliser holds the same rule, and the plan on screen should not disagree with it.
+    const steps = cmp.steps
+      .map((st) => ({ day: Math.max(1, Math.round(Number(st.day) || 1)), role: String(st.role || '').trim() }))
+      .sort((a, b) => a.day - b.day);
+    if (steps.some((st) => !st.role)) { window.showToast('Say what each email is for — it is what the assistant writes to.'); return; }
+    cmp.steps = steps;
+    const btn = $('nl-cmp-write');
+    btn.disabled = true;
+    btn.textContent = `Writing ${steps.length} emails…`;
+    try {
+      const { campaign } = await api(ISSUES_API, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'draftCampaign',
+          assistantId: state.assistant.id,
+          name: $('nl-cmp-name').value,
+          campaignType: cmp.type,
+          goal: $('nl-cmp-goal').value,
+          audience: cmp.who === 'subscribed' ? 'Everyone who subscribes' : $('nl-cmp-audience').value,
+          triggerEvent: cmp.who,
+          facts: $('nl-cmp-facts').value,
+          avoid: $('nl-cmp-avoid').value,
+          steps,
+        }),
+      });
+      cmp.draft = campaign;
+      renderCampaignReview();
+      showCampaignPane('review');
+    } catch (err) {
+      window.showToast(err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Write the emails';
+    }
+  }
+
+  function renderCampaignReview() {
+    const d = state.campaign.draft;
+    const automatic = d.trigger && d.trigger.startsAutomatically;
+    const n = d.newsletters.length;
+    $('nl-cmp-review-note').textContent = automatic
+      ? `${n} emails over ${d.newsletters[n - 1].sendDay} days. Edit anything, then save — it becomes your welcome sequence, switched off until you turn it on under Automatic emails. Nobody is emailed by saving.`
+      : `${n} emails over ${d.newsletters[n - 1].sendDay} days. Edit anything, then save — each email becomes a draft you send to the right people on its day. Nothing is sent by saving.`;
+    const warn = $('nl-cmp-warnings');
+    if (d.warnings && d.warnings.length) {
+      warn.innerHTML = `<p class="font-bold mb-1">We tidied this before showing it</p><ul class="list-disc pl-5">${d.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>`;
+      show(warn, 'block');
+    } else hide(warn);
+    $('nl-cmp-emails').innerHTML = d.newsletters.map((e, i) => `
+      <div class="rounded-xl border border-gray-200 p-4">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-[11px] font-black px-2 py-0.5 rounded bg-emerald-600 text-white">Day ${esc(String(e.sendDay))}</span>
+          <span class="text-xs font-bold text-gray-500 uppercase tracking-wide">Email ${i + 1}${e.role ? ` · ${esc(e.role)}` : ''}</span>
+        </div>
+        <input type="text" maxlength="120" value="${esc(e.subject)}" data-cmp-subject="${i}" aria-label="Email ${i + 1} subject"
+          class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm font-bold mb-2">
+        <input type="text" maxlength="160" value="${esc(e.preheader)}" data-cmp-preheader="${i}" aria-label="Email ${i + 1} preview line" placeholder="Preview line"
+          class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-xs mb-2">
+        <textarea rows="8" data-cmp-body="${i}" aria-label="Email ${i + 1} body"
+          class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm font-mono">${esc(e.bodyMarkdown)}</textarea>
+        ${e.callToAction ? `<p class="text-xs text-gray-600 mt-1">Asks them to: <span class="font-bold">${esc(e.callToAction.label)}</span>${e.callToAction.url ? '' : ' <span class="text-amber-700 font-bold">· needs a link — add it to the copy</span>'}</p>` : ''}
+      </div>`).join('');
+    $('nl-cmp-save').textContent = automatic ? 'Save as welcome sequence' : `Save as ${n} draft ${n === 1 ? 'email' : 'emails'}`;
+  }
+
+  async function saveCampaign(replace = false) {
+    const d = state.campaign.draft;
+    const emails = d.newsletters.map((e) => ({
+      subject: e.subject, preheader: e.preheader, bodyMarkdown: e.bodyMarkdown, delayDays: e.delayDaysAfterPrevious,
+    }));
+    if (emails.some((e) => !e.subject.trim() || !e.bodyMarkdown.trim())) {
+      window.showToast('Every email needs a subject and some copy before it can be saved.');
+      return;
+    }
+    const automatic = d.trigger && d.trigger.startsAutomatically;
+    const btn = $('nl-cmp-save');
+    btn.disabled = true;
+    try {
+      // Raw fetch, not api(): a 409 here is a QUESTION ("replace the welcome sequence you have?"),
+      // and api() would flatten its code into an error string.
+      const res = await fetch(automatic ? SEQ_API : ISSUES_API, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify(automatic
+          ? { action: 'importCampaign', assistantId: state.assistant.id, name: d.name, replace, steps: emails }
+          : { action: 'createCampaign', assistantId: state.assistant.id, emails }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 409 && data.code === 'SEQUENCE_HAS_STEPS' && !replace) {
+        const ok = await window.confirmModal(
+          `Your welcome sequence already has ${data.stepCount} ${data.stepCount === 1 ? 'email' : 'emails'}. Replace ${data.stepCount === 1 ? 'it' : 'them'} with these ${emails.length}? The current ${data.stepCount === 1 ? 'one is' : 'ones are'} deleted. It stays switched off either way.`,
+          { title: 'Replace your welcome sequence?', confirmLabel: 'Replace', confirmColor: '#dc2626' });
+        btn.disabled = false;
+        if (ok) await saveCampaign(true);
+        return;
+      }
+      if (!res.ok) throw new Error(data.error || `Could not save (HTTP ${res.status}).`);
+      hide($('nl-campaign-modal'));
+      state.campaign = null;
+      if (automatic) {
+        window.showToast(data.deduped ? 'Already saved — it is your welcome sequence.' : 'Saved as your welcome sequence, switched off. Turn it on under Automatic emails when you are ready.');
+      } else {
+        window.showToast(data.deduped ? 'Already saved — these are in your list.' : `Saved ${data.created} draft ${data.created === 1 ? 'email' : 'emails'}. Send each one on its day.`);
+        await refreshList();
+      }
+    } catch (err) {
+      window.showToast(err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // Edits in the review pane go straight into the draft, so Save sends what is on screen.
+  function onCampaignReviewInput(e) {
+    const d = state.campaign && state.campaign.draft;
+    if (!d) return;
+    const t = e.target;
+    const at = (attr) => (t.hasAttribute(attr) ? d.newsletters[Number(t.getAttribute(attr))] : null);
+    let row;
+    if ((row = at('data-cmp-subject'))) row.subject = t.value;
+    else if ((row = at('data-cmp-preheader'))) row.preheader = t.value;
+    else if ((row = at('data-cmp-body'))) row.bodyMarkdown = t.value;
+  }
+
   function wire() {
+    // New email campaign — bound once per view mount, delegated, never from a render path.
+    $('nl-campaign')?.addEventListener('click', openCampaignModal);
+    document.querySelectorAll('[data-nl-campaign-close]').forEach((el) => el.addEventListener('click', () => { hide($('nl-campaign-modal')); state.campaign = null; }));
+    $('nl-cmp-kinds')?.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-cmp-kind]');
+      if (b) pickCampaignKind(b.getAttribute('data-cmp-kind'));
+    });
+    $('nl-cmp-who')?.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-cmp-who]');
+      if (b && state.campaign) { state.campaign.who = b.getAttribute('data-cmp-who'); renderCampaignPlan(); }
+    });
+    $('nl-cmp-steps')?.addEventListener('input', (e) => {
+      const cmp = state.campaign;
+      if (!cmp) return;
+      const t = e.target;
+      if (t.hasAttribute('data-cmp-day')) cmp.steps[Number(t.getAttribute('data-cmp-day'))].day = t.value;
+      if (t.hasAttribute('data-cmp-role')) cmp.steps[Number(t.getAttribute('data-cmp-role'))].role = t.value;
+    });
+    $('nl-cmp-steps')?.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-cmp-remove]');
+      if (!b || !state.campaign || state.campaign.steps.length <= 1) return;
+      state.campaign.steps.splice(Number(b.getAttribute('data-cmp-remove')), 1);
+      renderCampaignPlan();
+    });
+    $('nl-cmp-add')?.addEventListener('click', () => {
+      const cmp = state.campaign;
+      if (!cmp || cmp.steps.length >= MAX_CAMPAIGN_STEPS) return;
+      const last = cmp.steps[cmp.steps.length - 1];
+      cmp.steps.push({ day: (Number(last && last.day) || 0) + 3, role: '' });
+      renderCampaignPlan();
+      const inputs = document.querySelectorAll('[data-cmp-role]');
+      if (inputs.length) inputs[inputs.length - 1].focus();
+    });
+    $('nl-cmp-write')?.addEventListener('click', writeCampaign);
+    $('nl-cmp-back')?.addEventListener('click', () => showCampaignPane('plan'));
+    $('nl-cmp-save')?.addEventListener('click', () => saveCampaign(false));
+    $('nl-cmp-emails')?.addEventListener('input', onCampaignReviewInput);
+
     $('nl-crumbs')?.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-nl-crumb]');
       const c = btn && state.crumbs[Number(btn.getAttribute('data-nl-crumb'))];

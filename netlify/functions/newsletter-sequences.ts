@@ -183,7 +183,7 @@ export default withLambda(async (event: HandlerEvent) => {
         if (existing?.isEnabled) {
             return json(409, {
                 code: 'SEQUENCE_ENABLED',
-                error: 'Your welcome sequence is switched on, so it cannot be replaced from here — people part way through it would get the new emails. Switch it off under Automatic emails in the Newsletter Studio first, then save this again.',
+                error: 'Your welcome sequence is switched on, so it cannot be replaced from here — people part way through it would get the new emails. Switch it off under Automatic emails in the Email Studio first, then save this again.',
             });
         }
         if (current.length && body.replace !== true) {

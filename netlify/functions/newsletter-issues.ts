@@ -1,10 +1,11 @@
 // netlify/functions/newsletter-issues.ts
-// Newsletter Assistant — issue CRUD, drafting, preview and approval. Org-scoped via requireTenant.
+// Email Marketing Assistant — issue CRUD, drafting, preview and approval. Org-scoped via requireTenant.
 // Mirrors netlify/functions/blog-posts.ts, which is the same shape for the long-form surface.
 //
 //   GET    ?id=<n>                 → one issue, with its resolved audience size
 //   GET                            → the org's issues (summary rows)
 //   POST   { action: 'create' }    → a new draft
+//   POST   { action: 'draftCampaign' } → write every email of an agreed campaign plan. RETURNS ONLY
 //   POST   { action: 'createCampaign' } → one draft per email of a chat-drafted campaign, all or none
 //   POST   { action: 'update' }    → subject / preheader / body / segment
 //   POST   { action: 'generate' }  → draft it with the assistant (src/utils/newsletter-generate.ts)
@@ -52,6 +53,8 @@ import { LOCAL_TIME_RE, instantToWallClock, resolveSendTimezone, wallClockToInst
 import { contentFindings, severityRank, warmupFinding } from '../../src/utils/deliverability';
 import { sampleMergeContext } from '../../src/config/newsletter-merge-vars';
 import { MAX_CAMPAIGN_EMAILS } from '../../src/utils/newsletter-campaign-chat-draft';
+import { draftCampaignEmails } from '../../src/utils/newsletter-campaign-generate';
+import { CAMPAIGN_CADENCES } from '../../src/config/email-campaign-cadences';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /**
@@ -205,13 +208,13 @@ export default withLambda(async (event: HandlerEvent) => {
 
         if (idParam) {
             const id = Number(idParam);
-            if (!Number.isFinite(id)) return json(400, { error: 'Invalid issue id.' });
+            if (!Number.isFinite(id)) return json(400, { error: 'Invalid email id.' });
             const [issue] = await db
                 .select()
                 .from(newsletterIssues)
                 .where(and(eq(newsletterIssues.id, id), eq(newsletterIssues.organisationId, orgId)))
                 .limit(1);
-            if (!issue) return json(404, { error: 'Issue not found.' });
+            if (!issue) return json(404, { error: 'Email not found.' });
 
             // The post this issue was drafted from, when it came from a blog hand-off. Org-scoped
             // again rather than trusted from the issue row: the id is a foreign key we wrote, but
@@ -332,6 +335,12 @@ export default withLambda(async (event: HandlerEvent) => {
                 defaultTemplate: p.defaultTemplate,
             })),
             templates: NEWSLETTER_TEMPLATES.map((t) => ({ key: t.key, label: t.label, description: t.description })),
+            // The campaign builder's starting shapes — the same list the chat prompt is built from
+            // (src/config/email-campaign-cadences.ts), so the two never suggest different days.
+            campaignCadences: CAMPAIGN_CADENCES.map((c) => ({
+                type: c.type, label: c.label, description: c.description, goal: c.goal,
+                suggestsSubscribed: !!c.suggestsSubscribed, steps: c.steps,
+            })),
             // ⚠️ The organisation's colours, resolved by the SAME function the server mints designs
             // with (src/utils/brand-theme.ts). The browser had its own hardcoded copy of the default
             // theme and used it for a converted sequence step and for every new button — two places
@@ -345,7 +354,7 @@ export default withLambda(async (event: HandlerEvent) => {
         const ctx = await requireTenant(event, db, { roles: WRITE_ROLES });
         if ('error' in ctx) return ctx.error;
         const id = Number(event.queryStringParameters?.id || '');
-        if (!Number.isFinite(id) || !id) return json(400, { error: 'Invalid issue id.' });
+        if (!Number.isFinite(id) || !id) return json(400, { error: 'Invalid email id.' });
 
         // Archive, never destroy — an issue that went out is the record of what subscribers were
         // sent, and `sent` issues are refused outright.
@@ -357,7 +366,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 inArray(newsletterIssues.status, ['draft', 'pending_approval', 'in_review', 'rejected', 'approved', 'scheduled']),
             ))
             .returning({ id: newsletterIssues.id });
-        if (!updated) return json(409, { error: 'Only an unsent issue can be archived.' });
+        if (!updated) return json(409, { error: 'Only an unsent email can be archived.' });
         return json(200, { archived: true });
     }
 
@@ -379,7 +388,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId))).limit(1);
             if (!a) return json(404, { error: 'Assistant not found.' });
         }
-        const subject = String(body.subject || 'Untitled issue').trim().slice(0, MAX_SUBJECT) || 'Untitled issue';
+        const subject = String(body.subject || 'Untitled email').trim().slice(0, MAX_SUBJECT) || 'Untitled email';
         const purpose = purposeOrDefault(body.purpose);
         // A template is opted INTO. An issue created with no template is a plain Markdown issue —
         // which is what the chat card creates, what the blog hand-off creates, and what the
@@ -429,6 +438,44 @@ export default withLambda(async (event: HandlerEvent) => {
             ...(bodyMarkdown ? { generationReason: NEWSLETTER_DRAFT_REASON } : {}),
         }).returning();
         return json(200, { issue, deduped: false });
+    }
+
+    // The Email Studio's campaign builder: write every email of a plan the person has agreed
+    // (src/utils/newsletter-campaign-generate.ts). RETURNS ONLY — nothing is saved until they read
+    // the emails and press Save, which goes through createCampaign below or the sequence endpoint's
+    // importCampaign, exactly like the chat card. Same rule as 'refine': the assistant proposes,
+    // the person keeps.
+    if (action === 'draftCampaign') {
+        const assistantId = Number(body.assistantId || '') || null;
+        if (assistantId) {
+            const [a] = await db.select({ id: aiAssistants.id }).from(aiAssistants)
+                .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId))).limit(1);
+            if (!a) return json(404, { error: 'Assistant not found.' });
+        }
+        const steps = (Array.isArray(body.steps) ? body.steps : [])
+            .map((st: any) => ({ day: Math.max(1, Math.min(365, Math.round(Number(st?.day) || 1))), role: String(st?.role || '').trim().slice(0, 120) }))
+            .filter((st: { role: string }) => st.role);
+        if (!steps.length) return json(400, { error: 'Give each email in the plan a job before writing them.' });
+        if (steps.length > MAX_CAMPAIGN_EMAILS) return json(400, { error: `A campaign can hold at most ${MAX_CAMPAIGN_EMAILS} emails.` });
+        try {
+            const campaign = await draftCampaignEmails(db, {
+                organisationId: orgId,
+                userId: ctx.userId,
+                assistantId,
+                name: String(body.name || '').trim().slice(0, 80) || 'Email campaign',
+                campaignType: body.campaignType,
+                goal: String(body.goal || '').trim().slice(0, 300),
+                audience: String(body.audience || '').trim().slice(0, 300),
+                triggerEvent: body.triggerEvent === 'subscribed' ? 'subscribed' : 'custom',
+                facts: String(body.facts || '').slice(0, 4000),
+                avoid: String(body.avoid || '').trim().slice(0, 500),
+                steps,
+            });
+            return json(200, { campaign });
+        } catch (err) {
+            console.error('[newsletter-issues] campaign draft failed', { orgId }, err);
+            return json(502, { error: 'The assistant could not write these emails. Try again in a moment.' });
+        }
     }
 
     // A chat-drafted campaign whose trigger cannot start by itself (src/utils/
@@ -491,13 +538,13 @@ export default withLambda(async (event: HandlerEvent) => {
     }
 
     const id = Number(body.id || '');
-    if (!Number.isFinite(id) || !id) return json(400, { error: 'Invalid issue id.' });
+    if (!Number.isFinite(id) || !id) return json(400, { error: 'Invalid email id.' });
 
     const [issue] = await db.select()
         .from(newsletterIssues)
         .where(and(eq(newsletterIssues.id, id), eq(newsletterIssues.organisationId, orgId)))
         .limit(1);
-    if (!issue) return json(404, { error: 'Issue not found.' });
+    if (!issue) return json(404, { error: 'Email not found.' });
 
     // ⚠️ One gate, checked before every mutating action. Once an issue is sending or sent, its
     // words are already in people's inboxes and editing the row would rewrite history — the
@@ -507,13 +554,13 @@ export default withLambda(async (event: HandlerEvent) => {
     // that repeats it. The lock exists so a record of what went out cannot be rewritten, and a
     // resend does not rewrite it; it is also only ever valid on an issue that has already sent.
     if (LOCKED.includes(issue.status) && action !== 'preview' && action !== 'resend') {
-        return json(409, { error: 'This issue has already been sent and can no longer be changed.' });
+        return json(409, { error: 'This email has already been sent and can no longer be changed.' });
     }
 
     if (action === 'resend') {
         // The same gate as approving: a resend is the decision to email real people again.
         if (!APPROVE_ROLES.includes(ctx.role)) {
-            return json(403, { error: 'Only an owner or admin can resend an issue.' });
+            return json(403, { error: 'Only an owner or admin can resend an email.' });
         }
 
         // ⚠️ Re-checked on the server even though the UI only draws the button when it passes. The
@@ -552,7 +599,7 @@ export default withLambda(async (event: HandlerEvent) => {
 
         // The unique index refused it: another admin, or a retried request, got there first.
         if (!resend) {
-            return json(409, { error: 'This issue has already been resent once.', reason: 'already_resent' });
+            return json(409, { error: 'This email has already been resent once.', reason: 'already_resent' });
         }
 
         return json(200, { issue: resend, recipients: eligibility.unopened });
@@ -560,7 +607,7 @@ export default withLambda(async (event: HandlerEvent) => {
 
     if (action === 'sendTime') {
         if (LOCKED.includes(issue.status)) {
-            return json(409, { error: 'This issue has already been sent.' });
+            return json(409, { error: 'This email has already been sent.' });
         }
         const mode = body.mode === 'recipient_local' ? 'recipient_local' : 'at_once';
 
@@ -578,7 +625,7 @@ export default withLambda(async (event: HandlerEvent) => {
         // where a list lives.
         if (issue.abState === 'testing') {
             return json(409, {
-                error: 'This issue is running a subject-line test. A test decides its winner from the first few hours of opens, which cannot work when the send is spread across a day — turn one of them off.',
+                error: 'This email is running a subject-line test. A test decides its winner from the first few hours of opens, which cannot work when the send is spread across a day — turn one of them off.',
             });
         }
 
@@ -619,13 +666,13 @@ export default withLambda(async (event: HandlerEvent) => {
         // Setting up the test is drafting; it commits to nothing until the issue is approved, so it
         // shares the ordinary write roles rather than the approver's.
         if (LOCKED.includes(issue.status)) {
-            return json(409, { error: 'This issue has already been sent.' });
+            return json(409, { error: 'This email has already been sent.' });
         }
         const enabled = body.enabled !== false;
         // The mirror of the refusal in 'sendTime' — whichever is set up second is the one refused.
         if (enabled && issue.sendMode === 'recipient_local') {
             return json(409, {
-                error: 'This issue is set to send at each subscriber\'s local time, which spreads it across a day. A subject-line test decides from the first few hours of opens, so the two cannot run together — turn one of them off.',
+                error: 'This email is set to send at each subscriber\'s local time, which spreads it across a day. A subject-line test decides from the first few hours of opens, so the two cannot run together — turn one of them off.',
             });
         }
         if (!enabled) {
@@ -676,13 +723,13 @@ export default withLambda(async (event: HandlerEvent) => {
         return json(200, {
             issue: updated,
             warning: domain ? null
-                : 'This issue will send from your connected mailbox, which cannot report opens — so there will be nothing to pick a winner from and everyone held back will get the first subject line. Verify a sending domain to make the test mean something.',
+                : 'This email will send from your connected mailbox, which cannot report opens — so there will be nothing to pick a winner from and everyone held back will get the first subject line. Verify a sending domain to make the test mean something.',
         });
     }
 
     if (action === 'update') {
         const patch: Record<string, unknown> = { updatedAt: new Date() };
-        if ('subject' in body) patch.subject = String(body.subject || '').trim().slice(0, MAX_SUBJECT) || 'Untitled issue';
+        if ('subject' in body) patch.subject = String(body.subject || '').trim().slice(0, MAX_SUBJECT) || 'Untitled email';
         if ('preheader' in body) patch.preheader = String(body.preheader || '').trim().slice(0, 200) || null;
         if ('purpose' in body) patch.purpose = purposeOrDefault(body.purpose);
 
@@ -780,7 +827,7 @@ export default withLambda(async (event: HandlerEvent) => {
         } catch (err) {
             if (err instanceof IssueNotFoundError) return json(404, { error: err.message });
             console.error('[newsletter-issues] draft failed', { orgId, id }, err);
-            return json(502, { error: 'The assistant could not draft this issue. Try again in a moment.' });
+            return json(502, { error: 'The assistant could not draft this email. Try again in a moment.' });
         }
     }
 
@@ -801,7 +848,7 @@ export default withLambda(async (event: HandlerEvent) => {
             if (err instanceof IssueNotFoundError) return json(404, { error: err.message });
             if (err instanceof NothingToRefineError) return json(409, { error: err.message });
             console.error('[newsletter-issues] refine failed', { orgId, id }, err);
-            return json(502, { error: 'The assistant could not revise this issue. Try again in a moment.' });
+            return json(502, { error: 'The assistant could not revise this email. Try again in a moment.' });
         }
     }
 
@@ -879,9 +926,9 @@ export default withLambda(async (event: HandlerEvent) => {
 
     if (action === 'approve') {
         if (!APPROVE_ROLES.includes(ctx.role)) {
-            return json(403, { error: 'Only an owner or admin can approve an issue for sending.' });
+            return json(403, { error: 'Only an owner or admin can approve an email for sending.' });
         }
-        if (!issue.bodyMarkdown.trim()) return json(400, { error: 'There is nothing to send yet — draft the issue first.' });
+        if (!issue.bodyMarkdown.trim()) return json(400, { error: 'There is nothing to send yet — draft the email first.' });
 
         const [org] = await db.select({ name: organisations.name }).from(organisations)
             .where(eq(organisations.id, orgId)).limit(1);
@@ -930,13 +977,13 @@ export default withLambda(async (event: HandlerEvent) => {
         // thing that sends, so there is one code path whether an issue was scheduled or sent by
         // hand, and one place where consent is re-checked.
         if (!APPROVE_ROLES.includes(ctx.role)) {
-            return json(403, { error: 'Only an owner or admin can send an issue.' });
+            return json(403, { error: 'Only an owner or admin can send an email.' });
         }
         if (!['approved', 'scheduled'].includes(issue.status)) {
-            return json(409, { error: 'Approve the issue before sending it.' });
+            return json(409, { error: 'Approve the email before sending it.' });
         }
         if (!issue.renderedPayload) {
-            return json(409, { error: 'This issue needs approving again before it can be sent.' });
+            return json(409, { error: 'This email needs approving again before it can be sent.' });
         }
         const [updated] = await db.update(newsletterIssues).set({
             status: 'scheduled',
@@ -948,7 +995,7 @@ export default withLambda(async (event: HandlerEvent) => {
             eq(newsletterIssues.organisationId, orgId),
             inArray(newsletterIssues.status, ['approved', 'scheduled']),
         )).returning();
-        if (!updated) return json(409, { error: 'This issue is no longer ready to send.' });
+        if (!updated) return json(409, { error: 'This email is no longer ready to send.' });
         // Picked up by process-newsletter-sends within the next tick (*/5).
         return json(200, { issue: updated, queued: true });
     }
@@ -961,7 +1008,7 @@ export default withLambda(async (event: HandlerEvent) => {
             updatedAt: new Date(),
         }).where(and(eq(newsletterIssues.id, id), eq(newsletterIssues.organisationId, orgId)))
             .returning({ id: newsletterIssues.id });
-        if (!updated) return json(404, { error: 'Issue not found.' });
+        if (!updated) return json(404, { error: 'Email not found.' });
         return json(200, { issue: updated, status: 'draft' });
     }
 

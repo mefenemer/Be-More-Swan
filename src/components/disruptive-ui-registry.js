@@ -1575,7 +1575,7 @@
   function renderNewsletterIssueDraftCard(ui, esc) {
     const bodyMarkdown = typeof ui.bodyMarkdown === 'string' ? ui.bodyMarkdown.trim() : '';
     if (!bodyMarkdown) return null;
-    const subject = typeof ui.subject === 'string' && ui.subject.trim() ? ui.subject.trim() : 'Untitled issue';
+    const subject = typeof ui.subject === 'string' && ui.subject.trim() ? ui.subject.trim() : 'Untitled email';
     const preheader = typeof ui.preheader === 'string' ? ui.preheader.trim() : '';
     const warnings = (Array.isArray(ui.warnings) ? ui.warnings : []).filter((w) => typeof w === 'string' && w.trim());
     const words = bodyMarkdown.split(/\s+/).filter(Boolean).length;
@@ -1592,7 +1592,7 @@
       <div class="flex items-start gap-3 mb-3">
         <div class="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-xl shrink-0">✉️</div>
         <div class="min-w-0">
-          <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase" data-nid-eyebrow>Newsletter draft · Not saved yet</p>
+          <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase" data-nid-eyebrow>Email draft · Not saved yet</p>
           <p class="font-bold text-gray-900 break-words">${esc(subject)}</p>
           ${preheader ? `<p class="text-xs text-gray-500 break-words">${esc(preheader)}</p>` : ''}
         </div>
@@ -1651,7 +1651,7 @@
 
       if (discard) {
         setBusy(true);
-        setEyebrow('Newsletter draft · Discarded');
+        setEyebrow('Email draft · Discarded');
         say('Discarded — nothing was saved. Ask me for another angle any time.');
         return;
       }
@@ -1660,7 +1660,7 @@
       // though the whole issue is on screen above the button. Saving is not — a draft harms nobody.
       if (schedule && typeof window.confirmModal === 'function') {
         const ok = await window.confirmModal(
-          `This approves the issue and sets it to send on ${sendAtLabel}, in your business's timezone. It goes to everyone subscribed unless you change that in the Studio first. Approving records that you have read it.`,
+          `This approves the email and sets it to send on ${sendAtLabel}, in your business's timezone. It goes to everyone subscribed unless you change that in the Studio first. Approving records that you have read it.`,
           { title: 'Approve and schedule?', confirmLabel: 'Approve and schedule', confirmColor: '#059669' });
         if (!ok) return;
       }
@@ -1680,28 +1680,28 @@
           // transient error must never strand it behind two dead buttons.
           respond({ ok, deduped, error, scheduled, scheduleError }) {
             if (ok) {
-              setEyebrow(scheduled ? 'Newsletter draft · Scheduled' : 'Newsletter draft · Saved');
-              // "Issues" and "Newsletter Studio" are the REAL names of those surfaces
+              setEyebrow(scheduled ? 'Email draft · Scheduled' : 'Email draft · Saved');
+              // "Issues" and "Email Studio" are the REAL names of those surfaces
               // (assistant-dashboard-registry.js newsletter_editor.hubTab.label and the detail
               // page's primary button), pinned by tests so this sentence cannot drift off them.
               if (scheduled) {
-                say(`Approved and scheduled for ${sendAtLabel}, your time. You can still change or cancel it in the Newsletter Studio until it starts sending.`);
+                say(`Approved and scheduled for ${sendAtLabel}, your time. You can still change or cancel it in the Email Studio until it starts sending.`);
                 return;
               }
               // ⚠️ A half-success is reported as one. The issue IS saved; only the scheduling was
               // refused (almost always because approving needs an owner or an admin), and a card
               // that said "could not save" would send them looking for a draft that is right there.
               if (scheduleError) {
-                say(`Saved to your Issues tab, but not scheduled: ${scheduleError}`, 'error');
+                say(`Saved to your Emails tab, but not scheduled: ${scheduleError}`, 'error');
                 return;
               }
               say(deduped
-                ? 'Already saved — it is in your Issues tab.'
-                : 'Saved to your Issues tab — open it in the Newsletter Studio to edit, choose who it goes to, and send it.');
+                ? 'Already saved — it is in your Emails tab.'
+                : 'Saved to your Emails tab — open it in the Email Studio to edit, choose who it goes to, and send it.');
               return;
             }
             setBusy(false);
-            setEyebrow('Newsletter draft · Not saved yet');
+            setEyebrow('Email draft · Not saved yet');
             say(error || 'Could not save that draft — please try again.', 'error');
           },
         },
@@ -1745,8 +1745,8 @@
     const lastDay = Number(emails[emails.length - 1].sendDay) || 1;
     const typeLabel = CAMPAIGN_TYPE_LABELS[ui.campaignType] || 'Custom';
     const n = emails.length;
-    const saveLabel = automatic ? 'Save as welcome sequence' : `Save as ${n} draft ${n === 1 ? 'issue' : 'issues'}`;
-    const eyebrow = (s) => `${isDraft ? 'Campaign draft' : 'Campaign plan'} · ${s}`;
+    const saveLabel = automatic ? 'Save as welcome sequence' : `Save as ${n} draft ${n === 1 ? 'email' : 'emails'}`;
+    const eyebrow = (s) => `${isDraft ? 'Email campaign draft' : 'Email campaign plan'} · ${s}`;
 
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-lg';
@@ -1805,8 +1805,8 @@
       <p class="mt-2 text-xs font-semibold text-indigo-700" data-ncd-status>${!isDraft
         ? 'This is the plan, not the emails yet. Tell me what to change — more or fewer emails, different days — or say “write it” and I’ll draft every one.'
         : automatic
-          ? 'Saving makes this your welcome sequence, under Automatic emails in the Newsletter Studio. It stays switched off until you turn it on there — nobody is emailed by saving.'
-          : 'Saving puts each email in your Issues tab as a draft. Nothing is sent to anyone: you send each one to the right people on the right day from the Newsletter Studio.'}</p>
+          ? 'Saving makes this your welcome sequence, under Automatic emails in the Email Studio. It stays switched off until you turn it on there — nobody is emailed by saving.'
+          : 'Saving puts each email in your Emails tab as a draft. Nothing is sent to anyone: you send each one to the right people on the right day from the Email Studio.'}</p>
     `;
     if (!isDraft) return el;
 
@@ -1842,12 +1842,12 @@
               setEyebrow('Saved');
               if (automatic) {
                 say(deduped
-                  ? 'Already saved — it is your welcome sequence, under Automatic emails in the Newsletter Studio.'
-                  : `${replaced ? 'Replaced your welcome sequence' : 'Saved as your welcome sequence'} — ${stepCount || n} emails, switched off. Turn it on under Automatic emails in the Newsletter Studio when you are ready.`);
+                  ? 'Already saved — it is your welcome sequence, under Automatic emails in the Email Studio.'
+                  : `${replaced ? 'Replaced your welcome sequence' : 'Saved as your welcome sequence'} — ${stepCount || n} emails, switched off. Turn it on under Automatic emails in the Email Studio when you are ready.`);
               } else {
                 say(deduped
-                  ? 'Already saved — these are in your Issues tab.'
-                  : `Saved ${created || n} draft ${(created || n) === 1 ? 'issue' : 'issues'} to your Issues tab. Send each one from the Newsletter Studio on its day.`);
+                  ? 'Already saved — these are in your Emails tab.'
+                  : `Saved ${created || n} draft ${(created || n) === 1 ? 'email' : 'emails'} to your Emails tab. Send each one from the Email Studio on its day.`);
               }
               return;
             }

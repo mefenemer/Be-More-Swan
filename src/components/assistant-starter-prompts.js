@@ -53,8 +53,8 @@
     ],
     newsletter_editor: [
       'Draft this month\u2019s newsletter — I\u2019ll tell you what to include.',
-      'What should I put in this week\u2019s issue?',
-      'How many people would receive an issue if I sent one today?',
+      'What should I put in this week\u2019s email?',
+      'How many people would receive an email if I sent one today?',
     ],
     blog_writer: [
       'Draft a blog post on a topic I’ll give you.',

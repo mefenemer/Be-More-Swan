@@ -1,7 +1,7 @@
 // tests/audience-consent.test.ts
 // "May this organisation email this address?" — asked once, answered for every assistant.
 //
-// The Newsletter Assistant introduces a second place that can send to a person the Lead Generator
+// The Email Marketing Assistant introduces a second place that can send to a person the Lead Generator
 // already knows about. That is where the promise on the tin ("your contacts work across every
 // assistant") either becomes real or becomes a liability: an unsubscribe recorded by one feature
 // and ignored by another is not a missing feature, it is a stranger receiving mail they explicitly

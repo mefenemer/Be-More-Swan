@@ -692,10 +692,10 @@
         </div>
 
         <div>
-          <!-- What we actually sent them. The counts on the Newsletter Assistant's Overview and the
+          <!-- What we actually sent them. The counts on the Email Marketing Assistant's Overview and the
                Results line on an issue are both AGGREGATES; this is the only per-person view of who
                got what, and "Last emailed" above is the single date it replaces. -->
-          <p class="text-xs font-bold text-gray-500 uppercase mb-2">Newsletters</p>
+          <p class="text-xs font-bold text-gray-500 uppercase mb-2">Emails</p>
           ${renderSendHistory(newsletters, newslettersUnavailable)}
         </div>
 
@@ -737,7 +737,7 @@
    * ⚠️ Engagement is reported ONLY when the issue could measure it. `engagementTracked` is false
    * for anything sent through a connected mailbox — no pixel, no rewritten links — and printing
    * "Not opened" there would be our instrumentation dressed up as the reader's behaviour. Same rule
-   * as the Results panel in the Newsletter Studio (newsletter.js renderStats).
+   * as the Results panel in the Email Studio (newsletter.js renderStats).
    */
   function renderSendHistory(rows, unavailable) {
     // ⚠️ Kept apart from "nothing sent yet", the same way the KPI cards keep an error from a zero.
@@ -745,7 +745,7 @@
     // history, and reporting that as "we have never emailed them" is a confident falsehood about
     // the one thing this section exists to answer.
     if (unavailable) {
-      return '<p class="text-sm text-gray-400">Newsletter history isn\'t available on this environment yet.</p>';
+      return '<p class="text-sm text-gray-400">Email history isn\'t available on this environment yet.</p>';
     }
     if (!Array.isArray(rows) || !rows.length) {
       return '<p class="text-sm text-gray-400">No newsletters sent to them yet.</p>';

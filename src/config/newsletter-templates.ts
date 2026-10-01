@@ -46,7 +46,7 @@ export const NEWSLETTER_TEMPLATES: NewsletterTemplate[] = [
         description: 'Words first — a greeting and a few short sections. The shape people read fastest.',
         build: () => [
             text('Hi {{contact.first_name | "there"}},'),
-            text('Open with the one thing this issue is about, in a sentence.'),
+            text('Open with the one thing this email is about, in a sentence.'),
             heading('First thing'),
             text('Replace this with what you wanted to tell them.'),
             heading('Second thing'),

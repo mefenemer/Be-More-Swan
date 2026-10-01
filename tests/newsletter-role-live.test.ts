@@ -166,7 +166,7 @@ await check('every KPI card has a field behind it', () => {
     const block = REGISTRY.slice(start, landmark(REGISTRY, 'blog_writer: {'));
     const expected: [string, string][] = [
         ['Subscribers', 'subscribers'],
-        ['Issues Sent', 'issuesSent'],
+        ['Emails Sent', 'issuesSent'],
         ['Open Rate', 'openRate'],
         ['Click Rate', 'clickRate'],
     ];
@@ -251,7 +251,14 @@ await check('the copy migration and the content seed do not disagree', () => {
     // db/seed-assistant-content.ts (what a full seed would write). If they drift, the next seed run
     // silently reverts production to the older wording — the failure mode that made a targeted
     // migration the right call in the first place.
-    const sql = read('db/newsletter-role-copy.sql');
+    // ⚠️ Production ran newsletter-role-copy.sql AND THEN db/email-marketing-rename.sql, which
+    // REPLACEs phrases in the same columns ("issue" → "email"). An applied migration cannot be
+    // edited (the runner re-runs a drifted file), so what production holds is the first file with
+    // the second's replacements applied — compare the seed against THAT.
+    let sql = read('db/newsletter-role-copy.sql');
+    for (const [, from, to] of read('db/email-marketing-rename.sql').matchAll(/REPLACE\([^,]+, '([^']+)', '([^']+)'\)/g)) {
+        sql = sql.split(from).join(to);
+    }
     const seed = withoutComments(read('db/seed-assistant-content.ts'));
     const start = landmark(seed, `roleKey: '${ROLE}'`);
     const block = seed.slice(start, landmark(seed, 'roleKey:', start + 10));

@@ -268,7 +268,7 @@ window.NotifKit = (function () {
         // card. None of them had an entry here, so they fell through to the generic action fallback
         // at the bottom, which drops the user on the DASHBOARD with no trail back to the control the
         // message just told them to open. A card that states a fix and then hides it is most of the
-        // way to not notifying anyone. (Reported in prod for a Newsletter Assistant, 20 Aug 2026.)
+        // way to not notifying anyone. (Reported in prod for an Email Marketing Assistant, 20 Aug 2026.)
         if ((notif.type === 'autopilot_schedule_unreadable' || notif.type === 'autopilot_setup_blocked'
             || notif.type === 'content_library_empty') && meta.assistantId) {
             return { label: 'Open settings', run: () => {
@@ -307,7 +307,7 @@ window.NotifKit = (function () {
         // button beats one that lands on a bare, unstyled half-page.
         if (notif.type === 'newsletter_issue_ready' && meta.newsletterIssueId
             && typeof window.loadView === 'function') {
-            return { label: 'Review issue', run: () => {
+            return { label: 'Review email', run: () => {
                 window._newsletterInitialIssueId = meta.newsletterIssueId;
                 window._newsletterAssistantId = meta.assistantId || null;
                 window.loadView('newsletter');

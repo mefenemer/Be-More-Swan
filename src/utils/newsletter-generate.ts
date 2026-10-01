@@ -1,5 +1,5 @@
 // src/utils/newsletter-generate.ts
-// Drafting core for the Newsletter Assistant — the mirror of src/utils/blog-generate.ts, and
+// Drafting core for the Email Marketing Assistant — the mirror of src/utils/blog-generate.ts, and
 // deliberately so: same blueprint guardrails, same inspo styling, same date block, same usage
 // logging, same "stamp the provenance marker in the write that stamps the body" rule.
 //
@@ -114,7 +114,7 @@ export interface GenerateIssueResult {
 
 export class IssueNotFoundError extends Error {
     constructor(id: number) {
-        super(`Newsletter issue ${id} not found in this organisation.`);
+        super(`Newsletter email ${id} not found in this organisation.`);
         this.name = 'IssueNotFoundError';
     }
 }
@@ -319,7 +319,7 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
 
     const brief = [
         issue.subject ? `Working title: ${issue.subject}` : '',
-        topic ? `This issue is about: ${topic}` : '',
+        topic ? `This email is about: ${topic}` : '',
         org?.targetAudience ? `Audience: ${org.targetAudience}` : '',
         org?.businessDescription ? `Business context: ${org.businessDescription}` : '',
         notes ? `Source material / author notes:\n${notes}` : '',
@@ -587,7 +587,7 @@ export interface RefineIssueResult {
 
 export class NothingToRefineError extends Error {
     constructor() {
-        super('There is nothing written yet — draft the issue first, then ask for changes.');
+        super('There is nothing written yet — draft the email first, then ask for changes.');
         this.name = 'NothingToRefineError';
     }
 }

@@ -433,7 +433,7 @@ export default withLambda(async (event) => {
                 // Present only for roles that file records. The card renders one strip or the
                 // other, never both — see generateAssistantCardHTML in assistants.js.
                 recordMetrics: recordMetric,
-                // Present only for the long-form roles (Blog Writer, Newsletter Assistant). Third
+                // Present only for the long-form roles (Blog Writer, Email Marketing Assistant). Third
                 // and last of the mutually exclusive strips; `kind` tells the card which nouns to
                 // use. Null for every other role.
                 longformMetrics: longformMetrics.get(a.id) ?? null,

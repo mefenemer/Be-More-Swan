@@ -1,5 +1,5 @@
 // netlify/functions/draft-newsletter-issues.ts
-// Newsletter autopilot: draft the next issue for every Newsletter Assistant on a cadence, and leave
+// Newsletter autopilot: draft the next issue for every Email Marketing Assistant on a cadence, and leave
 // it waiting for a human. Scheduled daily — see netlify.toml.
 //
 // ⚠️ IT DRAFTS. IT NEVER SENDS. Nothing here touches newsletter_sends or moves an issue past
@@ -101,7 +101,7 @@ export default withLambda(async () => {
                 organisationId: a.organisationId,
                 userId: a.userId,
                 assistantId: a.id,
-                subject: 'Untitled issue',
+                subject: 'Untitled email',
                 isAutonomous: true,
                 // Stamped BEFORE drafting so generateIssueBody's COALESCE keeps this more specific
                 // reason rather than overwriting it with the generic assistant_draft marker.
@@ -140,7 +140,7 @@ export default withLambda(async () => {
                 // Explicit so the stored column is right without db/notifications-categorization.sql
                 // having been re-applied; the DB trigger only stamps when this is NULL.
                 category: 'state_change',
-                context: { assistant: { name: a.name }, issue: { subject: ready?.subject || 'Untitled issue' } },
+                context: { assistant: { name: a.name }, issue: { subject: ready?.subject || 'Untitled email' } },
                 metadata: { assistantId: a.id, newsletterIssueId: issue.id },
             }).catch(err => console.error('[draft-newsletter-issues] notification failed', err));
 

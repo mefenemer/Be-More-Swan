@@ -212,7 +212,7 @@ check('the alerts deep-link to the setting they tell the user to change', () => 
 
 // ── Only a social assistant is judged against a SOCIAL schedule ──────────────
 // The save path ran every non-blog role through enqueueScheduleGapFill, and resolvePostingSchedule
-// substitutes a default cadence when a role has none — so a Newsletter Assistant (its own engine,
+// substitutes a default cadence when a role has none — so an Email Marketing Assistant (its own engine,
 // its own Monthly option) was told its POSTING schedule could not be read.
 check('the social gap-fill is routed to social assistants, not to everything that is not a blog', () => {
     for (const path of ['../netlify/functions/update-assistant-context.ts', '../netlify/functions/set-draft-horizon.ts']) {

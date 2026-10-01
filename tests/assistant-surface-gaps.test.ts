@@ -1,5 +1,5 @@
 // tests/assistant-surface-gaps.test.ts
-// Four defects found by reviewing the Blog Writer and Newsletter Assistant end to end, all of the
+// Four defects found by reviewing the Blog Writer and Email Marketing Assistant end to end, all of the
 // same family: a surface that LOOKS wired because the registry entry, the toggle or the button is
 // there, over a pipeline that never reaches it. None of them threw, none logged, and all four were
 // invisible from the code that declares them.
@@ -144,7 +144,7 @@ await check('subscribers count the ORG, issues count the ASSISTANT', () => {
         landmark(POLLER, "case 'newsletter_subscribers'"),
         landmark(POLLER, "case 'newsletter_issues_sent'"),
     );
-    // audience_contacts has no assistant_id — the list is shared, so two Newsletter Assistants in
+    // audience_contacts has no assistant_id — the list is shared, so two Email Marketing Assistants in
     // one workspace must report the same number.
     assert.match(subs, /audienceContacts\.organisationId, goal\.organisationId/);
     assert.doesNotMatch(subs, /audienceContacts\.assistantId/);
@@ -268,7 +268,7 @@ await check('issues render in all three views, and can be filtered like any othe
     assert.match(CALENDAR, /published: new Set\(\['published', 'sent'\]\)/);
     // The filter is only usable if the option exists.
     assert.match(CALENDAR, /_matchesPlatformFilter\('newsletter'\)/);
-    assert.match(CALENDAR_HTML, /<option value="newsletter">Newsletter<\/option>/);
+    assert.match(CALENDAR_HTML, /<option value="newsletter">Email<\/option>/);
 });
 
 await check('a sending issue is plotted on its due date, not on an unstamped sentAt', () => {

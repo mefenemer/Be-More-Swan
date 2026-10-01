@@ -101,7 +101,7 @@ const SERVICES: ServiceDef[] = [
         },
     },
     {
-        key: 'newsletter-domains', name: 'Newsletter sending domains', category: 'Email', tier: 'core',
+        key: 'newsletter-domains', name: 'Email sending domains', category: 'Email', tier: 'core',
         purpose: 'Registers and verifies each tenant\'s own sending domain, so newsletters send from their address rather than ours. '
             + 'Needs a FULL-ACCESS Resend key — the least-privilege sending key is rejected on /domains.',
         consoleUrl: 'https://resend.com/api-keys', envVars: ['RESEND_DOMAINS_API_KEY'],
@@ -128,7 +128,7 @@ const SERVICES: ServiceDef[] = [
         },
     },
     {
-        key: 'newsletter-webhook', name: 'Newsletter delivery events', category: 'Email', tier: 'core',
+        key: 'newsletter-webhook', name: 'Email delivery events', category: 'Email', tier: 'core',
         purpose: 'Svix signing secret for Resend delivery events. Without it every bounce and spam complaint is rejected 401 — '
             + 'the audience never learns an address is dead and the list degrades silently.',
         consoleUrl: 'https://resend.com/webhooks', envVars: ['RESEND_WEBHOOK_SECRET'],

@@ -223,7 +223,7 @@ const AUTHORED: RoleContent[] = [
         // Industry Round-Ups", which is a research capability nothing in the pipeline performs —
         // the assistant writes from the tenant's own brief and business context, and inventing
         // industry news is exactly what its prompt forbids. Claim the shipped behaviour only.
-        keyFeatures: ['Drafts in Your Brand Voice', 'Personalised Per Subscriber', 'Sign-Up Form for Your Website', 'You Approve Every Issue'],
+        keyFeatures: ['Drafts in Your Brand Voice', 'Personalised Per Subscriber', 'Sign-Up Form for Your Website', 'You Approve Every Email'],
         // Mailchimp is NOT built and was never built. What exists: sending from a domain the
         // customer verifies, or from their connected Gmail/Outlook for a small list.
         integrations: ['Your own sending domain', 'Gmail', 'Outlook']

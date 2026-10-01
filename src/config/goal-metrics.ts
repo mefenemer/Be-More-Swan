@@ -483,7 +483,7 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         // count and not every row: a goal that rises when someone unsubscribes (they still have a
         // contact row) would be measuring the opposite of what the user means by "grow my list".
         key: 'newsletter_subscribers',
-        label: 'Newsletter Subscribers',
+        label: 'Email Subscribers',
         unit: 'subscribers',
         source: 'internal',
         direction: 'increase',
@@ -499,13 +499,13 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         // Issues that actually went out — newsletter_issues.status = 'sent'. NOT issues drafted:
         // a cadence that drafts weekly and sends nothing is precisely the failure this should show.
         key: 'newsletter_issues_sent',
-        label: 'Issues Sent',
-        unit: 'issues',
+        label: 'Emails Sent',
+        unit: 'emails',
         source: 'internal',
         direction: 'increase',
         objective: 'outcome',
         roles: ['newsletter_editor'],
-        description: 'Newsletter issues this assistant has drafted, had approved, and sent.',
+        description: 'Emails this assistant has drafted, had approved, and sent.',
         available: true,
         realism: { maxDailyDelta: 10 },
     },

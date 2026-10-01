@@ -2468,9 +2468,9 @@ function formatCurrency(amount, currency) {
       // Org-wide, deliberately NOT inside an assistant: the audience outlives any one hire
       // and is read by every assistant that can send (docs/newsletter-assistant-plan.md).
       'audience': { file: 'audience.html', title: '| Audience' },
-      // Newsletter Studio. No sidebar link yet — it gets its entry point from the Newsletter
+      // Email Studio. No sidebar link yet — it gets its entry point from the Newsletter
       // Assistant's detail page when that role goes live (Phase 5). Reachable at ?view=newsletter.
-      'newsletter': { file: 'newsletter.html', title: '| Newsletter' },
+      'newsletter': { file: 'newsletter.html', title: '| Email Studio' },
       'calendar': { file: 'calendar.html', title: '| Content Calendar' },
       'referral': { file: 'referral-content.html', title: '| Refer a Friend' },
       'review-queue': { file: 'review-queue.html', title: '| Review' },
@@ -2530,7 +2530,7 @@ function formatCurrency(amount, currency) {
         // answered by whichever workspace happened to be opened earlier in the session, and a post
         // created there was filed under it — a Lead Generator, if that was the last one visited.
         // Cleared BEFORE the swap so the incoming view's own script can set it afresh.
-        // Where the user is coming FROM, for views that offer a way back (the Newsletter Studio's
+        // Where the user is coming FROM, for views that offer a way back (the Email Studio's
         // breadcrumb). Captured before the clear below and before the swap: the assistant id is
         // about to be nulled, and the detail page's active tab only exists in the DOM being replaced.
         if (routeKey !== window._currentViewKey) {
@@ -5341,7 +5341,7 @@ function formatCurrency(amount, currency) {
 <script src="/my-content.js"></script>
 <!-- Shared Audience view (audience.html). Org-scoped; reads no assistant context. -->
 <script src="/audience.js"></script>
-<!-- Newsletter Studio (newsletter.html). Org-scoped; drafts, previews and approves issues.
+<!-- Email Studio (newsletter.html). Org-scoped; drafts, previews and approves issues.
      ⚠️ newsletter-findings.js is the SAME artifact src/utils/deliverability.ts imports on the
      server — loaded here so the "before you send" panel updates as the author types instead of
      only on reload. Never replace it with a hand-written browser copy. The designer needs

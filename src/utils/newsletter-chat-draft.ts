@@ -67,7 +67,7 @@ export function normaliseSendAt(value: unknown): string | null {
 /** First non-empty line, stripped of Markdown heading marks — the fallback when no subject came back. */
 function deriveSubject(bodyMarkdown: string): string {
     const line = bodyMarkdown.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
-    return line.replace(/^#+\s*/, '').slice(0, MAX_SUBJECT_CHARS) || 'Untitled issue';
+    return line.replace(/^#+\s*/, '').slice(0, MAX_SUBJECT_CHARS) || 'Untitled email';
 }
 
 export function newsletterDraftFromUiElement(uiElement: unknown): NewsletterChatDraft | null {
@@ -86,7 +86,7 @@ export function newsletterDraftFromUiElement(uiElement: unknown): NewsletterChat
     );
 
     return {
-        subject: subject.text || 'Untitled issue',
+        subject: subject.text || 'Untitled email',
         preheader: preheader.text,
         bodyMarkdown: body.text,
         warnings: [...new Set([...subject.warnings, ...preheader.warnings, ...body.warnings])],
