@@ -4536,12 +4536,41 @@ export const audienceForms = pgTable("audience_forms", {
   // a question that gets asked later and must not be answered with the current template.
   consentText: text("consent_text"),
   status: text("status").notNull().default("active"),
+  // ⚠️ The FORM DEFINITION (src/utils/form-definition.ts) — authoritative when present. The columns
+  // above are derived from it on every save (columnsFromDefinition), so their readers agree with it.
+  // NULL on a row saved before the form builder: legacyToDefinition() reads the columns instead.
+  definition: jsonb("definition"),
+  slug: text("slug"),                                            // bemoreswan.com/f/<slug>
+  sequenceId: integer("sequence_id").references((): AnyPgColumn => newsletterSequences.id, { onDelete: "set null" }),
+  assistantId: integer("assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
   createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
   index("audience_forms_org_idx").on(t.organisationId),
+  uniqueIndex("audience_forms_slug_uidx").on(sql`lower(${t.slug})`).where(sql`slug IS NOT NULL`),
+  index("audience_forms_sequence_idx").on(t.sequenceId),
   check("audience_forms_status_check", sql`${t.status} IN ('active','disabled')`),
+]);
+
+// What each form submission said — consent evidence, and the tags its confirmation applies.
+export const audienceFormSubmissions = pgTable("audience_form_submissions", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  formId: integer("form_id").references(() => audienceForms.id, { onDelete: "set null" }),
+  contactId: integer("contact_id").references(() => audienceContacts.id, { onDelete: "cascade" }),
+  definitionHash: text("definition_hash").notNull(),
+  consentText: text("consent_text").notNull(),
+  answers: jsonb("answers").notNull().default({}),
+  tags: jsonb("tags").notNull().default([]),
+  pageUrl: text("page_url"),
+  surface: text("surface").notNull(),
+  tagsAppliedAt: timestamp("tags_applied_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("audience_form_submissions_form_idx").on(t.formId, t.createdAt),
+  index("audience_form_submissions_contact_idx").on(t.contactId, t.formId),
+  check("audience_form_submissions_surface_check", sql`${t.surface} IN ('embed','hosted')`),
 ]);
 
 // Double opt-in pending tokens. tokenHash, never the token — it is the whole credential and it
@@ -4768,8 +4797,10 @@ export const newsletterSequences = pgTable("newsletter_sequences", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
-  uniqueIndex("newsletter_sequences_assistant_trigger_uidx").on(t.assistantId, t.triggerEvent).where(sql`assistant_id IS NOT NULL`),
-  check("newsletter_sequences_trigger_check", sql`${t.triggerEvent} IN ('subscribed')`),
+  // ONE welcome sequence per org and per assistant; any number of form-triggered ones (db/form-builder.sql).
+  uniqueIndex("newsletter_sequences_org_welcome_uidx").on(t.organisationId).where(sql`trigger_event = 'subscribed'`),
+  uniqueIndex("newsletter_sequences_assistant_welcome_uidx").on(t.assistantId).where(sql`assistant_id IS NOT NULL AND trigger_event = 'subscribed'`),
+  check("newsletter_sequences_trigger_check", sql`${t.triggerEvent} IN ('subscribed', 'form')`),
 ]);
 
 export const newsletterSequenceSteps = pgTable("newsletter_sequence_steps", {

@@ -5341,6 +5341,11 @@ function formatCurrency(amount, currency) {
 <script src="/my-content.js"></script>
 <!-- Shared Audience view (audience.html). Org-scoped; reads no assistant context. -->
 <script src="/audience.js"></script>
+<!-- The sign-up form renderer (library mode — no data-bms-form, so it only defines window.BmsForm)
+     and the visual form builder that previews with it. The SAME subscribe.js customers paste on
+     their websites: the preview cannot disagree with the real form. docs/form-builder-plan.md. -->
+<script src="/subscribe.js"></script>
+<script src="/src/components/form-builder.js"></script>
 <!-- Email Studio (newsletter.html). Org-scoped; drafts, previews and approves issues.
      ⚠️ newsletter-findings.js is the SAME artifact src/utils/deliverability.ts imports on the
      server — loaded here so the "before you send" panel updates as the author types instead of

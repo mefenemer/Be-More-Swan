@@ -13,7 +13,7 @@
 
 import { and, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { audienceConsentEvents, audienceContactSegments, audienceContacts } from '../../db/schema';
+import { audienceConsentEvents, audienceContactSegments, audienceContacts, audienceSegments } from '../../db/schema';
 import { cleanName, looksLikeEmail, normaliseEmail } from './audience-contacts';
 import { emitWebhook, type WebhookEvent } from './webhooks';
 
@@ -276,6 +276,26 @@ export async function addToSegment(db: Db, contactId: number, segmentId: number,
         .insert(audienceContactSegments)
         .values({ contactId, segmentId, addedBy: addedBy ?? null })
         .onConflictDoNothing();
+}
+
+/**
+ * Apply tags (by NAME) to a contact, creating any tag that does not exist yet.
+ *
+ * A tag is an audience_segments row of kind 'tag' (db/audience-tags.sql). The name is unique per org
+ * case-insensitively ACROSS kinds, so a tag called "VIP" can collide with a manual segment called
+ * "vip" — that one is skipped rather than joined: a form must not quietly add strangers to a segment
+ * somebody curates by hand.
+ */
+export async function applyTagsByName(db: Db, organisationId: number, contactId: number, names: string[]): Promise<void> {
+    for (const raw of names) {
+        const name = String(raw || '').trim().slice(0, 40);
+        if (!name) continue;
+        await db.insert(audienceSegments).values({ organisationId, name, kind: 'tag' }).onConflictDoNothing();
+        const [seg] = await db.select({ id: audienceSegments.id, kind: audienceSegments.kind }).from(audienceSegments)
+            .where(and(eq(audienceSegments.organisationId, organisationId), sql`lower(${audienceSegments.name}) = lower(${name})`))
+            .limit(1);
+        if (seg && seg.kind === 'tag') await addToSegment(db, contactId, seg.id, null);
+    }
 }
 
 export async function removeFromSegment(db: Db, contactId: number, segmentId: number): Promise<void> {

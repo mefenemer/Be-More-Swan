@@ -58,12 +58,23 @@ export default withLambda(async (event: HandlerEvent) => {
         const ctx = await requireTenant(event, db);
         if ('error' in ctx) return ctx.error;
         try {
+            // Every automatic email series this org has: the ONE welcome sequence, and any number of
+            // email campaigns a sign-up form starts (trigger 'form'). The picker in the Email Studio
+            // and the form builder's campaign dropdown both read this list.
+            const sequences = await db.select({
+                id: newsletterSequences.id, name: newsletterSequences.name, triggerEvent: newsletterSequences.triggerEvent,
+                isEnabled: newsletterSequences.isEnabled,
+                steps: sql<number>`(SELECT count(*)::int FROM newsletter_sequence_steps s WHERE s.sequence_id = ${newsletterSequences.id})`,
+            }).from(newsletterSequences)
+                .where(eq(newsletterSequences.organisationId, ctx.organisationId))
+                .orderBy(asc(newsletterSequences.createdAt));
+            const wantId = Number(event.queryStringParameters?.sequenceId || '') || null;
             const [sequence] = await db.select().from(newsletterSequences)
                 .where(and(
                     eq(newsletterSequences.organisationId, ctx.organisationId),
-                    eq(newsletterSequences.triggerEvent, 'subscribed'),
+                    wantId ? eq(newsletterSequences.id, wantId) : eq(newsletterSequences.triggerEvent, 'subscribed'),
                 )).limit(1);
-            if (!sequence) return json(200, { sequence: null, steps: [], enrolments: {} });
+            if (!sequence) return json(200, { sequence: null, steps: [], enrolments: {}, sequences });
 
             const steps = await db.select().from(newsletterSequenceSteps)
                 .where(eq(newsletterSequenceSteps.sequenceId, sequence.id))
@@ -79,7 +90,7 @@ export default withLambda(async (event: HandlerEvent) => {
             const enrolments: Record<string, number> = {};
             for (const c of counts) enrolments[c.state] = c.n;
 
-            return json(200, { sequence, steps, enrolments });
+            return json(200, { sequence, steps, enrolments, sequences });
         } catch (err) {
             const code = (err as { code?: string; cause?: { code?: string } })?.code
                 ?? (err as { cause?: { code?: string } })?.cause?.code;
@@ -98,6 +109,23 @@ export default withLambda(async (event: HandlerEvent) => {
     try { body = JSON.parse(event.body || '{}'); }
     catch { return json(400, { error: 'Invalid JSON body.' }); }
     const action = String(body.action || '');
+
+    // An email campaign a sign-up form starts. Unlike the welcome sequence there can be any number,
+    // so this always creates — the name is what tells them apart in the pickers.
+    if (action === 'create' && body.trigger === 'form') {
+        const assistantId = Number(body.assistantId || '') || null;
+        if (assistantId) {
+            const [a] = await db.select({ id: aiAssistants.id }).from(aiAssistants)
+                .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId))).limit(1);
+            if (!a) return json(404, { error: 'Assistant not found.' });
+        }
+        const [sequence] = await db.insert(newsletterSequences).values({
+            organisationId: orgId, assistantId, triggerEvent: 'form',
+            name: String(body.name || 'Form email campaign').trim().slice(0, 80) || 'Form email campaign',
+            createdBy: ctx.userId,
+        }).returning();
+        return json(200, { sequence });
+    }
 
     if (action === 'create') {
         // ⚠️ IDEMPOTENT. Every read in this file and in the enrolment path resolves the org's
@@ -162,10 +190,16 @@ export default withLambda(async (event: HandlerEvent) => {
             if (!a) return json(404, { error: 'Assistant not found.' });
         }
 
+        // A campaign started by a sign-up form is a NEW sequence every time (there is no "the" form
+        // campaign to replace) — matched by name only to make a second press of Save a no-op.
+        const formTrigger = body.trigger === 'form';
+        const campaignName = String(body.name || '').trim().slice(0, 80) || (formTrigger ? 'Form email campaign' : 'Welcome sequence');
         const [existing] = await db.select().from(newsletterSequences)
             .where(and(
                 eq(newsletterSequences.organisationId, orgId),
-                eq(newsletterSequences.triggerEvent, 'subscribed'),
+                formTrigger
+                    ? and(eq(newsletterSequences.triggerEvent, 'form'), eq(newsletterSequences.name, campaignName))
+                    : eq(newsletterSequences.triggerEvent, 'subscribed'),
             )).limit(1);
         const current = existing
             ? await db.select({
@@ -179,14 +213,16 @@ export default withLambda(async (event: HandlerEvent) => {
         const same = current.length === steps.length && current.every((cur, i) =>
             cur.subject === steps[i].subject && cur.bodyMarkdown === steps[i].bodyMarkdown && cur.delayDays === steps[i].delayDays);
         if (existing && same) return json(200, { sequence: existing, deduped: true, stepCount: steps.length });
+        // A same-named form campaign with DIFFERENT emails is a different campaign, not a replacement.
+        const reuse = formTrigger ? (existing && same ? existing : null) : existing;
 
-        if (existing?.isEnabled) {
+        if (reuse?.isEnabled) {
             return json(409, {
                 code: 'SEQUENCE_ENABLED',
                 error: 'Your welcome sequence is switched on, so it cannot be replaced from here — people part way through it would get the new emails. Switch it off under Automatic emails in the Email Studio first, then save this again.',
             });
         }
-        if (current.length && body.replace !== true) {
+        if (!formTrigger && current.length && body.replace !== true) {
             return json(409, { code: 'SEQUENCE_HAS_STEPS', stepCount: current.length });
         }
 
@@ -204,10 +240,11 @@ export default withLambda(async (event: HandlerEvent) => {
         })));
 
         const sequence = await db.transaction(async (tx) => {
-            const seq = existing ?? (await tx.insert(newsletterSequences).values({
+            const seq = reuse ?? (await tx.insert(newsletterSequences).values({
                 organisationId: orgId,
                 assistantId,
-                name: String(body.name || 'Welcome sequence').trim().slice(0, 80) || 'Welcome sequence',
+                triggerEvent: formTrigger ? 'form' : 'subscribed',
+                name: campaignName,
                 createdBy: ctx.userId,
             }).returning())[0];
             // Replace, not merge: a 3-email campaign over an old 5-step sequence must not leave
@@ -227,15 +264,18 @@ export default withLambda(async (event: HandlerEvent) => {
             await tx.update(newsletterSequences).set({ updatedAt: new Date() }).where(eq(newsletterSequences.id, seq.id));
             return seq;
         });
-        return json(200, { sequence, deduped: false, replaced: current.length > 0, stepCount: steps.length });
+        return json(200, { sequence, deduped: false, replaced: !formTrigger && current.length > 0, stepCount: steps.length });
     }
 
+    // Every action below works on ONE sequence: the one named by sequenceId (an email campaign a form
+    // starts), or the welcome sequence when none is given — which is every caller that predates them.
+    const seqId = Number(body.sequenceId || '') || null;
     const [sequence] = await db.select().from(newsletterSequences)
         .where(and(
             eq(newsletterSequences.organisationId, orgId),
-            eq(newsletterSequences.triggerEvent, 'subscribed'),
+            seqId ? eq(newsletterSequences.id, seqId) : eq(newsletterSequences.triggerEvent, 'subscribed'),
         )).limit(1);
-    if (!sequence) return json(404, { error: 'No welcome sequence yet.' });
+    if (!sequence) return json(404, { error: seqId ? 'That email campaign no longer exists.' : 'No welcome sequence yet.' });
 
     if (action === 'saveStep') {
         const stepNumber = Number(body.stepNumber || 0);

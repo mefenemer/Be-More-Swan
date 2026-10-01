@@ -21,15 +21,15 @@
 // that adapts.
 
 import { HandlerEvent } from '@netlify/functions';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
-    audienceConfirmations, audienceContacts, audienceForms, organisations,
+    audienceConfirmations, audienceContacts, audienceFormSubmissions, audienceForms, organisations,
 } from '../../db/schema';
 import { looksLikeEmail, normaliseEmail, cleanName } from '../../src/utils/audience-contacts';
-import { addToSegment, recordConsentEvent, setContactStatus, upsertContact } from '../../src/utils/audience-store';
+import { addToSegment, applyTagsByName, recordConsentEvent, setContactStatus, upsertContact } from '../../src/utils/audience-store';
 import { bindConversion } from '../../src/utils/campaign-attribution-store';
-import { enrolInWelcomeSequence } from '../../src/utils/newsletter-sequence';
+import { enrolAfterSignup, enrolInWelcomeSequence } from '../../src/utils/newsletter-sequence';
 import {
     FORM_KEY_RE, MIN_FILL_MS, originAllowed,
     DEFAULT_CONSENT_TEXT, DEFAULT_SUCCESS_MESSAGE, SINGLE_OPT_IN_SUCCESS_MESSAGE,
@@ -42,6 +42,11 @@ import { checkRateLimit, getClientIp } from '../../src/utils/rate-limit';
 import { pseudonymiseIp } from '../../src/utils/ip-pseudonymise';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { isValidTimezone } from '../../src/utils/newsletter-schedule';
+import {
+    definitionHash, legacyToDefinition, normaliseFormDefinition, publicDefinition, validateAnswers, SLUG_RE,
+    type FormDefinition,
+} from '../../src/utils/form-definition';
+import { signAssetId } from '../../src/utils/newsletter-media-url';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /** Per-IP: a person signs up once. Ten a minute is already a script. */
@@ -66,50 +71,89 @@ export function hostedMissing() {
     };
 }
 
-export interface HostedPageContent {
-    orgName: string;
-    headline: string;
-    intro: string;
-    fields: string[];
-    consentText: string;
-    doubleOptIn: boolean;
+/** The columns every public read needs to resolve a form's definition. */
+const FORM_COLUMNS = {
+    id: audienceForms.id,
+    organisationId: audienceForms.organisationId,
+    publicKey: audienceForms.publicKey,
+    name: audienceForms.name,
+    fields: audienceForms.fields,
+    theme: audienceForms.theme,
+    consentText: audienceForms.consentText,
+    successMessage: audienceForms.successMessage,
+    doubleOptIn: audienceForms.doubleOptIn,
+    redirectUrl: audienceForms.redirectUrl,
+    status: audienceForms.status,
+    allowedOrigins: audienceForms.allowedOrigins,
+    segmentId: audienceForms.segmentId,
+    hostedEnabled: audienceForms.hostedEnabled,
+    hostedHeadline: audienceForms.hostedHeadline,
+    hostedIntro: audienceForms.hostedIntro,
+    definition: audienceForms.definition,
+    sequenceId: audienceForms.sequenceId,
+    orgName: organisations.name,
+};
+
+/**
+ * A form's definition, whatever era it was saved in. A row with a stored definition goes through the
+ * normaliser again on the way OUT — the gate is cheap, and a definition written by an older build
+ * must not reach a stranger's browser on the strength of having once been valid.
+ */
+export function resolveDefinition(row: Parameters<typeof legacyToDefinition>[0] & { definition?: unknown }): FormDefinition {
+    return row.definition ? normaliseFormDefinition(row.definition).definition : legacyToDefinition(row);
+}
+
+/** Path-only (same origin as whatever serves it): the renderer refuses any logo from elsewhere. */
+function logoPath(def: FormDefinition): string | null {
+    const id = def.style.logo?.assetId;
+    if (!id) return null;
+    try { return `/api/newsletter/media?a=${id}&s=${signAssetId(id)}`; }
+    catch { return null; }   // no signing secret in this environment — the form simply has no logo
 }
 
 /**
- * The hosted sign-up page.
+ * JSON that is safe inside a <script> element. JSON.stringify leaves `</script>` intact, which closes
+ * the element and turns everything after it into markup — on OUR domain, written by a tenant.
+ */
+export function inlineJson(value: unknown): string {
+    return JSON.stringify(value)
+        .replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')
+        .replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+}
+
+/**
+ * The hosted sign-up page — /f/<slug> or /s/<key>.
+ *
+ * A shell: the definition is inlined as JSON and drawn by /subscribe.js, the SAME renderer that draws
+ * the form on a customer's own website and in the form builder's preview. One renderer is one set of
+ * escaping rules, one set of style tokens and one honeypot — two renderers is how the hosted page
+ * once lacked protections the embed had.
  *
  * ⚠️ NOINDEX, deliberately. The value here is a link somebody puts in a bio, on a poster or behind a
  * QR code — being found by search adds nothing a form page could realistically rank for, while an
  * abandoned or half-configured page indexed under our domain, carrying a tenant's name, is a real
  * cost. The link works exactly as well either way.
  *
- * ⚠️ It carries the SAME anti-bot pair as the embeddable widget: a honeypot field and a minimum
- * fill time. A public url on our own domain is a more attractive target than a form on one small
- * business's website, not a less attractive one — so the protections cannot be the ones the embed
- * happens to have and this page happens to skip.
+ * ⚠️ It carries the SAME anti-bot pair as the embeddable widget — the renderer's honeypot and its
+ * minimum fill time. A public url on our own domain is a more attractive target than a form on one
+ * small business's website, not a less attractive one.
  */
-export function hostedPage(key: string, c: HostedPageContent) {
-    const field = (name: string, label: string, type = 'text') => `
-      <label>${esc(label)}
-        <input type="${type}" name="${esc(name)}" ${name === 'email' ? 'required autocomplete="email"' : ''}>
-      </label>`;
-
-    const inputs = [
-        field('email', 'Email address', 'email'),
-        c.fields.includes('first_name') ? field('first_name', 'First name') : '',
-        c.fields.includes('last_name') ? field('last_name', 'Last name') : '',
-        c.fields.includes('company') ? field('company', 'Company') : '',
-    ].filter(Boolean).join('');
-
+export function hostedPage(target: { key?: string; slug?: string }, def: ReturnType<typeof publicDefinition>, orgName: string) {
+    const title = def.content.headline || 'Sign up';
+    const bg = /^#[0-9a-f]{6}$/i.test(def.style.pageBackground) ? def.style.pageBackground : '#f9fafb';
+    const attr = target.slug ? `data-bms-slug="${esc(target.slug)}"` : `data-bms-key="${esc(target.key || '')}"`;
     return {
         statusCode: 200,
         headers: {
             'Content-Type': 'text/html; charset=utf-8',
             'Cache-Control': 'no-store',
             'X-Robots-Tag': 'noindex',
-            // The page posts to our own origin only, loads no third-party anything, and embeds no
-            // remote script — so the policy can say exactly that.
-            'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'",
+            // Our own script and API. Images: the signed media proxy is ours but 302s to a fresh presigned
+            // storage URL, and CSP checks every redirect hop — hence https: (the renderer only ever asks for
+            // a logo on our own origin).
+            // style-src stays 'unsafe-inline' for the renderer's shadow-root <style>; every value in
+            // it is a validated token.
+            'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' https:; connect-src 'self'; base-uri 'none'; form-action 'none'",
             'Referrer-Policy': 'no-referrer',
         },
         body: `<!DOCTYPE html>
@@ -117,77 +161,15 @@ export function hostedPage(key: string, c: HostedPageContent) {
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>${esc(c.headline)} — ${esc(c.orgName)}</title>
-<style>
-*{box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f9fafb;color:#111827;margin:0;
-  display:flex;align-items:center;justify-content:center;min-height:100vh;padding:1.5rem;line-height:1.5}
-.card{background:#fff;border-radius:1rem;box-shadow:0 4px 24px rgba(0,0,0,.08);padding:2rem;max-width:26rem;width:100%}
-h1{font-size:1.35rem;margin:0 0 .35rem}
-.who{color:#6b7280;font-size:.85rem;margin:0 0 1rem}
-.intro{color:#374151;font-size:.95rem;margin:0 0 1.25rem;white-space:pre-line}
-label{display:block;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#6b7280;margin-bottom:.75rem}
-input{display:block;width:100%;margin-top:.3rem;padding:.7rem .75rem;font-size:1rem;border:1px solid #d1d5db;border-radius:.6rem;
-  font-family:inherit;color:#111827;background:#fff}
-input:focus{outline:2px solid #059669;outline-offset:1px;border-color:#059669}
-button{width:100%;margin-top:.5rem;padding:.8rem 1rem;font-size:1rem;font-weight:700;color:#fff;background:#059669;border:none;
-  border-radius:.6rem;cursor:pointer;font-family:inherit}
-button:hover{background:#047857}button[disabled]{opacity:.6;cursor:default}
-.consent{color:#6b7280;font-size:.78rem;margin:1rem 0 0}
-.msg{margin-top:1rem;padding:.75rem .85rem;border-radius:.6rem;font-size:.9rem;display:none}
-.ok{background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46}
-.err{background:#fef2f2;border:1px solid #fecaca;color:#991b1b}
-.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
-.foot{text-align:center;color:#9ca3af;font-size:.72rem;margin-top:1.25rem}
-</style>
+<title>${esc(title)} — ${esc(orgName)}</title>
+<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.5rem;box-sizing:border-box;background:${bg}}
+#bms-form{width:100%;max-width:28rem}</style>
 </head>
 <body>
-<div class="card">
-  <h1>${esc(c.headline)}</h1>
-  <p class="who">from ${esc(c.orgName)}</p>
-  ${c.intro ? `<p class="intro">${esc(c.intro)}</p>` : ''}
-  <form id="f" novalidate>
-    ${inputs}
-    <div class="hp" aria-hidden="true"><label>Leave this empty<input type="text" name="hp" tabindex="-1" autocomplete="off"></label></div>
-    <button type="submit" id="b">Subscribe</button>
-  </form>
-  <p class="consent">${esc(c.consentText)}</p>
-  <div class="msg ok" id="ok"></div>
-  <div class="msg err" id="err"></div>
-  <noscript><p class="msg err" style="display:block">This form needs JavaScript. Please email ${esc(c.orgName)} directly to subscribe.</p></noscript>
-  <p class="foot">Powered by Be More Swan</p>
-</div>
-<script>
-(function () {
-  var started = Date.now();
-  var f = document.getElementById('f'), b = document.getElementById('b');
-  var ok = document.getElementById('ok'), err = document.getElementById('err');
-  f.addEventListener('submit', function (e) {
-    e.preventDefault();
-    err.style.display = 'none';
-    var tz = '';
-    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e0) { tz = ''; }
-    var data = new FormData(f), payload = { key: ${JSON.stringify(key)}, ms: Date.now() - started, url: location.href, timezone: tz };
-    data.forEach(function (v, k) { payload[k] = v; });
-    // Sent as the API's own field names, so this page and the embeddable widget are two callers of
-    // one endpoint rather than two contracts.
-    payload.firstName = payload.first_name || '';
-    payload.lastName = payload.last_name || '';
-    b.disabled = true;
-    fetch('/api/audience/subscribe', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-    }).then(function (r) { return r.json().then(function (d) { return { r: r, d: d }; }); })
-      .then(function (res) {
-        if (!res.r.ok) throw new Error(res.d && res.d.error ? res.d.error : 'Something went wrong. Please try again.');
-        if (res.d.redirectUrl) { location.href = res.d.redirectUrl; return; }
-        f.style.display = 'none';
-        ok.textContent = res.d.message || 'Thanks — check your email.';
-        ok.style.display = 'block';
-      })
-      .catch(function (e2) { b.disabled = false; err.textContent = e2.message; err.style.display = 'block'; });
-  });
-})();
-</script>
+<div id="bms-form"></div>
+<noscript><p style="font-family:sans-serif;text-align:center">This form needs JavaScript. Please contact ${esc(orgName)} directly to sign up.</p></noscript>
+<script type="application/json" id="bms-def">${inlineJson(def)}</script>
+<script src="/subscribe.js" data-bms-hosted ${attr}></script>
 </body>
 </html>`,
     };
@@ -248,77 +230,55 @@ export default withLambda(async (event: HandlerEvent) => {
         const key = cfgMatch[1];
         if (!FORM_KEY_RE.test(key)) return json(404, { error: 'Form not found.' }, origin);
 
-        const [form] = await db
-            .select({
-                name: audienceForms.name,
-                fields: audienceForms.fields,
-                theme: audienceForms.theme,
-                consentText: audienceForms.consentText,
-                successMessage: audienceForms.successMessage,
-                doubleOptIn: audienceForms.doubleOptIn,
-                redirectUrl: audienceForms.redirectUrl,
-                status: audienceForms.status,
-                allowedOrigins: audienceForms.allowedOrigins,
-                orgName: organisations.name,
-            })
-            .from(audienceForms)
+        const [form] = await db.select(FORM_COLUMNS).from(audienceForms)
             .leftJoin(organisations, eq(organisations.id, audienceForms.organisationId))
-            .where(eq(audienceForms.publicKey, key))
-            .limit(1);
+            .where(eq(audienceForms.publicKey, key)).limit(1);
 
         if (!form || form.status !== 'active') return json(404, { error: 'Form not found.' }, origin);
+        const def = resolveDefinition(form);
+        // The embed can be switched off while the hosted page stays on.
+        if (!def.delivery.embed.enabled) return json(404, { error: 'Form not found.' }, origin);
 
         return json(200, {
-            name: form.name,
-            fields: form.fields,
-            theme: form.theme,
-            consentText: form.consentText || DEFAULT_CONSENT_TEXT,
-            successMessage: form.successMessage
-                || (form.doubleOptIn ? DEFAULT_SUCCESS_MESSAGE : SINGLE_OPT_IN_SUCCESS_MESSAGE),
-            doubleOptIn: form.doubleOptIn,
-            redirectUrl: form.redirectUrl,
+            definition: publicDefinition(def, { logoUrl: logoPath(def), senderName: form.orgName || '' }),
+            // ⚠️ The pre-definition shape, kept for copies of the old subscribe.js still sitting in
+            // browser caches on customers' sites. Derived from the same definition, so they agree.
+            name: def.name,
+            fields: def.fields.filter((f) => f.target.kind === 'contact').map((f) => (f.target as { column: string }).column),
+            theme: { accent: def.style.accent, layout: def.style.layout, buttonLabel: def.content.buttonLabel },
+            consentText: def.consent.text,
+            successMessage: def.content.successMessage,
+            doubleOptIn: def.audience.doubleOptIn,
+            redirectUrl: def.content.redirectUrl,
             senderName: form.orgName || '',
         }, origin);
     }
 
     // ── The hosted sign-up page ─────────────────────────────────────────────
-    // For the customers who have no website to embed a form in. Same form, same consent text, same
-    // double opt-in setting — a second description of what somebody agreed to is the one that
-    // drifts from the one they were actually shown.
+    // /f/<slug> (a name the tenant chose) or /s/<key> (the original, random). For the customers who
+    // have no website to embed a form in. Same form, same consent text, same double opt-in setting —
+    // a second description of what somebody agreed to is the one that drifts from the one they saw.
+    const slugMatch = path.match(/^\/f\/([^/?#]+)/);
     const hostedMatch = path.match(/^\/s\/([^/?#]+)/);
-    if (hostedMatch && method === 'GET') {
-        const key = hostedMatch[1];
-        if (!FORM_KEY_RE.test(key)) return hostedMissing();
+    if ((slugMatch || hostedMatch) && method === 'GET') {
+        const slug = slugMatch ? decodeURIComponent(slugMatch[1]).toLowerCase() : '';
+        const key = hostedMatch ? hostedMatch[1] : '';
+        // Validated BEFORE it reaches a query or the page. Neither value is ever interpolated raw.
+        if (slugMatch ? !SLUG_RE.test(slug) : !FORM_KEY_RE.test(key)) return hostedMissing();
 
-        const [form] = await db
-            .select({
-                name: audienceForms.name,
-                fields: audienceForms.fields,
-                consentText: audienceForms.consentText,
-                doubleOptIn: audienceForms.doubleOptIn,
-                status: audienceForms.status,
-                hostedEnabled: audienceForms.hostedEnabled,
-                hostedHeadline: audienceForms.hostedHeadline,
-                hostedIntro: audienceForms.hostedIntro,
-                orgName: organisations.name,
-            })
-            .from(audienceForms)
+        const [form] = await db.select(FORM_COLUMNS).from(audienceForms)
             .leftJoin(organisations, eq(organisations.id, audienceForms.organisationId))
-            .where(eq(audienceForms.publicKey, key))
+            .where(slugMatch ? sql`lower(${audienceForms.slug}) = ${slug}` : eq(audienceForms.publicKey, key))
             .limit(1);
 
-        // A page that is switched off answers exactly like a key that never existed. Whether a
-        // given tenant has a sign-up page is not something a stranger with a url should learn.
+        // A page that is switched off answers exactly like one that never existed. Whether a given
+        // tenant has a sign-up page is not something a stranger with a url should learn.
         if (!form || form.status !== 'active' || !form.hostedEnabled) return hostedMissing();
-
-        return hostedPage(key, {
-            orgName: form.orgName || 'this business',
-            headline: form.hostedHeadline || form.name || 'Subscribe',
-            intro: form.hostedIntro || '',
-            fields: Array.isArray(form.fields) ? (form.fields as string[]) : ['email'],
-            consentText: form.consentText || DEFAULT_CONSENT_TEXT,
-            doubleOptIn: form.doubleOptIn,
-        });
+        const def = resolveDefinition(form);
+        const orgName = form.orgName || 'this business';
+        const pub = publicDefinition(def, { logoUrl: logoPath(def), senderName: orgName });
+        if (!pub.content.headline) pub.content.headline = def.name;
+        return hostedPage(slugMatch ? { slug } : { key }, pub, orgName);
     }
 
     // ── Confirmation ────────────────────────────────────────────────────────
@@ -409,17 +369,43 @@ export default withLambda(async (event: HandlerEvent) => {
                     try { await addToSegment(db, row.contactId, form.segmentId, null); }
                     catch (err) { console.error('[audience-public] confirmed but segment assignment failed', { formId: row.formId }, err); }
                 }
+                // Tags wait for confirmation for the same reason segments do.
+                try {
+                    const pendingTags = await db.select({ id: audienceFormSubmissions.id, tags: audienceFormSubmissions.tags })
+                        .from(audienceFormSubmissions)
+                        .where(and(eq(audienceFormSubmissions.contactId, row.contactId), eq(audienceFormSubmissions.formId, row.formId), isNull(audienceFormSubmissions.tagsAppliedAt)));
+                    const names = [...new Set(pendingTags.flatMap((p) => (Array.isArray(p.tags) ? p.tags as string[] : [])))];
+                    if (names.length) await applyTagsByName(db, row.organisationId, row.contactId, names);
+                    if (pendingTags.length) {
+                        await db.update(audienceFormSubmissions).set({ tagsAppliedAt: new Date() })
+                            .where(and(eq(audienceFormSubmissions.contactId, row.contactId), eq(audienceFormSubmissions.formId, row.formId), isNull(audienceFormSubmissions.tagsAppliedAt)));
+                    }
+                } catch (err) { console.error('[audience-public] confirmed but tagging failed', { formId: row.formId }, err); }
             }
 
             // The moment of maximum interest. Best-effort by design: enrolInWelcomeSequence never
             // throws, because a confirmation that 500s over a welcome email would leave somebody
             // who just clicked "confirm" believing they had failed to subscribe.
+            // ⚠️ enrolInWelcomeSequence is still the floor (a contact confirmed through a form that has
+            // since been deleted gets the welcome sequence); enrolAfterSignup adds the form's own campaign.
             if (row.contactId) {
-                await enrolInWelcomeSequence(db, {
-                    organisationId: row.organisationId,
-                    contactId: row.contactId,
-                    email: row.email,
-                });
+                const [src] = row.formId
+                    ? await db.select({ definition: audienceForms.definition, sequenceId: audienceForms.sequenceId })
+                        .from(audienceForms).where(eq(audienceForms.id, row.formId)).limit(1)
+                    : [];
+                if (src) {
+                    await enrolAfterSignup(db, {
+                        organisationId: row.organisationId, contactId: row.contactId, email: row.email,
+                        formSequenceId: src.sequenceId ?? null,
+                        skipWelcome: src.definition ? normaliseFormDefinition(src.definition).definition.campaign.skipWelcome : false,
+                    });
+                } else {
+                    await enrolInWelcomeSequence(db, {
+                        organisationId: row.organisationId,
+                        contactId: row.contactId,
+                        email: row.email,
+                    });
+                }
             }
 
             return page(200, 'You are subscribed', `<p>Thanks — you will hear from ${who} soon. Every email carries an unsubscribe link.</p>`);
@@ -440,28 +426,25 @@ export default withLambda(async (event: HandlerEvent) => {
     try { body = JSON.parse(event.body || '{}'); }
     catch { return json(400, { error: 'Invalid request.' }, origin); }
 
+    // A form is addressed by its public key (the embed, /s/<key>) or its slug (/f/<slug>).
     const key = String(body.key || '');
-    if (!FORM_KEY_RE.test(key)) return json(404, { error: 'Form not found.' }, origin);
+    const slugIn = String(body.slug || '').toLowerCase();
+    const byKey = FORM_KEY_RE.test(key);
+    if (!byKey && !SLUG_RE.test(slugIn)) return json(404, { error: 'Form not found.' }, origin);
 
     const [form] = await db
-        .select({
-            id: audienceForms.id,
-            organisationId: audienceForms.organisationId,
-            allowedOrigins: audienceForms.allowedOrigins,
-            segmentId: audienceForms.segmentId,
-            doubleOptIn: audienceForms.doubleOptIn,
-            successMessage: audienceForms.successMessage,
-            redirectUrl: audienceForms.redirectUrl,
-            status: audienceForms.status,
-            hostedEnabled: audienceForms.hostedEnabled,
-            senderName: organisations.name,
-        })
+        .select({ ...FORM_COLUMNS, senderName: organisations.name })
         .from(audienceForms)
         .leftJoin(organisations, eq(organisations.id, audienceForms.organisationId))
-        .where(eq(audienceForms.publicKey, key))
+        .where(byKey ? eq(audienceForms.publicKey, key) : sql`lower(${audienceForms.slug}) = ${slugIn}`)
         .limit(1);
 
     if (!form || form.status !== 'active') return json(404, { error: 'Form not found.' }, origin);
+    // ⚠️ A slug only ever addresses the HOSTED page. Without this, a form whose page is switched off
+    // could still be posted to by anyone who learned its slug.
+    if (!byKey && !form.hostedEnabled) return json(404, { error: 'Form not found.' }, origin);
+    const def = resolveDefinition(form);
+    const surface: 'embed' | 'hosted' = body.surface === 'hosted' ? 'hosted' : 'embed';
 
     // The one error this endpoint states plainly: it is the tenant's own misconfiguration, it
     // leaks nothing about any subscriber, and a silent failure here is a form that "just does
@@ -498,7 +481,7 @@ export default withLambda(async (event: HandlerEvent) => {
             return json(429, { error: 'Too many sign-ups from this connection. Please try again shortly.' }, origin,
                 { 'Retry-After': String(perIp.retryAfterSecs) });
         }
-        const perKey = await checkRateLimit(db, 'audience_subscribe_key', key, KEY_LIMIT);
+        const perKey = await checkRateLimit(db, 'audience_subscribe_key', form.publicKey, KEY_LIMIT);
         if (!perKey.allowed) {
             return json(429, { error: 'This form is temporarily busy. Please try again shortly.' }, origin,
                 { 'Retry-After': String(perKey.retryAfterSecs) });
@@ -509,7 +492,21 @@ export default withLambda(async (event: HandlerEvent) => {
         console.error('[audience-public] rate limiter unavailable — allowing the request', err);
     }
 
-    const email = normaliseEmail(body.email);
+    // ⚠️ The answers are checked against the STORED definition — required questions, the options a
+    // choice may take, the shape of a phone number. The browser's copy of the form is never trusted.
+    // A submission with no `answers` is an older cached subscribe.js posting the flat shape; it is
+    // mapped onto the definition's contact fields and checked exactly the same way.
+    const rawAnswers = body.answers && typeof body.answers === 'object' ? body.answers : (() => {
+        const flat: Record<string, unknown> = { email: body.email, first_name: body.firstName, last_name: body.lastName, company: body.company };
+        const out: Record<string, unknown> = {};
+        for (const f of def.fields) if (f.target.kind === 'contact') out[f.id] = flat[f.target.column];
+        return out;
+    })();
+    const checked = validateAnswers(def, rawAnswers);
+    if (!checked.ok) return json(400, { error: checked.error }, origin);
+    const answers = checked.answers;
+
+    const email = normaliseEmail(answers.email);
     if (!looksLikeEmail(email)) return json(400, { error: 'Enter a valid email address.' }, origin);
 
     const orgId = form.organisationId;
@@ -555,9 +552,11 @@ export default withLambda(async (event: HandlerEvent) => {
             const res = await upsertContact(db, {
                 organisationId: orgId,
                 email,
-                firstName: cleanName(body.firstName),
-                lastName: cleanName(body.lastName),
-                company: cleanName(body.company),
+                firstName: cleanName(answers.contact.first_name),
+                lastName: cleanName(answers.contact.last_name),
+                company: cleanName(answers.contact.company),
+                phone: cleanName(answers.contact.phone),
+                customFields: answers.custom,
                 status: form.doubleOptIn ? 'pending' : 'subscribed',
                 source: 'web_form',
                 consentBasis: form.doubleOptIn ? 'double_opt_in' : 'single_opt_in',
@@ -590,6 +589,26 @@ export default withLambda(async (event: HandlerEvent) => {
             evidence: returning ? 'Signed up again after previously unsubscribing.' : null,
         });
 
+        // What this form asked and what they answered — the consent evidence a form builder makes
+        // necessary (the form can change tomorrow; this records the one they saw), and the tags
+        // their confirmation will apply. Best effort: a missing table must not stop a sign-up.
+        let submissionTags: string[] = answers.tags;
+        try {
+            await db.insert(audienceFormSubmissions).values({
+                organisationId: orgId,
+                formId: form.id,
+                contactId,
+                definitionHash: definitionHash(def),
+                consentText: def.consent.text,
+                answers: answers.stored,
+                tags: answers.tags,
+                pageUrl: sourceUrl,
+                surface,
+            });
+        } catch (err) {
+            console.error('[audience-public] submission record failed — has db/form-builder.sql been applied?', { formId: form.id }, err);
+        }
+
         // Which advert, post or email brought this person here — if any.
         //
         // Placed here, above the double opt-in branch, so BOTH paths bind: attribution is a fact
@@ -620,6 +639,21 @@ export default withLambda(async (event: HandlerEvent) => {
                 try { await addToSegment(db, contactId, form.segmentId, null); }
                 catch (err) { console.error('[audience-public] subscribed but segment assignment failed', { formId: form.id }, err); }
             }
+            if (submissionTags.length) {
+                try {
+                    await applyTagsByName(db, orgId, contactId, submissionTags);
+                    await db.update(audienceFormSubmissions).set({ tagsAppliedAt: new Date() })
+                        .where(and(eq(audienceFormSubmissions.contactId, contactId), eq(audienceFormSubmissions.formId, form.id), isNull(audienceFormSubmissions.tagsAppliedAt)));
+                } catch (err) { console.error('[audience-public] subscribed but tagging failed', { formId: form.id }, err); }
+            }
+            // ⚠️ Single opt-in subscribes NOW, so this is the moment of maximum interest too. Before the
+            // form builder only the confirmation click enrolled anybody, and a single opt-in form's
+            // subscribers silently never received the welcome sequence at all.
+            await enrolAfterSignup(db, {
+                organisationId: orgId, contactId, email,
+                formSequenceId: form.sequenceId ?? null,
+                skipWelcome: def.campaign.skipWelcome,
+            });
             return json(200, successBody, origin);
         }
 
@@ -681,7 +715,7 @@ export default withLambda(async (event: HandlerEvent) => {
         try {
             await sendConfirmationEmail({
                 to: email,
-                firstName: cleanName(body.firstName),
+                firstName: cleanName(answers.contact.first_name),
                 senderName: form.senderName || 'the sender',
                 sourceUrl,
                 baseUrl,

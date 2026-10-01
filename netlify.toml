@@ -386,6 +386,15 @@
   to = "/.netlify/functions/audience-public"
   status = 200
 
+# The same hosted page at a name the tenant CHOSE: /f/<slug> (db/form-builder.sql). /s/<key> keeps
+# working — those links are already printed on posters. A short, public, top-level namespace like
+# /go/ below: slugs are unique across every organisation, and src/utils/form-definition.ts keeps a
+# reserved list so a tenant cannot claim one that reads as ours.
+[[redirects]]
+  from = "/f/*"
+  to = "/.netlify/functions/audience-public"
+  status = 200
+
 # Campaign Assistant Phase A: tracked-link click recorder. Rewrite (status 200) — the original
 # /go/:token path survives in event.rawUrl, which campaign-link-redirect.ts parses; the function
 # then issues the real 302 itself, because it must record the click and set the visitor cookie on

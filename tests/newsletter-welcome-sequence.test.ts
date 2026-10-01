@@ -158,7 +158,10 @@ await check('an org cannot end up with two welcome sequences', () => {
     const create = API.slice(landmark(API, "if (action === 'create')"), landmark(API, "if (action === 'saveStep')"));
     assert.match(create, /if \(existing\) return json\(200, \{ sequence: existing \}\)/,
         'creating twice must return the sequence that exists, not insert a second');
-    assert.match(SQL, /newsletter_sequences_org_trigger_uidx[\s\S]{0,120}\(organisation_id, trigger_event\)/,
+    // Since db/form-builder.sql: still ONE welcome sequence per org (a partial unique index on the
+    // 'subscribed' trigger), while a form may start any number of email campaigns.
+    const FB = read('db/form-builder.sql');
+    assert.match(FB, /newsletter_sequences_org_welcome_uidx[\s\S]{0,120}\(organisation_id\) WHERE trigger_event = 'subscribed'/,
         'and the index is what makes it true under a retry or a race');
 });
 

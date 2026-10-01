@@ -103,7 +103,7 @@ await check('the uiElement is normalised before it is persisted to the transcrip
 });
 
 await check('a reply claiming a draft it did not write is replaced', () => {
-    const guard = ORCH.slice(landmark(ORCH, 'route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && replyClaimsPostSaved'));
+    const guard = ORCH.slice(landmark(ORCH, 'route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved'));
     assert.match(guard.slice(0, 400), /honestDraftReply/);
     // And the shared sentence must name no surface, or it would point a newsletter user at Blogs.
     const claims = read('src/utils/chat-draft-claims.ts');

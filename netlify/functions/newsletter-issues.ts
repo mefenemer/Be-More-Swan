@@ -466,7 +466,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 campaignType: body.campaignType,
                 goal: String(body.goal || '').trim().slice(0, 300),
                 audience: String(body.audience || '').trim().slice(0, 300),
-                triggerEvent: body.triggerEvent === 'subscribed' ? 'subscribed' : 'custom',
+                triggerEvent: body.triggerEvent === 'subscribed' ? 'subscribed' : body.triggerEvent === 'form' ? 'form' : 'custom',
                 facts: String(body.facts || '').slice(0, 4000),
                 avoid: String(body.avoid || '').trim().slice(0, 500),
                 steps,

@@ -138,7 +138,9 @@ check('a timezone from a browser is validated before it is stored', () => {
 });
 
 check('both sign-up surfaces report it', () => {
-    assert.match(PUBLIC, /Intl\.DateTimeFormat\(\)\.resolvedOptions\(\)\.timeZone/, 'the hosted page');
+    // The hosted page is drawn by the SAME renderer as the embed (subscribe.js), so it reports the
+    // zone by construction — asserted by checking it loads that renderer.
+    assert.match(PUBLIC, /<script src="\/subscribe\.js" data-bms-hosted/, 'the hosted page');
     assert.match(EMBED, /Intl\.DateTimeFormat\(\)\.resolvedOptions\(\)\.timeZone/, 'the embeddable widget');
     assert.match(EMBED, /catch \(tzErr\)/, 'and neither may throw on an old browser');
 });

@@ -210,7 +210,7 @@ await check('the honeypot and the timing check answer with the ordinary success 
 });
 
 await check('the widget actually sends what those checks read', () => {
-    assert.match(WIDGET, /name="website"/, 'the honeypot field must exist in the rendered form');
+    assert.match(WIDGET, /name="bms-website"/, 'the honeypot field must exist in the rendered form');
     assert.match(WIDGET, /ms: Date\.now\(\) - shownAt/, 'and the elapsed time must be measured from RENDER');
     assert.match(WIDGET, /shownAt = Date\.now\(\)/);
     // Off-screen, not display:none — some bots skip hidden fields and fill everything else.

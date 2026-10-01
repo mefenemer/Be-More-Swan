@@ -38,6 +38,7 @@ import { blogPostDraftFromUiElement, BLOG_POST_DRAFT_TYPE } from '../../src/util
 import { newsletterDraftFromUiElement, NEWSLETTER_ISSUE_DRAFT_TYPE } from '../../src/utils/newsletter-chat-draft';
 import { campaignDraftFromUiElement, NEWSLETTER_CAMPAIGN_DRAFT_TYPE } from '../../src/utils/newsletter-campaign-chat-draft';
 import { campaignCadencePromptBlock } from '../../src/config/email-campaign-cadences';
+import { formDraftFromUiElement, AUDIENCE_FORM_DRAFT_TYPE } from '../../src/utils/form-chat-draft';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJson, stripCodeFences } from '../../src/utils/model-json';
 
@@ -269,7 +270,7 @@ function looksLikeStructuredAttempt(text: string): boolean {
 function onScreenCardBlock(uiElement: unknown): string | null {
     if (!uiElement || typeof uiElement !== 'object') return null;
     const type = (uiElement as { type?: unknown }).type;
-    if (type !== NEWSLETTER_CAMPAIGN_DRAFT_TYPE && type !== NEWSLETTER_ISSUE_DRAFT_TYPE) return null;
+    if (type !== NEWSLETTER_CAMPAIGN_DRAFT_TYPE && type !== NEWSLETTER_ISSUE_DRAFT_TYPE && type !== AUDIENCE_FORM_DRAFT_TYPE) return null;
     // Warnings were OUR notes to the user about what we tidied, not part of the draft.
     const { warnings: _w, ...card } = uiElement as Record<string, unknown>;
     return `[ON SCREEN — the card under this reply, exactly as the user sees it]\n${JSON.stringify(card)}`;
@@ -1473,9 +1474,31 @@ STEP 5 — REVISE. When they ask to change one email, return the WHOLE campaign 
             // campaign builder starts from, so the chat and the Studio never suggest different days.
             campaignCadencePromptBlock(),
             `WHAT THE PRODUCT DOES WITH A CAMPAIGN — be exact.
-TRIGGERS THAT START BY THEMSELVES: subscribed.
+TRIGGERS THAT START BY THEMSELVES: subscribed, form.
   • A campaign triggered by "subscribed" saves as their WELCOME SEQUENCE — "Automatic emails" in the Email Studio. There is only one. You cannot see whether they already have one: say that saving will make this their welcome sequence, that the card will ask before replacing one that already has emails, and that it stays OFF until they switch it on in the Studio.
+  • A campaign triggered by "form" starts when someone fills in a sign-up form (a free-guide download, a waitlist, a "register your purchase" form). It saves as its own email campaign — they can have any number — and they link it to the form in the form builder (Audience → Sign-up forms). Saying so is part of your plan. It also stays OFF until they switch it on under Automatic emails in the Email Studio.
   • ANY OTHER trigger (a renewal date, a cancellation, an upgrade, inactivity, a custom event) does NOT start by itself — the platform cannot detect that event yet. Say so plainly in your plan, and say how it runs instead: each email saves as its own draft email in their Emails tab, and they send it to the right segment on the right day. Never say those emails will "fire", "trigger" or "go out automatically".`,
+            // Mode A of docs/form-builder-plan.md — the same FormDefinition the visual builder edits.
+            `SIGN-UP FORMS — you also design the forms people fill in to join this business's audience: a newsletter sign-up, a free download, a waitlist, an event registration, an enquiry, or a "register your purchase" form. A form can be pasted into their website, given its own page on Be More Swan to share from a social bio, or both. Every answer lands in their Audience.
+
+HOW TO BUILD ONE — never output a form in your first reply unless they have already told you all of this.
+STEP 1 — SCOPE, in ONE reply and at most four short questions, whatever you do not already know:
+  • PURPOSE — what someone gets for filling it in (the newsletter, a guide, a place on a waitlist).
+  • WHAT TO ASK — the fewest questions that serve the purpose. Email always. Every extra question costs sign-ups: suggest at most three more, and say why each earns its place.
+  • WHERE IT LIVES — their website, its own page to share, or both. For its own page, suggest a short address ending (e.g. "pricing-guide").
+  • LOOK — their brand colours, or "match my brand" (their brand kit is used automatically).
+If they have given you enough, go straight to Step 2.
+STEP 2 — PROPOSE THE FORM as an "audience_form_draft". In "reply", say in one sentence what it asks and why, and invite changes.
+STEP 3 — REVISE. When they ask for a change, return the WHOLE form with only that changed. The form on screen is the "[ON SCREEN …]" block at the end of your earlier reply; start from it.
+
+FORM RULES
+  • Ask only for what the purpose needs. Never ask for a date of birth, home address, payment details, passwords or anything sensitive (health, religion, ethnicity, politics, sexuality) — a sign-up form cannot protect it. If they insist, say so and leave it out.
+  • Field types: email, text, textarea, phone, select, radio, checkbox. select/radio need 2–20 options; a single checkbox ("Send me the guide") may have one.
+  • Every answer must land somewhere — "target": { "kind": "contact", "column": "first_name" | "last_name" | "company" | "phone" }, or { "kind": "custom", "key": "<short_snake_case>" } (e.g. "team_size"), or { "kind": "tag" } (each chosen option becomes a tag; choice fields only).
+  • Consent: always a plain sentence saying what they will receive and that they can unsubscribe at any time. Keep double opt-in ON unless they ask otherwise.
+  • Colours are #rrggbb only. Never invent a URL; a redirect only if they gave you one.
+  • You CANNOT see their segments or email campaigns, so never choose one. Say that they link the form to an email campaign in the form builder after saving — unlinked, new sign-ups get their welcome sequence (if it is switched on).
+  • Saving a form from this card saves it SWITCHED OFF. Never say a form is live, published or collecting sign-ups; say they publish it in the form builder (Audience → Sign-up forms).`,
             // The one thing this route must never get wrong. The card is an OFFER, so a reply
             // that reports the issue as filed is false at the exact moment the user reads it.
             `WHAT HAPPENS TO THE DRAFT — including the draft object below does NOT save anything. It puts the email or campaign on screen underneath your reply with buttons to keep it or discard it. Until they press one, it exists only in this conversation.
@@ -1488,7 +1511,7 @@ SCHEDULING A SINGLE EMAIL — you may PROPOSE a send time by putting "sendAt" on
 
 You cannot SEND, approve, schedule or switch on anything yourself. If they are not an owner or an admin, approving will refuse and say why.
 
-ONE DRAFT OBJECT PER REPLY — one email or one campaign, never both.
+ONE DRAFT OBJECT PER REPLY — one email, one email campaign or one sign-up form, never two.
 
 NEVER claim you have written something unless THIS reply carries the draft object. If it is null, nothing was written, and a reply saying otherwise leaves the user looking for something that does not exist.`,
             `WHAT YOU CANNOT SEE — this conversation gives you no sight of their audience, segments, emails, welcome sequence or results: not how many subscribers they have, not what has been sent, opened or unsubscribed. If they ask, say plainly that you cannot see it from here and point them at the right place — subscribers and segments are on the Audience page; past emails, their results and the welcome sequence are in the Email Studio. Never guess at a number, and never describe a screen you have not been told about.`,
@@ -1500,7 +1523,7 @@ NEVER claim you have written something unless THIS reply carries the draft objec
             `Return STRICT JSON and NOTHING else — no markdown, no code fences, no prose before or after the object. Keep "reply" to one to three short sentences: the emails belong in the draft object, never in the reply. Every string must be valid JSON — escape the quotes and newlines inside bodyMarkdown.
 {
   "reply": "your conversational message to the user",
-  "uiElement": null, OR a single email, OR a campaign
+  "uiElement": null, OR a single email, OR a campaign, OR a sign-up form
 }
 
 A single issue:
@@ -1521,7 +1544,7 @@ A campaign, as a plan or as finished drafts:
     "campaignType": "onboarding" | "renewal" | "upgrade" | "winback" | "reengagement" | "launch" | "custom",
     "goal": "<what the reader has DONE when this worked, one sentence>",
     "audience": "<who is in it, in plain words>",
-    "trigger": { "event": "subscribed" | "custom", "description": "<what puts someone in>", "startsAutomatically": <true ONLY when event is "subscribed"> },
+    "trigger": { "event": "subscribed" | "form" | "custom", "description": "<what puts someone in>", "startsAutomatically": <true ONLY when event is "subscribed" or "form"> },
     "tone": "<the voice for the whole series, a few words>",
     "newsletters": [
       {
@@ -1537,7 +1560,24 @@ A campaign, as a plan or as finished drafts:
     ]
   }
 }
-Campaign rules: "newsletters" is in send order and "sequenceOrder" runs 1, 2, 3… with no gaps. "sendDay" counts the day they enter as Day 1 and only goes up. "delayDaysAfterPrevious" is days since the PREVIOUS email — the first email's is sendDay − 1, every later one is its sendDay minus the previous email's sendDay. For a countdown (renewal, launch) still count forward from the day they enter, and put the countdown ("14 days before") in "role". In a plan, fill every field except bodyMarkdown, which is "".`,
+Campaign rules: "newsletters" is in send order and "sequenceOrder" runs 1, 2, 3… with no gaps. "sendDay" counts the day they enter as Day 1 and only goes up. "delayDaysAfterPrevious" is days since the PREVIOUS email — the first email's is sendDay − 1, every later one is its sendDay minus the previous email's sendDay. For a countdown (renewal, launch) still count forward from the day they enter, and put the countdown ("14 days before") in "role". In a plan, fill every field except bodyMarkdown, which is "".
+
+A sign-up form:
+{
+  "type": "audience_form_draft",
+  "form": {
+    "name": "<internal name>",
+    "purpose": "newsletter" | "lead_magnet" | "waitlist" | "event" | "enquiry" | "onboarding" | "custom",
+    "content": { "headline": "...", "intro": "...", "buttonLabel": "...", "successMessage": "...", "redirectUrl": null },
+    "fields": [ { "id": "f_email", "type": "email", "label": "Email", "required": true, "target": { "kind": "contact", "column": "email" } },
+                { "id": "f_<short>", "type": "...", "label": "...", "placeholder": "", "help": "", "required": false, "options": [ { "value": "...", "label": "..." } ], "target": { ... } } ],
+    "consent": { "text": "...", "requireCheckbox": false },
+    "style": { "useBrandKit": true, "accent": "#rrggbb", "background": "#ffffff", "text": "#111827", "pageBackground": "#f9fafb", "font": "system" | "serif" | "rounded" | "mono" | "inherit", "radius": "none" | "small" | "large", "layout": "stacked" | "inline" },
+    "delivery": { "embed": { "enabled": true, "allowedOrigins": null }, "hosted": { "enabled": <true if it gets its own page>, "slug": "<short-address or null>" } },
+    "audience": { "doubleOptIn": true, "segmentId": null, "tags": [ "<optional tag every sign-up gets>" ] },
+    "campaign": { "sequenceId": null, "skipWelcome": false }
+  }
+}`,
         ].filter(Boolean).join('\n\n'),
         parseResponse: parseStructuredReply,
     },
@@ -2154,9 +2194,13 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 orgRow?.businessDescription ?? '',
             ].join('\n'))
             : null;
+        // Or a sign-up form — through the same gate the form builder and the public endpoint use.
+        const formDraft = route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft
+            ? formDraftFromUiElement(uiElement) : null;
         if (route === ROUTES.newsletter_editor) {
             uiElement = newsletterDraft ? { type: NEWSLETTER_ISSUE_DRAFT_TYPE, ...newsletterDraft }
                 : campaignDraft ? { type: NEWSLETTER_CAMPAIGN_DRAFT_TYPE, ...campaignDraft }
+                : formDraft ? { type: AUDIENCE_FORM_DRAFT_TYPE, ...formDraft }
                 : null;
         }
 
@@ -2214,7 +2258,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
 
         // And the newsletter route's. Identical shape: it never persists on the turn, so the only
         // unbacked claim available to it is claiming an issue it did not write.
-        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && replyClaimsPostSaved(content) && !alreadyApologised) {
+        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked newsletter draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );
