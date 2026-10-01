@@ -5,6 +5,7 @@
 //   GET    ?id=<n>                 → one issue, with its resolved audience size
 //   GET                            → the org's issues (summary rows)
 //   POST   { action: 'create' }    → a new draft
+//   POST   { action: 'createCampaign' } → one draft per email of a chat-drafted campaign, all or none
 //   POST   { action: 'update' }    → subject / preheader / body / segment
 //   POST   { action: 'generate' }  → draft it with the assistant (src/utils/newsletter-generate.ts)
 //   POST   { action: 'refine' }    → rewrite the existing draft to an instruction. RETURNS ONLY —
@@ -50,6 +51,7 @@ import { linkReportForIssue } from '../../src/utils/newsletter-link-clicks';
 import { LOCAL_TIME_RE, instantToWallClock, resolveSendTimezone, wallClockToInstant } from '../../src/utils/newsletter-schedule';
 import { contentFindings, severityRank, warmupFinding } from '../../src/utils/deliverability';
 import { sampleMergeContext } from '../../src/config/newsletter-merge-vars';
+import { MAX_CAMPAIGN_EMAILS } from '../../src/utils/newsletter-campaign-chat-draft';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /**
@@ -427,6 +429,65 @@ export default withLambda(async (event: HandlerEvent) => {
             ...(bodyMarkdown ? { generationReason: NEWSLETTER_DRAFT_REASON } : {}),
         }).returning();
         return json(200, { issue, deduped: false });
+    }
+
+    // A chat-drafted campaign whose trigger cannot start by itself (src/utils/
+    // newsletter-campaign-chat-draft.ts AUTOMATIC_TRIGGERS) — a renewal, a win-back. Saved as one
+    // DRAFT issue per email, which the user sends to the right segment on the right day. Nothing is
+    // approved or scheduled: the plan's days are relative to an event the platform cannot see, so
+    // there is no date to put on them.
+    //
+    // ⚠️ ALL OR NOTHING, and deduped per email on the same grain as 'create'. Half a campaign in
+    // the Studio is worse than none (email 3 refers to email 2), and the card's Save is pressed
+    // again on every reload of the conversation.
+    if (action === 'createCampaign') {
+        const assistantId = Number(body.assistantId || '') || null;
+        if (assistantId) {
+            const [a] = await db.select({ id: aiAssistants.id }).from(aiAssistants)
+                .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId))).limit(1);
+            if (!a) return json(404, { error: 'Assistant not found.' });
+        }
+        const raw = Array.isArray(body.emails) ? body.emails : [];
+        if (!raw.length) return json(400, { error: 'There are no emails in this campaign to save.' });
+        if (raw.length > MAX_CAMPAIGN_EMAILS) return json(400, { error: `A campaign can hold at most ${MAX_CAMPAIGN_EMAILS} emails.` });
+        const emails = raw.map((e: any) => ({
+            subject: String(e?.subject || '').trim().slice(0, MAX_SUBJECT),
+            preheader: String(e?.preheader || '').trim().slice(0, 200) || null,
+            bodyMarkdown: scrubMergeTags(String(e?.bodyMarkdown || '').slice(0, MAX_BODY)).text,
+        }));
+        const blank = emails.findIndex((e: { subject: string; bodyMarkdown: string }) => !e.subject || !e.bodyMarkdown.trim());
+        if (blank !== -1) return json(400, { error: `Email ${blank + 1} has no subject or no copy yet.` });
+
+        const result = await db.transaction(async (tx) => {
+            const out: { id: number; deduped: boolean }[] = [];
+            for (const e of emails) {
+                const [existing] = await tx.select({ id: newsletterIssues.id }).from(newsletterIssues)
+                    .where(and(
+                        eq(newsletterIssues.organisationId, orgId),
+                        eq(newsletterIssues.subject, e.subject),
+                        eq(newsletterIssues.bodyMarkdown, e.bodyMarkdown),
+                    )).limit(1);
+                if (existing) { out.push({ id: existing.id, deduped: true }); continue; }
+                const [row] = await tx.insert(newsletterIssues).values({
+                    organisationId: orgId,
+                    userId: ctx.userId,
+                    assistantId,
+                    subject: e.subject,
+                    preheader: e.preheader,
+                    bodyMarkdown: e.bodyMarkdown,
+                    purpose: purposeOrDefault(body.purpose),
+                    // Same provenance stamp as a single chat draft: assistant-written copy.
+                    generationReason: NEWSLETTER_DRAFT_REASON,
+                }).returning({ id: newsletterIssues.id });
+                out.push({ id: row.id, deduped: false });
+            }
+            return out;
+        });
+        return json(200, {
+            issueIds: result.map((r) => r.id),
+            created: result.filter((r) => !r.deduped).length,
+            deduped: result.every((r) => r.deduped),
+        });
     }
 
     const id = Number(body.id || '');

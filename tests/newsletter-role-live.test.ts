@@ -346,13 +346,14 @@ await check('the chat knows what it is, and what it cannot do', () => {
     // The three things a chat can get catastrophically wrong for this role. ⚠️ The first is about
     // SENDING, which the chat can never do — distinct from saving, which it now can (via the card,
     // pressed by a human). tests/newsletter-chat-draft.test.ts covers the save contract itself.
-    assert.match(route, /NEVER say the issue has been saved/i, 'the card is an offer, not a filing');
+    // "anything" since campaigns: an issue OR a campaign — the card is still only an offer.
+    assert.match(route, /NEVER say anything has been saved/i, 'the card is an offer, not a filing');
     // ⚠️ SENDING is still never available; SCHEDULING now is, but only as a proposal the model
     // makes and a human presses. The distinction is the whole safety property: a button on a card
     // under an issue somebody has just read is a human decision, and the server still refuses
     // approval to anyone who is not an owner or an admin.
-    assert.match(route, /You still cannot SEND anything/i, 'sending is never available here');
-    assert.match(route, /you cannot approve or schedule on your own/i,
+    assert.match(route, /You cannot SEND, approve, schedule or switch on anything yourself/i, 'sending is never available here');
+    assert.match(route, /Pressing THAT is what schedules it — you have not/i,
         'and the model must not believe it schedules anything by itself');
     assert.match(route, /Only propose a time when they have actually asked for one/i,
         'an unasked-for send time is a button that gets pressed by accident');

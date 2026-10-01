@@ -98,11 +98,12 @@ await check('the uiElement is normalised before it is persisted to the transcrip
     // uiElementJson is stored verbatim and re-rendered on every reload, so a half-formed object
     // comes back as a broken card with a Save button for as long as the conversation lives.
     assert.match(ORCH, /const newsletterDraft = route === ROUTES\.newsletter_editor \? newsletterDraftFromUiElement\(uiElement\) : null;/);
-    assert.match(ORCH, /uiElement = newsletterDraft \? \{ type: NEWSLETTER_ISSUE_DRAFT_TYPE, \.\.\.newsletterDraft \} : null;/);
+    // Followed by the campaign alternative (tests/newsletter-campaign-draft.test.ts), then null.
+    assert.match(ORCH, /uiElement = newsletterDraft \? \{ type: NEWSLETTER_ISSUE_DRAFT_TYPE, \.\.\.newsletterDraft \}/);
 });
 
 await check('a reply claiming a draft it did not write is replaced', () => {
-    const guard = ORCH.slice(landmark(ORCH, 'route === ROUTES.newsletter_editor && !newsletterDraft'));
+    const guard = ORCH.slice(landmark(ORCH, 'route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && replyClaimsPostSaved'));
     assert.match(guard.slice(0, 400), /honestDraftReply/);
     // And the shared sentence must name no surface, or it would point a newsletter user at Blogs.
     const claims = read('src/utils/chat-draft-claims.ts');
