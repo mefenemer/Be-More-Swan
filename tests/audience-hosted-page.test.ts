@@ -38,7 +38,10 @@ const PUBLIC = read('netlify/functions/audience-public.ts');
 const FORMS = read('netlify/functions/audience-forms.ts');
 const SQL = read('db/audience-hosted-pages.sql');
 const TOML = read('netlify.toml');
-const UI = read('audience.js');
+// The forms list and the builder are shared components since the form builder (signup-forms.js,
+// form-builder.js); audience.js only opens the list.
+const UI = read('src/components/signup-forms.js');
+const BUILDER = read('src/components/form-builder.js');
 const RENDERER = read('subscribe.js');
 
 console.log('\nThe hosted sign-up page\n');
@@ -144,17 +147,20 @@ check('the form key reaching the inline script is validated first', () => {
 
 check('the link is built from the browser\'s own origin', () => {
     // A hardcoded domain is what breaks on a preview deploy.
-    assert.match(UI, /return `\$\{location\.origin\}\/s\/\$\{form\.publicKey\}`/);
+    assert.match(UI, /`\$\{location\.origin\}\/s\/\$\{f\.publicKey\}`/);
+    assert.match(UI, /`\$\{location\.origin\}\/f\/\$\{slug\}`/, 'and the chosen address when there is one');
 });
 
-check('the panel says the page is the same form, not a second one', () => {
-    assert.match(UI, /same consent wording and double opt-in setting/);
-    assert.match(UI, /No website needed/);
+check('the page is a setting OF A FORM, explained where it is switched on', () => {
+    // The old dialog showed one form's settings under the list, as though they applied to every form.
+    assert.match(UI, /belongs to THAT form and lives in its builder/);
+    assert.match(BUILDER, /For when you have no website, or want a link to share/);
 });
 
-check('a headline is only sent when the field is on screen', () => {
-    // Sending undefined while the page is off would blank a headline written earlier.
-    assert.match(UI, /\$\('aud-form-hosted-headline'\) \? \{ hostedHeadline/);
+check('the builder saves the whole definition, so nothing it does not show can be blanked', () => {
+    // Replaces the old "only send a headline while the field is on screen" guard: there is no partial
+    // write left to get wrong.
+    assert.match(BUILDER, /action: 'save', id: S\.formId, definition: S\.def/);
 });
 
 // ── 6. What the page actually renders ───────────────────────────────────────

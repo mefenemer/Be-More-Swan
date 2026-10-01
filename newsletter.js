@@ -211,6 +211,7 @@
       // started by the server disagreed about what colour the customer's newsletter is.
       if (brandTheme) state.brandTheme = brandTheme;
       renderList();
+      loadAutoList();
       fillSegments();
       renderVarChips();
       const pick = selectId || (state.current && state.current.id);
@@ -241,6 +242,7 @@
       if (campaignCadences) state.campaignCadences = campaignCadences;
       if (brandTheme) state.brandTheme = brandTheme;
       renderList();
+      loadAutoList();
     } catch { /* the list is context, not the work — a failure here must not disturb the editor */ }
   }
 
@@ -254,6 +256,25 @@
     const p = findPurpose(key);
     if (!p || p.key === 'newsletter') return '';
     return `<p class="mt-1"><span class="inline-flex px-1.5 py-0.5 text-[10px] font-bold rounded-full border ${esc(p.chipClass)}">${esc(p.label)}</span></p>`;
+  }
+
+  /** The automatic series card (welcome sequence + form-started campaigns). Best effort — it is context. */
+  async function loadAutoList() {
+    const host = $('nl-auto-list');
+    if (!host) return;
+    try {
+      const data = await api('/.netlify/functions/newsletter-sequences');
+      const list = (data.sequences || []).slice().sort((a, b) => (a.triggerEvent === 'subscribed' ? -1 : 0) - (b.triggerEvent === 'subscribed' ? -1 : 0));
+      host.innerHTML = list.length ? list.map((x) => `<li>
+          <button type="button" data-auto-seq="${x.triggerEvent === 'subscribed' ? '' : x.id}" class="w-full text-left px-4 py-3 hover:bg-gray-50 cursor-pointer">
+            <div class="flex items-start justify-between gap-2">
+              <p class="text-sm font-bold text-gray-900 truncate">${esc(x.triggerEvent === 'subscribed' ? 'Welcome sequence' : x.name)}</p>
+              <span class="shrink-0 inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border ${x.isEnabled ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-gray-100 text-gray-600 border-gray-200'}">${x.isEnabled ? 'On' : 'Off'}</span>
+            </div>
+            <p class="text-xs text-gray-500 mt-0.5">${esc(String(x.steps || 0))} email${x.steps === 1 ? '' : 's'} · ${x.triggerEvent === 'subscribed' ? 'when someone subscribes' : 'when someone fills in a linked form'}</p>
+          </button></li>`).join('')
+        : '<li class="px-4 py-4 text-xs text-gray-500">None yet. Use <span class="font-bold">New email campaign</span> to create one.</li>';
+    } catch { host.innerHTML = ''; }
   }
 
   function renderList() {
@@ -309,7 +330,32 @@
       class="px-2 py-1 text-[11px] font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer">+ ${esc(v.label)}</button>`).join('');
   }
 
-  function insertVar(key) { insertVarInto($('nl-body'), key); scheduleSave(); }
+  /**
+   * The text box a personalisation tag goes into: the one the person last clicked into.
+   *
+   * ⚠️ It used to ALWAYS be #nl-body — which a designed email hides, so the "+ First name" buttons
+   * wrote into an invisible textarea and appeared to do nothing at all. The designer's own text boxes
+   * (a heading, a paragraph, a button label) are ordinary inputs, so the tag goes into whichever was
+   * focused last, and an `input` event tells the designer (and the autosave) that it changed.
+   */
+  let lastTextTarget = null;
+  function insertTarget() {
+    const ok = (el) => el && document.contains(el) && el.offsetParent !== null && !el.disabled;
+    if (ok(lastTextTarget)) return lastTextTarget;
+    const body = $('nl-body');
+    return ok(body) ? body : null;
+  }
+
+  function insertVar(key) {
+    const ta = insertTarget();
+    if (!ta) {
+      window.showToast('Click into the text where it should go — a heading, a paragraph or a button — then choose it again.');
+      return;
+    }
+    insertVarInto(ta, key);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    scheduleSave();
+  }
 
   /** ⚠️ Takes the textarea: the sequence step editor has its own, and there must be one insert. */
   function insertVarInto(ta, key) {
@@ -377,6 +423,9 @@
       // this button only makes the issue due — there is one send path, scheduled or not.
       const sendable = ['approved', 'scheduled'].includes(issue.status) && !!issue.renderedPayload;
       if (sendable) show($('nl-send'), 'inline-flex'); else hide($('nl-send'));
+      // Delete is offered for anything that has not gone out. Sending and sent emails are the record
+      // of what people received; the server refuses those too.
+      if (['sending', 'sent', 'archived'].includes(issue.status)) hide($('nl-delete')); else show($('nl-delete'), 'inline-flex');
 
       // A sent issue is a record of what people received, not a document. Lock the inputs rather
       // than letting someone type into a thing the server will refuse to save.
@@ -1900,6 +1949,7 @@
       seqState.sequence = data.sequence;
       seqState.sequences = data.sequences || [];
       renderSeqPicker();
+      loadAutoList();   // the Studio's card shows On/Off and counts — keep it in step
       seqState.steps = data.steps || [];
       seqState.enrolments = data.enrolments || {};
       if (!seqState.editing) seqState.editing = { stepNumber: 1, design: null, revision: null };
@@ -2638,6 +2688,7 @@
       if (!res.ok) throw new Error(data.error || `Could not save (HTTP ${res.status}).`);
       hide($('nl-campaign-modal'));
       state.campaign = null;
+      loadAutoList();
       if (d.trigger.event === 'form') {
         window.showToast(data.deduped ? 'Already saved — it is under Automatic emails.' : 'Saved as an email campaign, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on under Automatic emails.');
       } else if (automatic) {
@@ -2665,6 +2716,33 @@
     else if ((row = at('data-cmp-body'))) row.bodyMarkdown = t.value;
   }
 
+
+  async function deleteCurrent() {
+    const issue = state.current;
+    if (!issue) return;
+    const scheduled = ['approved', 'scheduled'].includes(issue.status);
+    const ok = await window.confirmModal(
+      scheduled
+        ? `Delete "${issue.subject || 'Untitled email'}"? It is approved to send — deleting it cancels that, and nobody will receive it.`
+        : `Delete "${issue.subject || 'Untitled email'}"? It has not been sent to anyone.`,
+      { title: 'Delete this email?', confirmLabel: 'Delete', confirmColor: '#dc2626' });
+    if (!ok) return;
+    // ⚠️ Drop any queued autosave first: it would write to the row a second after it was archived.
+    cancelPending();
+    state.dirty = false;
+    try {
+      await api(`${ISSUES_API}?id=${encodeURIComponent(issue.id)}`, { method: 'DELETE' });
+      state.current = null;
+      if (state.designer) { state.designer.destroy(); state.designer = null; }
+      hide($('nl-editor'));
+      show($('nl-empty'), 'block');
+      window.showToast('Email deleted.');
+      await refreshList();
+    } catch (err) {
+      window.showToast(err.message);
+    }
+  }
+
   function wire() {
     $('nl-seq-picker')?.addEventListener('change', async (e) => {
       if (e.target.id !== 'nl-seq-pick') return;
@@ -2675,11 +2753,8 @@
     });
     // New email campaign — bound once per view mount, delegated, never from a render path.
     $('nl-campaign')?.addEventListener('click', openCampaignModal);
-    $('nl-forms')?.addEventListener('click', async () => {
-      try { await flushPending(); } catch (err) { window.showToast(err.message); return; }
-      window._audienceOpenForms = true;
-      window.loadView?.('audience');
-    });
+    // Opened IN PLACE — closing it leaves the person in the Studio, where they were.
+    $('nl-forms')?.addEventListener('click', () => window.SignupForms?.open());
     document.querySelectorAll('[data-nl-campaign-close]').forEach((el) => el.addEventListener('click', () => { hide($('nl-campaign-modal')); state.campaign = null; }));
     $('nl-cmp-kinds')?.addEventListener('click', (e) => {
       const b = e.target.closest('[data-cmp-kind]');
@@ -2741,6 +2816,22 @@
       openIssue(Number(btn.getAttribute('data-issue')));
     });
 
+    // Remember where the person was typing, so a personalisation tag lands there (see insertVar).
+    // Several events, not just focus: focus events are not raised in every situation (a window that
+    // is not the active one, a field focused by script), and a click or a keystroke always means it.
+    const rememberText = (e) => {
+      const t = e.target;
+      const text = t && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && (t.type === 'text' || t.type === '')));
+      if (text && (t.id === 'nl-body' || t.closest('#nl-design-host'))) lastTextTarget = t;
+    };
+    ['focusin', 'pointerdown', 'keyup', 'input'].forEach((ev) => $('nl-editor')?.addEventListener(ev, rememberText));
+    $('nl-delete')?.addEventListener('click', deleteCurrent);
+    $('nl-auto-list')?.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-auto-seq]');
+      if (!b) return;
+      seqState.selectedId = Number(b.getAttribute('data-auto-seq')) || null;
+      openWelcomeModal();
+    });
     $('nl-vars')?.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-var]');
       if (btn) insertVar(btn.getAttribute('data-var'));
@@ -2799,7 +2890,7 @@
     $('nl-preview')?.addEventListener('click', preview);
     $('nl-send')?.addEventListener('click', sendNow);
     $('nl-sending')?.addEventListener('click', openSendingModal);
-    $('nl-welcome')?.addEventListener('click', openWelcomeModal);
+    $('nl-welcome')?.addEventListener('click', () => { seqState.selectedId = null; openWelcomeModal(); });
     // ⚠️ Flush on the way out. Closing a modal is the one moment these forms lose their only copy
     // of what was typed, and there is no Save button left to have caught it on the way past.
     document.querySelectorAll('[data-nl-welcome-close]').forEach((el) => el.addEventListener('click', () => {

@@ -291,6 +291,7 @@
       ${label('A line or two about what people get')}<textarea data-fb-content="intro" rows="3" maxlength="600" class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-4">${esc(c.intro)}</textarea>
       ${label('Button')}${input('data-fb-content="buttonLabel" maxlength="40"', c.buttonLabel)}
       ${label('Consent sentence')}<textarea data-fb-consent="text" rows="2" maxlength="500" class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm mb-2">${esc(S.def.consent.text)}</textarea>
+      <p class="text-[11px] text-gray-400 -mt-1 mb-2">Shown beside the button, and kept with every sign-up as the record of what they agreed to.</p>
       <label class="flex items-center gap-2 text-sm text-gray-700 mb-4 cursor-pointer"><input type="checkbox" data-fb-consent="requireCheckbox" ${S.def.consent.requireCheckbox ? 'checked' : ''}> They must tick a box to agree</label>
       ${label('Message after signing up')}${input('data-fb-content="successMessage" maxlength="300" placeholder="Leave blank for the standard message"', c.successMessage)}
       ${label('Or send them to a page (optional)')}${input('data-fb-content="redirectUrl" maxlength="500" placeholder="https://…"', c.redirectUrl || '')}`;
@@ -306,23 +307,31 @@
     return `
       <label class="flex items-start gap-2 text-sm text-gray-700 mb-2 cursor-pointer">
         <input type="checkbox" data-fb-delivery="embed" ${d.embed.enabled ? 'checked' : ''} class="mt-0.5">
-        <span><span class="font-bold">On my website</span><span class="block text-[11px] text-gray-500">Paste a snippet into Squarespace, WordPress, Wix or any site that accepts an embed code.</span></span>
+        <span><span class="font-bold">On my website</span><span class="block text-[11px] text-gray-500">You get a short piece of code to paste into your website (Squarespace, WordPress, Wix or any site that accepts an embed code) — the form appears wherever you paste it.</span></span>
       </label>
       ${d.embed.enabled ? (snippet
         ? `<textarea readonly rows="3" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-xs font-mono bg-gray-50 mb-2">${esc(snippet)}</textarea>
-           <button type="button" data-fb-copy="snippet" class="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer mb-3">Copy snippet</button>`
-        : '<p class="text-[11px] text-gray-500 mb-3">Save the form to get your snippet.</p>')
+           <button type="button" data-fb-copy="snippet" class="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer mb-3">Copy website code</button>`
+        : '<p class="text-[11px] text-gray-500 mb-3">Save the form to get the code for your website.</p>')
         + `${label('Only these websites may use it (one per line — blank for any)')}<textarea data-fb-origins rows="2" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm mb-5" placeholder="https://www.example.com">${esc((d.embed.allowedOrigins || []).join('\n'))}</textarea>` : '<div class="mb-5"></div>'}
       <label class="flex items-start gap-2 text-sm text-gray-700 mb-2 cursor-pointer">
         <input type="checkbox" data-fb-delivery="hosted" ${d.hosted.enabled ? 'checked' : ''} class="mt-0.5">
-        <span><span class="font-bold">Its own page on Be More Swan</span><span class="block text-[11px] text-gray-500">No website needed — share the link in a bio, on a poster or behind a QR code.</span></span>
+        <span><span class="font-bold">Its own page on Be More Swan</span><span class="block text-[11px] text-gray-500">For when you have no website, or want a link to share: we host a page with just this form on it. Put the link in your Instagram bio, a link tree, an email signature, or behind a QR code on a poster.</span></span>
       </label>
       ${d.hosted.enabled ? `
         ${label('Page address')}
         <div class="flex items-center gap-1 mb-1"><span class="text-sm text-gray-500 shrink-0">${esc(location.host)}/f/</span>
           <input data-fb-slug maxlength="48" value="${esc(d.hosted.slug || '')}" placeholder="your-form" class="flex-1 min-w-0 px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm"></div>
         ${slugNote}
-        ${S.publicKey ? `<p class="text-[11px] text-gray-400 mb-3">Also always at ${esc(origin)}/s/${esc(S.publicKey)}</p>` : ''}` : ''}`;
+        ${S.publicKey ? (() => {
+          const link = d.hosted.slug ? `${origin}/f/${d.hosted.slug}` : `${origin}/s/${S.publicKey}`;
+          return `<div class="flex items-center gap-2 mb-3">
+              <input readonly value="${esc(link)}" class="flex-1 min-w-0 px-3 py-2 rounded-lg border border-gray-300 text-xs font-mono bg-gray-50">
+              <button type="button" data-fb-copy="link" data-link="${esc(link)}" class="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Copy link</button>
+              <a href="${esc(link)}" target="_blank" rel="noopener" class="px-2 py-1.5 text-xs font-bold text-emerald-700 hover:text-emerald-800">Open ↗</a>
+            </div>
+            ${S.status !== 'active' ? '<p class="text-[11px] text-amber-700 mb-3">The page shows nothing until the form is Live (top right).</p>' : ''}`;
+        })() : '<p class="text-[11px] text-gray-500 mb-3">Save the form to get its link.</p>'}` : ''}`;
   }
 
   function panelAfter() {
@@ -408,9 +417,12 @@
       touched(); renderPanel(); renderPreview();
       return;
     }
-    if (t.closest('[data-fb-copy]')) {
-      const ta = $('fb-panel').querySelector('textarea[readonly]');
-      if (ta) navigator.clipboard?.writeText(ta.value).then(() => window.showToast?.('Snippet copied.'));
+    const cp = t.closest('[data-fb-copy]');
+    if (cp) {
+      const isLink = cp.getAttribute('data-fb-copy') === 'link';
+      const text = isLink ? cp.getAttribute('data-link') : ($('fb-panel').querySelector('textarea[readonly]') || {}).value;
+      if (text) navigator.clipboard?.writeText(text).then(() => window.showToast?.(isLink ? 'Link copied.' : 'Website code copied.'))
+        .catch(() => window.prompt('Copy this:', text));
       return;
     }
     if (t.closest('#fb-save')) save();
