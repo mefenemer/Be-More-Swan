@@ -260,6 +260,20 @@ function looksLikeStructuredAttempt(text: string): boolean {
     return t.startsWith('{') || t.startsWith('[') || /"reply"\s*:/.test(text) || /"uiElement"\s*:/.test(text);
 }
 
+/**
+ * A newsletter card as the model should see it in its own earlier reply: the exact object the user
+ * has on screen. Null for anything that is not a newsletter card (other routes keep text-only
+ * history, unchanged). See the latestCardIdx comment in the handler for why this exists.
+ */
+function onScreenCardBlock(uiElement: unknown): string | null {
+    if (!uiElement || typeof uiElement !== 'object') return null;
+    const type = (uiElement as { type?: unknown }).type;
+    if (type !== NEWSLETTER_CAMPAIGN_DRAFT_TYPE && type !== NEWSLETTER_ISSUE_DRAFT_TYPE) return null;
+    // Warnings were OUR notes to the user about what we tidied, not part of the draft.
+    const { warnings: _w, ...card } = uiElement as Record<string, unknown>;
+    return `[ON SCREEN — the card under this reply, exactly as the user sees it]\n${JSON.stringify(card)}`;
+}
+
 function parseStructuredReply(raw: string): { content: string; uiElement: unknown | null } {
     const stripped = stripCodeFences(raw);
 
@@ -1442,9 +1456,9 @@ Every timing is a suggestion. If they want Day 2 instead of Day 3, or four email
 
 STEP 3 — AGREE. Wait for them to accept or adjust. "Looks good", "go", "write it" are a yes. If they change it, send the revised plan (still "stage": "plan") and wait again.
 
-STEP 4 — DRAFT every email in the agreed plan, together, as one "newsletter_campaign_draft" with "stage": "draft". Keep the agreed order, days and jobs.
+STEP 4 — DRAFT every email in the agreed plan, together, as one "newsletter_campaign_draft" with "stage": "draft" and EVERY bodyMarkdown written. The plan they agreed to is the "[ON SCREEN …]" block at the end of your own earlier reply — that is exactly the card they are looking at. Write THAT plan: the same emails, days, jobs and subjects, unless they asked for a change. Never answer "write it" with another plan, and never say the emails are written unless every bodyMarkdown in this reply is filled in.
 
-STEP 5 — REVISE. When they ask to change one email, return the WHOLE campaign with only that email changed, so the card on screen is always complete.`,
+STEP 5 — REVISE. When they ask to change one email, return the WHOLE campaign with only that email changed, so the card on screen is always complete. Start from the "[ON SCREEN …]" block — copy every other email from it unchanged. Never write an "[ON SCREEN …]" block yourself; it is added for you.`,
             `WRITING A CAMPAIGN THAT HOLDS TOGETHER
   • ONE VOICE — the same greeting style, sign-off and formality in every email. Decide them in email 1 and keep them.
   • ONE JOB AND ONE ASK PER EMAIL — a single primary call to action each.
@@ -1858,7 +1872,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // the cost of every turn without bound. Fetched newest-first, then flipped back to
     // chronological order for the prompt.
     const history = (await db
-        .select({ role: chatMessages.role, content: chatMessages.content, createdAt: chatMessages.createdAt })
+        .select({ role: chatMessages.role, content: chatMessages.content, uiElementJson: chatMessages.uiElementJson, createdAt: chatMessages.createdAt })
         .from(chatMessages)
         .where(and(
             eq(chatMessages.chatSessionId, session.id),
@@ -1941,8 +1955,21 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     }
 
     // `history` is already role-filtered and capped by the query above.
+    // ⚠️ The model is sent the TEXT of its earlier replies, never the card under them — so on the
+    // newsletter route it could not see the campaign plan it had just proposed. Asked to "write it",
+    // it re-invented a different plan, or followed its own "plan before writing" rule and proposed
+    // one AGAIN while its reply said the emails were written (seen on prod 2026-10-01). The latest
+    // newsletter card is therefore restated inside the reply it belongs to, as what is on screen.
+    // Only the LATEST one: every redraft is a full card, and twenty turns of them would crowd out
+    // the conversation for no gain — the newest one is the only version the user is looking at.
+    const latestCardIdx = route === ROUTES.newsletter_editor
+        ? history.map((m) => onScreenCardBlock(m.uiElementJson) ? 1 : 0).lastIndexOf(1)
+        : -1;
     const llmMessages = [
-        ...history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+        ...history.map((m, i) => ({
+            role: m.role as 'user' | 'assistant',
+            content: i === latestCardIdx ? `${m.content}\n\n${onScreenCardBlock(m.uiElementJson)}` : m.content,
+        })),
         { role: 'user' as const, content: recordContext ? `${recordContext}\n\n${message}` : message },
     ];
 

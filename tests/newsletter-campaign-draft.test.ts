@@ -189,6 +189,27 @@ await check('a reply that carries a campaign is not mistaken for an unbacked cla
     assert.match(ORCH, /route === ROUTES\.newsletter_editor && !newsletterDraft && !campaignDraft && replyClaimsPostSaved/);
 });
 
+await check('the model can see the plan it proposed — the latest newsletter card is restated in history', () => {
+    // Prod 2026-10-01: history carried reply TEXT only, so "write it" was answered with a second,
+    // different plan and a reply claiming the emails were written.
+    assert.match(ORCH, /uiElementJson: chatMessages\.uiElementJson, createdAt: chatMessages\.createdAt/);
+    const block = ORCH.slice(landmark(ORCH, 'const latestCardIdx = route === ROUTES.newsletter_editor'), landmark(ORCH, "{ role: 'user' as const, content: recordContext"));
+    assert.match(block, /lastIndexOf\(1\)/, 'only the LATEST card, not every redraft');
+    assert.match(block, /i === latestCardIdx \? /);
+    const helper = ORCH.slice(landmark(ORCH, 'function onScreenCardBlock'), landmark(ORCH, 'function parseStructuredReply'));
+    assert.match(helper, /NEWSLETTER_CAMPAIGN_DRAFT_TYPE/);
+    assert.match(helper, /return null/, 'other routes keep text-only history');
+    assert.match(ORCH, /Never answer "write it" with another plan/);
+});
+
+await check('"draft" with no copy at all says so instead of silently showing a plan', () => {
+    const d = campaignDraftFromUiElement(campaign([email({ bodyMarkdown: '' }), email({ bodyMarkdown: '' })]))!;
+    assert.equal(d.stage, 'plan');
+    assert.ok(d.warnings.some((w) => /came back without their copy, so this is still the plan/.test(w)));
+    const plan = campaignDraftFromUiElement({ ...campaign([email({ bodyMarkdown: '' })]), stage: 'plan' })!;
+    assert.equal(plan.warnings.length, 0, 'an honest plan carries no warning');
+});
+
 // ── 4. The card ─────────────────────────────────────────────────────────────
 
 const CARD = REGISTRY_UI.slice(landmark(REGISTRY_UI, 'function renderNewsletterCampaignDraftCard'), landmark(REGISTRY_UI, "register('newsletter_campaign_draft'"));

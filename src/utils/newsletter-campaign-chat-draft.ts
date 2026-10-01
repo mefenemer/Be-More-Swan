@@ -161,6 +161,12 @@ export function campaignDraftFromUiElement(uiElement: unknown, suppliedText = ''
 
     const written = newsletters.filter((n) => n.bodyMarkdown).length;
     const stage: 'plan' | 'draft' = written === newsletters.length ? 'draft' : 'plan';
+    // The prod failure of 2026-10-01: "write it" answered with stage 'draft' and not one word of
+    // copy. Shown as a bare plan, the card contradicted a reply saying the emails were written, with
+    // nothing on screen to say why.
+    if (!written && ui.stage === 'draft') {
+        warnings.push('The emails came back without their copy, so this is still the plan. Say \u201cwrite it\u201d again and I will draft them.');
+    }
     if (written && stage === 'plan') {
         warnings.push(`${newsletters.length - written} of the emails came back without their copy, so this cannot be saved yet. Ask me to write the rest.`);
     }
