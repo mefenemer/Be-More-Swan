@@ -7325,7 +7325,8 @@ function _pceNextVisibleClip(from) {
     return -1;
 }
 
-const _pcePrev = { on: false, i: 0, offset: 0, starting: false };
+// `only` — playing ONE clip from its row's ▶ (stop at its out point) rather than the whole cut.
+const _pcePrev = { on: false, i: 0, offset: 0, starting: false, only: false };
 
 /**
  * Why the preview could not start. Empty when there is nothing to say.
@@ -7503,6 +7504,7 @@ window._pcePreviewStart = async function () {
         _pceRenderClips();
         return;
     }
+    if (_pcePrev.on && _pcePrev.only) window._pcePreviewStop();   // a single clip was playing — start the whole cut
     if (_pcePrev.on) { video.play().catch(() => {}); return; }
     const first = _pceNextVisibleClip(0);
     if (first < 0) {
@@ -7517,9 +7519,36 @@ window._pcePreviewStart = async function () {
     await _pcePreviewSeat(first);
 };
 
+/**
+ * ▶ on a clip's row: play just that clip, from its in point to its out point, in the canvas.
+ * Pressing it again (■) stops. Same machinery as the full-cut preview, with `only` set so the tick
+ * stops at the clip's end instead of seating the next one — works for a single-clip post too.
+ */
+window._pcePlayClip = async function (i) {
+    _pcePrevMsg = '';
+    const clips = _pceClips();
+    if (!clips[i]) return;
+    if (_pcePrev.on && _pcePrev.only && _pcePrev.i === i) return window._pcePreviewStop();
+    if (!clips[i].url) {
+        _pcePrevMsg = `Clip ${i + 1} has no playable file. Removing and re-adding that clip usually fixes it.`;
+        _pceRenderClips();
+        return;
+    }
+    const video = _pcePreviewVideoEl();
+    if (!video) return;
+    if (_pcePrev.on) window._pcePreviewStop();
+    _pcePrev.on = true;
+    _pcePrev.only = true;
+    _pceCloseTextLook();
+    _pceCanvasBorrow();
+    await _pcePreviewSeat(i);
+    _pceRenderClips();
+};
+
 window._pcePreviewStop = function () {
     if (!_pcePrev.on) return;
     _pcePrev.on = false;
+    _pcePrev.only = false;
     _pcePrev.i = 0;
     _pcePrev.offset = 0;
     // ⚠️ Stopping must not OPEN anything. Pressing Stop only repaints, and a repaint used to be
@@ -7551,6 +7580,7 @@ function _pcePreviewTick(video) {
     const out = clip.outS != null ? clip.outS
         : (_pceClipFullLength(clip) != null ? _pceClipFullLength(clip) : video.duration);
     if (!(out > 0) || video.currentTime < out - 0.03) return;
+    if (_pcePrev.only) return _pcePreviewStop();   // one clip from its own ▶ — done at its end
     // The next VISIBLE clip. A hidden one is skipped rather than played silently past — that is the
     // whole point of hiding it — and the offset still counts it, so a box on a later clip still
     // shows at the second it will really show at.
@@ -7826,6 +7856,7 @@ const PCE_ACTS = {
     'add-text-still': () => window._pceAddTextToClip(null),
     'suggest-text': (el) => window._pceSuggestTextForClip(Number(el.getAttribute('data-pce-i'))),
     'clip-up': (el) => window._pceClipMove(Number(el.getAttribute('data-pce-i')), -1),
+    'clip-play': (el) => window._pcePlayClip(Number(el.getAttribute('data-pce-i'))),
     'clip-down': (el) => window._pceClipMove(Number(el.getAttribute('data-pce-i')), 1),
     'clip-remove': (el) => window._pceClipRemove(Number(el.getAttribute('data-pce-i'))),
     'hide-clip': (el) => window._pceToggleHidden('clip', el.getAttribute('data-pce-key')),
@@ -8702,6 +8733,15 @@ function _pceRenderClipsInner(host, clipsOverride) {
             + '<span class="w-4 shrink-0 text-[10px] font-bold text-gray-400" style="font-variant-numeric:tabular-nums">' + (i + 1) + '</span>'
             + '<span class="flex-1 min-w-0 truncate text-[11px] text-gray-700" title="' + name + '">' + name + '</span>'
             + '<span class="w-10 shrink-0 text-right text-[10px] text-gray-400" style="font-variant-numeric:tabular-nums">' + (len == null ? '—' : _pceFmtS(len)) + '</span>'
+            // Play just this clip (▶), or stop it (■) while it plays.
+            + (function () {
+                const playing = _pcePrev.on && _pcePrev.only && _pcePrev.i === i;
+                return '<button type="button" data-pce-act="clip-play" data-pce-i="' + i + '"'
+                    + ' title="' + (playing ? 'Stop' : 'Play this clip') + '"'
+                    + ' aria-label="' + (playing ? 'Stop clip ' : 'Play clip ') + (i + 1) + '"'
+                    + ' class="px-1 cursor-pointer leading-none ' + (playing ? 'text-pink-600' : 'text-gray-400 hover:text-pink-600') + '">'
+                    + (playing ? '&#9632;' : '&#9654;') + '</button>';
+            })()
             // Drag to reorder. The arrows stay: they are the keyboard-reachable way to do the same
             // thing, and a list that can ONLY be reordered by dragging cannot be reordered at all
             // by someone not using a mouse.
@@ -12274,12 +12314,19 @@ function _railRender() {
     window.addEventListener('error', (ev) => {
         // Resource loads (a 404 on an image) also arrive here and are not what this is for.
         if (!ev || !ev.message) return;
-        const at = ev.filename ? `${String(ev.filename).split('/').pop()}:${ev.lineno}` : '';
+        const at = ev.filename ? `${String(ev.filename).split('/').pop().split('?')[0]}:${ev.lineno}` : frameOf(ev.error);
         show(ev.message, at);
     });
+    // The first frame of a stack, as "file.js:123" — a rejected promise carries no filename of its
+    // own, so without this the banner said WHAT broke and never WHERE.
+    const frameOf = (err) => {
+        const st = err && typeof err.stack === 'string' ? err.stack : '';
+        const m = st.match(/([\w.-]+\.(?:js|html))(?:\?[^:)\s]*)?:(\d+)(?::\d+)?/);
+        return m ? `${m[1]}:${m[2]}` : '';
+    };
     window.addEventListener('unhandledrejection', (ev) => {
         const r = ev && ev.reason;
-        show((r && r.message) || String(r || 'a request failed'), '');
+        show((r && r.message) || String(r || 'a request failed'), frameOf(r));
     });
 })();
 

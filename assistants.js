@@ -9,6 +9,24 @@ window.cachedContext = {};
 // the name-generator/rename path that rewrites the avatar's letter. window._detailAvatarColor holds
 // the RESOLVED colour (an explicit choice, or the id-derived fallback for an assistant nobody has
 // styled), so this function never has to know which of the two it is drawing.
+// The hero avatar's letter: the user's custom one (configuration.avatarLetter, edited from the
+// avatar's own menu) else the current name's initial.
+window._paintDetailAvatarLetter = function () {
+    const el = document.getElementById('detail-avatar');
+    if (!el) return;
+    const name = document.getElementById('detail-name-input')?.value || '';
+    const own = window.AssistantColors?.cleanLetter(window._detailChosenLetter || '') || '';
+    el.textContent = own || (Array.from(name.trim())[0] || 'A').toUpperCase();
+};
+
+// The name input is sized to its text, so the pencil and the swan sit right after the name.
+window._fitDetailNameInput = function () {
+    const i = document.getElementById('detail-name-input');
+    if (!i) return;
+    const len = Math.max(4, (i.value || i.placeholder || '').length);
+    i.style.width = `calc(${len}ch + 0.5rem)`;
+};
+
 window._applyDetailAvatarColor = function () {
     const el = document.getElementById('detail-avatar');
     if (!el) return;
@@ -226,7 +244,10 @@ window._buildAssistantCardGoals = function (assistant) {
 };
 
 window.generateAssistantCardHTML = function(assistant) {
-    const initial = assistant.name ? assistant.name.charAt(0).toUpperCase() : 'A';
+    // The user's custom icon letter when they set one, else the name's initial.
+    window.AssistantColors?.remember(assistant);
+    const initial = String(window.AssistantColors?.letterFor(assistant.id, assistant.name, assistant.avatarLetter)
+        || (assistant.name ? assistant.name.charAt(0).toUpperCase() : 'A')).replace(/[<>&"']/g, '') || 'A';
     const role = assistant.role || 'Custom Assistant';
     // The card icon carries the assistant's identity colour — the same one its detail hero, its
     // calendar chips and its notifications use. Cached here as well as read, because the calendar
@@ -6275,6 +6296,8 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
             // an autosave that stayed silent about the colour would depend on the endpoint's
             // carry-across to survive. `null` is the explicit "back to automatic" reset.
             if (window._detailChosenColor !== undefined) body.avatarColor = window._detailChosenColor;
+            // Same for the custom icon letter: null = back to the name's initial.
+            if (window._detailChosenLetter !== undefined) body.avatarLetter = window._detailChosenLetter;
             const res = await fetch('/.netlify/functions/update-assistant-context', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -6290,14 +6313,16 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                 window._renderAutopilotCard(currentData);
                 if (disclosureText !== undefined) currentData.disclosureText = disclosureText;
                 if (newName) {
-                    document.getElementById('detail-avatar').textContent = newName.charAt(0).toUpperCase();
                     currentData.name = newName;
+                    window._paintDetailAvatarLetter();
                 }
                 // Keep the in-memory record in step, so a later save that rebuilds newConfiguration
                 // from currentData carries the colour rather than a stale one.
                 currentData.configuration = { ...(currentData.configuration || {}) };
                 if (window._detailChosenColor) currentData.configuration.avatarColor = window._detailChosenColor;
                 else delete currentData.configuration.avatarColor;
+                if (window._detailChosenLetter) currentData.configuration.avatarLetter = window._detailChosenLetter;
+                else delete currentData.configuration.avatarLetter;
                 _detailSetSaveStatus('✓ Saved', 'text-emerald-600');
                 setTimeout(() => _detailSetSaveStatus(''), 3000);
                 // Refresh the Kick Off readiness so "AI disclosure acknowledged" (and any
@@ -6424,7 +6449,15 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
 
         // Hero header
         const nameInput = document.getElementById('detail-name-input');
-        if (nameInput) nameInput.value = currentData.name || 'Your Assistant';
+        if (nameInput) {
+            nameInput.value = currentData.name || 'Your Assistant';
+            window._fitDetailNameInput();
+            // Bound once per page: the view is re-injected on every visit, so the node is new.
+            if (!nameInput.dataset.fitBound) {
+                nameInput.dataset.fitBound = '1';
+                nameInput.addEventListener('input', () => { window._fitDetailNameInput(); window._paintDetailAvatarLetter(); });
+            }
+        }
 
         // Assistant Profile slide-over title — "[Name]'s Profile" (header button keeps its
         // static "Assistant Profile" label; the personalised title shows on the drawer home).
@@ -6434,8 +6467,11 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
             homeTitleEl.textContent = window._assistantProfileTitle;
         }
 
-        const avatarEl = document.getElementById('detail-avatar');
-        if (avatarEl) avatarEl.textContent = (currentData.name || 'A').charAt(0).toUpperCase();
+        const _storedLetter = (currentData.configuration || {}).avatarLetter;
+        window._detailChosenLetter = window.AssistantColors?.cleanLetter(_storedLetter || '') || null;
+        const letterInput = document.getElementById('assistant-avatar-letter');
+        if (letterInput) letterInput.value = window._detailChosenLetter || '';
+        window._paintDetailAvatarLetter();
         // Identity colour: cache what this assistant's record says, then paint the hero avatar and
         // the picker from the single resolver every other surface uses. _detailChosenColor is the
         // EXPLICIT choice (null = automatic) and is what gets saved; _detailAvatarColor is what is
@@ -6773,6 +6809,14 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
             e.stopPropagation();
             if (colorMenu.classList.contains('hidden')) { paintSelection(); openMenu(); } else closeMenu();
         });
+        // The icon letter, edited in the same menu. Saved through the same autosave as the colour.
+        const letterInput = document.getElementById('assistant-avatar-letter');
+        letterInput?.addEventListener('input', () => {
+            const cleaned = AC.cleanLetter ? AC.cleanLetter(letterInput.value) : letterInput.value.trim().slice(0, 2).toUpperCase();
+            window._detailChosenLetter = cleaned || null;
+            window._paintDetailAvatarLetter();
+            triggerAutoSave();
+        });
         document.addEventListener('click', (e) => {
             if (!colorMenu.classList.contains('hidden') && !colorMenu.contains(e.target) && e.target !== colorBtn) closeMenu();
         });
@@ -6795,6 +6839,8 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
             const nameInput = document.getElementById('detail-name-input');
             if (nameInput) {
                 nameInput.value = _namePool[_namePoolIdx];
+                window._fitDetailNameInput();
+                window._paintDetailAvatarLetter();
                 triggerAutoSave();
             }
         });

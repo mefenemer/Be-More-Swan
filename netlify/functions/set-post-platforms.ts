@@ -34,7 +34,7 @@
 import { randomUUID } from 'crypto';
 import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts, scheduledPostAssets } from '../../db/schema';
+import { contentAssets, scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { collectPostAssetIds, releaseAssets } from '../../src/utils/release-post-media';
 import { platformFormat } from '../../src/config/platform-formats';
@@ -150,8 +150,35 @@ export default withLambda(async (event) => {
         ? [anchorBaseAssetId]
         : anchorAssetIds;
 
+    // ── …and only the media the NEW format can carry ────────────────────────────────────────────
+    // "Change platform & format" from a Reel to an image Feed post used to copy the Reel's VIDEO
+    // onto the new row, which then opened straight into "A Feed post can't carry this — Reel would
+    // take it". Choosing an image format is the user saying what they want; the video is dropped
+    // for that row (it stays on any sibling that keeps it) and the media step asks for a picture.
+    const kindById = new Map<number, string>();
+    if (copyAssetIds.length) {
+        const rows = await db.select({ id: contentAssets.id, assetType: contentAssets.assetType })
+            .from(contentAssets).where(inArray(contentAssets.id, copyAssetIds));
+        for (const r of rows) kindById.set(r.id, r.assetType);
+    }
+    const mediaFor = (formatKey: string | null): number[] => {
+        const spec = formatKey ? postFormatSpec(formatKey) : null;
+        if (!spec) return copyAssetIds; // no declared format ⇒ derived from the media, keep it
+        if (spec.media === 'none') return [];
+        let ids = copyAssetIds;
+        if (spec.media === 'image' || spec.media === 'video') {
+            // An asset whose kind we can't read is kept — dropping a user's media on a guess is worse.
+            ids = ids.filter(id => { const k = kindById.get(id); return !k || k === spec.media; });
+        }
+        return spec.maxItems > 0 ? ids.slice(0, spec.maxItems) : ids;
+    };
+
     for (const dest of toAdd) {
         const platform = dest.platform;
+        const destAssetIds = mediaFor(dest.formatKey ?? null);
+        // Text-on-picture design and the soundtrack belong to the media they were made on: if that
+        // media didn't come across, neither do they.
+        const keptMedia = destAssetIds.length === copyAssetIds.length;
         // The format comes from the DESTINATION, never from the anchor. Copying the anchor's key
         // would put an ig_reel on a LinkedIn row — a format that platform does not have — which is
         // why this used to be hardcoded to null. Null is still right when the caller named no
@@ -162,16 +189,16 @@ export default withLambda(async (event) => {
             assistantId: anchor.assistantId,
             platform,
             postFormat: dest.formatKey
-                ? legacyPostFormat(dest, copyAssetIds.length > 0)
+                ? legacyPostFormat(dest, destAssetIds.length > 0)
                 : (anchor.postFormat ?? platformFormat(canonicalPlatform(platform)).defaultPostFormat),
             formatKey: dest.formatKey,
             publishDate: anchor.publishDate,
             caption: anchor.caption,
             hashtags: anchor.hashtags,
-            contentAssetIds: copyAssetIds,
-            imageOverlays: anchor.imageOverlays,
-            overlayBaseAssetId: anchorBaseAssetId,
-            audioOverlays: anchor.audioOverlays,
+            contentAssetIds: destAssetIds,
+            imageOverlays: keptMedia ? anchor.imageOverlays : null,
+            overlayBaseAssetId: keptMedia ? anchorBaseAssetId : null,
+            audioOverlays: keptMedia ? anchor.audioOverlays : null,
             status: anchor.status,
             triggerType: anchor.triggerType ?? 'manual',
             isAutonomous: false,
@@ -184,7 +211,7 @@ export default withLambda(async (event) => {
         // Mirror the junction rows too — scheduled_post_assets is the source of truth for newer
         // queries, and a sibling with media in the legacy column but no junction rows renders
         // correctly in the editor and then resolves nothing at publish time.
-        const assetIds = copyAssetIds;
+        const assetIds = destAssetIds;
         if (assetIds.length) {
             await db.insert(scheduledPostAssets)
                 .values(assetIds.map((contentAssetId, position) => ({

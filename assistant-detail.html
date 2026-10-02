@@ -14,6 +14,13 @@
   #btn-generate-name { display:inline-flex; align-items:center; gap:4px; padding:3px 9px 3px 5px; border-radius:9999px;
     border:1px solid #fbcfe8; background:#fff; font-size:12px; font-weight:700; color:#be185d; }
   #btn-generate-name:hover { background:#fdf2f8; border-color:#f472b6; }
+  #btn-generate-name { white-space: nowrap; }
+  /* The avatar opens the letter + colour menu — a pencil badge says it's editable. */
+  .detail-avatar-btn { position:relative; display:block; padding:0; border:0; background:none; cursor:pointer; border-radius:0.75rem; }
+  .detail-avatar-btn:hover #detail-avatar { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #f9a8d4; }
+  .detail-avatar-pencil { position:absolute; right:-5px; bottom:-5px; width:20px; height:20px; border-radius:9999px; background:#fff;
+    border:1px solid #e5e7eb; color:#374151; display:flex; align-items:center; justify-content:center; box-shadow:0 1px 3px rgba(0,0,0,.12); }
+  .detail-avatar-btn:hover .detail-avatar-pencil { color:#be185d; border-color:#f9a8d4; }
   /* Click feedback — the wand "casts" while an AI request is in flight, so the user sees activity. */
   .ai-wand-img.is-casting { animation: aiWandCast 0.7s ease-in-out infinite; transform-origin: bottom center; }
   @keyframes aiWandCast {
@@ -122,43 +129,49 @@
     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 z-10 relative">
       <!-- Identity strip -->
       <div class="flex items-center gap-4">
-        <div id="detail-avatar" class="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-base shadow-sm shrink-0">A</div>
+        <!-- The avatar IS the identity editor: its pencil badge opens the letter + colour menu. A
+             separate colour dot beside the name read as decoration, not as a control. The menu's
+             swatches/selection are rendered by assistants.js from window.AssistantColors (the
+             palette is never retyped here); the id btn-assistant-color is kept for that wiring. -->
+        <div class="relative shrink-0">
+          <button id="btn-assistant-color" type="button" aria-haspopup="true" aria-expanded="false"
+            title="Change icon letter and colour" aria-label="Change icon letter and colour" class="detail-avatar-btn">
+            <div id="detail-avatar" class="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-base shadow-sm shrink-0">A</div>
+            <span class="detail-avatar-pencil" aria-hidden="true">
+              <svg width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15.232 5.232l3.536 3.536M9 13l6.232-6.232a2.5 2.5 0 113.536 3.536L12.536 16.536a4 4 0 01-1.768 1.022L7 19l1.442-3.768A4 4 0 019 13z"/></svg>
+            </span>
+          </button>
+          <!-- ⚠️ The grid and the width are INLINE, not Tailwind utilities: style.css is a prebuilt
+               JIT bundle, and grid-cols-5 / w-56 aren't in it. -->
+          <div id="assistant-color-menu"
+            style="width:15rem;top:3.5rem" class="hidden absolute left-0 z-30 bg-white rounded-xl border border-gray-200 shadow-xl p-3">
+            <label for="assistant-avatar-letter" class="block text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-1">Icon letter</label>
+            <input id="assistant-avatar-letter" type="text" maxlength="2" autocomplete="off"
+              class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-bold mb-1" placeholder="A">
+            <p class="text-[11px] text-gray-400 mb-3">1–2 characters. Leave empty to use the name's first letter.</p>
+            <p class="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-2">Icon colour</p>
+            <div id="assistant-color-swatches" style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0.5rem"></div>
+            <button id="btn-assistant-color-auto" type="button"
+              class="mt-3 w-full text-xs font-semibold text-gray-500 hover:text-gray-800 text-left cursor-pointer">Reset colour to automatic</button>
+          </div>
+        </div>
         <div class="min-w-0">
-          <div class="flex items-center gap-2 flex-wrap">
+          <!-- Name, pencil, swan on ONE line (nowrap): the swan belongs to the name it suggests.
+               The input is sized to its text by _fitDetailNameInput (assistants.js), so the pencil
+               and the swan sit right after the name rather than at the end of a 280px field. -->
+          <div class="flex items-center gap-2" style="flex-wrap:nowrap">
             <input id="detail-name-input" type="text" value="Loading…"
               title="Click to rename your assistant" aria-label="Assistant name (click to rename)"
-              class="text-lg font-extrabold text-gray-900 bg-transparent focus:outline-none focus:ring-0 transition-colors min-w-0 w-auto"
-              style="width: 100%; max-width: 280px;"
+              class="text-lg font-extrabold text-gray-900 bg-transparent focus:outline-none focus:ring-0 transition-colors min-w-0"
+              style="width: 12ch; max-width: 280px;"
               placeholder="Assistant Name">
-            <button type="button" class="detail-name-edit" title="Rename your assistant" aria-label="Rename your assistant"
+            <button type="button" class="detail-name-edit shrink-0" title="Rename your assistant" aria-label="Rename your assistant"
               onclick="const i=document.getElementById('detail-name-input'); i.focus(); i.select();">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536M9 13l6.232-6.232a2.5 2.5 0 113.536 3.536L12.536 16.536a4 4 0 01-1.768 1.022L7 19l1.442-3.768A4 4 0 019 13z"/></svg>
             </button>
-            <button id="btn-generate-name" title="Let Be More Swan suggest a name" aria-label="Suggest a name" class="transition-colors cursor-pointer" type="button">
+            <button id="btn-generate-name" title="Let Be More Swan suggest a name" aria-label="Suggest a name" class="transition-colors cursor-pointer shrink-0" type="button">
               <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="ai-wand-img"> Suggest a name
             </button>
-            <!-- Icon colour. Deliberately sits with the name: the name and the colour are the two
-                 halves of an assistant's identity, and this is the one place the user renames it.
-                 The swatch grid and the current selection are rendered by assistants.js from
-                 window.AssistantColors, so the palette is never retyped into markup. -->
-            <div class="relative shrink-0">
-              <button id="btn-assistant-color" type="button" aria-haspopup="true" aria-expanded="false"
-                title="Change icon colour" aria-label="Change icon colour"
-                class="w-7 h-7 rounded-lg border border-gray-300 hover:border-gray-400 flex items-center justify-center transition-colors cursor-pointer">
-                <span id="assistant-color-current" class="w-4 h-4 rounded-full shadow-inner" style="background:#9ca3af"></span>
-              </button>
-              <!-- ⚠️ The grid and the width are INLINE, not Tailwind utilities: style.css is a
-                   prebuilt JIT bundle, and grid-cols-5 / w-56 aren't in it. Adding them means
-                   rebuilding the stylesheet, which churns unrelated classes — so the two rules
-                   this menu needs are stated directly. -->
-              <div id="assistant-color-menu" style="width:14rem"
-                class="hidden absolute left-0 top-9 z-30 bg-white rounded-xl border border-gray-200 shadow-xl p-3">
-                <p class="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-2">Icon colour</p>
-                <div id="assistant-color-swatches" style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0.5rem"></div>
-                <button id="btn-assistant-color-auto" type="button"
-                  class="mt-3 w-full text-xs font-semibold text-gray-500 hover:text-gray-800 text-left cursor-pointer">Reset to automatic</button>
-              </div>
-            </div>
           </div>
           <!-- Issue #204: role title moved directly under the name so it reads as part of the
                identity, with the status pill/badges now the second row. -->

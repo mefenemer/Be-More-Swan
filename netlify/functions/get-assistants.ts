@@ -39,6 +39,8 @@ export default withLambda(async (event) => {
             // when they've never picked one, in which case every surface falls back to the same
             // id-derived colour — see src/config/assistant-colors.ts / window.AssistantColors.
             avatarColor: sql<string | null>`(${aiAssistants.configuration} ->> 'avatarColor')`,
+            // The user's custom icon letter (null ⇒ the name's initial), same home as the colour.
+            avatarLetter: sql<string | null>`(${aiAssistants.configuration} ->> 'avatarLetter')`,
             status: aiAssistants.provisioningStatus,
             isActive: aiAssistants.isActive,
             // Canonical lifecycle state machine (assistant-lifecycle-epic).
