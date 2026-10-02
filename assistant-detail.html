@@ -3,6 +3,17 @@
      Artwork: /images/BeMoreSwan_SwanAI.png (transparent pink swan + AI wand). */
   .ai-wand-img { height: 22px; width: auto; display: inline-block; }
   #btn-generate-name .ai-wand-img { height: 20px; }
+  /* The name is an input styled as a heading, which read as plain text: a dashed underline and a
+     pencil say "you can change this" at rest, before anyone thinks to hover. */
+  #detail-name-input { border-bottom: 2px dashed #e5e7eb; cursor: text; }
+  #detail-name-input:hover { border-bottom-color: #9ca3af; }
+  #detail-name-input:focus { border-bottom-style: solid; border-bottom-color: #ff007f; }
+  .detail-name-edit { display:inline-flex; align-items:center; color:#9ca3af; cursor:pointer; padding:2px; border-radius:6px; background:none; border:0; }
+  .detail-name-edit:hover { color:#374151; background:#f3f4f6; }
+  /* The swan suggests a name — say so in words, not just an icon. */
+  #btn-generate-name { display:inline-flex; align-items:center; gap:4px; padding:3px 9px 3px 5px; border-radius:9999px;
+    border:1px solid #fbcfe8; background:#fff; font-size:12px; font-weight:700; color:#be185d; }
+  #btn-generate-name:hover { background:#fdf2f8; border-color:#f472b6; }
   /* Click feedback — the wand "casts" while an AI request is in flight, so the user sees activity. */
   .ai-wand-img.is-casting { animation: aiWandCast 0.7s ease-in-out infinite; transform-origin: bottom center; }
   @keyframes aiWandCast {
@@ -115,11 +126,16 @@
         <div class="min-w-0">
           <div class="flex items-center gap-2 flex-wrap">
             <input id="detail-name-input" type="text" value="Loading…"
-              class="text-lg font-extrabold text-gray-900 bg-transparent border-b-2 border-transparent hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-0 transition-colors min-w-0 w-auto"
+              title="Click to rename your assistant" aria-label="Assistant name (click to rename)"
+              class="text-lg font-extrabold text-gray-900 bg-transparent focus:outline-none focus:ring-0 transition-colors min-w-0 w-auto"
               style="width: 100%; max-width: 280px;"
               placeholder="Assistant Name">
-            <button id="btn-generate-name" title="Generate a name" class="p-1 rounded-lg hover:bg-emerald-50 transition-colors cursor-pointer" type="button">
-              <img src="/images/BeMoreSwan_SwanAI.png" alt="Generate a name with Be More Swan AI" class="ai-wand-img">
+            <button type="button" class="detail-name-edit" title="Rename your assistant" aria-label="Rename your assistant"
+              onclick="const i=document.getElementById('detail-name-input'); i.focus(); i.select();">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536M9 13l6.232-6.232a2.5 2.5 0 113.536 3.536L12.536 16.536a4 4 0 01-1.768 1.022L7 19l1.442-3.768A4 4 0 019 13z"/></svg>
+            </button>
+            <button id="btn-generate-name" title="Let Be More Swan suggest a name" aria-label="Suggest a name" class="transition-colors cursor-pointer" type="button">
+              <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="ai-wand-img"> Suggest a name
             </button>
             <!-- Icon colour. Deliberately sits with the name: the name and the colour are the two
                  halves of an assistant's identity, and this is the one place the user renames it.
@@ -153,14 +169,8 @@
                  "+N more" escape hatch — into an identity line beside the role, and the Overview
                  "Goal Progress" card now shows every goal properly. See #goal-progress-card below. -->
           </div>
-          <!-- Issue #162: Brand Protected badge sits to the right of the status pill, not the name. -->
           <div class="flex items-center gap-3 mt-1.5">
             <span id="detail-status" class="inline-flex items-center gap-1.5 py-0.5 px-2 rounded-md text-xs font-bold bg-gray-100 text-gray-600 border border-gray-200">…</span>
-            <!-- Brand Safety badge — shown when guardrails are configured -->
-            <span id="guardrails-protected-badge" class="hidden inline-flex items-center gap-1 py-0.5 px-2 rounded-md text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-              Brand Protected
-            </span>
           </div>
         </div>
       </div>
@@ -300,37 +310,38 @@
        empty state and CTA rather than hiding, which is what makes the feature discoverable. That is
        also what makes it safe to skeleton on first load. -->
   <div id="goal-progress-card" class="mb-8" style="order:-2">
-    <div class="flex items-center justify-between mb-4">
-      <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Goal Progress</h3>
-      <div class="flex items-center gap-3">
-        <!-- "Check again now" — goals.latest_value is a CACHE, refreshed by a background sweep that
-             runs hourly at best and once a day on the entry tier. Without this button a figure the
-             user knows to be wrong is indistinguishable from a broken feature, and there is nothing
-             they can do about either. Wired in _renderGoalProgressCard (assistants.js) →
-             refresh-goal.ts, which re-measures every goal on this assistant on the spot.
-             ⚠️ Ships `hidden` on purpose: _wireGoalRefreshButton assigns the onclick ONLY once there
-             is an assistant id and a non-empty _goalsCache, and reveals it in the same breath. Drop
-             the class and the button is visible-but-dead during the skeleton, on a detail page opened
-             with no ?id, and whenever the goals fetch fails — the silent no-op it exists to end. -->
-        <!-- Both are pill buttons matching #autopilot-adjust-btn ("Adjust schedule") and
-             #btn-audience-connections ("Manage connections"), so every card-level action on this
-             page is the same control in the same top-right slot. They were underlined text links,
-             which read as page chrome rather than as things this card can do.
-             ⚠️ Same display-utility trap as the connections button: `hidden` is display:none and
-             the compiled style.css orders `.inline-flex` after it, so #btn-refresh-goals — which
-             ships hidden and is revealed by _wireGoalRefreshButton — must not take one. -->
-        <button type="button" id="btn-refresh-goals"
-          title="Re-measure these goals now instead of waiting for the next background check"
-          class="hidden shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Check again now</button>
-        <button type="button" onclick="window._activateMainTab && window._activateMainTab('goals')"
-          class="shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Manage goals</button>
-      </div>
-    </div>
-    <!-- The loading skeleton is applied to this inner panel, not to #goal-progress-card: the overlay
-         is inset:0 with a rounded-2xl radius, so on the outer wrapper it would veil the section
-         heading too and its corners wouldn't line up. min-height gives the spinner room while the
+    <!-- The title and its two actions sit INSIDE the white panel, so "Check again now" and "Manage
+         goals" read as part of the card they act on (they used to float above it, looking like page
+         chrome). The loading skeleton is applied to this panel: the overlay is inset:0 with a
+         rounded-2xl radius, so on the outer wrapper its corners wouldn't line up. min-height gives the spinner room while the
          body is still empty (p-6 around nothing is shorter than the spinner). -->
     <div id="goal-progress-panel" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6" style="min-height:92px">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Goal Progress</h3>
+        <div class="flex items-center gap-3">
+          <!-- "Check again now" — goals.latest_value is a CACHE, refreshed by a background sweep that
+               runs hourly at best and once a day on the entry tier. Without this button a figure the
+               user knows to be wrong is indistinguishable from a broken feature, and there is nothing
+               they can do about either. Wired in _renderGoalProgressCard (assistants.js) →
+               refresh-goal.ts, which re-measures every goal on this assistant on the spot.
+               ⚠️ Ships `hidden` on purpose: _wireGoalRefreshButton assigns the onclick ONLY once there
+               is an assistant id and a non-empty _goalsCache, and reveals it in the same breath. Drop
+               the class and the button is visible-but-dead during the skeleton, on a detail page opened
+               with no ?id, and whenever the goals fetch fails — the silent no-op it exists to end. -->
+          <!-- Both are pill buttons matching #autopilot-adjust-btn ("Adjust schedule") and
+               #btn-audience-connections ("Manage connections"), so every card-level action on this
+               page is the same control in the same top-right slot. They were underlined text links,
+               which read as page chrome rather than as things this card can do.
+               ⚠️ Same display-utility trap as the connections button: `hidden` is display:none and
+               the compiled style.css orders `.inline-flex` after it, so #btn-refresh-goals — which
+               ships hidden and is revealed by _wireGoalRefreshButton — must not take one. -->
+          <button type="button" id="btn-refresh-goals"
+            title="Re-measure these goals now instead of waiting for the next background check"
+            class="hidden shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Check again now</button>
+          <button type="button" onclick="window._activateMainTab && window._activateMainTab('goals')"
+            class="shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Manage goals</button>
+        </div>
+      </div>
       <div id="goal-progress-body"></div>
       <!-- Freshness, same contract as the Audience block's #audience-refresh-note: how often these
            figures are measured and when the next check lands. Rendered (not static) because the
@@ -2529,17 +2540,6 @@ document.getElementById('btn-confirm-revoke-all')?.addEventListener('click', asy
     btn.textContent = 'Yes, Revoke All';
     btn.disabled = false;
   }
-});
-
-// Show "Brand Protected" badge when strict_rules or knowledge is populated
-window._updateGuardrailsBadge = function () {
-  const rules = (document.getElementById('edit_strict_rules')?.value || '').trim();
-  const knowledge = (document.getElementById('edit_knowledge')?.value || '').trim();
-  const badge = document.getElementById('guardrails-protected-badge');
-  if (badge) badge.classList.toggle('hidden', !rules && !knowledge);
-};
-['edit_strict_rules', 'edit_knowledge'].forEach(id => {
-  document.getElementById(id)?.addEventListener('input', window._updateGuardrailsBadge);
 });
 
 // SC5: Single-connection revocation — called from the platform card's "Disconnect" button

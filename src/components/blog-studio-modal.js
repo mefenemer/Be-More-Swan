@@ -86,13 +86,17 @@
   var BUSY_BUTTONS = ['bs-approve', 'bs-pick-time', 'bs-publish', 'bs-schedule',
     'bs-unschedule', 'bs-unpublish', 'bs-repush', 'bs-discard', 'bs-reject-go'];
 
-  // Whole-modal busy state for the long-running lifecycle actions (publish). Shows the OS wait
-  // cursor and disables every button in the footer, so a second click cannot fire a second publish
+  // Whole-modal busy state for the long-running lifecycle actions (publish). Shows the shared pink
+  // busy spinner (window.bmsBusy, dialogs.js — it replaced the OS wait cursor) and disables every button in the footer, so a second click cannot fire a second publish
   // while the first is still in flight — publish-blog is not idempotent from the author's point of
   // view (it re-renders the payload and re-runs syndication).
+  var busyShown = false;
   function setBusy(on) {
     var root = el('bms-blog-backdrop');
     if (root) root.classList.toggle('bs-busy', !!on);
+    // bmsBusy is refcounted, so only report a real change — a second setBusy(false) on the
+    // settled path must not decrement someone else's busy state.
+    if (!!on !== busyShown) { busyShown = !!on; window.bmsBusy?.(busyShown); }
     // An explicit list, not a container sweep: the lifecycle row has no wrapper id, and the ones
     // that were ALREADY disabled (Unschedule/Unpublish are hidden+idle on a draft) must come back
     // disabled — hence the marker attribute rather than a blanket re-enable.
@@ -158,6 +162,16 @@
     + '#bms-blog-backdrop{position:fixed;inset:0;z-index:85;background:rgba(17,24,39,.6);'
     + '-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);display:none;overflow-y:auto;}'
     + '#bms-blog-backdrop.bs-open{display:block;}'
+    // PAGE mode inside the workspace (2026-10-02) — like the Email Studio and the social post editor:
+    // under the 64px header, beside the 16rem sidebar (md and up), full size, no backdrop, breadcrumbs.
+    // The standalone blog-studio.html has no header or sidebar, so it keeps the pop-up look.
+    + '#bms-blog-backdrop.bs-page{top:64px;left:0;background:#f9fafb;-webkit-backdrop-filter:none;backdrop-filter:none;}'
+    + '@media (min-width:768px){#bms-blog-backdrop.bs-page{left:16rem;}}'
+    + '#bms-blog-backdrop.bs-page .bms-blog-panel{max-width:none;margin:0;border-radius:0;box-shadow:none;min-height:100%;}'
+    + '.bs-crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:14px;color:#6b7280;margin-bottom:6px;}'
+    + '.bs-crumbs button{background:none;border:0;padding:0;font:inherit;font-weight:600;color:#6b7280;cursor:pointer;}'
+    + '.bs-crumbs button:hover{color:#111827;text-decoration:underline;}'
+    + '.bs-crumbs .bs-crumb-here{font-weight:600;color:#111827;}'
     + '.bms-blog-panel{max-width:1100px;margin:24px auto;background:#f9fafb;border-radius:16px;'
     + 'box-shadow:0 24px 70px rgba(0,0,0,.35);padding:24px;position:relative;}'
     + '.bms-blog-close{position:absolute;top:16px;right:16px;background:#f3f4f6;border:0;border-radius:8px;'
@@ -297,10 +311,10 @@
     + '.bs-btn-outline:hover{background:#fdf2f8;}'
     + '.bs-btn:disabled{opacity:.5;cursor:not-allowed;}'
     // Publishing is the one action here that runs long enough for the author to wonder whether
-    // the click landed, and the banner alone sits below the fold on a long post. `cursor:progress`
-    // over the WHOLE modal is the signal they already expect from the OS. !important because
-    // .bs-btn:disabled (set on the buttons for the same beat) otherwise wins on the buttons.
-    + '#bms-blog-backdrop.bs-busy,#bms-blog-backdrop.bs-busy *{cursor:progress !important;}'
+    // the click landed, and the banner alone sits below the fold on a long post. The signal is the
+    // shared pink spinner (setBusy → window.bmsBusy); the class only stops the disabled buttons
+    // reading as clickable.
+    + '#bms-blog-backdrop.bs-busy .bs-btn{cursor:default !important;}'
     + '.bs-ready-q{font-size:14px;font-weight:600;color:#1f2937;margin:0 0 8px;}'
     + '.bs-stack{display:flex;flex-direction:column;gap:8px;}';
 
@@ -308,6 +322,7 @@
   var MARKUP = ''
     + '<div class="bms-blog-panel">'
     + '  <button type="button" class="bms-blog-close" id="bs-close" aria-label="Close">&times;</button>'
+    + '  <nav id="bs-crumbs" class="bs-crumbs" aria-label="Breadcrumb"></nav>'
     + '  <div class="bs-row" style="justify-content:space-between;margin-bottom:16px;padding-right:40px;">'
     + '    <h1 style="font-size:20px;font-weight:700;">Blog Studio</h1>'
     + '    <span id="bs-save-status" class="bs-status"></span>'
@@ -491,7 +506,7 @@
     + '<span class="bs-btn-ico">\uD83D\uDD17</span>Connect Google Search Console</button>'
     + '          <button id="bs-gsc-disconnect" class="bs-linkbtn bs-hidden" type="button">Disconnect</button>'
     + '        </div>'
-    + '        <div class="bs-status" style="font-size:11px;margin-top:4px;">Lets your Blog Writer spot posts losing search traffic and flag them for a refresh.</div>'
+    + '        <div class="bs-status" style="font-size:11px;margin-top:4px;">Lets your ' + String(window.RoleLabels ? window.RoleLabels.get('blog_writer') : 'Blog Writing Assistant').replace(/[&<>"']/g, '') + ' spot posts losing search traffic and flag them for a refresh.</div>'
     + '        </div>'
     + '      </details>'
     + '      <details class="bs-sec" data-bs-sec="widget">'
@@ -1743,6 +1758,14 @@
 
   // ── Wire all events once, after markup injection ───────────────────────────────────────────────
   function wireEvents() {
+    // Breadcrumbs (page mode) — delegated, bound once; renderCrumbs only writes them.
+    el('bs-crumbs').addEventListener('click', function (e) {
+      var b = e.target.closest && e.target.closest('[data-bs-crumb]');
+      if (!b) return;
+      var act = b.getAttribute('data-bs-crumb');
+      closeBlogStudio();
+      if (act === 'assistants' && typeof window.loadView === 'function') window.loadView('assistants');
+    });
     el('bs-close').addEventListener('click', closeBlogStudio);
     el('bms-blog-backdrop').addEventListener('mousedown', function (e) {
       if (e.target === el('bms-blog-backdrop')) closeBlogStudio();  // click the dimmed area to dismiss
@@ -2406,12 +2429,40 @@
     ['bs-ai-topic', 'bs-ai-keywords'].forEach(function (id) { var e = el(id); if (e) e.value = ''; });
   }
 
+  /**
+   * Breadcrumbs back to where the Studio was opened from: the view still behind it, and — on an
+   * assistant's page — that assistant. Every crumb closes the Studio; "Assistants" also navigates.
+   * Bound once in wireEvents by delegation; this only writes the trail.
+   */
+  function renderCrumbs(inWorkspace) {
+    var nav = el('bs-crumbs');
+    if (!nav) return;
+    if (!inWorkspace) { nav.innerHTML = ''; return; }
+    var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+    var sep = '<span aria-hidden="true">\u203A</span>';
+    var view = window._currentViewKey || '';
+    var trail;
+    if (view === 'assistant-detail') {
+      var nameEl = document.getElementById('detail-name-input');
+      trail = '<button type="button" data-bs-crumb="assistants">Assistants</button>' + sep
+        + '<button type="button" data-bs-crumb="back">' + esc((nameEl && nameEl.value) || 'Assistant') + '</button>' + sep;
+    } else {
+      trail = '<button type="button" data-bs-crumb="back">' + esc(window._currentViewTitle || 'Back') + '</button>' + sep;
+    }
+    nav.innerHTML = trail + '<span class="bs-crumb-here" aria-current="page">Blog Studio</span>';
+  }
+
   // ── Public API ─────────────────────────────────────────────────────────────────────────────────
   function openBlogStudio(opts) {
     opts = opts || {};
     inject();
     state.assistantId = opts.assistantId != null ? opts.assistantId : null;
-    el('bms-blog-backdrop').classList.add('bs-open');
+    var bd = el('bms-blog-backdrop');
+    // Page mode only inside the workspace — it needs a header and a sidebar to sit beside.
+    var inWorkspace = !!document.getElementById('sidebar-container');
+    bd.classList.toggle('bs-page', inWorkspace);
+    renderCrumbs(inWorkspace);
+    bd.classList.add('bs-open');
     window.ScrollLock.lock('blog-studio');
 
     clearWorkspaceState();

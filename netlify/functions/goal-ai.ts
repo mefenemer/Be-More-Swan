@@ -25,6 +25,7 @@ import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJson, parseModelJsonArray } from '../../src/utils/model-json';
 
+import { liveRoleLabel } from '../../src/utils/live-role-label';
 const json = (statusCode: number, payload: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
 });
@@ -72,7 +73,7 @@ export default withLambda(async (event) => {
         if (!goal || goal.organisationId !== orgId) return json(404, { error: 'Goal not found.' });
 
         const [assistant] = await db
-            .select({ name: aiAssistants.name, role: aiAssistants.aiAssistantJobRole, onboardingContext: aiAssistants.onboardingContext })
+            .select({ name: aiAssistants.name, role: liveRoleLabel, onboardingContext: aiAssistants.onboardingContext })
             .from(aiAssistants)
             .where(and(eq(aiAssistants.id, goal.assistantId), eq(aiAssistants.organisationId, orgId)))
             .limit(1);
@@ -124,7 +125,7 @@ export default withLambda(async (event) => {
         if (!goal || goal.organisationId !== orgId) return json(404, { error: 'Goal not found.' });
 
         const [assistant] = await db
-            .select({ id: aiAssistants.id, role: aiAssistants.aiAssistantJobRole, onboardingContext: aiAssistants.onboardingContext })
+            .select({ id: aiAssistants.id, role: liveRoleLabel, onboardingContext: aiAssistants.onboardingContext })
             .from(aiAssistants)
             .where(and(eq(aiAssistants.id, goal.assistantId), eq(aiAssistants.organisationId, orgId)))
             .limit(1);
@@ -179,7 +180,7 @@ export default withLambda(async (event) => {
         if (!assistantId || !FIELD_LABELS[field]) return json(400, { error: 'assistantId and a valid field are required.' });
 
         const [assistant] = await db
-            .select({ id: aiAssistants.id, role: aiAssistants.aiAssistantJobRole })
+            .select({ id: aiAssistants.id, role: liveRoleLabel })
             .from(aiAssistants)
             .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId)))
             .limit(1);
@@ -220,7 +221,7 @@ export default withLambda(async (event) => {
         if (!assistantId) return json(400, { error: 'assistantId is required.' });
 
         const [assistant] = await db
-            .select({ name: aiAssistants.name, role: aiAssistants.aiAssistantJobRole, onboardingContext: aiAssistants.onboardingContext })
+            .select({ name: aiAssistants.name, role: liveRoleLabel, onboardingContext: aiAssistants.onboardingContext })
             .from(aiAssistants)
             .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId)))
             .limit(1);

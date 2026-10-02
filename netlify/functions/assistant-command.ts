@@ -21,6 +21,7 @@ import { normalizePlatform } from '../../src/config/platform-formats';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJson } from '../../src/utils/model-json';
 
+import { liveRoleLabel } from '../../src/utils/live-role-label';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-haiku-4-5-20251001';
 
@@ -66,7 +67,7 @@ export default withLambda(async (event) => {
         db.select({
             id: aiAssistants.id,
             name: aiAssistants.name,
-            role: aiAssistants.aiAssistantJobRole,
+            role: liveRoleLabel,
             lifecycleStatus: aiAssistants.lifecycleStatus,
             provisioningStatus: aiAssistants.provisioningStatus,
             provisioningBlockedReason: aiAssistants.provisioningBlockedReason,

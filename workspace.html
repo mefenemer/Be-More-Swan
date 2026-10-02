@@ -44,6 +44,11 @@
   @media (min-width: 768px) { #post-review-modal.pr-page { left: 16rem; } }
   #post-review-modal.pr-page #post-review-panel { max-width: none !important; max-height: none !important;
     height: 100%; border-radius: 0; box-shadow: none; }
+  /* More room as a page: the post card, its platform tabs and the timeline under it go up to 600px
+     (the pop-up's 448). A media post's card is then fitted to the height by _pceFitCanvasToView. */
+  #post-review-modal.pr-page [data-mockup-card],
+  #post-review-modal.pr-page #post-review-tabs,
+  #post-review-modal.pr-page #pce-stage-strip { max-width: 600px; }
 </style>
 </head>
 <body class="bg-gray-50 text-gray-900 font-sans antialiased min-h-screen overflow-x-hidden">
@@ -780,6 +785,10 @@ window.showComplianceModals = function showComplianceModals(force) {
              are now the first two controls of step 1 ("Write with <assistant>"), which is where
              both of them describe what they do — the header is for what the modal IS and how to
              leave it, and a pair of drafting buttons up here duplicated the step below. -->
+        <!-- Back to the "Where should this go?" picker that opened this post — same picker, pre-filled
+             with what the post has (rqReviewAddDestination). It already existed as "+ Destination"
+             on the tab strip, which nobody could find; this is where you look for "go back". -->
+        <button type="button" id="pce-change-dest" onclick="rqReviewAddDestination()" class="hidden px-3 py-1.5 text-xs font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer whitespace-nowrap">Change platform &amp; format</button>
         <button onclick="closePostReview()" aria-label="Close" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 cursor-pointer">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
@@ -2538,7 +2547,16 @@ function formatCurrency(amount, currency) {
       'review-queue': document.getElementById('nav-review-queue')
     };
 
+    // Every navigation shows the shared busy spinner until the new view is fetched, swapped in and
+    // initialised — a slow view used to leave the old page on screen with no sign the click landed.
     async function loadView(routeKey, param = null) {
+      if (!routes[routeKey]) return;
+      window.bmsBusy?.(true);
+      try { return await _loadViewInner(routeKey, param); }
+      finally { window.bmsBusy?.(false); }
+    }
+
+    async function _loadViewInner(routeKey, param = null) {
       const route = routes[routeKey];
       if (!route) return;
 
@@ -2548,6 +2566,8 @@ function formatCurrency(amount, currency) {
       // pending edit first.
       const postEditor = document.getElementById('post-review-modal');
       if (postEditor && !postEditor.classList.contains('hidden') && typeof closePostReview === 'function') closePostReview();
+      // Same for the Blog Studio, which is also a page here now (bs-page in blog-studio-modal.js).
+      if (document.getElementById('bms-blog-backdrop')?.classList.contains('bs-open')) window.closeBlogStudio?.();
 
       // ── US2 (AC2.1/2.2/2.3): Onboarding route guard (anti-snooping) ──
       // Catches deep links (?view=calendar) and any programmatic navigation into a
@@ -3329,34 +3349,12 @@ function formatCurrency(amount, currency) {
     window._onboardingComplete = false; // pessimistic until status loads
     let _onboardingLoaded = false;
 
-    // ── Busy cursor ──────────────────────────────────────────────────────
-    // "This is working, wait" for an action with a visible delay.
-    //
-    // The class goes on <body>, NOT on the control that was clicked, so the wait state survives the
-    // pointer moving off the button mid-action (exactly when someone waiting starts moving it). The
-    // `body.bms-busy *` rule with !important overrides any element-level cursor for the duration. The
-    // rule lives in the hand-written <style> block at the end of this file, so no Tailwind rebuild is
-    // involved.
-    //
-    // Refcounted: two overlapping operations must not have the first to finish clear the cursor out
-    // from under the second.
-    let _bmsBusyDepth = 0;
-    window.setBusyCursor = function (on) {
-      _bmsBusyDepth = Math.max(0, _bmsBusyDepth + (on ? 1 : -1));
-      document.body.classList.toggle('bms-busy', _bmsBusyDepth > 0);
-    };
-
-    /**
-     * Run `fn` with the page showing a busy cursor, restoring it however `fn` ends.
-     *
-     * `finally`, so a thrown error or an early return cannot strand the whole page in a wait
-     * cursor with no way back short of a reload.
-     */
-    window.withBusyCursor = async function (fn) {
-      window.setBusyCursor(true);
-      try { return await fn(); }
-      finally { window.setBusyCursor(false); }
-    };
+    // ── Busy indicator ───────────────────────────────────────────────────
+    // "This is working, wait" for an action with a visible delay. Was a wait mouse cursor; it is now
+    // the shared pink spinner (window.bmsBusy in dialogs.js — refcounted, debounced, never blocks a
+    // click). The old names stay as aliases so every existing caller gets the new indicator.
+    window.setBusyCursor = function (on) { window.bmsBusy?.(on); };
+    window.withBusyCursor = function (fn) { return window.bmsWithBusy(fn); };
 
     // showToast now lives in /dialogs.js (loaded in <head>).
 
@@ -5490,6 +5488,8 @@ function formatCurrency(amount, currency) {
 <script src="/src/components/assistant-inspo.js"></script>
 <!-- Role-specific onboarding schemas — the catalogue's Hire Role buttons route any roleKey
      defined here to assistant-setup.html (schema-driven wizard) instead of onboarding.html. -->
+<script src="/src/public/role-labels.js"></script>
+<script>window.RoleLabels && window.RoleLabels.load();</script>
 <script src="/src/public/assistant-onboarding-schemas.js"></script>
 <!-- Role marketing copy (read from master_assistants via the API) + shared detail modal —
      the catalogue primes this registry from the list it already fetches, then opens the modal
@@ -6589,6 +6589,15 @@ let _rqOvDragId = null;
  * thing. Nothing is cropped and nothing moves; there is simply less of it.
  */
 const _PCE_CANVAS_MAX_VH = 0.52;
+/**
+ * In PAGE mode (the editor fills the workspace — #post-review-modal.pr-page) there is far more room
+ * than the pop-up had, so the post is drawn bigger: up to ~3/4 of the height below the header, and a
+ * card up to 600px wide instead of the pop-up's 448. Same scaling as above — the card, the media and
+ * the overlay layer all change size together, so text stays exactly where it was dragged.
+ */
+const _PCE_PAGE_MAX_VH = 0.74;
+const _PCE_PAGE_CARD_MAX_PX = 600;
+function _pceIsPageMode() { return !!document.getElementById('post-review-modal')?.classList.contains('pr-page'); }
 function _pceFitCanvasToView() {
     const body = document.getElementById('post-review-body');
     const card = body && body.querySelector('[data-mockup-card]');
@@ -6599,8 +6608,16 @@ function _pceFitCanvasToView() {
     // Nothing to reason about until the media reports its shape; the load/metadata handlers that
     // already repaint the overlays call back in here once it does.
     if (!(natW > 0) || !(natH > 0)) return;
-    const cap = Math.max(240, Math.round(window.innerHeight * _PCE_CANVAS_MAX_VH));
+    const page = _pceIsPageMode();
+    const cap = page
+        ? Math.max(320, Math.round((window.innerHeight - 64) * _PCE_PAGE_MAX_VH))
+        : Math.max(240, Math.round(window.innerHeight * _PCE_CANVAS_MAX_VH));
     const widthForCap = Math.round(cap * (natW / natH));
+    if (page) {
+        // Never wider than a post plausibly is on a big screen, never taller than the space allows.
+        card.style.maxWidth = Math.min(widthForCap, _PCE_PAGE_CARD_MAX_PX) + 'px';
+        return;
+    }
     // Only ever NARROWER than the card's own maximum — a landscape clip is already short enough,
     // and widening the card would stretch a post mock-up past the width a post actually has.
     card.style.maxWidth = widthForCap < 448 ? widthForCap + 'px' : '';
@@ -9467,9 +9484,8 @@ function _rqBindTimeline() {
  * cleared in a finally so a failure cannot leave the page stuck looking busy.
  */
 function _rqSetBusyCursor(on) {
-    const el = document.documentElement;
-    if (!el) return;
-    el.style.cursor = on ? 'progress' : '';
+    // The shared pink spinner (dialogs.js), not a mouse cursor — see window.bmsBusy.
+    window.bmsBusy?.(!!on);
 }
 
 /**
@@ -10594,6 +10610,13 @@ function _rqReviewRenderTabs() {
     // reported (the format picker is gone), so with one platform this strip still earns its space:
     // it says which network you are looking at and what it will publish as. The trailing note is
     // the way to a second one.
+    // The header's "Change platform & format" follows the same rule as the tab strip's + Destination.
+    const changeDest = document.getElementById('pce-change-dest');
+    if (changeDest) {
+        const can = group.length > 0 && _rqCanEditDestinations(group);
+        changeDest.classList.toggle('hidden', !can);
+        changeDest.style.display = can ? '' : 'none';
+    }
     if (!group.length) { host.classList.add('hidden'); host.innerHTML = ''; return; }
     host.classList.remove('hidden');
     // "+ Add a platform" used to sit here, opening the Platforms step. Both are gone: a post now goes
@@ -12966,6 +12989,23 @@ function _pceDestLabel(platform, formatKey) {
  * writing"); what is new is that you can narrow it. Seeding empty would make the everyday post six
  * clicks of work to get back what connecting the accounts already meant.
  */
+/**
+ * The platforms switched ON for an assistant (its Connections tab), or null for "no selection ever
+ * recorded" — which the server's rule reads as DO NOT FILTER, so the picker then shows everything.
+ * ⚠️ Asked of the server (assistant-enabled-platforms): the rule reads two fields and maps connection
+ * ids to platforms, and a second copy of it here would drift exactly like the ones before it did.
+ */
+let _pceDestEnabled = null;
+async function _pceLoadEnabledPlatforms(assistantId) {
+    _pceDestEnabled = null;
+    if (!assistantId) return;
+    try {
+        const r = await fetch(`/.netlify/functions/assistant-enabled-platforms?assistantId=${encodeURIComponent(assistantId)}`, { credentials: 'same-origin' });
+        const d = r.ok ? await r.json() : null;
+        if (d && Array.isArray(d.enabled)) _pceDestEnabled = new Set(d.enabled.map(x => String(x).toLowerCase()));
+    } catch { /* unknown → show everything, as before; the server still refuses nothing new */ }
+}
+
 async function pceOpenDestinationsForCreate(assistantId) {
     _pceDestMode = 'create';
     _pceDestAssistantId = assistantId;
@@ -12973,24 +13013,32 @@ async function pceOpenDestinationsForCreate(assistantId) {
 
     let cap = _gpCap;
     if (!cap) { cap = await window.checkCapacity().catch(() => null); _gpCap = cap; }
+    await _pceLoadEnabledPlatforms(assistantId);
     const connected = (cap?.connectedPlatforms || []).map(s => String(s).toLowerCase());
-    const ids = window.PlatformConstants.all.map(p => p.id).filter(id => connected.some(c => c.includes(id)));
+    const offered = window.PlatformConstants.all.map(p => p.id).filter(id => !_pceDestEnabled || _pceDestEnabled.has(id));
+    const ids = offered.filter(id => connected.some(c => c.includes(id)));
     // Instagram when nothing is connected: the post is still editable and the connection is asked
-    // for at approval (rqEnsurePlatformConnection), same fallback the old seeding used.
-    const seed = ids.length ? ids : ['instagram'];
+    // for at approval (rqEnsurePlatformConnection), same fallback the old seeding used — unless the
+    // assistant has Instagram switched off, in which case its first enabled platform.
+    const seed = ids.length ? ids : [offered.includes('instagram') ? 'instagram' : (offered[0] || 'instagram')];
     _pceDestChosen = new Set(seed.map(id => _pceDestKey(id, _pceDefaultLiveFormat(id)?.k ?? null)));
 
     document.getElementById('pce-dest-title').textContent = 'Where should this go?';
-    document.getElementById('pce-dest-sub').textContent = 'Pick a platform and what to post there. Everything you have connected is ticked.';
+    document.getElementById('pce-dest-sub').textContent = _pceDestEnabled
+        ? 'Pick a platform and what to post there. Only the platforms switched on for this assistant are shown, and the connected ones are ticked.'
+        : 'Pick a platform and what to post there. Everything you have connected is ticked.';
     document.getElementById('pce-dest-confirm').textContent = 'Start writing';
     _pceShowDestinations();
 }
 
 /** "+ Destination" on the tab strip — the same picker, pre-filled with what the post already has. */
-function rqReviewAddDestination() {
+async function rqReviewAddDestination() {
     if (_pcePlatformBusy) return;
     const group = _rqReviewGroupIds.map(i => _rqPostCache[i]).filter(Boolean);
     if (!group.length) return;
+    // Same filter as a new post: only what this assistant is switched on for (plus anything the
+    // post already goes to, which the render keeps so it can still be unticked).
+    await _pceLoadEnabledPlatforms(group[0].assistantId || _gpCurrentAssistantId || window._currentAssistantId);
     _pceDestMode = 'add';
     _pceDestAssistantId = null;
     _pceDestChosen = new Set(group.map(p => _pceDestKey(p.platform, p.formatKey)));
@@ -13051,7 +13099,12 @@ function _pceRenderDestinations() {
     // Connected accounts first — the ones you can actually publish to are the ones under the cursor.
     // The rest stay pickable: drafting ahead of connecting is legitimate, and approve-post is the
     // real gate (it returns PLATFORM_NOT_CONNECTED with a prompt).
-    const ordered = [...window.PlatformConstants.all].sort((a, b) => (isConnected(b.id) ? 1 : 0) - (isConnected(a.id) ? 1 : 0));
+    // Only what this assistant is switched on for (see _pceLoadEnabledPlatforms) — and, when changing
+    // an existing post, anything it already goes to, so a destination can still be removed after its
+    // platform was switched off.
+    const already = new Set([..._pceDestChosen].map(k => _pceDestParse(k).platform));
+    const offered = window.PlatformConstants.all.filter(p => !_pceDestEnabled || _pceDestEnabled.has(p.id) || (_pceDestMode === 'add' && already.has(p.id)));
+    const ordered = [...offered].sort((a, b) => (isConnected(b.id) ? 1 : 0) - (isConnected(a.id) ? 1 : 0));
 
     host.innerHTML = ordered.map(p => {
         const formats = _pceFormatsFor(p.id);
@@ -13135,11 +13188,14 @@ async function pceConfirmDestinations() {
     const was = btn.textContent;
     btn.textContent = 'Working…';
 
+    // The busy indicator is refcounted, so release it only if this call raised it.
+    let busy = false;
     try {
         if (_pceDestMode === 'create') {
             // Starting a post is a server round trip and then a whole editor being built. The
             // button below says "Working…" but is dismissed before the slow half even begins.
             _rqSetBusyCursor(true);
+            busy = true;
             const res = await fetch('/.netlify/functions/create-manual-post', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ assistantId: _pceDestAssistantId, destinations, blank: true }),
@@ -13167,7 +13223,7 @@ async function pceConfirmDestinations() {
         window.showToast?.(err.message || 'Could not save the destinations.', { icon: '⚠️' });
         btn.textContent = was;
     } finally {
-        _rqSetBusyCursor(false);
+        if (busy) _rqSetBusyCursor(false);
         _pceDestBusy = false;
         _pceRenderDestinations();
     }
@@ -19830,15 +19886,6 @@ async function gpSubmitReject() {
 </div>
 
 <style>
-  /* Busy cursor — set by window.setBusyCursor/withBusyCursor while a slow action runs.
-
-     On <body> and every descendant, with !important, so the wait cursor wins over any inline
-     or element-level cursor (e.g. a button's own pointer) for the duration of the action.
-
-     Plain CSS here rather than a Tailwind utility: rebuilding style.css to add one class churns
-     unrelated selectors across the whole file. */
-  body.bms-busy, body.bms-busy * { cursor: wait !important; }
-
   /* US-DASH-3 — Swan Command Bar. Scoped plain CSS (immune to prebuilt-Tailwind).
      The trigger (#nav-ask-team) lives on the Help & Support page (issue #170);
      the overlay below is opened from there or via ⌘K. */

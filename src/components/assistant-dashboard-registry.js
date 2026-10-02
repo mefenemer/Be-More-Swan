@@ -717,7 +717,7 @@
       ideasReview: {
         label: 'Review Lead Ideas',
         title: 'Lead Ideas',
-        description: 'Ideas for where to find your next customers. Approve one and the Lead Generator finds matching companies, scores them into your Enrichment tab, and suggests the next best action for each.',
+        description: 'Ideas for where to find your next customers. Approve one and the {role:lead_qualifier} finds matching companies, scores them into your Enrichment tab, and suggests the next best action for each.',
       },
       // "Find New Leads" (assistant-discovery-campaigns.js) — the outbound discovery engine:
       // author an Idea/Blueprint + cadence + guardrails; a background run searches the web,

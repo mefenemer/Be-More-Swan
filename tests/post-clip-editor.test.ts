@@ -1746,16 +1746,18 @@ check('why-it-did-not-happen reaches the banner, not only the panel', () => {
     assert.ok(ai.includes('_pceClipSay(index,'), 'a refused suggestion is still panel-only');
 });
 
-check('opening a post shows a busy pointer', () => {
+check('opening a post shows the busy spinner', () => {
     // It fetches the post, resolves its media and lays out the mock-up; on a cut that is seconds,
-    // and the only sign anything was happening was the modal eventually appearing.
+    // and the only sign anything was happening was the modal eventually appearing. The signal is
+    // the shared pink spinner (window.bmsBusy, dialogs.js), not a mouse cursor.
     const fn = slice('function _rqSetBusyCursor(on) {', 'async function _rqOpenPostReview(postId, opts = {}) {');
-    assert.ok(fn.includes('document.documentElement'), 'a per-element cursor would be overridden');
+    assert.ok(fn.includes('window.bmsBusy'), 'the busy state must go through the shared spinner');
+    assert.ok(!/style\.cursor/.test(fn), 'the busy signal is the spinner now, not a cursor');
     assert.ok(fn.includes('finally {'), 'a failed open would leave the page stuck looking busy');
     // The create path starts it before the fetch: its own button is dismissed before the slow half.
     const dest = slice('async function pceConfirmDestinations() {', '\n// Scheduling choice');
     assert.ok(dest.includes('_rqSetBusyCursor(true)'), 'starting a post shows nothing while it works');
-    assert.ok(dest.includes('_rqSetBusyCursor(false)'), 'the busy pointer is never cleared');
+    assert.ok(dest.includes('if (busy) _rqSetBusyCursor(false)'), 'the spinner is refcounted: release only what this call raised');
 });
 
 

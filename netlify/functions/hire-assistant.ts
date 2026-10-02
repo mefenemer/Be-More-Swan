@@ -113,7 +113,7 @@ export default withLambda(async (event) => {
         // either). masterAssistantId is stable across renames; the name fallback keeps legacy rows
         // that predate the FK working.
         const [existing] = await db
-            .select({ id: aiAssistants.id, provisioningStatus: aiAssistants.provisioningStatus, lifecycleStatus: aiAssistants.lifecycleStatus })
+            .select({ id: aiAssistants.id, name: aiAssistants.name, provisioningStatus: aiAssistants.provisioningStatus, lifecycleStatus: aiAssistants.lifecycleStatus })
             .from(aiAssistants)
             .where(and(
                 eq(aiAssistants.organisationId, orgId),
@@ -131,8 +131,10 @@ export default withLambda(async (event) => {
             } else if (existing.lifecycleStatus === 'archived') {
                 return json(409, { error: `${master.name} was archived in your workspace — restore or rename it before re-hiring.`, code: 'ARCHIVED' });
             } else {
-                // Already on the team: hand back the existing instance so setup can re-run.
-                return json(200, { assistantId: existing.id, name: master.name, roleKey: master.roleKey, alreadyHired: true });
+                // Already on the team: hand back the existing instance so setup can re-run. `name` is the
+                // instance's OWN name (the user may have renamed it — the setup wizard's naming step
+                // prefills from this); `roleName` is the catalogue role title.
+                return json(200, { assistantId: existing.id, name: existing.name || master.name, roleName: master.name, roleKey: master.roleKey, alreadyHired: true });
             }
         }
 
@@ -160,7 +162,7 @@ export default withLambda(async (event) => {
             metadata: { assistantId: created.id, roleKey: master.roleKey },
         });
 
-        return json(200, { assistantId: created.id, name: master.name, roleKey: master.roleKey });
+        return json(200, { assistantId: created.id, name: master.name, roleName: master.name, roleKey: master.roleKey });
     } catch (err: any) {
         // Unique (organisationId, name) race — another tab hired it first.
         if (err?.code === '23505' || err?.message?.includes('ai_assistants_org_name_unique')) {

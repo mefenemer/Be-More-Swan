@@ -8,6 +8,7 @@
   <!-- Toast + the confirm/alert/prompt dialogs. In <head> and not deferred: handlers reach
        for these, so they must exist before anything can run. -->
   <script src="/dialogs.js"></script>
+  <script src="/src/public/role-labels.js"></script>
   <link href="./style.css" rel="stylesheet">
   <script src="./explainers.js?v=20260630-2" defer></script>
   <!-- Generated from src/config/*.ts by `npm run gen:constants`. Needed here for
@@ -133,7 +134,7 @@
                 <span class="text-xs font-bold text-emerald-700 bg-white border border-emerald-200 px-2 py-0.5 rounded-full">Available</span>
               </div>
               <div>
-                <p class="font-bold text-gray-900 mt-1">Social Media Manager</p>
+                <p class="font-bold text-gray-900 mt-1" data-role-label="social_media_manager">Social Media Assistant</p>
                 <p class="text-xs text-gray-500 mt-0.5">Research, write, and schedule content across your platforms automatically.</p>
               </div>
               <div id="check-social-media" class="absolute top-3 right-3 w-5 h-5 bg-emerald-600 rounded-full flex items-center justify-center">
@@ -806,7 +807,7 @@
           </div>
 
           <div id="setup-loading-view" class="hidden py-12">
-            <div class="w-16 h-16 border-4 border-emerald-100 border-t-emerald-600 rounded-full animate-spin mx-auto mb-6"></div>
+            <span class="animate-spin mx-auto mb-6" role="status" aria-label="Loading" style="display:inline-block;box-sizing:border-box;width:64px;height:64px;border-radius:9999px;border:4px solid #eae4d7;border-top-color:#ff007f;flex-shrink:0;"></span>
             <h3 class="text-xl font-bold text-gray-900">Getting your assistant settled in...</h3>
             <p class="text-gray-500 mt-2">Setting up your accounts and getting your assistant ready to start.</p>
           </div>
@@ -974,7 +975,9 @@
       if (lbl) lbl.textContent = `Step ${i - FIRST_STEP + 1} of ${displayTotal}`;
     }
     const subtitle = document.getElementById('nav-subtitle');
-    if (subtitle) subtitle.textContent = '| Social Media Manager';
+    // Role title from master data (role-labels.js), never hardcoded — it is admin-editable.
+    if (subtitle) subtitle.textContent = '| ' + (window.RoleLabels ? window.RoleLabels.get('social_media_manager') : 'Social Media Assistant');
+    window.RoleLabels?.load().then(() => { if (subtitle) subtitle.textContent = '| ' + (window.RoleLabels ? window.RoleLabels.get('social_media_manager') : 'Social Media Assistant'); });
 
     // Render the real first step (guards against a resumed draft landing on the skipped step 1).
     if (currentStep < FIRST_STEP) currentStep = FIRST_STEP;
@@ -1906,7 +1909,7 @@
       // that (master_assistants.name is admin-editable, so a rename would break a name match).
       // This wizard is the Social Media Manager path, hence the literal default.
       roleKey: sessionStorage.getItem('aura_role_key') || 'social_media_manager',
-      assistantName: sessionStorage.getItem('aura_assistant_name') || 'Social Media Manager',
+      assistantName: sessionStorage.getItem('aura_assistant_name') || (window.RoleLabels ? window.RoleLabels.get('social_media_manager') : 'Social Media Assistant'),
       customAssistantName: document.getElementById('val_assistant_name')?.value || 'Digital Assistant',
       tier: currentTierKey,
       ...(draftId ? { draftId } : {}),
@@ -2206,7 +2209,7 @@
     const iconContainer = document.getElementById('name-validation-icon');
 
     // Show loading spinner in input
-    iconContainer.innerHTML = `<svg class="animate-spin h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" class="opacity-25"></circle><path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" class="opacity-75"></path></svg>`;
+    iconContainer.innerHTML = `<span class="animate-spin" role="status" aria-label="Loading" style="display:inline-block;box-sizing:border-box;width:20px;height:20px;border-radius:9999px;border:3px solid #eae4d7;border-top-color:#ff007f;flex-shrink:0;"></span>`;
 
     try {
       const res = await fetch(`/.netlify/functions/check-assistant-name?name=${encodeURIComponent(name)}`);
@@ -2251,7 +2254,8 @@
     errorContainer.classList.add('hidden');
 
     try {
-      const role = "Social Media Manager"; // Constant derived from current workflow path
+      // The role title from master data (admin-editable), so suggestions fit the role as named today.
+      const role = (await window.RoleLabels?.load(), (window.RoleLabels ? window.RoleLabels.get('social_media_manager') : 'Social Media Assistant'));
       const res = await fetch('/.netlify/functions/generate-names', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

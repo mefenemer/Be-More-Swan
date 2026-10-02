@@ -8,6 +8,7 @@ import { kindOf, categoryOf, priorityOf, isDismissibleType, resolvesOnClick } fr
 import { isInAppEnabledFor, resolveInAppPrefs, type AssistantOverrideMap } from '../../src/utils/notification-prefs';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
+import { liveRoleLabel } from '../../src/utils/live-role-label';
 const jwtSecret = process.env.JWT_SECRET;
 
 // Notification "kind" classification (action vs info) lives in src/utils/notification-actions.ts
@@ -139,7 +140,7 @@ export default withLambda(async (event: HandlerEvent) => {
             if (actorIds.length > 0) {
                 try {
                     const rows = await db.select({
-                        id: aiAssistants.id, name: aiAssistants.name, jobRole: aiAssistants.aiAssistantJobRole,
+                        id: aiAssistants.id, name: aiAssistants.name, jobRole: liveRoleLabel,
                         // The user's chosen icon colour, so the inbox draws the same assistant in the
                         // same colour as the cards and the calendar. Null ⇒ automatic (id-derived).
                         avatarColor: sql<string | null>`(${aiAssistants.configuration} ->> 'avatarColor')`,

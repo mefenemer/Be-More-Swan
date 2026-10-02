@@ -5609,7 +5609,7 @@ function _renderOperationSection(data) {
     host.innerHTML = fields.map(f => `
         <div>
           <label for="edit_op_${esc(f.key)}" class="block text-sm font-bold text-gray-700 mb-1">${esc(f.label || f.key)}</label>
-          ${f.helpText ? `<p class="text-xs text-gray-500 mb-2">${esc(f.helpText)}</p>` : ''}
+          ${f.helpText ? `<p class="text-xs text-gray-500 mb-2">${esc(window.RoleLabels ? window.RoleLabels.fill(f.helpText) : f.helpText)}</p>` : ''}
           ${_onboardingFieldControl(f, ctx, 'edit_op_')}
         </div>`).join('');
 
@@ -5766,9 +5766,6 @@ function _detailHydrate(data) {
     // Per-assistant AI disclosure (EU AI Act transparency rules — Art. 50)
     _detailSetVal('edit_ai_disclosure', data.disclosureText || '');
     _renderDisclosureHelp(data);
-
-    // Reflect guardrails state in the Brand Protected header badge
-    if (typeof window._updateGuardrailsBadge === 'function') window._updateGuardrailsBadge();
 
     // Size the auto-growing brief fields to their loaded content (visible tab only — the rest
     // are resized when their tab is first shown, see the tab-switching handler).
@@ -6637,6 +6634,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                 wrap.innerHTML = window.AssistantWelcomeMessages.buildBannerHtml({
                     assistantId,
                     roleKey: currentData.roleKey,
+                    roleLabel: currentData.role,
                     assistantName: currentData.name,
                     draftsQueued: 0,
                 });

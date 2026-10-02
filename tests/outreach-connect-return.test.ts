@@ -197,9 +197,11 @@ console.log('\n──── the Goal Progress actions are the same control ─�
 // rather than as things the Goal Progress card can do. Both are now the same pill as
 // "Adjust schedule" / "Manage connections", in the same top-right slot.
 
+// The header now sits INSIDE the white panel (the actions belong to the card), so it runs from
+// the panel to the body.
 const GOALS_HDR = DETAIL.slice(
-    landmark(DETAIL, 'id="goal-progress-card"'),
     landmark(DETAIL, 'id="goal-progress-panel"'),
+    landmark(DETAIL, 'id="goal-progress-body"'),
 );
 const ADJUST = (() => {
     const from = DETAIL.slice(landmark(DETAIL, 'id="autopilot-adjust-btn"'));
@@ -223,6 +225,12 @@ check('both actions carry the Adjust schedule pill, not a text-link style', () =
         );
         assert.doesNotMatch(cls, /underline/, `${name} is a button now, not a link`);
     }
+});
+
+check('the actions sit inside the Goal Progress panel, not above it', () => {
+    assert.ok(GOALS_HDR.includes('Goal Progress</h3>'), 'the title is not inside the panel');
+    assert.ok(GOALS_HDR.includes('id="btn-refresh-goals"'), 'Check again now is outside the card');
+    assert.ok(GOALS_HDR.includes("_activateMainTab('goals')"), 'Manage goals is outside the card');
 });
 
 check('they stay in the header\'s right-hand group', () => {

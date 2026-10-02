@@ -1367,7 +1367,7 @@
         <div class="flex items-start justify-between gap-4 p-5 border-b border-gray-100 shrink-0">
           <div>
             <h3 class="text-lg font-bold text-gray-900">${esc(state.cfg?.title || 'Find New Leads')}</h3>
-            <p class="text-sm text-gray-500 mt-0.5">Describe who you want to reach — the Lead Generator searches the web, scores what it finds, and files leads for your approval.</p>
+            <p class="text-sm text-gray-500 mt-0.5">Describe who you want to reach — the ${esc(window.RoleLabels ? window.RoleLabels.get('lead_qualifier') : 'Lead Generation Assistant')} searches the web, scores what it finds, and files leads for your approval.</p>
           </div>
           <button type="button" data-dc-close class="text-gray-400 hover:text-gray-600 text-2xl leading-none cursor-pointer">&times;</button>
         </div>

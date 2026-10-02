@@ -108,7 +108,8 @@ async function main() {
         assert.match(body, /window\.openPostReview\(Number\(hubLink\.postId\)\)/);
         assert.match(body, /closeAssistantChatModal/, 'without closing the chat the editor opens BEHIND it (same z-index, later in the DOM)');
         assert.ok(body.indexOf('closeAssistantChatModal') < body.indexOf('window.openPostReview(Number'), 'close the chat BEFORE opening the editor');
-        assert.match(body, /cursor = 'progress'/);
+        assert.match(body, /window\.bmsBusy\?\.\(true\)/, 'the shared busy spinner shows at once');
+        assert.match(body, /window\.bmsBusy\?\.\(false\)/, 'and is released however the open ends');
         assert.match(body, /a\.href = /, 'keep the href as the fallback outside the workspace shell');
     });
 

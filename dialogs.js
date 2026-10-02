@@ -236,3 +236,128 @@ window.promptModal = function(message, opts = {}) {
     input.focus();
   });
 };
+
+// ── The busy indicator ───────────────────────────────────────────────────────────────────────
+// ONE "this is working, wait" signal for the whole product: the pink rotating circle the detail
+// page's cards show while they load (.card-loading-spinner in assistant-detail.html). It replaces
+// the browser's wait/progress mouse cursor, which was easy to miss, invisible on touch screens and
+// not part of the brand.
+//
+// `window.bmsBusy(true|false)` is refcounted — two overlapping operations must not have the first
+// to finish clear the indicator out from under the second — and shows nothing for the first 150ms,
+// so a quick action doesn't flash it. `window.bmsWithBusy(fn)` wraps an async fn and clears it in a
+// `finally`, so an error cannot strand it on screen. `window.bmsSpinnerHtml(px)` is the same circle
+// inline, for a button or a panel. `pointer-events:none`: it signals, it never blocks a click.
+(function () {
+  var STYLE_ID = 'bms-busy-styles';
+  function ensureStyles() {
+    if (document.getElementById(STYLE_ID)) return;
+    var st = document.createElement('style');
+    st.id = STYLE_ID;
+    st.textContent =
+      '.bms-spinner{display:inline-block;box-sizing:border-box;border-radius:9999px;border:3px solid #eae4d7;border-top-color:#ff007f;animation:bmsSpin .7s linear infinite;vertical-align:middle;flex-shrink:0;}'
+      + '@keyframes bmsSpin{to{transform:rotate(360deg);}}'
+      + '@media (prefers-reduced-motion: reduce){.bms-spinner{animation-duration:1.6s;}}'
+      + '#bms-busy-indicator{position:fixed;left:50%;top:50%;z-index:12000;pointer-events:none;display:flex;align-items:center;justify-content:center;'
+      + 'width:64px;height:64px;margin:-32px 0 0 -32px;border-radius:9999px;background:rgba(255,255,255,.92);box-shadow:0 10px 30px rgba(0,0,0,.12);'
+      + 'opacity:0;transition:opacity .15s ease;}'
+      + '#bms-busy-indicator.is-on{opacity:1;}';
+    (document.head || document.documentElement).appendChild(st);
+  }
+
+  window.bmsSpinnerHtml = function (px) {
+    ensureStyles();
+    var s = Number(px) || 16;
+    var b = s <= 16 ? 2 : 3;
+    return '<span class="bms-spinner" role="status" aria-label="Loading" style="width:' + s + 'px;height:' + s + 'px;border-width:' + b + 'px;"></span>';
+  };
+
+  var depth = 0;
+  var showTimer = null;
+  function indicator() {
+    var el = document.getElementById('bms-busy-indicator');
+    if (!el && document.body) {
+      ensureStyles();
+      el = document.createElement('div');
+      el.id = 'bms-busy-indicator';
+      el.setAttribute('role', 'status');
+      el.setAttribute('aria-live', 'polite');
+      el.innerHTML = '<span class="bms-spinner" style="width:30px;height:30px;"></span><span style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);">Loading…</span>';
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+
+  window.bmsBusy = function (on) {
+    depth = Math.max(0, depth + (on ? 1 : -1));
+    if (depth > 0) {
+      if (showTimer || indicator()?.classList.contains('is-on')) return;
+      showTimer = setTimeout(function () {
+        showTimer = null;
+        if (depth > 0) indicator()?.classList.add('is-on');
+      }, 150);
+    } else {
+      if (showTimer) { clearTimeout(showTimer); showTimer = null; }
+      var el = document.getElementById('bms-busy-indicator');
+      if (el) el.classList.remove('is-on');
+    }
+  };
+
+  window.bmsWithBusy = async function (fn) {
+    window.bmsBusy(true);
+    try { return await fn(); }
+    finally { window.bmsBusy(false); }
+  };
+
+  // ── "Loading…" placeholders get the spinner too ────────────────────────────────────────────
+  // ~150 panels, tables and lists across the product say "Loading…" (or "Loading assistants…")
+  // while they fetch, as bare grey text. Rather than hand-edit each, any element whose ONLY content
+  // is such a phrase gets the pink circle in front of it — including ones rendered later through
+  // innerHTML, via the observer. Leaf elements only (never a control: an <option>, a button's
+  // "Checking…"), marked so a re-check never adds a second circle; when the content arrives the
+  // placeholder is replaced wholesale and the circle goes with it.
+  var LOADING_RE = /^(loading|fetching)\b[^<>]{0,50}(…|\.\.\.)$/i;
+  var SKIP = { OPTION: 1, SELECT: 1, BUTTON: 1, TEXTAREA: 1, INPUT: 1, SCRIPT: 1, STYLE: 1, TITLE: 1, A: 1, LABEL: 1 };
+  function decorate(el) {
+    if (!el || el.nodeType !== 1 || SKIP[el.tagName]) return;
+    if (el.hasAttribute('data-bms-spun')) {
+      if (el.firstElementChild && el.firstElementChild.classList.contains('bms-spinner')) return;
+      el.removeAttribute('data-bms-spun'); // its content was rewritten since — judge it afresh
+    }
+    if (el.childElementCount !== 0) return;
+    var t = (el.textContent || '').trim();
+    if (!t || !LOADING_RE.test(t)) return;
+    if (el.closest('button, a, select, [data-no-spinner]')) return;
+    el.setAttribute('data-bms-spun', '');
+    var sp = document.createElement('span');
+    sp.className = 'bms-spinner';
+    sp.setAttribute('aria-hidden', 'true');
+    sp.style.cssText = 'width:16px;height:16px;border-width:2px;margin-right:8px;';
+    el.insertBefore(sp, el.firstChild);
+  }
+  function scan(root) {
+    if (!root || root.nodeType !== 1) return;
+    decorate(root);
+    var all = root.getElementsByTagName('*');
+    for (var i = 0; i < all.length; i++) decorate(all[i]);
+  }
+  function startPlaceholderSpinners() {
+    if (!document.body) return;
+    ensureStyles();
+    scan(document.body);
+    new MutationObserver(function (records) {
+      for (var i = 0; i < records.length; i++) {
+        var r = records[i];
+        // A textContent write ("Loading…") replaces the text node: the target is the element.
+        if (r.target && r.target.nodeType === 1) decorate(r.target);
+        else if (r.target && r.target.parentElement) decorate(r.target.parentElement);
+        for (var j = 0; j < r.addedNodes.length; j++) {
+          var n = r.addedNodes[j];
+          if (n.nodeType === 1) scan(n);
+        }
+      }
+    }).observe(document.body, { childList: true, subtree: true, characterData: true });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startPlaceholderSpinners);
+  else startPlaceholderSpinners();
+})();
