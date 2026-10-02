@@ -9,10 +9,7 @@
 
   <!-- Loading state -->
   <div id="billing-loading" class="flex items-center justify-center py-24 text-gray-400 gap-3">
-    <svg class="w-5 h-5 animate-spin text-emerald-500" fill="none" viewBox="0 0 24 24">
-      <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" class="opacity-25"/>
-      <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" class="opacity-75"/>
-    </svg>
+    <span class="animate-spin" role="status" aria-label="Loading" style="display:inline-block;box-sizing:border-box;width:20px;height:20px;border-radius:9999px;border:3px solid #eae4d7;border-top-color:#ff007f;flex-shrink:0;"></span>
     <span class="text-sm font-medium">Loading billing data…</span>
   </div>
 
@@ -317,10 +314,7 @@
 
         <!-- Stripe Elements loading state -->
         <div id="card-form-loading" class="flex items-center justify-center py-8 gap-3 text-gray-400">
-          <svg class="w-5 h-5 animate-spin text-emerald-500" fill="none" viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" class="opacity-25"/>
-            <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" class="opacity-75"/>
-          </svg>
+          <span class="animate-spin" role="status" aria-label="Loading" style="display:inline-block;box-sizing:border-box;width:20px;height:20px;border-radius:9999px;border:3px solid #eae4d7;border-top-color:#ff007f;flex-shrink:0;"></span>
           <span class="text-sm">Loading secure card form…</span>
         </div>
 
@@ -412,10 +406,7 @@
       </div>
       <div id="receipt-iframe-wrap" class="flex-1 relative overflow-hidden">
         <div id="receipt-loading" class="absolute inset-0 flex items-center justify-center text-gray-400 gap-2">
-          <svg class="w-5 h-5 animate-spin text-emerald-500" fill="none" viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" class="opacity-25"/>
-            <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" class="opacity-75"/>
-          </svg>
+          <span class="animate-spin" role="status" aria-label="Loading" style="display:inline-block;box-sizing:border-box;width:20px;height:20px;border-radius:9999px;border:3px solid #eae4d7;border-top-color:#ff007f;flex-shrink:0;"></span>
           <span class="text-sm">Loading receipt…</span>
         </div>
         <iframe id="receipt-iframe" src="about:blank" title="Payment Receipt"

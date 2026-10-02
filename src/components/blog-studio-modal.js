@@ -86,13 +86,17 @@
   var BUSY_BUTTONS = ['bs-approve', 'bs-pick-time', 'bs-publish', 'bs-schedule',
     'bs-unschedule', 'bs-unpublish', 'bs-repush', 'bs-discard', 'bs-reject-go'];
 
-  // Whole-modal busy state for the long-running lifecycle actions (publish). Shows the OS wait
-  // cursor and disables every button in the footer, so a second click cannot fire a second publish
+  // Whole-modal busy state for the long-running lifecycle actions (publish). Shows the shared pink
+  // busy spinner (window.bmsBusy, dialogs.js — it replaced the OS wait cursor) and disables every button in the footer, so a second click cannot fire a second publish
   // while the first is still in flight — publish-blog is not idempotent from the author's point of
   // view (it re-renders the payload and re-runs syndication).
+  var busyShown = false;
   function setBusy(on) {
     var root = el('bms-blog-backdrop');
     if (root) root.classList.toggle('bs-busy', !!on);
+    // bmsBusy is refcounted, so only report a real change — a second setBusy(false) on the
+    // settled path must not decrement someone else's busy state.
+    if (!!on !== busyShown) { busyShown = !!on; window.bmsBusy?.(busyShown); }
     // An explicit list, not a container sweep: the lifecycle row has no wrapper id, and the ones
     // that were ALREADY disabled (Unschedule/Unpublish are hidden+idle on a draft) must come back
     // disabled — hence the marker attribute rather than a blanket re-enable.
@@ -307,10 +311,10 @@
     + '.bs-btn-outline:hover{background:#fdf2f8;}'
     + '.bs-btn:disabled{opacity:.5;cursor:not-allowed;}'
     // Publishing is the one action here that runs long enough for the author to wonder whether
-    // the click landed, and the banner alone sits below the fold on a long post. `cursor:progress`
-    // over the WHOLE modal is the signal they already expect from the OS. !important because
-    // .bs-btn:disabled (set on the buttons for the same beat) otherwise wins on the buttons.
-    + '#bms-blog-backdrop.bs-busy,#bms-blog-backdrop.bs-busy *{cursor:progress !important;}'
+    // the click landed, and the banner alone sits below the fold on a long post. The signal is the
+    // shared pink spinner (setBusy → window.bmsBusy); the class only stops the disabled buttons
+    // reading as clickable.
+    + '#bms-blog-backdrop.bs-busy .bs-btn{cursor:default !important;}'
     + '.bs-ready-q{font-size:14px;font-weight:600;color:#1f2937;margin:0 0 8px;}'
     + '.bs-stack{display:flex;flex-direction:column;gap:8px;}';
 
@@ -502,7 +506,7 @@
     + '<span class="bs-btn-ico">\uD83D\uDD17</span>Connect Google Search Console</button>'
     + '          <button id="bs-gsc-disconnect" class="bs-linkbtn bs-hidden" type="button">Disconnect</button>'
     + '        </div>'
-    + '        <div class="bs-status" style="font-size:11px;margin-top:4px;">Lets your Blog Writer spot posts losing search traffic and flag them for a refresh.</div>'
+    + '        <div class="bs-status" style="font-size:11px;margin-top:4px;">Lets your ' + String(window.RoleLabels ? window.RoleLabels.get('blog_writer') : 'Blog Writing Assistant').replace(/[&<>"']/g, '') + ' spot posts losing search traffic and flag them for a refresh.</div>'
     + '        </div>'
     + '      </details>'
     + '      <details class="bs-sec" data-bs-sec="widget">'

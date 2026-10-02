@@ -42,6 +42,7 @@ import { formDraftFromUiElement, AUDIENCE_FORM_DRAFT_TYPE } from '../../src/util
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJson, stripCodeFences } from '../../src/utils/model-json';
 
+import { liveRoleLabel } from '../../src/utils/live-role-label';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -1858,7 +1859,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             .select({
                 id: aiAssistants.id,
                 name: aiAssistants.name,
-                jobRole: aiAssistants.aiAssistantJobRole,
+                jobRole: liveRoleLabel,
                 systemPrompt: aiAssistants.systemPrompt,
                 onboardingContext: aiAssistants.onboardingContext,
                 mediaSources: aiAssistants.mediaSources,
@@ -2038,7 +2039,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 .select({
                     id: aiAssistants.id,
                     name: aiAssistants.name,
-                    jobRole: aiAssistants.aiAssistantJobRole,
+                    jobRole: liveRoleLabel,
                     systemPrompt: aiAssistants.systemPrompt,
                     onboardingContext: aiAssistants.onboardingContext,
                 })

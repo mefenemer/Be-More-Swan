@@ -31,43 +31,36 @@
     ));
   }
 
-  // role      — how the assistant names its own job in the intro ("I'm your …").
+  // role      — NOT stored per role: the intro's "I'm your …" is the master-data role title
+  //             (roleLabel / window.RoleLabels), see roleLine(). Only the generic default keeps one.
   // working   — present-tense line for what it is doing RIGHT NOW (no full stop; the template adds one).
   // produces  — plural noun for the review-queue items it drafts. Present ⇒ a known draft count can
   //             replace `working` with a concrete "N queued for your approval" line (buildWorkingLine).
   const ROLES = {
     social_media_manager: {
-      role: 'your Social Media Manager',
       working: 'I’m already getting to work drafting your first posts',
       produces: 'posts',
     },
     blog_writer: {
-      role: 'your Blog Writer',
       working: 'I’m already getting to work drafting your first articles',
       produces: 'articles',
     },
     lead_qualifier: {
-      role: 'your Lead Qualifier',
       working: 'I’m already lining up leads to score and prioritise for you',
     },
     accounts_receivable_clerk: {
-      role: 'your Accounts Receivable Clerk',
       working: 'I’m getting across your invoices so I can help you chase what’s owed',
     },
     meeting_note_taker: {
-      role: 'your Meeting Note-Taker',
       working: 'I’m ready to turn your meetings into clean, shareable notes and action items',
     },
     tier1_support_agent: {
-      role: 'your Support Agent',
       working: 'I’m ready to help you answer customer questions calmly and consistently',
     },
     crm_enricher: {
-      role: 'your CRM Enricher',
       working: 'I’m ready to start filling in the gaps on your contacts and companies',
     },
     campaign_orchestrator: {
-      role: 'your Campaign Orchestrator',
       working: 'I’m ready to help you shape and coordinate your next campaign',
     },
     default: {
@@ -75,6 +68,16 @@
       working: 'I’m already getting to work',
     },
   };
+
+  /**
+   * "your Social Media Assistant" — the role title is master data (admin-editable), so it comes
+   * from the caller's live roleLabel, else window.RoleLabels, never a hardcoded string here.
+   */
+  function roleLine(o) {
+    const label = (o && o.roleLabel)
+      || (o && o.roleKey && window.RoleLabels && ROLES[o.roleKey] ? window.RoleLabels.get(o.roleKey) : '');
+    return label ? `your ${label}` : ROLES.default.role;
+  }
 
   /** Copy for a roleKey, falling back to the generic default. */
   function get(roleKey) {
@@ -108,7 +111,7 @@
   /**
    * Big centred welcome card for a setup-complete screen. Two buttons: primary "Chat with
    * {name}" (opens the conversation) and a secondary route to the assistant's workspace.
-   * opts: { assistantId, roleKey, assistantName, draftsQueued }
+   * opts: { assistantId, roleKey, roleLabel?, assistantName, draftsQueued }
    */
   function buildCardHtml(opts) {
     const o = opts || {};
@@ -122,7 +125,7 @@
       <div class="max-w-md mx-auto text-center py-4" data-assistant-welcome>
         <div class="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center text-4xl mx-auto mb-4">🦢</div>
         <h2 class="text-2xl sm:text-3xl font-extrabold text-gray-900 mb-3">Hi, I’m ${name}! 👋</h2>
-        <p class="text-gray-600 leading-relaxed mb-2">I’m ${escapeHtml(copy.role)}, and I’m all set up. ${working}.</p>
+        <p class="text-gray-600 leading-relaxed mb-2">I’m ${escapeHtml(roleLine(o))}, and I’m all set up. ${working}.</p>
         <p class="text-gray-500 text-sm leading-relaxed mb-6">Want to chat any time? Just hit the <span class="font-semibold text-gray-700">Chat</span> button and I’ll help however I can — steer my work, ask a question, or point me at something new.</p>
         <div class="flex flex-col sm:flex-row gap-3 justify-center">
           ${chat ? `<a href="${chat}" data-welcome-chat class="inline-flex items-center justify-center gap-2 px-6 py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-lg shadow transition">
@@ -140,7 +143,7 @@
    * Dismissible welcome strip for the Assistant Detail page (the user is already ON the
    * workspace, so there's no "go to workspace" button — just a Chat button and a dismiss).
    * The [data-welcome-dismiss] control is wired by the caller.
-   * opts: { assistantId, roleKey, assistantName, draftsQueued }
+   * opts: { assistantId, roleKey, roleLabel?, assistantName, draftsQueued }
    */
   function buildBannerHtml(opts) {
     const o = opts || {};
@@ -154,7 +157,7 @@
         <div class="w-11 h-11 bg-white rounded-full flex items-center justify-center text-2xl shrink-0 shadow-sm">🦢</div>
         <div class="min-w-0 grow">
           <p class="font-bold text-gray-900">Hi, I’m ${name}! 👋</p>
-          <p class="text-sm text-gray-600 mt-0.5">I’m ${escapeHtml(copy.role)}, and I’m all set up. ${working}. Want to chat any time? Just hit the <span class="font-semibold text-gray-700">Chat</span> button up top.</p>
+          <p class="text-sm text-gray-600 mt-0.5">I’m ${escapeHtml(roleLine(o))}, and I’m all set up. ${working}. Want to chat any time? Just hit the <span class="font-semibold text-gray-700">Chat</span> button up top.</p>
           ${chat ? `<a href="${chat}" data-welcome-chat class="inline-flex items-center gap-1.5 mt-3 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg shadow-sm transition">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.9 9.9 0 01-4-.8L3 20l1.3-3.5A7.9 7.9 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
             Chat with ${name}

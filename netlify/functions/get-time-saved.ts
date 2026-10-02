@@ -24,6 +24,7 @@ import { evaluateMilestones } from '../../src/utils/gamification';
 import { parseRoiPeriod, roiPeriodStart } from '../../src/utils/roi-period';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
+import { liveRoleLabel } from '../../src/utils/live-role-label';
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 });
@@ -70,7 +71,7 @@ export default withLambda(async (event) => {
     // itemised rows that no assistant produced. See src/utils/roi-activity.ts for the full note.
     const assistantIds = await activeAssistantIds(db, orgId);
     const assistants = await db
-        .select({ id: aiAssistants.id, name: aiAssistants.name, role: aiAssistants.aiAssistantJobRole })
+        .select({ id: aiAssistants.id, name: aiAssistants.name, role: liveRoleLabel })
         .from(aiAssistants).where(eq(aiAssistants.organisationId, orgId));
 
     // No active assistants ⇒ nothing to itemise. Returning early also keeps the inArray() calls

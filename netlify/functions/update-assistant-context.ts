@@ -283,6 +283,14 @@ export default withLambda(async (event) => {
         if (error?.message?.startsWith('DISCLOSURE_REQUIRED')) {
             return { statusCode: 422, body: JSON.stringify({ error: 'AI disclosure text is required before this assistant can be activated (EU AI Act Art. 52).', code: 'DISCLOSURE_MISSING' }) };
         }
+        // Names are unique per organisation (ai_assistants_org_name_unique). Say so, rather than a
+        // generic failure the user can't act on — the setup wizard's naming step and the detail
+        // page's rename both land here.
+        const pgCode = error?.code || error?.cause?.code;
+        const pgMsg = String(error?.message || '') + String(error?.cause?.message || '');
+        if (pgCode === '23505' || pgMsg.includes('ai_assistants_org_name_unique')) {
+            return { statusCode: 409, body: JSON.stringify({ error: 'You already have an assistant with that name — please choose another.', code: 'NAME_TAKEN' }) };
+        }
         console.error('Update Context Error:', error);
         return { statusCode: 500, body: JSON.stringify({ error: 'Failed to update context.' }) };
     }

@@ -18,6 +18,7 @@ import { CURRENT_TOS_VERSION } from './accept-tos';
 import { CURRENT_DPA_VERSION } from './accept-dpa';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
+import { liveRoleLabel } from '../../src/utils/live-role-label';
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 });
@@ -53,7 +54,7 @@ export async function computeAssistantReadiness(db: Db, orgId: number, assistant
             const [assistant] = await tx.select({
                 id: aiAssistants.id,
                 name: aiAssistants.name,
-                role: aiAssistants.aiAssistantJobRole,
+                role: liveRoleLabel,
                 userId: aiAssistants.userId,
                 masterAssistantId: aiAssistants.masterAssistantId,
                 isActive: aiAssistants.isActive,

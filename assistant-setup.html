@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <script src="./auth-check.js"></script>
+  <script src="/dialogs.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Set up your Assistant | Be More Swan</title>
@@ -53,7 +54,8 @@
 
   <!-- Loading / error states -->
   <div id="setup-loading" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-12 text-center text-gray-500">
-    Hiring your assistant…
+    <span class="animate-spin" role="status" aria-label="Loading" style="display:inline-block;box-sizing:border-box;width:30px;height:30px;border-radius:9999px;border:3px solid #eae4d7;border-top-color:#ff007f;margin-bottom:12px;"></span>
+    <p>Hiring your assistant…</p>
   </div>
   <div id="setup-error" class="hidden bg-white rounded-2xl border border-gray-200 shadow-sm p-12 text-center">
     <div class="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center text-2xl mx-auto mb-3">🤔</div>
@@ -65,6 +67,7 @@
 </main>
 
 <script src="./mobileMenu.js"></script>
+<script src="/src/public/role-labels.js"></script>
 <script src="/src/public/assistant-onboarding-schemas.js"></script>
 <script src="/src/components/assistant-welcome-messages.js"></script>
 <script src="/src/components/assistant-onboarding-shell.js"></script>
@@ -101,6 +104,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
+  // Live role titles for the wizard's copy ({role:key} tokens) — fetched alongside the hire.
+  const labelsReady = window.RoleLabels ? window.RoleLabels.load() : Promise.resolve();
+
   // Create (or reuse) the org's instance for this role — the wizard saves onto its id.
   let hire = null;
   try {
@@ -127,12 +133,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (hire.alreadyHired) document.getElementById('setup-already-hired').classList.remove('hidden');
   document.getElementById('setup-root').classList.remove('hidden');
 
+  await labelsReady;
   window.AssistantOnboardingShell.mount({
     container: document.getElementById('setup-root'),
     assistantId: hire.assistantId,
     configurationSchema: schema,
     roleKey,
     assistantName: hire.name,
+    // The role title from master data (admin-editable) — steers the swan's name suggestions.
+    roleLabel: hire.roleName || hire.name,
+    onComplete: ({ assistantName }) => {
+      if (assistantName) document.getElementById('setup-assistant-name').textContent = `Set up ${assistantName}`;
+    },
     // No auto-redirect: the success state is now an in-character welcome from the assistant
     // (assistant-welcome-messages.js) with its own "Chat with …" and "Go to workspace" buttons,
     // so the user reads the greeting and chooses where to go rather than being whisked away.

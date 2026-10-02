@@ -135,10 +135,11 @@ check('the wait cursor is armed before the request and cleared on both outcomes'
         'a network failure leaves the modal frozen with no way out');
 });
 
-check('busy is a real cursor, not just a disabled button', () => {
-    assert.ok(/#bms-blog-backdrop\.bs-busy[^']*cursor:progress !important/.test(modal),
-        'nothing paints the wait cursor — !important is needed to beat .bs-btn:disabled');
+check('busy shows the shared spinner, not just a disabled button', () => {
     const busy = modal.slice(landmark(modal, 'function setBusy('), landmark(modal, 'function refreshReadout('));
+    assert.ok(/window\.bmsBusy\?\.\(busyShown\)/.test(busy), 'nothing shows the busy spinner');
+    // bmsBusy is refcounted: a repeated setBusy(false) must not release someone else's busy state.
+    assert.ok(/if \(!!on !== busyShown\)/.test(busy), 'setBusy reports to the spinner on every call, unbalancing it');
     assert.ok(/classList\.toggle\('bs-busy'/.test(busy), 'the busy class is never applied');
     // Two publishes of the same post re-render the payload and re-run syndication.
     assert.ok(/b\.disabled = true;/.test(busy), 'the action row stays clickable mid-publish');

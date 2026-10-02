@@ -2547,7 +2547,16 @@ function formatCurrency(amount, currency) {
       'review-queue': document.getElementById('nav-review-queue')
     };
 
+    // Every navigation shows the shared busy spinner until the new view is fetched, swapped in and
+    // initialised — a slow view used to leave the old page on screen with no sign the click landed.
     async function loadView(routeKey, param = null) {
+      if (!routes[routeKey]) return;
+      window.bmsBusy?.(true);
+      try { return await _loadViewInner(routeKey, param); }
+      finally { window.bmsBusy?.(false); }
+    }
+
+    async function _loadViewInner(routeKey, param = null) {
       const route = routes[routeKey];
       if (!route) return;
 
@@ -3340,34 +3349,12 @@ function formatCurrency(amount, currency) {
     window._onboardingComplete = false; // pessimistic until status loads
     let _onboardingLoaded = false;
 
-    // ── Busy cursor ──────────────────────────────────────────────────────
-    // "This is working, wait" for an action with a visible delay.
-    //
-    // The class goes on <body>, NOT on the control that was clicked, so the wait state survives the
-    // pointer moving off the button mid-action (exactly when someone waiting starts moving it). The
-    // `body.bms-busy *` rule with !important overrides any element-level cursor for the duration. The
-    // rule lives in the hand-written <style> block at the end of this file, so no Tailwind rebuild is
-    // involved.
-    //
-    // Refcounted: two overlapping operations must not have the first to finish clear the cursor out
-    // from under the second.
-    let _bmsBusyDepth = 0;
-    window.setBusyCursor = function (on) {
-      _bmsBusyDepth = Math.max(0, _bmsBusyDepth + (on ? 1 : -1));
-      document.body.classList.toggle('bms-busy', _bmsBusyDepth > 0);
-    };
-
-    /**
-     * Run `fn` with the page showing a busy cursor, restoring it however `fn` ends.
-     *
-     * `finally`, so a thrown error or an early return cannot strand the whole page in a wait
-     * cursor with no way back short of a reload.
-     */
-    window.withBusyCursor = async function (fn) {
-      window.setBusyCursor(true);
-      try { return await fn(); }
-      finally { window.setBusyCursor(false); }
-    };
+    // ── Busy indicator ───────────────────────────────────────────────────
+    // "This is working, wait" for an action with a visible delay. Was a wait mouse cursor; it is now
+    // the shared pink spinner (window.bmsBusy in dialogs.js — refcounted, debounced, never blocks a
+    // click). The old names stay as aliases so every existing caller gets the new indicator.
+    window.setBusyCursor = function (on) { window.bmsBusy?.(on); };
+    window.withBusyCursor = function (fn) { return window.bmsWithBusy(fn); };
 
     // showToast now lives in /dialogs.js (loaded in <head>).
 
@@ -5501,6 +5488,8 @@ function formatCurrency(amount, currency) {
 <script src="/src/components/assistant-inspo.js"></script>
 <!-- Role-specific onboarding schemas — the catalogue's Hire Role buttons route any roleKey
      defined here to assistant-setup.html (schema-driven wizard) instead of onboarding.html. -->
+<script src="/src/public/role-labels.js"></script>
+<script>window.RoleLabels && window.RoleLabels.load();</script>
 <script src="/src/public/assistant-onboarding-schemas.js"></script>
 <!-- Role marketing copy (read from master_assistants via the API) + shared detail modal —
      the catalogue primes this registry from the list it already fetches, then opens the modal
@@ -9495,9 +9484,8 @@ function _rqBindTimeline() {
  * cleared in a finally so a failure cannot leave the page stuck looking busy.
  */
 function _rqSetBusyCursor(on) {
-    const el = document.documentElement;
-    if (!el) return;
-    el.style.cursor = on ? 'progress' : '';
+    // The shared pink spinner (dialogs.js), not a mouse cursor — see window.bmsBusy.
+    window.bmsBusy?.(!!on);
 }
 
 /**
@@ -13200,11 +13188,14 @@ async function pceConfirmDestinations() {
     const was = btn.textContent;
     btn.textContent = 'Working…';
 
+    // The busy indicator is refcounted, so release it only if this call raised it.
+    let busy = false;
     try {
         if (_pceDestMode === 'create') {
             // Starting a post is a server round trip and then a whole editor being built. The
             // button below says "Working…" but is dismissed before the slow half even begins.
             _rqSetBusyCursor(true);
+            busy = true;
             const res = await fetch('/.netlify/functions/create-manual-post', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ assistantId: _pceDestAssistantId, destinations, blank: true }),
@@ -13232,7 +13223,7 @@ async function pceConfirmDestinations() {
         window.showToast?.(err.message || 'Could not save the destinations.', { icon: '⚠️' });
         btn.textContent = was;
     } finally {
-        _rqSetBusyCursor(false);
+        if (busy) _rqSetBusyCursor(false);
         _pceDestBusy = false;
         _pceRenderDestinations();
     }
@@ -19895,15 +19886,6 @@ async function gpSubmitReject() {
 </div>
 
 <style>
-  /* Busy cursor — set by window.setBusyCursor/withBusyCursor while a slow action runs.
-
-     On <body> and every descendant, with !important, so the wait cursor wins over any inline
-     or element-level cursor (e.g. a button's own pointer) for the duration of the action.
-
-     Plain CSS here rather than a Tailwind utility: rebuilding style.css to add one class churns
-     unrelated selectors across the whole file. */
-  body.bms-busy, body.bms-busy * { cursor: wait !important; }
-
   /* US-DASH-3 — Swan Command Bar. Scoped plain CSS (immune to prebuilt-Tailwind).
      The trigger (#nav-ask-team) lives on the Help & Support page (issue #170);
      the overlay below is opened from there or via ⌘K. */

@@ -219,8 +219,8 @@
         a.addEventListener('click', (e) => {
           if (typeof window.openPostReview !== 'function') return;
           e.preventDefault();
-          // Busy cursor at once — openPostReview sets it too, but only after the chat closes.
-          document.documentElement.style.cursor = 'progress';
+          // Busy spinner at once — openPostReview shows it too, but only after the chat closes.
+          window.bmsBusy?.(true);
           // The chat modal shares the editor's z-index and sits later in the DOM, so the editor
           // would open BEHIND it. Close the chat first; its thread is kept and resumes from 💬 Chat.
           const chatModal = document.getElementById('chat-modal');
@@ -228,7 +228,7 @@
             window.closeAssistantChatModal?.();
           }
           Promise.resolve(window.openPostReview(Number(hubLink.postId)))
-            .finally(() => { document.documentElement.style.cursor = ''; });
+            .finally(() => { window.bmsBusy?.(false); });
         });
       }
       return a;

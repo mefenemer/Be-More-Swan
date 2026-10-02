@@ -24,6 +24,11 @@
   const API = '/.netlify/functions/lead-generation';
   const state = { assistantId: null, cfg: null, overlay: null };
 
+  // Role titles are master data — {role:key} tokens filled by role-labels.js (workspace.html).
+  function _roleText(text) {
+    return window.RoleLabels ? window.RoleLabels.fill(text) : String(text || '').replace(/\{role:[a-z0-9_]+\}/g, 'assistant');
+  }
+
   function esc(value) {
     return String(value ?? '')
       .replace(/&/g, '&amp;')
@@ -81,7 +86,7 @@
       <div class="text-center py-10">
         <p class="text-4xl mb-3">💡</p>
         <p class="font-bold text-gray-900 mb-1">No lead ideas yet</p>
-        <p class="text-sm text-gray-500 max-w-sm mx-auto mb-5">${esc(state.cfg?.description || 'Let the Lead Generator suggest where to find your next customers — review and approve the ones worth pursuing.')}</p>
+        <p class="text-sm text-gray-500 max-w-sm mx-auto mb-5">${esc(_roleText(state.cfg?.description || 'Let the {role:lead_qualifier} suggest where to find your next customers — review and approve the ones worth pursuing.'))}</p>
         <button type="button" data-generate
           class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Propose lead ideas</button>
       </div>`;
@@ -219,7 +224,7 @@
         <div class="flex items-start justify-between gap-4 p-5 border-b border-gray-100 shrink-0">
           <div>
             <h3 class="text-lg font-bold text-gray-900">${esc(state.cfg?.title || 'Lead Ideas')}</h3>
-            <p class="text-sm text-gray-500 mt-0.5">Approve an idea and the Lead Generator finds, scores and files matching leads.</p>
+            <p class="text-sm text-gray-500 mt-0.5">Approve an idea and the ${esc(_roleText('{role:lead_qualifier}'))} finds, scores and files matching leads.</p>
           </div>
           <button type="button" data-ideas-close class="text-gray-400 hover:text-gray-600 text-2xl leading-none cursor-pointer">&times;</button>
         </div>

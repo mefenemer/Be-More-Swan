@@ -18,6 +18,7 @@ import { resolveLiveSocialPlatforms } from '../../src/utils/live-social-connecti
 import { PLATFORM_FORMATS } from '../../src/config/platform-formats';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
+import { liveRoleLabel } from '../../src/utils/live-role-label';
 // Display names for the "Connected accounts:" line. Social platforms come from the catalogue so a
 // new one can never arrive here unlabelled; non-social services (Canva, Gmail, …) fall through to
 // the capitalised service name.
@@ -46,7 +47,7 @@ export default withLambda(async (event) => {
         const [a] = await tx.select({
             id: aiAssistants.id,
             name: aiAssistants.name,
-            role: aiAssistants.aiAssistantJobRole,
+            role: liveRoleLabel,
             lifecycleStatus: aiAssistants.lifecycleStatus,
             provisioningStatus: aiAssistants.provisioningStatus,
             provisioningBlockedReason: aiAssistants.provisioningBlockedReason,

@@ -22,6 +22,7 @@ import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJson } from '../../src/utils/model-json';
 
+import { liveRoleLabel } from '../../src/utils/live-role-label';
 const BATCH = 50;
 
 export default withLambda(async () => {
@@ -30,7 +31,7 @@ export default withLambda(async () => {
 
     const candidates = await db
         .select({
-            id: aiAssistants.id, name: aiAssistants.name, role: aiAssistants.aiAssistantJobRole,
+            id: aiAssistants.id, name: aiAssistants.name, role: liveRoleLabel,
             organisationId: aiAssistants.organisationId, userId: aiAssistants.userId, onboardingContext: aiAssistants.onboardingContext,
         })
         .from(aiAssistants)

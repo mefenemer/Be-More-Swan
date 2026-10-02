@@ -180,7 +180,7 @@ export default withLambda(async (event): Promise<HandlerResponse> => {
         .map(([, label]) => label);
       if (!onboardingContext?.primary_platforms?.length) missing.push('Platforms');
       if (missing.length) {
-        return { statusCode: 400, body: JSON.stringify({ error: `Missing required Social Media Manager context fields (${missing.join(', ')}).` }) };
+        return { statusCode: 400, body: JSON.stringify({ error: `Missing required setup answers (${missing.join(', ')}).` }) };
       }
     }
 

@@ -112,8 +112,8 @@
 
     blog_writer: [
       {
-        title: 'What should your Blog Writer cover?',
-        description: 'Your Blog Writer drafts long-form posts in your brand voice — you review and approve each one before it publishes.',
+        title: 'What should your {role:blog_writer} cover?',
+        description: 'Your {role:blog_writer} drafts long-form posts in your brand voice — you review and approve each one before it publishes.',
         fields: [
           {
             key: 'blogTopics',
@@ -140,7 +140,7 @@
       },
       {
         title: 'How often should it publish?',
-        description: 'When you approve a post, your Blog Writer schedules it into the next free slot of this cadence — you never pick a date by hand.',
+        description: 'When you approve a post, your {role:blog_writer} schedules it into the next free slot of this cadence — you never pick a date by hand.',
         operational: true,
         fields: [
           {
@@ -265,7 +265,7 @@
     lead_qualifier: [
       {
         title: 'Who is your ideal customer?',
-        description: 'Your Lead Generator scores every enquiry against this profile, so you only spend time on leads worth chasing.',
+        description: 'Your {role:lead_qualifier} scores every enquiry against this profile, so you only spend time on leads worth chasing.',
         fields: [
           {
             key: 'targetIndustries',
@@ -318,7 +318,7 @@
       },
       {
         title: 'Operational set-up',
-        description: 'How your Lead Generator sends the outreach you approve.',
+        description: 'How your {role:lead_qualifier} sends the outreach you approve.',
         operational: true,
         // ⚠️ THREE QUESTIONS WERE REMOVED HERE — do not reinstate without wiring them first.
         //   leadIntake        'Where do new leads arrive?'
@@ -347,7 +347,7 @@
             label: 'Send outreach emails from your own inbox?',
             type: 'radio',
             required: true,
-            helpText: 'Connect an email account and your Lead Generator can send approved outreach for you. You can connect it right after setup.',
+            helpText: 'Connect an email account and your {role:lead_qualifier} can send approved outreach for you. You can connect it right after setup.',
             options: [
               { value: 'none', label: "No — I'll send outreach myself", description: 'Approved leads get a ready-to-send draft; you send it from your own email.' },
               { value: 'google', label: 'Yes — Google (Gmail / Workspace)', description: 'BMS sends approved outreach from your connected Google account.' },
@@ -393,7 +393,7 @@
             type: 'textarea',
             required: false,
             placeholder: 'Mark Fenemer\nFounder, Be More Swan\n07700 900123 · bemoreswan.com',
-            helpText: 'Added under every outreach email — first emails, follow-ups and replies. Plain text, exactly as you type it (your recipient\'s email app chooses the font). When this is set, your Lead Generator stops signing off its drafts so the email is not signed twice. Leave blank for no signature.',
+            helpText: 'Added under every outreach email — first emails, follow-ups and replies. Plain text, exactly as you type it (your recipient\'s email app chooses the font). When this is set, your {role:lead_qualifier} stops signing off its drafts so the email is not signed twice. Leave blank for no signature.',
           },
         ],
       },
