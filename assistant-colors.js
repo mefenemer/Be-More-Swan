@@ -47,6 +47,9 @@ window.AssistantColors = (function () {
     // Surfaces that only hold an assistant id (a calendar chip, a notification actor) look the
     // colour up here rather than each keeping its own copy of the org's assistants.
     const _explicit = new Map();
+    const _letters = new Map();
+    // Same rule as the server (update-assistant-context.ts): ≤2 characters, nothing markup-ish.
+    const cleanLetter = (v) => Array.from(String(v || '').replace(/[<>&"'`\s]/g, '')).slice(0, 2).join('').toUpperCase();
 
     // Record what an assistant record says about its colour. Accepts the shapes the various
     // endpoints return — `avatarColor` at the top level (get-assistants, notification actors) or
@@ -60,6 +63,10 @@ window.AssistantColors = (function () {
         // stale one outlives the reset until the next full page load.
         if (isValid(raw)) _explicit.set(String(id), raw.toLowerCase());
         else _explicit.delete(String(id));
+        // The custom icon letter travels with the colour (configuration.avatarLetter).
+        const letter = assistant.avatarLetter ?? (assistant.configuration && assistant.configuration.avatarLetter);
+        if (typeof letter === 'string' && cleanLetter(letter)) _letters.set(String(id), cleanLetter(letter));
+        else if (letter !== undefined || assistant.configuration) _letters.delete(String(id));
     };
 
     const rememberAll = (assistants) => (assistants || []).forEach(remember);
@@ -72,7 +79,15 @@ window.AssistantColors = (function () {
         return isValid(cached) ? cached : autoColor(id);
     };
 
+    // The letter(s) to draw: the user's custom choice, else the name's initial.
+    const letterFor = (id, name, explicit) => {
+        const own = cleanLetter(explicit) || (id != null ? _letters.get(String(id)) : '');
+        if (own) return own;
+        const first = Array.from(String(name || '').trim())[0];
+        return first ? first.toUpperCase() : 'A';
+    };
+
     const nameOf = (value) => (PALETTE.find(c => c.value === String(value).toLowerCase()) || {}).name || 'Automatic';
 
-    return { PALETTE, VALUES, NEUTRAL, isValid, autoColor, colorFor, remember, rememberAll, nameOf };
+    return { PALETTE, VALUES, NEUTRAL, isValid, autoColor, colorFor, remember, rememberAll, nameOf, letterFor, cleanLetter };
 })();

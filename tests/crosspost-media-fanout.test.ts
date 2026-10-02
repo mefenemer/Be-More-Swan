@@ -394,11 +394,14 @@ check('the preview swap fires on exactly the baked photos and nothing else', () 
 // its own bake had no base pin and composited straight onto the baked pixels.
 check('a new platform inherits the CLEAN picture, not the baked one', () => {
     const setp = fn('netlify/functions/set-post-platforms.ts');
-    assert.match(setp, /overlayBaseAssetId: anchorBaseAssetId/,
+    // The copy is then narrowed per destination to the media its format can carry (mediaFor);
+    // the design and its pin travel only when ALL of the media did.
+    assert.match(setp, /overlayBaseAssetId: keptMedia \? anchorBaseAssetId : null/,
         "the pin must travel with the design, or the sibling's bake has no clean original to composite onto");
-    assert.match(setp, /contentAssetIds: copyAssetIds/,
+    assert.match(setp, /const mediaFor = [\s\S]{0,200}return copyAssetIds;/,
         'the copy takes the clean original when the anchor has already baked');
-    assert.match(setp, /const assetIds = copyAssetIds;/,
+    assert.match(setp, /contentAssetIds: destAssetIds/);
+    assert.match(setp, /const assetIds = destAssetIds;/,
         'the junction rows must mirror the SAME assets as the legacy array, or the two disagree at publish time');
 });
 

@@ -491,7 +491,7 @@ window.NotifKit = (function () {
         const a = notif.actor;
         if (a && a.name) {
             const color = actorColor(a.assistantId, a.avatarColor);
-            return `<div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-white text-sm font-bold" style="background:${color}" title="${escHtml(a.name)}">${actorInitial(a.name)}</div>`;
+            return `<div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-white text-sm font-bold" style="background:${color}" title="${escHtml(a.name)}">${window.AssistantColors ? escHtml(window.AssistantColors.letterFor(a.assistantId, a.name, a.avatarLetter)) : actorInitial(a.name)}</div>`;
         }
         return `<div class="w-10 h-10 rounded-full ${st.ring} border flex items-center justify-center shrink-0">${st.icon}</div>`;
     };

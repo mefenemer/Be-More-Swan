@@ -136,7 +136,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 return typeof num === 'number' && Number.isInteger(num) && num > 0 ? num : null;
             };
             const actorIds = [...new Set(allNotes.map(numericAssistantId).filter((id): id is number => id !== null))];
-            let actorById = new Map<number, { name: string; jobRole: string | null; avatarColor: string | null }>();
+            let actorById = new Map<number, { name: string; jobRole: string | null; avatarColor: string | null; avatarLetter: string | null }>();
             if (actorIds.length > 0) {
                 try {
                     const rows = await db.select({
@@ -144,8 +144,9 @@ export default withLambda(async (event: HandlerEvent) => {
                         // The user's chosen icon colour, so the inbox draws the same assistant in the
                         // same colour as the cards and the calendar. Null ⇒ automatic (id-derived).
                         avatarColor: sql<string | null>`(${aiAssistants.configuration} ->> 'avatarColor')`,
+                        avatarLetter: sql<string | null>`(${aiAssistants.configuration} ->> 'avatarLetter')`,
                     }).from(aiAssistants).where(inArray(aiAssistants.id, actorIds));
-                    actorById = new Map(rows.map(r => [r.id, { name: r.name, jobRole: r.jobRole, avatarColor: r.avatarColor }]));
+                    actorById = new Map(rows.map(r => [r.id, { name: r.name, jobRole: r.jobRole, avatarColor: r.avatarColor, avatarLetter: r.avatarLetter }]));
                 } catch { /* assistant lookup best-effort; degrade to system attribution */ }
             }
 
@@ -164,7 +165,7 @@ export default withLambda(async (event: HandlerEvent) => {
                     priority: priorityOf(n.type),
                     isDismissible: isDismissibleType(n.type),
                     resolvesOnClick: resolvesOnClick(n.type),
-                    actor: asst ? { assistantId: aid, name: asst.name, jobRole: asst.jobRole, avatarColor: asst.avatarColor } : null,
+                    actor: asst ? { assistantId: aid, name: asst.name, jobRole: asst.jobRole, avatarColor: asst.avatarColor, avatarLetter: asst.avatarLetter } : null,
                 };
             });
             return { statusCode: 200, body: JSON.stringify({ notifications: annotated }) };

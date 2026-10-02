@@ -37,7 +37,7 @@ export default withLambda(async (event) => {
     const { userId: currentUserId, organisationId: orgId } = ctx;
 
     // 2. Payload Extraction
-    const { assistantId, newContext, newConfiguration, newName, appliedDefaults, disclosureText, avatarColor } = JSON.parse(event.body || '{}');
+    const { assistantId, newContext, newConfiguration, newName, appliedDefaults, disclosureText, avatarColor, avatarLetter } = JSON.parse(event.body || '{}');
 
     if (!assistantId || !newContext) return { statusCode: 400, body: JSON.stringify({ error: 'Missing parameters.' }) };
 
@@ -141,6 +141,25 @@ export default withLambda(async (event) => {
                     ...updatePayload.configuration,
                     avatarColor: existingConfig.avatarColor,
                 };
+            }
+            // ── The icon's letter ─────────────────────────────────────────────────────────────────
+            // Same contract as the colour: `configuration.avatarLetter`, carried across saves that
+            // don't mention it, explicit null = back to the name's initial. At most 2 characters,
+            // and nothing that could break out of the markup it is interpolated into.
+            if (avatarLetter !== undefined) {
+                const cleaned = typeof avatarLetter === 'string'
+                    ? Array.from(avatarLetter.replace(/[<>&"'`\s]/g, '')).slice(0, 2).join('').toUpperCase()
+                    : '';
+                const base = updatePayload.configuration ?? newConfiguration ?? existingConfig;
+                const next = { ...(base as any) };
+                if (cleaned) next.avatarLetter = cleaned; else delete next.avatarLetter;
+                updatePayload.configuration = next;
+            } else if (
+                Object.prototype.hasOwnProperty.call(existingConfig, 'avatarLetter')
+                && updatePayload.configuration
+                && !Object.prototype.hasOwnProperty.call(updatePayload.configuration, 'avatarLetter')
+            ) {
+                updatePayload.configuration = { ...updatePayload.configuration, avatarLetter: existingConfig.avatarLetter };
             }
             // Same fate, same fix: the Inspo tab's topic frequency is written only by inspo-items.ts
             // (PATCH), and no form here knows about it. Dropping it would silently reset a user's

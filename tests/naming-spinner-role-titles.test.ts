@@ -88,7 +88,7 @@ console.log('\n──── the detail header ────');
 
 check('the name looks editable and the swan says what it does', () => {
     assert.match(DETAIL, /title="Click to rename your assistant"/);
-    assert.match(DETAIL, /class="detail-name-edit"/);
+    assert.match(DETAIL, /class="detail-name-edit shrink-0"/);
     assert.match(DETAIL, /#detail-name-input \{ border-bottom: 2px dashed/);
     assert.match(DETAIL, /class="ai-wand-img"> Suggest a name/);
 });
@@ -118,6 +118,42 @@ check('client copy names roles through RoleLabels, not literals', () => {
     assert.doesNotMatch(read('src/components/assistant-welcome-messages.js'), /role: 'your (Social Media Manager|Blog Writer|Lead Qualifier|Campaign Orchestrator)'/);
     assert.doesNotMatch(read('onboarding-social-media.html'), /const role = "Social Media Manager"/);
     assert.match(read('src/public/role-labels.js'), /fetch\('\/\.netlify\/functions\/master-assistants'/);
+});
+
+
+// ── 2026-10-02, round 2 ──────────────────────────────────────────────────────────────────────────
+console.log('\n──── header, avatar editor, per-clip play, format change drops wrong media ────');
+
+check('name, pencil and swan sit on one line', () => {
+    const row = DETAIL.slice(landmark(DETAIL, 'style="flex-wrap:nowrap"'), landmark(DETAIL, 'Issue #204'));
+    assert.ok(landmark(row, 'id="detail-name-input"') < landmark(row, 'class="detail-name-edit')
+        && landmark(row, 'class="detail-name-edit') < landmark(row, 'id="btn-generate-name"'), 'order: name, pencil, swan');
+});
+
+check('the avatar is the letter + colour editor; the loose colour dot is gone', () => {
+    assert.doesNotMatch(DETAIL, /assistant-color-current/);
+    const av = DETAIL.slice(landmark(DETAIL, 'id="btn-assistant-color"'), landmark(DETAIL, 'id="assistant-color-menu"'));
+    assert.match(av, /id="detail-avatar"/);
+    assert.match(av, /detail-avatar-pencil/);
+    assert.match(DETAIL, /id="assistant-avatar-letter" type="text" maxlength="2"/);
+    assert.match(read('assistants.js'), /body\.avatarLetter = window\._detailChosenLetter/);
+    assert.match(read('netlify/functions/update-assistant-context.ts'), /next\.avatarLetter = cleaned/);
+    assert.match(read('assistant-colors.js'), /const letterFor = /);
+});
+
+check('every clip row has its own play button that stops at the clip\'s end', () => {
+    assert.match(W, /data-pce-act="clip-play" data-pce-i="' \+ i \+ '"/);
+    assert.match(W, /'clip-play': \(el\) => window\._pcePlayClip\(/);
+    assert.match(W, /if \(_pcePrev\.only\) return _pcePreviewStop\(\);/);
+});
+
+check('changing to an image format does not carry the video across', () => {
+    const sp = read('netlify/functions/set-post-platforms.ts');
+    assert.match(sp, /ids = ids\.filter\(id => \{ const k = kindById\.get\(id\); return !k \|\| k === spec\.media; \}\)/);
+});
+
+check('a rejected promise reports where it came from', () => {
+    assert.match(W, /show\(\(r && r\.message\) \|\| String\(r \|\| 'a request failed'\), frameOf\(r\)\)/);
 });
 
 console.log(`\n${passed} checks passed`);
