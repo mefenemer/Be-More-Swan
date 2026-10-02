@@ -1036,7 +1036,7 @@ check('every abort path states a reason instead of returning silently', () => {
     assert.ok(fn.includes('has no playable file'), 'no message when a clip has no url');
     assert.ok(fn.includes('clips.findIndex((c) => !c || !c.url)'),
         'a missing url is still discovered inside the seat, which aborts through _pcePreviewStop');
-    const seat = slice('async function _pcePreviewSeat(i) {', '\nwindow._pcePreviewStart');
+    const seat = slice('async function _pcePreviewSeat(i, startS) {', '\nwindow._pcePreviewStart');
     assert.ok(seat.includes('_pcePrevMsg ='), 'the seat still fails silently');
     assert.ok(seat.includes("would not start playback"), 'a refused play() is swallowed');
 });
@@ -1050,7 +1050,7 @@ check('the message is declared before the functions that set it', () => {
     // _pcePreviewSeat sets it and is defined above _pcePreviewStart; a `let` below both would be a
     // ReferenceError the first time a preview failed, which is the worst possible moment.
     assert.ok(only(workspace, "let _pcePrevMsg = '';", 'workspace.html')
-        < only(workspace, 'async function _pcePreviewSeat(i) {', 'workspace.html'),
+        < only(workspace, 'async function _pcePreviewSeat(i, startS) {', 'workspace.html'),
         '_pcePrevMsg is declared after a function that assigns it');
 });
 
@@ -1504,7 +1504,7 @@ check('the preview skips a hidden clip, and still counts it', () => {
     assert.ok(fn.includes('!_pceClipHidden(clips[i].id)'), 'the search does not skip hidden clips');
     const tick = slice('function _pcePreviewTick(video) {', '/** Seconds this clip contributes');
     assert.ok(tick.includes('_pceNextVisibleClip(_pcePrev.i + 1)'), 'the preview plays hidden clips anyway');
-    const seat = slice('async function _pcePreviewSeat(i) {', '\nwindow._pcePreviewStart');
+    const seat = slice('async function _pcePreviewSeat(i, startS) {', '\nwindow._pcePreviewStart');
     assert.ok(seat.includes('_pcePrev.offset += _pceClipLength(clips[k])'),
         'the offset no longer counts every earlier clip, so later text is timed wrong');
 });
