@@ -80,15 +80,16 @@ check('the lead path never reaches db.delete — the row survives the delete', (
     // The whole fix. The FK below is ON DELETE SET NULL, so a db.delete on this path would sever
     // the provenance recordLeadRejection resolves BY, empty the Deleted section of the one thing
     // it exists to hold, and re-open the re-discovery hole (see the FK check further down).
+    // Batched 2026-10-03: the lead branch is `if (leadIds.length)`, the hard delete `if (otherIds.length)`.
     const lead = DELETE_BLOCK.slice(
-        landmark(DELETE_BLOCK, "existing.recordType === 'lead'"),
-        landmark(DELETE_BLOCK, 'const [row] = await db.delete(assistantRecords)'),
+        landmark(DELETE_BLOCK, 'if (leadIds.length) {'),
+        landmark(DELETE_BLOCK, 'if (otherIds.length) {'),
     );
     assert.ok(!/db\.delete\(assistantRecords\)/.test(lead),
         'a lead is being hard-deleted again — the record IS the verdict, and deleting it destroys '
         + 'the only thing stopping a second search re-finding the same company');
-    assert.ok(/continue;/.test(lead),
-        'the lead branch must return to the loop, or it falls through into the non-lead delete below');
+    assert.ok(/const otherIds = existingRows\.filter\(\(r\) => r\.recordType !== 'lead'\)/.test(DELETE_BLOCK),
+        'the hard delete must only ever see non-lead ids, or a lead falls through into it');
 });
 
 check('deleting a lead marks it rejected and clears its due date', () => {
@@ -157,8 +158,9 @@ check('a delete writes the same ledger event a reject does, under the same guard
     assert.ok(/const wasDecided = LIVE_APPROVAL\.has\(existing\.approvalStatus \?\? ''\)/.test(DELETE_BLOCK),
         'without the wasDecided guard, deleting an already-rejected lead writes a second '
         + 'lead_rejected row and inflates the count the Strategy Agent clusters on');
-    assert.ok(/blueprintVersion: await getBlueprintVersion/.test(DELETE_BLOCK)
-        && /icpSnapshot: await getIcpSnapshot/.test(DELETE_BLOCK),
+    // Memoised per assistant / campaign since the batch, but still written on EVERY event.
+    assert.ok(/blueprintVersion: await versionOf\(/.test(DELETE_BLOCK) && /getBlueprintVersion\(db, aid\)/.test(DELETE_BLOCK)
+        && /icpSnapshot: await icpOf\(/.test(DELETE_BLOCK) && /getIcpSnapshot\(db, \{/.test(DELETE_BLOCK),
         'neither attribution key can be backfilled — an event without them is permanently '
         + 'unattributable');
     assert.ok(/actor: 'user'/.test(DELETE_BLOCK),
@@ -180,7 +182,7 @@ check('a missing reason still deletes, and still discards the discovery row', ()
 });
 
 check('non-lead records really are deleted', () => {
-    assert.ok(/existing\.recordType === 'lead'/.test(DELETE_BLOCK),
+    assert.ok(/r\.recordType === 'lead'/.test(DELETE_BLOCK),
         'the lead-only guard is gone — meetings, invoices and tickets would be retained forever in '
         + 'a Deleted section none of them has');
     assert.ok(/db\.delete\(assistantRecords\)/.test(DELETE_BLOCK),
@@ -188,7 +190,7 @@ check('non-lead records really are deleted', () => {
 });
 
 check('a record belonging to another tenant is still a 404, before anything is written', () => {
-    const iLookup = landmark(DELETE_BLOCK, 'const [existing]');
+    const iLookup = landmark(DELETE_BLOCK, 'const existingRows = await db.select');
     const iNotFound = landmark(DELETE_BLOCK, "return json(404, { error: 'Record not found.' })");
     const iWrite = landmark(DELETE_BLOCK, 'recordEvent(');
     assert.ok(/eq\(assistantRecords\.organisationId, orgId\)/.test(DELETE_BLOCK.slice(iLookup, iWrite)),

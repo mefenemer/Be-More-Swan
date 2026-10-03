@@ -1247,3 +1247,9 @@ node_bundler = "esbuild"
 # instead, which calls the same function. The two must stay in step.
 [functions.reconcile-campaigns]
   schedule = "0 * * * *"
+
+# The Leads tab's bulk delete (assistant-records DELETE { ids }) writes a ledger event per lead.
+# Batched since 2026-10-03, but a full chunk still needs more than the 10s default — a timeout here
+# comes back as a bare gateway error after part of the chunk is already done.
+[functions.assistant-records]
+  timeout = 26

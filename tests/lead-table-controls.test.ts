@@ -232,7 +232,8 @@ const DELETE_BLOCK = (() => {
 })();
 
 check('ids are a loop over the one-record body, not a second implementation', () => {
-    assert.ok(/for \(const id of ids\)/.test(DELETE_BLOCK), 'the bulk path is not a loop over the single path');
+    // One read for single and bulk alike (batched 2026-10-03) — still ONE implementation.
+    assert.ok(/inArray\(assistantRecords\.id, ids\)/.test(DELETE_BLOCK), 'the single and bulk paths no longer share the lookup');
     // Exactly one of each. Two would mean the bulk branch grew its own copy, and copies drift.
     for (const once of ['recordLeadRejection(', 'db.update(discoveredLeads)', 'db.delete(assistantRecords)']) {
         const n = DELETE_BLOCK.split(once).length - 1;
@@ -252,18 +253,25 @@ check('going over the cap is refused, never silently truncated', () => {
 });
 
 check('a missing record still 404s on the single path, and is only counted on the bulk one', () => {
-    assert.ok(/if \(!bulk\) return json\(404/.test(DELETE_BLOCK),
+    assert.ok(/if \(!bulk && !byId\.has\(ids\[0\]\)\) return json\(404/.test(DELETE_BLOCK),
         'the single path must still 404 — callers depend on it');
-    assert.ok(/notFound\+\+/.test(DELETE_BLOCK),
+    assert.ok(/notFound \+= ids\.filter\(\(id\) => !byId\.has\(id\)\)\.length/.test(DELETE_BLOCK),
         'a bulk run must count what was already gone rather than failing the other 49 rows the user selected');
 });
 
 check('every id is still tenant-scoped, inside the loop', () => {
-    const loop = DELETE_BLOCK.slice(landmark(DELETE_BLOCK, 'for (const id of ids)'));
+    const loop = DELETE_BLOCK.slice(landmark(DELETE_BLOCK, 'const existingRows = await db.select'));
     const scoped = loop.split('eq(assistantRecords.organisationId, orgId)').length - 1;
-    assert.ok(scoped >= 2,
+    // the read, the lead update and the hard delete
+    assert.ok(scoped >= 3,
         'both the lookup and the delete must be organisation-scoped inside the loop — one unscoped '
         + 'id in a list of a hundred is an IDOR that deletes another tenant\'s record');
+});
+
+check('bulk delete is chunked small enough to finish, and the function has the time to', () => {
+    assert.match(HUB, /const CHUNK = 25;/);
+    assert.match(read('netlify.toml'), /\[functions\.assistant-records\]\s*\n\s*timeout = 26/);
+    assert.match(HUB, /the server took too long\. Press Delete again to finish the rest\./);
 });
 
 console.log('\n──── the next step says who performs it ────');

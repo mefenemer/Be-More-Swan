@@ -5927,13 +5927,18 @@ function rqToggleGroup(key) {
 // job that produced it was an ordinary scheduled one.
 function rqOriginPill(draft) {
     const who = draft.assistantName || 'your assistant';
-    const P = (label, cls) => ({ label, cls });
+    const P = (label, cls, title) => ({ label, cls, title: title || '' });
     if (draft.isRevised)              return P(`Revised by ${who}`,  'bg-violet-100 text-violet-700');
     if (draft.originIdea)             return P('From your idea',     'bg-sky-100 text-sky-700');
     switch (draft.triggerType) {
         case 'on_demand':     return P(`Created by ${who}`, 'bg-violet-100 text-violet-700');
         case 'scheduled':     return P(`Autopilot · ${who}`, 'bg-indigo-100 text-indigo-700');
-        case 'conversion':    return P('Conversion post',   'bg-amber-100 text-amber-700');
+        // Made by the weekly conversion scheduler (schedule-conversion-posts.ts): one direct
+        // "here's how to work with me" post built from the assistant's service offerings, at most
+        // once every 7 days, between the value-first posts. Named on hover, because the pill alone
+        // reads like a post type nobody asked for.
+        case 'conversion':    return P('Conversion post',   'bg-amber-100 text-amber-700',
+            `${who} writes one of these a week: a direct “how to work with me” post built from your service offerings, with a clear call to action. The rest of your posts stay value-first. Review it like any other draft.`);
         case 'orchestration': return P(draft.handoffFrom ? `Hand-off from ${draft.handoffFrom}` : 'Team hand-off',
                                                            'bg-teal-100 text-teal-700');
         // A person typed this one. ownerLabel is "Jane Smith" for a teammate's post; its absence
@@ -6079,7 +6084,7 @@ function rqRenderSocialCard(draft) {
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 mb-0.5">
           <p class="text-sm font-semibold text-gray-900 truncate">${title}</p>
-          ${!isArchived ? `<span class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${origin.cls}">${_rqEsc(origin.label)}</span>` : ''}
+          ${!isArchived ? `<span class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${origin.cls}"${origin.title ? ` title="${_rqEsc(origin.title)}"` : ''}>${_rqEsc(origin.label)}</span>` : ''}
         </div>
         <p class="text-xs text-gray-500 truncate">${isArchived ? _rqEsc(draft.assistantName || 'AI Assistant') + ' · ' : ''}${ago}</p>
         ${draft.caption ? `<p class="text-xs text-gray-600 truncate mt-0.5 ${isArchived ? 'line-through opacity-60' : ''}">${_rqEsc(draft.caption)}</p>` : ''}
@@ -7177,8 +7182,19 @@ function _rqPaintPlayheads(t, dur) {
         const lo = ax.start;
         const hi = ax.start + (ax.outS - ax.inS);
         if (!(t >= lo - 0.001 && t <= hi + 0.001)) { head.style.display = 'none'; continue; }
+        const frac = Math.min(1, Math.max(0, (ax.inS + (t - ax.start)) / ax.full));
+        // ⚠️ The fraction is of the BAR, not of the row: each text row is bar + two number boxes, so
+        // a percentage of the whole box put the line over the inputs — the "black vertical line" on
+        // clip 2 during preview. Measured against the first bar in the block, in px.
+        const box = head.parentElement;
+        const bar = g.querySelector('[data-tl-track]');
         head.style.display = '';
-        head.style.left = (((ax.inS + (t - ax.start)) / ax.full) * 100) + '%';
+        if (box && bar) {
+            const b = bar.getBoundingClientRect();
+            const o = box.getBoundingClientRect();
+            if (b.width > 0) { head.style.left = (b.left - o.left + frac * b.width) + 'px'; continue; }
+        }
+        head.style.left = (frac * 100) + '%';
     }
 }
 
