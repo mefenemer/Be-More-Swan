@@ -916,11 +916,14 @@
   // leads spans forty domains, and there is no single search to narrow.
 
   /** Delete a set of records in one pass, banking the reason against every one of them. */
-  async function deleteRecords(ids, reason) {
+  async function deleteRecords(ids, reason, onProgress) {
     // Chunked to the server's MAX_BULK. Going over is a 400 there rather than a silent
     // truncation, so the split has to happen here — and it is sequential, because each chunk is
     // already several round trips per id and firing them together would race the same tables.
-    const CHUNK = 100;
+    // 25, not the server's 100: every lead still costs a ledger write, and a chunk that overruns the
+    // function's limit comes back as a gateway error after doing part of the work. Smaller chunks
+    // also mean the progress line actually moves on a list of hundreds.
+    const CHUNK = 25;
     let deleted = 0;
     let notFound = 0;
     for (let i = 0; i < ids.length; i += CHUNK) {
@@ -933,6 +936,8 @@
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        // A timeout/gateway error has no JSON body — say what it was rather than a bare failure.
+        if (!data.error && res.status >= 500) data.error = 'the server took too long. Press Delete again to finish the rest.';
         // Report the partial truthfully. Rows in earlier chunks really are gone, and telling the
         // user "delete failed" would have them press it again on a list that has already changed.
         state.records = state.records.filter((r) => !ids.slice(0, i).includes(r.id));
@@ -942,6 +947,7 @@
       }
       deleted += Number(data.count) || 0;
       notFound += Number(data.notFound) || 0;
+      if (typeof onProgress === 'function') onProgress(Math.min(ids.length, i + CHUNK), ids.length);
     }
     const gone = new Set(ids);
     state.records = state.records.filter((r) => !gone.has(r.id));
@@ -995,7 +1001,9 @@
       status.className = 'text-[11px] font-semibold text-gray-500 mt-1.5';
       status.textContent = `Deleting ${n} ${noun}…`;
       try {
-        const { deleted, notFound } = await deleteRecords(ids, reason);
+        const { deleted, notFound } = await deleteRecords(ids, reason, (done, total) => {
+          if (total > 25) status.textContent = `Deleting… ${done} of ${total}`;
+        });
         // renderTable() has already replaced this strip's parent; the toast is what survives.
         // For leads it names the destination — a row vanishing from a table it was just filtered
         // in is exactly the moment "where did that go?" gets asked.

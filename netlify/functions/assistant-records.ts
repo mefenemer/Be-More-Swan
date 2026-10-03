@@ -973,25 +973,29 @@ export default withLambda(async (event) => {
             let excludeCampaignId: number | null = null;
             let canExcludeDomain = false;
 
-            for (const id of ids) {
-                const [existing] = await db.select({
-                    id: assistantRecords.id,
-                    recordType: assistantRecords.recordType,
-                    aiAssistantId: assistantRecords.aiAssistantId,
-                    status: assistantRecords.status,
-                    approvalStatus: assistantRecords.approvalStatus,
-                }).from(assistantRecords)
-                    .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
-                    .limit(1);
-                // A single delete of something that is not yours (or is already gone) is a 404. In a
-                // bulk run it is counted and skipped: the other 49 rows the user selected are theirs,
-                // and failing all of them because one had already been deleted in another tab would be
-                // a worse answer than doing the work and saying what was missing.
-                if (!existing) {
-                    if (!bulk) return json(404, { error: 'Record not found.' });
-                    notFound++;
-                    continue;
-                }
+            // ── Read everything once, write once per table ─────────────────────────────────
+            // This was one select + one link lookup + a blueprint/ICP read + two updates PER lead,
+            // sequentially: ~7 round trips each, so a 100-lead chunk ran far past the function's
+            // limit and came back as a bare gateway error ("Could not delete those records") after
+            // doing part of the work — reported by a user clearing every lead to niche down. The
+            // rules are unchanged; only the round trips are pooled. Per lead there is now just the
+            // ledger event (and the reason, when one is given).
+            const existingRows = await db.select({
+                id: assistantRecords.id,
+                recordType: assistantRecords.recordType,
+                aiAssistantId: assistantRecords.aiAssistantId,
+                status: assistantRecords.status,
+                approvalStatus: assistantRecords.approvalStatus,
+            }).from(assistantRecords)
+                .where(and(inArray(assistantRecords.id, ids), eq(assistantRecords.organisationId, orgId)));
+            const byId = new Map(existingRows.map((r) => [r.id, r]));
+            // A single delete of something that is not yours (or is already gone) is a 404. In a
+            // bulk run it is counted and skipped: the other rows the user selected are theirs.
+            if (!bulk && !byId.has(ids[0])) return json(404, { error: 'Record not found.' });
+            notFound += ids.filter((id) => !byId.has(id)).length;
+
+            const leadIds = existingRows.filter((r) => r.recordType === 'lead').map((r) => r.id);
+            const otherIds = existingRows.filter((r) => r.recordType !== 'lead').map((r) => r.id);
 
                 // ── Deleting a LEAD does not delete the lead ─────────────────────────────────
                 //
@@ -1019,71 +1023,85 @@ export default withLambda(async (event) => {
                 // record survives, so provenance stays resolvable and recordLeadRejection can run
                 // at any point. Reinstating a hard delete for leads reinstates the ordering trap
                 // along with it; don't do one without the other.
-                if (existing.recordType === 'lead') {
-                    // Link back to the discovery row when there is one. A hand-added lead has none,
-                    // so this is legitimately null rather than a lookup failure.
-                    const [link] = await db.select({ id: discoveredLeads.id })
+                if (leadIds.length) {
+                    // Link back to the discovery rows. A hand-added lead has none, so a missing
+                    // link is legitimately null rather than a lookup failure.
+                    const links = await db.select({ id: discoveredLeads.id, campaignId: discoveredLeads.campaignId, recordId: discoveredLeads.assistantRecordId })
                         .from(discoveredLeads)
-                        .where(eq(discoveredLeads.assistantRecordId, existing.id))
-                        .limit(1);
+                        .where(and(inArray(discoveredLeads.assistantRecordId, leadIds), eq(discoveredLeads.organisationId, orgId)));
+                    const linkByRecord = new Map<number, { id: number; campaignId: number | null }>();
+                    for (const l of links) if (l.recordId != null && !linkByRecord.has(l.recordId)) linkByRecord.set(l.recordId, { id: l.id, campaignId: l.campaignId });
 
-                    // Same guard as both reject paths: only a genuine transition writes a ledger
-                    // row, so deleting a lead that was already approved or already rejected cannot
-                    // inflate the rejection count the Strategy Agent clusters on.
-                    const wasDecided = LIVE_APPROVAL.has(existing.approvalStatus ?? '')
-                        || existing.approvalStatus === 'rejected';
-                    if (!wasDecided) {
-                        await recordEvent(db, 'lead_rejected', {
-                            organisationId: orgId,
-                            aiAssistantId: existing.aiAssistantId,
-                            discoveredLeadId: link?.id ?? null,
-                            assistantRecordId: existing.id,
-                            actor: 'user',
-                            actorUserId: userId,
-                            blueprintVersion: await getBlueprintVersion(db, existing.aiAssistantId),
-                            icpSnapshot: await getIcpSnapshot(db, {
-                                discoveredLeadId: link?.id ?? null,
-                                aiAssistantId: existing.aiAssistantId,
-                            }),
-                            payload: { from: existing.approvalStatus, to: 'rejected', rating: existing.status, via: 'delete' },
-                        });
-                    }
+                    // Same answer for every lead of one assistant / one campaign — asked once.
+                    const versionMemo = new Map<number | null, Promise<string | null>>();
+                    const versionOf = (aid: number | null) => {
+                        if (!versionMemo.has(aid)) versionMemo.set(aid, getBlueprintVersion(db, aid));
+                        return versionMemo.get(aid)!;
+                    };
+                    const icpMemo = new Map<string, Promise<Record<string, unknown> | null>>();
+                    const icpOf = (link: { id: number; campaignId: number | null } | undefined, aid: number | null) => {
+                        const key = link ? `c${link.campaignId ?? 'x' + link.id}` : `a${aid}`;
+                        if (!icpMemo.has(key)) icpMemo.set(key, getIcpSnapshot(db, { discoveredLeadId: link?.id ?? null, aiAssistantId: aid }));
+                        return icpMemo.get(key)!;
+                    };
 
                     // Optional: deleting is a decision the user has already made, and a reason they
                     // decline to give must never block it. An unknown value is dropped by
                     // recordLeadRejection (closed vocabulary), which logs the offending value.
                     const reason = typeof body.reason === 'string' ? body.reason : '';
-                    if (reason) {
-                        const result = await recordLeadRejection(db, {
-                            organisationId: orgId,
-                            aiAssistantId: existing.aiAssistantId,
-                            assistantRecordId: existing.id,
-                            reason,
-                        });
-                        if (result.id !== null) { feedbackRecorded = true; feedbackCount++; }
-                        // The follow-up offer, single-record path only: over a bulk selection one
-                        // reason spans many domains and there is no single one to exclude.
-                        if (!bulk) {
-                            excludeDomain = result.domain;
-                            excludeCampaignId = result.campaignId;
-                            // Narrowed through the shared guard rather than cast: `reason` is
-                            // deliberately unvalidated on this path (an unknown value is dropped
-                            // by recordLeadRejection instead of blocking the delete), so this is
-                            // the first place that needs it to be a real vocabulary member.
-                            canExcludeDomain = result.id !== null
-                                && !!result.domain
-                                && !!result.campaignId
-                                && isLeadRejectReason(reason)
-                                && DOMAIN_EXCLUSION_REASONS.includes(reason);
+
+                    for (const id of leadIds) {
+                        const existing = byId.get(id)!;
+                        const link = linkByRecord.get(id);
+                        // Same guard as both reject paths: only a genuine transition writes a ledger
+                        // row, so deleting a lead that was already approved or already rejected
+                        // cannot inflate the rejection count the Strategy Agent clusters on.
+                        const wasDecided = LIVE_APPROVAL.has(existing.approvalStatus ?? '')
+                            || existing.approvalStatus === 'rejected';
+                        if (!wasDecided) {
+                            await recordEvent(db, 'lead_rejected', {
+                                organisationId: orgId,
+                                aiAssistantId: existing.aiAssistantId,
+                                discoveredLeadId: link?.id ?? null,
+                                assistantRecordId: existing.id,
+                                actor: 'user',
+                                actorUserId: userId,
+                                blueprintVersion: await versionOf(existing.aiAssistantId),
+                                icpSnapshot: await icpOf(link, existing.aiAssistantId),
+                                payload: { from: existing.approvalStatus, to: 'rejected', rating: existing.status, via: 'delete' },
+                            });
+                        }
+                        if (reason) {
+                            const result = await recordLeadRejection(db, {
+                                organisationId: orgId,
+                                aiAssistantId: existing.aiAssistantId,
+                                assistantRecordId: existing.id,
+                                reason,
+                            });
+                            if (result.id !== null) { feedbackRecorded = true; feedbackCount++; }
+                            // The follow-up offer, single-record path only: over a bulk selection one
+                            // reason spans many domains and there is no single one to exclude.
+                            if (!bulk) {
+                                excludeDomain = result.domain;
+                                excludeCampaignId = result.campaignId;
+                                // Narrowed through the shared guard rather than cast: `reason` is
+                                // deliberately unvalidated on this path, so this is the first place
+                                // that needs it to be a real vocabulary member.
+                                canExcludeDomain = result.id !== null
+                                    && !!result.domain
+                                    && !!result.campaignId
+                                    && isLeadRejectReason(reason)
+                                    && DOMAIN_EXCLUSION_REASONS.includes(reason);
+                            }
                         }
                     }
 
-                    // Mark the discovery row discarded whether or not a reason was given — the state
+                    // Mark the discovery rows discarded whether or not a reason was given — the state
                     // is a fact about the row, not about how thoughtfully it was removed.
                     await db.update(discoveredLeads)
                         .set({ status: 'discarded', updatedAt: new Date() })
                         .where(and(
-                            eq(discoveredLeads.assistantRecordId, existing.id),
+                            inArray(discoveredLeads.assistantRecordId, leadIds),
                             eq(discoveredLeads.organisationId, orgId),
                         ));
 
@@ -1091,7 +1109,7 @@ export default withLambda(async (event) => {
                     // `data` — the same rule lead-retention-sweep.ts writes under. A lead's data
                     // carries enrichAttemptedAt, dealOutcome, emailKind and the outreach draft, and
                     // a read-modify-write here would race the enrichment worker.
-                    const [row] = await db.update(assistantRecords)
+                    const rows = await db.update(assistantRecords)
                         .set({
                             approvalStatus: 'rejected',
                             scheduledFor: null,      // a rejected lead with a due date is a row the calendar still believes in
@@ -1104,30 +1122,23 @@ export default withLambda(async (event) => {
                                 true
                             )`,
                         })
-                        .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
+                        .where(and(inArray(assistantRecords.id, leadIds), eq(assistantRecords.organisationId, orgId)))
                         .returning({ id: assistantRecords.id });
-                    if (!row) {
-                        if (!bulk) return json(404, { error: 'Record not found.' });
-                        notFound++;
-                        continue;
-                    }
-                    deletedIds.push(row.id);
-                    continue;
+                    for (const r of rows) deletedIds.push(r.id);
+                    notFound += leadIds.length - rows.length;
                 }
 
                 // Every other record type — meetings, invoices, tickets, orders — really is
                 // dropped. None of them has a Deleted section to land in, and none of them teaches
                 // a search anything by surviving.
-                const [row] = await db.delete(assistantRecords)
-                    .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
-                    .returning({ id: assistantRecords.id });
-                if (!row) {
-                    if (!bulk) return json(404, { error: 'Record not found.' });
-                    notFound++;
-                    continue;
+                if (otherIds.length) {
+                    const rows = await db.delete(assistantRecords)
+                        .where(and(inArray(assistantRecords.id, otherIds), eq(assistantRecords.organisationId, orgId)))
+                        .returning({ id: assistantRecords.id });
+                    for (const r of rows) deletedIds.push(r.id);
+                    notFound += otherIds.length - rows.length;
                 }
-                deletedIds.push(row.id);
-            }
+                if (!bulk && !deletedIds.length) return json(404, { error: 'Record not found.' });
 
             // `deleted` stays the single id on the single path — nothing in the app reads it, but
             // the shape is the one the endpoint has always returned and there is no reason to
