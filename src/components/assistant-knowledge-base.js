@@ -93,7 +93,7 @@
             <p class="text-xs text-gray-500 mt-0.5">Write it the way you'd explain it to a customer — your assistant answers with exactly what's in here.</p>
           </div>
           <button type="button" data-kb-upload-trigger
-            class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition whitespace-nowrap">
+            class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition whitespace-nowrap">
             Load from .txt / .md file
           </button>
           <input type="file" accept=".txt,.md,text/plain,text/markdown" class="hidden" data-kb-file>
@@ -113,11 +113,11 @@
         <p class="hidden mt-3 text-xs font-semibold" data-kb-editor-status></p>
         <div class="flex items-center gap-2 mt-4">
           <button type="button" data-kb-save
-            class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">
+            class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">
             ${article ? 'Save changes' : 'Add to Knowledge Base'}
           </button>
           <button type="button" data-kb-cancel
-            class="px-4 py-2 bg-white border border-gray-200 text-gray-700 hover:border-gray-300 text-sm font-bold rounded-lg transition">
+            class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition">
             Cancel
           </button>
         </div>
@@ -219,11 +219,11 @@
             <p class="hidden mt-3 text-xs font-semibold" data-kb-row-status></p>
             <div class="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
               <button type="button" data-kb-edit="${a.id}"
-                class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition">
+                class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">
                 Edit
               </button>
               <button type="button" data-kb-delete="${a.id}"
-                class="px-3 py-1.5 bg-white border border-gray-200 text-red-600 hover:border-red-300 hover:bg-red-50 text-xs font-bold rounded-lg transition ml-auto">
+                class="btn-destructive px-3 py-1.5 border text-xs font-bold rounded-lg transition ml-auto">
                 Delete
               </button>
             </div>
@@ -280,7 +280,7 @@
           <p class="text-sm text-gray-500 mt-1 max-w-2xl">${esc(state.kb.description)}</p>
         </div>
         <button type="button" data-kb-add
-          class="inline-flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition whitespace-nowrap shrink-0">
+          class="btn-primary inline-flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition whitespace-nowrap shrink-0">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
           Add article
         </button>

@@ -787,7 +787,7 @@
       </div>
       <p class="text-[11px] text-gray-500 mt-1.5">Pick a reason to delete it and record what the search got wrong.</p>` : ''}
       <div class="flex flex-wrap items-center gap-2 mt-2">
-        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg bg-white border border-red-200 text-red-700 hover:bg-red-100 transition cursor-pointer" data-hub-del-plain>Delete without a reason</button>
+        <button type="button" class="btn-destructive px-2 py-1 text-[11px] font-bold rounded-lg border transition cursor-pointer" data-hub-del-plain>Delete without a reason</button>
         <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-500 hover:text-gray-700 transition cursor-pointer" data-hub-del-cancel>Cancel</button>
       </div>
       <p class="hidden text-[11px] font-semibold mt-1.5" data-hub-del-status></p>`;
@@ -862,7 +862,7 @@
       <p class="text-[11px] font-bold text-gray-700">Noted. Stop this search finding <span class="font-mono">${esc(domain)}</span>?</p>
       <p class="text-[11px] text-gray-500 mb-2">Adds the domain to this search’s exclusions. You can remove it later by editing the search.</p>
       <div class="flex flex-wrap gap-1.5">
-        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white transition cursor-pointer" data-hub-exclude>Yes, exclude it</button>
+        <button type="button" class="btn-primary px-2 py-1 text-[11px] font-bold rounded-lg transition cursor-pointer" data-hub-exclude>Yes, exclude it</button>
         <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-400 hover:text-gray-600 transition cursor-pointer" data-hub-exclude-skip>No thanks</button>
       </div>
       <p class="hidden text-[11px] font-semibold mt-1.5" data-hub-exclude-status></p>`;
@@ -987,7 +987,7 @@
       </div>
       <p class="text-[11px] text-gray-500 mt-1.5">Pick one reason for all ${n} — it is recorded against every one of them, and it is what teaches the search. Clearing leads nobody could contact? <strong>${esc(RC.leadRejectReasonLabel('bad_contact'))}</strong> — it records the problem without telling the search to look somewhere else.</p>` : ''}
       <div class="flex flex-wrap items-center gap-2 mt-2">
-        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg bg-white border border-red-200 text-red-700 hover:bg-red-100 transition cursor-pointer" data-hub-bulk-plain>Delete without a reason</button>
+        <button type="button" class="btn-destructive px-2 py-1 text-[11px] font-bold rounded-lg border transition cursor-pointer" data-hub-bulk-plain>Delete without a reason</button>
         <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-500 hover:text-gray-700 transition cursor-pointer" data-hub-bulk-cancel>Cancel</button>
       </div>
       <p class="hidden text-[11px] font-semibold mt-1.5" data-hub-bulk-status></p>`;
@@ -1344,7 +1344,7 @@
   function detailActions(record, opts) {
     const bar = document.createElement('div');
     bar.className = 'flex flex-wrap items-center gap-2 mt-4 pt-3 border-t border-gray-100';
-    const btnCls = 'px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed';
+    const btnCls = 'btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed';
     const buttons = [];
 
     // Ledger: track who has been emailed and when (the AR chase history).
@@ -1676,9 +1676,9 @@
       // Every button here was the same ghost, so a row reading "Edit · Record outcome · Copy
       // outreach draft · Approve · Reject" offered five equal-looking choices and no way in.
       btn.className = b.danger
-        ? 'px-3 py-1.5 bg-white border border-gray-200 text-red-600 hover:border-red-300 hover:bg-red-50 text-xs font-bold rounded-lg transition disabled:opacity-60 ml-auto'
+        ? 'btn-destructive px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-60 ml-auto'
         : b.primary
-          ? 'px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed'
+          ? 'btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed'
           : btnCls;
       // ⚠️ AFTER the className assignment, which is a whole-attribute WRITE and silently dropped
       // the class when this ran first. The button was still invisible — the inline style is what
@@ -1760,7 +1760,7 @@
             : 'blocks this company from every search, so nobody there is found again. There is no address on this lead to block instead.'}
           Your own funnel history stays, carrying nothing that identifies them.</p>
         <button type="button" data-hub-erase
-          class="px-2 py-1 text-[11px] font-bold rounded-lg bg-white border border-gray-200 text-gray-500 hover:border-red-300 hover:text-red-700 transition cursor-pointer">Erase their data</button>
+          class="btn-destructive px-2 py-1 text-[11px] font-bold rounded-lg border transition cursor-pointer">Erase their data</button>
       </div>
       <p class="hidden text-[11px] font-semibold mt-1.5" data-hub-erase-status></p>`;
 
@@ -1879,13 +1879,13 @@
       </details>` : ''}
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-retry-now
-          class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Try again now</button>
+          class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Try again now</button>
         <button type="button" data-retry-edit
-          class="px-3 py-1.5 bg-white border border-red-200 text-red-700 hover:bg-red-100 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Fix the post</button>
+          class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Fix the post</button>
         <input type="datetime-local" data-retry-at
           class="px-2 py-1.5 bg-white border border-red-200 text-xs text-gray-700 rounded-lg">
         <button type="button" data-retry-schedule
-          class="px-3 py-1.5 bg-white border border-red-200 text-red-700 hover:bg-red-100 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Reschedule</button>
+          class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Reschedule</button>
       </div>
       <p class="hidden text-xs font-semibold mt-2" data-retry-status></p>
     `;
@@ -2427,7 +2427,7 @@
              this correct if a second action is ever put back beside it. -->
         <div class="ml-auto flex items-center gap-2">
           <button type="button" data-hub-bulkdelete
-            class="px-3 py-1.5 bg-white border border-red-200 text-red-700 hover:bg-red-100 text-xs font-bold rounded-lg transition cursor-pointer"></button>
+            class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition cursor-pointer"></button>
         </div>
       </div>
       <div data-hub-bulkstrip></div>`;
@@ -2818,9 +2818,7 @@
             <p class="hidden mt-2 text-xs font-semibold" data-deleted-status></p>
           </div>
           <button type="button" data-deleted-return="${r.id}"
-            class="px-3 py-1.5 ${dnc
-              ? 'bg-white border border-gray-200 text-gray-700 hover:border-emerald-300'
-              : 'bg-emerald-700 hover:bg-emerald-800 text-white'} text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0">
+            class="px-3 py-1.5 ${dnc ? 'btn-secondary border' : 'btn-primary'} text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0">
             Send back for enrichment
           </button>
         </div>`;
@@ -3025,7 +3023,7 @@
           <p class="text-sm text-gray-500 mt-1 max-w-2xl">${esc(hub.description)}</p>
         </div>
         <button type="button" id="datahub-create-post"
-          class="inline-flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap shrink-0">
+          class="btn-primary inline-flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap shrink-0">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
           Create Post
         </button>
@@ -3061,20 +3059,18 @@
         <div class="flex flex-wrap items-center gap-2 shrink-0">
           ${hub.manualAdd ? `
           <button type="button" data-hub-add
-            class="inline-flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap">
+            class="btn-primary inline-flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
             Add Lead
           </button>` : ''}
           <input type="file" accept=".csv" class="hidden" data-hub-file>
           <button type="button" data-hub-import
-            class="inline-flex items-center gap-2 px-4 py-2 ${hub.manualAdd
-              ? 'bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800'
-              : 'bg-emerald-700 hover:bg-emerald-800 text-white'} text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap">
+            class="inline-flex items-center gap-2 px-4 py-2 ${hub.manualAdd ? 'btn-secondary border' : 'btn-primary'} text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12m0-12l-4 4m4-4l4 4"/></svg>
             Import CSV
           </button>
           <button type="button" data-hub-export
-            class="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-sm font-bold rounded-lg transition whitespace-nowrap">
+            class="btn-utility inline-flex items-center gap-2 px-4 py-2 border text-sm font-bold rounded-lg transition whitespace-nowrap">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 16V4m0 12l-4-4m4 4l4-4"/></svg>
             Export CSV
           </button>
@@ -3175,7 +3171,7 @@
         <p class="text-xs font-semibold hidden" data-import-status></p>
         <div class="flex items-center justify-end gap-2 pt-1">
           <button type="button" data-hubmodal-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 rounded-lg cursor-pointer">Cancel</button>
-          <button type="button" data-import-choose class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Choose a CSV file</button>
+          <button type="button" data-import-choose class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Choose a CSV file</button>
         </div>`,
     });
     body.querySelectorAll('[data-hubmodal-close]').forEach((b) => b.addEventListener('click', close));
@@ -3248,12 +3244,12 @@
     // active_scenarios row.
     const cta = s.active
       ? `<button type="button" data-recipe-toggle="${s.active.id}" data-enabled="${on ? '1' : '0'}"
-           class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-bold text-gray-700 cursor-pointer whitespace-nowrap">
+           class="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs font-bold cursor-pointer whitespace-nowrap">
            <span class="w-1.5 h-1.5 rounded-full ${on ? 'bg-emerald-600' : 'bg-gray-400'}"></span>${on ? 'On' : 'Off'}</button>`
       : (s.tier !== 2 && !s.connection && !s.connectionOptional)
         ? `<a href="/api/oauth/${esc(s.providerKey)}/connect"
              class="px-3 py-1.5 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-xs font-bold rounded-lg transition whitespace-nowrap">Connect ${esc(s.providerName)}</a>`
-        : `<button type="button" data-recipe-setup class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition whitespace-nowrap">Set it up</button>`;
+        : `<button type="button" data-recipe-setup class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition whitespace-nowrap">Set it up</button>`;
     return `
       <div class="flex items-start gap-3 py-3 ${last ? '' : 'border-b border-gray-100'}">
         <div class="min-w-0 flex-1">
@@ -3275,7 +3271,7 @@
           <p class="text-sm font-bold text-gray-900">As a spreadsheet</p>
           <p class="text-xs text-gray-500 mt-0.5">Every lead in this tab, with its score, contact details and outreach draft.</p>
           <button type="button" data-export-plain
-            class="mt-3 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition">Download CSV</button>
+            class="btn-utility mt-3 px-4 py-2 text-sm font-bold rounded-lg transition">Download CSV</button>
         </div>
 
         <div class="border border-gray-200 rounded-xl p-4">
@@ -3283,9 +3279,9 @@
           <p class="text-xs text-gray-500 mt-0.5">The same leads, with column headers that match each importer&rsquo;s template, so the fields map themselves.</p>
           <div class="flex flex-wrap items-center gap-2 mt-3">
             <button type="button" data-export-crm="hubspot"
-              class="px-4 py-2 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-sm font-bold rounded-lg transition">HubSpot CSV</button>
+              class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition">HubSpot CSV</button>
             <button type="button" data-export-crm="salesforce"
-              class="px-4 py-2 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-sm font-bold rounded-lg transition">Salesforce CSV</button>
+              class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition">Salesforce CSV</button>
           </div>
           <p class="text-xs text-gray-500 mt-2">Leads found by a search usually have a company inbox rather than a named person, so the name columns are often empty. Salesforce needs a last name to import a row as a Lead &mdash; those rows are companies, not people, and nothing invents a surname to get them through.</p>
         </div>
@@ -3385,7 +3381,7 @@
           <div class="flex items-center justify-end gap-2 pt-1">
             <button type="button" data-add-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 rounded-lg cursor-pointer">Cancel</button>
             <button type="submit" data-add-submit
-              class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Add &amp; score lead</button>
+              class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Add &amp; score lead</button>
           </div>
         </form>
       </div>`;
@@ -3519,7 +3515,7 @@
           <p class="hidden text-xs font-semibold" data-edit-status></p>
           <div class="flex items-center justify-end gap-2 pt-1">
             <button type="button" data-edit-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 rounded-lg cursor-pointer">Cancel</button>
-            <button type="submit" data-edit-submit class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Save changes</button>
+            <button type="submit" data-edit-submit class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Save changes</button>
           </div>
         </form>
       </div>`;

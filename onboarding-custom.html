@@ -25,7 +25,7 @@
     <p id="upsell-message" class="text-gray-600 mb-8 leading-relaxed">To connect more apps or add complex steps, you need to upgrade your tier.</p>
     <div class="flex flex-col sm:flex-row gap-3">
       <button onclick="closeUpsellModal()" class="px-5 py-3 text-gray-600 font-bold hover:bg-gray-100 rounded-lg transition w-full sm:w-auto">Keep Current Plan</button>
-      <a href="pricing.html" class="px-5 py-3 bg-green-600 text-white text-center font-bold rounded-lg shadow hover:bg-green-700 transition w-full">View Plans</a>
+      <a href="pricing.html" class="btn-secondary px-5 py-3 text-center font-bold rounded-lg shadow transition w-full border">View Plans</a>
     </div>
   </div>
 </div>
@@ -387,7 +387,7 @@
           <button type="button" id="btn-back" onclick="prevStep()" class="text-gray-500 font-semibold hover:text-gray-900 transition">
             ← Back
           </button>
-          <button type="button" id="btn-next" onclick="nextStep()" class="px-8 py-3 bg-green-600 text-white font-bold rounded-lg shadow hover:bg-green-700 transition">
+          <button type="button" id="btn-next" onclick="nextStep()" class="btn-primary px-8 py-3 font-bold rounded-lg shadow transition">
             Next Step
           </button>
         </div>
@@ -615,7 +615,7 @@ ${document.getElementById('acceptance_criteria_rules').value || missingFallback}
 <!-- ── "Need help?" floating support widget ──────────────────────────── -->
 <div id="onboarding-help-fab" style="position:fixed;bottom:24px;right:24px;z-index:9999">
   <button onclick="window._helpWidgetOpen()" id="help-fab-btn"
-    class="flex items-center gap-2 bg-gray-900 hover:bg-black text-white text-sm font-bold px-4 py-2.5 rounded-full shadow-lg transition-all">
+    class="btn-utility flex items-center gap-2 text-sm font-bold px-4 py-2.5 rounded-full shadow-lg transition-all">
     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
         d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-3 3-3-3z"/>
@@ -641,7 +641,7 @@ ${document.getElementById('acceptance_criteria_rules').value || missingFallback}
       </div>
       <div id="help-form-error" class="hidden text-xs text-red-600 font-medium"></div>
       <button onclick="window._helpWidgetSubmit()" id="help-submit-btn"
-        class="w-full py-2.5 bg-gray-900 hover:bg-black text-white text-sm font-bold rounded-lg transition">
+        class="btn-primary w-full py-2.5 text-sm font-bold rounded-lg transition">
         Send to Support
       </button>
     </div>

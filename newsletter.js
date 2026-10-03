@@ -683,7 +683,7 @@
             class="w-full px-3 py-2 rounded-lg border border-emerald-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
         </div>
         <button type="button" id="nl-resend-go"
-          class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Resend</button>
+          class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Resend</button>
       </div>
       <p class="text-[11px] text-emerald-700 mt-2">A different subject line is the whole point — the same one arriving twice reads as a mistake.</p>`;
     show(el, 'block');
@@ -1384,7 +1384,7 @@
     const host = $('nl-improve-modes');
     if (host) {
       host.innerHTML = REFINE_MODES.map(([key, label]) =>
-        `<button type="button" data-nl-mode="${key}" class="px-3 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 cursor-pointer">${esc(label)}</button>`).join('');
+        `<button type="button" data-nl-mode="${key}" class="btn-secondary px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">${esc(label)}</button>`).join('');
       host.querySelectorAll('[data-nl-mode]').forEach((el) =>
         el.addEventListener('click', () => refine(el.getAttribute('data-nl-mode'), '')));
     }
@@ -1435,8 +1435,8 @@
       ${r.warnings && r.warnings.length
         ? `<ul class="list-disc pl-5 mt-2 text-[11px] space-y-0.5">${r.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}
       <div class="flex flex-wrap gap-2 mt-3">
-        <button type="button" id="nl-rev-keep" class="px-3 py-1.5 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-lg cursor-pointer">Use this version</button>
-        <button type="button" id="nl-rev-drop" class="px-3 py-1.5 text-xs font-bold text-sky-800 bg-white border border-sky-300 rounded-lg hover:bg-sky-50 cursor-pointer">Keep mine</button>
+        <button type="button" id="nl-rev-keep" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Use this version</button>
+        <button type="button" id="nl-rev-drop" class="btn-secondary px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Keep mine</button>
       </div>
       ${state.designer
         ? '<p class="text-[11px] text-sky-700 mt-2">Your pictures, buttons and spacing stay exactly where they are — only the words change.</p>' : ''}`;
@@ -1511,7 +1511,7 @@
     if (!host) return;
     host.innerHTML = state.templates.map((t) => `
       <button type="button" data-nl-tpl="${esc(t.key)}"
-        class="text-left px-3 py-2.5 rounded-xl border border-gray-200 hover:border-emerald-400 hover:bg-emerald-50 cursor-pointer">
+        class="btn-secondary text-left px-3 py-2.5 rounded-xl border cursor-pointer">
         <p class="text-sm font-bold text-gray-900">${esc(t.label)}</p>
         <p class="text-xs text-gray-500 mt-0.5">${esc(t.description)}</p>
       </button>`).join('');
@@ -1759,7 +1759,7 @@
           class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
         <p class="text-[11px] text-gray-400 mt-1">Use a subdomain such as <span class="font-mono">mail.</span> — it keeps your marketing separate from your everyday business email.</p>
         <div class="flex justify-end mt-4">
-          <button type="button" id="nl-domain-create" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Get my DNS records</button>
+          <button type="button" id="nl-domain-create" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Get my DNS records</button>
         </div>`;
       $('nl-domain-create')?.addEventListener('click', async () => {
         const value = ($('nl-domain-input')?.value || '').trim();
@@ -1823,9 +1823,9 @@
       </div>
 
       <div class="flex flex-wrap items-center justify-end gap-2 mt-6">
-        <button type="button" id="nl-domain-remove" class="px-3 py-2 text-xs font-bold text-red-700 bg-white border border-red-200 rounded-lg hover:bg-red-50 cursor-pointer">Remove</button>
+        <button type="button" id="nl-domain-remove" class="btn-destructive px-3 py-2 text-xs font-bold border rounded-lg cursor-pointer">Remove</button>
         <span id="nl-domain-status" class="flex-1"></span>
-        ${verified ? '' : '<button type="button" id="nl-domain-check" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Check DNS</button>'}
+        ${verified ? '' : '<button type="button" id="nl-domain-check" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Check DNS</button>'}
       </div>`;
 
     $('nl-domain-check')?.addEventListener('click', async () => {
@@ -2043,7 +2043,7 @@
           <p class="text-sm text-gray-600 mb-1">You do not have a welcome sequence yet.</p>
           <p class="text-xs text-gray-400 mb-4">Right now a new subscriber hears nothing until your next email.</p>
           <button type="button" id="nl-seq-create"
-            class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Create a welcome sequence</button>
+            class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Create a welcome sequence</button>
         </div>`;
       $('nl-seq-create')?.addEventListener('click', async () => {
         try {
@@ -2075,8 +2075,8 @@
         </div>
         <button type="button" id="nl-seq-toggle"
           class="px-4 py-2 text-sm font-bold rounded-lg cursor-pointer ${seq.isEnabled
-            ? 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'
-            : 'text-white bg-emerald-600 hover:bg-emerald-700'}">${seq.isEnabled ? 'Switch off' : 'Switch on'}</button>
+            ? 'btn-secondary border'
+            : 'btn-primary'}">${seq.isEnabled ? 'Switch off' : 'Switch on'}</button>
       </div>
 
       <div class="space-y-2 mb-4" id="nl-seq-list"></div>
@@ -2124,15 +2124,15 @@
 
         <div class="flex flex-wrap items-center gap-2 mt-3">
           <button type="button" id="nl-seq-generate" data-nl-assistant="draft"
-            class="px-3 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 cursor-pointer">Ask your assistant to draft</button>
+            class="btn-assistant px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Ask your assistant to draft</button>
           <button type="button" id="nl-seq-improve" data-nl-assistant="improve"
-            class="px-3 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 cursor-pointer">Ask your assistant to improve</button>
+            class="btn-assistant px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Ask your assistant to improve</button>
           <button type="button" id="nl-seq-design-on"
-            class="px-3 py-1.5 text-xs font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Design this email</button>
+            class="btn-secondary px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Design this email</button>
           <button type="button" id="nl-seq-design-off"
-            class="hidden px-3 py-1.5 text-xs font-bold text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer" style="display:none">Back to plain text</button>
+            class="hidden btn-secondary px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer" style="display:none">Back to plain text</button>
           <button type="button" id="nl-seq-preview"
-            class="px-3 py-1.5 text-xs font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Preview email</button>
+            class="btn-utility px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Preview email</button>
         </div>
 
         <div class="flex items-center justify-end gap-3 mt-3">
@@ -2145,7 +2145,7 @@
       </div>
       <div class="flex justify-end mt-4">
         <button type="button" data-seq-delete-all
-          class="px-3 py-1.5 text-xs font-bold text-red-600 bg-white border border-red-200 rounded-lg hover:bg-red-50 cursor-pointer">Delete this ${seq.triggerEvent === 'form' ? 'campaign' : 'welcome sequence'}</button>
+          class="btn-destructive px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Delete this ${seq.triggerEvent === 'form' ? 'campaign' : 'welcome sequence'}</button>
       </div>`;
 
     // Every label that names the assistant, including the two just rendered into this modal.
@@ -2464,8 +2464,8 @@
         <pre class="mt-2 p-3 rounded-lg bg-white/70 border border-sky-200 text-[12px] whitespace-pre-wrap font-mono max-h-64 overflow-auto">${esc(r.bodyMarkdown || '')}</pre>
       </details>
       <div class="flex flex-wrap gap-2 mt-3">
-        <button type="button" id="nl-seq-rev-keep" class="px-3 py-1.5 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-lg cursor-pointer">Use this version</button>
-        <button type="button" id="nl-seq-rev-drop" class="px-3 py-1.5 text-xs font-bold text-sky-800 bg-white border border-sky-300 rounded-lg hover:bg-sky-50 cursor-pointer">Keep mine</button>
+        <button type="button" id="nl-seq-rev-keep" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Use this version</button>
+        <button type="button" id="nl-seq-rev-drop" class="btn-secondary px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Keep mine</button>
       </div>
       <p class="text-[11px] text-sky-700 mt-2">Choosing a version saves it. Keeping yours changes nothing.</p>`;
     show(el, 'block');

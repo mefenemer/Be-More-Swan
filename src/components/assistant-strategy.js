@@ -346,9 +346,9 @@
           class="mt-2 w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5"></textarea>
         <div class="flex gap-2 mt-2">
           <button type="button" data-sa-reject-confirm="${p.id}"
-            class="px-3 py-1.5 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-gray-800 transition">Say no to this</button>
+            class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition">Say no to this</button>
           <button type="button" data-sa-reject-cancel="${p.id}"
-            class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 text-xs font-bold rounded-lg hover:border-gray-300 transition">Cancel</button>
+            class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Cancel</button>
         </div>
       </div>`;
   }
@@ -362,9 +362,9 @@
         <div class="mt-2">${valueHtml(current, 'old')}</div>
         <div class="flex gap-2 mt-2">
           <button type="button" data-sa-rollback-force="${p.id}"
-            class="px-3 py-1.5 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition">Undo anyway</button>
+            class="btn-destructive px-3 py-1.5 text-xs font-bold rounded-lg transition">Undo anyway</button>
           <button type="button" data-sa-conflict-dismiss="${p.id}"
-            class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 text-xs font-bold rounded-lg hover:border-gray-300 transition">Keep what it says now</button>
+            class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Keep what it says now</button>
         </div>
       </div>`;
   }
@@ -406,14 +406,14 @@
           <div class="flex flex-wrap gap-2 mt-3">
             ${p.status === 'pending' ? `
               <button type="button" data-sa-apply="${p.id}" ${busy ? 'disabled' : ''}
-                class="px-3 py-1.5 bg-emerald-700 text-white text-xs font-bold rounded-lg hover:bg-emerald-800 transition disabled:opacity-50">
+                class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">
                 ${busy ? 'Applying&hellip;' : 'Yes, make this change'}</button>
               <button type="button" data-sa-reject="${p.id}" ${busy ? 'disabled' : ''}
-                class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 text-xs font-bold rounded-lg hover:border-gray-300 transition disabled:opacity-50">No thanks</button>
+                class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">No thanks</button>
             ` : ''}
             ${p.canRollback ? `
               <button type="button" data-sa-rollback="${p.id}" ${busy ? 'disabled' : ''}
-                class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 text-xs font-bold rounded-lg hover:border-gray-300 transition disabled:opacity-50">
+                class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">
                 ${busy ? 'Undoing&hellip;' : 'Undo this'}</button>` : ''}
           </div>`}
       </div>`;

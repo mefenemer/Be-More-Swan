@@ -83,7 +83,7 @@
         <p id="upsell-message" class="text-gray-600 mb-8 leading-relaxed">To use this feature, you need to upgrade your tier.</p>
         <div class="flex flex-col sm:flex-row gap-3">
             <button onclick="closeUpsellModal()" class="px-5 py-3 text-gray-600 font-bold hover:bg-gray-100 rounded-lg transition w-full sm:w-auto">Keep Current Plan</button>
-            <a href="pricing.html" class="px-5 py-3 bg-green-600 text-white text-center font-bold rounded-lg shadow hover:bg-green-700 transition w-full">View Plans</a>
+            <a href="pricing.html" class="btn-secondary px-5 py-3 text-center font-bold rounded-lg shadow transition w-full border">View Plans</a>
         </div>
     </div>
 </div>
@@ -101,7 +101,7 @@
             <p class="text-gray-600 mb-6 leading-relaxed">Our <b><span id="waitlist-role-name"></span></b> assistant is currently in private beta. Drop your email below and we'll notify you the moment it opens to the public.</p>
             <form onsubmit="submitWaitlist(event)" class="flex flex-col gap-3">
                 <input type="email" id="waitlist-email" required placeholder="Enter your best email" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
-                <button type="submit" class="px-5 py-3 bg-green-600 text-white font-bold rounded-lg shadow hover:bg-green-700 transition w-full">Join the Waitlist</button>
+                <button type="submit" class="btn-primary px-5 py-3 font-bold rounded-lg shadow transition w-full">Join the Waitlist</button>
             </form>
         </div>
 
@@ -109,7 +109,7 @@
             <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center text-green-600 text-3xl mx-auto mb-4">✓</div>
             <h3 class="text-xl font-bold text-gray-900 mb-2">You're on the list!</h3>
             <p class="text-gray-600">We'll reach out as soon as this assistant is ready for deployment.</p>
-            <button onclick="closeWaitlistModal()" class="mt-6 px-5 py-2 text-gray-600 font-bold hover:bg-gray-100 rounded-lg transition w-full border border-gray-200">Close</button>
+            <button onclick="closeWaitlistModal()" class="btn-secondary mt-6 px-5 py-2 font-bold rounded-lg transition w-full border">Close</button>
         </div>
     </div>
 </div>
@@ -269,7 +269,7 @@
 
                 <div class="mt-10 pt-6 border-t border-gray-100 flex justify-end items-center">
                     <button type="button" id="btn-next" onclick="nextStep()"
-                            class="px-8 py-3 bg-green-600 text-white font-bold rounded-lg shadow hover:bg-green-700 transition cursor-pointer">
+                            class="btn-primary px-8 py-3 font-bold rounded-lg shadow transition cursor-pointer">
                         Next Step
                     </button>
                 </div>

@@ -15,7 +15,7 @@
               title="Credits are used only when generating AI images (1) or videos (5) — uploads, stock and brand cards are free.">i</span>
       </span>
       <button id="btn-open-upload" type="button"
-        class="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow transition cursor-pointer">
+        class="btn-primary inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold rounded-xl shadow transition cursor-pointer">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
         Add Content
       </button>
@@ -56,7 +56,7 @@
       <!-- Tab toggle: File vs Link vs Generate AI -->
       <div class="flex bg-gray-100 rounded-xl p-1 gap-1">
         <button id="tab-file" type="button" onclick="window._mcSwitchTab('file')"
-          class="flex-1 py-2 text-sm font-bold rounded-lg transition bg-white shadow text-gray-900 cursor-pointer">
+          class="btn-utility flex-1 py-2 text-sm font-bold rounded-lg transition shadow cursor-pointer">
           Upload File
         </button>
         <button id="tab-link" type="button" onclick="window._mcSwitchTab('link')"
@@ -157,7 +157,7 @@
         </div>
 
         <button id="ai-generate-btn" type="button" onclick="window._mcGenerateAI()"
-          class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow transition cursor-pointer flex items-center justify-center gap-2">
+          class="btn-assistant w-full py-2.5 text-sm font-bold rounded-xl shadow transition cursor-pointer flex items-center justify-center gap-2">
           <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
           Generate
         </button>
@@ -180,7 +180,7 @@
           <p id="ai-results-hint" class="hidden text-xs text-gray-500 mb-2">Pick as many variations as you want — this generation is already paid for, so keeping extras is free.</p>
           <div id="ai-results" class="hidden grid grid-cols-2 gap-3"></div>
           <button id="ai-save-btn" type="button" onclick="window._mcSaveAiSelection()" style="display:none"
-            class="hidden w-full mt-3 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow transition cursor-pointer items-center justify-center gap-2">
+            class="hidden btn-primary w-full mt-3 py-2.5 text-sm font-bold rounded-xl shadow transition cursor-pointer items-center justify-center gap-2">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
             <span id="ai-save-label">Add 1 to My Content</span>
           </button>
@@ -197,7 +197,7 @@
           <div class="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center text-amber-600 text-2xl mx-auto mb-3">🔒</div>
           <p class="text-sm font-bold text-gray-800">AI video is a premium feature</p>
           <p class="text-xs text-gray-500 mt-1 mb-4">Available on the Saver and Employee plans.</p>
-          <a href="/billing.html" class="inline-block px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow transition">Upgrade your plan →</a>
+          <a href="/billing.html" class="btn-golive inline-block px-5 py-2.5 text-sm font-bold rounded-xl shadow transition">Upgrade your plan →</a>
         </div>
 
         <!-- Generation form -->
@@ -225,7 +225,7 @@
           </div>
 
           <button id="vid-generate-btn" type="button" onclick="window._mcGenerateVideo()"
-            class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow transition cursor-pointer flex items-center justify-center gap-2">
+            class="btn-assistant w-full py-2.5 text-sm font-bold rounded-xl shadow transition cursor-pointer flex items-center justify-center gap-2">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
             Generate
           </button>
@@ -246,7 +246,7 @@
         <!-- Result preview -->
         <div id="vid-result" class="hidden space-y-3">
           <video id="vid-player" controls playsinline class="w-full rounded-xl border border-gray-200 bg-black max-h-72"></video>
-          <button type="button" onclick="window._mcVideoDone()" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow transition cursor-pointer">Added to My Content — Done</button>
+          <button type="button" onclick="window._mcVideoDone()" class="btn-primary w-full py-2.5 text-sm font-bold rounded-xl shadow transition cursor-pointer">Added to My Content — Done</button>
         </div>
 
         <p id="vid-error" class="hidden text-sm text-red-600 font-medium"></p>
@@ -261,7 +261,7 @@
         Cancel
       </button>
       <button id="btn-upload-submit" type="button" onclick="window._mcSubmitUpload()"
-        class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow transition cursor-pointer flex items-center gap-2">
+        class="btn-primary px-6 py-2.5 text-sm font-bold rounded-xl shadow transition cursor-pointer flex items-center gap-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
         Add to My Content
       </button>
@@ -278,7 +278,7 @@
     <p id="detach-warning" class="hidden text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4"></p>
     <div class="flex gap-3 justify-end mt-4">
       <button onclick="document.getElementById('modal-detach').classList.add('hidden')" class="px-4 py-2 font-bold text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer" type="button">Keep it</button>
-      <button id="btn-confirm-detach" class="px-4 py-2 bg-amber-500 text-white font-bold rounded-lg hover:bg-amber-600 cursor-pointer" type="button">Yes, Remove</button>
+      <button id="btn-confirm-detach" class="btn-destructive px-4 py-2 font-bold rounded-lg cursor-pointer" type="button">Yes, Remove</button>
     </div>
   </div>
 </div>
@@ -292,7 +292,7 @@
     <p id="delete-warning" class="hidden text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4"></p>
     <div class="flex gap-3 justify-end">
       <button onclick="document.getElementById('modal-delete-asset').classList.add('hidden')" class="px-4 py-2 font-bold text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer" type="button">Cancel</button>
-      <button id="btn-confirm-delete" class="px-4 py-2 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 cursor-pointer" type="button">Delete</button>
+      <button id="btn-confirm-delete" class="btn-destructive px-4 py-2 font-bold rounded-lg cursor-pointer" type="button">Delete</button>
     </div>
   </div>
 </div>
@@ -321,7 +321,7 @@
            so a direct href navigates to the picture instead of saving it. No target="_blank" —
            the response is an attachment, and a blank tab that downloads and closes just flickers. -->
       <a id="view-asset-download" href="#" download
-        class="px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-lg hover:bg-emerald-700 transition inline-flex items-center gap-2">
+        class="btn-utility px-4 py-2 text-sm font-bold rounded-lg transition inline-flex items-center gap-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
         Download
       </a>

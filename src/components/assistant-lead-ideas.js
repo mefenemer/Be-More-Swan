@@ -72,9 +72,9 @@
         ${!approved && !declined ? `
           <div class="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
             <button type="button" data-approve="${idea.id}"
-              class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Approve &amp; find leads</button>
+              class="btn-golive px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Approve &amp; find leads</button>
             <button type="button" data-decline="${idea.id}"
-              class="px-3 py-1.5 bg-white border border-gray-200 text-gray-600 hover:border-gray-300 text-xs font-bold rounded-lg transition disabled:opacity-60">Decline</button>
+              class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-60">Decline</button>
             <span class="hidden text-xs font-semibold text-red-600" data-idea-status></span>
           </div>` : ''}
         <div data-idea-results></div>
@@ -88,7 +88,7 @@
         <p class="font-bold text-gray-900 mb-1">No lead ideas yet</p>
         <p class="text-sm text-gray-500 max-w-sm mx-auto mb-5">${esc(_roleText(state.cfg?.description || 'Let the {role:lead_qualifier} suggest where to find your next customers — review and approve the ones worth pursuing.'))}</p>
         <button type="button" data-generate
-          class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Propose lead ideas</button>
+          class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Propose lead ideas</button>
       </div>`;
   }
 
@@ -97,7 +97,7 @@
       <div class="space-y-3">${ideas.map(ideaCard).join('')}</div>
       <div class="mt-4 pt-4 border-t border-gray-100 flex justify-center">
         <button type="button" data-generate
-          class="px-4 py-2 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Propose more ideas</button>
+          class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Propose more ideas</button>
       </div>`);
     wireList();
   }
@@ -121,7 +121,7 @@
       await refresh();
     } catch (err) {
       setBody(`<div class="bg-red-50 border border-red-200 rounded-xl p-4 text-sm font-semibold text-red-700">${esc(err.message)}</div>
-        <div class="mt-3 text-center"><button type="button" data-generate class="px-4 py-2 bg-emerald-700 text-white text-sm font-bold rounded-lg">Try again</button></div>`);
+        <div class="mt-3 text-center"><button type="button" data-generate class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Try again</button></div>`);
       wireGenerate();
     }
   }

@@ -10,6 +10,7 @@ import { createNotification } from '../../src/utils/notify';
 import { sendEmail } from '../../src/utils/email';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
+import { adminInbox } from '../../src/utils/admin-inbox';
 const CHECKLIST = [
     'Demographic proxy language (e.g. gendered terms, nationality assumptions)',
     'Communication style framing (formal vs. informal defaults)',
@@ -31,21 +32,22 @@ const handler = async () => {
             userId: admin.id,
             metadata: { dueDate: new Date().toISOString() },
         });
+    }
 
-        // Email reminder
-        if (admin.email) {
+    // One email to the business inbox (admin-inbox.ts), not one per admin account — those went to a
+    // personal address. The in-app notification above still reaches every super admin.
+    for (const to of adminInbox()) {
             await sendEmail({
-                to: admin.email,
+                to,
                 subject: '[Be More Swan] Quarterly Bias Prompt Review Due',
-                html: `<p>Hi ${admin.firstName || 'there'},</p>
-<p>It's time for the <strong>quarterly bias review</strong> of all masterAssistant system prompts.</p>
+                html: `<p>Hi there,</p>
+<p>It's time for the <strong>quarterly bias review</strong> of every active assistant's system prompt.</p>
 <p>Please review the following checklist for each active assistant:</p>
 <ul>${CHECKLIST.map(c => `<li>${c}</li>`).join('')}</ul>
 <p>Once complete, record your findings in the Bias Audit section of the Admin Dashboard:</p>
-<p><a href="${BASE}/admin.html?section=bias-audit" style="display:inline-block;padding:10px 20px;background:#059669;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold;">Open Bias Audit Dashboard</a></p>
+<p><a href="${BASE}/admin.html?view=bias-audit" style="display:inline-block;padding:10px 20px;background:#059669;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold;">Open Bias Audit Dashboard</a></p>
 <p style="color:#6b7280;font-size:12px;">Review outcomes should include: reviewDate, promptsReviewed, findingsCount, and actionsRequired.</p>`,
             }).catch(() => {});
-        }
     }
 
     console.log(`[quarterly-bias-reminder] Notified ${superAdmins.length} super admin(s).`);

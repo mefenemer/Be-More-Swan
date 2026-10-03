@@ -758,7 +758,7 @@
 
         const cancelBtn = showCancel
             ? `<button onclick="window._billingOpenCancelModal('${_esc(sub.stripeSubscriptionId || '')}','${_esc(sub.planName)}','${sub.renewalDate || ''}')"
-                 class="inline-flex items-center px-4 py-2 border border-red-200 hover:border-red-300 text-red-600 hover:text-red-700 text-sm font-semibold rounded-xl transition cursor-pointer bg-white hover:bg-red-50">
+                 class="btn-destructive inline-flex items-center px-4 py-2 border text-sm font-semibold rounded-xl transition cursor-pointer">
                  Cancel Subscription
                </button>`
             : isCancelling
@@ -770,7 +770,7 @@
         // SC6: Cancel Scheduled Downgrade button
         const cancelDowngradeBtn = isDowngrading
             ? `<button onclick="window._cancelScheduledDowngrade()"
-                 class="inline-flex items-center px-4 py-2 border border-amber-200 hover:border-amber-400 text-amber-700 text-sm font-semibold rounded-xl transition cursor-pointer bg-white hover:bg-amber-50">
+                 class="btn-secondary inline-flex items-center px-4 py-2 border text-sm font-semibold rounded-xl transition cursor-pointer">
                  Cancel Downgrade
                </button>`
             : '';
@@ -778,7 +778,7 @@
         // SC1: Change Plan button — opens upgrade modal
         const changePlanBtn = !isTerminated && !isCancelling && !isDowngrading
             ? `<button onclick="window._openChangePlanModal()"
-                 class="inline-flex items-center px-4 py-2 border border-gray-200 hover:border-emerald-400 text-gray-700 hover:text-emerald-700 text-sm font-semibold rounded-xl transition cursor-pointer bg-white hover:bg-emerald-50">
+                 class="btn-secondary inline-flex items-center px-4 py-2 border text-sm font-semibold rounded-xl transition cursor-pointer">
                  Change Plan
                </button>`
             : '';
@@ -903,7 +903,7 @@
             // Receipt opens as an in-page modal; Stripe PDF link shown alongside when available.
             const receiptCell = `<div class="flex items-center justify-end gap-3">
                      <button onclick="window._billingOpenReceiptModal(${p.id})"
-                         class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 hover:border-gray-400 text-gray-700 hover:text-gray-900 text-xs font-semibold rounded-lg transition bg-white cursor-pointer">
+                         class="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 border text-xs font-semibold rounded-lg transition cursor-pointer">
                          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                          Receipt
                      </button>

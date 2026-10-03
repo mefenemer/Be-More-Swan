@@ -350,7 +350,10 @@ window.NotifKit = (function () {
             return { label: 'View issue', run: () => window.routeToIssueReport?.(meta.issueId) };
         }
         if (meta.action === 'view_invoices') return ACTIONS_BY_TYPE.invoice_ready;
-        if (meta.action === 'view_ticket')   return ACTIONS_BY_TYPE.ticket_created;
+        // A ticket notification opens THAT ticket's conversation (metadata.ticketId), not just the tab.
+        if (meta.action === 'view_ticket' || notif.type === 'ticket_reply' || notif.type === 'ticket_created') {
+            return { label: 'View ticket', run: () => window.routeToSupportTicket?.(meta.ticketId ?? null) };
+        }
         if (meta.action === 'open_wizard')   return { label: meta.ctaLabel || 'Open Setup Wizard', run: openWizard };
         if (meta.action === 'getting_started') return ACTIONS_BY_TYPE.onboarding_prompt;
         if (ACTIONS_BY_TYPE[notif.type]) return ACTIONS_BY_TYPE[notif.type];
@@ -413,11 +416,11 @@ window.NotifKit = (function () {
         trophy:  `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.196-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.783-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>`,
     };
     const CATEGORY_STYLE = {
-        critical_action: { ring: 'bg-red-50 text-red-600 border-red-100',       cta: 'bg-red-600 hover:bg-red-700',         icon: ICON.warning },
-        suggested_action:{ ring: 'bg-emerald-50 text-emerald-700 border-emerald-100', cta: 'bg-emerald-600 hover:bg-emerald-700', icon: ICON.action },
-        state_change:    { ring: 'bg-green-50 text-green-700 border-green-100',  cta: 'bg-emerald-600 hover:bg-emerald-700', icon: ICON.check },
-        informational:   { ring: 'bg-gray-100 text-gray-500 border-gray-200',    cta: 'bg-emerald-600 hover:bg-emerald-700', icon: ICON.info },
-        celebratory:     { ring: 'bg-amber-50 text-amber-600 border-amber-100',  cta: 'bg-emerald-600 hover:bg-emerald-700', icon: ICON.trophy, celebrate: true },
+        critical_action: { ring: 'bg-red-50 text-red-600 border-red-100',       cta: 'btn-primary', icon: ICON.warning },
+        suggested_action:{ ring: 'bg-emerald-50 text-emerald-700 border-emerald-100', cta: 'btn-primary', icon: ICON.action },
+        state_change:    { ring: 'bg-green-50 text-green-700 border-green-100',  cta: 'btn-primary', icon: ICON.check },
+        informational:   { ring: 'bg-gray-100 text-gray-500 border-gray-200',    cta: 'btn-primary', icon: ICON.info },
+        celebratory:     { ring: 'bg-amber-50 text-amber-600 border-amber-100',  cta: 'btn-primary', icon: ICON.trophy, celebrate: true },
     };
     const styleOf = (n) => CATEGORY_STYLE[catOf(n)] || CATEGORY_STYLE.informational;
 
@@ -639,7 +642,7 @@ window.initNotifications = async function() {
                 ${notif.message ? `<p class="text-sm text-gray-500 mt-0.5 line-clamp-2">${sanitizeText(notif.message)}</p>` : ''}
                 <p class="text-xs text-gray-400 mt-1">${fmtDate(notif.createdAt)}</p>
             </div>
-            ${resolved ? '' : `<button type="button" class="action-cta px-4 py-2 ${st.cta} text-white text-sm font-bold rounded-lg transition shrink-0 whitespace-nowrap">${action.label}</button>`}
+            ${resolved ? '' : `<button type="button" class="action-cta px-4 py-2 ${st.cta} text-sm font-bold rounded-lg transition shrink-0 whitespace-nowrap">${action.label}</button>`}
             ${resolved ? '' : `<button type="button" class="action-toggle-read shrink-0 text-xs font-semibold px-2.5 py-1 rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-700 whitespace-nowrap">${notif.isRead ? 'Mark as unread' : 'Mark as read'}</button>`}
             ${dismissBtnHTML(notif)}
         `;
@@ -966,13 +969,14 @@ window.initNotifications = async function() {
 };
 
 // Global click handler for routing to the Support area
-window.routeToSupportTicket = function() {
-    loadView('help');
-    setTimeout(() => {
-        const ticketTab = document.getElementById('tab-btn-tickets');
-        if (ticketTab) ticketTab.click();
-    }, 100);
-};
+// Defined by help.js (opens the Tickets tab reliably, after the view has loaded); this is only the
+// fallback for a page without it. Never overwrite help.js's version.
+if (typeof window.routeToSupportTicket !== 'function') {
+    window.routeToSupportTicket = function () {
+        if (typeof window.openHelpTab === 'function') return window.openHelpTab('tickets');
+        window.loadView && window.loadView('help');
+    };
+}
 
 // ── Header Action Center popover ──────────────────────────────────────────────
 // Quick triage from the workspace bell: two tabs (Action required / Updates), compact
@@ -1092,7 +1096,7 @@ window.NotificationPopover = (function () {
                 <p class="text-sm font-bold text-gray-900 truncate">${K.sanitizeText(n.title)}</p>
                 ${n.message ? `<p class="text-xs text-gray-500 mt-0.5 line-clamp-2">${K.sanitizeText(n.message)}</p>` : ''}
                 <div class="mt-2 flex items-center gap-2">
-                    ${action ? `<button type="button" class="pop-cta px-3 py-1.5 ${st.cta} text-white text-xs font-bold rounded-lg transition whitespace-nowrap">${K.escHtml(action.label)}</button>` : ''}
+                    ${action ? `<button type="button" class="pop-cta px-3 py-1.5 ${st.cta} text-xs font-bold rounded-lg transition whitespace-nowrap">${K.escHtml(action.label)}</button>` : ''}
                     ${n.isRead ? '' : '<button type="button" class="pop-read text-[11px] font-semibold text-gray-400 hover:text-gray-700 whitespace-nowrap">Mark read</button>'}
                     <span class="text-[11px] text-gray-400">${K.fmtDate(n.createdAt)}</span>
                 </div>

@@ -35,6 +35,8 @@ import {
     votedFeatureIds,
 } from '../../src/utils/feature-requests';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { sendEmail } from '../../src/utils/email';
+import { adminInbox } from '../../src/utils/admin-inbox';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode,
@@ -269,6 +271,20 @@ export default withLambda(async (event) => {
         status: 'pending_review',
         source: 'user',
     }).returning({ id: featureRequests.id });
+
+    // New ideas used to wait silently in Admin → Feature Requests at pending_review; the business
+    // inbox now hears about each one. Best-effort — the submission has already succeeded.
+    const esc = (v: string) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    for (const to of adminInbox()) {
+        await sendEmail({
+            to,
+            subject: `💡 New feature request #${created.id}: ${String(title).slice(0, 80)}`,
+            html: `<p>A new feature request is waiting for review (${esc(category)}${assistantRef ? ` · ${esc(assistantRef)}` : ''}):</p>
+                   <p><strong>${esc(title)}</strong></p>
+                   <blockquote style="border-left:3px solid #eae4d7;padding-left:12px;color:#444036;white-space:pre-wrap">${esc(description || '')}</blockquote>
+                   <p><a href="${process.env.BASE_URL || 'https://bemoreswan.com'}/admin.html?view=feature-roadmap">Review it in the admin portal →</a></p>`,
+        }).catch((e: unknown) => console.warn('[feature-requests] inbox alert failed:', e));
+    }
 
     return json(201, { ok: true, id: created.id });
 });

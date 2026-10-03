@@ -127,3 +127,50 @@ button:not(:disabled),
 summary {
     cursor: pointer;
 }
+/* ==========================================================================
+   BUTTON SYSTEM — colour by INTENT, never by screen (2026-10-03)
+   ==========================================================================
+   Every button carries exactly one of these, and no colour utilities of its own:
+     .btn-assistant    Assistant & AI — Chat, Suggest, Generate, Assign task, the swan
+     .btn-primary      The ONE main step on a view — Save, Continue, Submit, Create
+     .btn-golive       Commits outward — Approve, Publish, Post now, Upgrade, Hire, Pay
+     .btn-secondary    Back, Cancel, Close, View, Manage, Edit
+     .btn-destructive  Delete, Remove, Revoke, Disconnect, Reject, Discard
+     .btn-utility      Copy, Refresh, Export, Upload, Preview, Help — quiet tools
+   Colour only: padding, size and radius stay on the element's own utilities.
+
+   In @layer components, BELOW Tailwind's utilities layer, on purpose: a control that restyles
+   itself from JS (a selected tab, a busy state) adds utilities, and those must still win.
+
+   Contrast (WCAG AA ≥ 4.5:1, white or ink text): assistant 5.7 · primary 5.2 · go-live 9.8 ·
+   secondary 15 · destructive 4.8 · utility 7.1. The primary is the brand's DEEP pink (#d6006b):
+   white on the neon #ff007f is 3.8:1 and fails, so neon pink stays the focus ring and accents. */
+@layer components {
+  .btn-assistant, .btn-primary, .btn-golive, .btn-secondary, .btn-destructive, .btn-utility {
+    transition: background-color .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
+  }
+  .btn-assistant   { background-color: #7c3aed; color: #fff;     border-color: transparent; }
+  .btn-primary     { background-color: #d6006b; color: #fff;     border-color: transparent; }
+  .btn-golive      { background-color: #00e55c; color: #1f1e1b;  border-color: transparent; }
+  .btn-secondary   { background-color: #f6f3eb; color: #1f1e1b;  border-color: #eae4d7; }
+  .btn-destructive { background-color: #dc2626; color: #fff;     border-color: transparent; }
+  .btn-utility     { background-color: transparent; color: #5c564b; border-color: transparent; }
+
+  .btn-assistant:hover:not(:disabled)   { background-color: #6d28d9; }
+  .btn-primary:hover:not(:disabled)     { background-color: #b0005a; }
+  .btn-golive:hover:not(:disabled)      { background-color: #00cc52; }
+  .btn-secondary:hover:not(:disabled)   { background-color: #eae4d7; border-color: #d9d1bf; }
+  .btn-destructive:hover:not(:disabled) { background-color: #b91c1c; }
+  .btn-utility:hover:not(:disabled)     { background-color: #f6f3eb; color: #1f1e1b; }
+
+  .btn-assistant:focus-visible, .btn-primary:focus-visible, .btn-golive:focus-visible,
+  .btn-secondary:focus-visible, .btn-destructive:focus-visible, .btn-utility:focus-visible {
+    outline: 2px solid #ff007f;
+    outline-offset: 2px;
+  }
+  .btn-assistant:disabled, .btn-primary:disabled, .btn-golive:disabled,
+  .btn-secondary:disabled, .btn-destructive:disabled, .btn-utility:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+  }
+}

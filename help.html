@@ -28,6 +28,33 @@
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <!-- DOMPurify for XSS sanitisation (AC13) -->
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<style>
+  /* Article typography. The body carries Tailwind "prose" classes, but the typography plugin was
+     never part of style.css, so every article rendered as one undifferentiated block — headings at
+     body size, tables with no borders, lists with no bullets. Scoped to the reader, hand-written. */
+  #article-body { color: #2d2a23; font-size: 15px; line-height: 1.65; }
+  #article-body > h1:first-child { display: none; } /* the page shows the title already */
+  #article-body h1 { font-size: 1.5rem; font-weight: 800; margin: 1.5rem 0 .75rem; color: #1f1e1b; }
+  #article-body h2 { font-size: 1.2rem; font-weight: 800; margin: 1.75rem 0 .6rem; color: #1f1e1b; }
+  #article-body h3 { font-size: 1.05rem; font-weight: 700; margin: 1.25rem 0 .5rem; color: #1f1e1b; }
+  #article-body p { margin: .6rem 0; }
+  #article-body ul, #article-body ol { margin: .6rem 0 .6rem 1.4rem; }
+  #article-body ul { list-style: disc; }
+  #article-body ol { list-style: decimal; }
+  #article-body li { margin: .25rem 0; }
+  #article-body a { color: #d6006b; font-weight: 600; text-decoration: none; }
+  #article-body a:hover { text-decoration: underline; }
+  #article-body strong { font-weight: 700; color: #1f1e1b; }
+  #article-body table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 14px; display: block; overflow-x: auto; }
+  #article-body th, #article-body td { border: 1px solid #eae4d7; padding: .5rem .75rem; text-align: left; vertical-align: top; }
+  #article-body th { background: #f6f3eb; font-weight: 700; }
+  #article-body blockquote { border-left: 3px solid #ff007f; background: #fff0f5; padding: .6rem 1rem; margin: 1rem 0; border-radius: 0 .5rem .5rem 0; color: #444036; }
+  #article-body blockquote p { margin: .25rem 0; }
+  #article-body code { background: #f6f3eb; border-radius: .25rem; padding: .1rem .3rem; font-size: .9em; }
+  #article-body pre { background: #1f1e1b; color: #f6f3eb; padding: .75rem 1rem; border-radius: .5rem; overflow-x: auto; margin: 1rem 0; }
+  #article-body pre code { background: none; color: inherit; padding: 0; }
+  #article-body hr { border: 0; border-top: 1px solid #eae4d7; margin: 1.5rem 0; }
+</style>
 </head>
 <body class="font-sans text-gray-800 antialiased bg-gray-50 min-h-screen">
 
@@ -264,7 +291,7 @@ function renderList(searchTerm) {
       <h2 class="text-base font-bold text-gray-700 mb-3 pb-2 border-b border-gray-200">${cat}</h2>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         ${articles.map(a => `
-          <button data-id="${a.id}" class="article-card text-left bg-white border border-gray-200 rounded-xl p-4 hover:border-emerald-300 hover:shadow-sm transition group">
+          <button data-id="${a.id}" class="btn-secondary article-card text-left border rounded-xl p-4 hover:shadow-sm transition group">
             <h3 class="text-sm font-semibold text-gray-900 group-hover:text-emerald-700 transition leading-snug">${escHtml(a.title)}</h3>
             <p class="text-xs text-gray-400 mt-1">${escHtml(cat)}</p>
           </button>

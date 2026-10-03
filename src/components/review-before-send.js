@@ -68,11 +68,11 @@
           ${highStakesNote}
           <div class="mt-3 flex gap-2">
             <button data-rbsw-confirm
-                    class="px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold">
+                    class="btn-primary px-3 py-1.5 rounded text-xs font-semibold">
               I've reviewed — proceed
             </button>
             <button data-rbsw-cancel
-                    class="px-3 py-1.5 rounded bg-white border border-amber-400 text-amber-800 text-xs font-semibold hover:bg-amber-100">
+                    class="btn-secondary px-3 py-1.5 rounded border text-xs font-semibold">
               Cancel
             </button>
           </div>

@@ -89,10 +89,10 @@
                     <label class="block text-sm font-medium text-gray-700 mb-1">Working hours</label>
                     <p class="text-xs text-gray-500 mb-3">When should your assistant focus on your work? Pick a preset or set your own.</p>
                     <div class="flex flex-wrap gap-2 mb-3">
-                        <button type="button" class="wh-preset px-3 py-1.5 text-sm font-semibold rounded-full border border-gray-200 text-gray-600 hover:border-emerald-300 transition cursor-pointer" data-preset="standard_9_5" data-start="09:00" data-end="17:00">Standard 9–5</button>
-                        <button type="button" class="wh-preset px-3 py-1.5 text-sm font-semibold rounded-full border border-gray-200 text-gray-600 hover:border-emerald-300 transition cursor-pointer" data-preset="extended" data-start="08:00" data-end="18:00">Extended 8–6</button>
-                        <button type="button" class="wh-preset px-3 py-1.5 text-sm font-semibold rounded-full border border-gray-200 text-gray-600 hover:border-emerald-300 transition cursor-pointer" data-preset="always_on">Always on</button>
-                        <button type="button" class="wh-preset px-3 py-1.5 text-sm font-semibold rounded-full border border-gray-200 text-gray-600 hover:border-emerald-300 transition cursor-pointer" data-preset="custom">Custom</button>
+                        <button type="button" class="btn-secondary wh-preset px-3 py-1.5 text-sm font-semibold rounded-full border transition cursor-pointer" data-preset="standard_9_5" data-start="09:00" data-end="17:00">Standard 9–5</button>
+                        <button type="button" class="btn-secondary wh-preset px-3 py-1.5 text-sm font-semibold rounded-full border transition cursor-pointer" data-preset="extended" data-start="08:00" data-end="18:00">Extended 8–6</button>
+                        <button type="button" class="btn-secondary wh-preset px-3 py-1.5 text-sm font-semibold rounded-full border transition cursor-pointer" data-preset="always_on">Always on</button>
+                        <button type="button" class="btn-secondary wh-preset px-3 py-1.5 text-sm font-semibold rounded-full border transition cursor-pointer" data-preset="custom">Custom</button>
                     </div>
                     <div id="wh-custom-row" class="hidden items-center gap-2 mb-3">
                         <input type="time" id="wh-start" class="px-3 py-1.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none">
@@ -168,7 +168,7 @@
                         <p id="push-enable-desc" class="text-xs text-gray-500 mt-0.5 leading-snug"></p>
                     </div>
                     <button id="push-enable-btn" type="button"
-                        class="hidden shrink-0 px-4 py-2 rounded-xl text-sm font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition"></button>
+                        class="hidden btn-primary shrink-0 px-4 py-2 rounded-xl text-sm font-bold transition"></button>
                 </div>
             </div>
             <div id="notif-prefs-loading" class="p-6 text-sm text-gray-400">Loading preferences…</div>
@@ -389,7 +389,7 @@
                             placeholder="Composed with your assistant, our Be More Swan AI Digital Assistant. What's yours called 😉?"
                             class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition">
                         <button type="button" id="btn-save-ai-disclosure-text"
-                            class="shrink-0 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer">
+                            class="btn-primary shrink-0 px-4 py-2 text-sm font-bold rounded-lg shadow transition cursor-pointer">
                             Save
                         </button>
                     </div>
@@ -476,7 +476,7 @@
                     </div>
                 </div>
                 <button onclick="window.loadView('billing')"
-                    class="shrink-0 inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow transition cursor-pointer">
+                    class="btn-secondary shrink-0 inline-flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-xl shadow transition cursor-pointer border">
                     View Billing
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
                 </button>

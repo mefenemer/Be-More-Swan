@@ -9,6 +9,7 @@ import { sendEmail } from './email';
 import { resolveBaseUrl } from './base-url';
 import { isEmailAllowedForUser } from './notification-email-gate';
 
+import { adminInbox } from './admin-inbox';
 type Db = ReturnType<typeof getDb>;
 
 // Canonical lifecycle states. KEEP IN SYNC with db/issue-reports.sql status CHECK.
@@ -69,19 +70,14 @@ export function validateImageDataUrl(dataUrl: string): { mime: string } | { erro
 export interface AdminRecipient { id: number; email: string; firstName: string | null }
 
 /**
- * The "admin portal owner(s)" to email when a new issue is recorded. Prefers the
- * ISSUE_REPORT_NOTIFY_EMAIL env override; otherwise every super_admin / admin account.
+ * Who to email when a new issue is recorded. Prefers the ISSUE_REPORT_NOTIFY_EMAIL env override;
+ * otherwise the business inbox (admin-inbox.ts) — NOT every admin account, which sent it to a
+ * personal address (changed 2026-10-03).
  */
-export async function getAdminRecipients(db: Db): Promise<AdminRecipient[]> {
+export async function getAdminRecipients(_db: Db): Promise<AdminRecipient[]> {
     const override = process.env.ISSUE_REPORT_NOTIFY_EMAIL;
-    if (override) {
-        return override.split(',').map((e, i) => ({ id: -1 - i, email: e.trim(), firstName: null })).filter((r) => r.email);
-    }
-    const rows = await db
-        .select({ id: users.id, email: users.email, firstName: users.firstName })
-        .from(users)
-        .where(or(eq(users.role, 'super_admin'), eq(users.role, 'admin')));
-    return rows;
+    const list = override ? override.split(',').map((e) => e.trim()).filter(Boolean) : adminInbox();
+    return list.map((email, i) => ({ id: -1 - i, email, firstName: null }));
 }
 
 /**

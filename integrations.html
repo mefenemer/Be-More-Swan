@@ -49,8 +49,8 @@
           <option value="linkedin">LinkedIn</option>
           <option value="x">X (Twitter)</option>
         </select>
-        <button id="selftest-preflight-btn" type="button" onclick="runSelfTest(false)" class="px-3.5 py-2 text-sm font-bold rounded-lg border border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Run preflight</button>
-        <button id="selftest-post-btn" type="button" onclick="runSelfTest(true)" class="px-3.5 py-2 text-sm font-bold rounded-lg border border-amber-500 text-amber-700 hover:bg-amber-50 transition cursor-pointer">Send test post…</button>
+        <button id="selftest-preflight-btn" type="button" onclick="runSelfTest(false)" class="btn-secondary px-3.5 py-2 text-sm font-bold rounded-lg border transition cursor-pointer">Run preflight</button>
+        <button id="selftest-post-btn" type="button" onclick="runSelfTest(true)" class="btn-golive px-3.5 py-2 text-sm font-bold rounded-lg border transition cursor-pointer">Send test post…</button>
       </div>
       <p class="text-xs text-gray-400">Preflight checks the stored token, scopes and account identity without posting. Sending a live test post is owner/admin only and asks you to type CONFIRM first.</p>
       <div id="selftest-result" class="hidden text-sm rounded-xl p-3 border"></div>
@@ -144,8 +144,8 @@
         <p id="scenario-modal-error" class="hidden text-sm font-semibold text-red-600"></p>
       </div>
       <div class="p-5 border-t border-gray-100 flex justify-end gap-2 sticky bottom-0 bg-white">
-        <button type="button" id="scenario-modal-cancel" class="px-4 py-2 bg-white border border-gray-200 text-gray-600 text-sm font-bold rounded-lg">Cancel</button>
-        <button type="button" id="scenario-modal-save" class="px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg">Enable scenario</button>
+        <button type="button" id="scenario-modal-cancel" class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg">Cancel</button>
+        <button type="button" id="scenario-modal-save" class="btn-primary px-5 py-2 text-sm font-bold rounded-lg">Enable scenario</button>
       </div>
     </div>
   </div>
@@ -355,11 +355,11 @@
 
       const connectLabel = (s.status === 'expired' ? 'Reconnect ' : 'Connect ') + esc(p.name);
       const action = s.connected
-        ? '<button type="button" data-disconnect="' + p.id + '" class="w-full px-4 py-2 bg-white border border-gray-200 text-gray-600 hover:text-red-600 hover:border-red-200 text-sm font-bold rounded-lg transition">Disconnect</button>'
+        ? '<button type="button" data-disconnect="' + p.id + '" class="btn-destructive w-full px-4 py-2 border text-sm font-bold rounded-lg transition">Disconnect</button>'
         : p.needsSubdomain
           // Zendesk: reveal an inline subdomain field first — OAuth needs it to build
           // the https://{subdomain}.zendesk.com authorize URL.
-          ? '<button type="button" data-subdomain-reveal="' + p.id + '" class="block w-full text-center px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition">' + connectLabel + '</button>' +
+          ? '<button type="button" data-subdomain-reveal="' + p.id + '" class="btn-primary block w-full text-center px-4 py-2 text-sm font-bold rounded-lg transition">' + connectLabel + '</button>' +
             '<div class="hidden space-y-1.5" data-subdomain-form="' + p.id + '">' +
               '<label class="text-xs font-bold text-gray-600" for="subdomain-input-' + p.id + '">Zendesk Subdomain</label>' +
               '<div class="flex items-stretch gap-2">' +
@@ -367,7 +367,7 @@
                   '<input id="subdomain-input-' + p.id + '" data-subdomain-input="' + p.id + '" type="text" placeholder="yourcompany" autocomplete="off" spellcheck="false" class="min-w-0 grow px-2.5 py-2 text-sm focus:outline-none">' +
                   '<span class="px-2 text-xs text-gray-400 shrink-0 select-none">.zendesk.com</span>' +
                 '</div>' +
-                '<button type="button" data-subdomain-next="' + p.id + '" class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition shrink-0">Next</button>' +
+                '<button type="button" data-subdomain-next="' + p.id + '" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition shrink-0">Next</button>' +
               '</div>' +
               '<p class="hidden text-xs font-semibold text-red-600" data-subdomain-error="' + p.id + '">Enter your Zendesk subdomain — the bit before .zendesk.com.</p>' +
             '</div>'
@@ -375,7 +375,7 @@
           // picks a destination from the provider alone, and Search Console (whose other home is
           // Blog Studio) would land a user who started on this page inside the Blog Studio modal.
           // Harmless for the rest: it resolves to the same /integrations.html they already got.
-          : '<a href="/api/oauth/' + p.id + '/connect?returnTo=integrations" class="block w-full text-center px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition">' + connectLabel + '</a>';
+          : '<a href="/api/oauth/' + p.id + '/connect?returnTo=integrations" class="btn-primary block w-full text-center px-4 py-2 text-sm font-bold rounded-lg transition">' + connectLabel + '</a>';
 
       return (
         '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">' +
@@ -408,7 +408,7 @@
       grid.innerHTML = '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center col-span-full">' +
         '<p class="font-bold text-gray-900 mb-1">Couldn’t load your connections</p>' +
         '<p class="text-sm text-gray-500 mb-4">Check your connection and try again.</p>' +
-        '<button type="button" onclick="window.location.reload()" class="px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition">Retry</button></div>';
+        '<button type="button" onclick="window.location.reload()" class="btn-utility px-5 py-2 text-sm font-bold rounded-lg transition">Retry</button></div>';
     }
   }
 
@@ -547,7 +547,7 @@
       const dot = s.active.isEnabled ? 'bg-emerald-600' : 'bg-gray-400';
       return '<div class="flex items-center gap-2">' +
         '<button type="button" data-toggle="' + s.active.id + '" data-enabled="' + (s.active.isEnabled ? '1' : '0') + '" class="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm font-bold text-gray-700"><span class="w-1.5 h-1.5 rounded-full ' + dot + '"></span>' + label + '</button>' +
-        '<button type="button" data-config="' + s.id + '" class="grow px-3 py-2 bg-white border border-gray-200 text-gray-600 text-sm font-bold rounded-lg">Configure</button>' +
+        '<button type="button" data-config="' + s.id + '" class="btn-secondary grow px-3 py-2 border text-sm font-bold rounded-lg">Configure</button>' +
         '<button type="button" data-remove="' + s.active.id + '" class="px-3 py-2 text-gray-400 hover:text-red-600 text-sm font-bold rounded-lg" title="Remove">✕</button>' +
       '</div>';
     }
@@ -557,7 +557,7 @@
     if (s.tier !== 2 && !s.connection && !s.connectionOptional) {
       return '<a href="/api/oauth/' + esc(s.providerKey) + '/connect" class="block w-full text-center px-4 py-2 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-sm font-bold rounded-lg transition">Connect ' + esc(s.providerName) + ' first</a>';
     }
-    return '<button type="button" data-config="' + s.id + '" class="w-full px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition">Enable</button>';
+    return '<button type="button" data-config="' + s.id + '" class="btn-primary w-full px-4 py-2 text-sm font-bold rounded-lg transition">Enable</button>';
   }
 
   function render() {

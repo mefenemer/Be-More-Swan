@@ -278,7 +278,7 @@
         </label>
 
         <div class="flex items-center gap-2 mt-4">
-          <button type="button" data-dc-create class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Start finding leads</button>
+          <button type="button" data-dc-create class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Start finding leads</button>
           <span class="hidden text-xs font-semibold text-red-600" data-dc-error></span>
         </div>
       </div>`;
@@ -309,17 +309,17 @@
       : inFlight ? 'searching'
         : needsBrief ? 'plan needs review'
           : c.latestJobStatus ? esc(c.latestJobStatus) : 'no runs yet';
-    const ghost = 'px-2.5 py-1 bg-white border border-gray-200 text-gray-600 hover:border-gray-300 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed';
+    const ghost = 'btn-secondary px-2.5 py-1 border text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed';
     // Primary action: Cancel while a run is in flight, else Run now (blocked while paused).
     // A draft says "Review & start" and is emphasised: it is the ONLY thing standing between an
     // approved proposal and any leads, and it opens the BRIEF rather than starting a run, because
     // a draft is by definition a search plan nobody has read yet. Approving it is also what
     // activates a recurring cadence server-side (discovery-campaigns.ts approve_brief).
     const primaryBtn = running
-      ? `<button type="button" data-dc-cancel="${c.id}" class="px-3 py-1.5 bg-white border border-gray-200 text-red-600 hover:border-red-300 hover:bg-red-50 text-xs font-bold rounded-lg transition">Cancel run</button>`
+      ? `<button type="button" data-dc-cancel="${c.id}" class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Cancel run</button>`
       : needsBrief
-        ? `<button type="button" data-dc-brief="${c.id}" class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition">Review &amp; start</button>`
-        : `<button type="button" data-dc-run="${c.id}" class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed" ${paused ? 'disabled title="Resume this campaign to run it"' : ''}>Run now</button>`;
+        ? `<button type="button" data-dc-brief="${c.id}" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition">Review &amp; start</button>`
+        : `<button type="button" data-dc-run="${c.id}" class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed" ${paused ? 'disabled title="Resume this campaign to run it"' : ''}>Run now</button>`;
     return `
       <div class="border border-gray-200 rounded-xl p-4 ${paused ? 'opacity-70' : ''}" data-campaign="${c.id}" data-dc-idea-val="${esc(c.idea)}"
            data-dc-name-val="${esc(c.name || '')}"
@@ -341,7 +341,7 @@
         <div class="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-100">
           ${primaryBtn}
           ${running || needsBrief ? '' : `<button type="button" data-dc-brief="${c.id}" class="${ghost}">Review plan</button>`}
-          <button type="button" data-dc-view="${c.id}" class="px-3 py-1.5 bg-white border border-gray-200 text-gray-600 hover:border-gray-300 text-xs font-bold rounded-lg transition">View leads</button>
+          <button type="button" data-dc-view="${c.id}" class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">View leads</button>
           <button type="button" data-dc-edit="${c.id}" class="${ghost}">Edit</button>
           <button type="button" data-dc-toggle="${c.id}" data-paused="${paused ? '1' : '0'}" class="${ghost}">${paused ? 'Resume' : 'Pause'}</button>
           <button type="button" data-dc-archive="${c.id}" class="${ghost} text-gray-400 hover:text-red-600 hover:border-red-300 ml-auto">Archive</button>
@@ -502,7 +502,7 @@
           ${esc(String(t.territories.length))} ${esc(t.basis || 'areas')} asks a question each set of results can actually answer.
         </p>
         <div class="flex flex-wrap items-center gap-2 mt-2">
-          <button type="button" data-dc-split class="px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-60">
+          <button type="button" data-dc-split class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-60">
             Split into ${esc(String(t.territories.length))} areas
           </button>
           <!-- ⚠️ The finer level is the one that changes the ORDER of the answer, not a multiple of
@@ -510,7 +510,7 @@
                results a meaningful sample of six hundred. Districts are where a page of results is a
                real fraction of the question. Offered rather than defaulted: it is a much larger plan,
                and it is worked across several runs. -->
-          <button type="button" data-dc-split-fine class="px-3 py-1.5 bg-white border border-blue-300 text-blue-800 hover:bg-blue-100 text-xs font-bold rounded-lg transition disabled:opacity-60">
+          <button type="button" data-dc-split-fine class="btn-utility px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-60">
             Go finer — split by district
           </button>
           <span class="hidden text-xs font-semibold text-red-600 w-full" data-dc-split-error></span>
@@ -611,8 +611,8 @@
         ${marketAdviceBlock(brief)}
 
         <div class="flex flex-wrap items-center gap-2 mt-4">
-          <button type="button" data-dc-approve class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Approve &amp; start searching</button>
-          <button type="button" data-dc-regen class="px-3 py-2 bg-white border border-gray-200 text-gray-700 hover:border-gray-300 text-sm font-bold rounded-lg transition disabled:opacity-60">Draft a different plan</button>
+          <button type="button" data-dc-approve class="btn-golive px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Approve &amp; start searching</button>
+          <button type="button" data-dc-regen class="btn-secondary px-3 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-60">Draft a different plan</button>
           <button type="button" data-dc-brief-cancel class="px-3 py-2 text-sm font-bold text-gray-500 hover:text-gray-700 transition">Later</button>
           <span class="hidden text-xs font-semibold text-red-600 w-full" data-dc-brief-error></span>
         </div>
@@ -908,7 +908,7 @@
           <p class="hidden text-xs font-semibold text-red-600" data-edit-error></p>
           <div class="flex items-center justify-end gap-2 pt-1">
             <button type="button" data-edit-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 rounded-lg cursor-pointer">Cancel</button>
-            <button type="button" data-edit-save class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Save changes</button>
+            <button type="button" data-edit-save class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Save changes</button>
           </div>
         </div>
       </div>`;
@@ -1177,7 +1177,7 @@
         <p class="hidden text-xs font-semibold text-red-600" data-sched-error></p>
         <div class="flex items-center justify-end gap-2 pt-1">
           <button type="button" data-modal-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 rounded-lg cursor-pointer">Cancel</button>
-          <button type="button" data-sched-save class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Save schedule</button>
+          <button type="button" data-sched-save class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Save schedule</button>
         </div>
       </div>`;
   }

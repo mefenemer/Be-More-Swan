@@ -16,6 +16,7 @@ import { createNotification } from '../../src/utils/notify';
 import { sendEmail } from '../../src/utils/email';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
+import { adminInbox } from '../../src/utils/admin-inbox';
 // Simple PII tokeniser — replace obvious patterns before analysis
 function stripPii(text: string): string {
     return text
@@ -151,26 +152,21 @@ const handler = async () => {
         }
     }
 
-    // Notify all super_admins of the sampling run
-    const superAdmins = await db.select({ id: users.id, email: users.email, firstName: users.firstName })
-        .from(users)
-        .where(eq(users.role, 'super_admin'));
-
-    for (const admin of superAdmins) {
-        if (admin.email) {
+    // Email the sampling run to the business inbox (admin-inbox.ts) — it used to go to every
+    // super admin's own account, i.e. a personal address.
+    for (const to of adminInbox()) {
             await sendEmail({
-                to: admin.email,
+                to,
                 subject: `[Be More Swan] Monthly Bias Sampling Report — ${windowStart.toISOString().slice(0, 7)}`,
-                html: `<p>Hi ${admin.firstName || 'there'},</p>
+                html: `<p>Hi there,</p>
 <p>The monthly bias sampling job completed for <strong>${windowStart.toISOString().slice(0, 7)}</strong>.</p>
 <ul>
   <li>Events sampled: <strong>${sample.length}</strong></li>
   <li>Anomalies flagged: <strong>${anomalies.length}</strong></li>
   ${anomalies.length > 0 ? `<li style="color:#dc2626">Assistants suspended: ${[...new Set(anomalies.map(a => a.assistantId))].length}</li>` : '<li style="color:#059669">No distributional anomalies detected.</li>'}
 </ul>
-<p>View the full report in the <a href="${process.env.BASE_URL || 'https://bemoreswan.com'}/admin.html">Admin Dashboard → Bias Audit</a>.</p>`,
+<p>View the full report in the <a href="${process.env.BASE_URL || 'https://bemoreswan.com'}/admin.html?view=bias-audit">Admin Dashboard → Bias Audit</a>.</p>`,
             }).catch(() => {});
-        }
     }
 
     console.log(`[bias-sampling] Sampled ${sample.length} events, flagged ${anomalies.length} anomalies.`);

@@ -28,24 +28,24 @@
     <!-- Sign-up forms live on the Audience page (they feed every assistant that sends), but this is
          where an Email Marketing Assistant user goes looking for them. -->
     <button type="button" id="nl-forms"
-      class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-gray-700 bg-white hover:bg-gray-50 rounded-lg transition-colors border border-gray-300 cursor-pointer">
+      class="btn-secondary flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-colors border cursor-pointer">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
       Sign-up forms
     </button>
     <button type="button" id="nl-sending"
-      class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-gray-700 bg-white hover:bg-gray-50 rounded-lg transition-colors border border-gray-300 cursor-pointer">
+      class="btn-primary flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-colors border cursor-pointer">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
       Sending setup
     </button>
     <!-- A whole series, without the chat: plan it, have the assistant write every email, read them,
          save. The chat card does the same job in conversation; both save through the same endpoints. -->
     <button type="button" id="nl-campaign"
-      class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-gray-700 bg-white hover:bg-gray-50 rounded-lg transition-colors border border-gray-300 cursor-pointer">
+      class="btn-secondary flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-colors border cursor-pointer">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h10"/></svg>
       New email campaign
     </button>
     <button type="button" id="nl-new"
-      class="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors cursor-pointer">
+      class="btn-primary flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-colors cursor-pointer">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
       New email
     </button>
@@ -91,7 +91,7 @@
             <!-- What this email is FOR. A terms notice and a monthly round-up are different jobs,
                  and the chip is also the control: clicking it changes the brief the assistant is
                  given. See src/config/newsletter-purposes.ts. -->
-            <button type="button" id="nl-purpose" class="inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border bg-gray-100 text-gray-600 border-gray-200 cursor-pointer hover:brightness-95"></button>
+            <button type="button" id="nl-purpose" class="btn-secondary inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border cursor-pointer hover:brightness-95"></button>
           </div>
           <span id="nl-saved" class="text-xs text-gray-400"></span>
         </div>
@@ -151,11 +151,11 @@
 
         <div class="flex flex-wrap items-center gap-2 mt-2">
           <button type="button" id="nl-design-on"
-            class="px-3 py-1.5 text-xs font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Design this email</button>
+            class="btn-secondary px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Design this email</button>
           <button type="button" id="nl-design-template"
-            class="hidden px-3 py-1.5 text-xs font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer" style="display:none">Start from a template</button>
+            class="hidden btn-primary px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer" style="display:none">Start from a template</button>
           <button type="button" id="nl-design-off"
-            class="hidden px-3 py-1.5 text-xs font-bold text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer" style="display:none">Back to plain text</button>
+            class="hidden btn-secondary px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer" style="display:none">Back to plain text</button>
         </div>
 
         <!-- A revision the assistant has offered but nobody has accepted yet. ⚠️ It is deliberately
@@ -212,15 +212,15 @@
           <!-- ⚠️ data-nl-assistant is what stops this page saying "the assistant" about somebody the
                user hired and named themselves. One writer (applyAssistantNaming) fills every one. -->
           <button type="button" id="nl-generate" data-nl-assistant="draft"
-            class="px-4 py-2 text-sm font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 cursor-pointer">Ask your assistant to draft</button>
+            class="btn-assistant px-4 py-2 text-sm font-bold border rounded-lg cursor-pointer">Ask your assistant to draft</button>
           <button type="button" id="nl-improve" data-nl-assistant="improve"
-            class="px-4 py-2 text-sm font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 cursor-pointer">Ask your assistant to improve</button>
+            class="btn-assistant px-4 py-2 text-sm font-bold border rounded-lg cursor-pointer">Ask your assistant to improve</button>
           <button type="button" id="nl-preview"
-            class="px-4 py-2 text-sm font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Preview email</button>
+            class="btn-utility px-4 py-2 text-sm font-bold border rounded-lg cursor-pointer">Preview email</button>
           <!-- Removes an UNSENT email from the list (the server archives it — a sent email is the record
                of what people received and cannot be deleted). Hidden once an email has sent. -->
           <button type="button" id="nl-delete"
-            class="px-4 py-2 text-sm font-bold text-red-600 bg-white border border-red-200 rounded-lg hover:bg-red-50 cursor-pointer">Delete</button>
+            class="btn-destructive px-4 py-2 text-sm font-bold border rounded-lg cursor-pointer">Delete</button>
           <div class="flex-1"></div>
           <!-- ⚠️ NO SAVE BUTTON, and do not reinstate one. Every field here writes itself back —
                see the auto-save block in newsletter.js. The state of that is reported by
@@ -228,9 +228,9 @@
                whether their work is safe. A Save button beside it would be a second, contradictory
                answer to the same question. -->
           <button type="button" id="nl-approve"
-            class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Approve for sending</button>
+            class="btn-golive px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Approve for sending</button>
           <button type="button" id="nl-send"
-            class="hidden px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer" style="display:none">Send now</button>
+            class="hidden btn-golive px-4 py-2 text-sm font-bold rounded-lg cursor-pointer" style="display:none">Send now</button>
         </div>
       </div>
     </div>
@@ -281,7 +281,7 @@
 
       <div class="flex justify-end gap-2 mt-6">
         <button type="button" data-nl-newissue-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
-        <button type="button" id="nl-new-go" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Create</button>
+        <button type="button" id="nl-new-go" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Create</button>
       </div>
     </div>
   </div>
@@ -345,7 +345,7 @@
 
         <div class="flex justify-end gap-2">
           <button type="button" data-nl-campaign-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
-          <button type="button" id="nl-cmp-write" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Write the emails</button>
+          <button type="button" id="nl-cmp-write" class="btn-assistant px-4 py-2 text-sm font-bold rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Write the emails</button>
         </div>
       </div>
 
@@ -358,7 +358,7 @@
           <button type="button" id="nl-cmp-back" class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">← Back to the plan</button>
           <div class="flex gap-2">
             <button type="button" data-nl-campaign-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Discard</button>
-            <button type="button" id="nl-cmp-save" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Save</button>
+            <button type="button" id="nl-cmp-save" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Save</button>
           </div>
         </div>
       </div>
@@ -377,7 +377,7 @@
         class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm"></textarea>
       <div class="flex justify-end gap-2 mt-6">
         <button type="button" data-nl-improve-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
-        <button type="button" id="nl-improve-go" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Ask for the change</button>
+        <button type="button" id="nl-improve-go" class="btn-assistant px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Ask for the change</button>
       </div>
     </div>
   </div>
@@ -424,7 +424,7 @@
         class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm"></textarea>
       <div class="flex justify-end gap-2 mt-6">
         <button type="button" data-nl-brief-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
-        <button type="button" id="nl-brief-go" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Write the draft</button>
+        <button type="button" id="nl-brief-go" class="btn-assistant px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Write the draft</button>
       </div>
     </div>
   </div>

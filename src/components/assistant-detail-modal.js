@@ -204,8 +204,8 @@
 
     const ctaLabel = escHtml(opts.ctaLabel || 'Hire Role');
     const cta = opts.ctaHref
-      ? `<a href="${escHtml(opts.ctaHref)}" class="bg-emerald-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-emerald-800 transition">${ctaLabel}</a>`
-      : `<button type="button" data-detail-cta class="bg-emerald-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-emerald-800 transition cursor-pointer">${ctaLabel}</button>`;
+      ? `<a href="${escHtml(opts.ctaHref)}" class="btn-primary px-5 py-2.5 rounded-lg text-sm font-semibold transition">${ctaLabel}</a>`
+      : `<button type="button" data-detail-cta class="btn-primary px-5 py-2.5 rounded-lg text-sm font-semibold transition cursor-pointer">${ctaLabel}</button>`;
 
     const body = document.getElementById('assistant-detail-body');
     body.innerHTML = `

@@ -68,7 +68,7 @@
       <h3 class="text-xl font-bold text-emerald-900 mb-2">Need a role that isn't listed here?</h3>
       <p class="text-emerald-700 max-w-2xl">We are constantly training new assistants. Let our engineering team know what chore you want to automate next, and we will prioritize it.</p>
     </div>
-    <button onclick="document.getElementById('cat-role-request-modal').classList.remove('hidden')" class="flex-shrink-0 bg-emerald-700 text-white px-6 py-3 rounded-xl font-bold shadow-sm hover:bg-emerald-800 transition">Request a New Role</button>
+    <button onclick="document.getElementById('cat-role-request-modal').classList.remove('hidden')" class="btn-primary flex-shrink-0 px-6 py-3 rounded-xl font-bold shadow-sm transition">Request a New Role</button>
   </div>
 </div>
 
@@ -113,7 +113,7 @@
         </div>
       </div>
       <button id="cat-rr-submit" onclick="window._catSubmitRoleRequest()"
-        class="mt-6 w-full py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl transition flex items-center justify-center gap-2">
+        class="btn-primary mt-6 w-full py-3 font-bold rounded-xl transition flex items-center justify-center gap-2">
         <span id="cat-rr-btn-text">Submit Request</span>
         <div id="cat-rr-spinner" class="hidden w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin"></div>
       </button>
@@ -126,7 +126,7 @@
       <h3 class="text-lg font-extrabold text-gray-900 mb-1">Request received!</h3>
       <p class="text-sm text-gray-500">Our engineering team will review your submission and prioritize it on the roadmap. We'll notify you when it's ready.</p>
       <button onclick="document.getElementById('cat-role-request-modal').classList.add('hidden')"
-        class="mt-5 px-6 py-2 bg-gray-900 text-white text-sm font-bold rounded-xl hover:bg-black transition">Close</button>
+        class="btn-secondary mt-5 px-6 py-2 text-sm font-bold rounded-xl transition border">Close</button>
     </div>
   </div>
 </div>
@@ -145,7 +145,7 @@
       <p id="cat-wl-role-name" class="text-sm text-emerald-600 font-semibold mb-3"></p>
       <p class="text-sm text-gray-500 mb-4">We'll notify you the moment this assistant is ready.</p>
       <p id="cat-wl-error" class="hidden text-sm text-red-600 mb-3"></p>
-      <button id="cat-wl-submit" class="w-full py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl transition flex items-center justify-center gap-2">
+      <button id="cat-wl-submit" class="btn-primary w-full py-3 font-bold rounded-xl transition flex items-center justify-center gap-2">
         <span id="cat-wl-btn-text">Notify Me</span>
         <div id="cat-wl-spinner" class="hidden w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin"></div>
       </button>
@@ -212,7 +212,7 @@
             </div>
             <div class="p-4 bg-emerald-50 border-t border-emerald-100 flex justify-between items-center gap-3">
               <span class="text-xs font-bold text-emerald-700 uppercase tracking-wider">${required} tasks completed</span>
-              <button onclick="window._catHire('${a.roleKey}')" style="cursor:pointer" class="bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-emerald-800 transition">Hire Role</button>
+              <button onclick="window._catHire('${a.roleKey}')" style="cursor:pointer" class="btn-golive px-4 py-2 rounded-lg text-sm font-semibold transition">Hire Role</button>
             </div>
           </div>`;
       }
@@ -264,7 +264,7 @@
         </div>
         <div class="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center gap-3">
           ${detailHint}
-          <button onclick="window._catHire('${a.roleKey}')" style="cursor:pointer" class="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-800 transition">Hire Role</button>
+          <button onclick="window._catHire('${a.roleKey}')" style="cursor:pointer" class="btn-golive px-4 py-2 rounded-lg text-sm font-semibold transition">Hire Role</button>
         </div>
       </div>`;
   }

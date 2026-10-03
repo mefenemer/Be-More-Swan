@@ -59,7 +59,7 @@
     <svg class="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
     <span id="impersonation-label">Impersonation active</span>
   </div>
-  <button id="end-impersonation-btn" class="ml-4 px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg transition cursor-pointer shrink-0">
+  <button id="end-impersonation-btn" class="btn-primary ml-4 px-3 py-1 text-xs font-bold rounded-lg transition cursor-pointer shrink-0">
     End Session
   </button>
 </div>
@@ -82,7 +82,7 @@
       <p class="mt-3 text-base font-bold text-emerald-700" id="um-next-tier-price"></p>
     </div>
     <a id="um-cta-btn" href="#"
-      class="block w-full text-center py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl transition mb-3">
+      class="btn-primary block w-full text-center py-3 font-bold rounded-xl transition mb-3">
     </a>
     <button onclick="window._dismissUpgradeMoment()"
       class="w-full text-center text-sm text-gray-400 hover:text-gray-600 transition cursor-pointer py-1">
@@ -112,7 +112,7 @@
       <span class="text-sm text-gray-700">I have read and agree to the <a href="/privacy.html#dpa" target="_blank" class="text-emerald-700 underline font-medium">Data Processing Agreement</a> on behalf of my organisation.</span>
     </label>
     <button id="btn-dpa-accept" onclick="submitDpaAcceptance(this)"
-      class="w-full py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+      class="btn-primary w-full py-3 font-bold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed"
       disabled>
       Accept DPA &amp; Continue
     </button>
@@ -206,7 +206,7 @@ async function submitDpaAcceptance(btn) {
       <span class="text-sm text-gray-700">I have read and agree to the updated <a href="/terms_of_service.html" target="_blank" class="text-emerald-700 underline font-medium">Terms of Service</a> (v2.0).</span>
     </label>
     <button id="btn-tos-accept" onclick="submitTosAcceptance(this)"
-      class="w-full py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+      class="btn-primary w-full py-3 font-bold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed"
       disabled>
       Accept Terms &amp; Continue
     </button>
@@ -343,11 +343,11 @@ window.showComplianceModals = function showComplianceModals(force) {
         </div>
         <div id="gpw-media-picker" class="hidden border border-gray-200 rounded-xl p-2 max-h-48 overflow-y-auto">
           <div class="flex justify-end gap-2 mb-2">
-            <button type="button" onclick="gpwBrowseCanva()" class="px-2 py-1 text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer flex items-center gap-1">
+            <button type="button" onclick="gpwBrowseCanva()" class="btn-secondary px-2 py-1 text-xs font-semibold border rounded-lg transition cursor-pointer flex items-center gap-1">
               <span>🎨</span>
               <span>Canva</span>
             </button>
-            <button type="button" onclick="gpwUpload()" class="px-2 py-1 text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer flex items-center gap-1">
+            <button type="button" onclick="gpwUpload()" class="btn-utility px-2 py-1 text-xs font-semibold border rounded-lg transition cursor-pointer flex items-center gap-1">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
               <span>Upload</span>
             </button>
@@ -369,8 +369,8 @@ window.showComplianceModals = function showComplianceModals(force) {
       </button>
       <!-- Step 1: create the draft(s). No review step — the next screen chooses how it's scheduled. -->
       <div id="gpw-create-actions" class="flex gap-2">
-        <button id="gpw-submit-btn" onclick="gpwSubmit()" class="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Next: choose scheduling</button>
-        <button onclick="closeGeneratePostSheet()" class="px-5 py-2.5 border border-gray-300 text-gray-700 text-sm font-bold rounded-xl hover:bg-gray-50 transition cursor-pointer">Cancel</button>
+        <button id="gpw-submit-btn" onclick="gpwSubmit()" class="btn-primary flex-1 py-2.5 text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Next: choose scheduling</button>
+        <button onclick="closeGeneratePostSheet()" class="btn-secondary px-5 py-2.5 border text-sm font-bold rounded-xl transition cursor-pointer">Cancel</button>
       </div>
 
       <!-- Step 2: scheduling choice (shown after the draft is created). Human writes → no review;
@@ -382,32 +382,32 @@ window.showComplianceModals = function showComplianceModals(force) {
              post dropped you at a scheduling question with no route there short of finding the
              draft again in the Review Queue. -->
         <button onclick="gpwOpenInEditor()"
-          class="w-full mb-2 py-2.5 border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-bold rounded-xl transition cursor-pointer inline-flex items-center justify-center gap-1.5">
+          class="btn-secondary w-full mb-2 py-2.5 border text-sm font-bold rounded-xl transition cursor-pointer inline-flex items-center justify-center gap-1.5">
           <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
           Open in the editor
         </button>
         <div class="flex flex-col gap-2">
-          <button onclick="gpwSchedule('approve')" class="w-full py-2.5 border border-emerald-600 text-emerald-700 hover:bg-emerald-50 text-sm font-bold rounded-xl transition cursor-pointer inline-flex items-center justify-center gap-1.5">
+          <button onclick="gpwSchedule('approve')" class="btn-assistant w-full py-2.5 border text-sm font-bold rounded-xl transition cursor-pointer inline-flex items-center justify-center gap-1.5">
             <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
             Let <span id="gpw-assistant-name">your assistant</span> schedule it
           </button>
-          <button onclick="gpwSchedule('reschedule')" class="w-full py-2.5 border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-bold rounded-xl transition cursor-pointer">Pick a time myself</button>
-          <button onclick="gpwSchedule('publish_now')" class="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer">Post now</button>
+          <button onclick="gpwSchedule('reschedule')" class="btn-secondary w-full py-2.5 border text-sm font-bold rounded-xl transition cursor-pointer">Pick a time myself</button>
+          <button onclick="gpwSchedule('publish_now')" class="btn-golive w-full py-2.5 text-sm font-bold rounded-xl transition cursor-pointer">Post now</button>
         </div>
         <!-- Date/time picker (revealed by "Pick a time myself") -->
         <div id="gpw-schedule-picker" class="hidden mt-3">
           <label class="block text-xs font-semibold text-gray-700 mb-1">Scheduled date &amp; time</label>
           <input id="gpw-schedule-input" type="datetime-local" class="w-full text-sm border border-gray-300 rounded-xl px-3 py-2 mb-2 focus:outline-none focus:ring-2 focus:ring-emerald-400">
           <div class="flex gap-2">
-            <button onclick="gpwConfirmSchedule()" class="flex-1 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer">Confirm Schedule</button>
-            <button onclick="document.getElementById('gpw-schedule-picker').classList.add('hidden')" class="py-2 px-3 text-sm font-semibold text-gray-600 border border-gray-300 rounded-xl hover:bg-gray-50 transition cursor-pointer">Back</button>
+            <button onclick="gpwConfirmSchedule()" class="btn-primary flex-1 py-2 text-sm font-bold rounded-xl transition cursor-pointer">Confirm Schedule</button>
+            <button onclick="document.getElementById('gpw-schedule-picker').classList.add('hidden')" class="btn-secondary py-2 px-3 text-sm font-semibold border rounded-xl transition cursor-pointer">Back</button>
           </div>
         </div>
         <!-- Connect notice — scheduling/publishing needs a live connection for each draft's platform. -->
         <div id="gpw-connect-notice" class="hidden mt-3 flex items-start gap-2.5 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
           <svg class="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m9.656.656a4 4 0 010-5.656l3-3a4 4 0 015.656 5.656l-1.5 1.5"/></svg>
           <span class="flex-1"><span id="gpw-connect-notice-text">Connect the platform to schedule or publish this post.</span></span>
-          <button type="button" onclick="gpGoConnect()" class="shrink-0 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg transition cursor-pointer">Connect</button>
+          <button type="button" onclick="gpGoConnect()" class="btn-primary shrink-0 px-3 py-1.5 font-bold rounded-lg transition cursor-pointer">Connect</button>
         </div>
       </div>
     </div>
@@ -454,29 +454,29 @@ window.showComplianceModals = function showComplianceModals(force) {
       <p class="text-xs font-semibold text-gray-700 mb-1.5">Post media <span class="font-normal text-gray-400">(optional)</span></p>
       <!-- Media type toggle -->
       <div class="inline-flex p-0.5 bg-gray-100 rounded-lg mb-2">
-        <button type="button" id="gp-ai-type-image" onclick="gpAiSetMediaType('image')" class="px-3 py-1 text-xs font-semibold rounded-md transition cursor-pointer bg-white text-gray-900 shadow-sm">Image</button>
+        <button type="button" id="gp-ai-type-image" onclick="gpAiSetMediaType('image')" class="btn-secondary px-3 py-1 text-xs font-semibold rounded-md transition cursor-pointer shadow-sm border">Image</button>
         <button type="button" id="gp-ai-type-video" onclick="gpAiSetMediaType('video')" class="px-3 py-1 text-xs font-semibold rounded-md transition cursor-pointer text-gray-500 hover:text-gray-700">Video</button>
       </div>
       <!-- Source actions -->
       <div id="gp-ai-media-actions" class="flex flex-wrap gap-1.5">
-        <button type="button" onclick="gpAiUseOwn()" class="px-2.5 py-1 text-xs font-semibold border border-emerald-300 text-emerald-700 hover:bg-emerald-50 rounded-lg transition cursor-pointer flex items-center gap-1">
+        <button type="button" onclick="gpAiUseOwn()" class="btn-secondary px-2.5 py-1 text-xs font-semibold border rounded-lg transition cursor-pointer flex items-center gap-1">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
           <span id="gp-ai-own-label">Use my own</span>
         </button>
-        <button type="button" onclick="gpAiUpload()" class="px-2.5 py-1 text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer flex items-center gap-1">
+        <button type="button" onclick="gpAiUpload()" class="btn-utility px-2.5 py-1 text-xs font-semibold border rounded-lg transition cursor-pointer flex items-center gap-1">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
           <span>Upload</span>
         </button>
         <input type="file" id="gp-ai-upload-input" multiple class="hidden" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm" onchange="gpAiUploadSelected(event)">
-        <button type="button" id="gp-ai-src-canva" onclick="gpAiBrowseCanva()" class="px-2.5 py-1 text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer flex items-center gap-1">
+        <button type="button" id="gp-ai-src-canva" onclick="gpAiBrowseCanva()" class="btn-secondary px-2.5 py-1 text-xs font-semibold border rounded-lg transition cursor-pointer flex items-center gap-1">
           <span>🎨</span>
           <span>Canva</span>
         </button>
-        <button type="button" id="gp-ai-src-pexels" onclick="gpAiFind()" class="px-2.5 py-1 text-xs font-semibold border border-sky-300 text-sky-700 hover:bg-sky-50 rounded-lg transition cursor-pointer flex items-center gap-1">
+        <button type="button" id="gp-ai-src-pexels" onclick="gpAiFind()" class="btn-secondary px-2.5 py-1 text-xs font-semibold border rounded-lg transition cursor-pointer flex items-center gap-1">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
           <span id="gp-ai-find-label">Find a photo</span>
         </button>
-        <button type="button" id="gp-ai-src-ai" onclick="gpAiGenerate()" class="px-2.5 py-1 text-xs font-semibold border border-violet-300 text-violet-700 hover:bg-violet-50 rounded-lg transition cursor-pointer flex items-center gap-1">
+        <button type="button" id="gp-ai-src-ai" onclick="gpAiGenerate()" class="btn-assistant px-2.5 py-1 text-xs font-semibold border rounded-lg transition cursor-pointer flex items-center gap-1">
           <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
           <span id="gp-ai-gen-label">Generate with AI</span>
         </button>
@@ -512,14 +512,14 @@ window.showComplianceModals = function showComplianceModals(force) {
                Rebuilding Tailwind to add them churns unrelated classes across the sheet, so pick
                from what is already compiled. Verify with: grep -F ".bg-sky-500" style.css -->
           <button type="button" id="gp-ai-find-go" onclick="gpAiRunFind()"
-            class="px-3 py-1.5 text-xs font-bold rounded-lg bg-sky-500 text-white hover:opacity-80 transition">Search</button>
+            class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg hover:opacity-80 transition">Search</button>
         </div>
         <div class="flex items-center justify-between gap-2 mt-1">
           <p class="text-[11px] text-gray-400">Leave blank to search on the post's own topic.</p>
           <!-- Shown once a search has results. Same words, different results: it skips everything
                already shown and pages deeper (see collectCandidates in src/utils/pexels.ts). -->
           <button type="button" id="gp-ai-find-more" onclick="gpAiRunFind(true)"
-            class="hidden shrink-0 px-2.5 py-1 text-[11px] font-bold border border-sky-300 text-sky-700 hover:bg-sky-50 rounded-lg transition cursor-pointer">↻ Show different <span id="gp-ai-find-more-noun">photos</span></button>
+            class="hidden btn-utility shrink-0 px-2.5 py-1 text-[11px] font-bold border rounded-lg transition cursor-pointer">↻ Show different <span id="gp-ai-find-more-noun">photos</span></button>
         </div>
       </div>
       <!-- Library picker (shown after "Use my own") — already-uploaded content-assets -->
@@ -530,9 +530,9 @@ window.showComplianceModals = function showComplianceModals(force) {
         <p class="text-[11px] text-gray-500 mt-0.5"><span id="gp-ai-intent-label">This</span> can join onto the end of your current video, or take its place.</p>
         <div class="flex gap-2 mt-2">
           <button type="button" onclick="window._pceIntentChoose('add')"
-            class="flex-1 rounded-lg border border-emerald-300 bg-white px-2 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Add as another clip</button>
+            class="btn-primary flex-1 rounded-lg border px-2 py-1.5 text-xs font-bold transition cursor-pointer">Add as another clip</button>
           <button type="button" onclick="window._pceIntentChoose('replace')"
-            class="flex-1 rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-xs font-bold text-gray-700 hover:bg-gray-50 transition cursor-pointer">Replace what's there</button>
+            class="btn-primary flex-1 rounded-lg border px-2 py-1.5 text-xs font-bold transition cursor-pointer">Replace what's there</button>
         </div>
       </div>
       <div id="gp-ai-own" class="hidden mt-2 border border-gray-200 rounded-xl p-2 max-h-48 overflow-y-auto">
@@ -543,9 +543,9 @@ window.showComplianceModals = function showComplianceModals(force) {
            describing, and scrolled away from the selection it belonged to. -->
       <div id="gp-ai-own-bar" class="hidden mt-2 flex gap-2">
         <button type="button" id="gp-ai-own-add" onclick="window._pceOwnAdd()"
-          class="flex-1 rounded-lg bg-emerald-600 px-2 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 transition cursor-pointer">Add</button>
+          class="btn-primary flex-1 rounded-lg px-2 py-1.5 text-xs font-bold transition cursor-pointer">Add</button>
         <button type="button" id="gp-ai-own-replace" onclick="window._pceOwnReplace()"
-          class="flex-1 rounded-lg border border-gray-300 px-2 py-1.5 text-xs font-bold text-gray-700 hover:bg-gray-50 transition cursor-pointer">Replace with this</button>
+          class="btn-primary flex-1 rounded-lg border px-2 py-1.5 text-xs font-bold transition cursor-pointer">Replace with this</button>
       </div>
       <!-- Stock candidate grid (shown after "Find with AI") -->
       <div id="gp-ai-pexels" class="hidden mt-2 grid grid-cols-3 gap-2"></div>
@@ -557,27 +557,27 @@ window.showComplianceModals = function showComplianceModals(force) {
     </div>
     <!-- Actions -->
     <div id="gen-post-actions" class="flex gap-2">
-      <button id="gen-post-submit-btn" onclick="gpSubmit()" class="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Generate</button>
-      <button onclick="closeGeneratePostSheet()" class="px-5 py-2.5 border border-gray-300 text-gray-700 text-sm font-bold rounded-xl hover:bg-gray-50 transition cursor-pointer">Cancel</button>
+      <button id="gen-post-submit-btn" onclick="gpSubmit()" class="btn-assistant flex-1 py-2.5 text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Generate</button>
+      <button onclick="closeGeneratePostSheet()" class="btn-secondary px-5 py-2.5 border text-sm font-bold rounded-xl transition cursor-pointer">Cancel</button>
     </div>
     <!-- Per-platform connect notice — publishing/scheduling needs a live connection for the draft's
          platform, so when it's missing the approve buttons below are disabled and this asks for it. -->
     <div id="gp-connect-notice" class="hidden mt-2 flex items-start gap-2.5 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
       <svg class="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m9.656.656a4 4 0 010-5.656l3-3a4 4 0 015.656 5.656l-1.5 1.5"/></svg>
       <span class="flex-1"><span id="gp-connect-notice-text">Connect this platform to schedule or publish this post.</span></span>
-      <button type="button" onclick="gpGoConnect()" class="shrink-0 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg transition cursor-pointer">Connect</button>
+      <button type="button" onclick="gpGoConnect()" class="btn-primary shrink-0 px-3 py-1.5 font-bold rounded-lg transition cursor-pointer">Connect</button>
     </div>
     <div id="gen-post-approve-actions" class="hidden mt-2 space-y-2">
       <!-- Co-authored drafts get the same no-review scheduling choice as write-your-own: let the
            assistant slot it, pick a time, or post now. Reject discards the draft. -->
-      <button id="gp-approve-assistant-btn" onclick="gpAssistantSchedule()" class="w-full py-2.5 border border-emerald-600 text-emerald-700 hover:bg-emerald-50 text-sm font-bold rounded-xl transition cursor-pointer inline-flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent">
+      <button id="gp-approve-assistant-btn" onclick="gpAssistantSchedule()" class="btn-assistant w-full py-2.5 border text-sm font-bold rounded-xl transition cursor-pointer inline-flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed">
         <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
         Let your assistant schedule it
       </button>
       <div class="flex gap-2">
-        <button id="gp-approve-now-btn" onclick="gpApprovePost()" class="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-700">Post Now</button>
-        <button id="gp-approve-schedule-btn" onclick="gpSchedulePost()" class="flex-1 py-2.5 border border-emerald-600 text-emerald-700 hover:bg-emerald-50 text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent">Schedule for Later</button>
-        <button onclick="gpRejectPost()" class="py-2.5 px-3 border border-red-300 text-red-600 hover:bg-red-50 text-sm font-bold rounded-xl transition cursor-pointer">Reject</button>
+        <button id="gp-approve-now-btn" onclick="gpApprovePost()" class="btn-golive flex-1 py-2.5 text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Post Now</button>
+        <button id="gp-approve-schedule-btn" onclick="gpSchedulePost()" class="btn-golive flex-1 py-2.5 border text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Schedule for Later</button>
+        <button onclick="gpRejectPost()" class="btn-destructive py-2.5 px-3 border text-sm font-bold rounded-xl transition cursor-pointer">Reject</button>
       </div>
     </div>
     <!-- Schedule for later picker (shown when Schedule for Later is clicked) -->
@@ -585,13 +585,13 @@ window.showComplianceModals = function showComplianceModals(force) {
       <label class="block text-xs font-semibold text-gray-700 mb-1">Scheduled date &amp; time</label>
       <input id="gen-post-schedule-input" type="datetime-local" class="w-full text-sm border border-gray-300 rounded-xl px-3 py-2 mb-2 focus:outline-none focus:ring-2 focus:ring-emerald-400">
       <div class="flex gap-2">
-        <button onclick="gpConfirmSchedule()" class="flex-1 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer">Confirm Schedule</button>
-        <button onclick="document.getElementById('gen-post-schedule-picker').classList.add('hidden'); document.getElementById('gen-post-approve-actions').classList.remove('hidden');" class="py-2 px-3 text-sm font-semibold text-gray-600 border border-gray-300 rounded-xl hover:bg-gray-50 transition cursor-pointer">Back</button>
+        <button onclick="gpConfirmSchedule()" class="btn-primary flex-1 py-2 text-sm font-bold rounded-xl transition cursor-pointer">Confirm Schedule</button>
+        <button onclick="document.getElementById('gen-post-schedule-picker').classList.add('hidden'); document.getElementById('gen-post-approve-actions').classList.remove('hidden');" class="btn-secondary py-2 px-3 text-sm font-semibold border rounded-xl transition cursor-pointer">Back</button>
       </div>
     </div>
     <div id="gen-post-reject-form" class="hidden mt-2">
       <input id="gen-post-reject-reason" type="text" maxlength="300" placeholder="Rejection reason (required)" class="w-full text-sm border border-gray-300 rounded-xl px-3 py-2 mb-2 focus:outline-none focus:ring-2 focus:ring-red-300">
-      <button onclick="gpSubmitReject()" class="w-full py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl transition cursor-pointer">Confirm Rejection</button>
+      <button onclick="gpSubmitReject()" class="btn-primary w-full py-2 text-sm font-bold rounded-xl transition cursor-pointer">Confirm Rejection</button>
     </div>
     </div><!-- /gp-mode-ai -->
     </div><!-- /gp-modes -->
@@ -619,8 +619,8 @@ window.showComplianceModals = function showComplianceModals(force) {
       <span class="text-sm text-gray-700">I understand this assistant will publish content without human review. I accept sole responsibility for all published content.</span>
     </label>
     <div class="flex gap-3">
-      <button id="btn-autonomous-cancel" onclick="closeAutonomousOverrideModal()" class="flex-1 py-2 border border-gray-300 rounded-xl text-sm font-semibold text-gray-700 hover:bg-gray-50 transition cursor-pointer">Cancel</button>
-      <button id="btn-autonomous-accept" disabled onclick="confirmAutonomousOverride()" class="flex-1 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition cursor-pointer">I Accept</button>
+      <button id="btn-autonomous-cancel" onclick="closeAutonomousOverrideModal()" class="btn-secondary flex-1 py-2 border rounded-xl text-sm font-semibold transition cursor-pointer">Cancel</button>
+      <button id="btn-autonomous-accept" disabled onclick="confirmAutonomousOverride()" class="btn-primary flex-1 py-2 disabled:opacity-40 disabled:cursor-not-allowed font-bold rounded-xl text-sm transition cursor-pointer">I Accept</button>
     </div>
   </div>
 </div>
@@ -646,7 +646,7 @@ window.showComplianceModals = function showComplianceModals(force) {
       Be More Swan Ltd is not liable for reliance on AI-generated content.
     </p>
     <button id="btn-acknowledge-disclaimer"
-      class="w-full py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl transition cursor-pointer">
+      class="btn-primary w-full py-3 font-bold rounded-xl transition cursor-pointer">
       I understand — continue
     </button>
   </div>
@@ -698,9 +698,9 @@ window.showComplianceModals = function showComplianceModals(force) {
       <p id="pce-dest-note" class="text-[11px] text-gray-400 mt-1.5"></p>
       <div class="flex gap-2 mt-3">
         <button type="button" id="pce-dest-confirm" onclick="pceConfirmDestinations()"
-          class="px-4 py-2 text-sm font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg transition cursor-pointer">Start writing</button>
+          class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer">Start writing</button>
         <button type="button" onclick="pceCloseDestinations()"
-          class="px-4 py-2 text-sm font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer">Cancel</button>
+          class="btn-secondary px-4 py-2 text-sm font-semibold border rounded-lg transition cursor-pointer">Cancel</button>
       </div>
     </div>
   </div>
@@ -788,7 +788,7 @@ window.showComplianceModals = function showComplianceModals(force) {
         <!-- Back to the "Where should this go?" picker that opened this post — same picker, pre-filled
              with what the post has (rqReviewAddDestination). It already existed as "+ Destination"
              on the tab strip, which nobody could find; this is where you look for "go back". -->
-        <button type="button" id="pce-change-dest" onclick="rqReviewAddDestination()" class="hidden px-3 py-1.5 text-xs font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer whitespace-nowrap">Change platform &amp; format</button>
+        <button type="button" id="pce-change-dest" onclick="rqReviewAddDestination()" class="hidden btn-secondary px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer whitespace-nowrap">Change platform &amp; format</button>
         <button onclick="closePostReview()" aria-label="Close" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 cursor-pointer">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
@@ -985,7 +985,7 @@ window.showComplianceModals = function showComplianceModals(force) {
                   <button type="button" onclick="document.getElementById('pce-slide-file').click()"
                     class="text-[11px] font-semibold text-gray-500 hover:text-gray-800 underline cursor-pointer">Upload files instead</button>
                   <button type="button" id="pce-slide-library-add" onclick="_pceAddSlidesFromLibrary()" disabled
-                    class="px-2.5 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">Add</button>
+                    class="btn-primary px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">Add</button>
                 </div>
               </div>
               <p id="pce-slides-msg" class="text-[10px] text-gray-400 mt-1"></p>
@@ -1101,7 +1101,7 @@ window.showComplianceModals = function showComplianceModals(force) {
                      through before approving, on a post the user may have been perfectly happy with. -->
                 <div id="prq-ask-wrap" class="hidden">
                   <button type="button" id="prq-ask-btn" onclick="rqAskForSuggestion()"
-                    class="w-full px-3 py-2 text-xs font-bold rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition">
+                    class="btn-assistant w-full px-3 py-2 text-xs font-bold rounded-lg border transition">
                     Suggest an improvement
                   </button>
                 </div>
@@ -1110,11 +1110,11 @@ window.showComplianceModals = function showComplianceModals(force) {
                   <ul id="prq-suggestions" class="space-y-1.5 text-xs text-gray-600"></ul>
                   <div id="prq-suggestion-actions" class="flex gap-2 mt-2.5">
                     <button type="button" id="prq-ignore-btn" onclick="rqIgnoreSuggestions()"
-                      class="flex-1 px-3 py-2 text-xs font-semibold rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition">
+                      class="btn-secondary flex-1 px-3 py-2 text-xs font-semibold rounded-lg border transition">
                       Ignore
                     </button>
                     <button type="button" id="prq-apply-btn" onclick="rqPreviewSuggestions()"
-                      class="flex-1 px-3 py-2 text-xs font-bold rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 transition">
+                      class="btn-primary flex-1 px-3 py-2 text-xs font-bold rounded-lg border transition">
                       Accept
                     </button>
                   </div>
@@ -1132,8 +1132,8 @@ window.showComplianceModals = function showComplianceModals(force) {
                       class="w-full p-2 text-xs text-gray-800 border-0 focus:ring-0 focus:outline-none resize-y"></textarea>
                   </div>
                   <div class="flex gap-2 mt-2">
-                    <button type="button" onclick="rqCancelSuggestions()" class="flex-1 px-3 py-2 text-xs font-semibold rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">Discard</button>
-                    <button type="button" id="prq-save-btn" onclick="rqApplySuggestions()" class="flex-1 px-3 py-2 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Save this version</button>
+                    <button type="button" onclick="rqCancelSuggestions()" class="btn-destructive flex-1 px-3 py-2 text-xs font-semibold rounded-lg border">Discard</button>
+                    <button type="button" id="prq-save-btn" onclick="rqApplySuggestions()" class="btn-primary flex-1 px-3 py-2 text-xs font-bold rounded-lg">Save this version</button>
                   </div>
                 </div>
                 <div id="prq-clean" class="hidden text-xs text-emerald-700 font-semibold">✓ No compliance issues found.</div>
@@ -1230,12 +1230,12 @@ window.showComplianceModals = function showComplianceModals(force) {
                      hides the pair on a post that cannot be edited. -->
                 <div id="pce-ai-actions" class="hidden flex-col gap-1.5 mb-2.5 pb-2.5 border-b border-gray-100">
                   <button type="button" id="pce-ai-go" onclick="_pceDraftWithAI()"
-                    class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                    class="btn-assistant w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
                     <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-3.5 h-3.5 object-contain shrink-0">
                     <span id="pce-ai-go-label" class="text-[11px] font-bold">Draft it for me</span>
                   </button>
                   <button type="button" onclick="_pceAskSwanCaption()"
-                    class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-left hover:bg-emerald-100 transition cursor-pointer">
+                    class="btn-assistant w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border text-left transition cursor-pointer">
                     <svg class="w-3.5 h-3.5 text-emerald-700 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 10h8M8 14h5m-9 7l3.5-3.5H19a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v15z"/></svg>
                     <span class="text-[11px] font-bold text-emerald-800">Talk it through in chat</span>
                   </button>
@@ -1243,7 +1243,7 @@ window.showComplianceModals = function showComplianceModals(force) {
                 </div>
                 <div class="space-y-1.5">
                   <button type="button" data-rewrite-action onclick="_railRewrite('tone', 'warmer, more conversational')"
-                    class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-gray-200 text-left hover:bg-gray-50 transition cursor-pointer">
+                    class="btn-assistant w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border text-left transition cursor-pointer">
                     <svg class="w-3 h-3 text-emerald-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M4 7h16M4 12h10M4 17h7"/></svg>
                     <span class="text-[11px] font-semibold text-gray-700">Change the tone</span>
                   </button>
@@ -1253,12 +1253,12 @@ window.showComplianceModals = function showComplianceModals(force) {
                        button that spends a generation shortening to 280 characters duplicated a rule
                        the editor already enforces — and only for one of the platforms. -->
                   <button type="button" data-rewrite-action onclick="_railRewrite('hashtags')"
-                    class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-gray-200 text-left hover:bg-gray-50 transition cursor-pointer">
+                    class="btn-assistant w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border text-left transition cursor-pointer">
                     <svg class="w-3 h-3 text-emerald-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6 4L4.5 20M13 4l-1.5 16M3 9h17M2.5 15h17"/></svg>
                     <span class="text-[11px] font-semibold text-gray-700">Suggest hashtags</span>
                   </button>
                   <button type="button" data-rewrite-action onclick="_railRewrite('grammar')"
-                    class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-gray-200 text-left hover:bg-gray-50 transition cursor-pointer">
+                    class="btn-assistant w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border text-left transition cursor-pointer">
                     <svg class="w-3 h-3 text-emerald-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 11l3 3 8-8M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h9"/></svg>
                     <span class="text-[11px] font-semibold text-gray-700">Fix grammar &amp; flow</span>
                   </button>
@@ -1272,7 +1272,7 @@ window.showComplianceModals = function showComplianceModals(force) {
               </label>
               <div class="mt-3 flex flex-wrap items-center gap-2">
                 <button type="button" onclick="rqReviewSaveAmend()"
-                  class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer">Save changes</button>
+                  class="btn-primary px-4 py-2 rounded-lg text-xs font-bold transition cursor-pointer">Save changes</button>
                 <span id="post-review-amend-msg" class="text-xs font-semibold text-gray-500"></span>
               </div>
             </div>
@@ -1313,7 +1313,7 @@ window.showComplianceModals = function showComplianceModals(force) {
                      asset says nothing at all. -->
                 <div id="insp-media-props" class="hidden mb-3 grid grid-cols-2 gap-x-2 gap-y-1.5 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-2"></div>
                 <button type="button" onclick="_pceOpenMediaPicker()"
-                  class="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer">
+                  class="btn-secondary w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold border rounded-lg transition cursor-pointer">
                   <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.6-4.6a2 2 0 012.8 0L16 16m-2-2 1.6-1.6a2 2 0 012.8 0L20 14M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
                   <span id="insp-change-media-label">Choose media</span>
                 </button>
@@ -1412,7 +1412,7 @@ window.showComplianceModals = function showComplianceModals(force) {
                    drag, so the gesture both went undiscovered and felt like "clicking does nothing
                    but move it". The double-click still works for anyone who knows it. -->
               <button type="button" onclick="_pceEditCardWording()"
-                class="w-full mb-2 px-3 py-2 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 text-xs font-bold hover:bg-emerald-100 transition cursor-pointer">
+                class="btn-secondary w-full mb-2 px-3 py-2 rounded-lg border text-xs font-bold transition cursor-pointer">
                 Edit the words on the card
               </button>
               <p class="text-[11px] text-gray-400 mb-2">Or double-click them on the card. Drag them up and down to move them.</p>
@@ -1491,7 +1491,7 @@ window.showComplianceModals = function showComplianceModals(force) {
                      picture on a still) and puts the caret in it, which is the same thing the
                      timeline's own button does. -->
                 <button type="button" onclick="window._pceAddTextHere()"
-                  class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer">Add text</button>
+                  class="btn-primary px-4 py-2 rounded-lg text-xs font-bold transition cursor-pointer">Add text</button>
                 <button type="button" id="insp-overlay-clear" onclick="_pceClearOverlays()"
                   class="hidden text-xs font-semibold text-gray-500 hover:text-red-600 transition cursor-pointer">Remove all text</button>
               </div>
@@ -1516,18 +1516,18 @@ window.showComplianceModals = function showComplianceModals(force) {
 
               <div class="flex flex-wrap items-center gap-2">
                 <button type="button" id="insp-audio-record" onclick="_pceRecordAudio()"
-                  class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer">
+                  class="btn-primary inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition cursor-pointer">
                   <span class="w-2 h-2 rounded-full bg-white"></span> Record a voice note
                 </button>
                 <button type="button" onclick="document.getElementById('insp-audio-file').click()"
-                  class="px-3 py-2 rounded-lg border border-gray-300 text-gray-700 text-xs font-bold hover:bg-gray-50 transition cursor-pointer">Upload audio</button>
+                  class="btn-utility px-3 py-2 rounded-lg border text-xs font-bold transition cursor-pointer">Upload audio</button>
                 <input type="file" id="insp-audio-file" accept="audio/mpeg,audio/mp4,audio/wav,audio/webm,audio/ogg,.mp3,.m4a,.wav,.webm,.ogg"
                   class="hidden" onchange="_pceAddAudioFile(this.files && this.files[0]); this.value='';">
                 <!-- The library. Third way to get sound onto a post, and the only one that needs no
                      file of your own — tracks we licensed and host, so anything offered here is
                      already cleared for a commercial post. -->
                 <button type="button" data-music-act="open"
-                  class="px-3 py-2 rounded-lg border border-gray-300 text-gray-700 text-xs font-bold hover:bg-gray-50 transition cursor-pointer">&#9835; Browse music</button>
+                  class="btn-secondary px-3 py-2 rounded-lg border text-xs font-bold transition cursor-pointer">&#9835; Browse music</button>
               </div>
 
               <!-- ── The music library ────────────────────────────────────────────────────────
@@ -1579,7 +1579,7 @@ window.showComplianceModals = function showComplianceModals(force) {
           </button>
         </div>
         <div class="flex gap-2">
-          <button id="post-review-regen-btn" onclick="rqReviewRequestChanges()" class="flex-1 py-2.5 text-xs font-bold bg-violet-600 hover:bg-violet-700 text-white rounded-lg cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed">
+          <button id="post-review-regen-btn" onclick="rqReviewRequestChanges()" class="btn-assistant flex-1 py-2.5 text-xs font-bold rounded-lg cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed">
             <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
             Regenerate
           </button>
@@ -1590,7 +1590,7 @@ window.showComplianceModals = function showComplianceModals(force) {
         <label class="block text-xs font-semibold text-gray-600">Reason for rejecting (required)</label>
         <textarea id="post-review-reason" rows="2" maxlength="300" placeholder="This will be archived for 30 days, then deleted." class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-300"></textarea>
         <div class="flex gap-2">
-          <button id="post-review-reject-btn" onclick="rqReviewReject()" class="flex-1 py-2.5 text-xs font-bold bg-red-600 hover:bg-red-700 text-white rounded-lg cursor-pointer">Reject &amp; archive</button>
+          <button id="post-review-reject-btn" onclick="rqReviewReject()" class="btn-destructive flex-1 py-2.5 text-xs font-bold rounded-lg cursor-pointer">Reject &amp; archive</button>
           <button onclick="rqReviewToggle()" class="py-2.5 px-4 text-xs font-bold text-gray-500 hover:bg-gray-50 rounded-lg cursor-pointer">Cancel</button>
         </div>
       </div>
@@ -1634,7 +1634,7 @@ window.showComplianceModals = function showComplianceModals(force) {
             class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"></textarea>
           <p id="post-review-reschedule-status" class="hidden text-xs text-gray-500 italic"></p>
           <button type="button" onclick="rqReviewScheduleMyself()" data-rq-commit
-            class="w-full py-2 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer">Schedule it</button>
+            class="btn-golive w-full py-2 text-xs font-bold rounded-lg cursor-pointer">Schedule it</button>
         </div>
 
         <button type="button" onclick="rqReviewPublishNow()" data-rq-commit
@@ -1664,7 +1664,7 @@ window.showComplianceModals = function showComplianceModals(force) {
       <div id="post-review-connect" class="hidden flex items-start gap-2.5 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 mb-2">
         <svg class="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m9.656.656a4 4 0 010-5.656l3-3a4 4 0 015.656 5.656l-1.5 1.5"/></svg>
         <span class="flex-1"><span id="post-review-connect-text">Connect this platform to approve and schedule this post.</span></span>
-        <button type="button" id="post-review-connect-btn" class="shrink-0 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg transition cursor-pointer">Connect</button>
+        <button type="button" id="post-review-connect-btn" class="btn-primary shrink-0 px-3 py-1.5 font-bold rounded-lg transition cursor-pointer">Connect</button>
       </div>
       <!-- Per-post AI disclosure footer opt-out. Shown only when the workspace footer is on (there's
            nothing to remove otherwise). Checked = footer included; unchecking strips it from this post. -->
@@ -1709,7 +1709,7 @@ window.showComplianceModals = function showComplianceModals(force) {
       <div id="post-review-approved" class="hidden text-center space-y-2">
         <p class="text-sm font-extrabold text-emerald-700">✓ Approved</p>
         <p id="post-review-approved-msg" class="text-xs text-gray-600"></p>
-        <button onclick="_rqReviewRefresh()" class="w-full py-2.5 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition cursor-pointer">Done</button>
+        <button onclick="_rqReviewRefresh()" class="btn-primary w-full py-2.5 text-sm font-bold rounded-lg transition cursor-pointer">Done</button>
       </div>
     </div>
   </div>
@@ -1735,7 +1735,7 @@ window.showComplianceModals = function showComplianceModals(force) {
         <!-- Past conversations (chat-history-panel.js). Hidden for seeded, task-scoped chats —
              see openAssistantChatModal: those are about one draft, not an ongoing thread. -->
         <button type="button" id="chat-modal-history-btn" aria-expanded="false" title="Past conversations"
-          class="hidden px-2.5 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-xs font-bold text-gray-700 cursor-pointer">History</button>
+          class="hidden btn-secondary px-2.5 h-8 rounded-lg text-xs font-bold cursor-pointer border">History</button>
         <button onclick="window.closeAssistantChatModal()" aria-label="Close" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 cursor-pointer">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
@@ -1814,8 +1814,8 @@ window.showComplianceModals = function showComplianceModals(force) {
     </div>
     <p id="collision-modal-msg" class="text-sm text-gray-600 mb-5"></p>
     <div id="collision-modal-actions" class="flex flex-col gap-2">
-      <button id="collision-request-btn" type="button" class="w-full px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg transition cursor-pointer">Request Access to Existing Workspace</button>
-      <button type="button" onclick="window._closeCollisionModal()" class="w-full px-4 py-2.5 bg-white border border-gray-200 text-gray-700 text-sm font-bold rounded-lg hover:bg-gray-50 transition cursor-pointer">Cancel</button>
+      <button id="collision-request-btn" type="button" class="btn-primary w-full px-4 py-2.5 text-sm font-bold rounded-lg transition cursor-pointer">Request Access to Existing Workspace</button>
+      <button type="button" onclick="window._closeCollisionModal()" class="btn-secondary w-full px-4 py-2.5 border text-sm font-bold rounded-lg transition cursor-pointer">Cancel</button>
     </div>
     <p id="collision-modal-done" class="hidden text-sm text-emerald-700 font-semibold mt-1"></p>
   </div>
@@ -1884,7 +1884,7 @@ window.showComplianceModals = function showComplianceModals(force) {
     <h3 id="milestone-modal-title" class="text-xl font-extrabold text-gray-900 mb-2">Milestone reached!</h3>
     <p id="milestone-modal-msg" class="text-sm text-gray-600 leading-relaxed mb-6"></p>
     <button id="milestone-modal-close"
-      class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg transition cursor-pointer">
+      class="btn-primary px-6 py-2.5 text-sm font-bold rounded-lg transition cursor-pointer">
       Awesome!
     </button>
   </div>
@@ -1923,71 +1923,6 @@ window.showComplianceModals = function showComplianceModals(force) {
 
 <!-- ── SC2 / SC4: Upgrade Required Modal ─────────────────────────────── -->
 <!-- ── Report an Issue modal (testing phase) ─────────────────────────────────── -->
-<div id="modal-report-issue" class="hidden fixed inset-0 z-50 items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm" role="dialog" aria-modal="true">
-  <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col" style="max-height:90vh;">
-    <div class="bg-gradient-to-br from-amber-600 to-amber-800 px-6 py-5 text-white flex items-start justify-between shrink-0">
-      <div>
-        <div class="text-2xl mb-1">🐞</div>
-        <h2 class="text-lg font-bold">Report an Issue</h2>
-        <p class="text-amber-100 text-xs">Help us improve while we're in testing.</p>
-      </div>
-      <button onclick="window.closeReportIssue()" class="text-white/80 hover:text-white text-2xl leading-none" aria-label="Close">&times;</button>
-    </div>
-
-    <!-- Tabs -->
-    <div class="flex border-b border-gray-100 shrink-0">
-      <button id="ri-tab-new" onclick="window.riSwitchTab('new')" class="flex-1 py-2.5 text-sm font-bold text-amber-700 border-b-2 border-amber-600">Report an issue</button>
-      <button id="ri-tab-mine" onclick="window.riSwitchTab('mine')" class="flex-1 py-2.5 text-sm font-semibold text-gray-500 border-b-2 border-transparent hover:text-gray-700">My reports</button>
-    </div>
-
-    <!-- New issue form -->
-    <div id="ri-panel-new" class="p-6 overflow-y-auto">
-      <div class="mb-4 text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2">
-        Reporting from: <span id="ri-location" class="font-semibold text-gray-700">this page</span>
-      </div>
-      <label class="block text-sm font-semibold text-gray-700 mb-1">Describe the issue</label>
-      <textarea id="ri-description" rows="5" placeholder="What went wrong? What did you expect to happen?"
-        class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none resize-none"></textarea>
-
-      <label class="block text-sm font-semibold text-gray-700 mt-4 mb-1">Attach a screenshot <span class="text-gray-400 font-normal">(optional)</span></label>
-      <input id="ri-image" type="file" accept="image/png,image/jpeg,image/gif,image/webp"
-        class="block w-full text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100">
-      <div id="ri-image-preview" class="hidden mt-3">
-        <img id="ri-image-thumb" alt="Screenshot preview" class="max-h-40 rounded-lg border border-gray-200">
-        <button onclick="window.riClearImage()" class="block mt-1 text-xs text-red-600 hover:underline">Remove image</button>
-      </div>
-
-      <p id="ri-error" class="hidden mt-3 text-sm text-red-600"></p>
-
-      <div class="flex justify-end gap-2 mt-5">
-        <button onclick="window.closeReportIssue()" class="px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-        <button id="ri-submit" onclick="window.submitReportIssue()" class="px-5 py-2 bg-amber-600 text-white text-sm font-bold rounded-lg hover:bg-amber-700 disabled:opacity-50">Submit issue</button>
-      </div>
-    </div>
-
-    <!-- My reports list -->
-    <div id="ri-panel-mine" class="hidden p-6 overflow-y-auto">
-      <div class="flex items-center justify-between mb-3">
-        <label for="ri-status-filter" class="text-xs font-semibold text-gray-500">Filter by status</label>
-        <select id="ri-status-filter" onchange="window.riFilterReports(this.value)"
-          class="border border-gray-200 rounded-lg px-2 py-1 text-xs font-semibold text-gray-700 focus:ring-2 focus:ring-amber-500 focus:outline-none">
-          <option value="all">All statuses</option>
-          <option value="fixed_ready_to_test">Fixed & Ready to Test</option>
-          <option value="reported">Reported</option>
-          <option value="backlog">Backlog</option>
-          <option value="on_hold">On Hold</option>
-          <option value="fix_in_progress">Fix In Progress</option>
-          <option value="merge">Merge</option>
-          <option value="more_info_required">More Info Required</option>
-          <option value="roadmap">On Roadmap</option>
-          <option value="closed">Closed</option>
-        </select>
-      </div>
-      <div id="ri-my-list" class="space-y-3 text-sm text-gray-500">Loading…</div>
-    </div>
-  </div>
-</div>
-
 <div id="modal-upgrade" class="hidden fixed inset-0 z-50 items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm" role="dialog" aria-modal="true">
   <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
     <div class="bg-gradient-to-br from-emerald-700 to-emerald-900 px-8 py-6 text-white">
@@ -2026,11 +1961,11 @@ window.showComplianceModals = function showComplianceModals(force) {
 
       <div class="flex gap-3 mb-3">
         <button onclick="document.getElementById('modal-upgrade').classList.replace('flex','hidden');"
-                class="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-50 transition">
+                class="btn-secondary flex-1 px-4 py-2.5 border rounded-xl text-sm font-semibold transition">
           Maybe Later
         </button>
         <a id="upgrade-modal-cta" href="/pricing.html"
-           class="flex-1 block text-center px-4 py-2.5 bg-emerald-700 text-white rounded-xl text-sm font-semibold hover:bg-emerald-800 transition">
+           class="btn-secondary flex-1 block text-center px-4 py-2.5 rounded-xl text-sm font-semibold transition border">
           View Plans →
         </a>
       </div>
@@ -2056,10 +1991,6 @@ window.showComplianceModals = function showComplianceModals(force) {
   </div>
 
   <div class="flex items-center gap-3">
-    <!-- Issue #137: Report an Issue moved here from the side menu, next to Notifications -->
-    <a href="#" id="nav-report-issue" aria-label="Report an Issue" class="text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded-full p-2 transition-colors">
-      <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 00-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z"/></svg>
-    </a>
     <!-- Issue #106: Notifications moved here from the side menu -->
     <button id="nav-notifications" aria-label="Notifications" class="relative text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full p-2 transition-colors">
       <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
@@ -2113,7 +2044,7 @@ window.showComplianceModals = function showComplianceModals(force) {
         <div class="flex justify-between"><span class="text-gray-600">Retry attempts:</span><span id="payment-gate-attempts" class="font-semibold text-red-700">—</span></div>
       </div>
       <a id="payment-gate-portal-btn" href="/billing.html"
-         class="block w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-6 rounded-xl mb-3 transition-colors">
+         class="btn-secondary block w-full font-semibold py-3 px-6 rounded-xl mb-3 transition-colors border">
         Update Payment Details →
       </a>
       <a href="mailto:hello@bemoreswan.com?subject=Payment%20Issue" class="text-sm text-gray-500 hover:text-gray-700 underline">
@@ -2134,7 +2065,7 @@ window.showComplianceModals = function showComplianceModals(force) {
       <p class="text-gray-600 mb-6">You've been inactive for a while. For your security, you'll be signed out in
         <span id="session-timeout-countdown" class="font-bold text-amber-700">10:00</span> unless you stay signed in.</p>
       <button id="session-timeout-stay-btn" type="button"
-         class="block w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-3 px-6 rounded-xl mb-3 transition-colors">
+         class="btn-primary block w-full font-bold py-3 px-6 rounded-xl mb-3 transition-colors">
         Stay Signed In
       </button>
       <button id="session-timeout-logout-btn" type="button" class="text-sm text-gray-500 hover:text-gray-700 underline">
@@ -2979,7 +2910,7 @@ function formatCurrency(amount, currency) {
               <span class="text-3xl">🔒</span>
               <span class="text-sm font-bold text-gray-700">${title}</span>
               <span class="text-xs text-gray-500">${subtitle}</span>
-              <button class="mt-2 px-4 py-1.5 bg-emerald-700 text-white text-xs font-semibold rounded-lg hover:bg-emerald-800 transition">
+              <button class="btn-golive mt-2 px-4 py-1.5 text-xs font-semibold rounded-lg transition">
                 Upgrade to Unlock
               </button>
             </div>`;
@@ -3201,7 +3132,7 @@ function formatCurrency(amount, currency) {
 
       // Determine button label — will be updated after API call reveals tier
       panel.innerHTML = `
-        <button data-qr-btn class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-xs font-medium text-gray-600 transition-colors shadow-sm">
+        <button data-qr-btn class="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors shadow-sm">
           <span>🔍</span> Quick Review
         </button>
         <div data-qr-results class="hidden mt-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5 text-xs space-y-1"></div>`;
@@ -3595,7 +3526,7 @@ function formatCurrency(amount, currency) {
                   ${bullets.map(b => `<li class="flex items-start gap-1.5"><span class="text-emerald-500 font-bold">✓</span>${b}</li>`).join('')}
                 </ul>
                 <button data-plan-id="${p.id}" data-plan-name="${p.name}"
-                  class="choose-plan-btn mt-4 w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm transition">
+                  class="btn-primary choose-plan-btn mt-4 w-full py-2.5 px-4 font-bold rounded-xl text-sm transition">
                   Choose ${p.name} →
                 </button>
               </div>`;
@@ -4653,7 +4584,7 @@ function formatCurrency(amount, currency) {
           if (a.scope === 'info') {
             action = `<button type="button" data-review="${a.key}" class="text-xs font-semibold text-emerald-700 hover:underline cursor-pointer">Review</button>`;
           } else if (needsAccept) {
-            action = `<button type="button" data-review="${a.key}" class="text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 px-3.5 py-1.5 rounded-lg cursor-pointer">Review Now</button>`;
+            action = `<button type="button" data-review="${a.key}" class="btn-primary text-xs font-semibold px-3.5 py-1.5 rounded-lg cursor-pointer">Review Now</button>`;
           } else {
             action = `<div class="flex items-center gap-3">
                 <span class="text-xs font-semibold text-emerald-700">Accepted — no further action</span>
@@ -4802,7 +4733,7 @@ function formatCurrency(amount, currency) {
               :            "We're prepping your assistant. Click to view progress.";
     // US3 AC3.1: drafts get a destructive "Cancel Setup" action right on the card.
     const cancelBtn = isDraft
-      ? `<button onclick="event.stopPropagation(); window.cancelDraftSetup('${key}')" class="text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 px-2.5 py-1.5 rounded-lg border border-red-200 transition cursor-pointer">Cancel Setup</button>`
+      ? `<button onclick="event.stopPropagation(); window.cancelDraftSetup('${key}')" class="btn-secondary text-xs font-semibold px-2.5 py-1.5 rounded-lg border transition cursor-pointer">Cancel Setup</button>`
       : '';
     return `
       <div id="ip-card-${key}" class="bg-white rounded-2xl border-2 border-dashed border-amber-300 shadow-sm overflow-hidden flex flex-col hover:shadow-md transition-all cursor-pointer" onclick="window.openSetupChecklist('${key}')">
@@ -5066,7 +4997,7 @@ function formatCurrency(amount, currency) {
       if (state === 'completed') detail = `<p class="text-xs text-emerald-600 mt-0.5">Completed</p>`;
       else if (state === 'action') {
         detail = `<p class="text-xs text-amber-600 font-semibold mt-0.5">Action required</p>
-          <a href="${meta.wizard}?draftId=${item.draftId}&step=${s.step}" class="inline-flex items-center gap-1 mt-2 px-3 py-1.5 bg-emerald-700 text-white text-xs font-semibold rounded-lg hover:bg-emerald-800 transition">Continue this step →</a>`;
+          <a href="${meta.wizard}?draftId=${item.draftId}&step=${s.step}" class="btn-primary inline-flex items-center gap-1 mt-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition">Continue this step →</a>`;
       }
       else if (state === 'processing') {
         // AC2.3: active loading state + reassurance copy.
@@ -5081,7 +5012,7 @@ function formatCurrency(amount, currency) {
         detail = `<p class="text-xs text-amber-700 font-semibold mt-0.5">${title}</p>
           <p class="text-xs text-gray-600 mt-1 leading-relaxed">${msg}</p>
           <div class="mt-2 flex flex-wrap items-center gap-2">
-            <button onclick="window.retryProvisioning(${item.assistantId}, this)" class="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-700 text-white text-xs font-semibold rounded-lg hover:bg-emerald-800 transition cursor-pointer">${cta} &amp; retry</button>
+            <button onclick="window.retryProvisioning(${item.assistantId}, this)" class="btn-utility inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer">${cta} &amp; retry</button>
             <span class="text-xs text-gray-400">Once resolved, retry to finish setup.</span>
           </div>`;
       }
@@ -5108,7 +5039,7 @@ function formatCurrency(amount, currency) {
         <ul class="list-none">${rows}</ul>
         ${isDraft ? `
         <div class="mt-6 pt-6 border-t border-gray-100 flex justify-end">
-          <button onclick="window.cancelDraftFromChecklist(${item.draftId})" class="text-sm font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 px-3 py-2 rounded-lg border border-red-200 transition cursor-pointer">Cancel Setup</button>
+          <button onclick="window.cancelDraftFromChecklist(${item.draftId})" class="btn-secondary text-sm font-semibold px-3 py-2 rounded-lg border transition cursor-pointer">Cancel Setup</button>
         </div>` : ''}
       </div>`;
   };
@@ -5797,7 +5728,7 @@ function rqMoreButton(statusKey) {
     const total = _rqPostsTotal ?? shown;
     return `<div class="py-4 text-center border-t border-gray-100">
       <button id="rq-more-btn" onclick="rqLoadMorePosts('${statusKey}')"
-        class="px-4 py-2 text-xs font-bold rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
+        class="btn-secondary px-4 py-2 text-xs font-bold rounded-lg border transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
         Show more
       </button>
       <p class="text-[11px] text-gray-400 mt-1.5">Showing ${shown} of ${total}</p>
@@ -6150,8 +6081,8 @@ function rqRenderCard(item) {
         <input type="text" id="rq-reason-${item.id}" placeholder="Rejection reason (required)" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 mb-2 focus:outline-none focus:ring-2 focus:ring-red-300">
       </div>
       <div class="flex gap-2">
-        <button onclick="rqApprove(${item.id})" data-action="approve-output" class="flex-1 py-3 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition cursor-pointer">Approve</button>
-        <button onclick="rqToggleReject(${item.id})" class="flex-1 py-3 text-xs font-bold border border-red-300 text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer" id="rq-reject-btn-${item.id}">Reject</button>
+        <button onclick="rqApprove(${item.id})" data-action="approve-output" class="btn-golive flex-1 py-3 text-xs font-bold rounded-lg transition cursor-pointer">Approve</button>
+        <button onclick="rqToggleReject(${item.id})" class="btn-destructive flex-1 py-3 text-xs font-bold border rounded-lg transition cursor-pointer" id="rq-reject-btn-${item.id}">Reject</button>
       </div>` : expired ? `<span class="text-xs text-gray-400 italic">Expired</span>` : `<span class="text-xs text-gray-500">${item.status}</span>`}
     </div>`;
 
@@ -6455,7 +6386,7 @@ function renderPlatformMockup(post) {
     // editor (see _pceCanvasClick).
     const captionMic = editableNow
         ? `<button type="button" data-caption-mic title="Dictate your caption"
-             class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-gray-200 bg-white text-gray-500 hover:text-emerald-700 hover:border-emerald-300 transition cursor-pointer">
+             class="btn-secondary shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg border transition cursor-pointer">
              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15a3 3 0 003-3V6a3 3 0 00-6 0v6a3 3 0 003 3zM19 11a7 7 0 01-14 0M12 18v3"/></svg>
              <span class="text-[10px] font-bold">Dictate</span>
            </button>`
@@ -6467,7 +6398,7 @@ function renderPlatformMockup(post) {
     // better version lands in the post rather than in a conversation to be copied out.
     const captionImprove = editableNow && !captionEmpty
         ? `<button type="button" data-caption-improve title="Ask your assistant to improve this caption"
-             class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition cursor-pointer">
+             class="btn-assistant shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg border transition cursor-pointer">
              <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-3.5 h-3.5 object-contain">
              <span class="text-[10px] font-bold">Improve</span>
            </button>`
@@ -8393,9 +8324,9 @@ function _pceTrimTrackHtml(clip, index) {
         + _pceFmtS(phAt) + '</span>'
         + '<span class="flex-1"></span>'
         + '<button type="button" data-pce-act="clip-split" data-pce-i="' + index + '" title="Cut this clip in two at the playhead"'
-        + ' class="px-2 py-0.5 rounded border border-gray-200 text-[10px] font-bold text-gray-600 hover:border-pink-400 hover:text-pink-700 cursor-pointer">✂ Split</button>'
+        + ' class="btn-utility px-2 py-0.5 rounded border text-[10px] font-bold cursor-pointer">✂ Split</button>'
         + '<button type="button" data-pce-act="clip-dup" data-pce-i="' + index + '" title="Add a copy of this clip right after it"'
-        + ' class="px-2 py-0.5 rounded border border-gray-200 text-[10px] font-bold text-gray-600 hover:border-pink-400 hover:text-pink-700 cursor-pointer">⧉ Duplicate</button>'
+        + ' class="btn-utility px-2 py-0.5 rounded border text-[10px] font-bold cursor-pointer">⧉ Duplicate</button>'
         + '</div>'
         + (axis.provisional
             ? '<p class="mt-0.5 text-[10px] text-gray-400">'
@@ -10046,11 +9977,11 @@ function _prqWarningCard(warning, disposition, index) {
         <div class="flex gap-2 text-red-700"><span class="shrink-0">⚠</span><span>${_prqEsc(warning)}</span></div>
         <div class="flex flex-wrap gap-1.5 mt-2">
           <button type="button" onclick="rqSourceWarning(${index})"
-            class="px-2 py-1 text-[11px] font-bold rounded-md border border-red-300 text-red-700 bg-white hover:bg-red-100">Add a source</button>
+            class="btn-primary px-2 py-1 text-[11px] font-bold rounded-md border">Add a source</button>
           <button type="button" onclick="rqVerifyWarning(${index})"
-            class="px-2 py-1 text-[11px] font-bold rounded-md bg-red-600 text-white hover:bg-red-700">AI Resolve</button>
+            class="btn-primary px-2 py-1 text-[11px] font-bold rounded-md">AI Resolve</button>
           <button type="button" onclick="rqDismissWarning(${index})"
-            class="px-2 py-1 text-[11px] font-semibold rounded-md border border-gray-300 text-gray-600 bg-white hover:bg-gray-100">Doesn't apply</button>
+            class="btn-primary px-2 py-1 text-[11px] font-semibold rounded-md border">Doesn't apply</button>
         </div>
         <div data-prq-verify="${index}" class="hidden mt-2"></div>
       </div>`;
@@ -10277,7 +10208,7 @@ function _prqRenderVerification(index, d) {
                class="mt-1 block text-[11px] text-emerald-700 underline break-all">${_prqEsc(d.sourceUrl)}</a>
             <p class="mt-1 text-[10px] text-gray-500">Open it and check it says what the post claims. ${_prqEsc(searched)}</p>
             <button type="button" onclick="rqAcceptVerified(${index})"
-              class="mt-2 w-full px-2 py-1.5 text-[11px] font-bold rounded-md bg-emerald-600 text-white hover:bg-emerald-700">Use this source</button>
+              class="btn-primary mt-2 w-full px-2 py-1.5 text-[11px] font-bold rounded-md">Use this source</button>
           </div>`;
         return;
     }
@@ -10293,9 +10224,9 @@ function _prqRenderVerification(index, d) {
               class="mt-2 w-full p-2 text-[11px] text-gray-800 rounded-md border border-amber-200 resize-y"></textarea>
             <div class="flex gap-1.5 mt-1.5">
               <button type="button" onclick="rqDiscardVerify(${index})"
-                class="flex-1 px-2 py-1.5 text-[11px] font-semibold rounded-md border border-gray-300 text-gray-600 bg-white hover:bg-gray-50">Discard</button>
+                class="btn-destructive flex-1 px-2 py-1.5 text-[11px] font-semibold rounded-md border">Discard</button>
               <button type="button" onclick="rqAcceptVerifyRewrite(${index})"
-                class="flex-1 px-2 py-1.5 text-[11px] font-bold rounded-md bg-amber-600 text-white hover:bg-amber-700">Save this version</button>
+                class="btn-primary flex-1 px-2 py-1.5 text-[11px] font-bold rounded-md">Save this version</button>
             </div>
           </div>`;
         // Set via .value, not markup — the caption is user content and must not be parsed as HTML.
@@ -10462,7 +10393,7 @@ function _rqRenderRenderAlert(post) {
         el.className = 'mb-4 text-xs rounded-lg border px-3 py-2.5 border-red-200 bg-red-50 text-red-700';
         el.innerHTML = `<p class="font-semibold">⚠️ The text couldn't be rendered onto your video</p>
           <p class="mt-0.5">${_rqEsc(post.renderError || 'The render failed. Your post is held back so it can never publish without the text you added.')}</p>
-          <button onclick="rqRetryRender(${post.id})" class="mt-2 py-1.5 px-3 text-xs font-bold border border-red-400 text-red-700 hover:bg-red-100 rounded-lg cursor-pointer">Try the render again</button>`;
+          <button onclick="rqRetryRender(${post.id})" class="btn-secondary mt-2 py-1.5 px-3 text-xs font-bold border rounded-lg cursor-pointer">Try the render again</button>`;
         el.classList.remove('hidden');
         _rqStopRenderPoll();
         return;
@@ -10536,7 +10467,7 @@ async function rqRetryRender(postId) {
         }
     } catch (err) {
         if (el) el.innerHTML = `<p class="font-semibold">⚠️ ${_rqEsc(err.message || 'Could not start the render.')}</p>
-          <button onclick="rqRetryRender(${postId})" class="mt-2 py-1.5 px-3 text-xs font-bold border border-red-400 text-red-700 hover:bg-red-100 rounded-lg cursor-pointer">Try again</button>`;
+          <button onclick="rqRetryRender(${postId})" class="btn-secondary mt-2 py-1.5 px-3 text-xs font-bold border rounded-lg cursor-pointer">Try again</button>`;
     }
 }
 
@@ -13791,7 +13722,7 @@ function _pceRenderFormatRules(post, fmt) {
           <p>${_rqEsc(route.reason || '')}</p>
           ${sugg
             ? `<button type="button" onclick="rqReviewPickFormat(${post.id}, '${sugg.k}')"
-                 class="mt-1.5 px-2.5 py-1 rounded-lg border border-amber-300 bg-white text-amber-800 text-[11px] font-bold hover:bg-amber-100 transition cursor-pointer">Post it as a ${_rqEsc(sugg.n)} instead</button>`
+                 class="btn-secondary mt-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition cursor-pointer">Post it as a ${_rqEsc(sugg.n)} instead</button>`
             : `<p class="mt-1 text-amber-700/80">Swap the media, or pick a different format from the tab above.</p>`}`;
         blocked.classList.remove('hidden');
         return;
@@ -13808,7 +13739,7 @@ function _pceRenderFormatRules(post, fmt) {
           <p>${_rqEsc(fmt.n)} takes ${_rqEsc(takes)}. Approving would be refused.</p>
           ${target
             ? `<button type="button" onclick="rqReviewPickFormat(${post.id}, '${target.k}')"
-                 class="mt-1.5 px-2.5 py-1 rounded-lg border border-amber-300 bg-white text-amber-800 text-[11px] font-bold hover:bg-amber-100 transition cursor-pointer">Switch to ${_rqEsc(target.n)}</button>`
+                 class="btn-secondary mt-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition cursor-pointer">Switch to ${_rqEsc(target.n)}</button>`
             : `<p class="mt-1 text-amber-700/80">No format we can publish yet takes ${_rqEsc(a)} on ${_rqEsc(window.PlatformConstants.label(post.platform))} — swap the media instead.</p>`}`;
         blocked.classList.remove('hidden');
         return;
@@ -14937,7 +14868,7 @@ function _pceRenderMusicList() {
               <p class="text-[10px] text-gray-400 truncate">${_rqEsc(t.artist)} · ${_pceMusicLen(t.durationS)}${(t.tags || []).length ? ' · ' + _rqEsc((t.tags || []).join(', ')) : ''}</p>
             </div>
             <button type="button" data-music-act="add" data-music-id="${_rqEsc(String(t.id))}"
-              class="shrink-0 px-2 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-bold hover:bg-emerald-700 transition cursor-pointer">Add</button>
+              class="btn-primary shrink-0 px-2 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer">Add</button>
           </div>`;
     }).join('');
 }
@@ -16021,7 +15952,7 @@ function _rqReviewRenderActive() {
     if (post.mediaMissing && reviewableForMedia) {
         mediaAlert.innerHTML = `<p class="font-semibold">⚠️ Media deleted</p>
           <p class="mt-0.5">${_rqEsc(post.mediaMissingNote || 'The media attached to this post was deleted from My Content.')}</p>
-          <button onclick="rqReviewOpenMediaOnly()" class="mt-2 py-1.5 px-3 text-xs font-bold border border-red-400 text-red-700 hover:bg-red-100 rounded-lg cursor-pointer">Source new media</button>`;
+          <button onclick="rqReviewOpenMediaOnly()" class="btn-secondary mt-2 py-1.5 px-3 text-xs font-bold border rounded-lg cursor-pointer">Source new media</button>`;
         mediaAlert.classList.remove('hidden');
     } else {
         mediaAlert.classList.add('hidden');
@@ -16105,7 +16036,7 @@ function _rqReviewRenderActive() {
         noteEl.className = 'mt-4 text-xs rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-blue-700';
         noteEl.innerHTML = `<p class="font-semibold">${post.status === 'scheduled' ? 'Scheduled' : 'Approved'}</p>
           <p class="mt-0.5">${when ? `Goes out ${_rqEsc(when)}.` : 'Awaiting a slot from your assistant.'}</p>
-          <button onclick="rqReviewOpenRescheduleOnly()" class="mt-2 py-1.5 px-3 text-xs font-bold border border-blue-400 text-blue-700 hover:bg-blue-100 rounded-lg cursor-pointer">Change schedule</button>`;
+          <button onclick="rqReviewOpenRescheduleOnly()" class="btn-secondary mt-2 py-1.5 px-3 text-xs font-bold border rounded-lg cursor-pointer">Change schedule</button>`;
         noteEl.classList.remove('hidden');
     } else if (post.status === 'published') {
         noteEl.className = 'mt-4 text-xs rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-emerald-700';
@@ -16182,7 +16113,7 @@ function _rqCopyElsewhereHtml() {
     }
     const chips = options.map(p => `
         <button type="button" data-copy-chip="${_rqEsc(p.id)}" onclick="_rqCopyToggle('${_rqEsc(p.id)}')"
-          class="px-2.5 py-1 rounded-full border border-emerald-300 text-emerald-700 font-semibold hover:bg-emerald-100 transition cursor-pointer">
+          class="btn-secondary px-2.5 py-1 rounded-full border font-semibold transition cursor-pointer">
           ${_rqEsc(p.label)}</button>`).join('');
     return `
       <div class="mt-2 pt-2 border-t border-emerald-200">
@@ -16190,7 +16121,7 @@ function _rqCopyElsewhereHtml() {
         <p class="mt-0.5 text-emerald-600">Creates a new draft in your Review Queue — nothing goes out until you approve it.</p>
         <div class="mt-2 flex flex-wrap gap-1.5">${chips}</div>
         <button type="button" id="rq-copy-go" onclick="_rqCopyToPlatforms()" disabled
-          class="mt-2 py-1.5 px-3 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+          class="btn-primary mt-2 py-1.5 px-3 text-xs font-bold rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
           Create draft</button>
         <span id="rq-copy-msg" class="block mt-1.5 text-emerald-600"></span>
       </div>`;
@@ -19802,262 +19733,7 @@ async function gpSubmitReject() {
 }
 </script>
 
-<!-- ── Report an Issue (testing phase) ─────────────────────────────────────────── -->
-<script>
-(function () {
-  const modal = () => document.getElementById('modal-report-issue');
-  let _pendingImage = null; // data URL of the attached screenshot
-  let _myReports = []; // last-fetched list, re-filtered client-side
-  let _myReportsFilter = 'fixed_ready_to_test'; // default: surface tickets ready for the user to re-test
-
-  function show(el) { el.classList.remove('hidden'); el.classList.add('flex'); }
-  function hide(el) { el.classList.add('hidden'); el.classList.remove('flex'); }
-
-  const STATUS_BADGE = {
-    reported:            ['Reported', 'bg-gray-100 text-gray-700'],
-    backlog:             ['Backlog', 'bg-slate-100 text-slate-700'],
-    on_hold:             ['On Hold', 'bg-orange-100 text-orange-700'],
-    fix_in_progress:     ['Fix In Progress', 'bg-blue-100 text-blue-700'],
-    merge:               ['Merge', 'bg-indigo-100 text-indigo-700'],
-    fixed_ready_to_test: ['Fixed & Ready to Test', 'bg-emerald-100 text-emerald-700'],
-    more_info_required:  ['More Info Required', 'bg-amber-100 text-amber-800'],
-    closed:              ['Closed', 'bg-gray-200 text-gray-500'],
-    roadmap:             ['On Roadmap', 'bg-violet-100 text-violet-700'],
-  };
-  const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-  window.openReportIssue = function (tab) {
-    const m = modal(); if (!m) return;
-    // Stamp the location the user came from.
-    const loc = document.getElementById('ri-location');
-    if (loc) loc.textContent = window._currentViewTitle || window._currentViewKey || 'this page';
-    window.riSwitchTab(tab || 'new');
-    show(m);
-  };
-
-  window.closeReportIssue = function () { const m = modal(); if (m) hide(m); };
-
-  window.riSwitchTab = function (tab) {
-    const isNew = tab !== 'mine';
-    document.getElementById('ri-panel-new')?.classList.toggle('hidden', !isNew);
-    document.getElementById('ri-panel-mine')?.classList.toggle('hidden', isNew);
-    const tNew = document.getElementById('ri-tab-new');
-    const tMine = document.getElementById('ri-tab-mine');
-    if (tNew)  tNew.className  = `flex-1 py-2.5 text-sm border-b-2 ${isNew ? 'font-bold text-amber-700 border-amber-600' : 'font-semibold text-gray-500 border-transparent hover:text-gray-700'}`;
-    if (tMine) tMine.className = `flex-1 py-2.5 text-sm border-b-2 ${!isNew ? 'font-bold text-amber-700 border-amber-600' : 'font-semibold text-gray-500 border-transparent hover:text-gray-700'}`;
-    if (!isNew) loadMyReports();
-  };
-
-  window.riClearImage = function () {
-    _pendingImage = null;
-    const input = document.getElementById('ri-image'); if (input) input.value = '';
-    document.getElementById('ri-image-preview')?.classList.add('hidden');
-  };
-
-  document.addEventListener('change', function (e) {
-    if (e.target && e.target.id === 'ri-image') {
-      const file = e.target.files && e.target.files[0];
-      if (!file) return;
-      if (file.size > 5 * 1024 * 1024) { riError('Image exceeds the 5 MB limit.'); window.riClearImage(); return; }
-      const reader = new FileReader();
-      reader.onload = () => {
-        _pendingImage = reader.result;
-        const thumb = document.getElementById('ri-image-thumb');
-        if (thumb) thumb.src = _pendingImage;
-        document.getElementById('ri-image-preview')?.classList.remove('hidden');
-      };
-      reader.readAsDataURL(file);
-    }
-  });
-
-  function riError(msg) {
-    const el = document.getElementById('ri-error');
-    if (!el) return;
-    if (!msg) { el.classList.add('hidden'); return; }
-    el.textContent = msg; el.classList.remove('hidden');
-  }
-
-  window.submitReportIssue = async function () {
-    const desc = (document.getElementById('ri-description')?.value || '').trim();
-    riError('');
-    if (!desc) { riError('Please describe the issue.'); return; }
-    const btn = document.getElementById('ri-submit');
-    if (btn) { btn.disabled = true; btn.textContent = 'Submitting…'; }
-    try {
-      const res = await fetch('/.netlify/functions/issue-reports', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          description: desc,
-          sourceLocation: window._currentViewKey || null,
-          sourceUrl: window.location.href,
-          image: _pendingImage || undefined,
-        }),
-      });
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok) { riError(d.error || 'Could not submit. Please try again.'); return; }
-      // Reset the form and confirm.
-      document.getElementById('ri-description').value = '';
-      window.riClearImage();
-      window.showToast?.('Thanks! Your issue has been reported.', { icon: '🐞' });
-      window.riSwitchTab('mine');
-    } catch {
-      riError('Network error — please try again.');
-    } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Submit issue'; }
-    }
-  };
-
-  async function loadMyReports() {
-    const list = document.getElementById('ri-my-list');
-    if (!list) return;
-    list.innerHTML = '<div class="text-gray-400 animate-pulse">Loading…</div>';
-    const select = document.getElementById('ri-status-filter');
-    if (select) select.value = _myReportsFilter;
-    try {
-      const res = await fetch('/.netlify/functions/issue-reports');
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok) { list.innerHTML = `<p class="text-red-600">${esc(d.error || 'Failed to load.')}</p>`; return; }
-      _myReports = d.issues || [];
-      if (!_myReports.length) { list.innerHTML = '<p class="text-gray-400">You haven\'t reported any issues yet.</p>'; return; }
-      renderMyReportsList();
-    } catch {
-      list.innerHTML = '<p class="text-red-600">Network error — please try again.</p>';
-    }
-  }
-
-  function renderMyReportsList() {
-    const list = document.getElementById('ri-my-list');
-    if (!list) return;
-    const issues = _myReportsFilter === 'all'
-      ? _myReports
-      : _myReports.filter((i) => i.status === _myReportsFilter);
-    if (!issues.length) {
-      const [label] = STATUS_BADGE[_myReportsFilter] || [];
-      list.innerHTML = `<p class="text-gray-400">No reports with status "${esc(label || _myReportsFilter)}".</p>`;
-      return;
-    }
-    list.innerHTML = issues.map(renderIssueCard).join('');
-  }
-
-  window.riFilterReports = function (status) {
-    _myReportsFilter = status;
-    const select = document.getElementById('ri-status-filter');
-    if (select) select.value = status;
-    renderMyReportsList();
-  };
-
-  function renderIssueCard(i) {
-    const [label, cls] = STATUS_BADGE[i.status] || [i.statusLabel || i.status, 'bg-gray-100 text-gray-700'];
-    const date = i.createdAt ? new Date(i.createdAt).toLocaleDateString() : '';
-    const thread = (i.messages || []).map((m) => `
-      <div class="mt-2 rounded-lg p-2 text-xs ${m.authorType === 'admin' ? 'bg-blue-50 border border-blue-100' : 'bg-gray-50 border border-gray-100'}">
-        <span class="font-bold ${m.authorType === 'admin' ? 'text-blue-700' : 'text-gray-600'}">${m.authorType === 'admin' ? 'Support' : 'You'}</span>
-        <span class="text-gray-400"> · ${m.createdAt ? new Date(m.createdAt).toLocaleString() : ''}</span>
-        <p class="text-gray-800 whitespace-pre-wrap mt-0.5">${esc(m.body)}</p>
-      </div>`).join('');
-
-    // Action area depends on status.
-    let actions = '';
-    if (i.status === 'fixed_ready_to_test') {
-      actions = `
-        <div class="mt-3 flex gap-2">
-          <button onclick="window.riConfirmFixed(${i.id})" class="px-3 py-1.5 text-xs font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">Confirm fix works</button>
-          <button onclick="window.riToggleReply(${i.id})" class="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg hover:bg-gray-50">Still broken — reply</button>
-        </div>`;
-    } else if (i.status === 'more_info_required') {
-      actions = `<div class="mt-3"><button onclick="window.riToggleReply(${i.id})" class="px-3 py-1.5 text-xs font-bold bg-amber-600 text-white rounded-lg hover:bg-amber-700">Provide more info</button></div>`;
-    } else if (i.status !== 'closed') {
-      actions = `<div class="mt-3"><button onclick="window.riToggleReply(${i.id})" class="text-xs font-semibold text-amber-700 hover:underline">Add a comment</button></div>`;
-    }
-
-    return `
-      <div class="border border-gray-200 rounded-xl p-3" data-issue-id="${i.id}">
-        <div class="flex items-start justify-between gap-2">
-          <p class="text-sm font-semibold text-gray-800 whitespace-pre-wrap">${esc(i.description)}</p>
-          <span class="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}">${esc(label)}</span>
-        </div>
-        <p class="text-[11px] text-gray-400 mt-1">#${i.id} · ${esc(i.sourceLocation || '—')} · ${date}${i.hasImage ? ' · 📎 screenshot' : ''}</p>
-        ${thread}
-        ${actions}
-        <div id="ri-reply-${i.id}" class="hidden mt-2">
-          <textarea id="ri-reply-input-${i.id}" rows="2" placeholder="Type your reply…" class="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none resize-none"></textarea>
-          <button onclick="window.riSendReply(${i.id})" class="mt-1 px-3 py-1 text-xs font-bold bg-gray-900 text-white rounded-lg hover:bg-black">Send</button>
-        </div>
-      </div>`;
-  }
-
-  window.riToggleReply = function (id) {
-    document.getElementById(`ri-reply-${id}`)?.classList.toggle('hidden');
-  };
-
-  window.riSendReply = async function (id) {
-    const input = document.getElementById(`ri-reply-input-${id}`);
-    const message = (input?.value || '').trim();
-    if (!message) return;
-    try {
-      const res = await fetch('/.netlify/functions/issue-reports', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ issueId: id, message }),
-      });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); window.showToast?.(d.error || 'Could not send reply.'); return; }
-      loadMyReports();
-    } catch { window.showToast?.('Network error — please try again.'); }
-  };
-
-  window.riConfirmFixed = async function (id) {
-    try {
-      const res = await fetch('/.netlify/functions/issue-reports', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ issueId: id, action: 'confirm-fixed' }),
-      });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); window.showToast?.(d.error || 'Could not update.'); return; }
-      window.showToast?.('Great — marked as fixed. Thank you!', { icon: '✅' });
-      loadMyReports();
-    } catch { window.showToast?.('Network error — please try again.'); }
-  };
-
-  // Wire the sidebar link (injected async → use delegation) + Esc + backdrop close.
-  document.addEventListener('click', function (e) {
-    const link = e.target.closest && e.target.closest('#nav-report-issue');
-    if (link) { e.preventDefault(); window.openReportIssue('new'); return; }
-    const m = modal();
-    if (m && e.target === m) window.closeReportIssue();
-  });
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') { const m = modal(); if (m && !m.classList.contains('hidden')) window.closeReportIssue(); }
-  });
-
-  // Issue #87 — the in-app "issue_update" notification CTA (see notifications.js) routes
-  // here to jump straight to the reported issue instead of leaving the user to hunt for it.
-  window.routeToIssueReport = function (issueId) {
-    window.openReportIssue('mine');
-    if (issueId == null) return;
-    const focusCard = () => {
-      const card = document.querySelector(`[data-issue-id="${issueId}"]`);
-      if (!card) return false;
-      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      card.classList.add('ring-2', 'ring-amber-400');
-      setTimeout(() => card.classList.remove('ring-2', 'ring-amber-400'), 2000);
-      return true;
-    };
-    // loadMyReports() runs async on tab switch; give it a beat, then widen the status
-    // filter if the card isn't in the default "fixed_ready_to_test" view.
-    setTimeout(() => {
-      if (focusCard()) return;
-      window.riFilterReports('all');
-      setTimeout(focusCard, 150);
-    }, 400);
-  };
-
-  // Deep link from the notification email (?issue=N) opens "My reports" focused on that issue.
-  try {
-    const qs = new URLSearchParams(window.location.search);
-    const issueId = qs.get('issue');
-    if (issueId) window.addEventListener('load', () => setTimeout(() => window.routeToIssueReport(Number(issueId)), 600));
-  } catch { /* noop */ }
-})();
-</script>
+<!-- Report an Issue lives in Help & Support now (help.js: openReportIssue / routeToIssueReport). -->
 
 <!-- ════════════════════════════════════════════════════════════════════════
      Frictionless Onboarding Wizard — persistent right-hand slide-over companion.
@@ -20096,7 +19772,7 @@ async function gpSubmitReject() {
      Docked top-centre just under the header so it sits at eye level and is hard to miss. -->
 <button type="button" id="setup-wizard-fab"
         style="position:fixed; top:4.75rem; left:50%; transform:translateX(-50%); z-index:60; display:none;"
-        class="items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-full shadow-lg px-5 py-3 transition cursor-pointer">
+        class="btn-primary items-center gap-2 font-bold text-sm rounded-full shadow-lg px-5 py-3 transition cursor-pointer">
   <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
   <span>Resume setup <span id="setup-wizard-fab-count" class="opacity-90 font-semibold"></span></span>
 </button>
@@ -20480,7 +20156,7 @@ async function gpSubmitReject() {
     // "almost there" note instead so the button never 409s.
     let footer = '';
     if (step.subStepsReady) {
-      footer = '<button type="button" id="setup-wizard-kickoff" class="mt-3 w-full inline-flex items-center justify-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl px-4 py-2.5 transition cursor-pointer">🚀 Initiate Kick Off</button>';
+      footer = '<button type="button" id="setup-wizard-kickoff" class="btn-assistant mt-3 w-full inline-flex items-center justify-center gap-1 font-bold text-sm rounded-xl px-4 py-2.5 transition cursor-pointer">🚀 Initiate Kick Off</button>';
     } else if (step.subStepsAllRequiredDone) {
       footer = '<p class="mt-3 text-xs text-gray-500">Finishing setup — you\'ll be able to kick off in a moment.</p>';
     }
@@ -20529,7 +20205,7 @@ async function gpSubmitReject() {
           </div>
           <h3 class="text-xl font-extrabold text-gray-900 mb-1">Your assistant is live!</h3>
           <p class="text-sm text-gray-500 mb-6">Everything's set up — your assistant is working for you. You can revisit any step from My Account.</p>
-          <button type="button" id="setup-wizard-done-btn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl px-5 py-2.5 transition cursor-pointer">Done</button>
+          <button type="button" id="setup-wizard-done-btn" class="btn-primary font-bold text-sm rounded-xl px-5 py-2.5 transition cursor-pointer">Done</button>
           <button type="button" id="setup-wizard-tour-btn" class="block mx-auto mt-3 text-sm font-semibold text-emerald-700 hover:text-emerald-800 hover:underline cursor-pointer">🦢 Take a quick tour of the platform &rarr;</button>
         </div>`;
       const doneBtn = document.getElementById('setup-wizard-done-btn');

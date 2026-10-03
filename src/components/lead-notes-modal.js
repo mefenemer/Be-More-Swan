@@ -74,7 +74,7 @@
           <div class="flex items-center justify-end gap-2 pt-1">
             <button type="button" data-nt-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 rounded-lg cursor-pointer">Cancel</button>
             <button type="submit" data-nt-submit
-              class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Save note</button>
+              class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Save note</button>
           </div>
         </form>
       </div>`;

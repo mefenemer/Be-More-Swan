@@ -132,8 +132,9 @@ check('the form states that nothing is spent at staging', () => {
 check('the staging button is NOT styled like the money button', () => {
     // Staging is neutral; approving is the committing act. Two identical buttons would make the
     // difference invisible at a glance.
-    assert.match(panel, /data-cmp-stage="[^"]*"\s*\n\s*class="mt-3 px-3 py-1\.5 bg-white border/);
-    assert.match(panel, /data-cmp-approve="[^"]*"[^>]*\n\s*class="mt-3 px-4 py-2 bg-emerald-600/);
+    // Button system (2026-10-03): staging is SECONDARY, approving commits money — GO-LIVE.
+    assert.match(panel, /data-cmp-stage="[^"]*"\s*\n\s*class="btn-secondary /);
+    assert.match(panel, /data-cmp-approve="[^"]*"[^>]*\n\s*class="btn-golive /);
 });
 
 check('a failed stage does NOT re-render, so three written ads survive', () => {

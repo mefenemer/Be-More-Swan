@@ -51,7 +51,7 @@
       const dot = on ? 'bg-emerald-600' : 'bg-gray-400';
       return '<div class="flex items-center gap-2">' +
         '<button type="button" data-toggle="' + s.active.id + '" data-enabled="' + (on ? '1' : '0') + '" class="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm font-bold text-gray-700 cursor-pointer"><span class="w-1.5 h-1.5 rounded-full ' + dot + '"></span>' + (on ? 'Enabled' : 'Disabled') + '</button>' +
-        '<button type="button" data-config="' + s.id + '" class="grow px-3 py-2 bg-white border border-gray-200 text-gray-600 text-sm font-bold rounded-lg cursor-pointer">Configure</button>' +
+        '<button type="button" data-config="' + s.id + '" class="btn-secondary grow px-3 py-2 border text-sm font-bold rounded-lg cursor-pointer">Configure</button>' +
         '<button type="button" data-remove="' + s.active.id + '" class="px-3 py-2 text-gray-400 hover:text-red-600 text-sm font-bold rounded-lg cursor-pointer" title="Remove">✕</button>' +
       '</div>';
     }
@@ -60,7 +60,7 @@
     if (s.tier !== 2 && !s.connection && !s.connectionOptional) {
       return '<a href="/api/oauth/' + esc(s.providerKey) + '/connect" class="block w-full text-center px-4 py-2 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-sm font-bold rounded-lg transition">Connect ' + esc(s.providerName) + ' first</a>';
     }
-    return '<button type="button" data-config="' + s.id + '" class="w-full px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition cursor-pointer">Enable</button>';
+    return '<button type="button" data-config="' + s.id + '" class="btn-primary w-full px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer">Enable</button>';
   }
 
   function card(s) {
@@ -137,8 +137,8 @@
           '<input data-ai-webhook-url type="url" placeholder="https://…" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500"></div>' +
         '<div data-ai-fields class="space-y-2.5 mb-4"></div>' +
         '<p data-ai-error class="hidden text-sm font-semibold text-red-600 mb-3"></p>' +
-        '<div class="flex justify-end gap-2"><button type="button" data-ai-cancel class="px-4 py-2 bg-white border border-gray-200 text-gray-600 text-sm font-bold rounded-lg cursor-pointer">Cancel</button>' +
-          '<button type="button" data-ai-save class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg cursor-pointer">Enable</button></div>' +
+        '<div class="flex justify-end gap-2"><button type="button" data-ai-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg cursor-pointer">Cancel</button>' +
+          '<button type="button" data-ai-save class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Enable</button></div>' +
       '</div>';
     document.body.appendChild(modalEl);
     modalEl.querySelector('[data-ai-close]').addEventListener('click', closeModal);

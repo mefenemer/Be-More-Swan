@@ -173,8 +173,8 @@
           <div class="px-5 py-3 border-t border-gray-100 flex items-center justify-between">
             <span id="users-count" class="text-xs text-gray-400"></span>
             <div class="flex gap-2">
-              <button id="users-prev" onclick="usersPage(-1)" class="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">← Prev</button>
-              <button id="users-next" onclick="usersPage(1)"  class="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">Next →</button>
+              <button id="users-prev" onclick="usersPage(-1)" class="btn-secondary px-3 py-1.5 text-xs font-semibold border rounded-lg disabled:opacity-40 disabled:cursor-not-allowed">← Prev</button>
+              <button id="users-next" onclick="usersPage(1)"  class="btn-primary px-3 py-1.5 text-xs font-semibold border rounded-lg disabled:opacity-40 disabled:cursor-not-allowed">Next →</button>
             </div>
           </div>
         </div>
@@ -254,7 +254,7 @@
             </select>
           </label>
           <button id="catalog-sort-dir" onclick="toggleCatalogSortDir()" title="Toggle sort direction"
-            class="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg hover:bg-gray-50 transition">↑ Ascending</button>
+            class="btn-utility px-3 py-1.5 text-xs font-semibold border rounded-lg transition">↑ Ascending</button>
           <label class="text-xs text-gray-600 font-semibold">Group by
             <select id="catalog-group" onchange="setCatalogGroup(this.value)" class="ml-1 border border-gray-200 rounded px-2 py-1 text-xs font-normal">
               <option value="none">None</option>
@@ -276,8 +276,8 @@
           <span class="text-xs font-bold text-gray-400 uppercase">Date range</span>
           <label class="text-xs text-gray-600">From <input id="analytics-from" type="date" class="ml-1 border border-gray-200 rounded px-2 py-1 text-xs"></label>
           <label class="text-xs text-gray-600">To <input id="analytics-to" type="date" class="ml-1 border border-gray-200 rounded px-2 py-1 text-xs"></label>
-          <button onclick="loadAnalytics()" class="px-4 py-1.5 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition">Apply</button>
-          <button onclick="document.getElementById('analytics-from').value='';document.getElementById('analytics-to').value='';loadAnalytics();" class="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg hover:bg-gray-50 transition">Clear</button>
+          <button onclick="loadAnalytics()" class="btn-primary px-4 py-1.5 text-xs font-bold rounded-lg transition">Apply</button>
+          <button onclick="document.getElementById('analytics-from').value='';document.getElementById('analytics-to').value='';loadAnalytics();" class="btn-secondary px-3 py-1.5 text-xs font-semibold border rounded-lg transition">Clear</button>
         </div>
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div class="bg-white rounded-2xl border border-gray-200 p-6">
@@ -325,8 +325,8 @@
           <div class="px-5 py-3 border-t border-gray-100 flex items-center justify-between">
             <span id="logs-count" class="text-xs text-gray-400"></span>
             <div class="flex gap-2">
-              <button id="logs-prev" onclick="logsPage(-1)" class="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">← Prev</button>
-              <button id="logs-next" onclick="logsPage(1)"  class="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">Next →</button>
+              <button id="logs-prev" onclick="logsPage(-1)" class="btn-secondary px-3 py-1.5 text-xs font-semibold border rounded-lg disabled:opacity-40 disabled:cursor-not-allowed">← Prev</button>
+              <button id="logs-next" onclick="logsPage(1)"  class="btn-primary px-3 py-1.5 text-xs font-semibold border rounded-lg disabled:opacity-40 disabled:cursor-not-allowed">Next →</button>
             </div>
           </div>
         </div>
@@ -365,7 +365,7 @@
               <input id="new-budget" type="number" placeholder="optional" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none">
             </div>
           </div>
-          <button onclick="createModelConfig()" class="mt-4 px-5 py-2 bg-gray-900 text-white text-sm font-bold rounded-lg hover:bg-black transition">Create Slot</button>
+          <button onclick="createModelConfig()" class="btn-primary mt-4 px-5 py-2 text-sm font-bold rounded-lg transition">Create Slot</button>
         </div>
       </section>
 
@@ -405,7 +405,7 @@
           </select>
           <input type="date" id="audit-filter-from" onchange="loadAuditLog()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus:ring-2 focus:ring-indigo-400 outline-none" placeholder="From">
           <input type="date" id="audit-filter-to" onchange="loadAuditLog()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus:ring-2 focus:ring-indigo-400 outline-none" placeholder="To">
-          <button onclick="auditLogPage(0, true)" class="text-sm px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg font-semibold">Reset</button>
+          <button onclick="auditLogPage(0, true)" class="btn-destructive text-sm px-3 py-1.5 rounded-lg font-semibold">Reset</button>
         </div>
 
         <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
@@ -428,8 +428,8 @@
           <div class="px-5 py-3 border-t border-gray-100 flex items-center justify-between">
             <span id="audit-log-count" class="text-xs text-gray-400"></span>
             <div class="flex gap-2">
-              <button id="audit-log-prev" onclick="auditLogPage(-1)" class="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">← Prev</button>
-              <button id="audit-log-next" onclick="auditLogPage(1)"  class="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">Next →</button>
+              <button id="audit-log-prev" onclick="auditLogPage(-1)" class="btn-secondary px-3 py-1.5 text-xs font-semibold border rounded-lg disabled:opacity-40 disabled:cursor-not-allowed">← Prev</button>
+              <button id="audit-log-next" onclick="auditLogPage(1)"  class="btn-primary px-3 py-1.5 text-xs font-semibold border rounded-lg disabled:opacity-40 disabled:cursor-not-allowed">Next →</button>
             </div>
           </div>
         </div>
@@ -465,7 +465,7 @@
               class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none">
           </div>
           <button onclick="createFeatureFlag()"
-            class="mt-3 px-4 py-2 bg-gray-900 text-white text-sm font-bold rounded-lg hover:bg-black transition">
+            class="btn-primary mt-3 px-4 py-2 text-sm font-bold rounded-lg transition">
             Create Flag (disabled, 0% rollout)
           </button>
         </details>
@@ -522,9 +522,9 @@
           </div>
           <div class="flex gap-3 mt-4">
             <button onclick="saveFeatureFlag()"
-              class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition">Save Changes</button>
+              class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">Save Changes</button>
             <button onclick="document.getElementById('ff-edit-panel').classList.add('hidden')"
-              class="px-4 py-2 border border-gray-200 text-gray-600 text-sm font-semibold rounded-lg hover:bg-gray-50 transition">Cancel</button>
+              class="btn-secondary px-4 py-2 border text-sm font-semibold rounded-lg transition">Cancel</button>
           </div>
         </div>
       </section>
@@ -548,7 +548,7 @@
         <div id="md-pane-plans" class="md-pane hidden">
           <div class="flex items-center justify-between mb-3">
             <h2 class="text-sm font-bold text-gray-700">Master Plans</h2>
-            <button onclick="mdOpenAdd('plans')" class="px-3 py-1.5 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition">+ Add Plan</button>
+            <button onclick="mdOpenAdd('plans')" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition">+ Add Plan</button>
           </div>
           <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
             <table class="w-full text-sm admin-responsive-table">
@@ -568,8 +568,8 @@
               <p class="text-xs text-gray-400 mt-0.5">Edit each feature's value per plan, or disable a feature entirely. Drives the pricing page and in-app feature limits.</p>
             </div>
             <div class="flex items-center gap-2">
-              <button onclick="pfOpenAddFeature()" class="px-3 py-1.5 bg-gray-100 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-200 transition">+ Add Feature</button>
-              <button id="pf-save-btn" onclick="pfOpenApplyChooser()" disabled class="px-3 py-1.5 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition disabled:opacity-40 disabled:cursor-not-allowed">Save changes</button>
+              <button onclick="pfOpenAddFeature()" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition">+ Add Feature</button>
+              <button id="pf-save-btn" onclick="pfOpenApplyChooser()" disabled class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">Save changes</button>
             </div>
           </div>
           <div id="md-plan-features-body" class="bg-white rounded-2xl border border-gray-200 overflow-x-auto p-1">
@@ -581,7 +581,7 @@
         <div id="md-pane-assistants" class="md-pane hidden">
           <div class="flex items-center justify-between mb-3">
             <h2 class="text-sm font-bold text-gray-700">Master Assistants</h2>
-            <button onclick="mdOpenAdd('assistants')" class="px-3 py-1.5 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition">+ Add Assistant</button>
+            <button onclick="mdOpenAdd('assistants')" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition">+ Add Assistant</button>
           </div>
           <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
             <table class="w-full text-sm admin-responsive-table">
@@ -603,8 +603,8 @@
               <p class="text-xs text-gray-400 mt-0.5">Switch each capability on or off per assistant type, or disable one entirely. Gates what a hired assistant can actually do.</p>
             </div>
             <div class="flex items-center gap-2">
-              <button onclick="afOpenAddFeature()" class="px-3 py-1.5 bg-gray-100 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-200 transition">+ Add Feature</button>
-              <button id="af-save-btn" onclick="afSave()" disabled class="px-3 py-1.5 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition disabled:opacity-40 disabled:cursor-not-allowed">Save changes</button>
+              <button onclick="afOpenAddFeature()" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition">+ Add Feature</button>
+              <button id="af-save-btn" onclick="afSave()" disabled class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">Save changes</button>
             </div>
           </div>
           <div id="md-assistant-features-body" class="bg-white rounded-2xl border border-gray-200 overflow-x-auto p-1">
@@ -631,7 +631,7 @@
         <div id="md-pane-feature-flags-md" class="md-pane hidden">
           <div class="flex items-center justify-between mb-3">
             <h2 class="text-sm font-bold text-gray-700">Flag Definitions</h2>
-            <button onclick="mdOpenAdd('feature-flags-md')" class="px-3 py-1.5 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition">+ Add Flag</button>
+            <button onclick="mdOpenAdd('feature-flags-md')" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition">+ Add Flag</button>
           </div>
           <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
             <table class="w-full text-sm admin-responsive-table">
@@ -647,7 +647,7 @@
         <div id="md-pane-languages" class="md-pane hidden">
           <div class="flex items-center justify-between mb-3">
             <h2 class="text-sm font-bold text-gray-700">Supported Languages</h2>
-            <button onclick="mdOpenAdd('languages')" class="px-3 py-1.5 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition">+ Add Language</button>
+            <button onclick="mdOpenAdd('languages')" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition">+ Add Language</button>
           </div>
           <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
             <table class="w-full text-sm admin-responsive-table">
@@ -663,7 +663,7 @@
         <div id="md-pane-system-config" class="md-pane hidden">
           <div class="flex items-center justify-between mb-3">
             <h2 class="text-sm font-bold text-gray-700">System Configuration</h2>
-            <button onclick="mdOpenAdd('system-config')" class="px-3 py-1.5 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition">+ Add Config</button>
+            <button onclick="mdOpenAdd('system-config')" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition">+ Add Config</button>
           </div>
           <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
             <table class="w-full text-sm admin-responsive-table">
@@ -680,7 +680,7 @@
           <div class="flex items-center justify-between mb-3">
             <h2 class="text-sm font-bold text-gray-700">Help Articles</h2>
             <div class="flex items-center gap-3">
-              <button onclick="mdPreviewHelpSeed()" class="text-xs text-indigo-700 border border-indigo-200 hover:bg-indigo-50 font-semibold px-3 py-1.5 rounded-lg transition">Seed Preview (Dry Run)</button>
+              <button onclick="mdPreviewHelpSeed()" class="btn-utility text-xs border font-semibold px-3 py-1.5 rounded-lg transition">Seed Preview (Dry Run)</button>
               <a href="/help.html" target="_blank" class="text-xs text-emerald-700 hover:underline font-semibold">View public Help Center →</a>
             </div>
           </div>
@@ -689,7 +689,7 @@
             <div class="flex items-center justify-between mb-3">
               <h3 class="text-sm font-bold text-indigo-800">Seed Preview</h3>
               <div class="flex gap-2">
-                <button onclick="mdApplyHelpSeed()" class="text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-3 py-1.5 rounded-lg transition">Apply Seed</button>
+                <button onclick="mdApplyHelpSeed()" class="btn-primary text-xs font-semibold px-3 py-1.5 rounded-lg transition">Apply Seed</button>
                 <button onclick="document.getElementById('md-help-seed-preview').classList.add('hidden')" class="text-xs text-indigo-600 hover:text-indigo-800 font-semibold px-2 py-1.5">Dismiss</button>
               </div>
             </div>
@@ -723,8 +723,8 @@
           <div id="md-form-fields" class="grid grid-cols-1 sm:grid-cols-2 gap-4"></div>
           <p id="md-plan-warning" class="hidden mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">⚠️ Changes apply to new subscribers only. Existing subscribers retain their current terms until renewal or upgrade.</p>
           <div class="flex gap-3 mt-5">
-            <button onclick="mdSaveRecord()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition">Save</button>
-            <button onclick="mdCloseForm()" class="px-4 py-2 border border-gray-200 text-gray-600 text-sm font-semibold rounded-lg hover:bg-gray-50 transition">Cancel</button>
+            <button onclick="mdSaveRecord()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">Save</button>
+            <button onclick="mdCloseForm()" class="btn-secondary px-4 py-2 border text-sm font-semibold rounded-lg transition">Cancel</button>
           </div>
         </div>
 
@@ -749,8 +749,8 @@
           </div>
           <p class="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">⚠️ Applies to <strong>new</strong> subscribers only. Existing subscribers keep their current price until they change plan (handled separately). Saving mints a new Stripe price and archives the old one.</p>
           <div class="flex gap-3 mt-4">
-            <button id="mp-save-btn" onclick="managePriceSave()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition">Save price</button>
-            <button onclick="managePriceClose()" class="px-4 py-2 border border-gray-200 text-gray-600 text-sm font-semibold rounded-lg hover:bg-gray-50 transition">Cancel</button>
+            <button id="mp-save-btn" onclick="managePriceSave()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">Save price</button>
+            <button onclick="managePriceClose()" class="btn-secondary px-4 py-2 border text-sm font-semibold rounded-lg transition">Cancel</button>
             <span id="mp-status" class="self-center text-xs"></span>
           </div>
           <h4 class="text-xs font-bold text-gray-500 uppercase tracking-wide mt-6 mb-2">Price history</h4>
@@ -773,7 +773,7 @@
             <h2 class="text-lg font-bold text-gray-900">Admin Role Management</h2>
             <p class="text-sm text-gray-500 mt-0.5">View and manage admin accounts. Super admin promotions require 4-eyes approval.</p>
           </div>
-          <button onclick="loadManageAdmins()" class="text-sm px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700">Refresh</button>
+          <button onclick="loadManageAdmins()" class="btn-utility text-sm px-4 py-2 rounded-lg font-semibold">Refresh</button>
         </div>
         <div id="manage-admins-body">
           <p class="text-gray-400 text-sm">Loading…</p>
@@ -787,7 +787,7 @@
             <h2 class="text-lg font-bold text-gray-900">Dunning Queue</h2>
             <p class="text-sm text-gray-500 mt-0.5">Workspaces with failed payments (plan status: past_due). Sorted by most overdue first.</p>
           </div>
-          <button onclick="loadDunningQueue()" class="text-sm px-4 py-2 bg-orange-600 text-white rounded-lg font-semibold hover:bg-orange-700">Refresh</button>
+          <button onclick="loadDunningQueue()" class="btn-utility text-sm px-4 py-2 rounded-lg font-semibold">Refresh</button>
         </div>
         <div id="dunning-queue-body">
           <p class="text-gray-400 text-sm">Loading…</p>
@@ -801,7 +801,7 @@
             <h2 class="text-lg font-bold text-gray-900">Payment Disputes</h2>
             <p class="text-sm text-gray-500 mt-0.5">Stripe chargebacks opened against the platform. Evidence deadlines are highlighted when approaching.</p>
           </div>
-          <button onclick="loadDisputes()" class="text-sm px-4 py-2 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700">Refresh</button>
+          <button onclick="loadDisputes()" class="btn-utility text-sm px-4 py-2 rounded-lg font-semibold">Refresh</button>
         </div>
         <div id="disputes-body">
           <p class="text-gray-400 text-sm">Loading…</p>
@@ -1016,7 +1016,7 @@
         <div class="bg-white rounded-2xl border border-gray-200 p-5">
           <div class="flex items-center justify-between mb-3">
             <h3 class="text-sm font-bold text-gray-700">Data Categories — LLM Transfers (last 30 days)</h3>
-            <button onclick="downloadRopaExport()" class="px-3 py-1.5 text-xs font-bold bg-gray-900 text-white rounded-lg hover:bg-black transition">⬇ Article 30 RoPA Export</button>
+            <button onclick="downloadRopaExport()" class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition">⬇ Article 30 RoPA Export</button>
           </div>
           <div id="cogs-special-alert" class="hidden mb-3 flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
             <span class="text-base">🚨</span>
@@ -1033,6 +1033,67 @@
       </section>
 
       <!-- ── Breach Response — US-GDPR-3.2.1 ─────────────────────────────── -->
+      <!-- ── Bias Audit (US-GOV-3.3.1) ─────────────────────────────────────────────────────────
+           The quarterly reminder email (quarterly-bias-reminder.ts) links here. The API
+           (bias-audit.ts) existed for months with no screen at all, so the link landed on the
+           dashboard. Super admin only — the API enforces it. -->
+      <section id="view-bias-audit" class="admin-view hidden space-y-6 overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div>
+          <h2 class="text-lg font-extrabold text-gray-900">Bias Audit</h2>
+          <p class="text-sm text-gray-500 mt-0.5">Quarterly review of every active assistant's system prompt, bias incidents from sampling, and the monthly sampling reports.</p>
+        </div>
+
+        <div class="bg-white border border-gray-200 rounded-2xl p-5">
+          <div class="flex items-start justify-between gap-3 flex-wrap mb-3">
+            <div>
+              <h3 class="text-sm font-bold text-gray-800">Record a quarterly review</h3>
+              <p class="text-xs text-gray-500 mt-0.5" id="ba-due-line">Check each active assistant's prompt against the list below, then record what you found.</p>
+            </div>
+            <button type="button" onclick="adminGoTo('master-data'); setTimeout(() => mdSwitchTab('assistant-versions'), 0);"
+              class="px-3 py-1.5 text-xs font-bold rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer">Open the prompts (Master Data → Versions)</button>
+          </div>
+          <ul class="text-xs text-gray-600 list-disc pl-5 space-y-1 mb-4">
+            <li>Demographic proxy language (e.g. gendered terms, nationality assumptions)</li>
+            <li>Communication style framing (formal vs. informal defaults)</li>
+            <li>Geographic / language quality filtering</li>
+            <li>Lead priority criteria (name-origin clusters, region weighting)</li>
+          </ul>
+          <div class="grid gap-3" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
+            <label class="block text-xs font-bold text-gray-600">Prompts reviewed <span class="text-red-500">*</span>
+              <input id="ba-prompts" type="number" min="0" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-normal">
+            </label>
+            <label class="block text-xs font-bold text-gray-600">Findings <span class="text-red-500">*</span>
+              <input id="ba-findings" type="number" min="0" value="0" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-normal">
+            </label>
+          </div>
+          <label class="block text-xs font-bold text-gray-600 mt-3">Actions required
+            <textarea id="ba-actions" rows="2" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-normal" placeholder="None, or what has to change and in which prompt"></textarea>
+          </label>
+          <label class="block text-xs font-bold text-gray-600 mt-3">Notes
+            <textarea id="ba-notes" rows="2" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-normal"></textarea>
+          </label>
+          <div class="flex items-center gap-3 mt-4">
+            <button type="button" id="ba-save" onclick="saveBiasReview()" class="btn-primary px-4 py-2 text-sm font-bold rounded-xl cursor-pointer">Record review</button>
+            <span id="ba-save-msg" class="text-xs font-semibold"></span>
+          </div>
+        </div>
+
+        <div class="bg-white border border-gray-200 rounded-2xl p-5">
+          <h3 class="text-sm font-bold text-gray-800 mb-3">Review history</h3>
+          <div id="ba-reviews" class="text-sm text-gray-400">Loading…</div>
+        </div>
+
+        <div class="bg-white border border-gray-200 rounded-2xl p-5">
+          <h3 class="text-sm font-bold text-gray-800 mb-3">Bias incidents</h3>
+          <div id="ba-incidents" class="text-sm text-gray-400">Loading…</div>
+        </div>
+
+        <div class="bg-white border border-gray-200 rounded-2xl p-5">
+          <h3 class="text-sm font-bold text-gray-800 mb-3">Sampling reports</h3>
+          <div id="ba-reports" class="text-sm text-gray-400">Loading…</div>
+        </div>
+      </section>
+
       <section id="view-breach-response" class="admin-view hidden space-y-6">
 
         <!-- Header row -->
@@ -1042,7 +1103,7 @@
             <p class="text-sm text-gray-500 mt-0.5">Article 33/34 GDPR incident tracking and notification workflow</p>
           </div>
           <button onclick="openLogIncidentModal()"
-            class="px-4 py-2 text-sm font-bold text-white bg-red-600 hover:bg-red-700 rounded-xl transition cursor-pointer">
+            class="btn-primary px-4 py-2 text-sm font-bold rounded-xl transition cursor-pointer">
             + Log New Incident
           </button>
         </div>
@@ -1089,9 +1150,9 @@
             </div>
             <div class="flex gap-2 pt-2">
               <button onclick="document.getElementById('modal-log-incident').classList.add('hidden')" type="button"
-                class="flex-1 py-2.5 text-sm font-bold text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50 transition cursor-pointer">Cancel</button>
+                class="btn-secondary flex-1 py-2.5 text-sm font-bold border rounded-xl transition cursor-pointer">Cancel</button>
               <button onclick="submitLogIncident()" type="button"
-                class="flex-1 py-2.5 text-sm font-bold text-white bg-red-600 hover:bg-red-700 rounded-xl transition cursor-pointer">Log Incident</button>
+                class="btn-primary flex-1 py-2.5 text-sm font-bold rounded-xl transition cursor-pointer">Log Incident</button>
             </div>
           </div>
         </div>
@@ -1125,9 +1186,9 @@
             </div>
             <div class="flex gap-2 pt-2">
               <button onclick="document.getElementById('modal-ico-notification').classList.add('hidden')" type="button"
-                class="flex-1 py-2.5 text-sm font-bold text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50 transition cursor-pointer">Cancel</button>
+                class="btn-secondary flex-1 py-2.5 text-sm font-bold border rounded-xl transition cursor-pointer">Cancel</button>
               <button onclick="submitIcoNotification()" type="button"
-                class="flex-1 py-2.5 text-sm font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl transition cursor-pointer">Submit to ICO</button>
+                class="btn-primary flex-1 py-2.5 text-sm font-bold rounded-xl transition cursor-pointer">Submit to ICO</button>
             </div>
           </div>
         </div>
@@ -1142,10 +1203,10 @@
             <p class="text-sm text-gray-500 mt-0.5">Compile and inspect the full LLM blueprint for any assistant</p>
           </div>
           <div class="flex gap-2">
-            <button onclick="bpDryRun()" class="px-3 py-1.5 text-sm font-semibold border border-gray-300 rounded-lg hover:bg-gray-50 transition">Dry Run</button>
-            <button onclick="bpPreviewPayload()" id="bp-preview-btn" class="px-3 py-1.5 text-sm font-semibold border border-emerald-600 text-emerald-700 rounded-lg hover:bg-emerald-50 transition disabled:opacity-40 disabled:cursor-not-allowed" disabled>Preview LLM Payload</button>
-            <button onclick="bpOpenTestPanel()" id="bp-test-btn" class="px-3 py-1.5 text-sm font-semibold border border-violet-600 text-violet-700 rounded-lg hover:bg-violet-50 transition disabled:opacity-40 disabled:cursor-not-allowed" disabled>Test Generation</button>
-            <button onclick="bpSendToLlm()" id="bp-send-btn" class="px-3 py-1.5 text-sm font-semibold bg-emerald-700 text-white rounded-lg hover:bg-emerald-800 transition disabled:opacity-40 disabled:cursor-not-allowed" disabled>Send to LLM</button>
+            <button onclick="bpDryRun()" class="btn-secondary px-3 py-1.5 text-sm font-semibold border rounded-lg transition">Dry Run</button>
+            <button onclick="bpPreviewPayload()" id="bp-preview-btn" class="btn-utility px-3 py-1.5 text-sm font-semibold border rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed" disabled>Preview LLM Payload</button>
+            <button onclick="bpOpenTestPanel()" id="bp-test-btn" class="btn-secondary px-3 py-1.5 text-sm font-semibold border rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed" disabled>Test Generation</button>
+            <button onclick="bpSendToLlm()" id="bp-send-btn" class="btn-primary px-3 py-1.5 text-sm font-semibold rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed" disabled>Send to LLM</button>
           </div>
         </div>
 
@@ -1164,14 +1225,14 @@
             </select>
           </div>
           <div class="flex items-end">
-            <button onclick="bpCompile()" class="px-4 py-2 text-sm font-bold bg-gray-900 text-white rounded-lg hover:bg-black transition">Compile Blueprint</button>
+            <button onclick="bpCompile()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">Compile Blueprint</button>
           </div>
         </div>
 
         <!-- Stale notice -->
         <div id="bp-stale-notice" class="hidden bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3 text-sm">
           <span class="text-amber-800 font-medium">Blueprint is stale — source data has changed since last compile.</span>
-          <button onclick="bpCompile(true)" class="text-xs font-bold text-amber-700 border border-amber-300 rounded-lg px-3 py-1 hover:bg-amber-100 transition">Recompile Now</button>
+          <button onclick="bpCompile(true)" class="btn-secondary text-xs font-bold border rounded-lg px-3 py-1 transition">Recompile Now</button>
         </div>
 
         <!-- Blocking gap banner -->
@@ -1229,7 +1290,7 @@
                 <span class="absolute bottom-2 right-3 text-xs text-gray-400"><span id="bp-test-ctx-count">0</span>/500</span>
               </div>
             </div>
-            <button id="bp-test-run-btn" onclick="bpRunTest()" class="px-5 py-2 bg-violet-700 hover:bg-violet-800 text-white text-sm font-bold rounded-xl transition cursor-pointer">Run Test</button>
+            <button id="bp-test-run-btn" onclick="bpRunTest()" class="btn-primary px-5 py-2 text-sm font-bold rounded-xl transition cursor-pointer">Run Test</button>
           </div>
 
           <!-- Status / progress -->
@@ -1272,9 +1333,9 @@
 
             <!-- Actions -->
             <div class="flex flex-wrap gap-2">
-              <button onclick="bpTestRerun()" class="px-4 py-2 text-sm font-bold border border-violet-600 text-violet-700 hover:bg-violet-50 rounded-xl transition cursor-pointer">Re-run</button>
-              <button onclick="bpTestCopy()" class="px-4 py-2 text-sm font-bold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-xl transition cursor-pointer">Copy Output</button>
-              <button onclick="bpTestSaveReference()" class="px-4 py-2 text-sm font-bold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-xl transition cursor-pointer">Save as Reference</button>
+              <button onclick="bpTestRerun()" class="btn-secondary px-4 py-2 text-sm font-bold border rounded-xl transition cursor-pointer">Re-run</button>
+              <button onclick="bpTestCopy()" class="btn-utility px-4 py-2 text-sm font-bold border rounded-xl transition cursor-pointer">Copy Output</button>
+              <button onclick="bpTestSaveReference()" class="btn-primary px-4 py-2 text-sm font-bold border rounded-xl transition cursor-pointer">Save as Reference</button>
               <button onclick="bpCloseTestPanel()" class="px-4 py-2 text-sm font-bold text-gray-400 hover:text-gray-700 rounded-xl transition cursor-pointer">Close</button>
             </div>
           </div>
@@ -1458,9 +1519,9 @@
               </div>
             </div>
             <div class="flex items-center gap-2">
-              <button onclick="restoreEmailTemplate()" id="et-restore-btn" class="hidden px-3 py-2 text-sm font-semibold border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition">Restore to default</button>
-              <button onclick="sendEmailTest()" id="et-test-btn" class="px-3 py-2 text-sm font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition">Send test to me</button>
-              <button onclick="saveEmailTemplate()" id="et-save-btn" class="px-4 py-2 text-sm font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition">Save</button>
+              <button onclick="restoreEmailTemplate()" id="et-restore-btn" class="hidden btn-secondary px-3 py-2 text-sm font-semibold border rounded-lg transition">Restore to default</button>
+              <button onclick="sendEmailTest()" id="et-test-btn" class="btn-golive px-3 py-2 text-sm font-semibold border rounded-lg transition">Send test to me</button>
+              <button onclick="saveEmailTemplate()" id="et-save-btn" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">Save</button>
             </div>
           </div>
 
@@ -1494,8 +1555,8 @@
               <div>
                 <div class="flex items-center justify-between mb-1">
                   <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs font-bold">
-                    <button type="button" id="et-tab-rich" onclick="setEmailBodyTab('rich')" class="px-3 py-1 bg-emerald-600 text-white">Rich text</button>
-                    <button type="button" id="et-tab-plain" onclick="setEmailBodyTab('plain')" class="px-3 py-1 bg-white text-gray-600">Plain text</button>
+                    <button type="button" id="et-tab-rich" onclick="setEmailBodyTab('rich')" class="btn-primary px-3 py-1">Rich text</button>
+                    <button type="button" id="et-tab-plain" onclick="setEmailBodyTab('plain')" class="btn-secondary px-3 py-1 border">Plain text</button>
                   </div>
                   <select id="et-var-picker" onchange="insertEmailVariable(this.value); this.value='';"
                           class="text-xs border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white">
@@ -1522,8 +1583,8 @@
               <div class="flex items-center justify-between mb-2">
                 <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide">Live Preview</label>
                 <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs font-semibold">
-                  <button id="et-pv-desktop" onclick="setEmailPreviewMode('desktop')" class="px-3 py-1 bg-emerald-600 text-white">Desktop</button>
-                  <button id="et-pv-mobile" onclick="setEmailPreviewMode('mobile')" class="px-3 py-1 bg-white text-gray-600">Mobile</button>
+                  <button id="et-pv-desktop" onclick="setEmailPreviewMode('desktop')" class="btn-primary px-3 py-1">Desktop</button>
+                  <button id="et-pv-mobile" onclick="setEmailPreviewMode('mobile')" class="btn-secondary px-3 py-1 border">Mobile</button>
                 </div>
               </div>
               <p class="text-xs text-gray-400 mb-2">Subject: <span id="et-pv-subject" class="font-semibold text-gray-600"></span></p>
@@ -1557,8 +1618,8 @@
               </div>
             </div>
             <div class="flex items-center gap-2">
-              <button onclick="restoreNotifTemplate()" id="nt-restore-btn" class="hidden px-3 py-2 text-sm font-semibold border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition">Restore to default</button>
-              <button onclick="saveNotifTemplate()" id="nt-save-btn" class="px-4 py-2 text-sm font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition">Save</button>
+              <button onclick="restoreNotifTemplate()" id="nt-restore-btn" class="hidden btn-secondary px-3 py-2 text-sm font-semibold border rounded-lg transition">Restore to default</button>
+              <button onclick="saveNotifTemplate()" id="nt-save-btn" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">Save</button>
             </div>
           </div>
 
@@ -1587,8 +1648,8 @@
               <div>
                 <div class="flex items-center justify-between mb-1">
                   <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs font-bold">
-                    <button type="button" id="nt-tab-source" onclick="setNotifBodyTab('source')" class="px-3 py-1 bg-emerald-600 text-white">Plain text</button>
-                    <button type="button" id="nt-tab-preview" onclick="setNotifBodyTab('preview')" class="px-3 py-1 bg-white text-gray-600">Rich preview</button>
+                    <button type="button" id="nt-tab-source" onclick="setNotifBodyTab('source')" class="btn-primary px-3 py-1">Plain text</button>
+                    <button type="button" id="nt-tab-preview" onclick="setNotifBodyTab('preview')" class="btn-utility px-3 py-1">Rich preview</button>
                   </div>
                   <select id="nt-var-picker" onchange="insertNotifVariable(this.value); this.value='';"
                           class="text-xs border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white">
@@ -1684,9 +1745,9 @@
 
             <div class="flex items-center gap-2 pt-1">
               <button onclick="sendUserNotification()" id="sn-send-btn" disabled
-                      class="px-4 py-2 text-sm font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition disabled:opacity-50 disabled:cursor-not-allowed">Send message</button>
+                      class="btn-golive px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Send message</button>
               <button onclick="resetSendNotification()" type="button"
-                      class="px-3 py-2 text-sm font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition">Clear</button>
+                      class="btn-secondary px-3 py-2 text-sm font-semibold border rounded-lg transition">Clear</button>
             </div>
           </div>
 
@@ -1717,11 +1778,11 @@
             <p class="text-sm text-gray-500 mt-0.5">User-submitted issues from the testing phase. Update the status to notify the reporter.</p>
           </div>
           <div class="flex items-center gap-2">
-            <button onclick="passAllToDeveloper()" id="ir-pass-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🤖 Pass all to Developer</button>
-            <button onclick="moveAllToBacklog()" id="ir-backlog-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition disabled:opacity-60 disabled:cursor-not-allowed">📥 Move all to Backlog</button>
-            <button onclick="moveBacklogAllToDeveloper()" id="ir-backlog-dev-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🤖 Move All to a Developer</button>
-            <button onclick="requestMergeAll()" id="ir-merge-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🔀 Merge all to staging</button>
-            <button onclick="loadIssueReports()" class="px-3 py-2 text-sm font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition">↻ Refresh</button>
+            <button onclick="passAllToDeveloper()" id="ir-pass-all-btn" class="hidden btn-primary px-3 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">🤖 Pass all to Developer</button>
+            <button onclick="moveAllToBacklog()" id="ir-backlog-all-btn" class="hidden btn-primary px-3 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">📥 Move all to Backlog</button>
+            <button onclick="moveBacklogAllToDeveloper()" id="ir-backlog-dev-all-btn" class="hidden btn-primary px-3 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">🤖 Move All to a Developer</button>
+            <button onclick="requestMergeAll()" id="ir-merge-all-btn" class="hidden btn-primary px-3 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">🔀 Merge all to staging</button>
+            <button onclick="loadIssueReports()" class="btn-utility px-3 py-2 text-sm font-semibold border rounded-lg transition">↻ Refresh</button>
           </div>
         </div>
 
@@ -1768,14 +1829,14 @@
             <p class="text-sm text-gray-500 mt-0.5">Moderate user submissions and plan the delivery roadmap. User ideas land as "Pending Review".</p>
           </div>
           <div class="flex items-center gap-2">
-            <button onclick="openRoadmapAdd()" class="px-3 py-2 text-sm font-semibold bg-gray-900 text-white rounded-lg hover:bg-black transition">+ Add request</button>
-            <button onclick="loadFeatureRoadmap()" class="px-3 py-2 text-sm font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition">↻ Refresh</button>
+            <button onclick="openRoadmapAdd()" class="btn-primary px-3 py-2 text-sm font-semibold rounded-lg transition">+ Add request</button>
+            <button onclick="loadFeatureRoadmap()" class="btn-utility px-3 py-2 text-sm font-semibold border rounded-lg transition">↻ Refresh</button>
           </div>
         </div>
 
         <!-- Sub-tabs -->
         <div class="flex gap-1 mb-4 bg-gray-100 rounded-lg p-1 w-max">
-          <button id="fr-subtab-moderation" onclick="frSwitchPane('moderation')" class="px-4 py-1.5 text-sm font-semibold rounded-md bg-white text-gray-900 shadow-sm">Moderation</button>
+          <button id="fr-subtab-moderation" onclick="frSwitchPane('moderation')" class="btn-secondary px-4 py-1.5 text-sm font-semibold rounded-md shadow-sm border">Moderation</button>
           <button id="fr-subtab-roadmap" onclick="frSwitchPane('roadmap')" class="px-4 py-1.5 text-sm font-semibold rounded-md text-gray-500">Roadmap (Gantt)</button>
         </div>
 
@@ -1801,8 +1862,8 @@
               <p class="text-[11px] font-bold uppercase text-violet-500 mb-1">AI suggestion</p>
               <p id="fr-enhance-text" class="text-sm text-gray-700 whitespace-pre-wrap"></p>
               <div class="flex gap-2 mt-2">
-                <button onclick="frAcceptEnhance()" class="px-3 py-1 bg-violet-600 text-white text-xs font-bold rounded-md hover:bg-violet-700 transition">Use this</button>
-                <button onclick="frRejectEnhance()" class="px-3 py-1 border border-gray-300 text-gray-600 text-xs font-semibold rounded-md hover:bg-gray-50 transition">Keep mine</button>
+                <button onclick="frAcceptEnhance()" class="btn-primary px-3 py-1 text-xs font-bold rounded-md transition">Use this</button>
+                <button onclick="frRejectEnhance()" class="btn-secondary px-3 py-1 border text-xs font-semibold rounded-md transition">Keep mine</button>
               </div>
             </div>
           </div>
@@ -1839,8 +1900,8 @@
             </div>
           </div>
           <div class="flex items-center gap-2 pt-1">
-            <button onclick="submitRoadmapForm()" class="px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-lg hover:bg-emerald-700 transition">Save</button>
-            <button onclick="closeRoadmapForm()" class="px-4 py-2 border border-gray-300 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-50 transition">Cancel</button>
+            <button onclick="submitRoadmapForm()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">Save</button>
+            <button onclick="closeRoadmapForm()" class="btn-secondary px-4 py-2 border text-sm font-semibold rounded-lg transition">Cancel</button>
           </div>
         </div>
 
@@ -1907,7 +1968,7 @@
         <textarea id="lifecycle-note" rows="2" placeholder="Reason for this transition…" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none"></textarea>
       </div>
       <div id="lifecycle-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
-      <button onclick="submitLifecycleTransition()" class="w-full py-2.5 text-sm font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Apply Transition</button>
+      <button onclick="submitLifecycleTransition()" class="btn-primary w-full py-2.5 text-sm font-bold rounded-lg">Apply Transition</button>
     </div>
   </div>
 </div>
@@ -1918,7 +1979,7 @@
     <button onclick="document.getElementById('version-modal').classList.add('hidden')" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold">✕</button>
     <h3 id="version-modal-title" class="text-base font-bold text-gray-900 mb-1">Version History</h3>
     <div class="flex gap-2 mb-4">
-      <button onclick="openNewVersionForm()" class="px-3 py-1.5 text-xs font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">+ New Version</button>
+      <button onclick="openNewVersionForm()" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg">+ New Version</button>
     </div>
     <!-- New version form (hidden by default) -->
     <div id="new-version-form" class="hidden mb-4 p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-3">
@@ -1932,8 +1993,8 @@
         <input id="nv-change-note" type="text" placeholder="What changed and why…" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
       </div>
       <div class="flex gap-2">
-        <button onclick="submitNewVersion()" class="px-4 py-1.5 text-xs font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">Save Version</button>
-        <button onclick="document.getElementById('new-version-form').classList.add('hidden')" class="px-4 py-1.5 text-xs font-bold bg-gray-100 text-gray-600 rounded-lg">Cancel</button>
+        <button onclick="submitNewVersion()" class="btn-primary px-4 py-1.5 text-xs font-bold rounded-lg">Save Version</button>
+        <button onclick="document.getElementById('new-version-form').classList.add('hidden')" class="btn-secondary px-4 py-1.5 text-xs font-bold rounded-lg border">Cancel</button>
       </div>
     </div>
     <div id="version-history-list" class="overflow-y-auto flex-1 space-y-2"></div>
@@ -1948,7 +2009,7 @@
     <p class="text-sm text-gray-500 mb-4">Each assistant requires an individual changelog note before publishing.</p>
     <div id="bulk-publish-list" class="space-y-3 mb-4"></div>
     <div id="bulk-publish-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3"></div>
-    <button onclick="submitBulkPublish()" class="w-full py-2.5 text-sm font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700">🚀 Publish All to Live</button>
+    <button onclick="submitBulkPublish()" class="btn-golive w-full py-2.5 text-sm font-bold rounded-lg">🚀 Publish All to Live</button>
   </div>
 </div>
 
@@ -1976,7 +2037,7 @@
         <textarea id="billing-override-reason" rows="2" placeholder="Mandatory reason / note…" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none"></textarea>
       </div>
       <div id="billing-override-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
-      <button onclick="submitBillingOverride()" class="w-full py-2.5 text-sm font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700">Apply Override</button>
+      <button onclick="submitBillingOverride()" class="btn-primary w-full py-2.5 text-sm font-bold rounded-lg">Apply Override</button>
     </div>
   </div>
 </div>
@@ -2010,7 +2071,7 @@
         <textarea id="ai-credits-reason" rows="2" placeholder="Mandatory reason / note…" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none"></textarea>
       </div>
       <div id="ai-credits-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
-      <button onclick="submitAiCredits()" class="w-full py-2.5 text-sm font-bold bg-pink-600 text-white rounded-lg hover:bg-pink-700">Apply Adjustment</button>
+      <button onclick="submitAiCredits()" class="btn-primary w-full py-2.5 text-sm font-bold rounded-lg">Apply Adjustment</button>
     </div>
 
     <div class="mt-5">
@@ -2069,8 +2130,8 @@
 
     <!-- Action buttons -->
     <div class="flex gap-3 mt-5">
-      <button id="cascade-confirm-btn" onclick="confirmCascadeDelete()" class="hidden flex-1 py-2.5 text-sm font-bold text-white bg-red-600 hover:bg-red-700 rounded-xl transition">Delete</button>
-      <button onclick="closeCascadeDeleteSheet()" class="flex-1 py-2.5 text-sm font-semibold text-gray-700 border border-gray-200 rounded-xl hover:bg-gray-50 transition">Cancel</button>
+      <button id="cascade-confirm-btn" onclick="confirmCascadeDelete()" class="hidden btn-destructive flex-1 py-2.5 text-sm font-bold rounded-xl transition">Delete</button>
+      <button onclick="closeCascadeDeleteSheet()" class="btn-secondary flex-1 py-2.5 text-sm font-semibold border rounded-xl transition">Cancel</button>
     </div>
   </div>
 </div>
@@ -2084,8 +2145,8 @@
     <p class="text-xs text-gray-500 mb-4">Review the pre-send checklist before activating this blueprint.</p>
     <div id="bp-send-checklist-body" class="space-y-2 text-sm text-gray-700 mb-4"></div>
     <div class="flex gap-2">
-      <button onclick="closeBottomSheet('bp-send')" class="flex-1 px-4 py-2 text-sm font-semibold border border-gray-300 rounded-lg hover:bg-gray-50 transition">Cancel</button>
-      <button onclick="bpConfirmSend()" class="flex-1 px-4 py-2 text-sm font-semibold bg-emerald-700 text-white rounded-lg hover:bg-emerald-800 transition">Confirm Send</button>
+      <button onclick="closeBottomSheet('bp-send')" class="btn-secondary flex-1 px-4 py-2 text-sm font-semibold border rounded-lg transition">Cancel</button>
+      <button onclick="bpConfirmSend()" class="btn-primary flex-1 px-4 py-2 text-sm font-semibold rounded-lg transition">Confirm Send</button>
     </div>
   </div>
 </div>
@@ -2424,7 +2485,7 @@ const VIEW_LABELS = {
   'manage-admins': 'Admin Accounts', 'kill-switches': 'Emergency Controls',
   gamification: 'Gamification Settings', 'session-timeout': 'Session Timeout', 'reward-audits': 'Reward Audits',
   'feature-flags': 'Feature Flags', contacts: 'Contacts',
-  'breach-response': 'Breach Response', 'master-data': 'Master Data',
+  'breach-response': 'Breach Response', 'bias-audit': 'Bias Audit', 'master-data': 'Master Data',
   workspaces: 'Workspaces', 'workspace-detail': 'Workspace Detail',
   'blueprint-inspector': 'Blueprint Inspector', sandbox: 'Sandbox Environment',
   'email-templates': 'Manage Emails', 'notification-templates': 'Notification Templates',
@@ -2516,6 +2577,7 @@ const ADMIN_CATS = {
     { view: 'logs',            icon: '📋', label: 'System Logs',      perm: 'view_audit_log',      group: 'Monitoring' },
     { view: 'security-abuse',  icon: '🚩', label: 'Security & Abuse', perm: 'view_security_abuse', group: 'Monitoring' },
     { view: 'breach-response', icon: '🚨', label: 'Breach Response',  perm: 'breach_response',     group: 'Incidents' },
+    { view: 'bias-audit',      icon: '⚖️', label: 'Bias Audit',       perm: 'breach_response',     group: 'Incidents' },
   ]},
 };
 
@@ -2812,6 +2874,7 @@ function adminNav(view) {
   if (view === 'reward-audits')   loadRewardAudits();
   if (view === 'feature-flags')   loadFeatureFlags();
   if (view === 'breach-response') loadBreachResponse();
+  if (view === 'bias-audit')      loadBiasAudit();
   if (view === 'master-data')     { if (!_mdActiveTab) mdSwitchTab('plans'); else mdLoadTab(_mdActiveTab); }
   if (view === 'workspaces')          loadWorkspaces();
   if (view === 'blueprint-inspector') initBlueprintInspector();
@@ -3187,7 +3250,7 @@ async function openNotifEditor(key) {
       _ntVariables.map(v => `<option value="${v.key}">${escapeHtmlJs(v.label)}</option>`).join('');
     const chips = document.getElementById('nt-var-list');
     chips.innerHTML = _ntVariables.length
-      ? _ntVariables.map(v => `<button type="button" onclick="insertNotifVariable('${v.key}')" title="${escapeHtmlJs(v.label)}" class="font-mono px-2 py-0.5 rounded-md bg-gray-100 text-gray-600 hover:bg-emerald-50 hover:text-emerald-700 border border-gray-200">{{${escapeHtmlJs(v.key)}}}</button>`).join('')
+      ? _ntVariables.map(v => `<button type="button" onclick="insertNotifVariable('${v.key}')" title="${escapeHtmlJs(v.label)}" class="btn-secondary font-mono px-2 py-0.5 rounded-md border">{{${escapeHtmlJs(v.key)}}}</button>`).join('')
       : '<span class="text-gray-400">This notification has no dynamic variables.</span>';
 
     // Track which field Insert Variable should target.
@@ -3799,9 +3862,9 @@ function bpPreviewPayload() {
       <p class="text-xs text-gray-500 mt-0.5">${chars.toLocaleString()} characters — approx. ${tokens.toLocaleString()} tokens</p>
     </div>
     <div class="flex gap-2">
-      <button onclick="navigator.clipboard.writeText(document.getElementById('bp-payload-text').value)" class="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-100">Copy</button>
-      <button onclick="bpDownloadPayload()" class="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-100">Download .txt</button>
-      <button onclick="document.getElementById('bp-payload-panel').remove()" class="px-3 py-1.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-black">Close</button>
+      <button onclick="navigator.clipboard.writeText(document.getElementById('bp-payload-text').value)" class="btn-utility px-3 py-1.5 text-sm border rounded-lg">Copy</button>
+      <button onclick="bpDownloadPayload()" class="btn-utility px-3 py-1.5 text-sm border rounded-lg">Download .txt</button>
+      <button onclick="document.getElementById('bp-payload-panel').remove()" class="btn-secondary px-3 py-1.5 text-sm rounded-lg border">Close</button>
     </div>
   </div>
   <textarea id="bp-payload-text" class="flex-1 font-mono text-xs p-6 resize-none border-none focus:outline-none" readonly>${payload.replace(/</g,'&lt;')}</textarea>`;
@@ -3899,7 +3962,7 @@ async function bpLoadHistory() {
 
     el.innerHTML = `<div class="flex items-center justify-between mb-2">
         <p class="text-xs text-gray-500 font-semibold">Select two blueprint versions to compare</p>
-        <button onclick="bpCompareSelected()" class="px-3 py-1 text-xs font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40" id="bp-compare-btn" disabled>Compare selected</button>
+        <button onclick="bpCompareSelected()" class="btn-primary px-3 py-1 text-xs font-bold rounded-lg disabled:opacity-40" id="bp-compare-btn" disabled>Compare selected</button>
       </div>` + bpRowsHtml + (testRowsHtml ? `<p class="text-xs font-semibold text-gray-400 mt-3 mb-1">Test Runs</p>` + testRowsHtml : '');
   } catch { el.innerHTML = '<p class="text-red-500 text-xs">Failed to load history.</p>'; }
 }
@@ -3922,7 +3985,7 @@ function bpViewHistorySnapshot(idx) {
       <h2 class="font-extrabold text-gray-900">Frozen Snapshot</h2>
       <p class="text-xs text-gray-500 mt-0.5">${row.blueprintVersion} — ${fmt(row.compiledAt)} — ${row.completenessPercent}% complete</p>
     </div>
-    <button onclick="document.getElementById('bp-snapshot-panel').remove()" class="px-3 py-1.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-black">Close</button>
+    <button onclick="document.getElementById('bp-snapshot-panel').remove()" class="btn-secondary px-3 py-1.5 text-sm rounded-lg border">Close</button>
   </div>
   <div id="bp-snapshot-body" class="flex-1 overflow-auto p-6 space-y-3"></div>`;
   const body = panel.querySelector('#bp-snapshot-body');
@@ -3952,7 +4015,7 @@ function bpCompareSelected() {
       <h2 class="font-extrabold text-gray-900">Version Comparison</h2>
       <p class="text-xs text-gray-500 mt-0.5">${a.blueprintVersion?.slice(0,12)}… vs ${b.blueprintVersion?.slice(0,12)}…</p>
     </div>
-    <button onclick="document.getElementById('bp-compare-panel').remove()" class="px-3 py-1.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-black">Close</button>
+    <button onclick="document.getElementById('bp-compare-panel').remove()" class="btn-secondary px-3 py-1.5 text-sm rounded-lg border">Close</button>
   </div>
   <div class="flex-1 overflow-auto p-6 space-y-4">${
     Object.keys({ ...a.sections, ...b.sections }).map(key => {
@@ -4226,7 +4289,7 @@ function bpViewTestSnapshot(r) {
       <h2 class="font-extrabold text-gray-900">Admin Test Result</h2>
       <p class="text-xs text-gray-500 mt-0.5">${fmt(r.createdAt)} — ${platformLabel} — by ${r.adminName || 'Admin'}</p>
     </div>
-    <button onclick="document.getElementById('bp-test-snapshot-panel').remove()" class="px-3 py-1.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-black">Close</button>
+    <button onclick="document.getElementById('bp-test-snapshot-panel').remove()" class="btn-secondary px-3 py-1.5 text-sm rounded-lg border">Close</button>
   </div>
   <div class="flex-1 overflow-auto p-6 space-y-4">
     <div class="bg-white border border-gray-200 rounded-xl p-4">
@@ -4317,7 +4380,7 @@ async function loadPublishPipeline() {
               <p class="text-xs text-red-700 mt-0.5">${reason.errorMessage ?? 'Unknown error'} ${reason.errorCode ? `(code ${reason.errorCode})` : ''}</p>
               <p class="text-xs text-gray-400 mt-0.5">Attempts: ${p.attemptCount ?? 0}</p>
             </div>
-            <button onclick="ppRetryPost(${p.id})" class="shrink-0 px-3 py-1.5 text-xs font-bold bg-gray-900 text-white rounded-lg hover:bg-black transition">Retry</button>
+            <button onclick="ppRetryPost(${p.id})" class="btn-utility shrink-0 px-3 py-1.5 text-xs font-bold rounded-lg transition">Retry</button>
           </div>
         </div>`;
       }).join('');
@@ -4592,7 +4655,7 @@ async function openIssuePanel(id) {
         </div>
         <label class="block text-xs font-bold uppercase text-gray-400">Message to reporter <span class="text-gray-300 font-normal">(optional)</span></label>
         <textarea id="ir-admin-message" rows="3" placeholder="Supporting message — sent to the reporter with the status update…" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 resize-none focus:ring-2 focus:ring-emerald-500 focus:outline-none"></textarea>
-        <button onclick="submitIssueUpdate(${i.id})" class="w-full px-4 py-2 bg-gray-900 text-white text-sm font-bold rounded-lg hover:bg-black transition">Save & notify reporter</button>
+        <button onclick="submitIssueUpdate(${i.id})" class="btn-primary w-full px-4 py-2 text-sm font-bold rounded-lg transition">Save & notify reporter</button>
       </div>
 
       <div><span class="text-gray-400 text-xs font-bold uppercase">Conversation</span><div class="space-y-3 mt-2">${messages}</div></div>`;
@@ -4646,7 +4709,7 @@ function _esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').repl
 function _irHandoffCard(i) {
   const s = i.devHandoffStatus || null;
   const passBtn = (label) =>
-    `<button onclick="passToDeveloper(${i.id})" class="w-full px-4 py-2.5 bg-violet-600 text-white text-sm font-bold rounded-lg hover:bg-violet-700 transition flex items-center justify-center gap-2">
+    `<button onclick="passToDeveloper(${i.id})" class="btn-primary w-full px-4 py-2.5 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2">
        <span>🤖</span> ${label}
      </button>`;
   const resultBlock = i.devResult
@@ -4808,7 +4871,7 @@ function _irSqlCard(i) {
     : '';
   const canRun = _can('run_migration_sql');
   const runBtn = canRun
-    ? `<button onclick="runIssueSql(${i.id})" class="w-full px-4 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 transition flex items-center justify-center gap-2"><span>🗄️</span> ${st === 'applied' ? 'Re-run on staging Neon' : 'Run on staging Neon'}</button>`
+    ? `<button onclick="runIssueSql(${i.id})" class="btn-primary w-full px-4 py-2.5 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🗄️</span> ${st === 'applied' ? 'Re-run on staging Neon' : 'Run on staging Neon'}</button>`
     : `<p class="text-xs text-amber-700 font-semibold">Only a super-admin can run this SQL.</p>`;
   return `<div class="border border-blue-200 bg-blue-50 rounded-xl p-4 space-y-3">
       <div class="flex items-center justify-between">
@@ -4855,10 +4918,10 @@ function _irMergeCard(i) {
   const isSuper = _can('deploy_code');
   const sqlPending = i.devSqlStatus === 'pending';
   const mergeBtn = isSuper
-    ? `<button onclick="requestMerge(${i.id})" ${sqlPending ? 'disabled' : ''} class="w-full px-4 py-2.5 ${sqlPending ? 'bg-gray-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'} text-white text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🔀</span> Merge to staging</button>`
+    ? `<button onclick="requestMerge(${i.id})" ${sqlPending ? 'disabled' : ''} class="w-full px-4 py-2.5 ${sqlPending ? 'bg-gray-300 text-white cursor-not-allowed' : 'btn-primary'} text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🔀</span> Merge to staging</button>`
     : `<p class="text-xs text-amber-700 font-semibold">Only a super-admin can merge to staging.</p>`;
   const conflictBtn = isSuper
-    ? `<button onclick="requestConflictFix(${i.id})" class="w-full px-4 py-2.5 bg-white border-2 border-indigo-600 hover:bg-indigo-50 text-indigo-700 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🔧</span> Investigate &amp; fix conflicts</button>`
+    ? `<button onclick="requestConflictFix(${i.id})" class="btn-secondary w-full px-4 py-2.5 border-2 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🔧</span> Investigate &amp; fix conflicts</button>`
     : '';
 
   let chip, inner;
@@ -4909,7 +4972,7 @@ function _irProdCard(i) {
   const isSuper = _can('deploy_code');
   const canPromote = !ps || ps === 'failed';
   const promoteBtn = isSuper
-    ? `<button onclick="requestProdPromote(${i.id})" class="w-full px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🚀</span> ${ps === 'failed' ? 'Retry push to prod' : 'Push to prod'}</button>`
+    ? `<button onclick="requestProdPromote(${i.id})" class="btn-destructive w-full px-4 py-2.5 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🚀</span> ${ps === 'failed' ? 'Retry push to prod' : 'Push to prod'}</button>`
     : `<p class="text-xs text-amber-700 font-semibold">Only a super-admin can promote to production.</p>`;
 
   let chip, inner;
@@ -5486,7 +5549,7 @@ function loadSandboxPanel() {
         <div>
           <p class="text-sm font-bold text-amber-900">You are in Live mode.</p>
           <p class="text-sm text-amber-800 mt-1">Sandbox data management is only available in Sandbox mode. Flip the <strong>Live / Sandbox</strong> toggle in the top bar to manage test data.</p>
-          <button onclick="setAdminEnv('sandbox')" class="mt-3 px-4 py-2 bg-orange-600 text-white text-sm font-semibold rounded-lg hover:bg-orange-700 cursor-pointer">Switch to Sandbox</button>
+          <button onclick="setAdminEnv('sandbox')" class="btn-primary mt-3 px-4 py-2 text-sm font-semibold rounded-lg cursor-pointer">Switch to Sandbox</button>
         </div>
       </div>`;
     return;
@@ -5506,7 +5569,7 @@ function loadSandboxPanel() {
         <input type="checkbox" id="sb-seed-stripe" class="w-4 h-4" checked> Sync Stripe test Products &amp; Prices
       </label>
       <div class="mt-4 flex items-center gap-3">
-        <button onclick="sandboxSeed(this)" class="px-5 py-2 bg-emerald-700 text-white text-sm font-semibold rounded-lg hover:bg-emerald-800 cursor-pointer">Seed Master Data</button>
+        <button onclick="sandboxSeed(this)" class="btn-primary px-5 py-2 text-sm font-semibold rounded-lg cursor-pointer">Seed Master Data</button>
         <span id="sb-seed-status" class="text-sm"></span>
       </div>
     </div>
@@ -5516,7 +5579,7 @@ function loadSandboxPanel() {
       <h2 class="text-base font-bold text-red-700">Purge Sandbox Data</h2>
       <p class="text-sm text-gray-500 mt-1">Hard-deletes every row in the sandbox database and deactivates Stripe test Products/Prices. This cannot be undone.</p>
       <div class="mt-4">
-        <button onclick="openPurgeModal()" class="px-5 py-2 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-700 cursor-pointer">Purge Sandbox Data…</button>
+        <button onclick="openPurgeModal()" class="btn-destructive px-5 py-2 text-sm font-semibold rounded-lg cursor-pointer">Purge Sandbox Data…</button>
       </div>
     </div>`;
 }
@@ -5599,7 +5662,7 @@ async function loadGamificationSettings() {
       ${num('gm-hours-beta', ms.hours_for_beta, 'Hours saved → Beta access')}
       <label class="flex items-center gap-2 pt-3"><input id="gm-paused" type="checkbox" ${d.rewardsPaused ? 'checked' : ''} class="w-4 h-4"><span class="text-sm font-semibold text-gray-700">⛔ Pause milestone rewards (emergency stop)</span></label>
       <p class="text-xs text-gray-400">When paused, users still see Time Saved, but token drops and beta unlocks are suspended.</p>
-      <div class="pt-2"><button onclick="saveGamificationSettings(this)" class="px-5 py-2 bg-emerald-700 text-white text-sm font-semibold rounded-lg hover:bg-emerald-800 cursor-pointer">Save settings</button><span id="gm-save-status" class="ml-3 text-sm"></span></div>`;
+      <div class="pt-2"><button onclick="saveGamificationSettings(this)" class="btn-primary px-5 py-2 text-sm font-semibold rounded-lg cursor-pointer">Save settings</button><span id="gm-save-status" class="ml-3 text-sm"></span></div>`;
   } catch (e) { form.innerHTML = `<div class="text-red-500 text-sm">${e.message}</div>`; }
 }
 
@@ -5629,7 +5692,7 @@ async function loadSessionTimeoutSettings() {
     form.innerHTML = `
       ${num('st-timeout', d.inactivityTimeoutMinutes, 'Inactivity period (minutes)', 'How long a user can be idle before the countdown appears')}
       ${num('st-countdown', d.countdownMinutes, 'Countdown length (minutes)', 'How long the user has to click "Stay signed in" before auto-logout')}
-      <div class="pt-2"><button onclick="saveSessionTimeoutSettings(this)" class="px-5 py-2 bg-emerald-700 text-white text-sm font-semibold rounded-lg hover:bg-emerald-800 cursor-pointer">Save settings</button><span id="st-save-status" class="ml-3 text-sm"></span></div>`;
+      <div class="pt-2"><button onclick="saveSessionTimeoutSettings(this)" class="btn-primary px-5 py-2 text-sm font-semibold rounded-lg cursor-pointer">Save settings</button><span id="st-save-status" class="ml-3 text-sm"></span></div>`;
   } catch (e) { form.innerHTML = `<div class="text-red-500 text-sm">${e.message}</div>`; }
 }
 
@@ -5817,20 +5880,20 @@ async function openUserPanel(uid) {
         ${d.assistants.map(a => `<div class="text-sm py-1 border-b border-gray-50">${a.name} <span class="text-xs text-gray-400">${a.provisioningStatus}</span></div>`).join('')}
       </div>` : ''}
       <div class="space-y-2 pt-2">
-        <button onclick="openBillingOverride(${u.id},'${(u.email||'').replace(/'/g,"&#39;")}')" class="w-full py-2 text-sm font-bold bg-violet-50 border border-violet-200 text-violet-700 rounded-lg hover:opacity-80">💳 Override Subscription</button>
-        <button onclick="openAiCredits(${u.id},'${(u.email||'').replace(/'/g,"&#39;")}')" class="w-full py-2 text-sm font-bold bg-pink-50 border border-pink-200 text-pink-700 rounded-lg hover:opacity-80">🎨 AI Credits</button>
-        <button onclick="sendLoginLink(${u.id})" class="w-full py-2 text-sm font-bold bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg hover:opacity-80">📧 Send Login Link</button>
-        <button onclick="startImpersonation(${u.id}, '${(u.email||'').replace(/'/g,"&#39;")}')" class="w-full py-2 text-sm font-bold bg-amber-50 border border-amber-200 text-amber-700 rounded-lg hover:opacity-80">🔍 Impersonate User</button>
+        <button onclick="openBillingOverride(${u.id},'${(u.email||'').replace(/'/g,"&#39;")}')" class="btn-secondary w-full py-2 text-sm font-bold border rounded-lg hover:opacity-80">💳 Override Subscription</button>
+        <button onclick="openAiCredits(${u.id},'${(u.email||'').replace(/'/g,"&#39;")}')" class="btn-secondary w-full py-2 text-sm font-bold border rounded-lg hover:opacity-80">🎨 AI Credits</button>
+        <button onclick="sendLoginLink(${u.id})" class="btn-primary w-full py-2 text-sm font-bold border rounded-lg hover:opacity-80">📧 Send Login Link</button>
+        <button onclick="startImpersonation(${u.id}, '${(u.email||'').replace(/'/g,"&#39;")}')" class="btn-secondary w-full py-2 text-sm font-bold border rounded-lg hover:opacity-80">🔍 Impersonate User</button>
         ${u.status === 'locked'
-          ? `<button onclick="lockAccount(${u.id},'${(u.email||'').replace(/'/g,"&#39;")}','unlock')" class="w-full py-2 text-sm font-bold bg-green-50 border border-green-300 text-green-700 rounded-lg hover:opacity-80">🔓 Unlock Account</button>`
-          : `<button onclick="lockAccount(${u.id},'${(u.email||'').replace(/'/g,"&#39;")}','lock')" class="w-full py-2 text-sm font-bold bg-orange-50 border border-orange-300 text-orange-700 rounded-lg hover:opacity-80">🔒 Lock Account</button>`
+          ? `<button onclick="lockAccount(${u.id},'${(u.email||'').replace(/'/g,"&#39;")}','unlock')" class="btn-secondary w-full py-2 text-sm font-bold border rounded-lg hover:opacity-80">🔓 Unlock Account</button>`
+          : `<button onclick="lockAccount(${u.id},'${(u.email||'').replace(/'/g,"&#39;")}','lock')" class="btn-destructive w-full py-2 text-sm font-bold border rounded-lg hover:opacity-80">🔒 Lock Account</button>`
         }
-        <button onclick="adminEmailChange(${u.id},'${(u.email||'').replace(/'/g,"&#39;")}')" class="w-full py-2 text-sm font-bold bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-lg hover:opacity-80">✉️ Change Email Address</button>
-        <button onclick="promoteAdmin(${u.id})" class="w-full py-2 text-sm font-bold border border-gray-200 rounded-lg hover:bg-gray-50">Make Admin</button>
-        <button onclick="suspendUser(${u.id})" class="w-full py-2 text-sm font-bold bg-orange-50 border border-orange-200 text-orange-700 rounded-lg hover:opacity-80">Suspend Account</button>
-        <button onclick="deleteUser(${u.id},'${(u.email||'').replace(/'/g,"&#39;")}')" class="w-full py-2 text-sm font-bold bg-red-50 border border-red-200 text-red-600 rounded-lg hover:opacity-80">Delete Account</button>
-        <button onclick="gdprEraseUser(${u.id},'${(u.email||'').replace(/'/g,"&#39;")}')" class="w-full py-2 text-sm font-bold bg-red-100 border border-red-300 text-red-800 rounded-lg hover:opacity-80">🗑 GDPR Right to Erasure</button>
-        <button onclick="sarExport(${u.id},'${(u.email||'').replace(/'/g,"&#39;")}')" class="w-full py-2 text-sm font-bold bg-blue-50 border border-blue-200 text-blue-700 rounded-lg hover:opacity-80">📦 SAR Data Export</button>
+        <button onclick="adminEmailChange(${u.id},'${(u.email||'').replace(/'/g,"&#39;")}')" class="btn-secondary w-full py-2 text-sm font-bold border rounded-lg hover:opacity-80">✉️ Change Email Address</button>
+        <button onclick="promoteAdmin(${u.id})" class="btn-secondary w-full py-2 text-sm font-bold border rounded-lg">Make Admin</button>
+        <button onclick="suspendUser(${u.id})" class="btn-destructive w-full py-2 text-sm font-bold border rounded-lg hover:opacity-80">Suspend Account</button>
+        <button onclick="deleteUser(${u.id},'${(u.email||'').replace(/'/g,"&#39;")}')" class="btn-destructive w-full py-2 text-sm font-bold border rounded-lg hover:opacity-80">Delete Account</button>
+        <button onclick="gdprEraseUser(${u.id},'${(u.email||'').replace(/'/g,"&#39;")}')" class="btn-destructive w-full py-2 text-sm font-bold border rounded-lg hover:opacity-80">🗑 GDPR Right to Erasure</button>
+        <button onclick="sarExport(${u.id},'${(u.email||'').replace(/'/g,"&#39;")}')" class="btn-utility w-full py-2 text-sm font-bold border rounded-lg hover:opacity-80">📦 SAR Data Export</button>
       </div>`;
   } catch(e) {
     body.innerHTML = `<p class="text-red-500">${e.message}</p>`;
@@ -5939,13 +6002,13 @@ async function openTicketPanel(tid) {
       <!-- Reply composer -->
       <div class="border border-gray-200 rounded-xl overflow-hidden">
         <div class="flex border-b border-gray-100">
-          <button id="reply-tab-public" onclick="setReplyMode(false)" class="flex-1 py-2 text-xs font-bold text-blue-600 bg-blue-50">Public Reply</button>
+          <button id="reply-tab-public" onclick="setReplyMode(false)" class="btn-secondary flex-1 py-2 text-xs font-bold border">Public Reply</button>
           <button id="reply-tab-internal" onclick="setReplyMode(true)" class="flex-1 py-2 text-xs font-semibold text-gray-500 hover:bg-yellow-50 transition">Internal Note</button>
         </div>
         <textarea id="reply-body" rows="4" placeholder="Type your reply…"
           class="w-full px-4 py-3 text-sm text-gray-800 focus:outline-none resize-none border-0"></textarea>
         <div class="px-4 py-3 bg-gray-50 flex justify-end">
-          <button onclick="submitReply(${t.id})" class="px-4 py-2 bg-gray-900 text-white text-sm font-bold rounded-lg hover:bg-black transition">Send Reply</button>
+          <button onclick="submitReply(${t.id})" class="btn-golive px-4 py-2 text-sm font-bold rounded-lg transition">Send Reply</button>
         </div>
       </div>`;
   } catch(e) {
@@ -6048,7 +6111,7 @@ function renderCatalog() {
   const bulkPublishBar = betaAssistants.length
     ? `<div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between">
          <span class="text-sm text-blue-700 font-semibold">${betaAssistants.length} assistant${betaAssistants.length > 1 ? 's' : ''} in beta — ready to bulk publish</span>
-         <button onclick="openBulkPublish()" class="px-4 py-1.5 text-sm font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700">🚀 Bulk Publish to Live</button>
+         <button onclick="openBulkPublish()" class="btn-golive px-4 py-1.5 text-sm font-bold rounded-lg">🚀 Bulk Publish to Live</button>
        </div>`
     : '';
 
@@ -6108,10 +6171,10 @@ function _catalogRowHtml(a) {
         class="px-2.5 py-1 text-xs font-bold ${a.comingSoon?'bg-emerald-600 text-white hover:bg-emerald-700':'bg-amber-100 text-amber-700 hover:opacity-80'} rounded-lg transition">
         ${a.comingSoon ? '🚀 Launch' : '⏸ Coming Soon'}
       </button>
-      <button onclick="openLifecycleTransition(${a.id},'${a.name}','${a.lifecycleState||'draft'}')" class="px-2.5 py-1 text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg hover:opacity-80">
+      <button onclick="openLifecycleTransition(${a.id},'${a.name}','${a.lifecycleState||'draft'}')" class="btn-secondary px-2.5 py-1 text-xs font-bold border rounded-lg hover:opacity-80">
         🔄 State
       </button>
-      <button onclick="openVersionHistory(${a.id},'${a.name}')" class="px-2.5 py-1 text-xs font-bold bg-gray-50 text-gray-700 border border-gray-200 rounded-lg hover:opacity-80">
+      <button onclick="openVersionHistory(${a.id},'${a.name}')" class="btn-secondary px-2.5 py-1 text-xs font-bold border rounded-lg hover:opacity-80">
         📜 Versions
       </button>
     </td>
@@ -6446,7 +6509,7 @@ function renderKillSwitches() {
             class="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none"
             placeholder="Maintenance message…">
           <button onclick="saveKillSwitch('${def.key}', document.getElementById('ks-text-${def.key}').value)"
-            class="px-3 py-2 text-xs font-bold bg-gray-900 text-white rounded-lg hover:bg-black transition">Save</button>
+            class="btn-primary px-3 py-2 text-xs font-bold rounded-lg transition">Save</button>
         </div>
       </div>`;
     }
@@ -6538,7 +6601,7 @@ async function loadManageAdmins() {
                 <td class="px-4 py-3"><span class="text-xs ${a.status === 'active' ? 'text-emerald-600' : 'text-gray-400'}">${a.status}</span></td>
                 <td class="px-4 py-3 text-xs text-gray-400">${new Date(a.createdAt).toLocaleDateString('en-GB')}</td>
                 <td class="px-4 py-3">
-                  <button onclick="openRoleChange(${a.id},'${a.email}','${a.role}')" class="text-xs px-3 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-lg font-semibold hover:opacity-80">
+                  <button onclick="openRoleChange(${a.id},'${a.email}','${a.role}')" class="btn-secondary text-xs px-3 py-1.5 border rounded-lg font-semibold hover:opacity-80">
                     Change Role
                   </button>
                 </td>
@@ -6576,7 +6639,7 @@ async function loadPendingRoleApprovals() {
               <p class="text-sm font-semibold ${expired ? 'text-gray-500 line-through' : 'text-amber-800'}">${req.targetEmail} → super_admin</p>
               <p class="text-xs text-gray-500 mt-0.5">Reason: ${req.reason} · Expires: ${new Date(req.expiresAt).toLocaleString('en-GB')}</p>
             </div>
-            ${!expired ? `<button onclick="approveRoleChange('${req.requestId}','${req.targetEmail}')" class="px-4 py-1.5 text-sm font-bold bg-amber-600 text-white rounded-lg hover:bg-amber-700">Approve</button>` : '<span class="text-xs text-gray-400">Expired</span>'}
+            ${!expired ? `<button onclick="approveRoleChange('${req.requestId}','${req.targetEmail}')" class="btn-golive px-4 py-1.5 text-sm font-bold rounded-lg">Approve</button>` : '<span class="text-xs text-gray-400">Expired</span>'}
           </div>`;
         }).join('')}
       </div>`;
@@ -6670,7 +6733,7 @@ async function loadDunningQueue() {
                 </td>
                 <td class="px-4 py-3 text-gray-500 text-xs">${r.gracePeriodEndsAt ? new Date(r.gracePeriodEndsAt).toLocaleDateString('en-GB') : '—'}</td>
                 <td class="px-4 py-3">
-                  <button onclick="markPaymentArranged(${r.planId},'${(r.userEmail||'').replace(/'/g,"&#39;")}')" class="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700">
+                  <button onclick="markPaymentArranged(${r.planId},'${(r.userEmail||'').replace(/'/g,"&#39;")}')" class="btn-primary text-xs px-3 py-1.5 rounded-lg font-semibold">
                     Mark Arranged Offline
                   </button>
                 </td>
@@ -6962,7 +7025,7 @@ function renderContactDetail(lead, thread, tasks, client, tickets, issues, admin
         ${doneTasks.length ? `<details class="mt-1"><summary class="text-xs text-gray-400 cursor-pointer">${doneTasks.length} completed</summary>${doneTasks.map(taskRow).join('')}</details>` : ''}
         <div class="flex gap-2 mt-2">
           <input id="ct-task-input" placeholder="Add a task…" onkeydown="if(event.key==='Enter')_ctAddTask()" class="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-          <button onclick="_ctAddTask()" class="text-sm px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg font-semibold hover:bg-gray-200">Add</button>
+          <button onclick="_ctAddTask()" class="btn-primary text-sm px-3 py-1.5 rounded-lg font-semibold">Add</button>
         </div>`
       )}
 
@@ -6973,8 +7036,8 @@ function renderContactDetail(lead, thread, tasks, client, tickets, issues, admin
           <textarea id="ct-reply-body" rows="3" placeholder="Write a reply or an internal note…" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none resize-y"></textarea>
           <p id="ct-reply-error" class="hidden text-xs text-red-600 mt-1"></p>
           <div class="flex items-center gap-2 mt-2">
-            <button id="ct-reply-send" onclick="_ctSend('outbound')" class="px-4 py-2 bg-emerald-700 text-white text-sm font-bold rounded-lg hover:bg-emerald-800 disabled:opacity-60">Send email reply</button>
-            <button onclick="_ctSend('internal')" class="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-200">Add internal note</button>
+            <button id="ct-reply-send" onclick="_ctSend('outbound')" class="btn-golive px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-60">Send email reply</button>
+            <button onclick="_ctSend('internal')" class="btn-primary px-4 py-2 text-sm font-semibold rounded-lg">Add internal note</button>
           </div>
         </div>
         <div class="space-y-2">${[...thread].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(msgRow).join('')}</div>
@@ -7066,7 +7129,7 @@ function _ctSupportSection(tickets, client) {
   const open = tickets.filter(t => !['resolved', 'closed'].includes(t.status)).length;
   const row = t => {
     const sla = t.slaBreachedAt ? ' <span class="text-red-600 font-bold">· SLA breached</span>' : '';
-    return `<button onclick="openTicketPanel(${t.id})" class="w-full text-left border border-gray-200 rounded-xl px-3 py-2.5 hover:bg-gray-50 transition flex items-start justify-between gap-3">
+    return `<button onclick="openTicketPanel(${t.id})" class="btn-secondary w-full text-left border rounded-xl px-3 py-2.5 transition flex items-start justify-between gap-3">
       <div class="min-w-0">
         <p class="text-sm font-semibold text-gray-800 truncate">${_escH(t.subject)}</p>
         <p class="text-xs text-gray-400 mt-0.5">#${t.id} · ${_escH((t.category || '').replace(/_/g, ' '))} · ${age(t.createdAt)}${sla}</p>
@@ -7089,7 +7152,7 @@ function _ctIssuesSection(issues, client) {
   issues = Array.isArray(issues) ? issues : [];
   if (!issues.length && !client) return '';
   const open = issues.filter(i => !['closed', 'roadmap'].includes(i.status)).length;
-  const row = i => `<button onclick="openIssuePanel(${i.id})" class="w-full text-left border border-gray-200 rounded-xl px-3 py-2.5 hover:bg-gray-50 transition flex items-start justify-between gap-3">
+  const row = i => `<button onclick="openIssuePanel(${i.id})" class="btn-secondary w-full text-left border rounded-xl px-3 py-2.5 transition flex items-start justify-between gap-3">
       <div class="min-w-0">
         <p class="text-sm font-semibold text-gray-800 truncate">${_escH(i.description || '(no description)')}${i.hasImage ? ' 📎' : ''}</p>
         <p class="text-xs text-gray-400 mt-0.5">#${i.id}${i.sourceLocation ? ` · ${_escH(i.sourceLocation)}` : ''} · ${age(i.createdAt)}</p>
@@ -7323,7 +7386,7 @@ async function loadReconciliation() {
         <td class="px-4 py-3 text-xs text-gray-400">${m.lastWebhookDate ? fmt(m.lastWebhookDate) : '—'}</td>
         <td class="px-4 py-3">
           ${m.stripeTierKey ? `<button onclick="syncPlanToStripe(${m.dbPlanId}, '${m.stripeTierKey}', '${m.stripeSubscriptionId || ''}')"
-            class="px-3 py-1.5 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition">Sync DB→Stripe</button>` : '—'}
+            class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition">Sync DB→Stripe</button>` : '—'}
         </td>
       </tr>`).join('');
   } catch(e) {
@@ -7529,7 +7592,7 @@ async function loadModelConfig() {
             <input id="model-input-${c.id}" type="text" value="${c.model}"
               class="border border-gray-200 rounded-lg px-3 py-1.5 text-sm w-48 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
             <button onclick="saveModelConfig(${c.id})"
-              class="px-3 py-1.5 bg-gray-900 text-white text-sm font-bold rounded-lg hover:bg-black transition">Save</button>
+              class="btn-primary px-3 py-1.5 text-sm font-bold rounded-lg transition">Save</button>
             <button onclick="toggleModelActive(${c.id}, ${c.isActive})"
               class="px-3 py-1.5 border text-sm font-bold rounded-lg transition ${c.isActive?'border-red-200 text-red-600 hover:bg-red-50':'border-emerald-200 text-emerald-700 hover:bg-emerald-50'}">
               ${c.isActive ? 'Disable' : 'Enable'}
@@ -7657,7 +7720,7 @@ async function refreshVersionHistory() {
         </div>
         <p class="text-xs text-gray-600 mb-2">${v.changeNote}</p>
         ${v.systemPrompt ? `<pre class="text-xs bg-gray-50 border border-gray-100 rounded p-2 overflow-auto max-h-24 whitespace-pre-wrap">${v.systemPrompt.slice(0,300)}${v.systemPrompt.length>300?'…':''}</pre>` : ''}
-        ${v.id !== data.currentVersionId ? `<button onclick="rollbackToVersion(${v.id}, ${v.versionNumber})" class="mt-2 px-3 py-1 text-xs font-bold bg-orange-50 border border-orange-200 text-orange-700 rounded-lg hover:opacity-80">↩ Rollback to v${v.versionNumber}</button>` : ''}
+        ${v.id !== data.currentVersionId ? `<button onclick="rollbackToVersion(${v.id}, ${v.versionNumber})" class="btn-secondary mt-2 px-3 py-1 text-xs font-bold border rounded-lg hover:opacity-80">↩ Rollback to v${v.versionNumber}</button>` : ''}
       </div>
     `).join('');
   } catch(e) { list.innerHTML = `<p class="text-red-500">${e.message}</p>`; }
@@ -8088,6 +8151,97 @@ function fmtCountdown(ms) {
   return `<span class="${colour} font-bold">${h}h ${m}m remaining</span>`;
 }
 
+// ── Bias Audit ───────────────────────────────────────────────────────────────
+const BA_API = '/.netlify/functions/bias-audit';
+const _baEsc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const _baDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+
+async function loadBiasAudit() {
+  const get = async (resource) => {
+    const r = await fetch(`${BA_API}?resource=${resource}`, { credentials: 'same-origin' });
+    const d = await r.json().catch(() => null);
+    if (!r.ok) throw new Error((d && d.error) || `HTTP ${r.status}`);
+    return d || [];
+  };
+  const fail = (id, err) => { document.getElementById(id).innerHTML = `<p class="text-red-600 text-sm">${_baEsc(err.message || 'Could not load.')}</p>`; };
+
+  get('reviews').then((rows) => {
+    const el = document.getElementById('ba-reviews');
+    const last = rows[0];
+    const due = document.getElementById('ba-due-line');
+    if (due) {
+      const nextQuarter = (() => { const d = last ? new Date(last.reviewDate) : null; if (!d) return null; const m = Math.floor(d.getMonth() / 3) * 3 + 3; return new Date(d.getFullYear(), m, 1); })();
+      due.textContent = last
+        ? `Last review ${_baDate(last.reviewDate)}${nextQuarter && nextQuarter <= new Date() ? ' — a new quarter has started, so one is due now.' : '.'}`
+        : 'No review has been recorded yet — one is due now.';
+    }
+    el.innerHTML = rows.length
+      ? `<table class="w-full text-sm"><thead><tr class="text-left text-xs text-gray-400 uppercase"><th class="py-1 pr-3">Date</th><th class="py-1 pr-3">Prompts</th><th class="py-1 pr-3">Findings</th><th class="py-1">Actions required</th></tr></thead><tbody>`
+        + rows.map((r) => `<tr class="border-t border-gray-100 align-top"><td class="py-2 pr-3 whitespace-nowrap">${_baDate(r.reviewDate)}</td><td class="py-2 pr-3">${r.promptsReviewed}</td><td class="py-2 pr-3">${r.findingsCount}</td><td class="py-2 text-gray-600">${_baEsc(r.actionsRequired || '—')}${r.notes ? `<div class="text-xs text-gray-400 mt-0.5">${_baEsc(r.notes)}</div>` : ''}</td></tr>`).join('')
+        + '</tbody></table>'
+      : '<p class="text-sm text-gray-500">No reviews recorded yet.</p>';
+  }).catch((e) => fail('ba-reviews', e));
+
+  get('incidents').then((rows) => {
+    const el = document.getElementById('ba-incidents');
+    el.innerHTML = rows.length
+      ? rows.map((i) => `<div class="border-t border-gray-100 py-2 first:border-t-0">
+          <div class="flex items-center gap-2 text-xs"><span class="font-bold text-gray-800">#${i.id}</span><span class="text-gray-400">${_baDate(i.createdAt)} · ${_baEsc(i.detectionMethod)}${i.assistantId ? ' · assistant ' + i.assistantId : ''}</span>
+            <span class="ml-auto font-bold ${i.resolvedAt ? 'text-emerald-700' : 'text-amber-700'}">${i.resolvedAt ? (i.deployerAckAt ? 'Resolved · acknowledged' : 'Resolved') : 'Open'}</span></div>
+          <p class="text-sm text-gray-700 mt-1">${_baEsc(i.findingsSummary)}</p>
+          ${i.resolution ? `<p class="text-xs text-gray-500 mt-1">Resolution: ${_baEsc(i.resolution)}</p>`
+            : `<div class="flex gap-2 mt-2"><input id="ba-res-${i.id}" type="text" placeholder="How it was resolved" class="flex-1 border border-gray-300 rounded-lg px-2 py-1 text-xs">
+               <button type="button" onclick="resolveBiasIncident(${i.id})" class="btn-primary px-3 py-1 text-xs font-bold rounded-lg border cursor-pointer">Resolve</button></div>`}
+        </div>`).join('')
+      : '<p class="text-sm text-gray-500">No incidents.</p>';
+  }).catch((e) => fail('ba-incidents', e));
+
+  get('reports').then((rows) => {
+    const el = document.getElementById('ba-reports');
+    el.innerHTML = rows.length
+      ? rows.map((r) => `<div class="flex items-center gap-3 border-t border-gray-100 py-2 first:border-t-0 text-sm">
+          <span class="text-gray-700">${_baDate(r.runAt)}</span><span class="text-gray-500 text-xs">${r.sampledCount} sampled · ${r.flaggedAnomalies} flagged</span>
+          <a href="${BA_API}?resource=report-csv&reportId=${r.id}" class="ml-auto text-xs font-bold text-emerald-700 hover:underline">Download CSV</a></div>`).join('')
+      : '<p class="text-sm text-gray-500">No sampling reports yet.</p>';
+  }).catch((e) => fail('ba-reports', e));
+}
+
+async function saveBiasReview() {
+  const msg = document.getElementById('ba-save-msg');
+  const btn = document.getElementById('ba-save');
+  const prompts = document.getElementById('ba-prompts').value;
+  const findings = document.getElementById('ba-findings').value;
+  if (prompts === '' || findings === '') { msg.className = 'text-xs font-semibold text-red-600'; msg.textContent = 'Prompts reviewed and findings are required.'; return; }
+  btn.disabled = true; msg.className = 'text-xs font-semibold text-gray-500'; msg.textContent = 'Saving…';
+  try {
+    const r = await fetch(`${BA_API}?resource=review`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+      body: JSON.stringify({ promptsReviewed: prompts, findingsCount: findings,
+        actionsRequired: document.getElementById('ba-actions').value, notes: document.getElementById('ba-notes').value }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    msg.className = 'text-xs font-semibold text-emerald-700'; msg.textContent = '✓ Review recorded.';
+    ['ba-prompts', 'ba-actions', 'ba-notes'].forEach((id) => { document.getElementById(id).value = ''; });
+    document.getElementById('ba-findings').value = '0';
+    loadBiasAudit();
+  } catch (e) {
+    msg.className = 'text-xs font-semibold text-red-600'; msg.textContent = e.message || 'Could not save.';
+  } finally { btn.disabled = false; }
+}
+
+async function resolveBiasIncident(id) {
+  const input = document.getElementById(`ba-res-${id}`);
+  const resolution = (input && input.value || '').trim();
+  if (!resolution) { input?.focus(); window.showToast?.('Say how it was resolved first.', { icon: '⚠️' }); return; }
+  const r = await fetch(`${BA_API}?resource=resolve`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+    body: JSON.stringify({ incidentId: id, resolution }),
+  });
+  if (!r.ok) { const d = await r.json().catch(() => ({})); window.showToast?.(d.error || 'Could not resolve.', { icon: '⚠️' }); return; }
+  loadBiasAudit();
+}
+
 async function loadBreachResponse() {
   const el = document.getElementById('breach-incidents-list');
   el.innerHTML = '<div class="text-center py-12 text-gray-400 text-sm">Loading incidents…</div>';
@@ -8119,11 +8273,11 @@ async function loadBreachResponse() {
           </div>
           <div class="flex gap-2 flex-wrap shrink-0">
             ${isHighRisk ? `<button onclick="confirmRevokeTokens(${inc.id}, ${JSON.stringify(inc.affectedUserIds || []).replace(/"/g,"'")})"
-              class="px-3 py-1.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition cursor-pointer">
+              class="btn-destructive px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer">
               🔑 Revoke All Tokens
             </button>` : ''}
             ${!regulatorDone ? `<button onclick="openIcoModal(${inc.id}, ${JSON.stringify(inc).replace(/"/g,"'")})"
-              class="px-3 py-1.5 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 hover:bg-amber-100 rounded-lg transition cursor-pointer">
+              class="btn-primary px-3 py-1.5 text-xs font-bold border rounded-lg transition cursor-pointer">
               📋 Submit ICO Notification
             </button>` : '<span class="px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg">✓ ICO Notified</span>'}
           </div>
@@ -8636,7 +8790,7 @@ function pfOpenAddFeature() {
     <p class="text-[11px] text-gray-400 mt-3">Stored in the plan's <code>features</code> map. To bind a capacity column instead, set it via the Plans tab.</p>
     <div class="mt-5 flex justify-end gap-2">
       <button onclick="pfCloseAddFeature()" class="px-4 py-2 text-sm font-semibold text-gray-500 hover:text-gray-700">Cancel</button>
-      <button onclick="pfSubmitAddFeature()" class="px-4 py-2 text-sm font-bold text-white bg-gray-900 rounded-lg hover:bg-black">Add</button>
+      <button onclick="pfSubmitAddFeature()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Add</button>
     </div>
   </div>`;
   document.body.appendChild(ov);
@@ -8798,7 +8952,7 @@ function afOpenAddFeature() {
     <p class="text-[11px] text-gray-400 mt-3">Adding a key here surfaces the column. A capability only takes effect once the matching call site gates on <code>orgHasAssistantFeature</code>.</p>
     <div class="mt-5 flex justify-end gap-2">
       <button onclick="afCloseAddFeature()" class="px-4 py-2 text-sm font-semibold text-gray-500 hover:text-gray-700">Cancel</button>
-      <button onclick="afSubmitAddFeature()" class="px-4 py-2 text-sm font-bold text-white bg-gray-900 rounded-lg hover:bg-black">Add</button>
+      <button onclick="afSubmitAddFeature()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Add</button>
     </div>
   </div>`;
   document.body.appendChild(ov);
@@ -9324,7 +9478,7 @@ async function _swanRenderQueue() {
           </div>
           <div class="flex items-center gap-2 shrink-0">
             <button onclick="openSwanRead(${p.id})"
-              class="px-3 py-1.5 text-xs font-bold border border-gray-300 text-gray-700 rounded-lg hover:bg-white transition cursor-pointer">Read &amp; decide</button>
+              class="btn-secondary px-3 py-1.5 text-xs font-bold border rounded-lg transition cursor-pointer">Read &amp; decide</button>
           </div>
         </div>
       </div>`;
@@ -9424,13 +9578,13 @@ async function openSwanRead(id) {
 
       <div class="sticky bottom-0 bg-white border-t border-gray-100 pt-4 pb-1 flex flex-wrap gap-2">
         <button onclick="swanDecide(${p.id}, 'featured')" ${orphaned ? 'disabled' : ''}
-          class="px-3 py-2 text-sm font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">★ Front page</button>
+          class="btn-primary px-3 py-2 text-sm font-bold rounded-lg transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">★ Front page</button>
         <button onclick="swanDecide(${p.id}, 'live')" ${orphaned ? 'disabled' : ''}
-          class="px-3 py-2 text-sm font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">✓ Publish to author page</button>
+          class="btn-golive px-3 py-2 text-sm font-bold rounded-lg transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">✓ Publish to author page</button>
         <button onclick="swanDecide(${p.id}, 'rejected')"
-          class="px-3 py-2 text-sm font-bold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition cursor-pointer">Decline</button>
+          class="btn-secondary px-3 py-2 text-sm font-bold border rounded-lg transition cursor-pointer">Decline</button>
         <button onclick="swanDecide(${p.id}, null)"
-          class="px-3 py-2 text-sm font-bold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition cursor-pointer">Save notes only</button>
+          class="btn-primary px-3 py-2 text-sm font-bold border rounded-lg transition cursor-pointer">Save notes only</button>
       </div>`;
 
     // The body is the post's own sanitised published_payload snapshot — allowlisted server-side at
@@ -9522,9 +9676,9 @@ async function loadSwanFrontPage() {
         </div>
         <div class="flex items-center gap-2 shrink-0">
           <button onclick="openSwanRead(${p.id})"
-            class="px-2.5 py-1.5 text-xs font-bold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer">Read</button>
+            class="btn-secondary px-2.5 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Read</button>
           <button onclick="swanUnfeature(${p.id})"
-            class="px-2.5 py-1.5 text-xs font-bold border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 cursor-pointer">Take off</button>
+            class="btn-secondary px-2.5 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Take off</button>
         </div>
       </div>`).join('')
       : '<p class="text-sm text-gray-400">The front page is empty. Promote something from below.</p>';
@@ -9539,9 +9693,9 @@ async function loadSwanFrontPage() {
         </div>
         <div class="flex items-center gap-2 shrink-0">
           <button onclick="openSwanRead(${p.id})"
-            class="px-2.5 py-1.5 text-xs font-bold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer">Read</button>
+            class="btn-secondary px-2.5 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Read</button>
           <button onclick="swanFeature(${p.id})"
-            class="px-2.5 py-1.5 text-xs font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 cursor-pointer">★ Promote</button>
+            class="btn-primary px-2.5 py-1.5 text-xs font-bold rounded-lg cursor-pointer">★ Promote</button>
         </div>
       </div>`).join('')
       : '<p class="text-sm text-gray-400">Nothing live and unfeatured.</p>';
@@ -9815,15 +9969,15 @@ async function loadSwanContributors() {
             </label>
             <button onclick="swanToggleTier(${c.id}, ${c.frontPageTier ? 'false' : 'true'})"
               ${c.status === 'withdrawn' ? 'disabled title="This contributor has disconnected The Swan Index."' : ''}
-              class="px-2.5 py-1.5 text-xs font-bold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+              class="btn-secondary px-2.5 py-1.5 text-xs font-bold border rounded-lg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
               ${c.frontPageTier ? 'Remove tier' : 'Grant tier'}
             </button>
             ${c.status === 'withdrawn'
               ? '<span class="text-xs text-gray-400 px-2">Disconnected by the author</span>'
               : `<button onclick="swanToggleSuspend(${c.id}, '${c.status === 'suspended' ? 'active' : 'suspended'}', '${_swanEsc(c.handle)}', ${c.livePieces})"
                   class="px-2.5 py-1.5 text-xs font-bold rounded-lg cursor-pointer ${c.status === 'suspended'
-                    ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                    : 'border border-red-300 text-red-700 hover:bg-red-50'}">
+                    ? 'btn-primary'
+                    : 'btn-destructive'}">
                   ${c.status === 'suspended' ? 'Reinstate' : 'Suspend'}</button>`}
           </div>
         </div>
@@ -9883,7 +10037,9 @@ async function swanToggleSuspend(id, next, handle, livePieces) {
 // the only top-level statement that CALLS into the code above rather than declaring it.
 (function bootAdmin() {
   const params = new URLSearchParams(location.search);
-  const initialView = params.get('view') || 'dashboard';
+  // ?section= is what older emails link with (the quarterly bias reminder said ?section=bias-audit);
+  // treat it as ?view= so those links land where they say.
+  const initialView = params.get('section') || params.get('view') || 'dashboard';
   if (_catOwning(initialView) && initialView !== 'dashboard') adminGoTo(initialView);
   else adminCatNav('dashboard');
 })();

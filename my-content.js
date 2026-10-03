@@ -265,7 +265,7 @@ function _renderSections() {
             <p class="text-sm font-bold text-gray-700">No content matches these filters.</p>
             <p class="text-sm text-gray-400 mt-1">You have ${total} ${total === 1 ? 'item' : 'items'} in your library.</p>
             <button type="button" onclick="window._mcClearFilters()"
-              class="mt-4 px-4 py-2 text-xs font-bold rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition cursor-pointer">Clear filters</button>
+              class="btn-secondary mt-4 px-4 py-2 text-xs font-bold rounded-lg border transition cursor-pointer">Clear filters</button>
           </div>`;
     } else {
         container.innerHTML = sections.map(sec => _sectionHTML(sec)).join('');
@@ -338,7 +338,7 @@ function _mcRenderControls() {
         </select>
       </label>
       ${filtering ? `<button type="button" onclick="window._mcClearFilters()"
-        class="px-3 py-2 text-xs font-bold rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition cursor-pointer">Clear filters</button>` : ''}`;
+        class="btn-secondary px-3 py-2 text-xs font-bold rounded-lg border transition cursor-pointer">Clear filters</button>` : ''}`;
     host.classList.remove('hidden');
 }
 
@@ -459,7 +459,7 @@ function _assetRow(asset, sec) {
         actions = `
           <button type="button" onclick="window._mcKeepAsset(${asset.id})"
             title="Keep this card in your library permanently"
-            class="text-xs font-bold text-emerald-600 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-lg transition cursor-pointer">
+            class="btn-secondary text-xs font-bold border px-3 py-1.5 rounded-lg transition cursor-pointer">
             Keep
           </button>
           <button type="button" onclick="window._mcPromptDelete(${asset.id})"
@@ -477,7 +477,7 @@ function _assetRow(asset, sec) {
     } else if (asset.status === 'scheduled') {
         actions = `
           <button type="button" onclick="window._mcPromptDetach(${asset.id})"
-            class="text-xs font-bold text-amber-600 hover:text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-3 py-1.5 rounded-lg transition cursor-pointer">
+            class="btn-destructive text-xs font-bold border px-3 py-1.5 rounded-lg transition cursor-pointer">
             Remove from Post
           </button>`;
     } else if (asset.status === 'posted') {
