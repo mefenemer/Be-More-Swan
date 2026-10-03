@@ -255,7 +255,7 @@
         <!-- SC1: Seat usage pill -->
         <span id="seat-usage-pill" class="hidden text-xs font-semibold px-3 py-1.5 rounded-full border"></span>
         <button id="invite-member-btn" onclick="window._openInviteModal()"
-                class="px-4 py-2 bg-emerald-700 text-white rounded-xl text-sm font-semibold hover:bg-emerald-800 transition">
+                class="btn-primary px-4 py-2 rounded-xl text-sm font-semibold transition">
           + Invite Member
         </button>
       </div>
@@ -268,7 +268,7 @@
         <p class="text-sm font-semibold text-amber-900">Team members not available on your current plan</p>
         <p id="seat-limit-callout-msg" class="text-xs text-amber-700 mt-0.5">Upgrade your plan to invite colleagues and collaborate in your workspace.</p>
       </div>
-      <a href="#" onclick="window.loadView && window.loadView('billing')" class="shrink-0 px-3 py-1.5 bg-amber-600 text-white text-xs font-bold rounded-lg hover:bg-amber-700 transition">
+      <a href="#" onclick="window.loadView && window.loadView('billing')" class="btn-golive shrink-0 px-3 py-1.5 text-xs font-bold rounded-lg transition">
         Upgrade Plan
       </a>
     </div>
@@ -301,7 +301,7 @@
         <p id="domain-join-hint" class="hidden text-xs text-amber-600 mt-1"></p>
       </div>
       <button type="button" id="domain-join-toggle" role="switch" aria-checked="false"
-        class="bg-red-500 relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none">
+        class="btn-destructive relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 transition-colors duration-200 ease-in-out focus:outline-none">
         <span aria-hidden="true" class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
       </button>
     </div>
@@ -337,7 +337,7 @@
         <button onclick="document.getElementById('invite-modal').classList.add('hidden')"
                 class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800">Cancel</button>
         <button id="invite-submit-btn" onclick="window._submitInvite()"
-                class="px-5 py-2 bg-emerald-700 text-white rounded-xl text-sm font-semibold hover:bg-emerald-800 transition disabled:opacity-50">
+                class="btn-primary px-5 py-2 rounded-xl text-sm font-semibold transition disabled:opacity-50">
           Send Invite
         </button>
       </div>
@@ -369,7 +369,7 @@
         <button onclick="document.getElementById('role-modal').classList.add('hidden')"
                 class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800">Cancel</button>
         <button id="role-submit-btn" onclick="window._submitRoleChange()"
-                class="px-5 py-2 bg-emerald-700 text-white rounded-xl text-sm font-semibold hover:bg-emerald-800 transition">
+                class="btn-primary px-5 py-2 rounded-xl text-sm font-semibold transition">
           Save
         </button>
       </div>
@@ -711,7 +711,7 @@
     <div class="flex flex-wrap items-center gap-3 mb-5">
       <span id="brandkit-source" class="text-xs font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-600">Loading…</span>
       <button type="button" id="brandkit-extract"
-        class="text-xs font-bold px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition cursor-pointer">
+        class="btn-secondary text-xs font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer">
         Read colours from my website
       </button>
       <span id="brandkit-msg" class="text-xs font-semibold text-gray-500"></span>
@@ -775,7 +775,7 @@
 
         <div class="flex items-center gap-3 pt-1">
           <button type="button" id="brandkit-save"
-            class="px-5 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700 transition cursor-pointer">
+            class="btn-primary px-5 py-2.5 rounded-lg text-sm font-bold transition cursor-pointer">
             Save brand style
           </button>
           <button type="button" id="brandkit-reset"
@@ -819,7 +819,7 @@
         <div class="p-6">
           <form id="asset-upload-form" class="space-y-5">
             <div class="flex bg-gray-100 p-1 rounded-lg">
-              <button type="button" id="btn-tab-file" class="flex-1 py-1.5 text-xs font-bold bg-white text-gray-900 rounded-md shadow-sm transition-all">File</button>
+              <button type="button" id="btn-tab-file" class="btn-secondary flex-1 py-1.5 text-xs font-bold rounded-md shadow-sm transition-all border">File</button>
               <button type="button" id="btn-tab-url" class="flex-1 py-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 transition-all">URL</button>
             </div>
 

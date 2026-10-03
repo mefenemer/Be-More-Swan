@@ -795,7 +795,7 @@
                             </td>
                             <td class="px-4 py-5 text-center">
                                 <button onclick="openEnterpriseModal()"
-                                        class="inline-block px-5 py-2 text-sm font-bold rounded-lg text-white bg-pink-600 hover:bg-pink-700 transition">Book a Call</button>
+                                        class="btn-primary inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Book a Call</button>
                             </td>
                         </tr>
                     </tbody>
@@ -819,7 +819,7 @@
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
                 </a>
                 <button onclick="openEnterpriseModal()"
-                        class="inline-flex items-center justify-center gap-2 px-8 py-4 border-2 border-white/30 text-white font-bold rounded-xl hover:border-white/60 hover:bg-white/10 transition text-base">
+                        class="btn-secondary inline-flex items-center justify-center gap-2 px-8 py-4 border-2 font-bold rounded-xl transition text-base">
                     Talk to Enterprise Sales
                 </button>
             </div>
@@ -864,8 +864,8 @@
             </div>
             <p id="ent-form-error" class="text-red-600 text-sm hidden bg-red-50 border border-red-200 rounded-lg px-4 py-2.5"></p>
             <div class="flex gap-3 pt-1">
-                <button type="button" onclick="closeEnterpriseModal()" class="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-50 transition">Cancel</button>
-                <button type="submit" id="ent-submit-btn" class="flex-1 px-4 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-bold hover:bg-gray-800 transition">Request Discovery Call</button>
+                <button type="button" onclick="closeEnterpriseModal()" class="btn-secondary flex-1 px-4 py-2.5 border rounded-xl text-sm font-semibold transition">Cancel</button>
+                <button type="submit" id="ent-submit-btn" class="btn-primary flex-1 px-4 py-2.5 rounded-xl text-sm font-bold transition">Request Discovery Call</button>
             </div>
         </form>
         <div id="enterprise-success" class="px-8 py-12 text-center hidden">
@@ -874,7 +874,7 @@
             </div>
             <h3 class="text-xl font-bold text-gray-900 mb-2">Request received!</h3>
             <p class="text-gray-500 text-sm mb-6">Our team will be in touch within one business day to schedule your discovery call.</p>
-            <button onclick="closeEnterpriseModal()" class="px-6 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-bold hover:bg-gray-800 transition">Close</button>
+            <button onclick="closeEnterpriseModal()" class="btn-secondary px-6 py-2.5 rounded-xl text-sm font-bold transition border">Close</button>
         </div>
     </div>
 </div>
@@ -1071,7 +1071,7 @@
             '<td class="px-4 py-5 text-center"><a href="#" onclick="event.preventDefault(); choosePlan(\'starter\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Get Started</a></td>' +
             '<td class="px-4 py-5 text-center pk-col-tint"><a href="#" onclick="event.preventDefault(); choosePlan(\'pro_team\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Automate My Workflow</a></td>' +
             '<td class="px-4 py-5 text-center"><a href="#" onclick="event.preventDefault(); choosePlan(\'business\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Scale My Business</a></td>' +
-            '<td class="px-4 py-5 text-center"><button onclick="openEnterpriseModal()" class="inline-block px-5 py-2 text-sm font-bold rounded-lg text-white bg-pink-600 hover:bg-pink-700 transition">Book a Call</button></td>' +
+            '<td class="px-4 py-5 text-center"><button onclick="openEnterpriseModal()" class="btn-primary inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Book a Call</button></td>' +
             '</tr>';
 
         tbody.innerHTML = html;

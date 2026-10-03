@@ -197,9 +197,9 @@
    * compiled into style.css, so none of this needs a Tailwind rebuild.
    */
   const BTN = {
-    primary: 'px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed',
-    secondary: 'px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed',
-    danger: 'px-3 py-1.5 bg-white border border-gray-200 text-gray-500 hover:text-red-600 hover:border-red-300 text-xs font-bold rounded-lg transition',
+    primary: 'btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed',
+    secondary: 'btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed',
+    danger: 'btn-destructive px-3 py-1.5 text-xs font-bold rounded-lg transition',
   };
 
   /**
@@ -590,7 +590,7 @@
       <p class="text-sm font-semibold text-gray-900">No searches yet</p>
       <p class="text-xs text-gray-500 mt-1">Create a search and your assistant will start looking for companies that match it.</p>
       <button type="button" data-si-new-search
-        class="mt-3 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition">Find New Leads</button>
+        class="btn-assistant mt-3 px-3 py-1.5 text-xs font-bold rounded-lg transition">Find New Leads</button>
     </div>`;
   }
 
@@ -610,7 +610,7 @@
     if (state.error) {
       return `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
         <p class="text-sm font-semibold text-gray-900">${esc(state.error)}</p>
-        <button type="button" data-si-retry class="mt-3 px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-gray-300 text-xs font-bold rounded-lg transition">Try again</button>
+        <button type="button" data-si-retry class="btn-secondary mt-3 px-3 py-1.5 border text-xs font-bold rounded-lg transition">Try again</button>
       </div>`;
     }
 
@@ -619,9 +619,9 @@
         <div class="p-4 flex flex-wrap items-center gap-2">
           <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mr-auto">Lead searches</p>
           <button type="button" data-si-lead-ideas
-            class="px-2.5 py-1 text-xs font-bold rounded-lg border bg-white text-gray-600 border-gray-200 hover:border-gray-300 transition">Review Lead Ideas</button>
+            class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border transition">Review Lead Ideas</button>
           <button type="button" data-si-new-search
-            class="px-2.5 py-1 text-xs font-bold rounded-lg border bg-white text-emerald-700 border-emerald-200 hover:border-emerald-300 hover:bg-emerald-50 transition">Find New Leads</button>
+            class="btn-assistant px-2.5 py-1 text-xs font-bold rounded-lg border transition">Find New Leads</button>
         </div>
         ${state.savedSearches.length ? '' : emptyState()}
         ${!state.hasSocialFeed ? `
@@ -672,7 +672,7 @@
 
       ${state.nextCursor ? `
       <div class="text-center p-4">
-        <button type="button" data-si-more class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-gray-300 text-xs font-bold rounded-lg transition">Load more</button>
+        <button type="button" data-si-more class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Load more</button>
       </div>` : ''}`;
   }
 

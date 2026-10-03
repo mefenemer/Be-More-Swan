@@ -204,8 +204,8 @@ check('the panel has exactly one emphasised action', () => {
     const primaries = [...HUB.matchAll(/buttons\.push\(\{ label: [`']([^`']+)[`'], primary: true/g)].map((m) => m[1]);
     assert.deepStrictEqual(primaries, ['Move to ${reviewTabLabel()}'],
         `exactly one primary action is expected, found: ${primaries.join(', ') || 'none'}`);
-    assert.match(HUB, /b\.primary\s*\n?\s*\? 'px-3 py-1\.5 bg-emerald-700/,
-        'primary must render in the house emerald fill, not a fourth bespoke style');
+    assert.match(HUB, /b\.primary\s*\n?\s*\? 'btn-primary /,
+        'primary must render as the button system\'s .btn-primary, not a bespoke style');
 });
 
 console.log(`\n${passed} checks passed.`);

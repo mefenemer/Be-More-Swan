@@ -424,7 +424,7 @@ window.generateAssistantCardHTML = function(assistant) {
         <div class="flex items-center gap-2 flex-wrap mb-4 pt-4 border-t border-gray-50">
             ${quickActions.map(([icon, label, tab]) => `
             <button type="button" onclick="event.stopPropagation(); window._assistantDetailInitialTab='${tab}'; window.routeToAssistantDetail('${assistant.id}')"
-                class="px-2.5 py-1.5 text-xs font-semibold text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 hover:text-emerald-700 transition">${icon} ${label}</button>`).join('')}
+                class="btn-secondary px-2.5 py-1.5 text-xs font-semibold border rounded-lg transition">${icon} ${label}</button>`).join('')}
         </div>` : '';
 
     return `
@@ -442,7 +442,7 @@ window.generateAssistantCardHTML = function(assistant) {
         ${quickActionsHtml}
         <div class="mt-auto pt-4 border-t border-gray-50 flex justify-between items-center">
             <button type="button" onclick="event.stopPropagation(); window.openAssistantChatModal ? window.openAssistantChatModal('${assistant.id}', '${(assistant.name || 'Your assistant').replace(/'/g, '&#39;')}', '${role.replace(/'/g, '&#39;')}', '${(assistant.roleKey || '').replace(/'/g, '&#39;')}', { resume: true }) : (window.location.href = 'assistant-chat.html?assistantId=${assistant.id}')"
-               class="px-3.5 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition cursor-pointer">💬 Chat</button>
+               class="btn-assistant px-3.5 py-1.5 text-xs font-bold border rounded-lg transition cursor-pointer">💬 Chat</button>
             <span class="text-sm font-bold text-gray-900 group-hover:text-emerald-700 transition-colors">View Details &rarr;</span>
         </div>
     </div>`;
@@ -1325,7 +1325,7 @@ function _detailRqMoreButton(statusKey) {
     const total = _detailRqTotal ?? shown;
     return `<div class="py-4 text-center border-t border-gray-100">
       <button id="detail-rq-more-btn" onclick="_detailRqLoadMore('${statusKey}')"
-        class="px-4 py-2 text-xs font-bold rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
+        class="btn-secondary px-4 py-2 text-xs font-bold rounded-lg border transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
         Show more
       </button>
       <p class="text-[11px] text-gray-400 mt-1.5">Showing ${shown} of ${total}</p>
@@ -1702,8 +1702,8 @@ function _rqOutreachPreview(r, statusKey) {
           </label>
           ${_rqSignatureNote()}
           <div class="flex items-center gap-2 mt-2">
-            <button type="button" onclick="_detailRqRecordAct(this,'saveEmail')" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white transition cursor-pointer">Save changes</button>
-            <button type="button" onclick="_detailRqRecordAct(this,'cancelEmail')" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-gray-300 transition cursor-pointer">Cancel</button>
+            <button type="button" onclick="_detailRqRecordAct(this,'saveEmail')" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer">Save changes</button>
+            <button type="button" onclick="_detailRqRecordAct(this,'cancelEmail')" class="btn-secondary px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer">Cancel</button>
           </div>
         </div>
       </div>
@@ -2040,7 +2040,7 @@ function _rqOfferDomainExclusion(strip, domain, campaignId) {
       <p class="text-[11px] font-bold text-gray-700">Noted. Stop this search finding <span class="font-mono">${_rqEsc(domain)}</span>?</p>
       <p class="text-[11px] text-gray-500 mb-2">Adds the domain to this search’s exclusions. You can remove it later by editing the search.</p>
       <div class="flex flex-wrap gap-1.5">
-        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white transition cursor-pointer" data-exclude-domain>Yes, exclude it</button>
+        <button type="button" class="btn-primary px-2 py-1 text-[11px] font-bold rounded-lg transition cursor-pointer" data-exclude-domain>Yes, exclude it</button>
         <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-400 hover:text-gray-600 transition cursor-pointer" data-exclude-skip>No thanks</button>
       </div>
       <p class="hidden text-[11px] font-semibold mt-1.5" data-exclude-status></p>`;
@@ -2070,10 +2070,10 @@ function _rqOfferDomainExclusion(strip, domain, campaignId) {
 }
 
 function _rqRecordActions(r, statusKey) {
-    const secondary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 transition cursor-pointer';
-    const primary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white transition cursor-pointer';
+    const secondary = 'btn-secondary px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
+    const primary = 'btn-golive px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer';
     const btn = (label, act, cls) => `<button type="button" onclick="_detailRqRecordAct(this,'${act}')" class="${cls}">${label}</button>`;
-    const reject = `<button type="button" onclick="_detailRqRecordAct(this,'reject')" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-gray-200 text-red-600 hover:border-red-300 hover:bg-red-50 transition cursor-pointer ml-auto">Reject</button>`;
+    const reject = `<button type="button" onclick="_detailRqRecordAct(this,'reject')" class="btn-destructive px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer ml-auto">Reject</button>`;
     // Leads follow a simpler lifecycle than posts: Approve just accepts the lead (no "Approve &
     // Schedule"). The chase reminder (a scheduled_for that surfaces on the Calendar) is set later,
     // once the first outreach has gone out — via "Mark outreach sent" in the Approved column.
@@ -2202,7 +2202,7 @@ function _rqRecordActions(r, statusKey) {
         ${buttons}
         <div class="rq-sched-row hidden w-full flex items-center gap-2 mt-2">
           <input type="datetime-local" class="rq-sched-input border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
-          <button type="button" onclick="_detailRqRecordAct(this,'schedule')" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-yellow-500 hover:bg-yellow-600 text-white cursor-pointer">Confirm schedule</button>
+          <button type="button" onclick="_detailRqRecordAct(this,'schedule')" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Confirm schedule</button>
         </div>
         <p class="rq-rec-err hidden w-full text-xs font-semibold text-red-600 mt-1"></p>
     </div>`;
@@ -2317,7 +2317,7 @@ function _rqAttendeeFix(r, statusKey) {
       <summary class="cursor-pointer px-3 py-2 text-xs font-bold text-gray-700 select-none">${label}</summary>
       <div class="px-3 pb-3 pt-1 border-t border-gray-200">
         ${rows}
-        <button type="button" onclick="_detailRqRecordAct(this,'saveAttendees')" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white transition cursor-pointer mt-2">Save addresses</button>
+        <button type="button" onclick="_detailRqRecordAct(this,'saveAttendees')" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer mt-2">Save addresses</button>
       </div>
     </details>`;
 }
@@ -3364,9 +3364,9 @@ const _RQ_BLOG_STATUS = {
 };
 
 function _rqBlogActions(p, statusKey) {
-    const primary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white transition cursor-pointer';
-    const secondary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 transition cursor-pointer';
-    const danger = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-gray-200 text-red-600 hover:border-red-300 hover:bg-red-50 transition cursor-pointer';
+    const primary = 'btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer';
+    const secondary = 'btn-secondary px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
+    const danger = 'btn-destructive px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
     const btn = (action, label, cls) => `<button type="button" onclick="_detailRqBlogAct(this,'${action}')" class="${cls}">${label}</button>`;
     const actions = [];
     if (statusKey === 'review') {
@@ -3399,7 +3399,7 @@ function _rqBlogActions(p, statusKey) {
         ${actions.join('')}
         <div class="rq-sched-row hidden w-full flex items-center gap-2 mt-2">
           <input type="datetime-local" class="rq-sched-input border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
-          <button type="button" onclick="_detailRqBlogAct(this,'schedule')" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-yellow-500 hover:bg-yellow-600 text-white cursor-pointer">Confirm schedule</button>
+          <button type="button" onclick="_detailRqBlogAct(this,'schedule')" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Confirm schedule</button>
         </div>
         <p class="rq-rec-err hidden w-full text-xs font-semibold text-red-600 mt-1"></p>
     </div>`;
@@ -3439,8 +3439,8 @@ const _RQ_NEWSLETTER_STATUS = {
 };
 
 function _rqNewsletterActions(issue, statusKey) {
-    const primary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white transition cursor-pointer';
-    const secondary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 transition cursor-pointer';
+    const primary = 'btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer';
+    const secondary = 'btn-secondary px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
     // A sent issue is a record of what people received — it opens read-only and offers nothing else.
     const open = `<button type="button" onclick="window._detailRqNewsletterOpen(${issue.id})" class="${statusKey === 'posted' ? secondary : primary}">${statusKey === 'posted' ? 'View' : 'Open in Studio'}</button>`;
     return `<div class="flex items-center gap-2 mt-3">${open}</div>`;
@@ -4718,7 +4718,7 @@ window._openTuningPicker = async function() {
     }
     list.innerHTML = rows.slice(0, 15).map(r => `
         <button type="button" onclick="document.getElementById('modal-tuning-picker').classList.add('hidden'); window._openTuningSession({ ${r.arg}:${r.id} })"
-            class="w-full text-left px-4 py-3 rounded-xl border border-gray-200 hover:border-indigo-400 hover:bg-indigo-50/40 transition cursor-pointer">
+            class="btn-secondary w-full text-left px-4 py-3 rounded-xl border transition cursor-pointer">
             <p class="text-xs text-gray-400 mb-0.5">${_escapeHtml(r.label)}</p>
             <p class="text-sm text-gray-800">${_escapeHtml(r.body.slice(0, 120))}</p>
         </button>`).join('');
@@ -5007,7 +5007,7 @@ async function _renderOutreachEmailConnect(data) {
 
     const switchBtn = (wanted, mode, label, cls) =>
         `<button type="button" data-outreach-switch="${esc(wanted)}" data-outreach-mode="${esc(mode)}" class="${cls}">${esc(label)}</button>`;
-    const primaryCls = 'shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition whitespace-nowrap cursor-pointer';
+    const primaryCls = 'btn-primary shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition whitespace-nowrap cursor-pointer';
     const linkCls = 'text-xs font-bold text-emerald-700 hover:text-emerald-800 underline cursor-pointer';
 
     if (connected) {
@@ -5150,7 +5150,7 @@ function _renderMandateSuggestions(data) {
     const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     list.innerHTML = suggestions.map(s => `
       <button type="button" title="${esc(s.text)}"
-        class="mandate-suggestion text-left text-sm bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg p-3 hover:bg-emerald-100 hover:border-emerald-300 transition shadow-sm cursor-pointer">
+        class="btn-secondary mandate-suggestion text-left text-sm border rounded-lg p-3 transition shadow-sm cursor-pointer">
         <span class="font-bold block mb-1">${esc(s.title)}</span>
         <span class="line-clamp-2 text-emerald-700">${esc(s.text)}</span>
       </button>`).join('');
@@ -6542,7 +6542,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                             : `You have a limited time to reinstate it, subject to your plan's assistant limit.`}
                         After that, this assistant and all of its associated data will be permanently deleted — this cannot be undone.
                     </p>
-                    <button type="button" id="btn-reinstate-assistant" class="mt-2.5 px-4 py-2 text-sm font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors cursor-pointer">
+                    <button type="button" id="btn-reinstate-assistant" class="btn-primary mt-2.5 px-4 py-2 text-sm font-bold rounded-lg transition-colors cursor-pointer">
                         Reinstate assistant
                     </button>
                 </div>`;
@@ -7765,7 +7765,7 @@ async function _fetchAndRenderFollowerCounts() {
                     ${asOf}
                     <div id="follower-input-${r.platform}" class="hidden mt-1.5 flex items-center gap-2 justify-end">
                         <input type="number" min="0" inputmode="numeric" placeholder="Followers" class="w-28 border border-gray-300 rounded-lg px-2 py-1 text-xs focus:ring-2 focus:ring-emerald-300 focus:outline-none">
-                        <button type="button" onclick="window._saveFollowerCount('${r.platform}', this)" class="text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg px-2.5 py-1 cursor-pointer">Save</button>
+                        <button type="button" onclick="window._saveFollowerCount('${r.platform}', this)" class="btn-primary text-xs font-bold rounded-lg px-2.5 py-1 cursor-pointer">Save</button>
                         <span class="follower-input-err text-[11px] text-red-600 hidden"></span>
                     </div>
                 </div>`;
@@ -8069,7 +8069,7 @@ async function _renderKickOff(assistantId) {
             panel.innerHTML = `
                 <p class="text-xs font-bold text-red-500 uppercase tracking-wider mb-1">⚠ Attention required</p>
                 <p class="text-sm font-semibold text-red-800 mb-3">${reason}</p>
-                <button type="button" id="btn-fix-attention" class="px-4 py-2 text-sm font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm transition cursor-pointer">${ctaLabel}</button>`;
+                <button type="button" id="btn-fix-attention" class="btn-destructive px-4 py-2 text-sm font-bold rounded-lg shadow-sm transition cursor-pointer">${ctaLabel}</button>`;
             const fix = document.getElementById('btn-fix-attention');
             if (fix) fix.onclick = () => {
                 if (ctaKind === 'billing') window.loadView?.('billing');
@@ -8094,7 +8094,7 @@ async function _renderKickOff(assistantId) {
             panel.innerHTML = `
                 <p class="text-xs font-bold text-red-500 uppercase tracking-wider mb-1">⚠ ${b.title || 'Action required'}</p>
                 <p class="text-sm font-semibold text-red-800 mb-3">${b.message || 'An action is needed before setup can finish.'}</p>
-                <button type="button" id="btn-retry-prov" class="px-4 py-2 text-sm font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg shadow-sm transition cursor-pointer">${b.cta || 'Retry'} &amp; retry</button>`;
+                <button type="button" id="btn-retry-prov" class="btn-utility px-4 py-2 text-sm font-bold rounded-lg shadow-sm transition cursor-pointer">${b.cta || 'Retry'} &amp; retry</button>`;
             const r = document.getElementById('btn-retry-prov');
             if (r) r.onclick = () => window.retryProvisioning?.(assistantId, r, () => _renderKickOff(assistantId));
         }
@@ -9051,7 +9051,7 @@ function _buildRuleCategoryCard(catId, title, placeholder, rules, readOnlyAdd) {
     card.innerHTML = `
         <div class="px-4 py-3 bg-gray-50/60 border-b border-gray-100 flex items-center justify-between">
             <h4 class="text-sm font-bold text-gray-800"${RULE_CATEGORY_EXPLAIN[catId] ? ` data-explain="${RULE_CATEGORY_EXPLAIN[catId]}"` : ''}>${_escapeHtml(title)}</h4>
-            ${readOnlyAdd ? '' : `<button type="button" data-cat="${catId}" class="ar-add-btn text-sm font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1 bg-emerald-50 px-3 py-1.5 rounded-md transition-colors">
+            ${readOnlyAdd ? '' : `<button type="button" data-cat="${catId}" class="btn-primary ar-add-btn text-sm font-bold flex items-center gap-1 px-3 py-1.5 rounded-md transition-colors">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>Add Rule</button>`}
         </div>
         <div class="ar-rows divide-y divide-gray-100" data-cat="${catId}"></div>`;
@@ -9504,7 +9504,7 @@ function _renderGoalProgressCard() {
                         </div>
                     </div>
                     <button type="button" onclick="window._addGoalFromOverview()"
-                        class="shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Set your first goal</button>
+                        class="btn-secondary shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border transition cursor-pointer">Set your first goal</button>
                 </div>`;
         return;
     }
@@ -9813,7 +9813,7 @@ function _buildManualEntryRow(g) {
                 aria-label="Current value for ${_escapeHtml(g.title || label)}"
                 class="flex-1 min-w-0 border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
             <button type="button" onclick="window._recordGoalValue(${g.id})" id="manual-save-${g.id}"
-                class="shrink-0 px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition cursor-pointer">Save</button>
+                class="btn-primary shrink-0 px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer">Save</button>
         </div>
         <p id="manual-msg-${g.id}" class="hidden text-xs mt-1.5"></p>
     </div>`;
@@ -10174,15 +10174,15 @@ window._renderReviewChart = async function (goalId) {
         // US-03 — the headline resolution flow for a failing goal: diagnosis + a one-click strategy fix.
         // It's the primary CTA when off pace; "Get AI Recommendations" drops to a secondary outline.
         const fixBtn = offPace
-            ? `<button type="button" onclick="window._openStrategyFix(${goalId})" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer">${lock}One-Click Fix</button>`
+            ? `<button type="button" onclick="window._openStrategyFix(${goalId})" class="btn-primary px-5 py-2 text-sm font-bold rounded-lg shadow transition cursor-pointer">${lock}One-Click Fix</button>`
             : '';
-        const recsCls = offPace
-            ? 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
-            : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow';
+        // The assistant's own advice — the assistant colour; quieter (secondary) when the One-Click
+        // Fix beside it is the action that matters.
+        const recsCls = offPace ? 'btn-secondary border' : 'btn-assistant shadow';
         const assistantName = document.getElementById('detail-name-input')?.value?.trim() || 'AI';
         const recsBtn = `<button type="button" onclick="window._getAiRecommendations(${goalId})" class="px-5 py-2 ${recsCls} text-sm font-bold rounded-lg transition cursor-pointer">${lock}${_escapeHtml(assistantName)}'s Recommendations</button>`;
         const editBtn = offPace
-            ? `<button type="button" onclick="window._editBriefFromReview()" class="px-5 py-2 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-bold rounded-lg transition cursor-pointer">Edit Assistant Brief</button>`
+            ? `<button type="button" onclick="window._editBriefFromReview()" class="btn-secondary px-5 py-2 border text-sm font-bold rounded-lg transition cursor-pointer">Edit Assistant Brief</button>`
             : '';
         footer.innerHTML = editBtn + recsBtn + fixBtn;
     }
@@ -10477,8 +10477,8 @@ window._getAiRecommendations = async function (goalId) {
                 </label>`).join('')}
             </div>
             <div class="flex items-center gap-2 flex-wrap pt-1">
-                <button type="button" onclick="window._progressSelectedRecs()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow transition cursor-pointer">Progress Selected</button>
-                <button type="button" onclick="window._getAiRecommendations(${goalId})" class="px-4 py-2 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs font-bold rounded-lg transition cursor-pointer">Reject &amp; Ask for More</button>
+                <button type="button" onclick="window._progressSelectedRecs()" class="btn-primary px-4 py-2 text-xs font-bold rounded-lg shadow transition cursor-pointer">Progress Selected</button>
+                <button type="button" onclick="window._getAiRecommendations(${goalId})" class="btn-destructive px-4 py-2 border text-xs font-bold rounded-lg transition cursor-pointer">Reject &amp; Ask for More</button>
             </div>
         </div>`;
     } catch {

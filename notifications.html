@@ -5,7 +5,7 @@
             <h1 class="text-3xl font-extrabold text-gray-900">Notifications</h1>
             <p class="text-gray-500 mt-1">Stay updated on your workspace and assistant activities.</p>
         </div>
-        <button id="btn-mark-all-read" class="hidden sm:flex items-center gap-2 px-4 py-2 text-sm font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors border border-emerald-200">
+        <button id="btn-mark-all-read" class="hidden btn-secondary sm:flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-colors border">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
             Mark all as read
         </button>
@@ -13,12 +13,12 @@
 
     <!-- Action required vs Updates: actions are cleared by doing, updates by reading. -->
     <div class="flex gap-2 mb-4">
-        <button type="button" id="tab-action" class="flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800">
+        <button type="button" id="tab-action" class="btn-secondary flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg border">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>
             Action required
             <span id="tab-action-count" class="hidden bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-full">0</span>
         </button>
-        <button type="button" id="tab-updates" class="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-transparent text-gray-500 hover:text-gray-700">
+        <button type="button" id="tab-updates" class="btn-secondary flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
             Updates
             <span id="tab-updates-count" class="hidden bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-0.5 rounded-full">0</span>
@@ -47,7 +47,7 @@
             <!-- Shown by notifications.js only while a grouping is active; its label flips between
                  "Collapse all" and "Expand all" to match what the click will do. -->
             <button type="button" id="notif-expand-all" style="display:none"
-                class="hidden shrink-0 whitespace-nowrap px-3 py-2.5 text-sm font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer">Collapse all</button>
+                class="hidden btn-utility shrink-0 whitespace-nowrap px-3 py-2.5 text-sm font-bold border rounded-lg transition-colors cursor-pointer">Collapse all</button>
         </div>
     </div>
 

@@ -685,7 +685,7 @@
         ].filter(Boolean).join(' · ')
       : '';
 
-    const btn = 'px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition';
+    const btn = 'btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition';
     const noteCount = String(t.notes || '').trim() ? 'Notes' : 'Add a note';
 
     return `
@@ -716,7 +716,7 @@
     if (!loaded) {
       return `<div class="p-6 text-center">
         <p class="text-xs text-gray-500">${esc(state.rowError[t.id] || 'Could not open this conversation.')}</p>
-        <button type="button" data-lt-reopen="${t.id}" class="mt-2 px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-gray-300 text-xs font-bold rounded-lg transition">Try again</button>
+        <button type="button" data-lt-reopen="${t.id}" class="btn-secondary mt-2 px-3 py-1.5 border text-xs font-bold rounded-lg transition">Try again</button>
       </div>`;
     }
     const { messages, enrolment } = loaded;
@@ -776,7 +776,7 @@
         class="mt-2 w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 outline-none transition disabled:opacity-60">${esc(draft)}</textarea>
       <div class="flex items-center gap-2 mt-2 flex-wrap">
         <button type="button" data-lt-send-reply="${t.id}" ${sending || !draft.trim() ? 'disabled' : ''}
-          class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
           ${sending ? 'Sending&hellip;' : 'Send reply'}</button>
         <span class="text-[11px] text-gray-400">Your opt-out footer and postal address are added automatically.</span>
       </div>
@@ -846,7 +846,7 @@
             ? 'keeps them on your do-not-contact list, so no future search can find them and start this again.'
             : 'blocks this company from every search, so nobody there is found again. There is no address on this conversation to block instead.'}</p>
         <button type="button" data-lt-erase="${t.id}" ${busy ? 'disabled' : ''}
-          class="px-3 py-1.5 bg-white border border-gray-200 text-gray-500 hover:border-red-300 hover:text-red-700 text-xs font-bold rounded-lg transition disabled:opacity-50">
+          class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">
           ${busy ? 'Erasing&hellip;' : 'Erase their data'}</button>
       </div>
       ${outcome}
@@ -1532,7 +1532,7 @@
     if (state.error) {
       return `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
         <p class="text-sm font-semibold text-gray-900">${esc(state.error)}</p>
-        <button type="button" data-lt-retry class="mt-3 px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-gray-300 text-xs font-bold rounded-lg transition">Try again</button>
+        <button type="button" data-lt-retry class="btn-secondary mt-3 px-3 py-1.5 border text-xs font-bold rounded-lg transition">Try again</button>
       </div>`;
     }
     return listView();

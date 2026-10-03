@@ -55,8 +55,7 @@
     st.id = 'aos-styles';
     st.textContent = `
       .aos-swan-btn { position:absolute; right:8px; top:50%; transform:translateY(-50%); display:inline-flex; align-items:center; gap:6px;
-        padding:4px 10px 4px 6px; border-radius:9999px; border:1px solid #e5e7eb; background:#fff; font-size:12px; font-weight:700; color:#374151; cursor:pointer; }
-      .aos-swan-btn:hover { border-color:#f472b6; background:#fdf2f8; }
+        padding:4px 10px 4px 6px; border-radius:9999px; font-size:12px; font-weight:700; cursor:pointer; }
       .aos-swan-btn img { height:22px; width:auto; transform-origin:bottom center; }
       .aos-swan-btn.is-casting img { animation: aosSwanCast 0.7s ease-in-out infinite; }
       @keyframes aosSwanCast { 0% { transform: rotate(-9deg); } 50% { transform: rotate(9deg) scale(1.12); } 100% { transform: rotate(-9deg); } }
@@ -119,13 +118,13 @@
           <div style="position:relative;">
             <input type="text" name="${escapeHtml(name)}" value="${escapeHtml(value ?? '')}" maxlength="50" autocomplete="off"
               placeholder="e.g. Nova" class="${inputClasses()}" style="padding-right:150px;">
-            <button type="button" data-aos-suggest-name class="aos-swan-btn" title="Let Be More Swan suggest a name" aria-label="Suggest a name">
+            <button type="button" data-aos-suggest-name class="btn-assistant aos-swan-btn" title="Let Be More Swan suggest a name" aria-label="Suggest a name">
               <img src="${SWAN_IMG}" alt=""> Suggest a name
             </button>
           </div>
           <div class="flex flex-wrap items-center gap-2 mt-3">
             <span class="text-xs text-gray-500">Or pick a theme:</span>
-            ${NAME_THEMES.map((t) => `<button type="button" data-aos-name-theme="${escapeHtml(t)}" class="text-xs px-2 py-1 bg-white border border-gray-200 rounded hover:bg-gray-100 transition">${escapeHtml(t)}</button>`).join('')}
+            ${NAME_THEMES.map((t) => `<button type="button" data-aos-name-theme="${escapeHtml(t)}" class="btn-secondary text-xs px-2 py-1 border rounded transition">${escapeHtml(t)}</button>`).join('')}
           </div>
           <div data-aos-name-results class="hidden flex flex-wrap gap-2 mt-3"></div>
           <span data-aos-name-taken class="hidden text-red-500 text-xs font-bold mt-2 block">You already have an assistant with this name — please choose another.</span>`;
@@ -282,7 +281,7 @@
     function renderNameChips(names) {
       const box = formEl.querySelector('[data-aos-name-results]');
       if (!box) return;
-      box.innerHTML = names.map((n) => `<button type="button" data-aos-pick-name="${escapeHtml(n)}" class="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 rounded-md text-sm font-bold transition shadow-sm">${escapeHtml(n)}</button>`).join('');
+      box.innerHTML = names.map((n) => `<button type="button" data-aos-pick-name="${escapeHtml(n)}" class="btn-secondary px-3 py-1.5 border rounded-md text-sm font-bold transition shadow-sm">${escapeHtml(n)}</button>`).join('');
       box.classList.toggle('hidden', names.length === 0);
     }
     let suggesting = false;
@@ -368,8 +367,8 @@
               &larr; Back
             </button>
             ${isLast
-              ? `<button type="submit" data-aos-next class="px-8 py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-lg shadow transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Complete Setup</button>`
-              : `<button type="submit" data-aos-next class="px-8 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg shadow transition cursor-pointer">Continue &rarr;</button>`}
+              ? `<button type="submit" data-aos-next class="btn-primary px-8 py-3 font-bold rounded-lg shadow transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Complete Setup</button>`
+              : `<button type="submit" data-aos-next class="btn-primary px-8 py-3 font-bold rounded-lg shadow transition cursor-pointer">Continue &rarr;</button>`}
           </div>
         </div>`;
       container.querySelector('[data-aos-root]').scrollIntoView({ behavior: 'smooth', block: 'start' });

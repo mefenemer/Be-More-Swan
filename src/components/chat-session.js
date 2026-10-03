@@ -106,7 +106,7 @@
             <div class="flex flex-col gap-2.5 text-left">
               ${starterPrompts.map((prompt, i) => `
                 <button type="button" data-starter-prompt="${i}"
-                  class="group w-full flex items-center justify-between gap-3 bg-white border border-gray-200 hover:border-emerald-300 hover:bg-emerald-50 rounded-xl px-4 py-3 text-sm font-semibold text-gray-700 hover:text-emerald-800 shadow-sm transition text-left cursor-pointer">
+                  class="btn-secondary group w-full flex items-center justify-between gap-3 border rounded-xl px-4 py-3 text-sm font-semibold shadow-sm transition text-left cursor-pointer">
                   <span>${escapeHtml(prompt)}</span>
                   <svg class="w-4 h-4 shrink-0 text-gray-300 group-hover:text-emerald-700 transition" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
                 </button>`).join('')}
@@ -132,7 +132,7 @@
               class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm bg-white resize-none max-h-40"
               data-chat-input></textarea>
             <button type="submit"
-              class="px-5 py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-lg transition shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+              class="btn-primary px-5 py-3 font-bold rounded-lg transition shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
               data-chat-send>Send</button>
           </form>
         </div>`}

@@ -89,7 +89,7 @@
       host.innerHTML = `
         <div class="text-center py-8">
           <p class="text-sm text-gray-600 mb-4">You do not have a sign-up form yet.</p>
-          <button type="button" data-sf-new class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Create a sign-up form</button>
+          <button type="button" data-sf-new class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Create a sign-up form</button>
         </div>`;
       return;
     }
@@ -109,12 +109,12 @@
             <p class="text-[11px] text-gray-500">${esc(where)} · ${esc(String((d.fields || []).length || 1))} question${(d.fields || []).length === 1 ? '' : 's'}</p>
             <p class="text-[11px] text-gray-500">${esc(String(st.submissions))} sign-up${st.submissions === 1 ? '' : 's'} · ${esc(String(st.subscribed))} subscribed now · ${esc(String(st.last30))} in the last 30 days</p>
           </div>
-          <button type="button" data-sf-open="${f.id}" class="shrink-0 px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Open</button>
+          <button type="button" data-sf-open="${f.id}" class="btn-secondary shrink-0 px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer border">Open</button>
         </div>
         <div class="flex flex-wrap gap-2 mt-3">
-          ${hosted ? `<button type="button" data-sf-copy="page" data-id="${f.id}" class="px-3 py-1.5 text-xs font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Copy page link</button>
+          ${hosted ? `<button type="button" data-sf-copy="page" data-id="${f.id}" class="btn-utility px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Copy page link</button>
                      <a href="${esc(pageUrl(f))}" target="_blank" rel="noopener" class="px-3 py-1.5 text-xs font-bold text-emerald-700 hover:text-emerald-800">Open page ↗</a>` : ''}
-          ${embed ? `<button type="button" data-sf-copy="code" data-id="${f.id}" title="Paste it into your website where the form should appear" class="px-3 py-1.5 text-xs font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Copy website code</button>` : ''}
+          ${embed ? `<button type="button" data-sf-copy="code" data-id="${f.id}" title="Paste it into your website where the form should appear" class="btn-utility px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Copy website code</button>` : ''}
         </div>
       </div>`;
     }).join('') + '<button type="button" data-sf-new class="mt-2 text-xs font-bold text-emerald-700 hover:underline cursor-pointer">+ New form</button>';

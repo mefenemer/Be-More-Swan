@@ -87,9 +87,9 @@
       '    <div class="px-5 py-4 border-t border-gray-100 flex items-center gap-3">' +
       '      <p id="canva-browser-count" class="text-xs font-semibold text-gray-500"></p>' +
       '      <div class="ml-auto flex items-center gap-2">' +
-      '        <button type="button" id="canva-browser-cancel" class="px-3.5 py-2 text-xs font-bold rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition cursor-pointer">Cancel</button>' +
+      '        <button type="button" id="canva-browser-cancel" class="btn-secondary px-3.5 py-2 text-xs font-bold rounded-lg border transition cursor-pointer">Cancel</button>' +
       '        <button type="button" id="canva-browser-import" disabled' +
-      '                class="px-4 py-2 text-xs font-bold rounded-lg bg-emerald-700 text-white hover:bg-emerald-800 transition cursor-pointer disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed">Import</button>' +
+      '                class="btn-utility px-4 py-2 text-xs font-bold rounded-lg transition cursor-pointer disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed">Import</button>' +
       '      </div>' +
       '    </div>' +
       '  </div>' +
@@ -335,7 +335,7 @@
       '  <div class="w-12 h-12 rounded-2xl bg-teal-100 text-teal-700 flex items-center justify-center text-xl mx-auto">🎨</div>' +
       '  <p class="text-sm font-bold text-gray-900 mt-3">' + esc(line) + '</p>' +
       '  <p class="text-xs text-gray-500 mt-1 max-w-xs mx-auto">Connect it once and your designs become available here and in your Content Library.</p>' +
-      '  <a href="/integrations.html" class="inline-flex items-center gap-2 mt-4 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition cursor-pointer">' +
+      '  <a href="/integrations.html" class="inline-flex items-center gap-2 mt-4 px-4 py-2 btn-primary text-xs font-bold rounded-lg transition cursor-pointer">' +
       (code === 'expired' ? 'Reconnect Canva' : 'Connect Canva') + '</a>' +
       '</div>';
     var count = el('canva-browser-count');

@@ -250,7 +250,7 @@
               <label class="block text-sm font-bold text-gray-700" for="inspo-composer-body">The inspo</label>
               ${speechSupported() ? `
               <button type="button" data-inspo-mic
-                class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition">
+                class="btn-secondary inline-flex items-center gap-1.5 px-2.5 py-1 border text-xs font-bold rounded-lg transition">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-14 0m7 7v4m0-4a7 7 0 007-7m-7 7a7 7 0 01-7-7m7-9a3 3 0 013 3v5a3 3 0 11-6 0V5a3 3 0 013-3z"/></svg>
                 <span data-inspo-mic-label>Dictate</span>
               </button>` : ''}
@@ -269,11 +269,11 @@
         <p class="hidden mt-3 text-xs font-semibold" data-inspo-composer-status></p>
         <div class="flex items-center gap-2 mt-4">
           <button type="button" data-inspo-save
-            class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">
+            class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">
             ${item ? 'Save changes' : 'Add to Inspo'}
           </button>
           <button type="button" data-inspo-cancel
-            class="px-4 py-2 bg-white border border-gray-200 text-gray-700 hover:border-gray-300 text-sm font-bold rounded-lg transition">
+            class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition">
             Cancel
           </button>
         </div>
@@ -399,20 +399,20 @@
             <div class="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100 flex-wrap">
               ${canDraft && i.isActive ? `
               <button type="button" data-inspo-draft="${i.id}"
-                class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition">
+                class="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                 ${esc(draftLabel)}
               </button>` : ''}
               <button type="button" data-inspo-edit="${i.id}"
-                class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition">
+                class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">
                 Edit
               </button>
               <button type="button" data-inspo-toggle="${i.id}" data-active="${i.isActive ? '1' : '0'}"
-                class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition">
+                class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">
                 ${i.isActive ? 'Pause' : 'Reactivate'}
               </button>
               <button type="button" data-inspo-delete="${i.id}"
-                class="px-3 py-1.5 bg-white border border-gray-200 text-red-600 hover:border-red-300 hover:bg-red-50 text-xs font-bold rounded-lg transition ml-auto">
+                class="btn-destructive px-3 py-1.5 border text-xs font-bold rounded-lg transition ml-auto">
                 Delete
               </button>
             </div>
@@ -497,7 +497,7 @@
           <p class="text-sm text-gray-500 mt-1 max-w-2xl">${esc(state.inspo.description)}</p>
         </div>
         <button type="button" data-inspo-add
-          class="inline-flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition whitespace-nowrap shrink-0">
+          class="btn-primary inline-flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition whitespace-nowrap shrink-0">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
           Add inspo
         </button>

@@ -128,7 +128,7 @@
         <p class="text-gray-600 leading-relaxed mb-2">I’m ${escapeHtml(roleLine(o))}, and I’m all set up. ${working}.</p>
         <p class="text-gray-500 text-sm leading-relaxed mb-6">Want to chat any time? Just hit the <span class="font-semibold text-gray-700">Chat</span> button and I’ll help however I can — steer my work, ask a question, or point me at something new.</p>
         <div class="flex flex-col sm:flex-row gap-3 justify-center">
-          ${chat ? `<a href="${chat}" data-welcome-chat class="inline-flex items-center justify-center gap-2 px-6 py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-lg shadow transition">
+          ${chat ? `<a href="${chat}" data-welcome-chat class="btn-assistant inline-flex items-center justify-center gap-2 px-6 py-3 font-bold rounded-lg shadow transition">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.9 9.9 0 01-4-.8L3 20l1.3-3.5A7.9 7.9 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
             Chat with ${name}
           </a>` : ''}
@@ -158,7 +158,7 @@
         <div class="min-w-0 grow">
           <p class="font-bold text-gray-900">Hi, I’m ${name}! 👋</p>
           <p class="text-sm text-gray-600 mt-0.5">I’m ${escapeHtml(roleLine(o))}, and I’m all set up. ${working}. Want to chat any time? Just hit the <span class="font-semibold text-gray-700">Chat</span> button up top.</p>
-          ${chat ? `<a href="${chat}" data-welcome-chat class="inline-flex items-center gap-1.5 mt-3 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg shadow-sm transition">
+          ${chat ? `<a href="${chat}" data-welcome-chat class="btn-assistant inline-flex items-center gap-1.5 mt-3 px-4 py-2 text-sm font-bold rounded-lg shadow-sm transition">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.9 9.9 0 01-4-.8L3 20l1.3-3.5A7.9 7.9 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
             Chat with ${name}
           </a>` : ''}

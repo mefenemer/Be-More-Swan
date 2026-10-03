@@ -402,7 +402,7 @@
       // chaser most often wants and currently has to go to the Conversations tab to do.
       const canStop = isFollowUp && followUp && !(followUp.threadState && followUp.threadState !== 'open');
       footEl.innerHTML = `
-        ${canStop ? `<button type="button" data-lcm-stop class="px-4 py-2 text-sm font-bold text-red-700 bg-white border border-gray-200 hover:border-red-300 rounded-lg transition cursor-pointer">Stop follow-ups</button>` : ''}
+        ${canStop ? `<button type="button" data-lcm-stop class="btn-secondary px-4 py-2 text-sm font-bold border rounded-lg transition cursor-pointer">Stop follow-ups</button>` : ''}
         <button type="button" data-lcm-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 rounded-lg cursor-pointer">Close</button>`;
       footEl.querySelector('[data-lcm-close]').addEventListener('click', close);
 

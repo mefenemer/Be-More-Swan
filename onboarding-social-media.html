@@ -32,7 +32,7 @@
     <p id="upsell-message" class="text-gray-600 mb-8 leading-relaxed">To connect more apps or add complex steps, you need to upgrade your tier.</p>
     <div class="flex flex-col sm:flex-row gap-3">
       <button onclick="closeUpsellModal()" class="px-5 py-3 text-gray-600 font-bold hover:bg-gray-100 rounded-lg transition w-full sm:w-auto">Keep Current Plan</button>
-      <a href="pricing.html" class="px-5 py-3 bg-green-600 text-white text-center font-bold rounded-lg shadow hover:bg-green-700 transition w-full">View Plans</a>
+      <a href="pricing.html" class="btn-secondary px-5 py-3 text-center font-bold rounded-lg shadow transition w-full border">View Plans</a>
     </div>
   </div>
 </div>
@@ -49,7 +49,7 @@
     <div id="unlock-cost" class="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 mb-6 text-sm text-emerald-900">Calculating your upgrade cost…</div>
     <div class="flex flex-col sm:flex-row gap-3">
       <button onclick="closeUnlockModal()" class="px-5 py-3 text-gray-600 font-bold hover:bg-gray-100 rounded-lg transition w-full sm:w-auto">Maybe later</button>
-      <button id="unlock-upgrade-btn" onclick="doUnlockUpgrade()" class="px-5 py-3 bg-emerald-600 text-white text-center font-bold rounded-lg shadow hover:bg-emerald-700 transition w-full disabled:opacity-50">Upgrade Now</button>
+      <button id="unlock-upgrade-btn" onclick="doUnlockUpgrade()" class="btn-golive px-5 py-3 text-center font-bold rounded-lg shadow transition w-full disabled:opacity-50">Upgrade Now</button>
     </div>
   </div>
 </div>
@@ -98,7 +98,7 @@
       class="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition mb-3"
     />
     <button onclick="submitWaitlist()"
-      class="w-full px-6 py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-lg transition">
+      class="btn-primary w-full px-6 py-3 font-bold rounded-lg transition">
       Notify Me
     </button>
     <div id="waitlist-success" class="hidden mt-3 text-center text-sm text-emerald-700 font-semibold">✓ You're on the list! We'll email you when it's ready.</div>
@@ -433,17 +433,17 @@
 
                 <div class="flex flex-col sm:flex-row gap-2 mb-3">
                   <input type="text" id="ai_theme_input" class="flex-1 border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-emerald-500" placeholder="Enter a theme (e.g., Sci-Fi, Poets, Marvel)">
-                  <button type="button" id="btn-generate-names" onclick="generateAINames()" class="px-4 py-2 bg-gray-900 hover:bg-black text-white text-sm font-bold rounded-md transition-colors whitespace-nowrap flex items-center justify-center gap-2">
+                  <button type="button" id="btn-generate-names" onclick="generateAINames()" class="btn-assistant px-4 py-2 text-sm font-bold rounded-md transition-colors whitespace-nowrap flex items-center justify-center gap-2">
                     Generate Names
                   </button>
                 </div>
 
                 <div class="flex flex-wrap gap-2 mb-3 items-center">
                   <span class="text-xs text-gray-500">Suggestions:</span>
-                  <button type="button" onclick="setTheme('Star Wars')" class="text-xs px-2 py-1 bg-white border border-gray-200 rounded hover:bg-gray-100 transition">Star Wars</button>
-                  <button type="button" onclick="setTheme('Greek Mythology')" class="text-xs px-2 py-1 bg-white border border-gray-200 rounded hover:bg-gray-100 transition">Greek Mythology</button>
-                  <button type="button" onclick="setTheme('Famous Poets')" class="text-xs px-2 py-1 bg-white border border-gray-200 rounded hover:bg-gray-100 transition">Famous Poets</button>
-                  <button type="button" onclick="setTheme('Marvel')" class="text-xs px-2 py-1 bg-white border border-gray-200 rounded hover:bg-gray-100 transition">Marvel</button>
+                  <button type="button" onclick="setTheme('Star Wars')" class="btn-secondary text-xs px-2 py-1 border rounded transition">Star Wars</button>
+                  <button type="button" onclick="setTheme('Greek Mythology')" class="btn-secondary text-xs px-2 py-1 border rounded transition">Greek Mythology</button>
+                  <button type="button" onclick="setTheme('Famous Poets')" class="btn-secondary text-xs px-2 py-1 border rounded transition">Famous Poets</button>
+                  <button type="button" onclick="setTheme('Marvel')" class="btn-secondary text-xs px-2 py-1 border rounded transition">Marvel</button>
                 </div>
 
                 <div id="ai-names-results" class="flex flex-wrap gap-2 hidden">
@@ -825,7 +825,7 @@
               </svg>
               Save &amp; Continue Later
             </button>
-            <button type="button" id="btn-next" onclick="nextStep()" class="px-8 py-3 bg-green-600 text-white font-bold rounded-lg shadow hover:bg-green-700 transition cursor-pointer">
+            <button type="button" id="btn-next" onclick="nextStep()" class="btn-primary px-8 py-3 font-bold rounded-lg shadow transition cursor-pointer">
               Next Step
             </button>
           </div>
@@ -2267,7 +2267,7 @@
 
       if (data.names && data.names.length > 0) {
         resultsContainer.innerHTML = data.names.map(name =>
-                `<button type="button" onclick="applyGeneratedName('${name.replace(/'/g, "\\'")}')" class="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 rounded-md text-sm font-bold transition shadow-sm">${name}</button>`
+                `<button type="button" onclick="applyGeneratedName('${name.replace(/'/g, "\\'")}')" class="btn-secondary px-3 py-1.5 border rounded-md text-sm font-bold transition shadow-sm">${name}</button>`
         ).join('');
         resultsContainer.classList.remove('hidden');
       } else {
@@ -2340,7 +2340,7 @@
 <div id="onboarding-help-fab" style="position:fixed;bottom:24px;right:24px;z-index:9999">
   <!-- FAB button -->
   <button onclick="window._helpWidgetOpen()" id="help-fab-btn"
-    class="flex items-center gap-2 bg-gray-900 hover:bg-black text-white text-sm font-bold px-4 py-2.5 rounded-full shadow-lg transition-all">
+    class="btn-utility flex items-center gap-2 text-sm font-bold px-4 py-2.5 rounded-full shadow-lg transition-all">
     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
         d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-3 3-3-3z"/>
@@ -2369,7 +2369,7 @@
       </div>
       <div id="help-form-error" class="hidden text-xs text-red-600 font-medium"></div>
       <button onclick="window._helpWidgetSubmit()" id="help-submit-btn"
-        class="w-full py-2.5 bg-gray-900 hover:bg-black text-white text-sm font-bold rounded-lg transition">
+        class="btn-primary w-full py-2.5 text-sm font-bold rounded-lg transition">
         Send to Support
       </button>
     </div>
@@ -2467,7 +2467,7 @@
       <span class="text-sm text-gray-700">I have read and agree to the <a href="/privacy.html#dpa" target="_blank" class="text-emerald-700 underline font-medium">Data Processing Agreement</a> on behalf of my organisation.</span>
     </label>
     <button id="btn-dpa-onboarding-accept" onclick="acceptDpaAndRetry()"
-      class="w-full py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+      class="btn-golive w-full py-3 font-bold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed"
       disabled>
       Accept DPA &amp; Activate Assistant
     </button>

@@ -150,7 +150,7 @@
         <span class="text-xs font-bold px-2 py-0.5 rounded-full border ${owner.cls}">${esc(owner.label)}</span>
         ${guidance.note ? `<span class="text-xs text-emerald-800 flex-1 min-w-0">${esc(guidance.note)}</span>` : ''}
         ${action ? `<button type="button" data-lead-next-step="${esc(action.key)}"
-          class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed ml-auto shrink-0">${esc(action.label)}</button>` : ''}
+          class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed ml-auto shrink-0">${esc(action.label)}</button>` : ''}
       </div>`;
   }
 
@@ -333,7 +333,7 @@
                 </td>
                 <td class="px-5 py-3 text-right">
                   <button type="button" data-log-note="${i}"
-                    class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed">
+                    class="btn-primary px-3 py-1.5 border text-xs font-bold rounded-lg transition whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed">
                     Log note
                   </button>
                 </td>
@@ -357,7 +357,7 @@
             <div class="px-4 pb-3">
               <p class="text-sm text-gray-700 whitespace-pre-line">${esc(draft.body)}</p>
               <button type="button" data-copy-chase="${i}"
-                class="mt-3 px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition">
+                class="btn-utility mt-3 px-3 py-1.5 border text-xs font-bold rounded-lg transition">
                 Copy email
               </button>
             </div>
@@ -486,7 +486,7 @@
       <div class="flex items-center justify-between gap-3 px-5 py-3 border-t border-gray-100">
         <p class="text-xs text-gray-400" data-diff-status>Review the proposed values, then apply them to the record in ${crmLabel}.</p>
         <button type="button" data-apply-diff
-          class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">
+          class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">
           Apply in ${crmLabel}
         </button>
       </div>
@@ -603,7 +603,7 @@
         <div class="mt-2 bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
           <p class="text-sm text-gray-700 whitespace-pre-line">${esc(ui.draftReply.trim())}</p>
           <button type="button" data-copy-reply
-            class="mt-3 px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition">
+            class="btn-utility mt-3 px-3 py-1.5 border text-xs font-bold rounded-lg transition">
             Copy reply
           </button>
         </div>
@@ -612,7 +612,7 @@
       <div class="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-gray-100">
         <p class="text-xs text-gray-400" data-helpdesk-status>Logs this triage summary as an internal note on the ${isIntercom ? 'conversation' : 'ticket'}.</p>
         <button type="button" data-log-helpdesk
-          class="px-4 py-2 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">
+          class="btn-primary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">
           Log to ${deskLabel}
         </button>
       </div>
@@ -707,11 +707,11 @@
 
       <div class="flex items-center gap-2" data-handoff-actions>
         <button type="button" data-handoff-approve
-          class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          class="btn-golive px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
           Approve Handoff
         </button>
         <button type="button" data-handoff-decline
-          class="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
           Decline
         </button>
       </div>
@@ -819,11 +819,11 @@
 
       <div class="flex items-center gap-2" data-dcp-actions>
         <button type="button" data-dcp-approve
-          class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
           Save this search
         </button>
         <button type="button" data-dcp-decline
-          class="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
           Not this one
         </button>
       </div>
@@ -957,11 +957,11 @@
 
       <div class="flex items-center gap-2" data-csp-actions>
         <button type="button" data-csp-approve
-          class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
           Save this campaign
         </button>
         <button type="button" data-csp-decline
-          class="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
           Not this one
         </button>
       </div>
@@ -1156,7 +1156,7 @@
           ? `Pushes ${tasks.length} action item${tasks.length === 1 ? '' : 's'} to Notion.`
           : `Posts the summary and ${tasks.length} action item${tasks.length === 1 ? '' : 's'} to Slack${destination.toLowerCase() !== 'slack' ? ` (direct ${esc(destination)} sync is coming — Slack is the delivery channel today)` : ''}.`}</p>
         <button type="button" data-sync-action
-          class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">
+          class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">
           ${isNotion ? 'Sync to Notion' : 'Post to Slack'}
         </button>
       </div>
@@ -1282,7 +1282,7 @@
       <div class="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-gray-100">
         <p class="text-xs text-gray-400" data-publish-status>Publishes this draft to ${esc(label)} now.</p>
         <button type="button" data-publish-social
-          class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">
+          class="btn-golive px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">
           Publish to ${esc(label)}
         </button>
       </div>` : `
@@ -1383,11 +1383,11 @@
         <p class="text-xs text-gray-500" data-offer-status>Want me to put this in the post you're editing?</p>
         <div class="flex items-center gap-2">
           <button type="button" data-apply-draft
-            class="px-3 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">
+            class="btn-primary px-3 py-2 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">
             Yes, add it to my draft
           </button>
           <button type="button" data-dismiss-draft
-            class="px-3 py-2 border border-gray-300 text-gray-600 hover:bg-gray-50 text-xs font-bold rounded-lg transition">
+            class="btn-secondary px-3 py-2 border text-xs font-bold rounded-lg transition">
             No thanks
           </button>
         </div>
@@ -1416,7 +1416,7 @@
         offer.innerHTML = `
           <p class="text-xs font-bold text-emerald-700">✓ Added to your draft</p>
           <button type="button" data-back-to-draft
-            class="mt-2 px-3 py-2 border border-emerald-300 text-emerald-700 hover:bg-emerald-50 text-xs font-bold rounded-lg transition">
+            class="btn-secondary mt-2 px-3 py-2 border text-xs font-bold rounded-lg transition">
             Back to the post
           </button>`;
         offer.querySelector('[data-back-to-draft]').addEventListener('click', () => {
@@ -1488,11 +1488,11 @@
 
       <div class="flex items-center gap-2" data-bpd-actions>
         <button type="button" data-bpd-save
-          class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
           Save this draft
         </button>
         <button type="button" data-bpd-discard
-          class="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          class="btn-destructive px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
           Discard
         </button>
       </div>
@@ -1613,15 +1613,15 @@
 
       <div class="flex flex-wrap items-center gap-2" data-nid-actions>
         <button type="button" data-nid-save
-          class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
           Save this draft
         </button>
         ${sendAt ? `<button type="button" data-nid-schedule
-          class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
           Save and schedule
         </button>` : ''}
         <button type="button" data-nid-discard
-          class="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          class="btn-destructive px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
           Discard
         </button>
       </div>
@@ -1801,9 +1801,9 @@
 
       ${isDraft ? `<div class="flex flex-wrap items-center gap-2" data-ncd-actions>
         <button type="button" data-ncd-save
-          class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(saveLabel)}</button>
+          class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(saveLabel)}</button>
         <button type="button" data-ncd-discard
-          class="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Discard</button>
+          class="btn-destructive px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Discard</button>
       </div>` : ''}
       <p class="mt-2 text-xs font-semibold text-indigo-700" data-ncd-status>${!isDraft
         ? 'This is the plan, not the emails yet. Tell me what to change — more or fewer emails, different days — or say “write it” and I’ll draft every one.'
@@ -1938,8 +1938,8 @@
         <ul class="text-[11px] text-amber-900 list-disc pl-4">${warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>
       </div>` : ''}
       <div class="flex flex-wrap items-center gap-2" data-afd-actions>
-        <button type="button" data-afd-save class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save form</button>
-        <button type="button" data-afd-discard class="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Discard</button>
+        <button type="button" data-afd-save class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save form</button>
+        <button type="button" data-afd-discard class="btn-destructive px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Discard</button>
       </div>
       <p class="mt-2 text-xs font-semibold text-indigo-700" data-afd-status>Saving keeps it switched off. Open it in the form builder to link an email campaign, check it, and publish it — nobody can sign up until you do.</p>
     `;
@@ -1978,7 +1978,7 @@
             say(`Saved, switched off. Open it in the form builder to link an email campaign and publish it.${extra}`);
             const actions = el.querySelector('[data-afd-actions]');
             if (actions && window.FormBuilder) {
-              actions.innerHTML = '<button type="button" data-afd-open class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition">Open in the form builder</button>';
+              actions.innerHTML = '<button type="button" data-afd-open class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg transition border">Open in the form builder</button>';
             }
           },
         },
@@ -2025,7 +2025,7 @@
         </div>
         <p class="text-sm text-gray-700 mb-4">${esc(reason)}</p>
         <a href="/pricing.html"
-          class="block w-full text-center px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold rounded-lg transition">
+          class="btn-golive block w-full text-center px-4 py-2.5 text-sm font-bold rounded-lg transition">
           Upgrade to Premium
         </a>
         <p class="mt-2.5 text-xs text-gray-400 text-center">Your conversation is saved — pick up right where you left off.</p>

@@ -306,7 +306,7 @@
 
       <div class="flex justify-end gap-2 mt-4">
         <button type="button" data-aud-rule-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
-        <button type="button" id="aud-rule-save" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Save segment</button>
+        <button type="button" id="aud-rule-save" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Save segment</button>
       </div>`;
 
     body.querySelectorAll('[data-rule-field]').forEach((el) => el.addEventListener('change', () => {
@@ -493,7 +493,7 @@
           </p>
         </div>
         ${k.revokedAt ? '' : `<button type="button" data-key-revoke="${k.id}"
-          class="px-3 py-1.5 text-xs font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Revoke</button>`}
+          class="btn-destructive px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Revoke</button>`}
       </div>`).join('')
       + `<p class="text-[11px] text-gray-400 mt-1">Base URL: <span class="font-mono">${esc(location.origin)}/api/v1</span></p>`;
 
@@ -716,12 +716,12 @@
 
         <div class="pt-4 border-t border-gray-100 flex flex-wrap gap-2">
           ${contact.status === 'subscribed'
-            ? `<button type="button" data-aud-unsub="${esc(contact.email)}" class="px-3 py-2 text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 cursor-pointer">Unsubscribe</button>`
+            ? `<button type="button" data-aud-unsub="${esc(contact.email)}" class="btn-destructive px-3 py-2 text-xs font-bold border rounded-lg cursor-pointer">Unsubscribe</button>`
             : contact.status === 'pending' || contact.status === 'unsubscribed'
-              ? `<button type="button" data-aud-resub="${esc(contact.email)}" class="px-3 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 cursor-pointer">Mark as subscribed</button>`
+              ? `<button type="button" data-aud-resub="${esc(contact.email)}" class="btn-secondary px-3 py-2 text-xs font-bold border rounded-lg cursor-pointer">Mark as subscribed</button>`
               : ''}
           <div class="flex-1"></div>
-          <button type="button" data-aud-delete="${contact.id}" class="px-3 py-2 text-xs font-bold text-red-700 bg-white border border-red-200 rounded-lg hover:bg-red-50 cursor-pointer">Remove</button>
+          <button type="button" data-aud-delete="${contact.id}" class="btn-destructive px-3 py-2 text-xs font-bold border rounded-lg cursor-pointer">Remove</button>
         </div>`;
     } catch (err) {
       body.innerHTML = `<p class="text-sm text-red-600">${esc(err.message)}</p>`;

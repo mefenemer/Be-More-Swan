@@ -55,7 +55,7 @@ window.initHelpCenter = async function() {
             }
             grid.innerHTML = articles.map(article => `
                 <button type="button" data-article-id="${article.id}"
-                   class="text-left bg-white rounded-2xl border border-gray-200 shadow-sm p-6 hover:shadow-md hover:border-emerald-300 transition flex flex-col h-full">
+                   class="btn-primary text-left rounded-2xl border shadow-sm p-6 hover:shadow-md transition flex flex-col h-full">
                     <div class="flex justify-between items-start mb-4">
                         <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">${article.category}</span>
                     </div>

@@ -129,7 +129,7 @@
       <p class="text-emerald-700 max-w-xl">On our Enterprise tier, our engineering team designs a bespoke digital employee around your exact workflow — trained on your processes, connected to your systems.</p>
     </div>
     <div class="flex flex-col items-center md:items-end gap-2 flex-shrink-0">
-      <a href="pricing.html#enterprise" class="bg-emerald-700 text-white px-6 py-3 rounded-xl font-bold shadow-sm hover:bg-emerald-800 transition">Build a Custom Assistant</a>
+      <a href="pricing.html#enterprise" class="btn-primary px-6 py-3 rounded-xl font-bold shadow-sm transition">Build a Custom Assistant</a>
       <button onclick="document.getElementById('role-request-modal').classList.remove('hidden')" class="text-sm font-semibold text-emerald-700 hover:text-emerald-900 underline underline-offset-2 transition">or request a new standard role</button>
     </div>
   </div>
@@ -181,7 +181,7 @@
         </div>
       </div>
       <button id="rr-submit-btn" onclick="submitRoleRequest()"
-        class="mt-6 w-full py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl transition flex items-center justify-center gap-2">
+        class="btn-primary mt-6 w-full py-3 font-bold rounded-xl transition flex items-center justify-center gap-2">
         <span id="rr-btn-text" data-i18n="assistants.submit_request">Submit Request</span>
         <div id="rr-spinner" class="hidden w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin"></div>
       </button>
@@ -193,7 +193,7 @@
       <h3 class="text-lg font-extrabold text-gray-900 mb-1">Request received!</h3>
       <p class="text-sm text-gray-500">Our engineering team will review your submission and prioritise it on the roadmap. We'll be in touch.</p>
       <button onclick="document.getElementById('role-request-modal').classList.add('hidden')"
-        class="mt-5 px-6 py-2 bg-gray-900 text-white text-sm font-bold rounded-xl hover:bg-black transition">Close</button>
+        class="btn-secondary mt-5 px-6 py-2 text-sm font-bold rounded-xl transition border">Close</button>
     </div>
   </div>
 </div>
@@ -216,7 +216,7 @@
         <input id="waitlist-email" type="email" placeholder="you@company.com" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-sm mb-4 transition">
       </div>
       <p id="waitlist-error" class="hidden text-sm text-red-600 mb-3"></p>
-      <button id="waitlist-submit" class="w-full py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl transition flex items-center justify-center gap-2">
+      <button id="waitlist-submit" class="btn-primary w-full py-3 font-bold rounded-xl transition flex items-center justify-center gap-2">
         <span id="waitlist-btn-text">Notify Me</span>
         <div id="waitlist-spinner" class="hidden w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin"></div>
       </button>
@@ -234,7 +234,7 @@
           <input id="wl-referral-url" type="text" readonly
             class="flex-1 text-xs font-mono bg-white border border-emerald-200 rounded-lg px-3 py-2 text-gray-700 outline-none truncate cursor-text">
           <button onclick="window._copyReferralLink()"
-            class="shrink-0 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition cursor-pointer">
+            class="btn-utility shrink-0 px-3 py-2 text-xs font-bold rounded-lg transition cursor-pointer">
             Copy
           </button>
         </div>
@@ -406,7 +406,7 @@ function renderCard(a) {
           </div>
           <div class="p-4 bg-emerald-50 border-t border-emerald-100 flex justify-between items-center gap-3">
             <span class="text-xs font-bold text-emerald-700 uppercase tracking-wider">${required} tasks completed</span>
-            <button onclick="hireAssistant('${escAttr(a.roleKey)}')" class="bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-emerald-800 transition">Hire Role</button>
+            <button onclick="hireAssistant('${escAttr(a.roleKey)}')" class="btn-golive px-4 py-2 rounded-lg text-sm font-semibold transition">Hire Role</button>
           </div>
         </div>`;
     }
@@ -415,9 +415,9 @@ function renderCard(a) {
     const voted = _votedRoles().includes(a.roleKey);
     const voteBtn = voted
       ? `<button disabled data-vote-btn="${escHtml(a.roleKey)}"
-           class="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-semibold cursor-default">Voted! ✅</button>`
+           class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold cursor-default">Voted! ✅</button>`
       : `<button onclick="voteForRole('${escAttr(a.roleKey)}')" data-vote-btn="${escHtml(a.roleKey)}"
-           class="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-800 transition">Vote for this</button>`;
+           class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold transition">Vote for this</button>`;
 
     return `
       <div class="assistant-card bg-white rounded-2xl border border-gray-300 border-dashed shadow-sm overflow-hidden flex flex-col relative hover:shadow-md transition-shadow">
@@ -456,8 +456,8 @@ function renderCard(a) {
   // told us: WHICH role they want. rememberIntendedRole() stashes it so the workspace catalogue
   // can surface that role first once they've signed up and paid.
   const cta = _isLoggedIn
-    ? `<button onclick="hireAssistant('${escAttr(a.roleKey)}')" class="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-800 transition">Hire Assistant</button>`
-    : `<a href="pricing.html" onclick="rememberIntendedRole('${escAttr(a.roleKey)}')" class="bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-emerald-800 transition">Get Started</a>`;
+    ? `<button onclick="hireAssistant('${escAttr(a.roleKey)}')" class="btn-golive px-4 py-2 rounded-lg text-sm font-semibold transition">Hire Assistant</button>`
+    : `<a href="pricing.html" onclick="rememberIntendedRole('${escAttr(a.roleKey)}')" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold transition">Get Started</a>`;
 
   // Every card opens the detail modal on click (buttons/links excluded). This used to be gated on
   // the role having an entry in the hardcoded copy file, which silently hid the link for most of

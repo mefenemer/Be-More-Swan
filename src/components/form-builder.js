@@ -139,7 +139,7 @@
             <input type="checkbox" id="fb-live"> <span data-explain="form-live">Live</span>
           </label>
           <button type="button" data-fb-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 cursor-pointer">Cancel</button>
-          <button type="button" id="fb-save" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Save form</button>
+          <button type="button" id="fb-save" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Save form</button>
           <button type="button" data-fb-close aria-label="Close" class="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 cursor-pointer">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
           </button>
@@ -239,7 +239,7 @@
       <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mt-5 mb-2"><span data-explain="form-add-question">Add a question</span> ${full ? `<span class="normal-case font-normal">— a form holds at most ${MAX_FIELDS}</span>` : ''}</p>
       <div class="flex flex-wrap gap-2">${PALETTE.map((p) => {
         const off = full || (CONTACT_LABELS[p.key] && usedCols.has(p.key));
-        return `<button type="button" data-fb-add="${p.key}" ${off ? 'disabled' : ''} class="px-3 py-1.5 text-xs font-bold text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">+ ${p.label}</button>`;
+        return `<button type="button" data-fb-add="${p.key}" ${off ? 'disabled' : ''} class="btn-secondary px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">+ ${p.label}</button>`;
       }).join('')}</div>`;
   }
 
@@ -326,7 +326,7 @@
       </label>
       ${d.embed.enabled ? (snippet
         ? `<textarea readonly rows="3" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-xs font-mono bg-gray-50 mb-2">${esc(snippet)}</textarea>
-           <button type="button" data-fb-copy="snippet" class="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer mb-3">Copy website code</button>`
+           <button type="button" data-fb-copy="snippet" class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer mb-3">Copy website code</button>`
         : '<p class="text-[11px] text-gray-500 mb-3">Save the form to get the code for your website.</p>')
         + `${label('Only these websites may use it (one per line — blank for any)', 'form-allowed-websites')}<textarea data-fb-origins rows="2" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm mb-5" placeholder="https://www.example.com">${esc((d.embed.allowedOrigins || []).join('\n'))}</textarea>` : '<div class="mb-5"></div>'}
       <label class="flex items-start gap-2 text-sm text-gray-700 mb-2 cursor-pointer">
@@ -342,7 +342,7 @@
           const link = d.hosted.slug ? `${origin}/f/${d.hosted.slug}` : `${origin}/s/${S.publicKey}`;
           return `<div class="flex items-center gap-2 mb-3">
               <input readonly value="${esc(link)}" class="flex-1 min-w-0 px-3 py-2 rounded-lg border border-gray-300 text-xs font-mono bg-gray-50">
-              <button type="button" data-fb-copy="link" data-link="${esc(link)}" class="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer">Copy link</button>
+              <button type="button" data-fb-copy="link" data-link="${esc(link)}" class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Copy link</button>
               <a href="${esc(link)}" target="_blank" rel="noopener" class="px-2 py-1.5 text-xs font-bold text-emerald-700 hover:text-emerald-800">Open ↗</a>
             </div>
             ${S.status !== 'active' ? '<p class="text-[11px] text-amber-700 mb-3">The page shows nothing until the form is Live (top right).</p>' : ''}`;

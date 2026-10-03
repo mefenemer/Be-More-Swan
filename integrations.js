@@ -321,7 +321,7 @@ window._xOpenBuyCredits = function () {
         <p class="text-xs text-gray-500 mb-4">Top up your X allowance. Purchased credits don’t expire and are used after your monthly allowance. A link post costs 13 credits; a text post costs 1.</p>
         <div class="flex flex-col gap-2">
           ${Object.keys(_X_PACK_PRICES).map(id => `
-            <button type="button" onclick="window._xBuyCredits('${id}', this)" class="flex items-center justify-between w-full px-4 py-3 border border-gray-200 rounded-xl hover:border-emerald-300 hover:bg-emerald-50 transition cursor-pointer text-left">
+            <button type="button" onclick="window._xBuyCredits('${id}', this)" class="btn-secondary flex items-center justify-between w-full px-4 py-3 border rounded-xl transition cursor-pointer text-left">
               <span class="text-sm font-bold text-gray-800">${_X_PACK_PRICES[id].credits.toLocaleString()} X credits</span>
               <span class="text-sm font-bold text-emerald-700">${_xFmtPrice(id, currency)}</span>
             </button>`).join('')}
@@ -714,7 +714,7 @@ function _comingSoonCard(tool) {
           </div>
         </div>
         <p class="text-xs text-gray-500">${_esc(tool.description || '')}</p>
-        <button type="button" disabled class="mt-auto w-full text-sm font-bold text-gray-400 bg-gray-50 border border-gray-200 rounded-xl py-2.5 cursor-not-allowed">Not yet available</button>
+        <button type="button" disabled class="btn-secondary mt-auto w-full text-sm font-bold border rounded-xl py-2.5 cursor-not-allowed">Not yet available</button>
       </div>`;
 }
 
@@ -729,7 +729,7 @@ function _mailboxCard(m) {
     if (!meta) return '';
     const connected = !!m.connected;
     const connectUrl = _withAssistantId(`/api/oauth/${encodeURIComponent(m.provider)}/connect`);
-    const primaryBtn = 'w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition cursor-pointer';
+    const primaryBtn = 'btn-primary w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer';
 
     const capPill = connected
         ? '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">✓ Connected</span>'
@@ -753,8 +753,8 @@ function _mailboxCard(m) {
         ? `<details class="mt-1">
                <summary class="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 select-none">Manage connection</summary>
                <div class="mt-auto pt-4 border-t border-gray-100 flex items-center gap-2 flex-wrap">
-                   <a href="${connectUrl}" class="${ghostPill} text-gray-600 bg-gray-50 hover:bg-gray-100 border-gray-200">Reconnect</a>
-                   <span class="ml-auto"><button type="button" onclick="window._intDisconnectMailbox('${_esc(m.provider)}', '${_esc(meta.label)}')" class="${ghostPill} text-red-600 bg-white hover:bg-red-600 hover:text-white border-red-200 hover:border-red-600">Disconnect</button></span>
+                   <a href="${connectUrl}" class="${ghostPill} btn-secondary">Reconnect</a>
+                   <span class="ml-auto"><button type="button" onclick="window._intDisconnectMailbox('${_esc(m.provider)}', '${_esc(meta.label)}')" class="${ghostPill} btn-destructive">Disconnect</button></span>
                </div>
            </details>`
         : '';
@@ -807,7 +807,7 @@ window._intDisconnectMailbox = async function (provider, label) {
 function _searchConsoleCard(sc) {
     const connected = !!sc.connected;
     const connectUrl = _withAssistantId('/api/oauth/searchconsole/connect');
-    const primaryBtn = 'w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition cursor-pointer';
+    const primaryBtn = 'btn-primary w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer';
     const ghostPill = 'inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
 
     const capPill = connected
@@ -828,8 +828,8 @@ function _searchConsoleCard(sc) {
         ? `<details class="mt-1">
                <summary class="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 select-none">Manage connection</summary>
                <div class="mt-2 pt-3 border-t border-gray-100 flex items-center gap-2 flex-wrap">
-                   <a href="${connectUrl}" class="${ghostPill} text-gray-600 bg-gray-50 hover:bg-gray-100 border-gray-200">Reconnect</a>
-                   <span class="ml-auto"><button type="button" onclick="window._intDisconnectSearchConsole()" class="${ghostPill} text-red-600 bg-white hover:bg-red-600 hover:text-white border-red-200 hover:border-red-600">Disconnect</button></span>
+                   <a href="${connectUrl}" class="${ghostPill} btn-secondary">Reconnect</a>
+                   <span class="ml-auto"><button type="button" onclick="window._intDisconnectSearchConsole()" class="${ghostPill} btn-destructive">Disconnect</button></span>
                </div>
            </details>`
         : '';
@@ -961,7 +961,7 @@ function _swanProfileForm(d) {
         <div id="swanprof-err" class="hidden text-xs font-semibold text-red-600"></div>
         <div class="flex items-center gap-2">
           <button onclick="window._swanSaveProfile('${d.id}')" type="button"
-            class="px-3 py-1.5 text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg cursor-pointer">Save profile</button>
+            class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Save profile</button>
           <span class="text-[11px] text-gray-400">Changes show on your published pieces straight away.</span>
         </div>
       </div>
@@ -1003,7 +1003,7 @@ window._swanSaveProfile = async function (id) {
 
 function _firstPartyDestCard(d) {
     const connected = !!d.connected;
-    const primaryBtn = 'w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl shadow-sm hover:shadow transition cursor-pointer';
+    const primaryBtn = 'btn-primary w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-bold rounded-xl shadow-sm hover:shadow transition cursor-pointer';
     const ghostPill = 'inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
     const profileUrl = d.handle && d.siteUrl ? `${d.siteUrl}/@${d.handle}` : null;
 
@@ -1033,7 +1033,7 @@ function _firstPartyDestCard(d) {
            ${_swanProfileForm(d)}
            <details class="mt-1"><summary class="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 select-none">Manage connection</summary>
                <div class="mt-2 pt-3 border-t border-gray-100 flex items-center gap-2 flex-wrap">
-                   <button onclick="window._blogDestDisconnect('${d.id}', true)" class="${ghostPill} text-red-600 bg-white hover:bg-red-600 hover:text-white border-red-200 hover:border-red-600" type="button">Disconnect</button>
+                   <button onclick="window._blogDestDisconnect('${d.id}', true)" class="${ghostPill} btn-destructive" type="button">Disconnect</button>
                </div>
                <p class="mt-2 text-xs text-gray-500">Disconnecting withdraws your published pieces from the magazine. Your own blog is untouched.</p>
            </details>`
@@ -1067,7 +1067,7 @@ function _firstPartyDestCard(d) {
 function _socialDestCard(d) {
     const enabled = !!d.connected;
     const linked = !!d.socialConnected;
-    const primaryBtn = 'w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl shadow-sm hover:shadow transition cursor-pointer';
+    const primaryBtn = 'btn-primary w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-bold rounded-xl shadow-sm hover:shadow transition cursor-pointer';
     const ghostPill = 'inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
 
     const capPill = enabled
@@ -1086,7 +1086,7 @@ function _socialDestCard(d) {
            <p class="mt-2 text-xs font-semibold text-gray-400">On publish, posted to your feed with a link back to the full post</p>
            <details class="mt-1"><summary class="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 select-none">Manage connection</summary>
                <div class="mt-2 pt-3 border-t border-gray-100 flex items-center gap-2 flex-wrap">
-                   <button onclick="window._blogDestDisconnect('${d.id}', false, true)" class="${ghostPill} text-red-600 bg-white hover:bg-red-600 hover:text-white border-red-200 hover:border-red-600" type="button">Turn off</button>
+                   <button onclick="window._blogDestDisconnect('${d.id}', false, true)" class="${ghostPill} btn-destructive" type="button">Turn off</button>
                </div>
            </details>`;
     } else if (linked) {
@@ -1122,9 +1122,9 @@ function _blogDestCard(d) {
     if (d.firstParty) return _firstPartyDestCard(d);
     if (d.social) return _socialDestCard(d);
     const connected = !!d.connected;
-    const primaryBtn = 'w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl shadow-sm hover:shadow transition cursor-pointer';
+    const primaryBtn = 'btn-primary w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-bold rounded-xl shadow-sm hover:shadow transition cursor-pointer';
     const ghostPill = 'inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
-    const disconnectBtn = `<button onclick="window._blogDestDisconnect('${d.id}', false)" class="${ghostPill} text-red-600 bg-white hover:bg-red-600 hover:text-white border-red-200 hover:border-red-600" type="button">Disconnect</button>`;
+    const disconnectBtn = `<button onclick="window._blogDestDisconnect('${d.id}', false)" class="${ghostPill} btn-destructive" type="button">Disconnect</button>`;
 
     // Connect control: OAuth destinations redirect; paste destinations reveal an inline form.
     const connectBtn = d.oauth
@@ -1189,7 +1189,7 @@ window._blogDestToggleForm = function (id) {
         ${fields}
         <div id="blogdest-err-${id}" class="hidden text-xs font-semibold text-red-600 mb-2"></div>
         <button onclick="window._blogDestConnect('${id}')" type="button"
-            class="w-full px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition cursor-pointer">Connect</button>`;
+            class="btn-primary w-full px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer">Connect</button>`;
     host.classList.remove('hidden');
 };
 
@@ -1399,7 +1399,7 @@ function _connStatusRow(platform, conn) {
     const subTone = !conn ? 'text-gray-400' : health.problem ? 'text-amber-700' : on ? 'text-emerald-700' : 'text-gray-400';
     const control = isActive
         ? _connSwitch(conn, platform.label, on)
-        : `<button type="button" onclick="window._openBriefDrawer && window._openBriefDrawer('platforms')" class="shrink-0 px-2.5 py-1 text-xs font-bold rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">${conn ? 'Reconnect' : 'Connect'}</button>`;
+        : `<button type="button" onclick="window._openBriefDrawer && window._openBriefDrawer('platforms')" class="btn-secondary shrink-0 px-2.5 py-1 text-xs font-bold rounded-lg border transition cursor-pointer">${conn ? 'Reconnect' : 'Connect'}</button>`;
     return `
         <div class="flex items-center justify-between gap-3 py-2">
             <div class="flex items-center gap-2.5 min-w-0">
@@ -1425,7 +1425,7 @@ function _sourceStatusRow(source, conn) {
     const subTone = !conn ? 'text-gray-400' : health.problem ? 'text-amber-700' : 'text-emerald-700';
     const control = isActive
         ? ''
-        : `<button type="button" onclick="window._openBriefDrawer && window._openBriefDrawer('platforms')" class="shrink-0 px-2.5 py-1 text-xs font-bold rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">${conn ? 'Reconnect' : 'Connect'}</button>`;
+        : `<button type="button" onclick="window._openBriefDrawer && window._openBriefDrawer('platforms')" class="btn-secondary shrink-0 px-2.5 py-1 text-xs font-bold rounded-lg border transition cursor-pointer">${conn ? 'Reconnect' : 'Connect'}</button>`;
     return `
         <div class="flex items-center justify-between gap-3 py-2">
             <div class="flex items-center gap-2.5 min-w-0">
@@ -1503,7 +1503,7 @@ function _blogDestStatusRow(d) {
     const subTone = connected ? 'text-emerald-700' : 'text-gray-400';
     const control = connected
         ? ''
-        : `<button type="button" onclick="window._openBriefDrawer && window._openBriefDrawer('platforms')" class="shrink-0 px-2.5 py-1 text-xs font-bold rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Connect</button>`;
+        : `<button type="button" onclick="window._openBriefDrawer && window._openBriefDrawer('platforms')" class="btn-primary shrink-0 px-2.5 py-1 text-xs font-bold rounded-lg border transition cursor-pointer">Connect</button>`;
     return `
         <div class="flex items-center justify-between gap-3 py-2">
             <div class="flex items-center gap-2.5 min-w-0">
@@ -1621,13 +1621,13 @@ function _sourceCard(source, conn) {
     const account = conn?.externalAccountName || conn?.externalUserId || '';
 
     const connectIcon = `<svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.657l-3 3a4 4 0 01-5.657-5.657l1.5-1.5m6.828-6.829l3-3a4 4 0 015.657 5.657l-1.5 1.5"/></svg>`;
-    const primaryBtn = 'w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl shadow-sm hover:shadow transition cursor-pointer';
+    const primaryBtn = 'btn-primary w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-bold rounded-xl shadow-sm hover:shadow transition cursor-pointer';
     const connectBtn = `<button onclick="window._intConnectSource('${source.id}')" class="${primaryBtn}" type="button">${connectIcon} Connect ${_esc(source.label)}</button>`;
 
     const ghostPill = 'inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
-    const neutralPill = `${ghostPill} text-gray-600 bg-gray-50 hover:bg-gray-100 border-gray-200`;
+    const neutralPill = `${ghostPill} btn-secondary`;
     const reconnectBtn = `<button onclick="window._intConnectSource('${source.id}')" class="${neutralPill}" type="button">Reconnect</button>`;
-    const disconnectBtn = `<button onclick="window._intPromptDisconnect(${conn?.id})" class="${ghostPill} text-red-600 bg-white hover:bg-red-600 hover:text-white border-red-200 hover:border-red-600" type="button">Disconnect</button>`;
+    const disconnectBtn = `<button onclick="window._intPromptDisconnect(${conn?.id})" class="${ghostPill} btn-destructive" type="button">Disconnect</button>`;
 
     const accountChip = (isConnected && account)
         ? `<div class="flex items-center gap-1.5 w-fit max-w-full text-xs font-semibold text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-2.5 py-1.5 mt-2">
@@ -1647,10 +1647,10 @@ function _sourceCard(source, conn) {
     // source (it is connected or not), so the live row's one control opens the picker.
     if (_assistantScoped) {
         const control = !isConnected
-            ? `<button onclick="window._intConnectSource('${source.id}')" class="${_ROW_BTN} text-white bg-emerald-700 hover:bg-emerald-800 border-transparent" type="button">Connect</button>`
+            ? `<button onclick="window._intConnectSource('${source.id}')" class="${_ROW_BTN} btn-primary border-transparent" type="button">Connect</button>`
             : health.problem
-            ? `<button onclick="window._intConnectSource('${source.id}')" class="${_ROW_BTN} text-amber-700 bg-amber-50 hover:bg-amber-100 border-amber-200" type="button">Reconnect</button>`
-            : `<button type="button" onclick="window._intBrowseCanvaDesigns()" class="${_ROW_BTN} text-gray-700 bg-white hover:bg-gray-50 border-gray-200">Browse designs</button>`;
+            ? `<button onclick="window._intConnectSource('${source.id}')" class="${_ROW_BTN} btn-primary border-transparent" type="button">Reconnect</button>`
+            : `<button type="button" onclick="window._intBrowseCanvaDesigns()" class="${_ROW_BTN} btn-secondary">Browse designs</button>`;
         const sub = !isConnected ? 'Not connected'
             : health.problem ? _esc(health.label)
             : (account ? `Connected as ${_esc(account)}` : 'Connected');
@@ -1696,10 +1696,10 @@ function _platformCard(platform, conn) {
     // US-SMM-4.1.1 / 4.1.2: OAuth platforms use redirect; manual token entry kept for non-OAuth
     // Full-width primary CTA in the brand pink (emerald-700 is remapped to Neon Pink).
     const connectIcon = `<svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.657l-3 3a4 4 0 01-5.657-5.657l1.5-1.5m6.828-6.829l3-3a4 4 0 015.657 5.657l-1.5 1.5"/></svg>`;
-    const primaryBtn = 'w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl shadow-sm hover:shadow transition cursor-pointer';
+    const primaryBtn = 'btn-primary w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-bold rounded-xl shadow-sm hover:shadow transition cursor-pointer';
     const connectBtn = !hasHandle
         ? `<div class="flex flex-col gap-2">
-               <button disabled class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-gray-100 text-gray-400 text-sm font-bold rounded-xl cursor-not-allowed" type="button">${connectIcon} Connect ${platform.label}</button>
+               <button disabled class="btn-primary w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-bold rounded-xl cursor-not-allowed" type="button">${connectIcon} Connect ${platform.label}</button>
                <button onclick="window.loadView && window.loadView('assets')" class="text-xs font-semibold text-emerald-700 hover:underline cursor-pointer text-center" type="button">Add your ${platform.label} handle in Business Information first →</button>
            </div>`
         : platform.oauthPlatform
@@ -1710,12 +1710,14 @@ function _platformCard(platform, conn) {
 
     // Ghost-pill styles keep the connected-card footer calm and consistent.
     const ghostPill = 'inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
-    const neutralPill = `${ghostPill} text-gray-600 bg-gray-50 hover:bg-gray-100 border-gray-200`;
-    const brandPill = `${ghostPill} text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-100`;
+    const neutralPill = `${ghostPill} btn-secondary`;
+    const brandPill = `${ghostPill} btn-secondary`;
+    // The assistant writes these — they take the assistant colour (button system, 2026-10-03).
+    const aiPill = `${ghostPill} btn-assistant border-transparent`;
     const reconnectBtn = platform.oauthPlatform
         ? `<button onclick="window._intStartOAuth('${platform.id}')" class="${neutralPill}" type="button">Reconnect</button>`
         : `<button onclick="window._intOpenModal('${platform.id}')" class="${neutralPill}" type="button">Update token</button>`;
-    const disconnectBtn = `<button onclick="window._intPromptDisconnect(${conn?.id})" class="${ghostPill} text-red-600 bg-white hover:bg-red-600 hover:text-white border-red-200 hover:border-red-600" type="button">Disconnect</button>`;
+    const disconnectBtn = `<button onclick="window._intPromptDisconnect(${conn?.id})" class="${ghostPill} btn-destructive" type="button">Disconnect</button>`;
 
     // US-SMM-4.3.2: preflight audit status badge
     const meta = conn?.metadata ?? {};
@@ -1742,7 +1744,7 @@ function _platformCard(platform, conn) {
                 <p class="text-xs text-amber-600 italic hidden" id="trouble-chat-${conn?.id}-${chk.id}"></p>
                 <div class="flex items-center gap-2 flex-wrap">
                     ${chk.deepLink ? `<a href="${chk.deepLink}" target="_blank" rel="noopener noreferrer" class="text-xs font-bold text-amber-700 underline">Open Settings ↗</a>` : ''}
-                    <button onclick="window._intVerifyCheck('${conn?.id ?? ''}','${platform.id.toLowerCase()}','${chk.id}','${(chk.label || '').replace(/'/g, "\\'")}','${(chk.detail || '').replace(/'/g, "\\'")}',this)" class="text-xs font-bold text-emerald-700 bg-white border border-emerald-300 rounded-lg px-2 py-0.5 cursor-pointer hover:bg-emerald-50 transition" type="button" id="verify-btn-${conn?.id}-${chk.id}">I've done this</button>
+                    <button onclick="window._intVerifyCheck('${conn?.id ?? ''}','${platform.id.toLowerCase()}','${chk.id}','${(chk.label || '').replace(/'/g, "\\'")}','${(chk.detail || '').replace(/'/g, "\\'")}',this)" class="btn-primary text-xs font-bold border rounded-lg px-2 py-0.5 cursor-pointer transition" type="button" id="verify-btn-${conn?.id}-${chk.id}">I've done this</button>
                     <span id="verify-spin-${conn?.id}-${chk.id}" class="hidden text-xs text-gray-400">Checking…</span>
                 </div>
             </div>`).join('');
@@ -1759,11 +1761,11 @@ function _platformCard(platform, conn) {
         ? `<button onclick="window._intSyncProfile('${platform.id.toLowerCase()}')" class="${brandPill}" type="button">Sync Profile</button>`
         : '';
     const autoRespBtn = (isConnected && (platform.id === 'Instagram' || platform.id === 'Facebook'))
-        ? `<button onclick="window._intGenerateAutoResponder()" class="${brandPill}" type="button">Auto-Responder</button>`
+        ? `<button onclick="window._intGenerateAutoResponder()" class="${aiPill}" type="button">Auto-Responder</button>`
         : '';
     // AC1: Generate Bio for the social profile platforms.
     const bioBtn = (isConnected && (platform.id === 'Instagram' || platform.id === 'Facebook' || platform.id === 'LinkedIn'))
-        ? `<button onclick="window._intGenerateBio()" class="${brandPill}" type="button">Generate Bio</button>`
+        ? `<button onclick="window._intGenerateBio()" class="${aiPill}" type="button">Generate Bio</button>`
         : '';
 
     // Connected → footer of ghost-pill actions (value actions first, Disconnect pushed right).
@@ -1821,13 +1823,13 @@ function _platformCard(platform, conn) {
         let control, sub, subTone = '';
         if (!isConnected && !hasHandle) {
             // Same gate as the tile: a platform can only connect once its handle is on Business Information.
-            control = `<button onclick="window.loadView && window.loadView('assets')" class="${_ROW_BTN} text-gray-700 bg-white hover:bg-gray-50 border-gray-200" type="button">Add handle</button>`;
+            control = `<button onclick="window.loadView && window.loadView('assets')" class="${_ROW_BTN} btn-secondary" type="button">Add handle</button>`;
             sub = 'Add your handle in Business Information first';
         } else if (!isConnected) {
-            control = `<button onclick="${reconnectCall}" class="${_ROW_BTN} text-white bg-emerald-700 hover:bg-emerald-800 border-transparent" type="button">Connect</button>`;
+            control = `<button onclick="${reconnectCall}" class="${_ROW_BTN} btn-primary border-transparent" type="button">Connect</button>`;
             sub = 'Not connected';
         } else if (!isActive || connProblem) {
-            control = `<button onclick="${reconnectCall}" class="${_ROW_BTN} text-amber-700 bg-amber-50 hover:bg-amber-100 border-amber-200" type="button">Reconnect</button>`;
+            control = `<button onclick="${reconnectCall}" class="${_ROW_BTN} btn-primary border-transparent" type="button">Reconnect</button>`;
             sub = _esc(health.label || 'Needs attention');
             subTone = 'warn';
         } else {
@@ -2187,7 +2189,7 @@ function _intRenderAutoResponderChatPanel(draft, metaPushStatus) {
             <textarea class="hidden w-full text-sm border border-emerald-300 rounded-lg p-2 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-300" id="ar-editor-${key}" rows="3">${esc(value)}</textarea>
             <div class="flex gap-2 mt-1">
                 <button onclick="_intEditScript('${key}')" id="ar-edit-btn-${key}" class="text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer">Edit copy</button>
-                <button onclick="_intSaveScript('${key}')" id="ar-save-btn-${key}" class="hidden text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-2 py-0.5 rounded cursor-pointer">Save &amp; push</button>
+                <button onclick="_intSaveScript('${key}')" id="ar-save-btn-${key}" class="hidden btn-primary text-xs font-bold px-2 py-0.5 rounded cursor-pointer">Save &amp; push</button>
                 <button onclick="_intCancelEdit('${key}')" id="ar-cancel-btn-${key}" class="hidden text-xs font-bold text-gray-500 hover:text-gray-700 cursor-pointer">Cancel</button>
             </div>
         </div>`;
@@ -2348,7 +2350,7 @@ function _intRenderBioChatPanel(draft) {
             <textarea class="hidden w-full text-sm border border-emerald-300 rounded-lg p-2 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-300" id="bio-editor-${key}" rows="4" maxlength="${limits[key]}">${esc(value)}</textarea>
             <div class="flex gap-2 mt-1">
                 <button onclick="_intEditBio('${key}')" id="bio-edit-btn-${key}" class="text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer">Edit</button>
-                <button onclick="_intSaveBio('${key}')" id="bio-save-btn-${key}" class="hidden text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-2 py-0.5 rounded cursor-pointer">Save</button>
+                <button onclick="_intSaveBio('${key}')" id="bio-save-btn-${key}" class="hidden btn-primary text-xs font-bold px-2 py-0.5 rounded cursor-pointer">Save</button>
                 <button onclick="_intCancelBioEdit('${key}')" id="bio-cancel-btn-${key}" class="hidden text-xs font-bold text-gray-500 hover:text-gray-700 cursor-pointer">Cancel</button>
                 <button onclick="_intCopyBio('${key}')" class="text-xs font-bold text-gray-500 hover:text-gray-700 cursor-pointer ml-auto">Copy</button>
             </div>

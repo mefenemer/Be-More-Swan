@@ -63,8 +63,8 @@ window.initBrandAssets = function() {
                         </div>
                     </div>
                     <div class="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
-                        <button type="button" data-confirm-cancel class="px-4 py-2.5 bg-white border border-gray-200 hover:bg-gray-100 text-gray-700 text-sm font-bold rounded-xl transition cursor-pointer">${escHtml(cancelLabel)}</button>
-                        <button type="button" data-confirm-ok class="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl shadow transition cursor-pointer">${escHtml(confirmLabel)}</button>
+                        <button type="button" data-confirm-cancel class="btn-secondary px-4 py-2.5 border text-sm font-bold rounded-xl transition cursor-pointer">${escHtml(cancelLabel)}</button>
+                        <button type="button" data-confirm-ok class="btn-destructive px-4 py-2.5 text-sm font-bold rounded-xl shadow transition cursor-pointer">${escHtml(confirmLabel)}</button>
                     </div>
                 </div>`;
 
