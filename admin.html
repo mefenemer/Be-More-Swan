@@ -2793,6 +2793,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.querySelectorAll('.admin-cat-btn[data-cat], .admin-bottom-tab-btn[data-cat], .admin-more-item[data-cat]').forEach(btn => {
     if (!_catAllowed(btn.dataset.cat)) btn.style.display = 'none';
   });
+  // bootAdmin() runs before this resolves, so a deep link (?view=product-updates — every reminder
+  // email) has already opened its category with _can() denying everything: the sub-menu shows its
+  // title over an EMPTY list. Re-render the open one now the list is real. Not adminCatNav() — a
+  // repeat call there is a toggle and would close the panel instead.
+  if (_activeCategory && _activeCategory !== 'dashboard') _renderSecondaryItems(_activeCategory);
   initEnvToggle();
 });
 
@@ -2826,7 +2831,27 @@ function adminCatNav(cat) {
   if (!catDef) return;
 
   titleEl.textContent = catDef.label;
+  _renderSecondaryItems(cat);
 
+  secondary.classList.add('open');
+
+  // Move focus to first child item (keyboard nav)
+  setTimeout(() => itemsEl.querySelector('.admin-child-btn')?.focus(), 50);
+
+  // Sync bottom tab bar active state
+  document.querySelectorAll('.admin-bottom-tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.cat === cat);
+  });
+  document.querySelectorAll('.admin-more-item').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.cat === cat);
+  });
+}
+
+// Fill the sub-menu with a category's children, highlighting the current view. Split out of
+// adminCatNav() so the permissions load can repaint it without going through the toggle.
+function _renderSecondaryItems(cat) {
+  const itemsEl = document.getElementById('admin-secondary-items');
+  if (!itemsEl) return;
   const kids = _visibleChildren(cat);
   // Headings earn their space only when they actually divide something. A section
   // trimmed by permissions down to one group reads better as a plain list.
@@ -2843,19 +2868,6 @@ function adminCatNav(cat) {
         onclick="adminNav('${c.view}')"
         tabindex="0">${c.icon} ${c.label}</button>`;
   }).join('');
-
-  secondary.classList.add('open');
-
-  // Move focus to first child item (keyboard nav)
-  setTimeout(() => itemsEl.querySelector('.admin-child-btn')?.focus(), 50);
-
-  // Sync bottom tab bar active state
-  document.querySelectorAll('.admin-bottom-tab-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.cat === cat);
-  });
-  document.querySelectorAll('.admin-more-item').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.cat === cat);
-  });
 }
 
 function adminCatClose() {
