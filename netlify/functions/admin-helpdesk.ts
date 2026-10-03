@@ -215,6 +215,7 @@ export default withLambda(async (event) => {
                     await createNotification(db, 'ticket_reply', {
                         userId: ticket.userId,
                         context: { ticket: { id: ticketId, subject: ticket.subject } },
+                        metadata: { ticketId },
                     });
                 } catch { /* non-blocking */ }
             }

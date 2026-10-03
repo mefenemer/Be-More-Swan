@@ -1,15 +1,26 @@
 // netlify/functions/support-tickets.ts
 import { HandlerEvent } from '@netlify/functions';
-import { eq, desc } from 'drizzle-orm';
+import { and, asc, eq, desc } from 'drizzle-orm';
 import { Resend } from 'resend';
 import { getDb } from '../../db/client';
-import { users, supportTickets } from '../../db/schema';
+import { users, supportTickets, ticketReplies } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { logAuditEvent } from '../../src/utils/audit';
 import { checkRateLimit } from '../../src/utils/rate-limit';
 import { checkEarlySupportTicket } from '../../src/utils/churn';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { sendEmail } from '../../src/utils/email';
+import { adminInbox } from '../../src/utils/admin-inbox';
+
+const escHtml = (s: string) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/** Tell the business inbox — new tickets and customer replies used to reach nobody but the admin portal. */
+async function alertInbox(subject: string, html: string) {
+    for (const to of adminInbox()) {
+        await sendEmail({ to, subject, html }).catch((e: unknown) => console.warn('[support-tickets] inbox alert failed:', e));
+    }
+}
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
 const FROM_EMAIL = process.env.FROM_EMAIL || 'support@bemoreswan.com';
@@ -26,6 +37,25 @@ export default withLambda(async (event: HandlerEvent) => {
         // -------------------------------------------------------------
         // GET: Fetch Ticket History
         // -------------------------------------------------------------
+        if (event.httpMethod === 'GET' && event.queryStringParameters?.ticketId) {
+            // ── One ticket + its conversation, for its owner ─────────────────────────────────
+            // The customer could see a list of tickets but never a reply: replies lived only in
+            // ticket_replies, read by the admin helpdesk and emailed out. Internal notes stay
+            // internal — isInternal rows are never returned here.
+            const ticketId = Number(event.queryStringParameters.ticketId);
+            if (!Number.isInteger(ticketId)) return { statusCode: 400, body: JSON.stringify({ error: 'ticketId is required.' }) };
+            const [ticket] = await db.select().from(supportTickets)
+                .where(and(eq(supportTickets.id, ticketId), eq(supportTickets.userId, userId))).limit(1);
+            if (!ticket) return { statusCode: 404, body: JSON.stringify({ error: 'Ticket not found.' }) };
+            const rows = await db.select({
+                id: ticketReplies.id, body: ticketReplies.body, createdAt: ticketReplies.createdAt, authorId: ticketReplies.authorId,
+            }).from(ticketReplies)
+                .where(and(eq(ticketReplies.ticketId, ticketId), eq(ticketReplies.isInternal, false)))
+                .orderBy(asc(ticketReplies.createdAt));
+            const replies = rows.map((r) => ({ id: r.id, body: r.body, createdAt: r.createdAt, fromTeam: r.authorId !== userId }));
+            return { statusCode: 200, body: JSON.stringify({ ticket, replies }) };
+        }
+
         if (event.httpMethod === 'GET') {
             const userTickets = await db.select()
                 .from(supportTickets)
@@ -38,6 +68,29 @@ export default withLambda(async (event: HandlerEvent) => {
         // -------------------------------------------------------------
         // POST: Create New Ticket
         // -------------------------------------------------------------
+        if (event.httpMethod === 'POST' && (() => { try { return JSON.parse(event.body || '{}').ticketId != null; } catch { return false; } })()) {
+            // ── The customer replies on their own ticket ──────────────────────────────────────
+            const { ticketId: rawId, message } = JSON.parse(event.body || '{}');
+            const ticketId = Number(rawId);
+            const body = typeof message === 'string' ? message.trim() : '';
+            if (!Number.isInteger(ticketId) || !body) return { statusCode: 400, body: JSON.stringify({ error: 'A reply is required.' }) };
+            if (body.length > 10000) return { statusCode: 400, body: JSON.stringify({ error: 'That reply is too long.' }) };
+            const [ticket] = await db.select().from(supportTickets)
+                .where(and(eq(supportTickets.id, ticketId), eq(supportTickets.userId, userId))).limit(1);
+            if (!ticket) return { statusCode: 404, body: JSON.stringify({ error: 'Ticket not found.' }) };
+            if (ticket.status === 'closed') return { statusCode: 409, body: JSON.stringify({ error: 'This ticket is closed — open a new one.' }) };
+            const [reply] = await db.insert(ticketReplies).values({ ticketId, authorId: userId, body, isInternal: false }).returning();
+            // The ball is back with the team: a ticket waiting on the customer, or resolved and
+            // then answered, is open again.
+            await db.update(supportTickets).set({ status: 'open', updatedAt: new Date() }).where(eq(supportTickets.id, ticketId));
+            const [user] = await db.select({ email: users.email, firstName: users.firstName }).from(users).where(eq(users.id, userId));
+            await alertInbox(`[Ticket #${ticketId}] Customer replied: ${ticket.subject}`,
+                `<p><strong>${escHtml(user?.firstName || user?.email || 'A customer')}</strong> replied on ticket #${ticketId} — <em>${escHtml(ticket.subject)}</em>:</p>
+                 <blockquote style="border-left:3px solid #eae4d7;padding-left:12px;color:#444036;white-space:pre-wrap">${escHtml(body)}</blockquote>
+                 <p><a href="${process.env.BASE_URL || 'https://bemoreswan.com'}/admin.html?view=tickets">Open Support Tickets in the admin portal →</a></p>`);
+            return { statusCode: 201, body: JSON.stringify({ success: true, reply: { id: reply.id, body: reply.body, createdAt: reply.createdAt, fromTeam: false } }) };
+        }
+
         if (event.httpMethod === 'POST') {
             // SC4 — US-GAP-7.1.1: 10 ticket submissions per userId per 24 hours
             const rlSupport = await checkRateLimit(db, 'support', `user:${userId}`, { maxAttempts: 10, windowSecs: 24 * 60 * 60 });
@@ -74,6 +127,7 @@ export default withLambda(async (event: HandlerEvent) => {
             await createNotification(db, 'ticket_created', {
                 userId: userId,
                 context: { ticket: { id: newTicket.id, subject: newTicket.subject } },
+                metadata: { ticketId: newTicket.id },
             });
 
             // Audit Log
@@ -142,6 +196,13 @@ export default withLambda(async (event: HandlerEvent) => {
             } catch (emailErr) {
                 console.warn('[support-tickets] Confirmation email failed (non-blocking):', emailErr);
             }
+
+            // The business inbox hears about every new ticket — before this, only the admin portal did.
+            await alertInbox(`[Ticket #${newTicket.id}] New ${newTicket.category} ticket: ${newTicket.subject}`,
+                `<p>New support ticket from <strong>${escHtml(user.email || '')}</strong>:</p>
+                 <p><strong>${escHtml(newTicket.subject)}</strong> <span style="color:#787263">(${escHtml(newTicket.category)})</span></p>
+                 <blockquote style="border-left:3px solid #eae4d7;padding-left:12px;color:#444036;white-space:pre-wrap">${escHtml(newTicket.description)}</blockquote>
+                 <p><a href="${process.env.BASE_URL || 'https://bemoreswan.com'}/admin.html?view=tickets">Open Support Tickets in the admin portal →</a></p>`);
 
             // US-AUD-3.1.1 SC6: Signal 5 — flag early support tickets from new users
             checkEarlySupportTicket(db, userId, newTicket.id); // fire-and-forget

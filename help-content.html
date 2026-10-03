@@ -1,3 +1,30 @@
+<style>
+  /* Article typography. The body carries Tailwind "prose" classes, but the typography plugin was
+     never part of style.css, so every article rendered as one undifferentiated block — headings at
+     body size, tables with no borders, lists with no bullets. Scoped to the reader, hand-written. */
+  #help-article-body { color: #2d2a23; font-size: 15px; line-height: 1.65; }
+  #help-article-body > h1:first-child { display: none; } /* the page shows the title already */
+  #help-article-body h1 { font-size: 1.5rem; font-weight: 800; margin: 1.5rem 0 .75rem; color: #1f1e1b; }
+  #help-article-body h2 { font-size: 1.2rem; font-weight: 800; margin: 1.75rem 0 .6rem; color: #1f1e1b; }
+  #help-article-body h3 { font-size: 1.05rem; font-weight: 700; margin: 1.25rem 0 .5rem; color: #1f1e1b; }
+  #help-article-body p { margin: .6rem 0; }
+  #help-article-body ul, #help-article-body ol { margin: .6rem 0 .6rem 1.4rem; }
+  #help-article-body ul { list-style: disc; }
+  #help-article-body ol { list-style: decimal; }
+  #help-article-body li { margin: .25rem 0; }
+  #help-article-body a { color: #d6006b; font-weight: 600; text-decoration: none; }
+  #help-article-body a:hover { text-decoration: underline; }
+  #help-article-body strong { font-weight: 700; color: #1f1e1b; }
+  #help-article-body table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 14px; display: block; overflow-x: auto; }
+  #help-article-body th, #help-article-body td { border: 1px solid #eae4d7; padding: .5rem .75rem; text-align: left; vertical-align: top; }
+  #help-article-body th { background: #f6f3eb; font-weight: 700; }
+  #help-article-body blockquote { border-left: 3px solid #ff007f; background: #fff0f5; padding: .6rem 1rem; margin: 1rem 0; border-radius: 0 .5rem .5rem 0; color: #444036; }
+  #help-article-body blockquote p { margin: .25rem 0; }
+  #help-article-body code { background: #f6f3eb; border-radius: .25rem; padding: .1rem .3rem; font-size: .9em; }
+  #help-article-body pre { background: #1f1e1b; color: #f6f3eb; padding: .75rem 1rem; border-radius: .5rem; overflow-x: auto; margin: 1rem 0; }
+  #help-article-body pre code { background: none; color: inherit; padding: 0; }
+  #help-article-body hr { border: 0; border-top: 1px solid #eae4d7; margin: 1.5rem 0; }
+</style>
 <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full pb-20 relative">
   <div class="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
     <div>
@@ -33,8 +60,13 @@
   </div>
 
   <div class="border-b border-gray-200 mb-8">
-    <nav class="-mb-px flex space-x-8" aria-label="Tabs">
+    <!-- Four ways in, one page (2026-10-03): the workspace's separate "Report an issue" icon and its
+         pop-up were folded in here as their own tab. Each tab still writes where it always did —
+         issues → issue_reports (Admin → Issue Reports, the developer workflow), tickets →
+         support_tickets (Admin → Support Tickets), ideas → feature_requests (Admin → Feature Requests). -->
+    <nav class="-mb-px flex space-x-8 overflow-x-auto" aria-label="Tabs">
       <button id="tab-btn-docs" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-bold text-sm border-emerald-500 text-emerald-600">Knowledge Base</button>
+      <button id="tab-btn-issues" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">Report an Issue</button>
       <button id="tab-btn-tickets" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">Support Tickets</button>
       <button id="tab-btn-features" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">Feature Requests</button>
     </nav>
@@ -51,15 +83,9 @@
         </div>
         <input type="text" id="help-search-input" placeholder="Search documentation, guides, and FAQs..." class="w-full pl-11 pr-4 py-3.5 rounded-xl border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none transition-all shadow-sm">
       </div>
-      <div class="flex flex-wrap gap-2 mt-4" id="help-filters">
-        <button data-category="All" class="px-4 py-2 rounded-full text-sm font-bold bg-emerald-50 text-emerald-700 border border-emerald-100 transition filter-btn">All Articles</button>
-        <button data-category="Getting Started" class="px-4 py-2 rounded-full text-sm font-medium bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 transition filter-btn">Getting Started</button>
-        <button data-category="Your Assistants" class="px-4 py-2 rounded-full text-sm font-medium bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 transition filter-btn">Your Assistants</button>
-        <button data-category="Lead Management" class="px-4 py-2 rounded-full text-sm font-medium bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 transition filter-btn">Lead Management</button>
-        <button data-category="Integrations &amp; Connections" class="px-4 py-2 rounded-full text-sm font-medium bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 transition filter-btn">Integrations</button>
-        <button data-category="Billing &amp; Your Plan" class="px-4 py-2 rounded-full text-sm font-medium bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 transition filter-btn">Billing</button>
-        <button data-category="Troubleshooting &amp; Quick Fixes" class="px-4 py-2 rounded-full text-sm font-medium bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 transition filter-btn">Troubleshooting</button>
-      </div>
+      <!-- Rendered by help.js from the categories the published articles actually use, so a new
+           category is filterable the moment an article in it is published. -->
+      <div class="flex flex-wrap gap-2 mt-4" id="help-filters"></div>
     </div>
     <div id="help-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
     </div><!-- /#help-list-mode -->
@@ -82,9 +108,78 @@
         </div>
       </div>
       <div class="mt-6 flex items-center justify-end text-sm text-gray-500">
-        <a href="mailto:hello@bemoreswan.com?subject=Help%20Article%20Feedback" class="hover:text-gray-700">Was this helpful? Contact us &rarr;</a>
+        <button type="button" class="hover:text-gray-700" onclick="window.helpShowTab && window.helpShowTab('tickets')">Still stuck? Open a support ticket &rarr;</button>
       </div>
     </article>
+  </div>
+
+  <!-- ── Report an Issue (was the workspace header icon + modal) ─────────────────────────────── -->
+  <div id="tab-content-issues" class="tab-content hidden">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div class="lg:col-span-1">
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+          <h3 class="text-lg font-bold text-gray-900 mb-1">Something not working?</h3>
+          <p class="text-xs text-gray-500 mb-4">Tell us what went wrong. It goes straight to the team fixing things, and you can follow it here until it is fixed.</p>
+          <label for="ri-area" class="block text-sm font-bold text-gray-700 mb-1">Where did it happen?</label>
+          <select id="ri-area" class="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm bg-white mb-4">
+            <option value="dashboard">Workspace Overview (dashboard)</option>
+            <option value="assistants">My Assistants</option>
+            <option value="assistant-detail">An assistant's page</option>
+            <option value="post-editor">The post editor</option>
+            <option value="blog-studio">Blog Studio</option>
+            <option value="newsletter">Email Studio</option>
+            <option value="calendar">Content Calendar</option>
+            <option value="review-queue">Review</option>
+            <option value="audience">Audience</option>
+            <option value="my-content">My Content</option>
+            <option value="assets">Business Information</option>
+            <option value="catalog">Hire Assistant</option>
+            <option value="notifications">Notifications</option>
+            <option value="settings">Account Settings</option>
+            <option value="billing">Subscription &amp; Billing</option>
+            <option value="integrations">Connections &amp; integrations</option>
+            <option value="other">Somewhere else</option>
+          </select>
+          <label for="ri-description" class="block text-sm font-bold text-gray-700 mb-1">Describe the issue</label>
+          <textarea id="ri-description" rows="5" placeholder="What went wrong? What did you expect to happen?"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-600 focus:outline-none resize-none"></textarea>
+          <label for="ri-image" class="block text-sm font-bold text-gray-700 mt-4 mb-1">Attach a screenshot <span class="text-gray-400 font-normal">(optional)</span></label>
+          <input id="ri-image" type="file" accept="image/png,image/jpeg,image/gif,image/webp"
+            class="block w-full text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-gray-100 file:text-gray-700">
+          <div id="ri-image-preview" class="hidden mt-3">
+            <img id="ri-image-thumb" alt="Screenshot preview" class="max-h-40 rounded-lg border border-gray-200">
+            <button type="button" onclick="window.riClearImage()" class="block mt-1 text-xs text-red-600 hover:underline">Remove image</button>
+          </div>
+          <p id="ri-error" class="hidden mt-3 text-sm text-red-600"></p>
+          <button type="button" id="ri-submit" onclick="window.submitReportIssue()" class="btn-primary w-full mt-5 px-4 py-3 text-sm font-bold rounded-xl shadow-sm">Submit issue</button>
+          <p class="text-xs text-gray-500 mt-3">A question rather than a fault? <button type="button" class="font-semibold text-emerald-700 hover:underline" onclick="window.helpShowTab && window.helpShowTab('tickets')">Open a support ticket</button>. An idea? <button type="button" class="font-semibold text-emerald-700 hover:underline" onclick="window.helpShowTab && window.helpShowTab('features')">Suggest a feature</button>.</p>
+        </div>
+      </div>
+      <div class="lg:col-span-2">
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+          <div class="flex items-center justify-between gap-3 mb-4 flex-wrap">
+            <h3 class="text-lg font-bold text-gray-900">Your reported issues</h3>
+            <div class="flex items-center gap-2">
+              <label for="ri-status-filter" class="text-xs font-semibold text-gray-500">Show</label>
+              <select id="ri-status-filter" onchange="window.riFilterReports(this.value)"
+                class="border border-gray-300 rounded-lg px-2 py-1 text-xs font-semibold text-gray-700">
+                <option value="all">All statuses</option>
+                <option value="fixed_ready_to_test">Fixed &amp; Ready to Test</option>
+                <option value="reported">Reported</option>
+                <option value="backlog">Backlog</option>
+                <option value="on_hold">On Hold</option>
+                <option value="fix_in_progress">Fix In Progress</option>
+                <option value="merge">Merge</option>
+                <option value="more_info_required">More Info Required</option>
+                <option value="roadmap">On Roadmap</option>
+                <option value="closed">Closed</option>
+              </select>
+            </div>
+          </div>
+          <div id="ri-my-list" class="space-y-3 text-sm text-gray-500">Loading…</div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div id="tab-content-tickets" class="tab-content hidden">
@@ -102,10 +197,10 @@
               <label class="block text-sm font-bold text-gray-700 mb-1">Category</label>
               <select id="ticket-category" required class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm bg-white cursor-pointer">
                 <option value="" disabled selected>Select an issue type...</option>
-                <option value="technical">Technical Support / Bug</option>
-                <option value="assistant">Assistant Behavior Issue</option>
+                <option value="technical">How do I…? / Account help</option>
+                <option value="assistant">An assistant isn't doing what I expect</option>
                 <option value="billing">Billing / Subscription</option>
-                <option value="feature">Feature Request / Feedback</option>
+                <option value="other">Something else</option>
               </select>
             </div>
             <div>
@@ -115,7 +210,9 @@
             <button type="submit" id="btn-submit-ticket" class="btn-primary w-full px-4 py-3 text-sm font-bold rounded-xl transition-colors shadow-sm">
               Submit Ticket
             </button>
+            <p id="ticket-form-msg" class="hidden text-sm font-semibold"></p>
           </form>
+          <p class="text-xs text-gray-500 mt-4">Something broken? <button type="button" class="font-semibold text-emerald-700 hover:underline" onclick="window.helpShowTab && window.helpShowTab('issues')">Report an issue</button> instead — you can attach a screenshot. An idea? <button type="button" class="font-semibold text-emerald-700 hover:underline" onclick="window.helpShowTab && window.helpShowTab('features')">Suggest a feature</button>.</p>
         </div>
       </div>
 
@@ -123,6 +220,7 @@
         <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col h-full">
           <div class="px-6 py-5 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
             <h3 class="text-lg font-bold text-gray-900">Your Ticket History</h3>
+            <span class="text-xs text-gray-500">Select a ticket to read replies and respond</span>
           </div>
           <div class="overflow-x-auto">
             <table class="w-full text-sm text-left">
@@ -141,6 +239,8 @@
               </tbody>
             </table>
           </div>
+          <!-- One ticket's conversation: the description, every public reply, and a reply box. -->
+          <div id="ticket-thread" class="hidden border-t border-gray-100 p-6"></div>
         </div>
       </div>
 
@@ -431,11 +531,30 @@
         $('fr-dupes-list').innerHTML = matches.map((m) =>
           `<li class="flex items-center justify-between gap-2">
              <span class="text-amber-900">${esc(m.title)} ${badge(m.statusLabel)}</span>
-             <span class="text-xs text-amber-700 font-semibold">▲ ${m.voteCount}</span>
+             <button type="button" data-dupe-vote="${m.id}" title="Vote for this one instead of submitting a duplicate"
+               class="btn-secondary border shrink-0 px-2 py-0.5 text-xs font-semibold rounded-lg">▲ <span data-count="${m.id}">${m.voteCount}</span> · ${m.hasVoted ? 'Voted' : 'Vote'}</button>
            </li>`).join('');
         $('fr-dupes').classList.remove('hidden');
       } catch { /* ignore */ }
     }, 350);
+  });
+
+  // Voting from the duplicate warning — the usual right answer to "someone already asked for this".
+  $('fr-dupes-list').addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-dupe-vote]');
+    if (!btn) return;
+    btn.disabled = true;
+    try {
+      const res = await fetch(`${BASE}/feature-requests?action=vote`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ featureId: Number(btn.dataset.dupeVote) }),
+      });
+      const d = await res.json();
+      if (!res.ok) { window.showToast?.(d.error || 'Could not register your vote.'); return; }
+      btn.innerHTML = `▲ ${d.voteCount} · ${d.hasVoted ? 'Voted' : 'Vote'}`;
+      if (d.hasVoted) window.showToast?.('Vote added — no need to submit it again.', { icon: '👍' });
+    } catch { window.showToast?.('Network error — try again.'); }
+    finally { btn.disabled = false; }
   });
 
   async function submitRequest() {

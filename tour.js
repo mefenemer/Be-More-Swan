@@ -158,9 +158,10 @@
       placement: 'bottom',
     },
     {
-      targets: ['#nav-report-issue'],
+      view: 'help',
+      targets: ['#tab-btn-issues'],
       title: 'Spotted Something Off?',
-      copy: 'Report an Issue sends what you found straight to the team — along with where you were when you found it — so fixes land fast.',
+      copy: 'Report an Issue sends what you found straight to the team — say where it happened, add a screenshot, and follow it here until it is fixed.',
       placement: 'bottom',
     },
     {

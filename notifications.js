@@ -350,7 +350,10 @@ window.NotifKit = (function () {
             return { label: 'View issue', run: () => window.routeToIssueReport?.(meta.issueId) };
         }
         if (meta.action === 'view_invoices') return ACTIONS_BY_TYPE.invoice_ready;
-        if (meta.action === 'view_ticket')   return ACTIONS_BY_TYPE.ticket_created;
+        // A ticket notification opens THAT ticket's conversation (metadata.ticketId), not just the tab.
+        if (meta.action === 'view_ticket' || notif.type === 'ticket_reply' || notif.type === 'ticket_created') {
+            return { label: 'View ticket', run: () => window.routeToSupportTicket?.(meta.ticketId ?? null) };
+        }
         if (meta.action === 'open_wizard')   return { label: meta.ctaLabel || 'Open Setup Wizard', run: openWizard };
         if (meta.action === 'getting_started') return ACTIONS_BY_TYPE.onboarding_prompt;
         if (ACTIONS_BY_TYPE[notif.type]) return ACTIONS_BY_TYPE[notif.type];
@@ -966,13 +969,14 @@ window.initNotifications = async function() {
 };
 
 // Global click handler for routing to the Support area
-window.routeToSupportTicket = function() {
-    loadView('help');
-    setTimeout(() => {
-        const ticketTab = document.getElementById('tab-btn-tickets');
-        if (ticketTab) ticketTab.click();
-    }, 100);
-};
+// Defined by help.js (opens the Tickets tab reliably, after the view has loaded); this is only the
+// fallback for a page without it. Never overwrite help.js's version.
+if (typeof window.routeToSupportTicket !== 'function') {
+    window.routeToSupportTicket = function () {
+        if (typeof window.openHelpTab === 'function') return window.openHelpTab('tickets');
+        window.loadView && window.loadView('help');
+    };
+}
 
 // ── Header Action Center popover ──────────────────────────────────────────────
 // Quick triage from the workspace bell: two tabs (Action required / Updates), compact
