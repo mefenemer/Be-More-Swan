@@ -13,6 +13,7 @@ import { createNotifications } from '../../src/utils/notify';
 import { sendEmail } from '../../src/utils/email';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
+import { adminInbox } from '../../src/utils/admin-inbox';
 const jwtSecret = process.env.JWT_SECRET;
 const BASE_URL  = process.env.BASE_URL || 'https://bemoreswan.com';
 
@@ -90,18 +91,21 @@ export default withLambda(async (event) => {
             await createNotifications(db, 'security_incident_p0', superAdmins.map(sa => sa.id), {
                 context: { incident: { title, severity: severity.toUpperCase() } },
             });
+        }
 
-            // Also send email so superadmins are alerted even if not in-app
-            for (const sa of superAdmins) {
+        {
+            // And an email, so it is seen even by someone not in the admin portal — to the business
+            // inbox (admin-inbox.ts), not each admin's own account (a personal address).
+            for (const to of adminInbox()) {
                 sendEmail({
-                    to: sa.email,
+                    to,
                     subject: `[P0 ALERT] Security Incident Detected — ${title}`,
-                    html: `<p>Hi ${sa.firstName || 'Admin'},</p>
+                    html: `<p>Hi there,</p>
                            <p>A <strong>${severity.toUpperCase()}</strong> security incident has been logged on Be More Swan:</p>
                            <p><strong>${title}</strong></p>
                            <p>${description}</p>
                            <p>
-                             <a href="${BASE_URL}/admin.html#breach-response"
+                             <a href="${BASE_URL}/admin.html?view=breach-response"
                                 style="background:#dc2626;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">
                                Open Breach Response Timeline →
                              </a>
