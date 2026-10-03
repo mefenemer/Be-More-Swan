@@ -1770,6 +1770,67 @@
         </div>
       </section>
 
+      <!-- ── What's New Emails (Comms) ───────────────────────────────────────
+           The weekly product-update email (docs/weekly-product-update.md). A Claude task on the
+           founder's Mac uploads a draft each week; nothing reaches customers until an admin presses
+           Approve & send here. Data: netlify/functions/product-updates.ts. -->
+      <section id="view-product-updates" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
+          <div>
+            <h2 class="text-lg font-extrabold text-gray-900">What's New Emails</h2>
+            <p class="text-sm text-gray-500 mt-0.5">The weekly email telling customers about new features. Each week's draft arrives here with its screenshots. Review and edit it, send yourself a test, then approve it. Nothing is sent until you do.</p>
+          </div>
+          <button type="button" onclick="loadProductUpdates()" class="btn-utility px-3 py-2 text-sm font-semibold border rounded-lg transition">↻ Refresh</button>
+        </div>
+
+        <div id="pu-status" class="hidden mb-4 text-sm rounded-lg px-3 py-2"></div>
+
+        <div class="bg-white border border-gray-200 rounded-xl mb-6 overflow-hidden">
+          <div id="pu-list" class="divide-y divide-gray-100"><p class="p-4 text-sm text-gray-500">Loading…</p></div>
+        </div>
+
+        <div id="pu-editor" class="hidden">
+          <div id="pu-banner" class="mb-4 rounded-xl px-4 py-3 text-sm"></div>
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Left: the copy -->
+            <div class="space-y-4">
+              <div>
+                <div class="flex items-center justify-between mb-1">
+                  <label for="pu-subject" class="block text-xs font-bold text-gray-500 uppercase tracking-wide">Subject</label>
+                  <span id="pu-subject-count" class="text-xs text-gray-400"></span>
+                </div>
+                <input id="pu-subject" type="text" maxlength="150" oninput="puDirty()" class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm">
+              </div>
+              <div>
+                <label for="pu-preheader" class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Preview text <span class="normal-case font-normal text-gray-400">— the line inboxes show after the subject</span></label>
+                <input id="pu-preheader" type="text" maxlength="200" oninput="puDirty()" class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm">
+              </div>
+              <div>
+                <label for="pu-intro" class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Introduction <span class="normal-case font-normal text-gray-400">— after "Hi {first name},"</span></label>
+                <textarea id="pu-intro" rows="3" maxlength="1500" oninput="puDirty()" class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm"></textarea>
+              </div>
+              <div>
+                <p class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Features</p>
+                <div id="pu-items" class="space-y-3"></div>
+              </div>
+              <div id="pu-actions" class="flex flex-wrap items-center gap-2 pt-1">
+                <button type="button" id="pu-save" onclick="puSave()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Save changes</button>
+                <button type="button" id="pu-test" onclick="puTestSend()" class="btn-utility px-3 py-2 text-sm font-semibold border rounded-lg transition">Send me a test</button>
+                <button type="button" id="pu-discard" onclick="puDiscard()" class="btn-destructive px-3 py-2 text-sm font-semibold rounded-lg transition">Discard</button>
+                <button type="button" id="pu-approve" onclick="puApprove()" class="btn-golive px-4 py-2 text-sm font-bold rounded-lg transition ml-auto disabled:opacity-50">Approve &amp; send</button>
+              </div>
+              <button type="button" id="pu-resume" onclick="puResume()" class="hidden btn-secondary px-3 py-2 text-sm font-semibold border rounded-lg transition">Resume sending</button>
+            </div>
+            <!-- Right: exactly what lands in the inbox (rendered by the server from the SAVED copy) -->
+            <div>
+              <p class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Preview <span id="pu-preview-note" class="normal-case font-normal text-gray-400"></span></p>
+              <!-- A data: URL, not srcdoc — a sandboxed srcdoc iframe renders blank in Edge. -->
+              <iframe id="pu-preview" title="Email preview" sandbox="" class="w-full bg-gray-100 border border-gray-200 rounded-xl" style="height:900px"></iframe>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- ── Issue Reports (Testing) ─────────────────────────────────────── -->
       <section id="view-issue-reports" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
         <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
@@ -2490,6 +2551,7 @@ const VIEW_LABELS = {
   'blueprint-inspector': 'Blueprint Inspector', sandbox: 'Sandbox Environment',
   'email-templates': 'Manage Emails', 'notification-templates': 'Notification Templates',
   'send-notification': 'Send a Message',
+  'product-updates': "What's New Emails",
   systems: 'Systems & Connections',
   'issue-reports': 'Issue Reports', 'feature-roadmap': 'Feature Requests',
   'swan-queue': 'Swan Index — Review Queue', 'swan-front-page': 'Swan Index — Front Page',
@@ -2568,6 +2630,7 @@ const ADMIN_CATS = {
     { view: 'email-templates',        icon: '✉️', label: 'Manage Emails',          perm: 'manage_comms_templates' },
     { view: 'notification-templates', icon: '🔔', label: 'Notification Templates', perm: 'manage_comms_templates' },
     { view: 'send-notification',      icon: '📨', label: 'Send a Message',         perm: 'manage_comms_templates' },
+    { view: 'product-updates',        icon: '🆕', label: "What's New Emails",      perm: 'manage_comms_templates' },
   ]},
   // Security and Compliance were two rail entries holding five pages between them,
   // and an admin chasing an incident had to guess which one owned the trail.
@@ -2875,6 +2938,7 @@ function adminNav(view) {
   if (view === 'feature-flags')   loadFeatureFlags();
   if (view === 'breach-response') loadBreachResponse();
   if (view === 'bias-audit')      loadBiasAudit();
+  if (view === 'product-updates') loadProductUpdates();
   if (view === 'master-data')     { if (!_mdActiveTab) mdSwitchTab('plans'); else mdLoadTab(_mdActiveTab); }
   if (view === 'workspaces')          loadWorkspaces();
   if (view === 'blueprint-inspector') initBlueprintInspector();
@@ -8149,6 +8213,245 @@ function fmtCountdown(ms) {
   const m = Math.floor((ms % 3600000) / 60000);
   const colour = ms < 6 * 3600000 ? 'text-red-600' : ms < 24 * 3600000 ? 'text-amber-600' : 'text-gray-700';
   return `<span class="${colour} font-bold">${h}h ${m}m remaining</span>`;
+}
+
+// ── What's New Emails ────────────────────────────────────────────────────────
+// The weekly product-update email (docs/weekly-product-update.md). The list shows every email; the
+// editor works on one. Edits are saved explicitly, and the preview is rendered by the SERVER from the
+// saved copy — so what you see is exactly what will be sent, and Approve refuses while there are
+// unsaved edits (otherwise you would approve something other than what is on screen).
+const PU_API = '/.netlify/functions/product-updates';
+const _puEsc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const _puDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+const PU_STATUS = {
+  ready:     { label: 'Waiting for review', cls: 'bg-amber-100 text-amber-800' },
+  sending:   { label: 'Sending',            cls: 'bg-blue-100 text-blue-800' },
+  sent:      { label: 'Sent',               cls: 'bg-gray-100 text-gray-700' },
+  discarded: { label: 'Discarded',          cls: 'bg-gray-100 text-gray-400' },
+};
+let _puCurrent = null;   // { digest, images, recipients, progress }
+let _puItems = [];       // working copy of the features while editing
+let _puDirty = false;
+
+async function _puFetch(params, opts = {}) {
+  const r = await fetch(`${PU_API}?${params}`, { credentials: 'same-origin', ...opts,
+    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) } });
+  const d = await r.json().catch(() => null);
+  if (!r.ok) throw new Error((d && d.error) || `HTTP ${r.status}`);
+  return d;
+}
+
+function _puFlash(text, kind = 'ok') {
+  const el = document.getElementById('pu-status');
+  el.className = 'mb-4 text-sm rounded-lg px-3 py-2 ' + (kind === 'ok' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200');
+  el.textContent = text;
+  el.classList.remove('hidden');
+}
+
+async function loadProductUpdates() {
+  const list = document.getElementById('pu-list');
+  try {
+    const { digests } = await _puFetch('resource=list');
+    if (!digests.length) {
+      list.innerHTML = '<p class="p-4 text-sm text-gray-500">No emails yet. The weekly task uploads a draft here, and an email to hello@bemoreswan.com says when one is ready.</p>';
+      document.getElementById('pu-editor').classList.add('hidden');
+      return;
+    }
+    list.innerHTML = digests.map((d) => {
+      const st = PU_STATUS[d.status] || PU_STATUS.ready;
+      const period = d.periodStart && d.periodEnd ? `${_puDate(d.periodStart)} – ${_puDate(d.periodEnd)}` : _puDate(d.createdAt);
+      const outcome = d.status === 'sent' ? ` · sent to ${d.sentCount}${d.failedCount ? `, ${d.failedCount} failed` : ''}${d.approverEmail ? ` · approved by ${_puEsc(d.approverEmail)}` : ''}`
+        : d.status === 'sending' ? ` · ${d.sentCount || 0} of ${d.recipientCount || '?'} so far` : '';
+      return `<button type="button" onclick="puOpen(${d.id})" data-pu-id="${d.id}" class="pu-row w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3">
+          <span class="text-xs font-bold px-2 py-0.5 rounded-full shrink-0 ${st.cls}">${st.label}</span>
+          <span class="min-w-0 flex-1"><span class="block text-sm font-bold text-gray-900 truncate">${_puEsc(d.subject)}</span>
+          <span class="block text-xs text-gray-500">${period} · ${d.itemCount} feature${d.itemCount === 1 ? '' : 's'}${outcome}</span></span></button>`;
+    }).join('');
+    // Open the one the reminder email linked to, else the one waiting for review, else the newest.
+    const wanted = Number(new URLSearchParams(location.search).get('id'));
+    const pick = digests.find((d) => d.id === wanted) || digests.find((d) => d.status === 'ready') || digests[0];
+    if (pick && (!_puCurrent || _puCurrent.digest.id !== pick.id || !_puDirty)) puOpen(pick.id);
+  } catch (e) {
+    list.innerHTML = `<p class="p-4 text-sm text-red-600">${_puEsc(e.message || 'Could not load.')}</p>`;
+  }
+}
+
+async function puOpen(id) {
+  if (_puDirty && _puCurrent && _puCurrent.digest.id !== id) {
+    const ok = await window.confirmModal('You have unsaved changes to this email. Leave without saving them?',
+      { title: 'Discard your edits?', confirmLabel: 'Leave without saving', cancelLabel: 'Keep editing' });
+    if (!ok) return;
+  }
+  document.querySelectorAll('.pu-row').forEach((r) => r.classList.toggle('bg-pink-50', Number(r.dataset.puId) === id));
+  try {
+    _puCurrent = await _puFetch(`resource=digest&id=${id}`);
+  } catch (e) { _puFlash(e.message, 'err'); return; }
+  const u = new URL(location.href); u.searchParams.set('id', id); history.replaceState(history.state, '', u.toString());
+  const d = _puCurrent.digest;
+  _puItems = (d.items || []).map((it) => ({ ...it }));
+  document.getElementById('pu-subject').value = d.subject || '';
+  document.getElementById('pu-preheader').value = d.preheader || '';
+  document.getElementById('pu-intro').value = d.intro || '';
+  _puDirty = false;
+  _puRender();
+  document.getElementById('pu-editor').classList.remove('hidden');
+}
+
+function _puRender() {
+  const { digest: d, images, recipients, progress } = _puCurrent;
+  const editable = d.status === 'ready';
+  const imgUrl = Object.fromEntries((images || []).map((i) => [i.id, i.url]));
+
+  const banner = document.getElementById('pu-banner');
+  if (d.status === 'ready') {
+    banner.className = 'mb-4 rounded-xl px-4 py-3 text-sm bg-amber-50 border border-amber-200 text-amber-900';
+    banner.innerHTML = `<strong>Waiting for your review.</strong> Approving sends it to <strong>${recipients}</strong> customer${recipients === 1 ? '' : 's'} (active accounts that have not unsubscribed).`;
+  } else if (d.status === 'sending') {
+    banner.className = 'mb-4 rounded-xl px-4 py-3 text-sm bg-blue-50 border border-blue-200 text-blue-800';
+    banner.innerHTML = `<strong>Sending.</strong> ${progress.sent} of ${d.recipientCount} sent${progress.failed ? `, ${progress.failed} failed` : ''}. Refresh to update.`;
+  } else if (d.status === 'sent') {
+    banner.className = 'mb-4 rounded-xl px-4 py-3 text-sm bg-gray-50 border border-gray-200 text-gray-700';
+    banner.innerHTML = `<strong>Sent ${_puDate(d.sentAt)}</strong> to ${progress.sent} customer${progress.sent === 1 ? '' : 's'}${progress.failed ? ` (${progress.failed} failed)` : ''}.`;
+  } else {
+    banner.className = 'mb-4 rounded-xl px-4 py-3 text-sm bg-gray-50 border border-gray-200 text-gray-500';
+    banner.textContent = 'Discarded. This email was never sent.';
+  }
+
+  ['pu-subject', 'pu-preheader', 'pu-intro'].forEach((id) => { document.getElementById(id).disabled = !editable; });
+  document.getElementById('pu-subject-count').textContent = `${document.getElementById('pu-subject').value.length}/150`;
+  document.getElementById('pu-actions').classList.toggle('hidden', !editable);
+  document.getElementById('pu-resume').classList.toggle('hidden', d.status !== 'sending');
+  const approve = document.getElementById('pu-approve');
+  approve.textContent = `Approve & send to ${recipients} customer${recipients === 1 ? '' : 's'}`;
+
+  document.getElementById('pu-items').innerHTML = _puItems.map((it, i) => `
+    <div class="border border-gray-200 rounded-xl p-3 bg-white">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-xs font-bold text-gray-400">${i + 1}</span>
+        <input type="text" maxlength="120" value="${_puEsc(it.heading)}" ${editable ? '' : 'disabled'} oninput="puItem(${i},'heading',this.value)"
+          aria-label="Feature ${i + 1} heading" class="flex-1 border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-bold">
+        ${editable ? `
+        <button type="button" onclick="puMove(${i},-1)" ${i === 0 ? 'disabled' : ''} title="Move up" aria-label="Move feature ${i + 1} up" class="btn-utility px-2 py-1 text-xs rounded-lg border disabled:opacity-30">↑</button>
+        <button type="button" onclick="puMove(${i},1)" ${i === _puItems.length - 1 ? 'disabled' : ''} title="Move down" aria-label="Move feature ${i + 1} down" class="btn-utility px-2 py-1 text-xs rounded-lg border disabled:opacity-30">↓</button>
+        <button type="button" onclick="puRemoveItem(${i})" title="Remove this feature" aria-label="Remove feature ${i + 1}" class="btn-destructive px-2 py-1 text-xs rounded-lg">✕</button>` : ''}
+      </div>
+      <textarea rows="3" maxlength="1000" ${editable ? '' : 'disabled'} oninput="puItem(${i},'body',this.value)" aria-label="Feature ${i + 1} description"
+        class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm">${_puEsc(it.body)}</textarea>
+      ${it.imageId != null && imgUrl[it.imageId] ? `
+        <div class="mt-2 flex items-start gap-3">
+          <img src="${_puEsc(imgUrl[it.imageId])}" alt="" class="w-40 rounded-lg border border-gray-200">
+          ${editable ? `<button type="button" onclick="puItem(${i},'imageId',null)" class="btn-secondary px-2 py-1 text-xs font-semibold border rounded-lg">Remove screenshot</button>` : ''}
+        </div>` : '<p class="mt-2 text-xs text-gray-400">No screenshot</p>'}
+    </div>`).join('');
+
+  const frame = document.getElementById('pu-preview');
+  frame.src = 'data:text/html;charset=utf-8,' + encodeURIComponent(_puCurrent.previewHtml || '');
+  document.getElementById('pu-preview-note').textContent = _puDirty ? '— save to see your changes here' : '— exactly as it will be sent (shown with your first name)';
+  _puSyncButtons();
+}
+
+function _puSyncButtons() {
+  const approve = document.getElementById('pu-approve');
+  approve.disabled = _puDirty;
+  approve.title = _puDirty ? 'Save your changes first, so you approve what the preview shows' : '';
+  document.getElementById('pu-save').disabled = !_puDirty;
+}
+
+function puDirty() {
+  _puDirty = true;
+  document.getElementById('pu-subject-count').textContent = `${document.getElementById('pu-subject').value.length}/150`;
+  document.getElementById('pu-preview-note').textContent = '— save to see your changes here';
+  _puSyncButtons();
+}
+function puItem(i, key, value) {
+  _puItems[i][key] = value;
+  puDirty();
+  if (key === 'imageId') _puRender();
+}
+function puMove(i, delta) {
+  const j = i + delta;
+  if (j < 0 || j >= _puItems.length) return;
+  [_puItems[i], _puItems[j]] = [_puItems[j], _puItems[i]];
+  puDirty();
+  _puRender();
+}
+async function puRemoveItem(i) {
+  const ok = await window.confirmModal(`Remove "${_puEsc(_puItems[i].heading)}" from this email?`,
+    { title: 'Remove this feature?', confirmLabel: 'Remove', cancelLabel: 'Keep it' });
+  if (!ok) return;
+  _puItems.splice(i, 1);
+  puDirty();
+  _puRender();
+}
+
+async function puSave() {
+  const btn = document.getElementById('pu-save');
+  btn.disabled = true;
+  try {
+    await _puFetch(`resource=digest&id=${_puCurrent.digest.id}`, { method: 'PATCH', body: JSON.stringify({
+      subject: document.getElementById('pu-subject').value,
+      preheader: document.getElementById('pu-preheader').value,
+      intro: document.getElementById('pu-intro').value,
+      items: _puItems,
+    }) });
+    _puDirty = false;
+    _puFlash('Saved. The preview now shows your changes.');
+    await puOpen(_puCurrent.digest.id);
+    loadProductUpdates();
+  } catch (e) {
+    _puFlash(e.message, 'err');
+    _puSyncButtons();
+  }
+}
+
+async function puTestSend() {
+  if (_puDirty) { _puFlash('Save your changes first — the test sends the saved version.', 'err'); return; }
+  const btn = document.getElementById('pu-test');
+  btn.disabled = true;
+  try {
+    const { sentTo } = await _puFetch(`resource=test-send&id=${_puCurrent.digest.id}`, { method: 'POST' });
+    _puFlash(`Test sent to ${sentTo}. Only you received it.`);
+  } catch (e) { _puFlash(e.message, 'err'); }
+  btn.disabled = false;
+}
+
+async function puApprove() {
+  if (_puDirty) return;
+  const n = _puCurrent.recipients;
+  const ok = await window.confirmModal(
+    `This emails <strong>${n} customer${n === 1 ? '' : 's'}</strong> now. It cannot be recalled once it starts.<br><br>Subject: <strong>${_puEsc(_puCurrent.digest.subject)}</strong>`,
+    { title: 'Send this email to customers?', confirmLabel: `Send to ${n}`, cancelLabel: 'Not yet' });
+  if (!ok) return;
+  const btn = document.getElementById('pu-approve');
+  btn.disabled = true;
+  try {
+    const r = await _puFetch(`resource=approve&id=${_puCurrent.digest.id}`, { method: 'POST' });
+    _puFlash(r.dispatched
+      ? `Approved. Sending to ${r.recipients} customers now — this page shows progress when you refresh.`
+      : `Approved, but the sender did not start. Press "Resume sending" to start it.`, r.dispatched ? 'ok' : 'err');
+    await loadProductUpdates();
+    await puOpen(_puCurrent.digest.id);
+  } catch (e) { _puFlash(e.message, 'err'); btn.disabled = false; }
+}
+
+async function puResume() {
+  try {
+    const r = await _puFetch(`resource=resume&id=${_puCurrent.digest.id}`, { method: 'POST' });
+    _puFlash(r.dispatched ? 'Sending resumed. Anyone already emailed is skipped.' : 'The sender did not start. Try again in a minute.', r.dispatched ? 'ok' : 'err');
+  } catch (e) { _puFlash(e.message, 'err'); }
+}
+
+async function puDiscard() {
+  const ok = await window.confirmModal('This email will not be sent. Its features are not lost: next week\'s draft starts from the last email that was kept, so it picks them up again.',
+    { title: 'Discard this email?', confirmLabel: 'Discard', cancelLabel: 'Keep it' });
+  if (!ok) return;
+  try {
+    await _puFetch(`resource=discard&id=${_puCurrent.digest.id}`, { method: 'POST' });
+    _puDirty = false;
+    _puFlash('Discarded.');
+    await loadProductUpdates();
+    await puOpen(_puCurrent.digest.id);
+  } catch (e) { _puFlash(e.message, 'err'); }
 }
 
 // ── Bias Audit ───────────────────────────────────────────────────────────────

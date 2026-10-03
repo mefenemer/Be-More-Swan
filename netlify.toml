@@ -350,6 +350,19 @@
   to = "/.netlify/functions/newsletter-media"
   status = 200
 
+# The weekly "What's new" email to our own customers (docs/weekly-product-update.md). Both PUBLIC:
+# a mail client has no session. Screenshots are signed (?i=<imageId>&s=<HMAC>); the unsubscribe link
+# is signed per user and only ever turns off email_preferences.whats_new.
+[[redirects]]
+  from = "/api/product-updates/image"
+  to = "/.netlify/functions/product-update-image"
+  status = 200
+
+[[redirects]]
+  from = "/api/product-updates/unsubscribe"
+  to = "/.netlify/functions/product-update-unsubscribe"
+  status = 200
+
 # Shared Audience layer (docs/newsletter-assistant-plan.md): the PUBLIC ingress for the embeddable
 # sign-up form — /api/audience/form/:key, /api/audience/subscribe, /api/audience/confirm. Rewrite
 # (status 200) so the original path survives in event.rawUrl, which audience-public.ts parses.

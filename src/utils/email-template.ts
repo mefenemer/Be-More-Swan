@@ -38,6 +38,12 @@ export interface MasterTemplateOptions {
     unsubscribeUrl?: string;
     /** When true, omit the unsubscribe link (transactional/critical mail, e.g. password reset). */
     transactional?: boolean;
+    /**
+     * Logo colour override. The shell's teal predates the pink rebrand; the weekly "What's new"
+     * email passes the brand pink so it matches the app it is describing. Omitted → unchanged, so
+     * every existing template renders exactly as before.
+     */
+    accent?: string;
 }
 
 /**
@@ -49,7 +55,7 @@ export function renderMasterTemplate(bodyHtml: string, opts: MasterTemplateOptio
     const year = new Date().getFullYear();
     const unsubscribe = opts.transactional
         ? ''
-        : `<a href="${opts.unsubscribeUrl || `${BASE_URL}/account.html#notifications`}" style="color:${BRAND.muted};text-decoration:underline;">Unsubscribe</a> &nbsp;·&nbsp; `;
+        : `<a href="${opts.unsubscribeUrl || `${BASE_URL}/workspace.html?view=settings`}" style="color:${BRAND.muted};text-decoration:underline;">Unsubscribe</a> &nbsp;·&nbsp; `;
 
     const preheader = opts.preheader
         ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;">${escapeHtml(opts.preheader)}</div>`
@@ -72,7 +78,7 @@ ${preheader}
         <!-- Logo header -->
         <tr>
           <td style="padding:8px 24px 20px;text-align:center;">
-            <span style="font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:22px;font-weight:800;color:${BRAND.primary};letter-spacing:-0.5px;">${BRAND.logoText}</span>
+            <span style="font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:22px;font-weight:800;color:${opts.accent || BRAND.primary};letter-spacing:-0.5px;">${BRAND.logoText}</span>
           </td>
         </tr>
         <!-- Card body -->
@@ -84,7 +90,7 @@ ${preheader}
         <!-- Legal footer -->
         <tr>
           <td style="padding:24px;text-align:center;font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;line-height:1.5;color:${BRAND.muted};">
-            ${unsubscribe}<a href="${BASE_URL}/privacy.html" style="color:${BRAND.muted};text-decoration:underline;">Privacy</a> &nbsp;·&nbsp; <a href="${BASE_URL}/terms.html" style="color:${BRAND.muted};text-decoration:underline;">Terms</a>
+            ${unsubscribe}<a href="${BASE_URL}/privacy.html" style="color:${BRAND.muted};text-decoration:underline;">Privacy</a> &nbsp;·&nbsp; <a href="${BASE_URL}/terms_of_service.html" style="color:${BRAND.muted};text-decoration:underline;">Terms</a>
             <br><br>
             © ${year} ${BRAND.logoText}. All rights reserved.
           </td>

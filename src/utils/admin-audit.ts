@@ -49,7 +49,12 @@ export type AdminAction =
     // Auditable for the same reason a tier change is — the author can ask why, and "an editor
     // rejected it" is only an answer if we can say which editor, when, and on what note.
     | 'swan_index_curation'
-    | 'swan_index_profile_change';
+    | 'swan_index_profile_change'
+    // The weekly "What's new" email: approving it emails every customer, so who pressed the button
+    // (and what the copy said at that moment) must be answerable afterwards.
+    | 'product_update_edit'
+    | 'product_update_approve'
+    | 'product_update_discard';
 
 export interface AdminAuditParams {
     adminId: number;

@@ -310,6 +310,20 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         inApp: ON, email: ON,
         types: ['milestone', 'milestone_unlock', 'referral_reward', 'ticket_created', 'ticket_reply', 'system'],
     },
+    {
+        // The weekly "What's new" email (src/utils/product-update-email.ts). Its own row rather than
+        // part of product_updates: that row also carries support-ticket replies, so unsubscribing
+        // from feature news there would silently stop someone hearing back about their ticket.
+        // Email only — there is no in-app or push version, so both stay OFF and nothing reads them.
+        // The email's unsubscribe link writes email_preferences.whats_new = false.
+        key: 'whats_new',
+        label: "What's new at Be More Swan",
+        description: 'A short email about new features, at most once a week.',
+        scope: 'account',
+        push: PUSH_OFF,
+        inApp: OFF, email: ON,
+        types: [],
+    },
 ];
 
 // Reverse index: raw type → category. Built once.

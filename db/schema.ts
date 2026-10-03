@@ -5030,3 +5030,60 @@ export const musicTracks = pgTable("music_tracks", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+// ── What's new at Be More Swan — the weekly product-update email ─────────────
+// A weekly Claude task uploads a draft (copy + screenshots); an admin approves it in
+// Comms → What's New Emails before anything is sent. Requires db/product-update-emails.sql.
+// See docs/weekly-product-update.md and src/utils/product-update-email.ts.
+export interface ProductUpdateItem {
+  heading: string;
+  body: string;
+  /** product_update_images.id, or null for an item without a screenshot. */
+  imageId: number | null;
+}
+
+export const productUpdateDigests = pgTable("product_update_digests", {
+  id: serial().primaryKey(),
+  status: text("status").notNull().default("ready"), // 'ready' | 'sending' | 'sent' | 'discarded'
+  subject: text("subject").notNull(),
+  preheader: text("preheader"),
+  intro: text("intro"),
+  items: jsonb("items").$type<ProductUpdateItem[]>().notNull().default(sql`'[]'::jsonb`),
+  commitFrom: text("commit_from"),
+  commitTo: text("commit_to"),
+  periodStart: date("period_start"),
+  periodEnd: date("period_end"),
+  reminderSentAt: timestamp("reminder_sent_at"),
+  approvedBy: integer("approved_by").references(() => users.id, { onDelete: "set null" }),
+  approvedAt: timestamp("approved_at"),
+  sentAt: timestamp("sent_at"),
+  recipientCount: integer("recipient_count"),
+  sentCount: integer("sent_count").notNull().default(0),
+  failedCount: integer("failed_count").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  check("product_update_digests_status_check", sql`${t.status} IN ('ready','sending','sent','discarded')`),
+]);
+
+export const productUpdateImages = pgTable("product_update_images", {
+  id: serial().primaryKey(),
+  digestId: integer("digest_id").notNull().references(() => productUpdateDigests.id, { onDelete: "cascade" }),
+  mime: text("mime").notNull(),
+  dataB64: text("data_b64").notNull(),
+  width: integer("width"),
+  height: integer("height"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const productUpdateSends = pgTable("product_update_sends", {
+  id: serial().primaryKey(),
+  digestId: integer("digest_id").notNull().references(() => productUpdateDigests.id, { onDelete: "cascade" }),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("sending"), // 'sending' | 'sent' | 'failed'
+  error: text("error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  sentAt: timestamp("sent_at"),
+}, (t) => [
+  uniqueIndex("product_update_sends_digest_user_uidx").on(t.digestId, t.userId),
+]);
