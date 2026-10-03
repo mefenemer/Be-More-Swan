@@ -9,7 +9,7 @@ Your Mac (weekly Claude task)                 bemoreswan.com
 1. read the week's commits on main
 2. pick the customer-facing features
 3. write the copy
-4. screenshot each one (demo workspace)
+4. screenshot each one (own workspace)
 5. upload-draft.ts --upload  ───────────────▶ product-updates.ts?resource=ingest
                                               → saved as "Waiting for review"
                                               → reminder email to hello@bemoreswan.com
@@ -42,9 +42,9 @@ Account settings → Notification Preferences. Account, billing and security ema
 
 ## One-off setup
 
-1. **Demo workspace.** Create a customer account on bemoreswan.com for screenshots only (for example
-   `demo@bemoreswan.com`), hire the assistants you want to show, and fill it with tidy example content.
-   Screenshots must never show a real customer's or your own personal details.
+1. **Screenshot account.** The screenshots are taken in the founder's own workspace (Be More Swan
+   marketing itself), signed in to the browser pane in the Claude app. Decided 2026-10-03 instead of a
+   separate demo account. The privacy rules in step 4 are what keep customers' and personal data out.
 2. **Upload token.** Generate it into `.env` without it ever being printed, then copy it to Netlify:
    ```bash
    echo "PRODUCT_UPDATES_INGEST_TOKEN=$(openssl rand -hex 32)" >> .env
@@ -104,17 +104,23 @@ is useful. UK English, plain words, no jargon, no internal names (say "Email Mar
 The renderer treats everything as plain text: no HTML or Markdown. A blank line starts a new paragraph.
 
 ### 4. Take the screenshots
-1. Open bemoreswan.com in the browser pane. Check that it is signed in to the **demo workspace** (the
-   avatar initials and the account name). If it is signed in to anything else, or signed out, stop: tell
-   the user to sign in to the demo workspace, then continue.
+1. Open bemoreswan.com/workspace.html in the browser pane. If it shows the login page, stop: ask the user
+   to sign in to their own account in the pane, then continue. Never sign in or out yourself.
 2. Use the pane's default desktop size (about 800px wide, which suits a 600px email). Do not emulate a
    larger viewport: the screenshot is scaled down and blurs.
 3. Go to each feature. Wait until the pink loading spinner has gone before you capture. Close menus and
    dialogs you do not want in the picture.
 4. Copy the screenshot file and crop it to the feature with `sips` (it takes `--cropOffset <y> <x>` then
    `--cropToHeightWidth <h> <w>`). Name the files `1-<feature>.jpg`, `2-…` and so on.
-5. Open each crop and check it: no personal data, no error banners, no red over-limit counters, no typos
-   in the visible content. Retake on different content if needed. If a screenshot cannot be taken
+5. **Privacy rules.** These screenshots go to every customer, and the workspace is a real account:
+   - Never screenshot lead lists, lead details, contacts, the Audience page's subscriber list, inboxes,
+     conversations, email threads, billing, or any page listing other people or companies.
+   - Never show an email address, phone number, street address or a person's full name. That includes
+     placeholders that echo the account's own details (the Lead Generator's email signature field does).
+   - Prefer set-up screens, editors, empty states and the workspace's own example content.
+   - Crop tightly to the feature, so the sidebar, account menu and unrelated cards are cut out.
+6. Open each crop and check it against those rules, and for error banners, red over-limit counters and
+   typos in the visible content. Retake on different content if needed. If a screenshot cannot be taken
    cleanly, leave `image` off that item rather than ship a bad one.
 
 ### 5. Build, preview and upload
