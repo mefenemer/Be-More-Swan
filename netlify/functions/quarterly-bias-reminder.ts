@@ -38,11 +38,11 @@ const handler = async () => {
                 to: admin.email,
                 subject: '[Be More Swan] Quarterly Bias Prompt Review Due',
                 html: `<p>Hi ${admin.firstName || 'there'},</p>
-<p>It's time for the <strong>quarterly bias review</strong> of all masterAssistant system prompts.</p>
+<p>It's time for the <strong>quarterly bias review</strong> of every active assistant's system prompt.</p>
 <p>Please review the following checklist for each active assistant:</p>
 <ul>${CHECKLIST.map(c => `<li>${c}</li>`).join('')}</ul>
 <p>Once complete, record your findings in the Bias Audit section of the Admin Dashboard:</p>
-<p><a href="${BASE}/admin.html?section=bias-audit" style="display:inline-block;padding:10px 20px;background:#059669;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold;">Open Bias Audit Dashboard</a></p>
+<p><a href="${BASE}/admin.html?view=bias-audit" style="display:inline-block;padding:10px 20px;background:#059669;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold;">Open Bias Audit Dashboard</a></p>
 <p style="color:#6b7280;font-size:12px;">Review outcomes should include: reviewDate, promptsReviewed, findingsCount, and actionsRequired.</p>`,
             }).catch(() => {});
         }

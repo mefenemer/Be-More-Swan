@@ -1385,7 +1385,7 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         category: 'Compliance',
         type: 'system',
         title: 'Quarterly Bias Review Due',
-        message: 'A quarterly review of all masterAssistant system prompts for bias is due. Please complete the review checklist in the Admin Dashboard → Bias Audit.',
+        message: 'A quarterly bias review of every active assistant\'s system prompt is due. Complete the checklist and record it in Admin → Trust → Bias Audit.',
         variables: [],
     },
     {
