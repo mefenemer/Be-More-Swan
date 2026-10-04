@@ -73,7 +73,7 @@ check('a clip is followed by the text that shows on it', () => {
     const after = workspace.slice(at, workspace.indexOf("}).join('');", at));
     assert.ok(after.includes('tl.byClip[i] && tl.byClip[i].html'), "the clip's own text is not drawn under it");
     assert.ok(after.includes('tl.byClip[i] && tl.byClip[i].axis'), "the clip's axis is not handed to its block");
-    assert.ok(after.includes('No text on this clip'), 'an empty clip says nothing at all');
+    assert.ok(after.includes('No text or sound on this clip'), 'an empty clip says nothing at all');
 });
 
 check('sound and orphans come after the clips, not under one of them', () => {
@@ -591,7 +591,7 @@ check('text rows sit under the clip they belong to', () => {
     assert.ok(scope.includes('at.i === sp.i'), 'boxes grouped by the clip they start in');
     assert.ok(scope.includes('byClip[sp.i]'), 'the grouping is not keyed by clip index');
     // The clip heading is the clip's own row now, and the empty case is stated where it is placed.
-    assert.ok(workspace.includes('No text on this clip'), 'an empty clip says so');
+    assert.ok(workspace.includes('No text or sound on this clip'), 'an empty clip says so');
 });
 
 check('a box that cannot be placed is listed, never dropped', () => {
@@ -889,9 +889,12 @@ check('every text row can be deleted from the post editor', () => {
     // It was only possible inside the text editor: open a modal, find the right box among several
     // on several clips, delete it there. It is a layer in a list, and the list deletes.
     const at = only(workspace, 'const del = kind === ', 'workspace.html');
-    const del = workspace.slice(at, at + 500);
+    const del = workspace.slice(at, at + 800);
     assert.ok(del.includes("kind === 'text'"), 'sound rows must not offer a text delete');
     assert.ok(del.includes('data-pce-act="remove-text"'), 'the button is not wired');
+    // ...and a sound row offers its OWN delete. It had none: a library track could be re-timed
+    // on its row and removed only from a list in another panel.
+    assert.ok(del.includes('data-pce-act="remove-audio"'), 'a sound row cannot be deleted');
     const fn = slice('window._pceOverlayRemove = function (key) {', 'window._pceClipTrim = function');
     assert.ok(fn.includes('window.confirm'), 'typed words deleted with no question asked');
     assert.ok(fn.includes('_rqPersistOverlays('), 'the deletion is never saved');
@@ -2207,6 +2210,97 @@ check('it hit-tests its own first button and names whatever is in front', () => 
     const render = slice('function _pceRenderClipsInner(host, clipsOverride) {', '\n/**');
     assert.ok(/requestAnimationFrame\(\(\) => \{ try \{ _pceCheckPanelReachable\(\)/.test(render),
         'the check runs inside the render, against a stale rect, or not at all');
+});
+
+console.log('\nsound works the way text does');
+
+check('sound sits under the clip it starts on, on that clip\'s axis', () => {
+    // It was one "Sound" list after every clip, on the whole cut's ruler — added, measured and
+    // removed somewhere other than the text above it.
+    const parts = slice('function _rqTimelineParts(post) {', '\nfunction _pceTimedBlock(');
+    assert.ok(parts.includes('_pceSpanAt(spans, a.startS == null ? 0 : a.startS)'), 'sound is not placed by where it starts');
+    assert.ok(parts.includes('slot.html += mine.map((a) => audioRow(a, audioClips.indexOf(a), slot.axis))'),
+        'sound is not drawn on its clip\'s axis');
+});
+
+check('a sound row can be muted and removed, after asking', () => {
+    const tl = slice('const PCE_ACTS = {', '\nfunction _pceBindClipTrim() {');
+    assert.ok(tl.includes("'remove-audio':") && tl.includes("'hide-audio':"), 'the sound row buttons have no handler');
+    const fn = slice('window._pceAudioRemoveByKey = function (key) {', '\n};');
+    assert.ok(fn.includes('_pceAsk('), 'a sound is deleted with no question asked');
+    assert.ok(fn.includes('_pceRemoveAudio('), 'removal does not go through the one path that saves');
+    // A muted sound must actually be silent in the preview.
+    const sync = slice('function _pceSyncAudioPreview(video) {', '\n}');
+    assert.ok(sync.includes('_pceAudioHidden('), 'a muted sound still plays in the preview');
+});
+
+check('each clip offers + Add sound, which starts the next sound on that clip', () => {
+    const render = slice('function _pceRenderClipsInner(host, clipsOverride) {', '\n/**');
+    assert.ok(render.includes('data-pce-act="add-sound"'), 'no + Add sound on the clip');
+    const place = slice('function _pcePlaceNewSound(post, clip) {', '\n}');
+    assert.ok(place.includes('_pceAudioTarget = null'), 'the target can place more than one sound');
+    // Every way a sound arrives honours it.
+    for (const from of ['async function _pceAddAudioFile(file) {', 'async function _pceAddLibraryTrack(trackId) {']) {
+        assert.ok(slice(from, '\n}').includes('_pcePlaceNewSound(post, clip)'), `${from} ignores the clip it was added to`);
+    }
+});
+
+check('library music ends with the video instead of stretching it', () => {
+    // An unbounded track makes the renderer hold the last frame until the track ends — a 3-minute
+    // song under a 15-second Reel published as a 3-minute video.
+    const lib = slice('async function _pceAddLibraryTrack(trackId) {', '\n}');
+    assert.ok(lib.indexOf('_pceMusicDefaultEnd(post, clip)') > lib.indexOf('await _pceMeasureAudio(post)'),
+        'the end is set before the track has been measured');
+    const fn = slice('function _pceMusicDefaultEnd(post, clip) {', '\n}');
+    assert.ok(fn.includes('if (natural) end = Math.min(end, start + natural)'), 'the end can outrun the track');
+});
+
+check('sound moves with its clip when the cut changes', () => {
+    const changed = slice('function _pceClipsChanged(clips) {', '\n}');
+    assert.ok(changed.includes('_pceReanchorAudio(post, oldSpans, clips)'), 'a reorder leaves the sound behind');
+    assert.ok(changed.includes('if (soundMoved) _pcePersistAudio(id)'), 'the moved sound is never saved');
+});
+
+check('a long sound can still be slid along its clip', () => {
+    // Text keeps the whole box inside its clip; a music bed is longer than the clip, so that rule
+    // pinned it to the first second.
+    const drag = slice('function _rqBindTimeline() {', "\n    host.addEventListener('pointerup'");
+    assert.ok(drag.includes("if (d.kind === 'audio') {"), 'sound is moved by the text rule');
+    assert.ok(drag.includes("if (kind === 'audio' && drop != null) { window._pceAudioToClip(drop, key); return; }"),
+        'a sound cannot be dropped onto another clip');
+});
+
+console.log('\nfolding, playing, adding a clip');
+
+check('each clip folds its text and sound, and the heading folds them all', () => {
+    const render = slice('function _pceRenderClipsInner(host, clipsOverride) {', '\n/**');
+    assert.ok(render.includes('data-pce-act="fold-clip"') && render.includes('data-pce-act="fold-all"'), 'no fold controls');
+    assert.ok(render.includes("+ (folded ? '' : (''"), 'folding does not hide the rows');
+    // A folded clip still says what it carries.
+    assert.ok(render.includes('layerWords(onClip[i])'), 'a folded clip hides that it has text or sound');
+    // Adding to a folded clip opens it, or the new row's field is not there to focus.
+    assert.ok(slice('window._pceAddTextToClip = function (index, text) {', '\n};').includes('_pceUnfoldClip('),
+        'text added to a folded clip is invisible');
+});
+
+check('a one-clip video can be played whole', () => {
+    const render = slice('function _pceRenderClipsInner(host, clipsOverride) {', '\n/**');
+    assert.ok(render.includes("+ (clips.length\n            ? '<button type=\"button\" data-pce-act=\"' + (_pcePreviewing()"),
+        'the play button still needs two clips');
+    const start = slice('window._pcePreviewStart = async function () {', '\n};');
+    assert.ok(!start.includes('clips.length < 2'), 'the preview still refuses a single clip');
+});
+
+check('+ Add another clip opens the media picker, set to add', () => {
+    const tl = slice('const PCE_ACTS = {', '\nfunction _pceBindClipTrim() {');
+    assert.ok(tl.includes("'add-clip': () => window._pceAddClipFromPicker()"), 'it still opens the file dialog');
+    const fn = slice('window._pceAddClipFromPicker = function () {', '\n};');
+    assert.ok(fn.includes('_pcePickerAddOnly = true') && fn.includes('_pceOpenMediaPicker()'), 'not opened to add');
+    // Every source honours it: asking, uploading, and the visit ending.
+    assert.ok(slice('function _pceAskAddOrReplace(label, run) {', '\n}').includes('if (_pcePickerAddOnly)'),
+        'search and generation still ask add-or-replace');
+    assert.ok(slice('function _pceCloseMediaPicker() {', '\n}').includes('_pcePickerAddOnly = false'),
+        'the add-only visit outlives the modal');
 });
 
 console.log(`\n${passed} checks passed`);

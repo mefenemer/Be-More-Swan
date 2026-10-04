@@ -6895,13 +6895,20 @@ function _rqTimelineParts(post) {
         // the right box among several and delete it there. It is a layer in a list; the list deletes.
         // Hide while you work: "does this line work? let me see it without" is a question about the
         // next ten seconds, not an edit. Nothing about it is saved.
-        const hidden = kind === 'text' && _pceTextHidden(key);
+        // Sound gets the same two controls as text — hide while you edit, and remove. It had
+        // neither: a track added from the library could be re-timed on this row and deleted only
+        // from a list in another panel, which on a video is a panel most people never open.
+        // The action names are written out in full, never built from `kind`: the panel's tests read
+        // every data-pce-act in this file to prove each one has a handler.
+        const hidden = kind === 'audio' ? _pceAudioHidden(key) : _pceTextHidden(key);
+        const eyeAttrs = `aria-label="${hidden ? 'Show' : 'Hide'} ${esc}" aria-pressed="${hidden}"
+                 class="px-1 cursor-pointer leading-none ${hidden ? 'text-pink-600' : 'text-gray-300 hover:text-gray-600'}"
+                 data-pce-key="${_rqEsc(key)}">${hidden ? '\u25CC' : '\u25C9'}</button>`;
         const eye = kind === 'text'
             ? `<button type="button" title="${hidden ? 'Show this text again' : 'Hide this text while you edit'}"
-                 aria-label="${hidden ? 'Show' : 'Hide'} ${esc}" aria-pressed="${hidden}"
-                 class="px-1 cursor-pointer leading-none ${hidden ? 'text-pink-600' : 'text-gray-300 hover:text-gray-600'}"
-                 data-pce-act="hide-text" data-pce-key="${_rqEsc(key)}">${hidden ? '\u25CC' : '\u25C9'}</button>`
-            : '';
+                 data-pce-act="hide-text" ${eyeAttrs}`
+            : `<button type="button" title="${hidden ? 'Hear this sound again' : 'Mute this sound while you edit'}"
+                 data-pce-act="hide-audio" ${eyeAttrs}`;
         // ── The way in to styling ───────────────────────────────────────────────────────────────
         // The controls exist and nothing pointed at them. They used to appear on their own, because
         // anything that selected a box opened them, so there was never a reason to offer a button —
@@ -6918,7 +6925,9 @@ function _rqTimelineParts(post) {
             ? `<button type="button" title="Remove this text" aria-label="Remove ${esc}"
                  class="px-1 text-gray-300 hover:text-red-600 cursor-pointer leading-none"
                  data-pce-act="remove-text" data-pce-key="${_rqEsc(key)}">&times;</button>`
-            : '';
+            : `<button type="button" title="Remove this sound" aria-label="Remove ${esc}"
+                 class="px-1 text-gray-300 hover:text-red-600 cursor-pointer leading-none"
+                 data-pce-act="remove-audio" data-pce-key="${_rqEsc(key)}">&times;</button>`;
         // ── The numbers sit BESIDE the bar they describe ────────────────────────────────────────
         // They used to be one pair of boxes under the canvas, editing whichever box happened to be
         // selected — so refining three overlays meant selecting, scrolling, typing, scrolling back,
@@ -6938,7 +6947,7 @@ function _rqTimelineParts(post) {
         return `
           <div data-tl-row="${_rqEsc(key)}"${hidden ? ' style="opacity:.45"' : ''}>
             <div class="flex items-center gap-1.5">
-              ${kind === 'text' ? nameInput(key, label) : `<span class="flex-1 min-w-0 truncate text-[10px] font-semibold text-gray-500" title="${esc}">${esc}</span>`}
+              ${kind === 'text' ? nameInput(key, label) : `<span class="flex-1 min-w-0 truncate px-1 py-0.5 text-[10px] font-semibold text-indigo-700" title="${esc}">\u266B ${esc}</span>`}
               ${look}
               ${eye}
               ${del}
@@ -7036,17 +7045,50 @@ function _rqTimelineParts(post) {
         orphans = overlays.map((ov, i) => textRow(ov, i, cutAxis)).join('');
     }
 
-    // Drawn from the clip's EFFECTIVE range, not its stored one: an unbounded clip runs for its own
-    // natural length, and drawing it across the whole axis would claim a six-second voice note covers
-    // a ten-second video. Sound is not per-clip — it plays over the cut — so it sits after the list.
-    const audio = audioClips.map((a, i) => {
+    // ── Sound sits under the clip it STARTS on, exactly like text ──────────────────────────────
+    // It used to be a separate "Sound" list after every clip, drawn against the whole cut — so a
+    // track and the text above it were measured on two different rulers, added from two different
+    // places, and could be removed from neither row. The user asked for it to work the way text
+    // does, and everything text learned applies: the row shares its clip's axis (so a bar and the
+    // trim slider above it measure the same seconds), and a sideways drag stays on that clip.
+    //
+    // One honest difference: a track may run PAST its clip — a music bed under a whole Reel is the
+    // usual case. The bar fills to the clip's end and the words underneath say it carries on, the
+    // same treatment a text box with no end time gets.
+    //
+    // Drawn from the EFFECTIVE range, not the stored one: an unbounded clip runs for its natural
+    // length, and drawing it across the whole axis would claim a six-second voice note covers a
+    // ten-second video.
+    const audioRow = (a, i, axis) => {
+        const ax = axis || cutAxis;
         const r = _pceAudioDrawRange(a);
         const st = r.startS == null ? 0 : r.startS;
         const en = r.endS == null ? dur : r.endS;
+        const sp = spans && spans.length ? _pceSpanAt(spans, st) : null;
+        const src = (t) => ax.inS + (t - ax.start);
+        const runs = `plays for ${fmt(Math.max(0, en - st))}`;
+        const sub = !sp || ax === cutAxis
+            ? `${fmt(st)} → ${fmt(en)} of the whole video · ${runs}`
+            : en > sp.end + 0.05
+                ? `from ${fmt(src(st))} of clip ${sp.i + 1} and on past its end · ${runs}`
+                : `${fmt(src(st))} → ${fmt(src(en))} of clip ${sp.i + 1} · ${runs}`;
         return row('audio', a.id || `a${i}`, _pceAudioLabel(a).slice(0, 22), r,
-            !!(a.id && a.id === _pceSelectedAudioId),
-            `${fmt(st)} → ${fmt(en)} of the whole cut · plays for ${fmt(Math.max(0, en - st))}`, cutAxis);
-    }).join('');
+            !!(a.id && a.id === _pceSelectedAudioId), sub, ax);
+    };
+    let audio = '';
+    if (spans && spans.length) {
+        for (const sp of spans) {
+            const mine = audioClips.filter((a) => {
+                const at = _pceSpanAt(spans, a.startS == null ? 0 : a.startS);
+                return at && at.i === sp.i;
+            });
+            if (!mine.length) continue;
+            const slot = byClip[sp.i] || (byClip[sp.i] = { html: '', axis: clipAxis(sp.i) });
+            slot.html += mine.map((a) => audioRow(a, audioClips.indexOf(a), slot.axis)).join('');
+        }
+    } else {
+        audio = audioClips.map((a, i) => audioRow(a, i, cutAxis)).join('');
+    }
 
     return { any: true, note: '', dur, byClip, orphans, audio, cutAxis, isVideo };
 }
@@ -7225,23 +7267,57 @@ function _pceClipsTotalS(post) {
  * cleared when another post is opened, and while anything is hidden the panel says so in as many
  * words: the published video still has all of it.
  */
-const _pceHidden = { postId: null, clips: new Set(), text: new Set() };
+const _pceHidden = { postId: null, clips: new Set(), text: new Set(), audio: new Set() };
+
+/**
+ * Clips whose text and sound are folded away, by clip id — so the list can be read as just the cut.
+ *
+ * By id rather than position, for the reason text is anchored by id: a reorder must carry the fold
+ * with the footage. `_pceFoldAll` is the heading's "Collapse all", and an explicit per-clip toggle
+ * after it flips just that one clip (held in `_pceFolded` as an EXCEPTION to the default).
+ */
+const _pceFolded = new Set();
+let _pceFoldAll = false;
+const _pceClipFolded = (id) => _pceFoldAll !== _pceFolded.has(String(id));
+function _pceUnfoldClip(id) {
+    if (!_pceClipFolded(id)) return;
+    if (_pceFoldAll) _pceFolded.add(String(id)); else _pceFolded.delete(String(id));
+}
+
+/**
+ * The clip a "+ Add sound" was pressed on, for the ONE sound added next. Whichever way that sound
+ * arrives — the library, an upload, a recording — it starts at that clip. Cleared the moment it is
+ * used, and on any change of post, so it can never silently place a later sound.
+ */
+let _pceAudioTarget = null;
 
 function _pceHiddenReset(postId) {
     if (_pceHidden.postId === postId) return;
     _pceHidden.postId = postId;
     _pceHidden.clips.clear();
     _pceHidden.text.clear();
+    _pceHidden.audio.clear();
+    // Which clips have their text and sound folded away is a view of THIS post, like the above.
+    _pceFolded.clear();
+    _pceFoldAll = false;
+    _pceAudioTarget = null;
 }
 
 const _pceClipHidden = (id) => _pceHidden.clips.has(String(id));
 const _pceTextHidden = (id) => _pceHidden.text.has(String(id));
+// A "hidden" sound is a MUTED one: there is nothing to see, so hiding it means not hearing it in the
+// preview. Same promise as the others — nothing is saved, and the published video still has it.
+const _pceAudioHidden = (id) => _pceHidden.audio.has(String(id));
 
 window._pceToggleHidden = function (kind, id) {
-    const set = kind === 'clip' ? _pceHidden.clips : _pceHidden.text;
+    const set = kind === 'clip' ? _pceHidden.clips : kind === 'audio' ? _pceHidden.audio : _pceHidden.text;
     const key = String(id);
     if (set.has(key)) set.delete(key); else set.add(key);
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    // Muting has to be heard NOW, not at the next timeupdate — a paused preview sends none.
+    if (kind === 'audio' && _pceAudioHidden(key) && _pceAudioPreviewEls[key]) {
+        try { _pceAudioPreviewEls[key].pause(); } catch (e) { /* already stopped */ }
+    }
     // A hidden clip that is playing right now has to be left: the preview seats the NEXT visible
     // one rather than stopping on something the reviewer has just said they do not want to see.
     if (kind === 'clip' && _pcePrev.on && _pceClipHidden(key)) {
@@ -7255,13 +7331,34 @@ window._pceToggleHidden = function (kind, id) {
     _rqRenderTimeline(post);
 };
 
+/** Fold or unfold one clip's text and sound. A view choice — nothing is saved. */
+window._pceToggleFold = function (id) {
+    const key = String(id);
+    if (_pceFolded.has(key)) _pceFolded.delete(key); else _pceFolded.add(key);
+    _pceRenderClips();
+};
+
+/**
+ * "Collapse all" / "Expand all". Resets the per-clip exceptions, so the answer is uniform afterwards
+ * — "collapse all" that leaves the one clip you had opened still open is not what the words say.
+ */
+window._pceToggleFoldAll = function () {
+    const clips = _pceClips();
+    const allFolded = clips.length && clips.every((c) => _pceClipFolded(c.id));
+    _pceFoldAll = !allFolded;
+    _pceFolded.clear();
+    _pceRenderClips();
+};
+
 /** "2 clips and 1 text" — named rather than counted, so the note says what is missing. */
 function _pceHiddenSummary() {
     const bits = [];
     const c = _pceHidden.clips.size;
     const t = _pceHidden.text.size;
+    const a = _pceHidden.audio.size;
     if (c) bits.push(c + (c === 1 ? ' clip' : ' clips'));
     if (t) bits.push(t + (t === 1 ? ' text box' : ' text boxes'));
+    if (a) bits.push(a + (a === 1 ? ' sound' : ' sounds'));
     return bits.join(' and ');
 }
 
@@ -7438,7 +7535,9 @@ async function _pcePreviewSeat(i, startS) {
 window._pcePreviewStart = async function () {
     _pcePrevMsg = '';
     const clips = _pceClips();
-    if (clips.length < 2) return;                  // one clip already previews itself
+    // One clip is a whole video too — this used to bail out below two, which is why a one-clip Reel
+    // had no "play the whole thing" button at all. The tick stops after the last visible clip either way.
+    if (!clips.length) return;
     const video = _pcePreviewVideoEl();
     if (!video) {
         _pcePrevMsg = 'The picture above is not a video player, so there is nothing to play the cut in. Close the post and open it again.';
@@ -7935,13 +8034,20 @@ const PCE_ACTS = {
     'hide-clip': (el) => window._pceToggleHidden('clip', el.getAttribute('data-pce-key')),
     'hide-text': (el) => window._pceToggleHidden('text', el.getAttribute('data-pce-key')),
     'remove-text': (el) => window._pceOverlayRemove(el.getAttribute('data-pce-key')),
+    'hide-audio': (el) => window._pceToggleHidden('audio', el.getAttribute('data-pce-key')),
+    'remove-audio': (el) => window._pceAudioRemoveByKey(el.getAttribute('data-pce-key')),
+    'add-sound': (el) => window._pceAddSoundToClip(Number(el.getAttribute('data-pce-i'))),
+    'fold-clip': (el) => window._pceToggleFold(el.getAttribute('data-pce-key')),
+    'fold-all': () => window._pceToggleFoldAll(),
     'style-text': (el) => {
         const key = el.getAttribute('data-pce-key');
         // A second press closes it — the button reads as a toggle, so it is one.
         window._pceEditTextLook(window._pceEditingTextId() === key ? null : key);
     },
     'close-text-look': () => window._pceEditTextLook(null),
-    'add-clip': () => window._pceAddClipFiles(),
+    // The media picker, not the Mac's file dialog: uploading is one of five ways to get a clip, and
+    // the other four (your library, stock, AI, Canva) were unreachable from here.
+    'add-clip': () => window._pceAddClipFromPicker(),
     'preview-start': () => window._pcePreviewStart(),
     'preview-stop': () => window._pcePreviewStop(),
 };
@@ -8379,10 +8485,12 @@ function _pceClipsChanged(clips) {
     // rather than left pointing at a second that now belongs to something else.
     const oldSpans = post ? _pceSpansFor(_pceClips(post)) : null;
     const reanchored = post ? _pceReanchorOverlays(post, oldSpans, clips) : false;
+    const soundMoved = post ? _pceReanchorAudio(post, oldSpans, clips) : false;
 
     _pceRenderClips(clips);
     _pcePersistVideoEdit(id, clips);
     if (reanchored) _rqPersistOverlays(id);
+    if (soundMoved) _pcePersistAudio(id);
     // The timeline's axis is the length of this cut, so it has to be redrawn whenever the cut moves.
     if (post) _rqRenderTimeline(post);
     if (reanchored) _pceRefreshOverlayTiming();
@@ -8566,6 +8674,9 @@ window._pceAddTextToClip = function (index, text) {
         text ? { text } : {}));
     post.overlays = Array.isArray(post.overlays) ? post.overlays : [];
     post.overlays.push(ov);
+    // Adding to a folded clip must open it: the next lines focus the new row's field, and a row
+    // inside a fold does not exist to be focused.
+    if (sp && sp.clip) _pceUnfoldClip(sp.clip.id);
     _pceSelectedOverlayId = ov.id;
     _pceStyleMountedFor = null;          // the panel must mount against the new box
     // A box you have just made is a box you are editing, so the styling opens with it — this is the
@@ -8855,13 +8966,44 @@ function _pceRenderClipsInner(host, clipsOverride) {
     }
     const totalLabel = anyUnknown ? 'measuring…' : _pceFmtS(total);
 
+    // What sits on each clip, counted the way _rqTimelineParts places it (by where it STARTS), so a
+    // folded clip's "2 text · 1 sound" names exactly the rows that unfolding it would show.
+    const layerSpans = _pceSpansFor(clips);
+    const onClip = clips.map(() => ({ text: 0, sound: 0 }));
+    if (layerSpans && layerSpans.length) {
+        const count = (items, field) => {
+            for (const it of items) {
+                const sp = it && _pceSpanAt(layerSpans, it.startS == null ? 0 : it.startS);
+                if (sp && onClip[sp.i]) onClip[sp.i][field]++;
+            }
+        };
+        if (tl.isVideo) count((post && post.overlays) || [], 'text');
+        count(_pceAudioClips(post), 'sound');
+    }
+    const layerWords = (n) => [n.text ? n.text + ' text' : '', n.sound ? n.sound + (n.sound === 1 ? ' sound' : ' sounds') : '']
+        .filter(Boolean).join(' \u00B7 ');
+    const anyLayers = onClip.some((n) => n.text || n.sound);
+
     const rows = clips.map((c, i) => {
         const len = _pceClipLength(c);
+        const folded = _pceClipFolded(c.id);
         const name = _rqEsc(String(c.name || ('Clip ' + (i + 1))).slice(0, 28));
         return '<div data-clip-row="' + i + '"' + (_pceClipHidden(c.id) ? ' style="opacity:.5"' : '') + '>'
             + '<div class="flex items-center gap-1.5 py-1">'
+            // ── Fold this clip's text and sound away ────────────────────────────────────────
+            // A cut of four clips with a few lines each is a long list, and "which clips, in what
+            // order" is a question about the clips alone. Folding hides the rows, never the content:
+            // the count stays on the clip so a folded one still says what it is carrying.
+            + '<button type="button" data-pce-act="fold-clip" data-pce-key="' + _rqEsc(c.id) + '"'
+            + ' aria-expanded="' + !folded + '"'
+            + ' title="' + (folded ? 'Show the text and sound on this clip' : 'Hide the text and sound on this clip') + '"'
+            + ' aria-label="' + (folded ? 'Expand' : 'Collapse') + ' clip ' + (i + 1) + '"'
+            + ' class="w-3 shrink-0 text-[9px] text-gray-400 hover:text-gray-700 cursor-pointer leading-none">'
+            + (folded ? '\u25B6' : '\u25BC') + '</button>'
             + '<span class="w-4 shrink-0 text-[10px] font-bold text-gray-400" style="font-variant-numeric:tabular-nums">' + (i + 1) + '</span>'
             + '<span class="flex-1 min-w-0 truncate text-[11px] text-gray-700" title="' + name + '">' + name + '</span>'
+            + (folded && layerWords(onClip[i])
+                ? '<span class="shrink-0 text-[10px] text-gray-400">' + layerWords(onClip[i]) + '</span>' : '')
             + '<span class="w-10 shrink-0 text-right text-[10px] text-gray-400" style="font-variant-numeric:tabular-nums">' + (len == null ? '—' : _pceFmtS(len)) + '</span>'
             // Play just this clip (▶), or stop it (■) while it plays.
             + (function () {
@@ -8898,11 +9040,12 @@ function _pceRenderClipsInner(host, clipsOverride) {
             + ' data-pce-act="clip-remove" data-pce-i="' + i + '">&times;</button>'
             + '</div>'
             + _pceTrimTrackHtml(c, i)
+            + (folded ? '' : (''
             // What shows ON this clip, directly under the slider that decides how long it lasts.
             // "No text" is stated rather than left blank: an empty gap under clip 3 and an empty gap
             // under a clip whose text has drifted off the end look identical.
             + _pceTimedBlock(
-                (tl.byClip[i] && tl.byClip[i].html) || '<p class="text-[10px] text-gray-300">No text on this clip</p>',
+                (tl.byClip[i] && tl.byClip[i].html) || '<p class="text-[10px] text-gray-300">No text or sound on this clip</p>',
                 tl.byClip[i] && tl.byClip[i].axis)
             // ── Add text to THIS clip ───────────────────────────────────────────────────────────
             // Adding a box meant opening the text editor, where a new one landed on whichever clip
@@ -8924,11 +9067,19 @@ function _pceRenderClipsInner(host, clipsOverride) {
                   + ' text-gray-500 hover:border-pink-400 hover:text-pink-700 transition cursor-pointer'
                   + ' disabled:opacity-40 disabled:cursor-default">'
                   + (_pceClipAi.busy === i ? 'Thinking\u2026' : '\u2728 Suggest') + '</button>'
+                  // ── Add sound to THIS clip ──────────────────────────────────────────────────
+                  // Beside "+ Add text" because it is the same decision about different material:
+                  // the clip is the button you pressed, and the sound starts there.
+                  + '<button type="button" data-pce-act="add-sound" data-pce-i="' + i + '"'
+                  + ' title="Music from the library, an upload or a voice note, starting on this clip"'
+                  + ' class="flex-1 rounded-lg border border-dashed border-gray-300 py-1 text-[10px] font-semibold'
+                  + ' text-gray-500 hover:border-indigo-400 hover:text-indigo-700 transition cursor-pointer">'
+                  + '+ Add sound</button>'
                   + '</div>'
                   + (_pceClipAi.at === i && _pceClipAi.msg
                       ? '<p class="px-1 pb-1.5 text-[10px] text-amber-600">' + _rqEsc(_pceClipAi.msg) + '</p>'
                       : '')
-                : '')
+                : '')))
             + '</div>';
     }).join('');
 
@@ -8938,9 +9089,10 @@ function _pceRenderClipsInner(host, clipsOverride) {
     // join them up by name.
     const heading = 'Timeline';
     const tail = tl.orphans || tl.audio
-        // Sound is not per-clip: it plays across the cut, so it sits after the list rather than under
-        // any one clip. Orphans join it — a box whose start no longer lands in any clip belongs to
-        // none of them, and hiding it would be how a reviewer approves text they cannot see.
+        // Sound now sits under the clip it starts on, like text; `tl.audio` only carries sound that
+        // could not be placed (the clips are still being measured). Orphans join it — a box whose
+        // start no longer lands in any clip belongs to none of them, and hiding it would be how a
+        // reviewer approves text they cannot see.
         ? '<div class="pt-1.5">'
           + (tl.orphans ? '<p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Not on any clip</p>' : '')
           + _pceTimedBlock(tl.orphans, tl.cutAxis)
@@ -8951,15 +9103,26 @@ function _pceRenderClipsInner(host, clipsOverride) {
     host.innerHTML = '<div class="pt-1">'
         + '<div class="flex items-center justify-between mb-1">'
         + '<span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">' + heading + '</span>'
+        + '<span class="flex items-center gap-2">'
+        + (anyLayers
+            ? '<button type="button" data-pce-act="fold-all"'
+              + ' class="text-[10px] font-semibold text-gray-400 hover:text-gray-700 cursor-pointer">'
+              + (clips.every((c) => _pceClipFolded(c.id)) ? 'Expand all' : 'Collapse all') + '</button>'
+            : '')
         + '<span class="text-[10px] text-gray-400" style="font-variant-numeric:tabular-nums">' + totalLabel + '</span>'
+        + '</span>'
         + '</div>'
         + tl.note
         + '<div class="divide-y divide-gray-100">' + rows + '</div>'
         + tail
-        + (clips.length > 1
+        // ⚠️ For ONE clip too. It was `clips.length > 1`, on the grounds that a single clip has its
+        // own ▶ — but that button is a small glyph on the clip's row, and "play the whole video, with
+        // its text and sound" is the question a reviewer asks of every video, not only of a cut. A
+        // one-clip Reel simply had no such button, which read as it having been removed.
+        + (clips.length
             ? '<button type="button" data-pce-act="' + (_pcePreviewing() ? 'preview-stop' : 'preview-start') + '"'
               + ' class="mt-1.5 w-full rounded-lg border border-emerald-300 bg-emerald-50 py-1.5 text-[11px] font-bold text-emerald-800 hover:bg-emerald-100 transition cursor-pointer">'
-              + (_pcePreviewing() ? '■ Stop preview' : '▶ Preview the whole cut') + '</button>'
+              + (_pcePreviewing() ? '■ Stop preview' : '▶ Play the whole video') + '</button>'
             : '')
         // Clip controls only where there are clips. This panel also draws the sound on a PHOTO post,
         // and "Add another clip" there would offer to turn a picture into a video.
@@ -8969,7 +9132,7 @@ function _pceRenderClipsInner(host, clipsOverride) {
               + ' class="mt-1.5 w-full rounded-lg border border-dashed border-gray-300 py-1.5 text-[11px] font-semibold text-gray-500 hover:border-emerald-400 hover:text-emerald-700 transition cursor-pointer">'
               + '+ Add another clip</button>'
             : '<p class="mt-1 text-[10px] text-amber-600">That is the most clips one post can hold.</p>')
-        + (_pceHidden.clips.size + _pceHidden.text.size
+        + (_pceHidden.clips.size + _pceHidden.text.size + _pceHidden.audio.size
             // ⚠️ Standing, not a toast. A preview that is quietly missing a clip is a preview of a
             // video that does not exist, and the reviewer approves against what they can see.
             ? '<p class="mt-1 text-[10px] text-pink-700">'
@@ -9468,7 +9631,9 @@ function _rqBindTimeline() {
                 ? (() => { const a = _rqAxisOf(track0, dur); return a.start + (a.outS - a.inS); })()
                 : seed.endS,
             // Which clip it started on, so a drop onto a different one can be told from a re-time.
-            home: kind === 'text' ? _rqClipIndexAt(seed.startS == null ? 0 : seed.startS) : null,
+            home: _rqClipIndexAt(seed.startS == null ? 0 : seed.startS),
+            // A sound's stored end, as it was. Unbounded stays unbounded through a sideways move.
+            end0: ov.endS,
             drop: null,
         };
         // Grabbing a track selects it, and selection drives which inspector you land in — grabbing a
@@ -9524,11 +9689,24 @@ function _rqBindTimeline() {
             if (drop != null) return;
             const delta = ((ev.clientX - d.startX) / rect.width) * ax.full;
             const len = d.e0 - d.s0;
-            const ns = Math.max(lo, Math.min(hi - len, d.s0 + delta));
-            d.ov.startS = ns; d.ov.endS = ns + len;
+            if (d.kind === 'audio') {
+                // ⚠️ A sound is usually LONGER than the clip it starts on — a music bed under a whole
+                // Reel. Text's rule (keep the whole box inside the clip) would pin such a track to
+                // the clip's first second, so for sound only the START is kept on the clip and the
+                // end travels with it, or stays unset if it was.
+                const ns = Math.max(lo, Math.min(hi - 0.1, d.s0 + delta));
+                d.ov.startS = ns;
+                if (d.end0 != null) d.ov.endS = ns + (d.end0 - d.s0);
+            } else {
+                const ns = Math.max(lo, Math.min(hi - len, d.s0 + delta));
+                d.ov.startS = ns; d.ov.endS = ns + len;
+            }
         }
         const start = d.ov.startS == null ? lo : d.ov.startS;
-        const end = d.ov.endS == null ? hi : d.ov.endS;
+        // Drawn no further than the row's own clip. A sound may run on past it; the bar stops at
+        // the clip's edge, the same way it is drawn when the list repaints.
+        const drawnEnd = d.kind === 'audio' ? _pceAudioDrawRange(d.ov).endS : d.ov.endS;
+        const end = drawnEnd == null ? hi : Math.min(hi, drawnEnd);
         const pct = (t) => ((ax.inS + (t - ax.start)) / ax.full) * 100;
         d.seg.style.left = pct(start) + '%';
         d.seg.style.width = Math.max(2, pct(end) - pct(start)) + '%';
@@ -9553,6 +9731,7 @@ function _rqBindTimeline() {
         // A drop does its own save and repaint. It must not be followed by one that writes back the
         // timing the box had while it was hovering over another clip.
         if (kind === 'text' && drop != null) { window._pceOverlayToClip(drop, key); return; }
+        if (kind === 'audio' && drop != null) { window._pceAudioToClip(drop, key); return; }
         _rqRenderTimeline(_rqPostCache[_rqReviewPostId]);
         if (kind === 'audio') { _pceRenderAudioList(); _pcePersistAudio(_rqReviewPostId); }
         else _rqPersistOverlays(_rqReviewPostId);
@@ -11563,6 +11742,9 @@ function _pceCloseMediaPicker() {
     // left. Last, so the borrow-and-return above stays the first thing this function is seen to do
     // — post-editor-single-surface.test.ts reads for it near the top.
     _pceClipAddMode = false;
+    _pcePickerAddOnly = false;
+    const title = document.getElementById('pce-media-modal-title');
+    if (title) title.textContent = 'Choose media';
     _pceOwnPicked = [];
     _pceIntentRun = null;
     document.getElementById('gp-ai-intent')?.classList.add('hidden');
@@ -11777,6 +11959,8 @@ function _pceExitClipAddMode() { _pceClipAddMode = false; }
  * before anything is attachable — a search and a generation both answer too late to ask after.
  */
 function _pceAskAddOrReplace(label, run) {
+    // Opened from "+ Add another clip": the answer is already "add".
+    if (_pcePickerAddOnly) { _pceClipAddMode = true; run(); return; }
     // Nothing attached yet ⇒ there is no "replace" to offer, so do not ask; the result simply
     // becomes the post's video.
     if (!_pceHasClipToAddTo()) { _pceClipAddMode = false; run(); return; }
@@ -11827,7 +12011,7 @@ function _pceSyncOwnSelection() {
     const canAdd = _pceCanAddClip();
     // Replacing is one picture's job — with several ticked there is no single answer to "with
     // what" — and it needs something to replace.
-    const canReplace = n === 1 && (!canAdd || _pceHasClipToAddTo());
+    const canReplace = !_pcePickerAddOnly && n === 1 && (!canAdd || _pceHasClipToAddTo());
     // An empty bar is worse than no bar: two tiles ticked used to show a blank strip, because both
     // buttons were hidden and nothing said why.
     bar?.classList.toggle('hidden', n === 0 || (!canAdd && !canReplace));
@@ -11860,7 +12044,26 @@ window._pceOwnReplace = async function () {
 /** What the grid last rendered, so the actions can name and preview what was ticked. */
 let _pceOwnAssets = {};
 
-/** The device-file door, offered from the Clips panel. */
+/**
+ * "+ Add another clip": the media picker, opened to ADD.
+ *
+ * It used to open the Mac's file dialog directly — so uploading was the only way to extend a cut,
+ * and your library, stock search, AI video and Canva were all unreachable from the one button that
+ * asks for another clip. The picker already knows how to add (that is what `_pceClipAddMode` is
+ * for); it just asks "add or replace?" first, and from this button the question has been answered.
+ * `_pcePickerAddOnly` holds that answer for the whole visit and is cleared when the picker closes.
+ */
+let _pcePickerAddOnly = false;
+window._pceAddClipFromPicker = function () {
+    _pcePickerAddOnly = true;
+    _pceOpenMediaPicker();
+    const title = document.getElementById('pce-media-modal-title');
+    if (title) title.textContent = 'Add a clip';
+    const sub = document.getElementById('pce-media-modal-sub');
+    if (sub) sub.textContent = 'It joins the end of this video. Upload, pick from your library, find stock or generate one.';
+};
+
+/** The device-file door. No longer offered by "+ Add another clip" — kept for any other caller. */
 window._pceAddClipFiles = function () {
     const input = document.createElement('input');
     input.type = 'file';
@@ -14562,7 +14765,6 @@ function _pceRefreshAudioInspector() {
         const stillPost = clips.length && !_pcePostIsVideo(post);
         const plat = String((post && post.platform) || '').toLowerCase();
         const canVideo = !plat || window.PlatformConstants.canPublishVideo(plat);
-        becomes.classList.toggle('hidden', !clips.length || (!stillPost && canVideo));
         if (!canVideo) {
             becomes.textContent = `Sound has to be rendered in, so this publishes as a video — and we can’t send video to ${window.PlatformConstants.label(plat)} yet. Remove the sound, or post this one to Instagram or YouTube.`;
             becomes.className = 'mb-3 rounded-lg bg-red-50 border border-red-200 px-2.5 py-2 text-[11px] font-semibold text-red-800';
@@ -14570,6 +14772,9 @@ function _pceRefreshAudioInspector() {
             becomes.textContent = 'No network accepts a still image with sound — approving this will publish it as a video instead.';
             becomes.className = 'mb-3 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-2 text-[11px] font-semibold text-amber-800';
         }
+        // ⚠️ AFTER the className writes. Toggled before them, `hidden` was wiped by the very next
+        // line — so "a still image with sound" showed on every VIDEO post, sound or no sound.
+        becomes.classList.toggle('hidden', !clips.length || (!stillPost && canVideo));
     }
     // A browser with no MediaRecorder can still upload — say so on the button rather than letting it
     // fail on click.
@@ -14710,6 +14915,7 @@ async function _pceAddAudioFile(file) {
             url: URL.createObjectURL(file),
             name: asset.name,
         };
+        _pcePlaceNewSound(post, clip);
         post.audio.push(clip);
         _pceSelectedAudioId = clip.id;
         await _pceMeasureAudio(post);
@@ -14799,6 +15005,9 @@ async function _pceOpenMusicLibrary() {
 
 function _pceCloseMusicLibrary() {
     _pceMusic.open = false;
+    // "Done" without picking anything: a later sound, added some other way, must not quietly land
+    // on the clip whose "+ Add sound" was pressed and then abandoned.
+    _pceAudioTarget = null;
     _pceStopMusicPreview();
     document.getElementById('insp-music')?.classList.add('hidden');
 }
@@ -14942,10 +15151,12 @@ async function _pceAddLibraryTrack(trackId) {
             url: picked.url || null,
             name: picked.name,
         };
+        _pcePlaceNewSound(post, clip);
         post.audio.push(clip);
         _pceSelectedAudioId = clip.id;
         _pceStopMusicPreview();
         await _pceMeasureAudio(post);
+        _pceMusicDefaultEnd(post, clip);
         _pceRefreshAudioInspector();
         _rqRenderTimeline(post);
         _pceRenderLayers();
@@ -14967,10 +15178,153 @@ async function _pceRemoveAudio(index) {
     if (el) { el.pause(); delete _pceAudioPreviewEls[clip.id]; }
     post.audio = clips.filter((a) => a !== clip);
     if (_pceSelectedAudioId === clip.id) _pceSelectedAudioId = null;
+    // A muted sound that no longer exists must not keep being counted in "N sounds hidden".
+    _pceHidden.audio.delete(String(clip.id || `a${index}`));
     _pceRefreshAudioInspector();
     _rqRenderTimeline(post);
     _pceRenderLayers();
     await _pcePersistAudio(postId);
+}
+
+/**
+ * Remove a sound from its row in the clip list, after asking — the same question text gets.
+ *
+ * `key` is what the row carries: the clip's id, or `a<index>` for one without. Resolved the way
+ * _pceAudioClips orders them, so a row can never delete a different sound from the one it draws.
+ */
+window._pceAudioRemoveByKey = function (key) {
+    const clips = _pceAudioClips();
+    let i = clips.findIndex((a) => a && a.id === key);
+    if (i < 0) { const m = /^a(\d+)$/.exec(String(key)); if (m) i = Number(m[1]); }
+    const a = clips[i];
+    if (!a) return;
+    _pceAsk(
+        `Remove the sound \u201C${_pceAudioLabel(a).slice(0, 40)}\u201D?`,
+        'Nothing else on the post changes. Library music can be added again from Browse music.',
+        'Remove sound',
+        () => {
+            const at = _pceAudioClips().indexOf(a);
+            if (at >= 0) _pceRemoveAudio(at);
+        },
+    );
+};
+
+/**
+ * "+ Add sound" on a clip: open the Sound controls with that clip as where the next sound starts.
+ *
+ * The controls themselves are not duplicated into the clip list — the library, upload and recorder
+ * already live in the Sound section of "Video overlays & sound", and a second copy is a second
+ * place to drift. This opens that step, opens the library (the commonest answer), and says which
+ * clip the sound is going on, so pressing the button never lands somewhere that looks unrelated.
+ */
+window._pceAddSoundToClip = function (index) {
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (!post) return;
+    _pceAudioTarget = { postId: _rqReviewPostId, i: index };
+    if (_railOpen !== 'video') { _railOpen = 'video'; _railRender(); }
+    _pceSelectedAudioId = null;
+    _pceSelect('audio');
+    _pceOpenMusicLibrary();
+    const sum = _pceEl('insp-audio-summary');
+    if (sum) sum.textContent = `Adding sound to clip ${index + 1} \u2014 pick a track, upload a file or record a voice note.`;
+    _pceEl('pce-insp-audio')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+};
+
+/**
+ * Where a NEW sound starts: on the clip whose "+ Add sound" was pressed, else at the beginning.
+ * Consumes the target, so it places exactly one sound.
+ */
+function _pcePlaceNewSound(post, clip) {
+    const t = _pceAudioTarget && _pceAudioTarget.postId === _rqReviewPostId ? _pceAudioTarget : null;
+    _pceAudioTarget = null;
+    if (!t) return;
+    const spans = _pceSpansFor(_pceClips(post));
+    const sp = spans && spans[t.i];
+    if (!sp) return;
+    if (sp.start > 0.001) clip.startS = sp.start;
+    if (sp.clip) _pceUnfoldClip(sp.clip.id);
+}
+
+/**
+ * Library music ends with the video, not with the track.
+ *
+ * ⚠️ An unbounded sound plays for its own natural length — and the renderer EXTENDS the video to
+ * fit it (calculateMetadata in remotion/Root.tsx holds the last frame for the overhang). That is
+ * right for a voice note, which must never be cut off mid-sentence. It is wrong for a three-minute
+ * song under a fifteen-second Reel: the published video would be three minutes long, most of it a
+ * frozen frame. So a library track gets an explicit end — the end of the cut on a video, fifteen
+ * seconds on a still — and never past the track's own length. The row shows the end, and dragging
+ * or typing it changes it like any other.
+ */
+function _pceMusicDefaultEnd(post, clip) {
+    if (!clip || clip.endS != null) return;
+    const start = clip.startS == null ? 0 : clip.startS;
+    const natural = _pceAudioDurations[clip.assetId] || null;
+    const cutS = typeof _pceClipsTotalS === 'function' ? _pceClipsTotalS(post) : null;
+    const videoEnd = _pcePostIsVideo(post)
+        ? (cutS > 0 ? cutS : (_rqVideoDurationKnown() ? _rqVideoDuration() : null))
+        : start + 15;
+    let end = videoEnd != null && videoEnd > start + 0.5 ? videoEnd : start + 15;
+    if (natural) end = Math.min(end, start + natural);
+    clip.endS = Math.round(end * 100) / 100;
+}
+
+/**
+ * Put a sound on another clip, keeping how far into the clip it starts and how long it plays —
+ * the same promise _pceOverlayToClip makes for text. Unlike text, its END is not clamped to the new
+ * clip: a sound may run on past it, and cutting it short is not what "move it" asked for.
+ */
+window._pceAudioToClip = function (index, key) {
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    const a = _rqTimelineItem('audio', key);
+    const spans = post ? _pceSpansFor(_pceClips(post)) : null;
+    if (!a || !spans || !spans[index]) return;
+    const start = a.startS == null ? 0 : a.startS;
+    const from = _pceSpanAt(spans, start);
+    const to = spans[index];
+    if (!from || from.i === to.i) return;
+    const within = Math.min(start - from.start, Math.max(0, to.len - 0.2));
+    const next = to.start + Math.max(0, within);
+    // A bed that ran to the end of the video still does — the same rule a reorder follows.
+    const cutEnd = spans[spans.length - 1].end;
+    if (a.endS != null) a.endS = Math.abs(a.endS - cutEnd) < 0.05 ? cutEnd : next + (a.endS - start);
+    a.startS = next <= 0.001 ? undefined : next;
+    _rqRenderTimeline(post);
+    _pceRenderAudioList();
+    _pcePersistAudio(postId);
+};
+
+/**
+ * Keep sound with its clip when the cut changes — reorder, trim, remove — as text already is.
+ * Anchored by clip id, so a reorder carries the sound with its footage. A sound that ran to the end
+ * of the old cut runs to the end of the new one; any other end keeps its duration.
+ */
+function _pceReanchorAudio(post, oldSpans, newClips) {
+    const list = _pceAudioClips(post);
+    if (!post || !oldSpans || !list.length) return false;
+    const newSpans = _pceSpansFor(newClips);
+    if (!newSpans) return false;
+    const oldEnd = oldSpans[oldSpans.length - 1].end;
+    const newEnd = newSpans[newSpans.length - 1].end;
+    let moved = 0;
+    for (const a of list) {
+        const start = a.startS == null ? 0 : a.startS;
+        const from = _pceSpanAt(oldSpans, start);
+        if (!from) continue;
+        const to = newSpans.find((sp) => sp.clip && from.clip && sp.clip.id === from.clip.id)
+            || newSpans[Math.min(from.i, newSpans.length - 1)];
+        if (!to) continue;
+        const within = Math.min(Math.max(0, start - from.start), Math.max(0, to.len - 0.2));
+        const nextStart = to.start + within;
+        const wasStart = a.startS, wasEnd = a.endS;
+        if (a.endS != null) {
+            a.endS = Math.abs(a.endS - oldEnd) < 0.05 ? newEnd : nextStart + (a.endS - start);
+        }
+        a.startS = nextStart <= 0.001 ? undefined : nextStart;
+        if (a.startS !== wasStart || a.endS !== wasEnd) moved++;
+    }
+    return moved > 0;
 }
 
 // Save the arrangement. `url`/`name` are editor-only decorations (a signed URL and the asset's file
@@ -15030,7 +15384,8 @@ function _pceSyncAudioPreview(video) {
         if (!el) continue;
         const start = clip.startS == null ? 0 : clip.startS;
         const end = clip.endS == null ? Infinity : clip.endS;
-        const active = !video.paused && !video.ended && t >= start && t < end;
+        const active = !video.paused && !video.ended && t >= start && t < end
+            && !_pceAudioHidden(clip.id || `a${clips.indexOf(clip)}`);
         if (active) {
             const want = Math.max(0, t - start);
             if (el.paused) { try { el.currentTime = want; } catch { /* not seekable yet */ } el.play().catch(() => {}); }
@@ -18884,7 +19239,8 @@ function _pceSyncMediaModalClip(url, type) {
     const clipable = !!url && isVideo && !!fmt && fmt.m === 'video' && fmt.max === 1;
     // Says which of the two things the sources are about to offer, so the tick boxes and the
     // add-or-replace question are expected rather than surprising.
-    sub.textContent = clipable && url ? 'Pick one to replace this video, or tick several to join them on as clips.'
+    sub.textContent = _pcePickerAddOnly ? 'It joins the end of this video. Upload, pick from your library, find stock or generate one.'
+        : clipable && url ? 'Pick one to replace this video, or tick several to join them on as clips.'
         : _pceCanAddClip() ? 'Tick the clips you want — several will be joined into one video.'
         : !url ? ''
         : 'Whatever you pick replaces what is on the post.';
@@ -19374,10 +19730,16 @@ async function gpAiUploadSelected(e) {
     // have chosen beforehand: picking four files is already an unambiguous statement that they are
     // not each meant to replace the last. One file still replaces, which is what one file means.
     const allVideo = files.every(f => (f.type || '').startsWith('video/'));
-    if (allVideo && _pceCanAddClip() && (files.length > 1 || _pceClipAddMode)) {
+    if (allVideo && _pceCanAddClip() && (files.length > 1 || _pceClipAddMode || _pcePickerAddOnly)) {
         await _pceAttachClips(files);
         _pceExitClipAddMode();
         _pceCloseMediaPicker();
+        return;
+    }
+    // A picture cannot be a clip of a video. From "+ Add another clip" that is a refusal with a
+    // reason, not a silent swap of the whole post for a still.
+    if (_pcePickerAddOnly) {
+        window.showToast?.('Only a video can be added as a clip.');
         return;
     }
     // Auto-switch the Image/Video toggle to match the file being attached so the attach below
@@ -19426,7 +19788,7 @@ function gpAiBrowseCanva() {
         multiple: false,
         onImported: async (assetIds) => {
             if (!assetIds || !assetIds.length) return;
-            if (_pceClipAddMode) {
+            if (_pceClipAddMode || _pcePickerAddOnly) {
                 await _pceAppendClipAssets(assetIds.map(id => ({ id, name: 'Canva clip' })));
                 _pceExitClipAddMode();
                 _pceCloseMediaPicker();
