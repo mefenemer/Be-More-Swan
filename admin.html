@@ -1487,6 +1487,32 @@
         </div>
       </section>
 
+      <!-- ── Music Library ──────────────────────────────────────────────────────────────────
+           Every track the post editor's "Browse music" offers: the curated packs and the tracks
+           customers shared with the community. Withdraw stops a track being OFFERED; posts that
+           already use it are untouched (withdrawal is never retroactive). -->
+      <section id="view-music-library" class="admin-view hidden space-y-5 overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div>
+          <h2 class="text-xl font-extrabold text-gray-900">Music Library</h2>
+          <p class="text-sm text-gray-500 mt-0.5">Curated tracks and tracks customers shared with the community. Withdrawing a track stops it being offered — posts that already use it keep it.</p>
+        </div>
+
+        <div id="ml-counts" class="grid grid-cols-2 lg:grid-cols-5 gap-3"></div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <div id="ml-source" class="flex gap-1"></div>
+          <div id="ml-status" class="flex gap-1"></div>
+          <input type="search" id="ml-q" placeholder="Search title, artist, tag or id"
+            style="min-width:12rem" class="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:border-pink-400">
+        </div>
+
+        <div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div id="ml-list" class="divide-y divide-gray-100">
+            <p class="text-gray-400 text-xs animate-pulse p-5">Loading…</p>
+          </div>
+        </div>
+      </section>
+
       <section id="view-workspaces" class="admin-view hidden">
         <div class="flex items-center justify-between flex-wrap gap-3 mb-6">
           <div>
@@ -2556,6 +2582,7 @@ const VIEW_LABELS = {
   'issue-reports': 'Issue Reports', 'feature-roadmap': 'Feature Requests',
   'swan-queue': 'Swan Index — Review Queue', 'swan-front-page': 'Swan Index — Front Page',
   'swan-contributors': 'Swan Index — Contributors',
+  'music-library': 'Music Library',
 };
 
 // Category → child items mapping.
@@ -2614,6 +2641,10 @@ const ADMIN_CATS = {
     { view: 'swan-queue',        icon: '📥', label: 'Review Queue',  perm: 'curate_swan_index', group: 'The Swan Index' },
     { view: 'swan-front-page',   icon: '🗞️', label: 'Front Page',    perm: 'curate_swan_index', group: 'The Swan Index' },
     { view: 'swan-contributors', icon: '✍️', label: 'Contributors',  perm: 'curate_swan_index', group: 'The Swan Index' },
+    // What the post editor offers as music — and the only place a community-shared track that
+    // should not be in the library can be taken out. platform_config: an existing permission, so no
+    // role data has to change before it works.
+    { view: 'music-library',     icon: '🎵', label: 'Music Library', perm: 'platform_config',   group: 'Content Library' },
   ]},
   platform: { label: 'Platform', children: [
     { view: 'master-data',          icon: '🗂️', label: 'Master Data',           perm: 'platform_config',         group: 'Configuration' },
@@ -2965,6 +2996,7 @@ function adminNav(view) {
   if (view === 'swan-queue')          loadSwanQueue();
   if (view === 'swan-front-page')     loadSwanFrontPage();
   if (view === 'swan-contributors')   loadSwanContributors();
+  if (view === 'music-library')       loadMusicLibrary();
 }
 
 // ── US-COMMS-1: Manage Emails (template editor) ──────────────────────────────
@@ -4532,6 +4564,158 @@ async function api(url, opts) {
   const r = await fetch(url, opts);
   if (!r.ok) { const d = await r.json().catch(()=>({})); throw new Error(d.error || r.statusText || `Request failed (HTTP ${r.status}).`); }
   return r.json();
+}
+
+// ── Music Library ─────────────────────────────────────────────────────────────
+// Lists music_tracks with a preview, who uses each, and — for community tracks — which workspace
+// shared it and what they asked for (admins only; the library itself never shows either).
+const ML_API = '/.netlify/functions/admin-music-library';
+const _ml = { source: 'all', status: 'all', q: '', items: [], editing: null, playing: null, audio: null, qTimer: null };
+const _mlEsc = (v) => window.escapeHtml ? window.escapeHtml(String(v ?? '')) : String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const _mlLen = (s) => { const n = Math.round(Number(s) || 0); return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`; };
+
+function _mlChips(hostId, key, options) {
+  const host = document.getElementById(hostId);
+  if (!host) return;
+  host.innerHTML = options.map(([val, label]) => {
+    const on = _ml[key] === val;
+    return `<button type="button" onclick="mlSetFilter('${key}','${val}')"
+      class="px-2.5 py-1 rounded-full text-xs font-bold border cursor-pointer"
+      style="${on ? 'background:#d6006b;border-color:#d6006b;color:#fff' : 'background:#fff;border-color:#e5e7eb;color:#6b7280'}">${label}</button>`;
+  }).join('');
+}
+
+function mlSetFilter(key, val) { _ml[key] = val; loadMusicLibrary(); }
+
+async function loadMusicLibrary() {
+  _mlChips('ml-source', 'source', [['all', 'All'], ['community', 'Community'], ['curated', 'Curated']]);
+  _mlChips('ml-status', 'status', [['all', 'Any status'], ['active', 'Offered'], ['withdrawn', 'Withdrawn']]);
+  const q = document.getElementById('ml-q');
+  if (q && !q._mlBound) {
+    q._mlBound = true;
+    q.addEventListener('input', () => {
+      clearTimeout(_ml.qTimer);
+      _ml.qTimer = setTimeout(() => { _ml.q = q.value.trim(); loadMusicLibrary(); }, 300);
+    });
+  }
+  const host = document.getElementById('ml-list');
+  try {
+    const params = new URLSearchParams({ source: _ml.source, status: _ml.status, q: _ml.q });
+    const data = await api(`${ML_API}?${params}`);
+    _ml.items = data.items || [];
+    const c = data.counts || {};
+    const card = (label, n, sub) => `<div class="bg-white border border-gray-200 rounded-xl p-3">
+      <p class="text-[11px] font-bold uppercase tracking-wider text-gray-400">${label}</p>
+      <p class="text-2xl font-extrabold text-gray-900">${n ?? 0}</p>${sub ? `<p class="text-[11px] text-gray-400">${sub}</p>` : ''}</div>`;
+    document.getElementById('ml-counts').innerHTML =
+      card('Tracks', c.total) + card('Offered', c.active) + card('Withdrawn', c.withdrawn)
+      + card('Community', c.community, 'shared by customers') + card('Curated', c.curated, 'licensed packs');
+    _mlRender(data.truncated);
+  } catch (e) {
+    if (host) host.innerHTML = `<p class="p-5 text-sm text-red-600">${_mlEsc(e.message)}</p>`;
+  }
+}
+
+function _mlRender(truncated) {
+  const host = document.getElementById('ml-list');
+  if (!host) return;
+  if (!_ml.items.length) {
+    host.innerHTML = '<p class="p-8 text-center text-sm text-gray-400">No tracks match.</p>';
+    return;
+  }
+  host.innerHTML = _ml.items.map((t) => {
+    const editing = _ml.editing === t.id;
+    const playing = _ml.playing === t.id;
+    const created = t.createdAt ? new Date(t.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    const who = t.creator
+      ? `<p class="text-xs text-gray-500 mt-1">Shared by <b>${_mlEsc(t.creator.workspace || ('workspace #' + (t.creator.organisationId ?? '?')))}</b>
+           ${t.creator.sharedAt ? ' on ' + _mlEsc(new Date(t.creator.sharedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })) : ''}
+           · job #${t.creator.jobId}</p>
+         ${t.creator.prompt ? `<p class="text-[11px] text-gray-400 mt-0.5 italic">“${_mlEsc(t.creator.prompt.slice(0, 220))}${t.creator.prompt.length > 220 ? '…' : ''}”</p>` : ''}`
+      : '';
+    const title = editing
+      ? `<input id="ml-edit-title-${t.id}" type="text" maxlength="120" value="${_mlEsc(t.title)}"
+           class="w-full text-sm font-bold border border-gray-300 rounded-lg px-2 py-1 mb-1 focus:outline-none focus:border-pink-400">
+         <input id="ml-edit-tags-${t.id}" type="text" value="${_mlEsc((t.tags || []).join(', '))}" placeholder="tags, comma separated"
+           class="w-full text-xs border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:border-pink-400">`
+      : `<p class="font-bold text-gray-900 truncate">${_mlEsc(t.title)}</p>
+         <p class="text-xs text-gray-500">${_mlEsc(t.artist)} · ${_mlLen(t.durationS)}${(t.tags || []).length ? ' · ' + _mlEsc(t.tags.join(', ')) : ''}</p>`;
+    return `
+    <div class="p-4 sm:p-5 ${t.isActive ? '' : 'bg-gray-50'}">
+      <div class="flex items-start gap-3">
+        ${t.previewUrl
+          ? `<button type="button" onclick="mlTogglePlay(${t.id})" title="${playing ? 'Stop' : 'Listen'}"
+               class="shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-white cursor-pointer" style="background:${playing ? '#111827' : '#d6006b'}">${playing ? '&#9632;' : '&#9654;'}</button>`
+          : '<span class="shrink-0 w-8 h-8 rounded-full bg-gray-200" title="Preview unavailable"></span>'}
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2 flex-wrap mb-0.5">
+            <span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${t.kind === 'community' ? 'bg-pink-100 text-pink-700' : 'bg-gray-200 text-gray-600'}">${t.kind === 'community' ? 'Community' : 'Curated'}</span>
+            <span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${t.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${t.isActive ? 'Offered' : 'Withdrawn'}</span>
+            <span class="text-[11px] text-gray-400">#${t.id} · added ${_mlEsc(created)} · used by ${t.workspaces} workspace${t.workspaces === 1 ? '' : 's'}</span>
+          </div>
+          ${title}
+          ${who}
+        </div>
+        <div class="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+          ${editing
+            ? `<button onclick="mlSaveEdit(${t.id})" class="btn-primary px-2.5 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Save</button>
+               <button onclick="mlEdit(null)" class="btn-secondary px-2.5 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Cancel</button>`
+            : `<button onclick="mlEdit(${t.id})" class="btn-secondary px-2.5 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Edit</button>
+               ${t.isActive
+                 ? `<button onclick="mlWithdraw(${t.id})" class="btn-destructive px-2.5 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Withdraw</button>`
+                 : `<button onclick="mlRestore(${t.id})" class="btn-primary px-2.5 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Restore</button>`}`}
+        </div>
+      </div>
+    </div>`;
+  }).join('') + (truncated ? '<p class="p-4 text-xs text-gray-400">Showing the first 500 — search or filter to narrow it down.</p>' : '');
+}
+
+/** One preview at a time; a second press stops it. */
+function mlTogglePlay(id) {
+  const t = _ml.items.find((x) => x.id === id);
+  if (_ml.audio) { try { _ml.audio.pause(); } catch {} }
+  if (_ml.playing === id || !t || !t.previewUrl) { _ml.playing = null; _ml.audio = null; _mlRender(); return; }
+  _ml.audio = new Audio(t.previewUrl);
+  _ml.audio.addEventListener('ended', () => { _ml.playing = null; _mlRender(); });
+  _ml.playing = id;
+  _ml.audio.play().catch(() => { _ml.playing = null; _mlRender(); window.showToast?.('That preview would not play.'); });
+  _mlRender();
+}
+
+function mlEdit(id) { _ml.editing = id; _mlRender(); if (id) document.getElementById(`ml-edit-title-${id}`)?.focus(); }
+
+async function mlSaveEdit(id) {
+  const title = document.getElementById(`ml-edit-title-${id}`)?.value || '';
+  const tags = document.getElementById(`ml-edit-tags-${id}`)?.value || '';
+  try {
+    await api(ML_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'edit', id, title, tags }) });
+    _ml.editing = null;
+    window.showToast?.('Track updated.');
+    loadMusicLibrary();
+  } catch (e) { window.showToast?.(e.message || 'Could not save.'); }
+}
+
+async function mlWithdraw(id) {
+  const t = _ml.items.find((x) => x.id === id);
+  const reason = await window.promptModal(
+    `“${_mlEsc(t ? t.title : '#' + id)}” will no longer be offered in Browse music.`
+      + (t && t.workspaces ? ` ${t.workspaces} workspace${t.workspaces === 1 ? ' has' : 's have'} already picked it — their posts keep it.` : ''),
+    { title: 'Withdraw this track?', confirmLabel: 'Withdraw', placeholder: 'Why? (kept in the audit log)', multiline: true });
+  if (reason == null) return;
+  if (!reason.trim()) { window.showToast?.('Say why it is being withdrawn — it goes in the audit log.'); return; }
+  try {
+    await api(ML_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'withdraw', id, reason }) });
+    window.showToast?.('Withdrawn. It is no longer offered.');
+    loadMusicLibrary();
+  } catch (e) { window.showToast?.(e.message || 'Could not withdraw.'); }
+}
+
+async function mlRestore(id) {
+  try {
+    await api(ML_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'restore', id }) });
+    window.showToast?.('Restored. It is offered again.');
+    loadMusicLibrary();
+  } catch (e) { window.showToast?.(e.message || 'Could not restore.'); }
 }
 
 // ── Issue Reports (Testing) ──────────────────────────────────────────────────

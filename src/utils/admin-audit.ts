@@ -50,6 +50,9 @@ export type AdminAction =
     // rejected it" is only an answer if we can say which editor, when, and on what note.
     | 'swan_index_curation'
     | 'swan_index_profile_change'
+    // Music library: withdrawing a track (often one a customer shared with the community) or
+    // correcting how it is listed. Same reasoning as the Index — "who took it down, and why".
+    | 'music_library_curation'
     // The weekly "What's new" email: approving it emails every customer, so who pressed the button
     // (and what the copy said at that moment) must be answerable afterwards.
     | 'product_update_edit'
