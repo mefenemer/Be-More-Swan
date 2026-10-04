@@ -174,7 +174,8 @@ async function main() {
     }
 
     for (const t of ready) {
-        const mins = Math.floor(t.durationS / 60), secs = Math.round(t.durationS % 60);
+        // Round the whole length first: rounding only the seconds turns 1:59.6 into "1:60".
+        const whole = Math.round(t.durationS), mins = Math.floor(whole / 60), secs = whole % 60;
         console.log(`  ✓ ${t.title} — ${t.artist}  (${mins}:${String(secs).padStart(2, '0')}, ${t.tags.join('/') || 'no tags'})`);
     }
     if (problems.length) {
