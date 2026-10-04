@@ -12,11 +12,15 @@
 import { HandlerEvent } from '@netlify/functions';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { contentAssets, mediaGenerationJobs } from '../../db/schema';
+import { contentAssets, mediaGenerationJobs, musicTracks } from '../../db/schema';
 import { settleHold } from '../../src/utils/ai-credits';
-import { persistBufferToR2, r2IsConfigured } from '../../src/lib/media-persist';
+import { persistBufferToR2, putR2Object, r2IsConfigured } from '../../src/lib/media-persist';
 import { fetchMusicResult, StabilityPolicyError, StabilityError } from '../../src/lib/stability-audio';
-import { musicLabel } from '../../src/lib/music-prompt';
+import { trackName, communityTrackTitle, communityTrackTags, COMMUNITY_TERMS_URL } from '../../src/lib/music-prompt';
+import { COMMUNITY_MUSIC_PREFIX } from '../../src/lib/music-library';
+import crypto from 'crypto';
+
+type MusicJobMeta = { name?: string; share?: boolean; mood?: string | null; pace?: string | null };
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const POLL_INTERVAL_MS = 3_000;
@@ -69,13 +73,15 @@ export default withLambda(async (event: HandlerEvent) => {
             }
         }
 
+        const meta: MusicJobMeta = (Array.isArray(job.candidates) ? (job.candidates as MusicJobMeta[])[0] : null) || {};
         const stored = await persistBufferToR2({
             orgId, bytes: result.bytes, contentType: result.contentType || 'audio/mpeg', folder: 'generated-music',
         });
 
         const [asset] = await db.insert(contentAssets).values({
             userId: ownerId, organisationId: orgId,
-            name: musicLabel(job.prompt),
+            // The user's name for it, from the job — or the readable default when they gave none.
+            name: trackName(meta.name, job.prompt),
             assetType: 'audio', mimeType: result.contentType || 'audio/mpeg',
             fileSize: stored.fileSize, storageKey: stored.storageKey,
             // What was asked for. Stability makes exactly the requested length; the editor still
@@ -84,12 +90,44 @@ export default withLambda(async (event: HandlerEvent) => {
             // Provenance is the answer to "prove you may use this": who made it, from which prompt,
             // with which model (on the job row), and the seed that reproduces it.
             provider: 'stability', providerAssetId: job.falRequestId,
-            attributionName: 'Generated with Stable Audio (Stability AI)',
+            attributionName: meta.share
+                ? 'Generated with Stable Audio · shared with the Be More Swan community'
+                : 'Generated with Stable Audio (Stability AI)',
             prompt: job.prompt, aspectRatio: null, generationJobId: job.id,
             status: 'pending',
         }).returning({ id: contentAssets.id });
 
         await settleHold(db, { orgId, amount: cost, success: true, mediaType: 'audio', userId: ownerId, jobId: job.id });
+
+        // ── Shared with the community: into the library every workspace can browse ───────────────
+        // After the customer has their track and has been charged the shared price, and isolated so a
+        // failure here never takes their track away from them. It is logged loudly instead: they paid
+        // less on the understanding the track would be shared, and that needs fixing by hand.
+        if (meta.share) {
+            try {
+                // A COPY in the shared library's own folder. The customer's object lives under
+                // content/org-N/, which their workspace's deletion and retention sweep — a library
+                // track pointing there would vanish for everyone the day they leave.
+                const key = `${COMMUNITY_MUSIC_PREFIX}/${crypto.randomUUID()}.mp3`;
+                await putR2Object({ key, bytes: result.bytes, contentType: result.contentType || 'audio/mpeg' });
+                await db.insert(musicTracks).values({
+                    // Never the customer's own name or description for it — see communityTrackTitle.
+                    title: communityTrackTitle(meta.mood, meta.pace, job.id),
+                    artist: 'Be More Swan community',
+                    storageKey: key,
+                    durationS: job.durationSeconds ?? 30,
+                    tags: communityTrackTags(meta.mood, meta.pace),
+                    licenceName: 'Be More Swan Community Music (AI-generated with Stable Audio)',
+                    licenceTermsUrl: COMMUNITY_TERMS_URL,
+                    attributionRequired: false,
+                    source: 'Be More Swan community — Stable Audio 3.0 (Stability AI)',
+                    // Provenance: the job holds the prompt, the model, and the consent record.
+                    sourceReference: `media_generation_jobs:${job.id}`,
+                });
+            } catch (shareErr) {
+                console.error(`[process-music-job-background] SHARE FAILED for job ${job.id} — the customer paid the shared price but the track is NOT in the community library:`, shareErr);
+            }
+        }
         await db.update(mediaGenerationJobs)
             .set({ status: 'completed', resultAssetIds: [asset.id], updatedAt: new Date() })
             .where(eq(mediaGenerationJobs.id, jobId));

@@ -1,5 +1,5 @@
 // netlify/functions/check-provider-balances.ts
-// Is fal or Anthropic out of money (or refusing our key)? Emails the founder address when so.
+// Is fal, Anthropic or Stability out of money (or refusing our key)? Emails the founder address when so.
 //
 // Scheduled every 6h (netlify.toml). The probes and the rules live in src/utils/provider-balance.ts,
 // which says why this exists: two provider accounts ran dry within two weeks of each other and no
@@ -18,6 +18,7 @@ import { CONFIG_KEYS, getPlatformConfig, setPlatformConfig } from '../../src/uti
 import { sendEmail } from '../../src/utils/email';
 import {
     readFalBalance, probeAnthropic, assessProviders, FAL_LOCK_PATTERN, DEFAULT_FAL_LOW_BALANCE_USD,
+    readStabilityBalance, DEFAULT_STABILITY_LOW_BALANCE_CREDITS,
     type FalLockEvidence, type ProviderProblem,
 } from '../../src/utils/provider-balance';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -61,16 +62,20 @@ async function readFalEvidence(): Promise<FalLockEvidence> {
 export async function runProviderBalanceCheck() {
     const now = new Date();
     const lowLine = Number(process.env.FAL_LOW_BALANCE_USD) || DEFAULT_FAL_LOW_BALANCE_USD;
-    const [fal, anthropic, falEvidence] = await Promise.all([
+    const stabilityLow = Number(process.env.STABILITY_LOW_BALANCE_CREDITS) || DEFAULT_STABILITY_LOW_BALANCE_CREDITS;
+    const [fal, anthropic, stability, falEvidence] = await Promise.all([
         readFalBalance(),
         probeAnthropic(),
+        readStabilityBalance(),
         readFalEvidence().catch((err): FalLockEvidence => {
             console.error('[check-provider-balances] fal evidence query failed:', err);
             return { failures: 0, organisations: 0, latestAt: null, sample: null, lastSuccessAt: null };
         }),
     ]);
-    const problems = assessProviders({ fal, falEvidence, anthropic, falLowBalanceUsd: lowLine });
-    const summary = { fal, anthropic, falEvidence, problems: problems.map(p => p.headline) };
+    const problems = assessProviders({
+        fal, falEvidence, anthropic, falLowBalanceUsd: lowLine, stability, stabilityLowBalanceCredits: stabilityLow,
+    });
+    const summary = { fal, anthropic, stability, falEvidence, problems: problems.map(p => p.headline) };
     // Always logged: with no alert, this line is the only record that the check ran and what it saw.
     console.log('[check-provider-balances]', JSON.stringify(summary));
 

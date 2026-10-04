@@ -115,3 +115,44 @@ export function musicLabel(prompt: string): string {
     const short = first.length > 40 ? first.slice(0, 40).replace(/\s+\S*$/, '') + '\u2026' : first;
     return `AI music \u2014 ${short || 'generated track'}`;
 }
+
+export const TRACK_NAME_MAX = 80;
+
+/**
+ * The name a generated track is saved under. The user's own if they gave one (trimmed, control
+ * characters out, capped), else the readable default. Never empty: an unnamed row on the timeline is
+ * indistinguishable from a broken one.
+ */
+export function trackName(raw: unknown, prompt: string): string {
+    const name = String(raw ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, TRACK_NAME_MAX).trim();
+    return name || musicLabel(prompt);
+}
+
+/** The terms clause a shared track is given under, recorded with the customer's consent. */
+export const COMMUNITY_TERMS_CLAUSE = '11.8';
+export const COMMUNITY_TERMS_URL = 'https://bemoreswan.com/terms_of_service.html#community-music';
+
+/**
+ * The public title of a community-shared track.
+ *
+ * ⚠️ Never the customer's own name for it, and never their description. Both are free text typed for
+ * their own post — "Launch of Smith & Co spring sale", "for Dr Patel's clinic opening" — and the
+ * library is shown to every other workspace. Mood and pace say what the track IS; the job id keeps
+ * two "Upbeat · fast" tracks apart.
+ */
+export function communityTrackTitle(mood: unknown, pace: unknown, jobId: number): string {
+    const cap = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);
+    const m = MUSIC_MOODS.includes(mood as MusicMood) ? cap(mood as string) : null;
+    const p = MUSIC_PACES.includes(pace as MusicPace) ? (pace as string) : null;
+    const base = m && p ? `${m} \u00B7 ${p}` : m || (p ? cap(p) : 'AI track');
+    return `${base} #${jobId}`;
+}
+
+/** Library tags for a shared track — mood and pace only, the same vocabulary the picker filters on. */
+export function communityTrackTags(mood: unknown, pace: unknown): string[] {
+    const out: string[] = [];
+    if (MUSIC_MOODS.includes(mood as MusicMood)) out.push(mood as string);
+    if (MUSIC_PACES.includes(pace as MusicPace)) out.push(pace as string);
+    out.push('ai-generated', 'community');
+    return out;
+}

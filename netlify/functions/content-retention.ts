@@ -27,6 +27,7 @@
 // asset, an already-purged row) has no bytes to delete and may be stamped immediately; anything
 // with a key must survive to the next run if the delete failed or storage was unconfigured.
 
+import { isSharedLibraryKey } from '../../src/lib/music-library';
 import type { Handler } from '@netlify/functions';
 import { lte, and, eq, isNull, isNotNull, inArray, lt, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
@@ -200,8 +201,11 @@ export const runContentRetention = async () => {
         console.log(`[Retention] ${due.length} asset(s) due for purge.`);
 
         // 1. Delete the physical objects from R2.
-        const keyed = due.filter((a): a is typeof a & { storageKey: string } => !!a.storageKey);
+        // ⚠️ A shared library object is NOT this asset's to delete: the row is retired (its key
+        // stripped below) but the file stays for every other workspace using the track.
+        const keyed = due.filter((a): a is typeof a & { storageKey: string } => !!a.storageKey && !isSharedLibraryKey(a.storageKey));
         const deletedKeys = await deleteFromR2(keyed.map(a => a.storageKey));
+        for (const a of due) if (isSharedLibraryKey(a.storageKey)) deletedKeys.add(a.storageKey!);
 
         // 2. Only assets whose bytes are genuinely gone may be stamped purged. Assets with no
         //    storageKey (Pexels hotlinks, link assets) have nothing to delete and qualify at once;

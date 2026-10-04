@@ -12,7 +12,7 @@ import { getDb } from '../../db/client';
 import { requireTenant } from '../../src/utils/tenant';
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { getOrgMediaCapabilities } from '../../src/utils/assistant-capabilities';
-import { getBalance, monthlyAllowance, tierCanGenerateVideo, IMAGE_CREDIT_COST, MUSIC_CREDIT_COST, VIDEO_CREDIT_COST } from '../../src/utils/ai-credits';
+import { getBalance, monthlyAllowance, tierCanGenerateVideo, IMAGE_CREDIT_COST, MUSIC_CREDIT_COST, MUSIC_SHARED_CREDIT_COST, VIDEO_CREDIT_COST } from '../../src/utils/ai-credits';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -32,7 +32,7 @@ export default withLambda(async (event) => {
         body: JSON.stringify({
             balance, held,
             monthlyCredits,
-            imageCost: IMAGE_CREDIT_COST, videoCost: VIDEO_CREDIT_COST, musicCost: MUSIC_CREDIT_COST,
+            imageCost: IMAGE_CREDIT_COST, videoCost: VIDEO_CREDIT_COST, musicCost: MUSIC_CREDIT_COST, musicSharedCost: MUSIC_SHARED_CREDIT_COST,
             canImage,
             assistantCanVideo,
             tierCanVideo: tierCanGenerateVideo(tierKey),

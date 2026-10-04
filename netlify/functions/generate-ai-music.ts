@@ -1,8 +1,8 @@
 // netlify/functions/generate-ai-music.ts
 // "✨ Generate music" in the post editor's Sound layer — Stable Audio 3.0, asynchronous.
 //
-//   POST { description?, mood?, pace?, durationS, postId? }
-//        → feature gate → our prompt rules → moderation → hold MUSIC_CREDIT_COST credits
+//   POST { description?, mood?, pace?, durationS, postId?, name?, share }
+//        → feature gate → our prompt rules → moderation → hold musicCreditCost(share) credits
 //        → submit to Stability → create a processing job → trigger the background worker → { jobId }
 //   GET  ?jobId=N → { status, assetId?, url?, label?, durationS?, errorMessage? }   (editor polls)
 //
@@ -26,8 +26,8 @@ import { orgHasAssistantFeature, featureUnavailableResponse } from '../../src/ut
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { presignR2Get } from '../../src/utils/social-publish';
-import { holdCredits, settleHold, MUSIC_CREDIT_COST } from '../../src/utils/ai-credits';
-import { buildMusicPrompt } from '../../src/lib/music-prompt';
+import { holdCredits, settleHold, musicCreditCost } from '../../src/utils/ai-credits';
+import { buildMusicPrompt, trackName, COMMUNITY_TERMS_CLAUSE } from '../../src/lib/music-prompt';
 import { submitMusic, stabilityConfigured, StabilityPolicyError, StabilityError, MUSIC_MODEL } from '../../src/lib/stability-audio';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -100,7 +100,7 @@ export default withLambda(async (event) => {
         return json(503, { error: 'not_configured', message: 'Music generation is not switched on yet.' });
     }
 
-    let body: { description?: string; mood?: string; pace?: string; durationS?: number; postId?: number };
+    let body: { description?: string; mood?: string; pace?: string; durationS?: number; postId?: number; name?: string; share?: unknown };
     try { body = JSON.parse(event.body || '{}'); }
     catch { return json(400, { error: 'Invalid JSON.' }); }
 
@@ -126,8 +126,15 @@ export default withLambda(async (event) => {
     });
     if (blocked) return blocked;
 
-    const hold = await holdCredits(db, { orgId, amount: MUSIC_CREDIT_COST });
-    if (!hold.ok) return json(402, { error: 'insufficient_credits', cost: MUSIC_CREDIT_COST, balance: hold.balance });
+    // ── Shared with the community, or private and owned outright ─────────────────────────────────
+    // ⚠️ Shared ONLY on an explicit `share: true`. The panel defaults to sharing and always sends the
+    // choice, but this is the customer giving up ownership of what they made (terms §11.8) — a missing
+    // or malformed field is not consent, so it is the private, full-price answer.
+    const shared = body.share === true;
+    const cost = musicCreditCost(shared);
+
+    const hold = await holdCredits(db, { orgId, amount: cost });
+    if (!hold.ok) return json(402, { error: 'insufficient_credits', cost, balance: hold.balance });
 
     // ⚠️ The job row BEFORE the Stability call. The other way round, a failed insert (the CHECK not yet
     // widened on this database, say) would leave a generation running at Stability — billed to us on
@@ -137,17 +144,28 @@ export default withLambda(async (event) => {
         const [job] = await db.insert(mediaGenerationJobs).values({
             organisationId: orgId, userId, mediaType: 'audio', prompt: built.prompt,
             aspectRatio: 'none', durationSeconds: built.durationS,
-            model: MUSIC_MODEL, creditCost: MUSIC_CREDIT_COST, status: 'processing',
+            model: MUSIC_MODEL, creditCost: cost, status: 'processing',
+            // What the worker needs beyond the prompt, in `candidates` (unused for audio) rather than
+            // new columns — see db/z-ai-music-generation.sql for why this table must not grow one
+            // ahead of its migration. The sharing choice is the CONSENT RECORD: who agreed, when, to
+            // which clause — the answer to "did this customer agree to give us this track?".
+            candidates: [{
+                name: trackName(body.name, built.prompt),
+                share: shared,
+                mood: body.mood ?? null,
+                pace: body.pace ?? null,
+                ...(shared ? { consent: { userId, at: new Date().toISOString(), termsClause: COMMUNITY_TERMS_CLAUSE } } : {}),
+            }],
         }).returning({ id: mediaGenerationJobs.id });
         jobId = job.id;
     } catch (err) {
-        await settleHold(db, { orgId, amount: MUSIC_CREDIT_COST, success: false, mediaType: 'audio', userId });
+        await settleHold(db, { orgId, amount: cost, success: false, mediaType: 'audio', userId });
         console.error('[generate-ai-music] could not record the job (is db/z-ai-music-generation.sql applied?):', err);
         return json(500, { error: 'Music generation is not available right now. Your credits were not used.' });
     }
 
     const failJob = async (message: string, status: 'failed' | 'flagged') => {
-        await settleHold(db, { orgId, amount: MUSIC_CREDIT_COST, success: false, mediaType: 'audio', userId });
+        await settleHold(db, { orgId, amount: cost, success: false, mediaType: 'audio', userId });
         await db.update(mediaGenerationJobs).set({ status, errorMessage: message, updatedAt: new Date() })
             .where(eq(mediaGenerationJobs.id, jobId));
     };
@@ -168,5 +186,5 @@ export default withLambda(async (event) => {
     }
 
     await triggerWorker(event.headers as any, jobId);
-    return json(202, { jobId, cost: MUSIC_CREDIT_COST, durationS: built.durationS });
+    return json(202, { jobId, cost, shared, durationS: built.durationS });
 });

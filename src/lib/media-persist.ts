@@ -79,6 +79,19 @@ export async function persistRemoteMediaToR2(params: {
  * without R2 there is nowhere to put bytes that have no URL of their own, and unlike a provider
  * URL there is no fallback to fall back to.
  */
+/**
+ * Store bytes at an EXACT key. For objects that belong to no organisation — the shared music library —
+ * where persistBufferToR2's `content/org-N/…` path would put a shared file inside one workspace's
+ * folder, to be deleted with that workspace.
+ */
+export async function putR2Object(params: { key: string; bytes: Buffer; contentType: string }): Promise<void> {
+    const s3 = new S3Client({
+        region: 'auto', endpoint: R2_ENDPOINT,
+        credentials: { accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY! },
+    });
+    await s3.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: params.key, Body: params.bytes, ContentType: params.contentType }));
+}
+
 export async function persistBufferToR2(params: {
     orgId: number;
     bytes: Buffer;

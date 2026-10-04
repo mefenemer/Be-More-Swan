@@ -80,6 +80,24 @@ export interface MusicTrack {
 export const MAX_TRACK_S = 180;
 
 /**
+ * Objects under this prefix belong to the SHARED library — the curated packs and community-shared
+ * AI tracks — not to any one workspace.
+ *
+ * ⚠️ Every workspace that uses a library track gets its own content_assets row pointing at the ONE
+ * shared object (see music-library.ts `select`). So any code that deletes "the asset's file" when a
+ * workspace deletes or retires its row would delete the track for EVERY workspace. The three paths
+ * that delete by storage key — content-assets (user delete), content-retention (30-day purge) and
+ * storage-lifecycle-cleanup — all ask this first and leave such objects alone.
+ */
+export const SHARED_LIBRARY_PREFIX = 'library/';
+export function isSharedLibraryKey(key: string | null | undefined): boolean {
+    return typeof key === 'string' && key.startsWith(SHARED_LIBRARY_PREFIX);
+}
+
+/** Where a community-shared generated track is copied to — BMS's object, outside any org's folder. */
+export const COMMUNITY_MUSIC_PREFIX = 'library/music/community';
+
+/**
  * The tracks that may be OFFERED right now.
  *
  * Two reasons to withhold one, and they behave identically to the customer and differently to us: a

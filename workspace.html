@@ -1552,6 +1552,33 @@ window.showComplianceModals = function showComplianceModals(force) {
                 <textarea id="insp-genmusic-desc" rows="2" maxlength="400"
                   placeholder="Optional — e.g. warm acoustic guitar and soft piano, gentle build"
                   class="w-full text-xs border border-gray-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:border-pink-400"></textarea>
+                <!-- What the track is called on the timeline. Suggested from the choices above and kept
+                     in step with them until the user types their own. Renamable later on its row. -->
+                <label class="block mt-2 text-[10px] font-bold uppercase tracking-wider text-gray-400" for="insp-genmusic-name">Name</label>
+                <input type="text" id="insp-genmusic-name" maxlength="80"
+                  class="mt-1 w-full text-xs border border-gray-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:border-pink-400">
+                <!-- ── Shared or private ─────────────────────────────────────────────────────────
+                     Asked EVERY time, right before the credits are spent, and defaults to sharing.
+                     Sharing gives the track to Be More Swan for the community library (terms §11.8)
+                     at a lower price; private is the customer's own, outright, at the full price.
+                     Plain radios rather than a toggle: "who owns this" deserves to be read. -->
+                <fieldset class="mt-2.5">
+                  <legend class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Who owns it</legend>
+                  <label class="flex items-start gap-2 rounded-lg border border-gray-200 bg-white px-2 py-1.5 cursor-pointer mb-1">
+                    <input type="radio" name="insp-genmusic-share" value="shared" class="mt-0.5" checked>
+                    <span class="min-w-0">
+                      <span class="block text-[11px] font-bold text-gray-700">Share with the Be More Swan community <span id="insp-genmusic-cost-shared" class="font-semibold text-gray-500"></span></span>
+                      <span class="block text-[10px] text-gray-500">You can use it on any of your posts. It also joins the music library for other Be More Swan users, without your name or description. Be More Swan owns it (<a href="/terms_of_service.html#community-music" target="_blank" rel="noopener" class="underline">terms 11.8</a>).</span>
+                    </span>
+                  </label>
+                  <label class="flex items-start gap-2 rounded-lg border border-gray-200 bg-white px-2 py-1.5 cursor-pointer">
+                    <input type="radio" name="insp-genmusic-share" value="private" class="mt-0.5">
+                    <span class="min-w-0">
+                      <span class="block text-[11px] font-bold text-gray-700">Keep it private <span id="insp-genmusic-cost-private" class="font-semibold text-gray-500"></span></span>
+                      <span class="block text-[10px] text-gray-500">You own the track outright and nobody else is offered it.</span>
+                    </span>
+                  </label>
+                </fieldset>
                 <p id="insp-genmusic-meta" class="mt-1.5 text-[10px] text-gray-500"></p>
                 <button type="button" id="insp-genmusic-go" data-genmusic-act="generate"
                   class="btn-assistant mt-2 w-full py-2 rounded-lg text-xs font-bold transition cursor-pointer disabled:opacity-50 disabled:cursor-default">Generate</button>
@@ -6683,6 +6710,8 @@ function _rqRenderCanvasOverlays(post, canvasOnly) {
         if (!media._rqTimed) {
             media._rqTimed = true;
             media.addEventListener('timeupdate', () => {
+                // FIRST: playback past the trim must stop before the sound is asked to follow it.
+                _pceStopAtTrim(media);
                 _rqApplyOverlayTimes(media, layer, _rqPostCache[_rqReviewPostId] || post);
                 _pceSyncAudioPreview(media);
                 _pcePreviewTick(media);
@@ -6691,9 +6720,15 @@ function _rqRenderCanvasOverlays(post, canvasOnly) {
             // Pressing play on the canvas means "show me the post", and on a cut the post is all of
             // the clips. Without this the native control played clip one and stopped, which is a
             // perfectly reasonable thing for a <video> to do and the wrong answer to the question.
+            //
+            // ⚠️ ONE clip too. It was `> 1`, so on a single-clip post the native ▶ played the raw file
+            // — straight through a trimmed-off ending — while the sound followed a clock that
+            // _pceCutTime clamps at the trim: past it the music was re-seeked to the same second on
+            // every timeupdate. Reported as "the clip keeps playing past where I shortened it and
+            // the track gets stuck in a loop". The preview honours in AND out points for any count.
             media.addEventListener('play', () => {
                 if (_pcePrev.starting || _pcePrev.on) return;
-                if (_pceClips(_rqPostCache[_rqReviewPostId] || post).length > 1) window._pcePreviewStart();
+                if (_pceClips(_rqPostCache[_rqReviewPostId] || post).length >= 1) window._pcePreviewStart();
             });
             // Sound has to follow the transport, not just the clock: without these a paused video
             // keeps talking, and a scrub leaves the voice note where it was.
@@ -6977,7 +7012,7 @@ function _rqTimelineParts(post) {
         return `
           <div data-tl-row="${_rqEsc(key)}"${hidden ? ' style="opacity:.45"' : ''}>
             <div class="flex items-center gap-1.5">
-              ${kind === 'text' ? nameInput(key, label) : `<span class="flex-1 min-w-0 truncate px-1 py-0.5 text-[10px] font-semibold text-indigo-700" title="${esc}">\u266B ${esc}</span>`}
+              ${kind === 'text' ? nameInput(key, label) : soundNameInput(key, label)}
               ${look}
               ${eye}
               ${del}
@@ -7006,6 +7041,16 @@ function _rqTimelineParts(post) {
      * and typing there — a modal round trip to fix a typo. The canvas repaints as you type, so the
      * picture and the list never disagree about what it says.
      */
+    /**
+     * A sound's name, editable where it is read — the same affordance as a text row's wording. The
+     * name a generated track arrives with is a suggestion; this is where it stops being one.
+     */
+    const soundNameInput = (key, label) => `<span class="shrink-0 text-[10px] text-indigo-700" aria-hidden="true">\u266B</span><input type="text"
+        value="${_rqEsc(label)}" maxlength="120"
+        class="flex-1 min-w-0 bg-transparent text-[10px] font-semibold text-indigo-700 border border-transparent
+               rounded px-1 py-0.5 hover:border-gray-200 focus:outline-none focus:border-indigo-400 focus:bg-white"
+        title="Rename this sound" aria-label="Sound name" data-tl-audio-name="${_rqEsc(key)}">`;
+
     const nameInput = (key, label) => `<input type="text" value="${_rqEsc(label)}" maxlength="500"
         class="flex-1 min-w-0 bg-transparent text-[10px] font-semibold text-gray-600 border border-transparent
                rounded px-1 py-0.5 hover:border-gray-200 focus:outline-none focus:border-pink-400 focus:bg-white"
@@ -7102,7 +7147,7 @@ function _rqTimelineParts(post) {
             : en > sp.end + 0.05
                 ? `from ${fmt(src(st))} of clip ${sp.i + 1} and on past its end · ${runs}`
                 : `${fmt(src(st))} → ${fmt(src(en))} of clip ${sp.i + 1} · ${runs}`;
-        return row('audio', a.id || `a${i}`, _pceAudioLabel(a).slice(0, 22), r,
+        return row('audio', a.id || `a${i}`, _pceAudioLabel(a), r,
             !!(a.id && a.id === _pceSelectedAudioId), sub, ax);
     };
     let audio = '';
@@ -7460,6 +7505,26 @@ async function _pceCanvasShowFrame(clip, t) {
     }
     video.pause();
     try { video.currentTime = Math.max(0, t); } catch { /* not seekable yet */ }
+}
+
+/**
+ * The belt to the preview's braces: playback that is NOT the preview must never run past the clip's
+ * out point. Something can still start the raw element — a scrub then a keyboard space, a browser
+ * that resumes media on its own — and past the trim there is no honest moment of the finished video
+ * to sync the sound to (_pceCutTime clamps there, so the music would be re-seeked to one second in a
+ * loop). Pause both instead.
+ */
+function _pceStopAtTrim(video) {
+    if (!video || video.paused || _pcePrev.on || _pcePrev.starting) return;
+    const clips = _pceClips();
+    if (!clips.length) return;
+    const i = clips.findIndex((c) => c && c.url && c.url === video.currentSrc);
+    const clip = clips[i >= 0 ? i : 0];
+    const out = clip && clip.outS;
+    if (out == null || video.currentTime < out - 0.03) return;
+    video.pause();
+    try { video.currentTime = out; } catch { /* not seekable */ }
+    _pceStopAudioPreview();
 }
 
 /** True while the canvas element is being driven through a multi-clip cut. */
@@ -8903,7 +8968,7 @@ function _pceFocusMemo() {
     const el = document.activeElement;
     const host = document.getElementById('pce-clips-block');
     if (!el || !host || !host.contains(el)) return null;
-    const attrs = ['data-tl-text', 'data-tl-num', 'data-pce-act'];
+    const attrs = ['data-tl-text', 'data-tl-audio-name', 'data-tl-num', 'data-pce-act'];
     const sel = attrs
         .filter((a) => el.hasAttribute(a))
         .map((a) => `[${a}="${CSS.escape(el.getAttribute(a))}"]`)
@@ -9032,8 +9097,6 @@ function _pceRenderClipsInner(host, clipsOverride) {
             + (folded ? '\u25B6' : '\u25BC') + '</button>'
             + '<span class="w-4 shrink-0 text-[10px] font-bold text-gray-400" style="font-variant-numeric:tabular-nums">' + (i + 1) + '</span>'
             + '<span class="flex-1 min-w-0 truncate text-[11px] text-gray-700" title="' + name + '">' + name + '</span>'
-            + (folded && layerWords(onClip[i])
-                ? '<span class="shrink-0 text-[10px] text-gray-400">' + layerWords(onClip[i]) + '</span>' : '')
             + '<span class="w-10 shrink-0 text-right text-[10px] text-gray-400" style="font-variant-numeric:tabular-nums">' + (len == null ? '—' : _pceFmtS(len)) + '</span>'
             // Play just this clip (▶), or stop it (■) while it plays.
             + (function () {
@@ -9069,6 +9132,12 @@ function _pceRenderClipsInner(host, clipsOverride) {
             + ' class="px-1 text-gray-300 hover:text-red-600 cursor-pointer leading-none"'
             + ' data-pce-act="clip-remove" data-pce-i="' + i + '">&times;</button>'
             + '</div>'
+            // What a folded clip is carrying, on its OWN line under the name. It sat inside the
+            // header row and, being shrink-0, took its width from the name — so collapsing a clip
+            // truncated what it was called. The name keeps the row; the count gets a line.
+            + (folded && layerWords(onClip[i])
+                ? '<p class="-mt-1 pb-1 text-[10px] text-gray-400" style="padding-left:2.25rem">' + layerWords(onClip[i]) + '</p>'
+                : '')
             + _pceTrimTrackHtml(c, i)
             + (folded ? '' : (''
             // What shows ON this clip, directly under the slider that decides how long it lasts.
@@ -9809,6 +9878,21 @@ function _rqBindTimeline() {
             _rqRenderCanvasOverlays(c.post);
             if ((el.getAttribute('data-tl-kind') || 'text') === 'audio') _pcePersistAudio(_rqReviewPostId);
             else _rqPersistOverlays(_rqReviewPostId);
+            return;
+        }
+        if (el && el.hasAttribute && el.hasAttribute('data-tl-audio-name')) {
+            const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+            const clip = post && _rqTimelineItem('audio', el.getAttribute('data-tl-audio-name'));
+            if (!clip) return;
+            const next = String(el.value).replace(/\s+/g, ' ').trim().slice(0, 120);
+            // Blank is not a name — put the old one back rather than save a row nobody can identify.
+            if (!next) { el.value = _pceAudioLabel(clip); return; }
+            if (next === clip.label) return;
+            clip.label = next;
+            _rqRenderTimeline(post);
+            _pceRenderAudioList();
+            _pceRefreshAudioTiming();   // the "When: <name>" box under the canvas names it too
+            _pcePersistAudio(_rqReviewPostId);
             return;
         }
         if (el && el.hasAttribute && el.hasAttribute('data-tl-text')) {
@@ -15210,7 +15294,35 @@ async function _pceAddLibraryTrack(trackId) {
 
 const _PCE_GEN_MOODS = ['upbeat', 'chill', 'ambient', 'inspiring', 'dramatic', 'corporate'];   // = MUSIC_MOODS
 const _PCE_GEN_PACES = ['slow', 'medium', 'fast'];                                                // = MUSIC_PACES
-let _pceGen = { open: false, mood: 'upbeat', pace: 'medium', busy: false, cost: null, balance: null };
+let _pceGen = { open: false, mood: 'upbeat', pace: 'medium', busy: false, cost: null, sharedCost: null, balance: null, nameTouched: false };
+
+/** The sharing choice as it stands on screen. Read at the moment of generating, never cached. */
+function _pceGenShared() {
+    const el = document.querySelector('input[name="insp-genmusic-share"]:checked');
+    return !el || el.value === 'shared';
+}
+/** Back to the default — sharing — so every generation starts from the same, stated choice. */
+function _pceGenResetShare() {
+    const el = document.querySelector('input[name="insp-genmusic-share"][value="shared"]');
+    if (el) el.checked = true;
+}
+const _pceGenCost = (shared) => shared ? (_pceGen.sharedCost || 3) : (_pceGen.cost || 5);
+
+/**
+ * The name a track gets unless the user gives one: the mood, then the gist of their description,
+ * else the pace. "Inspiring · warm piano and soft strings", "Upbeat · fast". Short enough to read on
+ * a timeline row, specific enough to tell two generated beds apart.
+ */
+function _pceGenDefaultName() {
+    const cap = (w) => w ? w.charAt(0).toUpperCase() + w.slice(1) : '';
+    const desc = (document.getElementById('insp-genmusic-desc')?.value || '').trim().replace(/\s+/g, ' ');
+    // The first phrase, at most five words, never ending on "and"/"with"/"the" — "soft rain piano,
+    // gentle and warm" names itself "soft rain piano", not "soft rain piano, gentle and".
+    const words = desc.split(/[,.;:!?]/)[0].trim().split(' ').filter(Boolean).slice(0, 5);
+    while (words.length && /^(and|or|with|of|the|a|an|in|on|for|to|but)$/i.test(words[words.length - 1])) words.pop();
+    const gist = words.join(' ');
+    return `${cap(_pceGen.mood)} \u00B7 ${gist || _pceGen.pace}`.slice(0, 80);
+}
 
 (function _pceBindGenMusicOnce() {
     // Bound to DOCUMENT at load, like the library's picker — see _pceBindMusicOnce for why.
@@ -15225,7 +15337,23 @@ let _pceGen = { open: false, mood: 'upbeat', pace: 'medium', busy: false, cost: 
         else if (act === 'pace') { _pceGen.pace = el.getAttribute('data-genmusic-val'); _pceRenderGenMusic(); }
         else if (act === 'generate') _pceGenerateMusic();
     }, true);
+    document.addEventListener('input', (ev) => {
+        const id = ev.target && ev.target.id;
+        // Typing a name of your own stops the suggestion following the chips; clearing it hands the
+        // field back to the suggestion.
+        if (id === 'insp-genmusic-name') _pceGen.nameTouched = !!ev.target.value.trim();
+        else if (id === 'insp-genmusic-desc') _pceSyncGenName();
+    }, true);
+    // The price on the button follows the choice.
+    document.addEventListener('change', (ev) => {
+        if (ev.target && ev.target.name === 'insp-genmusic-share') _pceRenderGenMusic();
+    }, true);
 })();
+
+function _pceSyncGenName() {
+    const el = document.getElementById('insp-genmusic-name');
+    if (el && !_pceGen.nameTouched) el.value = _pceGenDefaultName();
+}
 
 /** How long to make it: from where it will start to the end of the video. 15s on a still. */
 function _pceGenMusicLength(post) {
@@ -15243,13 +15371,14 @@ function _pceGenMusicLength(post) {
 
 async function _pceOpenGenMusic() {
     _pceGen.open = true;
+    _pceGenResetShare();
     _pceCloseMusicLibraryOnly();
     document.getElementById('insp-genmusic')?.classList.remove('hidden');
     _pceRenderGenMusic();
     // The balance is a courtesy line, not a gate — the server decides. A failed read just leaves it out.
     try {
         const r = await fetch('/.netlify/functions/get-ai-credit-balance');
-        if (r.ok) { const d = await r.json(); _pceGen.balance = d.balance; _pceGen.cost = d.musicCost; }
+        if (r.ok) { const d = await r.json(); _pceGen.balance = d.balance; _pceGen.cost = d.musicCost; _pceGen.sharedCost = d.musicSharedCost; }
     } catch { /* leave the line without a balance */ }
     _pceRenderGenMusic();
 }
@@ -15290,13 +15419,22 @@ function _pceRenderGenMusic() {
     if (meta && post) {
         const len = _pceGenMusicLength(post);
         const t = _pceAudioTarget && _pceAudioTarget.postId === _rqReviewPostId ? _pceAudioTarget : null;
-        const cost = _pceGen.cost || 5;
+        const cost = _pceGenCost(_pceGenShared());
         meta.textContent = `${_pceFmtS(len)} long${t ? `, starting on clip ${t.i + 1}` : ''} \u2014 to the end of the `
             + `${_pcePostIsVideo(post) ? 'video' : 'post'}. Uses ${cost} AI credits`
             + (_pceGen.balance != null ? ` (you have ${_pceGen.balance}).` : '.');
     }
+    const sc = document.getElementById('insp-genmusic-cost-shared');
+    if (sc) sc.textContent = `\u00B7 ${_pceGenCost(true)} credits`;
+    const pc = document.getElementById('insp-genmusic-cost-private');
+    if (pc) pc.textContent = `\u00B7 ${_pceGenCost(false)} credits`;
+    _pceSyncGenName();
     const go = document.getElementById('insp-genmusic-go');
-    if (go) { go.disabled = _pceGen.busy; go.textContent = _pceGen.busy ? 'Composing\u2026' : 'Generate'; }
+    if (go) {
+        go.disabled = _pceGen.busy;
+        go.textContent = _pceGen.busy ? 'Composing\u2026'
+            : `Generate \u00B7 ${_pceGenCost(_pceGenShared())} credits${_pceGenShared() ? ' (shared)' : ' (private)'}`;
+    }
 }
 
 async function _pceGenerateMusic() {
@@ -15311,6 +15449,10 @@ async function _pceGenerateMusic() {
     const target = _pceAudioTarget && _pceAudioTarget.postId === postId ? { ..._pceAudioTarget } : null;
     const durationS = _pceGenMusicLength(post);
     const description = (document.getElementById('insp-genmusic-desc')?.value || '').trim();
+    const name = (document.getElementById('insp-genmusic-name')?.value || '').trim() || _pceGenDefaultName();
+    // Read off the screen at the moment of spending, and sent explicitly either way: the server treats
+    // anything but `share: true` as private, so a lost field can never give a track away.
+    const share = _pceGenShared();
 
     _pceGen.busy = true;
     _pceRenderGenMusic();
@@ -15318,11 +15460,14 @@ async function _pceGenerateMusic() {
     try {
         const res = await fetch('/.netlify/functions/generate-ai-music', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ description, mood: _pceGen.mood, pace: _pceGen.pace, durationS, postId }),
+            body: JSON.stringify({ description, mood: _pceGen.mood, pace: _pceGen.pace, durationS, postId, name, share }),
         });
         const d = await res.json().catch(() => ({}));
         if (!res.ok) {
-            if (res.status === 402) throw new Error(`Not enough AI credits \u2014 this needs ${d.cost || 5} and you have ${d.balance ?? 0}.`);
+            if (res.status === 402) {
+                throw new Error(`Not enough AI credits \u2014 this needs ${d.cost || _pceGenCost(share)} and you have ${d.balance ?? 0}.`
+                    + (share ? '' : ` Sharing it with the community costs ${_pceGenCost(true)}.`));
+            }
             throw new Error(d.message || d.error || 'Music generation could not be started.');
         }
         const jobId = d.jobId;
@@ -15333,7 +15478,7 @@ async function _pceGenerateMusic() {
             _pceSetGenMsg(`Composing your track\u2026 ${Math.round((Date.now() - started) / 1000)}s`);
             const pr = await fetch(`/.netlify/functions/generate-ai-music?jobId=${encodeURIComponent(jobId)}`);
             const pj = await pr.json().catch(() => ({}));
-            if (pj.status === 'completed' && pj.assetId) { await _pceAttachGeneratedTrack(postId, pj, target); break; }
+            if (pj.status === 'completed' && pj.assetId) { await _pceAttachGeneratedTrack(postId, pj, target, share); break; }
             if (pj.status === 'failed' || pj.status === 'flagged') throw new Error(pj.errorMessage || 'Music generation failed. Your credits were not used.');
             if (Date.now() - started > 510000) throw new Error('This is taking longer than it should. If a track arrives, it will be on the post; your credits are only used if it does.');
         }
@@ -15353,14 +15498,15 @@ async function _pceGenerateMusic() {
  * composed. The cache still holds the original, and _pcePersistAudio saves by id, so the track lands
  * where it was asked for either way — only the repaint is skipped when that post is not on screen.
  */
-async function _pceAttachGeneratedTrack(postId, job, target) {
+async function _pceAttachGeneratedTrack(postId, job, target, share) {
     const post = _rqPostCache[postId];
     if (!post) return;
     if (!Array.isArray(post.audio)) post.audio = [];
     const clip = {
         id: `a${job.assetId}_${Date.now().toString(36)}`,
         assetId: job.assetId,
-        label: String(job.label || 'AI music').replace(/^AI music \u2014 /, '\u2728 ').slice(0, 120),
+        // Exactly what the user named it (or the suggestion they accepted). Renamable on its row.
+        label: String(job.label || 'AI music').slice(0, 120),
         volume: 1,
         url: job.url || null,
         name: job.label,
@@ -15382,7 +15528,11 @@ async function _pceAttachGeneratedTrack(postId, job, target) {
         _pceRefreshAudioInspector();
         _rqRenderTimeline(post);
         _pceRenderLayers();
-        _pceSetGenMsg('Added to the post. Not quite right? Generate another \u2014 or remove it from the timeline.', 'ok');
+        _pceSetGenMsg(share
+            ? 'Added to the post, and shared with the Be More Swan community. Not quite right? Generate another \u2014 or remove it from the timeline.'
+            : 'Added to the post. It\u2019s private and yours. Not quite right? Generate another \u2014 or remove it from the timeline.', 'ok');
+        _pceGen.nameTouched = false;   // the next track gets its own suggestion, not this one's name
+        _pceGenResetShare();            // and starts from the default choice again, stated, not remembered
     }
     window.showToast?.('Your generated track has been added to the post.', { icon: '\u266B' });
 }

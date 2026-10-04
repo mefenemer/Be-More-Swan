@@ -2278,6 +2278,11 @@ check('each clip folds its text and sound, and the heading folds them all', () =
     assert.ok(render.includes("+ (folded ? '' : (''"), 'folding does not hide the rows');
     // A folded clip still says what it carries.
     assert.ok(render.includes('layerWords(onClip[i])'), 'a folded clip hides that it has text or sound');
+    // ...on its own line: inside the header row it squeezed the clip's NAME into an ellipsis.
+    const header = render.slice(render.indexOf('const folded = _pceClipFolded(c.id);'), render.indexOf('+ _pceTrimTrackHtml(c, i)'));
+    const countAt = header.indexOf('layerWords(onClip[i])');
+    const rowEnd = header.indexOf("data-pce-act=\"clip-remove\"");
+    assert.ok(countAt > rowEnd, 'the count is back inside the header row, truncating the clip name');
     // Adding to a folded clip opens it, or the new row's field is not there to focus.
     assert.ok(slice('window._pceAddTextToClip = function (index, text) {', '\n};').includes('_pceUnfoldClip('),
         'text added to a folded clip is invisible');
@@ -2301,6 +2306,19 @@ check('+ Add another clip opens the media picker, set to add', () => {
         'search and generation still ask add-or-replace');
     assert.ok(slice('function _pceCloseMediaPicker() {', '\n}').includes('_pcePickerAddOnly = false'),
         'the add-only visit outlives the modal');
+});
+
+check('the video\'s own play button honours the trim on a ONE-clip post too', () => {
+    // It handed only cuts (> 1 clip) to the preview, so a single trimmed clip played its raw file
+    // past the out point while the sound was re-seeked to the trim on every tick — "stuck in a loop".
+    assert.ok(workspace.includes('.length >= 1) window._pcePreviewStart();'), 'native play still bypasses the preview for one clip');
+    assert.ok(!workspace.includes('.length > 1) window._pcePreviewStart();'));
+    const tick = slice("media.addEventListener('timeupdate', () => {", '_pceTickPlayhead(media);');
+    assert.ok(tick.indexOf('_pceStopAtTrim(media)') !== -1 && tick.indexOf('_pceStopAtTrim(media)') < tick.indexOf('_pceSyncAudioPreview(media)'),
+        'the sound is synced before over-run playback is stopped');
+    const guard = slice('function _pceStopAtTrim(video) {', '\n}');
+    assert.ok(guard.includes('video.pause()') && guard.includes('_pceStopAudioPreview()'), 'over-run is not stopped, or the sound keeps going');
+    assert.ok(guard.includes('_pcePrev.on'), 'the guard would fight the preview, which seats clips itself');
 });
 
 console.log(`\n${passed} checks passed`);

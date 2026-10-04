@@ -15,6 +15,11 @@
 //           real balance, so a LOW balance can be warned about before it locks. ⚠️ It needs an ADMIN
 //           key. FAL_ADMIN_KEY if set, else FAL_KEY — an ordinary key answers 401/403 ('no_access'),
 //           and then the only signal left is evidence: fal's lock message in our own failed jobs.
+// Stability — GET api.stability.ai/v1/user/balance → { credits }. Free, read-only, any API key.
+//           Music generation (Stable Audio 3.0) costs 26 credits a track, so below that NO track can
+//           be made: customers get their AI credits back but no music. 401/403 here is the same key
+//           generate-ai-music uses, so a rejected key means music is down too — unlike fal, there is
+//           no separate admin key that could explain it away.
 // Anthropic — there is no balance endpoint. A 1-token Haiku call (~$0.00001) either succeeds or
 //           fails with the credit-balance 400 the outage produced. isUpstreamBlocked owns that test.
 //
@@ -28,6 +33,18 @@ const PROBE_TIMEOUT_MS = 8_000;
 const PROBE_MODEL = 'claude-haiku-4-5-20251001';
 /** Warn below this many USD. FLUX 1.1 Pro is ~$0.04 an image, so $10 is ~250 images of runway. */
 export const DEFAULT_FAL_LOW_BALANCE_USD = 10;
+
+export const STABILITY_BALANCE_URL = 'https://api.stability.ai/v1/user/balance';
+/** One Stable Audio 3.0 track. Below this, music generation cannot run at all. */
+export const STABILITY_TRACK_CREDITS = 26;
+/** Warn below this many Stability credits: ~20 tracks of runway (~$5). STABILITY_LOW_BALANCE_CREDITS overrides. */
+export const DEFAULT_STABILITY_LOW_BALANCE_CREDITS = 520;
+
+export type StabilityBalance =
+    | { status: 'ok'; credits: number }
+    | { status: 'key_rejected'; httpStatus: number }
+    | { status: 'not_configured' }
+    | { status: 'error'; detail: string };
 
 export type FalBalance =
     | { status: 'ok'; balance: number; currency: string }
@@ -70,6 +87,25 @@ export async function readFalBalance(fetchImpl: typeof fetch = fetch): Promise<F
     }
 }
 
+export async function readStabilityBalance(fetchImpl: typeof fetch = fetch): Promise<StabilityBalance> {
+    const key = process.env.STABILITY_API_KEY;
+    if (!key) return { status: 'not_configured' };
+    try {
+        const res = await fetchImpl(STABILITY_BALANCE_URL, {
+            headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' },
+            signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+        });
+        if (res.status === 401 || res.status === 403) return { status: 'key_rejected', httpStatus: res.status };
+        if (!res.ok) return { status: 'error', detail: `HTTP ${res.status}` };
+        const data: any = await res.json().catch(() => null);
+        const credits = Number(data?.credits);
+        if (!Number.isFinite(credits)) return { status: 'error', detail: 'no credits in the response' };
+        return { status: 'ok', credits };
+    } catch (err) {
+        return { status: 'error', detail: err instanceof Error ? err.message : String(err) };
+    }
+}
+
 /** Sort an Anthropic failure into "we must top up / fix the key" vs "try again later". */
 export function classifyAnthropicError(err: unknown): Exclude<AnthropicProbe, { status: 'ok' } | { status: 'not_configured' }> {
     const detail = String((err as { message?: string } | null)?.message || err).slice(0, 300);
@@ -96,7 +132,7 @@ export async function probeAnthropic(
 }
 
 export interface ProviderProblem {
-    provider: 'fal' | 'anthropic';
+    provider: 'fal' | 'anthropic' | 'stability';
     /** 'down' = customers are affected now; 'low' = they will be soon. */
     severity: 'down' | 'low';
     headline: string;
@@ -113,6 +149,9 @@ export function assessProviders(input: {
     falEvidence: FalLockEvidence;
     anthropic: AnthropicProbe;
     falLowBalanceUsd?: number;
+    /** Optional so existing callers and tests that predate music are unchanged. */
+    stability?: StabilityBalance;
+    stabilityLowBalanceCredits?: number;
 }): ProviderProblem[] {
     const problems: ProviderProblem[] = [];
     const low = input.falLowBalanceUsd ?? DEFAULT_FAL_LOW_BALANCE_USD;
@@ -137,6 +176,24 @@ export function assessProviders(input: {
     } else if (input.fal.status === 'ok' && input.fal.balance < low) {
         problems.push({ provider: 'fal', severity: 'low', headline: `fal balance is low — ${input.fal.balance.toFixed(2)} ${input.fal.currency} left`,
             lines: [`Below the ${low} ${input.fal.currency} warning line. fal locks the account at zero and every AI image then fails.`, topUp] });
+    }
+
+    // ── Stability (music) ───────────────────────────────────────────────────────────────────────
+    // A transient read error is NOT a problem, for the same reason as fal's: an alert that cries
+    // wolf is the one nobody reads when the account really is empty.
+    const st = input.stability;
+    const stLow = input.stabilityLowBalanceCredits ?? DEFAULT_STABILITY_LOW_BALANCE_CREDITS;
+    const stTopUp = 'Top up at https://platform.stability.ai/account/credits — customers get their AI credits back on every failed track, but no music.';
+    if (st?.status === 'ok' && st.credits < STABILITY_TRACK_CREDITS) {
+        problems.push({ provider: 'stability', severity: 'down', headline: 'Stability credits are EMPTY — Generate music is failing',
+            lines: [`Balance: ${st.credits.toFixed(1)} credits; one track needs ${STABILITY_TRACK_CREDITS}.`, stTopUp] });
+    } else if (st?.status === 'key_rejected') {
+        problems.push({ provider: 'stability', severity: 'down', headline: 'Stability rejected our API key — Generate music is failing',
+            lines: [`Balance endpoint answered HTTP ${st.httpStatus}.`, 'Check STABILITY_API_KEY in the Netlify environment (every context).'] });
+    } else if (st?.status === 'ok' && st.credits < stLow) {
+        const tracks = Math.floor(st.credits / STABILITY_TRACK_CREDITS);
+        problems.push({ provider: 'stability', severity: 'low', headline: `Stability credits are low — ${Math.round(st.credits)} left (~${tracks} tracks)`,
+            lines: [`Below the ${stLow}-credit warning line. Each generated track costs ${STABILITY_TRACK_CREDITS} credits (~$0.26).`, stTopUp] });
     }
 
     if (input.anthropic.status === 'exhausted') {
