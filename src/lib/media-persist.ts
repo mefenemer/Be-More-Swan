@@ -31,6 +31,11 @@ export function extFromMime(mime: string): string {
     if (mime.includes('png')) return 'png';
     if (mime.includes('webp')) return 'webp';
     if (mime.includes('jpeg') || mime.includes('jpg')) return 'jpg';
+    // Audio first: 'audio/mp4' is an m4a, and must not fall through to the video 'mp4' below.
+    if (mime.includes('audio/mpeg') || mime.includes('audio/mp3')) return 'mp3';
+    if (mime.includes('audio/wav') || mime.includes('audio/x-wav')) return 'wav';
+    if (mime.includes('audio/mp4')) return 'm4a';
+    if (mime.includes('audio/ogg')) return 'ogg';
     if (mime.includes('mp4')) return 'mp4';
     if (mime.includes('quicktime')) return 'mov';
     if (mime.includes('webm')) return 'webm';

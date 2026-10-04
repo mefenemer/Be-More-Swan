@@ -1528,6 +1528,36 @@ window.showComplianceModals = function showComplianceModals(force) {
                      already cleared for a commercial post. -->
                 <button type="button" data-music-act="open"
                   class="btn-secondary px-3 py-2 rounded-lg border text-xs font-bold transition cursor-pointer">&#9835; Browse music</button>
+                <!-- The fourth way: a track made for THIS post by Stable Audio, sized to the video,
+                     paid from the plan's AI credits. See netlify/functions/generate-ai-music.ts. -->
+                <button type="button" data-genmusic-act="open"
+                  class="btn-assistant px-3 py-2 rounded-lg text-xs font-bold transition cursor-pointer">&#10024; Generate music</button>
+              </div>
+
+              <!-- ── Generate music ────────────────────────────────────────────────────────────
+                   Inline, like the library above it, for the same reason: this is already a modal.
+                   Mood and pace are chips because they are what makes a prompt work; the words are
+                   optional. The length is NOT asked — it is the video's, which is the whole point of
+                   generating rather than picking. -->
+              <div id="insp-genmusic" class="hidden mt-3 rounded-xl border border-gray-200 bg-gray-50 p-2.5">
+                <div class="flex items-center justify-between mb-2">
+                  <p class="text-[11px] font-bold text-gray-600">Generate music for this post</p>
+                  <button type="button" data-genmusic-act="close"
+                    class="px-1.5 py-0.5 text-[10px] font-bold text-gray-400 hover:text-gray-700 cursor-pointer leading-none">Done</button>
+                </div>
+                <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Mood</p>
+                <div id="insp-genmusic-moods" class="flex flex-wrap gap-1 mb-2"></div>
+                <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Pace</p>
+                <div id="insp-genmusic-paces" class="flex flex-wrap gap-1 mb-2"></div>
+                <textarea id="insp-genmusic-desc" rows="2" maxlength="400"
+                  placeholder="Optional — e.g. warm acoustic guitar and soft piano, gentle build"
+                  class="w-full text-xs border border-gray-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:border-pink-400"></textarea>
+                <p id="insp-genmusic-meta" class="mt-1.5 text-[10px] text-gray-500"></p>
+                <button type="button" id="insp-genmusic-go" data-genmusic-act="generate"
+                  class="btn-assistant mt-2 w-full py-2 rounded-lg text-xs font-bold transition cursor-pointer disabled:opacity-50 disabled:cursor-default">Generate</button>
+                <p id="insp-genmusic-msg" class="hidden mt-2 text-[11px] font-semibold text-gray-500"></p>
+                <p class="mt-2 text-[10px] text-gray-400">Instrumental only. Describe instruments, mood and tempo — not an artist or song.
+                  Made with Stable Audio by Stability AI.</p>
               </div>
 
               <!-- ── The music library ────────────────────────────────────────────────────────
@@ -14976,6 +15006,7 @@ const _pceMusicPreviewEls = {};
 async function _pceOpenMusicLibrary() {
     const host = document.getElementById('insp-music');
     if (!host) return;
+    _pceCloseGenMusic();   // one picker at a time — the two panels stack otherwise
     _pceMusic.open = true;
     host.classList.remove('hidden');
     if (_pceMusic.tracks.length || _pceMusic.loading) { _pceRenderMusicList(); return; }
@@ -15166,6 +15197,194 @@ async function _pceAddLibraryTrack(trackId) {
     } catch (err) {
         _pceSetMusicMsg(err.message || 'Could not add that track.');
     }
+}
+
+// ── Generate music (Stable Audio, direct at Stability AI) ─────────────────────────────────────────
+//
+// The fourth way to get sound onto a post, beside recording, uploading and the library — and the
+// only one sized to the video. It ENDS where the library ends: an asset id becomes a clip in
+// `post.audio` through the same placement, the same "music ends with the video" rule, the same save.
+//
+// The server holds the credits, starts the job and returns at once; a background worker fetches the
+// track. This polls that job. Credits are taken only when a track arrives — every failure refunds.
+
+const _PCE_GEN_MOODS = ['upbeat', 'chill', 'ambient', 'inspiring', 'dramatic', 'corporate'];   // = MUSIC_MOODS
+const _PCE_GEN_PACES = ['slow', 'medium', 'fast'];                                                // = MUSIC_PACES
+let _pceGen = { open: false, mood: 'upbeat', pace: 'medium', busy: false, cost: null, balance: null };
+
+(function _pceBindGenMusicOnce() {
+    // Bound to DOCUMENT at load, like the library's picker — see _pceBindMusicOnce for why.
+    document.addEventListener('click', (ev) => {
+        const el = ev.target && ev.target.closest && ev.target.closest('[data-genmusic-act]');
+        if (!el) return;
+        ev.preventDefault();
+        const act = el.getAttribute('data-genmusic-act');
+        if (act === 'open') _pceOpenGenMusic();
+        else if (act === 'close') _pceCloseGenMusic();
+        else if (act === 'mood') { _pceGen.mood = el.getAttribute('data-genmusic-val'); _pceRenderGenMusic(); }
+        else if (act === 'pace') { _pceGen.pace = el.getAttribute('data-genmusic-val'); _pceRenderGenMusic(); }
+        else if (act === 'generate') _pceGenerateMusic();
+    }, true);
+})();
+
+/** How long to make it: from where it will start to the end of the video. 15s on a still. */
+function _pceGenMusicLength(post) {
+    const t = _pceAudioTarget && _pceAudioTarget.postId === _rqReviewPostId ? _pceAudioTarget : null;
+    const spans = _pceSpansFor(_pceClips(post));
+    const start = t && spans && spans[t.i] ? spans[t.i].start : 0;
+    let end = null;
+    if (_pcePostIsVideo(post)) {
+        const cutLen = typeof _pceClipsTotalS === 'function' ? _pceClipsTotalS(post) : null;
+        end = cutLen > 0 ? cutLen : (_rqVideoDurationKnown() ? _rqVideoDuration() : null);
+    }
+    const len = end != null ? end - start : 15;
+    return Math.round(Math.min(190, Math.max(6, len)));
+}
+
+async function _pceOpenGenMusic() {
+    _pceGen.open = true;
+    _pceCloseMusicLibraryOnly();
+    document.getElementById('insp-genmusic')?.classList.remove('hidden');
+    _pceRenderGenMusic();
+    // The balance is a courtesy line, not a gate — the server decides. A failed read just leaves it out.
+    try {
+        const r = await fetch('/.netlify/functions/get-ai-credit-balance');
+        if (r.ok) { const d = await r.json(); _pceGen.balance = d.balance; _pceGen.cost = d.musicCost; }
+    } catch { /* leave the line without a balance */ }
+    _pceRenderGenMusic();
+}
+
+/** Close the library without dropping a pending "+ Add sound" clip target — this panel uses it. */
+function _pceCloseMusicLibraryOnly() {
+    _pceMusic.open = false;
+    _pceStopMusicPreview();
+    document.getElementById('insp-music')?.classList.add('hidden');
+}
+
+function _pceCloseGenMusic() {
+    _pceGen.open = false;
+    document.getElementById('insp-genmusic')?.classList.add('hidden');
+}
+
+function _pceSetGenMsg(text, kind) {
+    const el = document.getElementById('insp-genmusic-msg');
+    if (!el) return;
+    el.textContent = text || '';
+    el.classList.toggle('hidden', !text);
+    el.className = (text ? '' : 'hidden ') + 'mt-2 text-[11px] font-semibold '
+        // Not emerald: that ramp is remapped to the brand pink here, and a pink "Added" reads as an error.
+        + (kind === 'error' ? 'text-red-600' : kind === 'ok' ? 'text-gray-700' : 'text-gray-500');
+}
+
+function _pceRenderGenMusic() {
+    const chip = (act, val, on) => `<button type="button" data-genmusic-act="${act}" data-genmusic-val="${val}"
+        class="px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer border"
+        style="${on ? 'background:#ec4899;border-color:#ec4899;color:#fff' : 'background:#fff;border-color:#e5e7eb;color:#6b7280'}"
+        >${val}</button>`;
+    const moods = document.getElementById('insp-genmusic-moods');
+    if (moods) moods.innerHTML = _PCE_GEN_MOODS.map((m) => chip('mood', m, _pceGen.mood === m)).join('');
+    const paces = document.getElementById('insp-genmusic-paces');
+    if (paces) paces.innerHTML = _PCE_GEN_PACES.map((p) => chip('pace', p, _pceGen.pace === p)).join('');
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const meta = document.getElementById('insp-genmusic-meta');
+    if (meta && post) {
+        const len = _pceGenMusicLength(post);
+        const t = _pceAudioTarget && _pceAudioTarget.postId === _rqReviewPostId ? _pceAudioTarget : null;
+        const cost = _pceGen.cost || 5;
+        meta.textContent = `${_pceFmtS(len)} long${t ? `, starting on clip ${t.i + 1}` : ''} \u2014 to the end of the `
+            + `${_pcePostIsVideo(post) ? 'video' : 'post'}. Uses ${cost} AI credits`
+            + (_pceGen.balance != null ? ` (you have ${_pceGen.balance}).` : '.');
+    }
+    const go = document.getElementById('insp-genmusic-go');
+    if (go) { go.disabled = _pceGen.busy; go.textContent = _pceGen.busy ? 'Composing\u2026' : 'Generate'; }
+}
+
+async function _pceGenerateMusic() {
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    if (!post || _pceGen.busy) return;
+    if (!Array.isArray(post.audio)) post.audio = [];
+    if (post.audio.length >= 10) { _pceSetGenMsg('That\u2019s the most sound a post can carry (10 clips).', 'error'); return; }
+
+    // Where it will start, decided NOW — the user may press "+ Add sound" on another clip while this
+    // composes, and the track belongs where it was asked for.
+    const target = _pceAudioTarget && _pceAudioTarget.postId === postId ? { ..._pceAudioTarget } : null;
+    const durationS = _pceGenMusicLength(post);
+    const description = (document.getElementById('insp-genmusic-desc')?.value || '').trim();
+
+    _pceGen.busy = true;
+    _pceRenderGenMusic();
+    _pceSetGenMsg('Starting\u2026');
+    try {
+        const res = await fetch('/.netlify/functions/generate-ai-music', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description, mood: _pceGen.mood, pace: _pceGen.pace, durationS, postId }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            if (res.status === 402) throw new Error(`Not enough AI credits \u2014 this needs ${d.cost || 5} and you have ${d.balance ?? 0}.`);
+            throw new Error(d.message || d.error || 'Music generation could not be started.');
+        }
+        const jobId = d.jobId;
+        const started = Date.now();
+        // Up to ~8½ minutes, the worker's own deadline plus a margin. Every 3s.
+        for (;;) {
+            await new Promise((r) => setTimeout(r, 3000));
+            _pceSetGenMsg(`Composing your track\u2026 ${Math.round((Date.now() - started) / 1000)}s`);
+            const pr = await fetch(`/.netlify/functions/generate-ai-music?jobId=${encodeURIComponent(jobId)}`);
+            const pj = await pr.json().catch(() => ({}));
+            if (pj.status === 'completed' && pj.assetId) { await _pceAttachGeneratedTrack(postId, pj, target); break; }
+            if (pj.status === 'failed' || pj.status === 'flagged') throw new Error(pj.errorMessage || 'Music generation failed. Your credits were not used.');
+            if (Date.now() - started > 510000) throw new Error('This is taking longer than it should. If a track arrives, it will be on the post; your credits are only used if it does.');
+        }
+    } catch (err) {
+        _pceSetGenMsg(err.message || 'Music generation failed.', 'error');
+    } finally {
+        _pceGen.busy = false;
+        _pceGen.balance = null;   // spent or refunded — re-read on the next open rather than guess
+        _pceRenderGenMusic();
+    }
+}
+
+/**
+ * Put a finished track on the post it was made for.
+ *
+ * ⚠️ By postId, not "whatever is open": the editor may have moved on to another post while it
+ * composed. The cache still holds the original, and _pcePersistAudio saves by id, so the track lands
+ * where it was asked for either way — only the repaint is skipped when that post is not on screen.
+ */
+async function _pceAttachGeneratedTrack(postId, job, target) {
+    const post = _rqPostCache[postId];
+    if (!post) return;
+    if (!Array.isArray(post.audio)) post.audio = [];
+    const clip = {
+        id: `a${job.assetId}_${Date.now().toString(36)}`,
+        assetId: job.assetId,
+        label: String(job.label || 'AI music').replace(/^AI music \u2014 /, '\u2728 ').slice(0, 120),
+        volume: 1,
+        url: job.url || null,
+        name: job.label,
+    };
+    if (job.durationS) _pceAudioDurations[clip.assetId] = job.durationS;
+    // Same placement as every other new sound: on the clip whose "+ Add sound" was pressed.
+    _pceAudioTarget = target;
+    _pcePlaceNewSound(post, clip);
+    post.audio.push(clip);
+    const onScreen = _rqReviewPostId === postId;
+    if (onScreen) {
+        _pceSelectedAudioId = clip.id;
+        await _pceMeasureAudio(post);
+    }
+    // A generated bed is music like any library track: it ends with the video, never stretches it.
+    _pceMusicDefaultEnd(post, clip);
+    await _pcePersistAudio(postId);
+    if (onScreen) {
+        _pceRefreshAudioInspector();
+        _rqRenderTimeline(post);
+        _pceRenderLayers();
+        _pceSetGenMsg('Added to the post. Not quite right? Generate another \u2014 or remove it from the timeline.', 'ok');
+    }
+    window.showToast?.('Your generated track has been added to the post.', { icon: '\u266B' });
 }
 
 async function _pceRemoveAudio(index) {

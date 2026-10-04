@@ -27,6 +27,7 @@ against. Registry of record: `netlify/functions/admin-system-status.ts`.
 |---------|----------|-------------------------------|
 | Cloudflare R2 | `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME` | Uploads return 501; media falls back to mock/placeholder URLs. |
 | Fal.ai | `FAL_KEY` | AI image/video generation returns placeholder assets. |
+| Stability AI | `STABILITY_API_KEY` (optional `STABILITY_AUDIO_MODEL`, default `stable-audio-3`) | "✨ Generate music" in the post editor answers "not switched on yet". Needs `db/z-ai-music-generation.sql` applied first. |
 | Embeddings & moderation | `VOYAGE_API_KEY` **or** `OPENAI_API_KEY` | KB search + content moderation degrade. |
 | Pexels | `PEXELS_API_KEY` | Stock media search unavailable. |
 | Serper | `SERPER_API_KEY` | Lead Generator outbound discovery can't run. |
