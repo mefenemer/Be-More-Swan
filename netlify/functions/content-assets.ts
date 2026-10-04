@@ -4,6 +4,7 @@
 // PATCH  → update asset status (e.g., pending → scheduled, detach from post)
 // DELETE → remove an asset record (and physical file if applicable)
 
+import { isSharedLibraryKey } from '../../src/lib/music-library';
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { eq, and, desc, inArray } from 'drizzle-orm';
@@ -219,6 +220,9 @@ export async function propagateAssetStatuses(
 // user-facing record), but it is logged so leaked objects can be reconciled.
 async function deleteStorageObject(storageKey: string | null | undefined): Promise<void> {
     if (!storageKey) return; // link/URL assets have no physical file
+    // A library track's file is shared by every workspace using it — deleting THIS row's reference
+    // must never delete the track for everyone else. See isSharedLibraryKey.
+    if (isSharedLibraryKey(storageKey)) return;
     const endpoint  = process.env.R2_ENDPOINT;
     const accessKey = process.env.R2_ACCESS_KEY_ID;
     const secretKey = process.env.R2_SECRET_ACCESS_KEY;

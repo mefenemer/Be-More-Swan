@@ -18,9 +18,12 @@ import assert from 'node:assert';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-    buildMusicPrompt, clampMusicDuration, musicLabel, MUSIC_MOODS, MUSIC_PACES, MUSIC_MIN_S, MUSIC_MAX_S,
+    buildMusicPrompt, clampMusicDuration, musicLabel, trackName, TRACK_NAME_MAX, MUSIC_MOODS, MUSIC_PACES, MUSIC_MIN_S, MUSIC_MAX_S,
+    communityTrackTitle, communityTrackTags,
 } from '../src/lib/music-prompt';
 import { extFromMime } from '../src/lib/media-persist';
+import { musicCreditCost, MUSIC_CREDIT_COST, MUSIC_SHARED_CREDIT_COST } from '../src/utils/ai-credits';
+import { isSharedLibraryKey, COMMUNITY_MUSIC_PREFIX } from '../src/lib/music-library';
 
 const root = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -269,7 +272,7 @@ check('the panel offers exactly the moods and paces the server accepts', () => {
 });
 
 check('a generated track is attached by the same rules as a library one', () => {
-    const attach = slice(ws, 'async function _pceAttachGeneratedTrack(postId, job, target) {', '\nasync function _pceRemoveAudio(');
+    const attach = slice(ws, 'async function _pceAttachGeneratedTrack(postId, job, target, share) {', '\nasync function _pceRemoveAudio(');
     assert.ok(attach.includes('_pcePlaceNewSound(post, clip)'), 'ignores the clip it was asked for on');
     assert.ok(attach.includes('_pceMusicDefaultEnd(post, clip)'), 'can stretch the video like an unbounded bed');
     assert.ok(attach.includes('_pcePersistAudio(postId)'), 'saves the open post instead of the one it was made for');
@@ -285,6 +288,107 @@ check('the length asked for is the video\'s, from where the sound will start', (
 check('the panel binds at load, on document — not from a render path', () => {
     assert.ok(ws.includes('(function _pceBindGenMusicOnce() {'));
     assert.ok(slice(ws, '(function _pceBindGenMusicOnce() {', '})();').includes("document.addEventListener('click'"));
+});
+
+console.log('\nnaming a track');
+
+check('the user\'s name is kept, cleaned and capped; no name falls back to a readable one', () => {
+    assert.strictEqual(trackName('  Morning   coffee bed ', 'p'), 'Morning coffee bed');
+    assert.strictEqual(trackName('a\u0000b\nc', 'p'), 'a b c');
+    assert.strictEqual(trackName('x'.repeat(200), 'p').length, TRACK_NAME_MAX);
+    assert.strictEqual(trackName('   ', 'upbeat, bright. fast'), 'AI music — upbeat, bright');
+    assert.strictEqual(trackName(undefined, 'chill'), 'AI music — chill');
+});
+
+check('the chosen name travels from the request to the asset', () => {
+    assert.ok(fn.includes('name: trackName(body.name, built.prompt),'), 'the request drops the name');
+    assert.ok(worker.includes('name: trackName(meta.name, job.prompt)'), 'the asset ignores it');
+    assert.ok(!/ADD COLUMN/i.test(mig), 'carried in an existing column on purpose');
+});
+
+check('the panel suggests a name and stops following the chips once one is typed', () => {
+    assert.ok(ws.includes('id="insp-genmusic-name"'));
+    const sync = slice(ws, 'function _pceSyncGenName() {', '\n}');
+    assert.ok(sync.includes('!_pceGen.nameTouched'), 'a typed name is overwritten by the next chip click');
+    const gen = slice(ws, 'async function _pceGenerateMusic() {', '\n}');
+    assert.ok(gen.includes('postId, name, share })'), 'the name is never sent');
+});
+
+check('any sound can be renamed on its timeline row, and the rename is saved', () => {
+    assert.ok(ws.includes('data-tl-audio-name="${_rqEsc(key)}"'), 'the row has no name field');
+    const onChange = slice(ws, "if (el && el.hasAttribute && el.hasAttribute('data-tl-audio-name')) {", "if (el && el.hasAttribute && el.hasAttribute('data-tl-text')) {");
+    assert.ok(onChange.includes('clip.label = next') && onChange.includes('_pcePersistAudio(_rqReviewPostId)'), 'a rename is not saved');
+    assert.ok(onChange.includes('if (!next)'), 'a blank name is saved');
+});
+
+console.log('\nshared with the community, or private');
+
+check('sharing costs less than owning outright', () => {
+    assert.ok(MUSIC_SHARED_CREDIT_COST < MUSIC_CREDIT_COST);
+    assert.strictEqual(musicCreditCost(true), MUSIC_SHARED_CREDIT_COST);
+    assert.strictEqual(musicCreditCost(false), MUSIC_CREDIT_COST);
+});
+
+check('only an explicit share:true gives a track away — anything else is private and full price', () => {
+    assert.ok(fn.includes('const shared = body.share === true;'), 'a missing or truthy-but-not-true field counts as consent');
+    assert.ok(fn.includes('const cost = musicCreditCost(shared);'));
+    assert.ok(fn.indexOf('const cost = musicCreditCost(shared);') < fn.indexOf('holdCredits('), 'credits held before the price is known');
+    assert.ok(!/MUSIC_CREDIT_COST/.test(fn), 'a fixed price survives somewhere in the request');
+});
+
+check('the consent is recorded with the job: who, when, which clause', () => {
+    assert.ok(fn.includes("consent: { userId, at: new Date().toISOString(), termsClause: COMMUNITY_TERMS_CLAUSE }"));
+    assert.ok(fn.includes('...(shared ? { consent:'), 'a private track carries a consent record');
+});
+
+check('a shared track is COPIED into the shared library folder and listed — after the customer has theirs', () => {
+    const share = slice(worker, 'if (meta.share) {', '} catch (shareErr) {');
+    assert.ok(share.includes('`${COMMUNITY_MUSIC_PREFIX}/${crypto.randomUUID()}.mp3`'), 'stored inside an org folder');
+    assert.ok(share.includes('putR2Object(') && share.includes('db.insert(musicTracks)'));
+    assert.ok(worker.indexOf("success: true, mediaType: 'audio'") < worker.indexOf('if (meta.share) {'),
+        'sharing can fail the customer\'s own track');
+    // Never the customer's own words in the public library.
+    assert.ok(share.includes('title: communityTrackTitle(meta.mood, meta.pace, job.id)'));
+    assert.ok(!/title:\s*(meta\.name|trackName)/.test(share), 'the customer\'s name for it goes public');
+    assert.ok(!/job\.prompt/.test(share), 'the customer\'s description goes public');
+    assert.ok(share.includes('attributionRequired: false'), 'a community track would demand a credit nobody can show');
+    assert.ok(share.includes('sourceReference: `media_generation_jobs:${job.id}`'), 'no route back to the consent record');
+});
+
+check('a community title says what the track is and nothing about who made it', () => {
+    assert.strictEqual(communityTrackTitle('chill', 'slow', 42), 'Chill · slow #42');
+    assert.strictEqual(communityTrackTitle('upbeat', null, 7), 'Upbeat #7');
+    assert.strictEqual(communityTrackTitle('Smith & Co launch', 'x', 9), 'AI track #9', 'free text reached the title');
+    assert.deepStrictEqual(communityTrackTags('ambient', 'fast'), ['ambient', 'fast', 'ai-generated', 'community']);
+    assert.deepStrictEqual(communityTrackTags('<script>', null), ['ai-generated', 'community']);
+});
+
+check('no workspace can delete a shared library file', () => {
+    assert.ok(isSharedLibraryKey(`${COMMUNITY_MUSIC_PREFIX}/x.mp3`) && isSharedLibraryKey('library/music/abc.mp3'));
+    assert.ok(!isSharedLibraryKey('content/org-4/generated-music/x.mp3') && !isSharedLibraryKey(null));
+    const del = slice(read('netlify/functions/content-assets.ts'), 'async function deleteStorageObject(', '\n}');
+    assert.ok(del.includes('if (isSharedLibraryKey(storageKey)) return;'), 'a user deleting their copy deletes it for everyone');
+    const ret = read('netlify/functions/content-retention.ts');
+    assert.ok(ret.includes('!!a.storageKey && !isSharedLibraryKey(a.storageKey)'), 'the 30-day purge deletes shared tracks');
+    const life = slice(read('netlify/functions/storage-lifecycle-cleanup.ts'), 'async function deleteFromR2(', '\n}');
+    assert.ok(life.includes('if (isSharedLibraryKey(key)) return true;'), 'the nightly cleanup deletes shared tracks');
+});
+
+check('the panel asks every time, defaults to sharing, and sends the choice either way', () => {
+    assert.ok(/name="insp-genmusic-share" value="shared" class="mt-0.5" checked>/.test(ws), 'sharing is not the default');
+    assert.ok(ws.includes('name="insp-genmusic-share" value="private"'));
+    assert.ok(slice(ws, 'async function _pceOpenGenMusic() {', '\n}').includes('_pceGenResetShare()'), 'a remembered choice instead of the default');
+    const gen = slice(ws, 'async function _pceGenerateMusic() {', '\n}');
+    assert.ok(gen.includes('const share = _pceGenShared();') && gen.includes('postId, name, share })'));
+    assert.ok(slice(ws, 'async function _pceAttachGeneratedTrack(', '\nasync function _pceRemoveAudio(').includes('_pceGenResetShare()'),
+        'the next track inherits this one\'s choice');
+});
+
+check('the terms say what sharing means, and 11.2 points to it', () => {
+    const terms = read('terms_of_service.html');
+    assert.ok(terms.includes('id="community-music"'), 'the panel links to an anchor that does not exist');
+    assert.ok(terms.includes('Except for music you choose to share with the community under 11.8'));
+    assert.ok(ws.includes('href="/terms_of_service.html#community-music"'));
 });
 
 Promise.all(pending).then(() => console.log(`\n${passed} checks passed`));

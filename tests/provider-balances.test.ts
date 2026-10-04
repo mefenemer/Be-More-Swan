@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
 import {
     assessProviders, classifyAnthropicError, readFalBalance, probeAnthropic, FAL_LOCK_PATTERN,
+    readStabilityBalance, STABILITY_TRACK_CREDITS, DEFAULT_STABILITY_LOW_BALANCE_CREDITS,
     type FalLockEvidence,
 } from '../src/utils/provider-balance';
 import { dueForAlert } from '../netlify/functions/check-provider-balances';
@@ -114,6 +115,46 @@ async function main() {
 
     await check('it is scheduled', () => {
         assert.match(readFileSync(join(root, 'netlify.toml'), 'utf8'), /\[functions\.check-provider-balances\]\s*\n\s*schedule = "15 \*\/6 \* \* \*"/);
+    });
+
+    // ── Stability (Generate music) ──────────────────────────────────────────────────────────────
+    const healthyFal = { status: 'ok' as const, balance: 80, currency: 'USD' };
+    const stab = (stability: any) => assessProviders({ fal: healthyFal, falEvidence: noEvidence, anthropic: ok, stability })
+        .filter((p) => p.provider === 'stability');
+
+    await check('Stability below one track is DOWN; below the line is LOW; above it is quiet', () => {
+        assert.strictEqual(stab({ status: 'ok', credits: STABILITY_TRACK_CREDITS - 1 })[0].severity, 'down');
+        const low = stab({ status: 'ok', credits: 100 });
+        assert.strictEqual(low[0].severity, 'low');
+        assert.ok(/~3 tracks/.test(low[0].headline), low[0].headline);
+        assert.deepStrictEqual(stab({ status: 'ok', credits: DEFAULT_STABILITY_LOW_BALANCE_CREDITS + 1 }), []);
+    });
+
+    await check('a rejected Stability key is DOWN; a transient read error and no key at all are not alerts', () => {
+        assert.strictEqual(stab({ status: 'key_rejected', httpStatus: 401 })[0].severity, 'down');
+        assert.deepStrictEqual(stab({ status: 'error', detail: 'HTTP 502' }), []);
+        assert.deepStrictEqual(stab({ status: 'not_configured' }), []);
+        assert.deepStrictEqual(stab(undefined), [], 'a caller without Stability must not alert');
+    });
+
+    await check('the Stability balance is read with Bearer auth from /v1/user/balance', async () => {
+        process.env.STABILITY_API_KEY = 'sk-test';
+        let url = '', auth = '';
+        const r = await readStabilityBalance((async (u: any, init: any) => {
+            url = String(u); auth = init.headers.Authorization;
+            return new Response(JSON.stringify({ credits: 412.5 }), { status: 200 });
+        }) as any);
+        assert.deepStrictEqual(r, { status: 'ok', credits: 412.5 });
+        assert.strictEqual(url, 'https://api.stability.ai/v1/user/balance');
+        assert.strictEqual(auth, 'Bearer sk-test');
+        const rej = await readStabilityBalance((async () => new Response('{}', { status: 401 })) as any);
+        assert.strictEqual(rej.status, 'key_rejected');
+    });
+
+    await check('the scheduled check actually asks Stability', () => {
+        const fn = readFileSync(join(root, 'netlify/functions/check-provider-balances.ts'), 'utf8');
+        assert.ok(fn.includes('readStabilityBalance()'), 'the probe is defined but never run');
+        assert.ok(fn.includes('stability, stabilityLowBalanceCredits'), 'the reading never reaches the rules');
     });
 
     console.log(`\n${passed} checks passed`);

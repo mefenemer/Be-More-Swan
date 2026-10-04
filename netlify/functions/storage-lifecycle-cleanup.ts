@@ -11,6 +11,7 @@
 // AC9: logs summary to admin_audit_log.
 // AC10: verifies R2 object absent via HEAD after delete; retries next run if failure.
 
+import { isSharedLibraryKey } from '../../src/lib/music-library';
 import { Handler } from '@netlify/functions';
 import { S3Client, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { eq, and, lt, or, isNull, sql } from 'drizzle-orm';
@@ -33,6 +34,8 @@ function getR2Client(): S3Client {
 
 async function deleteFromR2(s3: S3Client, key: string): Promise<boolean> {
     if (!R2_BUCKET || !key) return true; // mock mode
+    // Shared by every workspace using the track — report "gone" for this row, keep the object.
+    if (isSharedLibraryKey(key)) return true;
     try {
         await s3.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: key }));
         // AC10: confirm absent via HEAD

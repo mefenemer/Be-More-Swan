@@ -26,6 +26,14 @@ export const VIDEO_CREDIT_COST = 5;
 // video, so the same price to the customer. One track is sized to the whole video, so one is usually
 // all a post needs. Available on any paid tier with credits, like images; NOT premium-only.
 export const MUSIC_CREDIT_COST = 5;
+// …or less when the customer SHARES the track with the Be More Swan community instead of owning it
+// (terms §11.8): Be More Swan owns a shared track and adds it to the library every workspace can use,
+// so the customer is paying for a track and contributing one. The choice is made per generation and
+// defaults to sharing; keeping a track private and owning it outright is the full price.
+export const MUSIC_SHARED_CREDIT_COST = 3;
+export function musicCreditCost(shared: boolean): number {
+    return shared ? MUSIC_SHARED_CREDIT_COST : MUSIC_CREDIT_COST;
+}
 // Video generation is restricted to premium tiers (decided 2026-06-24). Image generation
 // is available on any paid tier with credits.
 export const VIDEO_TIERS = ['saver', 'employee'] as const;
