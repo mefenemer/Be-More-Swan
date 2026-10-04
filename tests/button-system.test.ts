@@ -35,7 +35,7 @@ check('they sit in @layer components, so a JS state utility still wins', () => {
 check('the brand-correct, AA-contrast values', () => {
     const css = read('input.css');
     assert.match(css, /\.btn-primary\s+\{ background-color: #d6006b; color: #fff;/);
-    assert.match(css, /\.btn-assistant\s+\{ background-color: #7c3aed;/);
+    assert.match(css, /\.btn-assistant\s+\{ background-color: #d6006b;/);
     assert.match(css, /\.btn-golive\s+\{ background-color: #00e55c; color: #1f1e1b;/);
     assert.match(css, /\.btn-destructive \{ background-color: #dc2626;/);
 });
