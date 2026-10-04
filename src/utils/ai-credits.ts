@@ -22,6 +22,10 @@ type Db = ReturnType<typeof getDb>;
 // Per-generation credit costs (Epic 2): Flux 2 image = 1, Hailuo 2.3 video = 5.
 export const IMAGE_CREDIT_COST = 1;
 export const VIDEO_CREDIT_COST = 5;
+// Stable Audio 3.0 = 26 Stability credits (~$0.26) per successful track — the same order as a Hailuo
+// video, so the same price to the customer. One track is sized to the whole video, so one is usually
+// all a post needs. Available on any paid tier with credits, like images; NOT premium-only.
+export const MUSIC_CREDIT_COST = 5;
 // Video generation is restricted to premium tiers (decided 2026-06-24). Image generation
 // is available on any paid tier with credits.
 export const VIDEO_TIERS = ['saver', 'employee'] as const;
@@ -29,7 +33,8 @@ export function tierCanGenerateVideo(tierKey: string | null | undefined): boolea
     return !!tierKey && (VIDEO_TIERS as readonly string[]).includes(tierKey);
 }
 
-export function creditCostFor(mediaType: 'image' | 'video'): number {
+export function creditCostFor(mediaType: 'image' | 'video' | 'audio'): number {
+    if (mediaType === 'audio') return MUSIC_CREDIT_COST;
     return mediaType === 'video' ? VIDEO_CREDIT_COST : IMAGE_CREDIT_COST;
 }
 
@@ -179,7 +184,7 @@ export async function settleHold(db: Db, params: {
     orgId: number;
     amount: number;
     success: boolean;
-    mediaType: 'image' | 'video';
+    mediaType: 'image' | 'video' | 'audio';
     userId?: number | null;
     jobId?: number | null;
     isAutonomous?: boolean;
@@ -193,7 +198,11 @@ export async function settleHold(db: Db, params: {
             WHERE organisation_id = ${params.orgId}
             RETURNING balance
         `);
-        const reason = params.mediaType === 'video' ? 'video_generation' : 'image_generation';
+        // ⚠️ 'music_generation' needs db/z-ai-music-generation.sql applied — the ledger's CHECK lists
+        // every reason, and an unknown one fails the INSERT after the hold has already been consumed.
+        const reason = params.mediaType === 'video' ? 'video_generation'
+            : params.mediaType === 'audio' ? 'music_generation'
+            : 'image_generation';
         await db.execute(sql`
             INSERT INTO ai_credit_ledger (organisation_id, user_id, delta, reason, job_id, balance_after, is_autonomous)
             VALUES (${params.orgId}, ${params.userId ?? null}, ${-params.amount}, ${reason},
