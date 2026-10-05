@@ -16,6 +16,7 @@
 import { getDb } from '../../db/client';
 import { sql } from 'drizzle-orm';
 import { getPeriodStart } from './atomic-cap-check';
+import { featureTierKey } from '../config/beta-plan';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -38,7 +39,8 @@ export function musicCreditCost(shared: boolean): number {
 // is available on any paid tier with credits.
 export const VIDEO_TIERS = ['saver', 'employee'] as const;
 export function tierCanGenerateVideo(tierKey: string | null | undefined): boolean {
-    return !!tierKey && (VIDEO_TIERS as readonly string[]).includes(tierKey);
+    const t = featureTierKey(tierKey);   // beta gets its source tier's video access
+    return !!t && (VIDEO_TIERS as readonly string[]).includes(t);
 }
 
 export function creditCostFor(mediaType: 'image' | 'video' | 'audio'): number {

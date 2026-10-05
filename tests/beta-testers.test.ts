@@ -12,6 +12,8 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { landmark } from './landmark';
+import { featureTierKey, BETA_FEATURES_AS } from '../src/config/beta-plan';
+import { tierCanGenerateVideo } from '../src/utils/ai-credits';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -61,6 +63,21 @@ check('the beta master plan is hidden from the picker and costs nothing', () => 
     assert.match(SQL, /FROM master_plans\s+WHERE tier_key = 'employee'/, 'copies the top self-serve tier');
     assert.match(SQL, /features, false\s*\nFROM/, 'is_active must be false — get-plans lists active plans only');
     assert.match(SQL, /ON CONFLICT \(tier_key\) DO NOTHING/, 'must be safe to re-run');
+});
+
+check('for features, beta is its source tier (every key-based gate agrees)', () => {
+    assert.strictEqual(featureTierKey('beta'), BETA_FEATURES_AS);
+    assert.strictEqual(featureTierKey('saver'), 'saver', 'other tiers pass through unchanged');
+    assert.strictEqual(featureTierKey(null), null);
+    assert.ok(SQL.includes(`WHERE tier_key = '${BETA_FEATURES_AS}'`), 'BETA_FEATURES_AS must be the tier the SQL copied');
+    assert.strictEqual(tierCanGenerateVideo('beta'), tierCanGenerateVideo(BETA_FEATURES_AS), 'video access must match the source tier');
+});
+
+check('check-capacity hands the client the FEATURE tier and offers beta no "upgrade"', () => {
+    const CAP = read('netlify/functions/check-capacity.ts');
+    assert.match(CAP, /tierKey: featureTierKey\(plan\?\.tierKey \?\? null\)/,
+        'the setup wizards rank plans by this key — raw "beta" ranked below the entry plan and locked features');
+    assert.match(CAP, /plan\?\.tierKey !== BETA_TIER_KEY/, 'a £0 plan would otherwise be offered the entry plan as an upgrade');
 });
 
 if (process.exitCode) console.error('\nbeta testers: FAILED');
