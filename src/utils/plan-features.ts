@@ -7,6 +7,7 @@
 import { and, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { plans, masterPlans } from '../../db/schema';
+import { featureTierKey } from '../config/beta-plan';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -130,5 +131,6 @@ export async function getActiveTierKeyByOrg(db: Db, orgId: number): Promise<stri
         .where(and(eq(plans.organisationId, orgId), eq(plans.status, 'active')))
         .orderBy(plans.startedAt)
         .limit(1);
-    return row?.tierKey ?? null;
+    // Beta behaves as its source tier for every feature decision (src/config/beta-plan.ts).
+    return featureTierKey(row?.tierKey ?? null);
 }

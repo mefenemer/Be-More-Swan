@@ -32,6 +32,7 @@ import { effectiveLimit, effectiveFeatures, type FeatureOverrides } from '../../
 import { SOCIAL_PLATFORMS } from '../../src/config/platform-formats';
 import { resolveLiveSocialPlatforms } from '../../src/utils/live-social-connections';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { BETA_TIER_KEY, featureTierKey } from '../../src/config/beta-plan';
 
 const stripe = process.env.STRIPE_SECRET_KEY
     ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' })
@@ -285,7 +286,9 @@ export default withLambda(async (event) => {
         // Returns null if the user is already on the highest-paid plan (enterprise contact path).
         const userCurrency = (plan as any)?.currency || 'GBP';
         let nextPlan: { tierKey: string; name: string; monthlyPriceGbp: string; monthlyPrice: string; assistantLimit: number | null } | null = null;
-        if (plan?.monthlyPriceGbp != null) {
+        // A beta plan costs £0, so "the cheapest plan above it" would offer the ENTRY plan as an
+        // upgrade from top-tier limits. Beta testers get no upgrade suggestion at all.
+        if (plan?.monthlyPriceGbp != null && plan?.tierKey !== BETA_TIER_KEY) {
             const [nextTierRow] = await db
                 .select({
                     tierKey: masterPlans.tierKey,
@@ -372,7 +375,10 @@ export default withLambda(async (event) => {
                 assistantPct,
                 taskPct,
                 tokenPct,
-                tierKey: plan?.tierKey ?? null,
+                // The tier the FEATURE gates should use — beta reads as its source tier, because
+                // the setup wizards rank plans by key and an unknown key ranked below the entry plan.
+                tierKey: featureTierKey(plan?.tierKey ?? null),
+                isBetaPlan: plan?.tierKey === BETA_TIER_KEY,
                 tierName: plan?.tierName ?? null,
                 planStatus: plan?.planStatus ?? null,
                 planType: plan?.planType ?? null,

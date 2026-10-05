@@ -25,6 +25,7 @@ import { enforcePromptModeration } from '../../src/utils/moderation';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJson } from '../../src/utils/model-json';
 import { hasFeature } from '../../src/utils/plan-features';
+import { featureTierKey } from '../../src/config/beta-plan';
 
 const jwtSecret   = process.env.JWT_SECRET;
 const anthropic   = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -54,7 +55,7 @@ async function getUserPlanTierKey(db: any, userId: number): Promise<string | nul
         .innerJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
         .where(and(eq(plans.userId, userId), eq(plans.status, 'active')))
         .limit(1);
-    return row?.tierKey ?? null;
+    return featureTierKey(row?.tierKey ?? null);   // beta reviews like its source tier
 }
 
 function buildPrompt(content: string, reviewType: 'quick' | 'full', brandVoice: string): string {

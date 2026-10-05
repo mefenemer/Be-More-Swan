@@ -36,6 +36,7 @@ import { pollCadenceHours } from '../../src/config/goal-metrics';
 import { pollOneGoal, type LiConn, type SocialConn } from './poll-goal-telemetry';
 import { desc } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { featureTierKey } from '../../src/config/beta-plan';
 
 const json = (statusCode: number, payload: unknown) => ({
     statusCode,
@@ -105,7 +106,7 @@ export default withLambda(async (event) => {
             .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
             .where(and(eq(plans.organisationId, orgId), eq(plans.status, 'active')))
             .limit(1);
-        const cadenceMs = pollCadenceHours(tierRow?.tierKey) * 3600_000;
+        const cadenceMs = pollCadenceHours(featureTierKey(tierRow?.tierKey)) * 3600_000;
 
         // Every active social connection for this org, in one query — the same shape
         // poll-goal-telemetry builds per batch, for the same reason (a metric may need a token).

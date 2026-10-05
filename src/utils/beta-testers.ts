@@ -17,7 +17,8 @@ import { FORM_KEY_RE } from './audience-forms';
 type Db = ReturnType<typeof getDb>;
 
 /** master_plans.tier_key of the free beta plan (db/beta-tester-plan.sql). */
-export const BETA_TIER_KEY = 'beta';
+export { BETA_TIER_KEY } from '../config/beta-plan';
+import { BETA_TIER_KEY } from '../config/beta-plan';
 /** plans.plan_type for a beta plan — what billing and reconciliation key off (there is no Stripe). */
 export const BETA_PLAN_TYPE = 'beta';
 

@@ -34,6 +34,7 @@ import { assembleBlueprint } from '../../src/utils/blueprint';
 import { getFreshAccessToken } from '../../src/utils/workspace-integrations';
 import { gscDateRange } from '../../src/utils/gsc-decay';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { featureTierKey } from '../../src/config/beta-plan';
 
 const GRAPH_VERSION = 'v19.0';
 const BATCH = 200;
@@ -726,7 +727,7 @@ export async function pollGoalTelemetry(): Promise<{ goals: number; polled: numb
         .from(plans)
         .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
         .where(and(inArray(plans.organisationId, orgIds), eq(plans.status, 'active')));
-    const tierByOrg = new Map<number, string | null>(tierRows.map(r => [r.orgId as number, r.tierKey]));
+    const tierByOrg = new Map<number, string | null>(tierRows.map(r => [r.orgId as number, featureTierKey(r.tierKey)]));
 
     // Every active social connection for every org in this batch, in ONE query.
     //
