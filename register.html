@@ -46,6 +46,14 @@
       <p id="registerSubtitle" class="text-gray-500 font-medium">Let's get your digital workspace provisioned.</p>
     </div>
 
+    <!-- Shown instead of the form to someone who is ALREADY signed in (see the start-up script). -->
+    <div id="signedInPanel" class="hidden text-center bg-emerald-50 border border-emerald-100 rounded-xl p-6" style="display:none">
+      <p class="font-bold text-gray-900 mb-1">You're already signed in.</p>
+      <p class="text-sm text-gray-600 mb-4">There's no need to create another account.</p>
+      <a href="/workspace.html" class="btn-primary inline-block px-6 py-2.5 rounded-lg font-bold">Go to your workspace</a>
+      <p class="text-xs text-gray-500 mt-4">Want to create a separate account? <a href="/logout.html" class="text-emerald-700 font-bold underline">Log out</a> first.</p>
+    </div>
+
     <form id="registrationForm" onsubmit="handleRegistration(event)" class="space-y-5">
 
       <!-- Name Fields -->
@@ -133,8 +141,24 @@
 <!-- Footer Placeholder -->
 <div id="footer-placeholder"></div>
 <script>
-  // Clear any stale auth session on page load, but preserve pending_tier in sessionStorage
-  document.addEventListener("DOMContentLoaded", () => {
+  // Clear STALE auth state on page load — but only for someone who is not actually signed in.
+  //
+  // ⚠️ This used to clear unconditionally, and aura_session is readable by page script, so simply
+  // OPENING /register logged out whoever was signed in: an existing customer clicking a "Get
+  // Started" link, or a beta tester's sign-up link opened in a browser that was logged in. It wiped
+  // the founder's live session on 2026-10-05. Ask the server first (check-capacity: 200 = a valid
+  // session), and show "already signed in" instead of the form if so. pending_tier lives in
+  // sessionStorage and is untouched either way.
+  document.addEventListener("DOMContentLoaded", async () => {
+    let signedIn = false;
+    try { signedIn = (await fetch('/.netlify/functions/check-capacity', { credentials: 'same-origin' })).ok; } catch (e) {}
+    if (signedIn) {
+      const form = document.getElementById('registrationForm');
+      form.classList.add('hidden'); form.style.display = 'none';
+      const panel = document.getElementById('signedInPanel');
+      panel.classList.remove('hidden'); panel.style.display = 'block';
+      return;
+    }
     localStorage.clear();
     document.cookie = "aura_session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
   });
