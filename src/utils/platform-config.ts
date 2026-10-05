@@ -22,6 +22,9 @@ export const CONFIG_KEYS = {
     // registration is locked. A form in Be More Swan's OWN workspace, so the waitlist runs through
     // the same form → contact → email campaign path a customer's does, end to end.
     WAITLIST_FORM_KEY:      'waitlist_form_key',
+    // string — public key of the SEPARATE "become a beta tester" form that /beta renders. Kept apart
+    // from the waitlist so testers (who get access) and waiters (who get told later) never mix.
+    BETA_FORM_KEY:          'beta_form_key',
     // Per-workspace rate limit overrides are stored as a JSON map under this key:
     //   { [workspaceId: string]: { limit: number, expiresAt?: string } }
     WORKSPACE_RATE_LIMITS:  'workspace_rate_limits',

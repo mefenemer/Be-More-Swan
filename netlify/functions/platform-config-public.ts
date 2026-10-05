@@ -5,7 +5,7 @@
 // No authentication required — returns only boolean flags, no sensitive data.
 //
 // GET /.netlify/functions/platform-config-public
-// → { maintenanceMode: bool, maintenanceMessage: string, registrationLocked: bool, waitlistFormKey: string|null }
+// → { maintenanceMode: bool, maintenanceMessage: string, registrationLocked: bool, waitlistFormKey: string|null, betaFormKey: string|null }
 //
 // waitlistFormKey is not sensitive: it is the same public key a sign-up form's embed snippet carries.
 
@@ -20,6 +20,7 @@ export default withLambda(async () => {
         const sessionTimeoutMinutes = Number(config[CONFIG_KEYS.SESSION_INACTIVITY_TIMEOUT_MINUTES]);
         const sessionCountdownMinutes = Number(config[CONFIG_KEYS.SESSION_COUNTDOWN_MINUTES]);
         const rawFormKey = String(config[CONFIG_KEYS.WAITLIST_FORM_KEY] ?? '').trim();
+        const rawBetaKey = String(config[CONFIG_KEYS.BETA_FORM_KEY] ?? '').trim();
         return {
             statusCode: 200,
             headers: {
@@ -33,6 +34,7 @@ export default withLambda(async () => {
                 registrationLocked:   config[CONFIG_KEYS.NEW_REGISTRATION_LOCK]  === true,
                 globalAiDisabled:     config[CONFIG_KEYS.GLOBAL_AI_DISABLED]     === true,
                 waitlistFormKey:      FORM_KEY_RE.test(rawFormKey) ? rawFormKey : null,
+                betaFormKey:          FORM_KEY_RE.test(rawBetaKey) ? rawBetaKey : null,
                 // issue #127: idle countdown timing, admin-configurable
                 sessionInactivityTimeoutMinutes: sessionTimeoutMinutes > 0 ? sessionTimeoutMinutes : DEFAULT_SESSION_TIMEOUT_CONFIG.inactivityTimeoutMinutes,
                 sessionCountdownMinutes:         sessionCountdownMinutes > 0 ? sessionCountdownMinutes : DEFAULT_SESSION_TIMEOUT_CONFIG.countdownMinutes,
@@ -44,7 +46,7 @@ export default withLambda(async () => {
         return {
             statusCode: 200,
             body: JSON.stringify({
-                maintenanceMode: false, registrationLocked: false, globalAiDisabled: false, waitlistFormKey: null,
+                maintenanceMode: false, registrationLocked: false, globalAiDisabled: false, waitlistFormKey: null, betaFormKey: null,
                 sessionInactivityTimeoutMinutes: DEFAULT_SESSION_TIMEOUT_CONFIG.inactivityTimeoutMinutes,
                 sessionCountdownMinutes: DEFAULT_SESSION_TIMEOUT_CONFIG.countdownMinutes,
             }),

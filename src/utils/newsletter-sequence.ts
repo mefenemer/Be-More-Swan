@@ -16,11 +16,11 @@
 //    unsubscribing on day two of a five-step series must not receive step three, and the audience
 //    status alone is not enough — an opt-out recorded by the Lead Generator counts too.
 
-import { and, asc, eq, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, isNull, lte, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
     audienceContacts, newsletterSequenceEnrolments, newsletterSequenceSteps, newsletterSequences,
-    organisations,
+    notifications, organisations,
 } from '../../db/schema';
 import { checkAudienceConsentBulk } from './audience-consent';
 import { renderForRecipient, newsletterUnsubscribeUrl, type IssueSnapshot } from './newsletter-render';
@@ -28,6 +28,7 @@ import { mintUnsubscribeToken, resolveSendRoute, type SendRoute } from './newsle
 import { sendEmail } from './email';
 import { sendGmailMessage } from './gmail';
 import { sendOutlookMessage } from './outlook';
+import { createNotification } from './notify';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -36,6 +37,19 @@ export const SEQUENCE_BATCH = 50;
 
 /** Give up on a step after this many failed attempts and halt, rather than retrying for ever. */
 export const MAX_ATTEMPTS = 3;
+
+/**
+ * How long an enrolment waits for a way to send before it gives up.
+ *
+ * ⚠️ No route used to HALT on the spot, silently: no error, no notification, and a halted
+ * enrolment is never resumed — so everyone who signed up before the tenant connected a mailbox
+ * was lost for good, and nothing said so. Now it waits, retrying hourly, and the owner is told.
+ * A week is the line past which a "welcome" email reads as a mistake rather than a welcome.
+ */
+export const NO_ROUTE_WAIT_DAYS = 7;
+const NO_ROUTE_RETRY_MS = 60 * 60 * 1000;
+/** One "your emails can't send" notification per person per day, however many are waiting. */
+const BLOCKED_NOTIFY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 export type HaltReason =
     | 'unsubscribed' | 'bounced' | 'complained' | 'suppressed' | 'consent_check_failed'
@@ -206,6 +220,8 @@ export interface SequenceSweepResult {
     halted: number;
     completed: number;
     failed: number;
+    /** Waiting for a way to send (no verified domain, no mailbox) — retried hourly. */
+    waiting: number;
 }
 
 /**
@@ -220,7 +236,7 @@ export async function processDueSequenceSteps(
     opts: { baseUrl: string; now?: Date; limit?: number },
 ): Promise<SequenceSweepResult> {
     const now = opts.now ?? new Date();
-    const out: SequenceSweepResult = { due: 0, sent: 0, halted: 0, completed: 0, failed: 0 };
+    const out: SequenceSweepResult = { due: 0, sent: 0, halted: 0, completed: 0, failed: 0, waiting: 0 };
 
     const due = await db
         .select({
@@ -233,6 +249,7 @@ export async function processDueSequenceSteps(
             unsubscribeToken: newsletterSequenceEnrolments.unsubscribeToken,
             nextSendAt: newsletterSequenceEnrolments.nextSendAt,
             attempt: newsletterSequenceEnrolments.attempt,
+            createdAt: newsletterSequenceEnrolments.createdAt,
         })
         .from(newsletterSequenceEnrolments)
         .where(and(
@@ -250,6 +267,37 @@ export async function processDueSequenceSteps(
             .set({ state: 'halted', haltReason: reason, nextSendAt: null, updatedAt: new Date() })
             .where(eq(newsletterSequenceEnrolments.id, id));
         out.halted++;
+    };
+
+    // Tell the person who switched the sequence on (or created it) that its emails are not going
+    // out. At most once a day per person — a list filling up must not become a notification storm.
+    const notified = new Set<number>();
+    const notifyBlocked = async (seq: { id: number; name: string; triggerEvent: string; assistantId: number | null; enabledBy: number | null; createdBy: number | null }, reason: string) => {
+        const userId = seq.enabledBy ?? seq.createdBy;
+        if (!userId || notified.has(userId)) return;
+        notified.add(userId);
+        try {
+            const [recent] = await db.select({ id: notifications.id }).from(notifications)
+                .where(and(
+                    eq(notifications.userId, userId),
+                    eq(notifications.type, 'newsletter_sequence_blocked'),
+                    gte(notifications.createdAt, new Date(now.getTime() - BLOCKED_NOTIFY_COOLDOWN_MS)),
+                ))
+                .limit(1);
+            if (recent) return;
+            await createNotification(db, 'newsletter_sequence_blocked', {
+                userId,
+                assistantId: seq.assistantId ?? null,
+                category: 'suggested_action',
+                context: {
+                    sequence: { name: seq.triggerEvent === 'subscribed' ? 'your welcome sequence' : `“${seq.name}”` },
+                    reason,
+                },
+                metadata: { newsletterSequenceId: seq.id },
+            });
+        } catch (err) {
+            console.error('[newsletter-sequence] blocked notification failed', { sequenceId: seq.id }, err);
+        }
     };
 
     for (const row of due) {
@@ -271,7 +319,12 @@ export async function processDueSequenceSteps(
             // Re-read the switch on EVERY send. Turning a sequence off has to stop mail already
             // queued, or the control is decorative for everyone mid-series.
             const [seq] = await db
-                .select({ isEnabled: newsletterSequences.isEnabled, assistantId: newsletterSequences.assistantId })
+                .select({
+                    id: newsletterSequences.id, name: newsletterSequences.name,
+                    triggerEvent: newsletterSequences.triggerEvent,
+                    isEnabled: newsletterSequences.isEnabled, assistantId: newsletterSequences.assistantId,
+                    enabledBy: newsletterSequences.enabledBy, createdBy: newsletterSequences.createdBy,
+                })
                 .from(newsletterSequences)
                 .where(eq(newsletterSequences.id, row.sequenceId))
                 .limit(1);
@@ -329,7 +382,23 @@ export async function processDueSequenceSteps(
             const senderName = org?.name || 'Your business';
 
             const routed = await resolveSendRoute(db, row.organisationId, { recipientCount: 1, senderName });
-            if ('error' in routed) { await halt(row.id, 'no_route'); continue; }
+            if ('error' in routed) {
+                // Wait for a route rather than dropping the person — see NO_ROUTE_WAIT_DAYS.
+                const waitedMs = now.getTime() - new Date(row.createdAt).getTime();
+                if (waitedMs > NO_ROUTE_WAIT_DAYS * 24 * 60 * 60 * 1000) {
+                    await db.update(newsletterSequenceEnrolments)
+                        .set({ state: 'halted', haltReason: 'no_route', lastError: routed.error, nextSendAt: null, updatedAt: new Date() })
+                        .where(eq(newsletterSequenceEnrolments.id, row.id));
+                    out.halted++;
+                } else {
+                    await db.update(newsletterSequenceEnrolments)
+                        .set({ attempt: 0, lastError: routed.error, nextSendAt: new Date(now.getTime() + NO_ROUTE_RETRY_MS), updatedAt: new Date() })
+                        .where(eq(newsletterSequenceEnrolments.id, row.id));
+                    out.waiting++;
+                }
+                await notifyBlocked(seq, 'there is no way to send them yet. Verify a sending domain or connect a mailbox in Email Studio ▸ Sending — emails already waiting will then go out by themselves.');
+                continue;
+            }
 
             const [contact] = await db
                 .select({

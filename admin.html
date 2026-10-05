@@ -6735,6 +6735,7 @@ const KILL_SWITCH_DEFS = [
   { key: 'maintenance_mode',      label: 'Maintenance Mode',            desc: 'Non-admin users see /maintenance.html. Admins unaffected.',               danger: true },
   { key: 'new_registration_lock', label: 'New Registration Lock',       desc: 'Blocks all new sign-ups. The public site switches to waitlist mode: sign-up buttons become “Join the waitlist” and /register redirects to /waitlist. Existing users log in and work as normal.', danger: false },
   { key: 'waitlist_form_key',     label: 'Waitlist Form Key (text)',    desc: 'Public key (aud_…) of the Email Marketing sign-up form in Be More Swan’s own workspace that /waitlist shows. Its linked email campaign sends the “you’re on the list” email. Allow this site’s origin on the form.', danger: false, type: 'text', placeholder: 'aud_…' },
+  { key: 'beta_form_key',         label: 'Beta Tester Form Key (text)', desc: 'Public key (aud_…) of the SEPARATE “Become a beta tester” sign-up form that /beta shows (homepage beta notice + “Become a Beta Tester” button). Link it to its own email campaign so testers get their own welcome.', danger: false, type: 'text', placeholder: 'aud_…' },
   { key: 'maintenance_message',   label: 'Maintenance Message (text)',  desc: 'Message shown on the maintenance page. Leave blank for default.',         danger: false, type: 'text' },
 ];
 

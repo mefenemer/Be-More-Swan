@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Become a Beta Tester | Be More Swan</title>
+  <meta name="description" content="Be More Swan is in beta. Apply to become a beta tester: early access to your AI team, in return for your honest feedback.">
+  <!-- Temporary page for the testing period — keep it out of the index. -->
+  <meta name="robots" content="noindex,follow">
+  <link href="./style.css" rel="stylesheet">
+  <link rel="icon" href="/favicon/favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
+  <link rel="manifest" href="/favicon/manifest.json">
+  <script src="/waitlist-mode.js" defer></script>
+</head>
+<body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
+
+<div id="nav-placeholder"></div>
+
+<!--
+  Beta testers are SEPARATE from the waitlist: testers get access now in return for feedback;
+  the waitlist is told when places open. Two Email Marketing forms in Be More Swan's own workspace,
+  each with its own email campaign, so the two groups never receive each other's emails.
+
+  Which form: platform_config `beta_form_key` (Admin Portal ▸ Emergency Controls). Shown whenever a
+  key is set — unlike the waitlist, recruiting testers does not depend on registration being locked.
+-->
+<main class="flex-grow flex items-center justify-center px-4 py-12 w-full">
+  <div class="bg-white p-8 md:p-12 rounded-3xl shadow-xl border border-gray-100 w-full max-w-lg relative overflow-hidden">
+    <div class="absolute top-0 left-0 w-full h-2 bg-emerald-700"></div>
+
+    <div class="text-center">
+      <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold uppercase tracking-wider mb-5">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Beta programme
+      </span>
+      <h1 class="text-3xl font-extrabold text-gray-900 tracking-tight mb-3">Become a beta tester</h1>
+      <p class="text-base text-gray-600 leading-relaxed mb-6">
+        Be More Swan is in beta, and we're looking for a small group of businesses to put their AI team to work first.
+      </p>
+    </div>
+
+    <ul class="space-y-2 text-sm text-gray-700 mb-8">
+      <li class="flex items-start gap-2"><span class="text-emerald-600 font-bold">✓</span><span><strong>Early access</strong> to Be More Swan's assistants before anyone else.</span></li>
+      <li class="flex items-start gap-2"><span class="text-emerald-600 font-bold">✓</span><span><strong>A direct line to the team</strong> — your feedback shapes what we build.</span></li>
+      <li class="flex items-start gap-2"><span class="text-emerald-600 font-bold">✓</span><span>In return, we ask for <strong>honest feedback</strong> as you use it.</span></li>
+    </ul>
+
+    <div id="bms-subscribe" aria-live="polite"></div>
+
+    <div id="beta-loading" class="flex justify-center py-6">
+      <span class="animate-spin" role="status" aria-label="Loading" style="display:inline-block;box-sizing:border-box;width:28px;height:28px;border-radius:9999px;border:3px solid #eae4d7;border-top-color:#ff007f;"></span>
+    </div>
+
+    <div id="beta-fallback" class="hidden text-center bg-gray-50 rounded-xl p-5 border border-gray-200 text-sm text-gray-600">
+      <p class="font-bold text-gray-800 mb-1">Beta applications aren't open right now.</p>
+      <p>Please <a href="/contact.html" class="text-emerald-700 font-bold underline underline-offset-2">get in touch</a> if you'd like to take part, or <a href="/waitlist.html" class="text-emerald-700 font-bold underline underline-offset-2">join the waitlist</a>.</p>
+    </div>
+
+    <p class="text-center text-sm text-gray-600 mt-8">
+      Just want to hear when it launches? <a href="/waitlist.html" class="text-emerald-700 font-bold hover:text-emerald-800">Join the waitlist →</a>
+    </p>
+    <p class="text-center text-sm text-gray-500 mt-2">
+      Already a customer? <a href="/login.html" class="text-emerald-700 font-bold hover:text-emerald-800">Log in</a>
+    </p>
+  </div>
+</main>
+
+<div id="footer-placeholder"></div>
+
+<script>
+  async function loadComponent(placeholderId, filePath) {
+    try {
+      const response = await fetch(filePath);
+      if (response.ok) document.getElementById(placeholderId).innerHTML = await response.text();
+    } catch (error) {
+      console.error(`Error loading component ${filePath}:`, error);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    loadComponent('nav-placeholder', './components/nav.html');
+    loadComponent('footer-placeholder', './components/footer.html');
+
+    const s = window.BmsWaitlist ? await window.BmsWaitlist.state() : { betaFormKey: null };
+    document.getElementById('beta-loading').remove();
+    const fallback = () => document.getElementById('beta-fallback').classList.remove('hidden');
+    if (!s.betaFormKey) { fallback(); return; }
+    window.BmsWaitlist.mount(s.betaFormKey, [], fallback);
+  });
+</script>
+</body>
+</html>

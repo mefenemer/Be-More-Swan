@@ -344,6 +344,14 @@ window.NotifKit = (function () {
                 window.loadView('newsletter');
             } };
         }
+        // Automated emails queued with no way to send. Lands on the Email Studio, whose Sending
+        // button is where a domain is verified or a mailbox connected. Same no-fallback rule.
+        if (notif.type === 'newsletter_sequence_blocked' && typeof window.loadView === 'function') {
+            return { label: 'Set up sending', run: () => {
+                window._newsletterAssistantId = meta.assistantId || null;
+                window.loadView('newsletter');
+            } };
+        }
         // Issue #87 — issue status updates need a link back to the reported issue itself,
         // not just a passive FYI. Opens the "Report an Issue" modal on the specific issue.
         if (notif.type === 'issue_update') {

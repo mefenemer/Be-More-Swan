@@ -6,6 +6,10 @@
  *   - every link to register.html / /register is pointed at /waitlist.html and, where it is a
  *     "Get Started" button, relabelled "Join the waitlist";
  *   - pages ask window.BmsWaitlist.isOn() before drawing a sign-up CTA (assistants.html does).
+ *   - elements marked `data-waitlist-show` are revealed (they ship hidden), and links marked
+ *     `data-waitlist-label="…"` take that label and point at /waitlist.html (or `data-waitlist-href`)
+ *     — so a page can say
+ *     "we're in beta" without a second copy of this logic.
  * While it is OFF this file changes nothing.
  *
  * This is presentation only. The lock itself is enforced by auth-guard (redirect) and register.ts
@@ -29,15 +33,26 @@
     _state = fetch('/.netlify/functions/platform-config-public', { credentials: 'same-origin' })
       .then(function (r) { return r.ok ? r.json() : {}; })
       .then(function (cfg) {
-        return { locked: cfg.registrationLocked === true, formKey: cfg.waitlistFormKey || null };
+        return { locked: cfg.registrationLocked === true, formKey: cfg.waitlistFormKey || null, betaFormKey: cfg.betaFormKey || null };
       })
       // Fail open, like the edge: an unreachable config must not hide sign-up from a live site.
-      .catch(function () { return { locked: false, formKey: null }; });
+      .catch(function () { return { locked: false, formKey: null, betaFormKey: null }; });
     return _state;
   }
 
   function rewrite(root) {
     if (!root || !root.querySelectorAll) return;
+    var shows = root.querySelectorAll('[data-waitlist-show]');
+    for (var k = 0; k < shows.length; k++) {
+      shows[k].classList.remove('hidden');
+      shows[k].style.display = '';
+    }
+    var swaps = root.querySelectorAll('a[data-waitlist-label]');
+    for (var m = 0; m < swaps.length; m++) {
+      swaps[m].setAttribute('href', swaps[m].getAttribute('data-waitlist-href') || '/waitlist.html');
+      swaps[m].textContent = swaps[m].getAttribute('data-waitlist-label');
+      swaps[m].removeAttribute('data-waitlist-label');
+    }
     var links = root.querySelectorAll('a[href]');
     for (var i = 0; i < links.length; i++) {
       var a = links[i];
@@ -56,7 +71,23 @@
     }
   }
 
+  /**
+   * Draw an Email Marketing sign-up form into #bms-subscribe — the same snippet a customer pastes
+   * into their own site, injected because the key is admin-set at runtime. subscribe.js reads its
+   * attributes from document.currentScript, which a dynamically inserted classic script still has.
+   * `preselect` pre-ticks choices (e.g. which assistant they came from).
+   */
+  function mount(formKey, preselect, onError) {
+    var tag = document.createElement('script');
+    tag.src = '/subscribe.js';
+    tag.setAttribute('data-bms-form', formKey);
+    if (preselect && preselect.length) tag.setAttribute('data-bms-preselect', preselect.join(','));
+    if (onError) tag.onerror = onError;
+    document.body.appendChild(tag);
+  }
+
   window.BmsWaitlist = {
+    mount: mount,
     /** Promise<{ locked, formKey }> — fetched once per page. */
     state: load,
     /** Promise<boolean> — is the site in waitlist mode? */

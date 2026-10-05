@@ -39,6 +39,7 @@ import { applyProseToDesign, designToMarkdown, normaliseDesign } from '../../src
 import { designFromTemplate } from '../../src/config/newsletter-templates';
 import { loadBrandNewsletterTheme } from '../../src/utils/brand-theme';
 import { resolveBaseUrl } from '../../src/utils/base-url';
+import { resolveSendRoute } from '../../src/utils/newsletter-send';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, obj: unknown) => ({
@@ -526,7 +527,19 @@ export default withLambda(async (event: HandlerEvent) => {
 
         // Say what switching off does NOT do: existing enrolments stop at their next step (the
         // worker re-reads this flag), but nothing already delivered is recalled.
-        return json(200, { sequence: updated, note: enable ? null : 'Anyone part way through will not receive the rest.' });
+        if (!enable) return json(200, { sequence: updated, note: 'Anyone part way through will not receive the rest.' });
+
+        // Switching on with no way to send used to look like success and then send nothing. It is
+        // still allowed — people queue and go out once a route exists — but it is said out loud.
+        const routed = await resolveSendRoute(db, orgId, { recipientCount: 1, senderName: '' }).catch(() => null);
+        const blocked = !routed || 'error' in routed;
+        return json(200, {
+            sequence: updated,
+            sendBlocked: blocked,
+            note: blocked
+                ? 'Switched on — but nothing can send yet. Verify a sending domain or connect a mailbox under Sending; new subscribers will wait and their emails go out as soon as you do.'
+                : null,
+        });
     }
 
     return json(400, { error: `Unknown action: ${action}` });
