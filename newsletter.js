@@ -1933,7 +1933,7 @@
         });
         window.showToast(res.verified
           ? 'Verified — your newsletter now sends from your own domain.'
-          : 'Not all records are visible yet — each row now says which. New records can take a few hours to spread.', { duration: 7000 });
+          : 'Not verified yet — each row says which records are still pending. We have asked the mail provider to check again: click Check DNS in a minute or two for the result.', { duration: 8000 });
         renderSending([res.domain]);
       } catch (err) { window.showToast(err.message); }
       finally { if (btn) { btn.disabled = false; btn.textContent = 'Check DNS'; } }
