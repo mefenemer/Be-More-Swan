@@ -148,8 +148,12 @@ export default async (request: Request, context: Context) => {
             // production before enabling: the new_registration_lock row does not exist, and
             // platform-config-public.ts coerces with `=== true`, so absent reads as false and its
             // error fallback also returns false. There was no hidden `true` to enforce.
+            //
+            // While locked, a would-be sign-up lands on the waitlist (waitlist.html, which embeds Be
+            // More Swan's own Email Marketing form) rather than on a login page that never said why
+            // it was there. Existing users are untouched: only /register is gated, never /login.
             if (cfg.registrationLocked && path === '/register') {
-                return Response.redirect(new URL('/login.html?locked=1', request.url), 302);
+                return Response.redirect(new URL('/waitlist.html', request.url), 302);
             }
         }
     } catch (err) {

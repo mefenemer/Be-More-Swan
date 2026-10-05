@@ -806,6 +806,13 @@ node_bundler = "esbuild"
   function = "auth-guard"
   path = "/admin"
 
+# Extensionless /register — NOT a protected page, bound so the registration lock catches it. Pretty
+# URLs ships every register.html href as /register, which /*.html does not match: without this the
+# lock only ever caught the JS redirects, and a nav "Get Started" click reached a form that 403'd.
+[[edge_functions]]
+  function = "auth-guard"
+  path = "/register"
+
 # US-GAP-7.1.1: In-memory rate limiting for sensitive endpoints
 [[edge_functions]]
   function = "rate-limit"

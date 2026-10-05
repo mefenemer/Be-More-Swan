@@ -55,7 +55,9 @@ export default withLambda(async (event) => {
 
         // US-ADM-3.2.1: New registration lock
         if (await isRegistrationLocked()) {
-            return { statusCode: 403, body: JSON.stringify({ error: 'New registrations are temporarily paused. Please check back soon.' }) };
+            // `waitlist: true` sends register.html on to /waitlist — the edge redirect is the first
+            // line, but it fails open, so this is the one that actually holds.
+            return { statusCode: 403, body: JSON.stringify({ error: 'New registrations are temporarily paused. Please check back soon.', waitlist: true }) };
         }
 
         phase = 'parse-validate';

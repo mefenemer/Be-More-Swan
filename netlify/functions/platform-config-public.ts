@@ -5,10 +5,13 @@
 // No authentication required — returns only boolean flags, no sensitive data.
 //
 // GET /.netlify/functions/platform-config-public
-// → { maintenanceMode: bool, maintenanceMessage: string, registrationLocked: bool }
+// → { maintenanceMode: bool, maintenanceMessage: string, registrationLocked: bool, waitlistFormKey: string|null }
+//
+// waitlistFormKey is not sensitive: it is the same public key a sign-up form's embed snippet carries.
 
 import { Handler } from '@netlify/functions';
 import { warmPlatformConfigCache, CONFIG_KEYS, DEFAULT_SESSION_TIMEOUT_CONFIG } from '../../src/utils/platform-config';
+import { FORM_KEY_RE } from '../../src/utils/audience-forms';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async () => {
@@ -16,6 +19,7 @@ export default withLambda(async () => {
         const config = await warmPlatformConfigCache();
         const sessionTimeoutMinutes = Number(config[CONFIG_KEYS.SESSION_INACTIVITY_TIMEOUT_MINUTES]);
         const sessionCountdownMinutes = Number(config[CONFIG_KEYS.SESSION_COUNTDOWN_MINUTES]);
+        const rawFormKey = String(config[CONFIG_KEYS.WAITLIST_FORM_KEY] ?? '').trim();
         return {
             statusCode: 200,
             headers: {
@@ -28,6 +32,7 @@ export default withLambda(async () => {
                 maintenanceMessage:   config[CONFIG_KEYS.MAINTENANCE_MESSAGE]    || 'We are performing scheduled maintenance. Please check back shortly.',
                 registrationLocked:   config[CONFIG_KEYS.NEW_REGISTRATION_LOCK]  === true,
                 globalAiDisabled:     config[CONFIG_KEYS.GLOBAL_AI_DISABLED]     === true,
+                waitlistFormKey:      FORM_KEY_RE.test(rawFormKey) ? rawFormKey : null,
                 // issue #127: idle countdown timing, admin-configurable
                 sessionInactivityTimeoutMinutes: sessionTimeoutMinutes > 0 ? sessionTimeoutMinutes : DEFAULT_SESSION_TIMEOUT_CONFIG.inactivityTimeoutMinutes,
                 sessionCountdownMinutes:         sessionCountdownMinutes > 0 ? sessionCountdownMinutes : DEFAULT_SESSION_TIMEOUT_CONFIG.countdownMinutes,
@@ -39,7 +44,7 @@ export default withLambda(async () => {
         return {
             statusCode: 200,
             body: JSON.stringify({
-                maintenanceMode: false, registrationLocked: false, globalAiDisabled: false,
+                maintenanceMode: false, registrationLocked: false, globalAiDisabled: false, waitlistFormKey: null,
                 sessionInactivityTimeoutMinutes: DEFAULT_SESSION_TIMEOUT_CONFIG.inactivityTimeoutMinutes,
                 sessionCountdownMinutes: DEFAULT_SESSION_TIMEOUT_CONFIG.countdownMinutes,
             }),

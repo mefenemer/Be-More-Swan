@@ -6733,7 +6733,8 @@ async function createFeatureFlag() {
 const KILL_SWITCH_DEFS = [
   { key: 'global_ai_disabled',    label: 'Global AI Disable',           desc: 'Blocks ALL AI calls platform-wide. Users get a 503 response.',          danger: true },
   { key: 'maintenance_mode',      label: 'Maintenance Mode',            desc: 'Non-admin users see /maintenance.html. Admins unaffected.',               danger: true },
-  { key: 'new_registration_lock', label: 'New Registration Lock',       desc: 'Blocks all new sign-ups at the register endpoint.',                       danger: false },
+  { key: 'new_registration_lock', label: 'New Registration Lock',       desc: 'Blocks all new sign-ups. The public site switches to waitlist mode: sign-up buttons become “Join the waitlist” and /register redirects to /waitlist. Existing users log in and work as normal.', danger: false },
+  { key: 'waitlist_form_key',     label: 'Waitlist Form Key (text)',    desc: 'Public key (aud_…) of the Email Marketing sign-up form in Be More Swan’s own workspace that /waitlist shows. Its linked email campaign sends the “you’re on the list” email. Allow this site’s origin on the form.', danger: false, type: 'text', placeholder: 'aud_…' },
   { key: 'maintenance_message',   label: 'Maintenance Message (text)',  desc: 'Message shown on the maintenance page. Leave blank for default.',         danger: false, type: 'text' },
 ];
 
@@ -6767,7 +6768,7 @@ function renderKillSwitches() {
         <div class="mt-3 flex gap-2">
           <input id="ks-text-${def.key}" type="text" value="${val}"
             class="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none"
-            placeholder="Maintenance message…">
+            placeholder="${def.placeholder || 'Maintenance message…'}">
           <button onclick="saveKillSwitch('${def.key}', document.getElementById('ks-text-${def.key}').value)"
             class="btn-primary px-3 py-2 text-xs font-bold rounded-lg transition">Save</button>
         </div>
