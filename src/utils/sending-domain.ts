@@ -169,15 +169,31 @@ export async function createSendingDomain(domain: string): Promise<SendingDomain
  * GET reports what it found. Firing only the POST and trusting its response would report the state
  * BEFORE the check on some responses.
  */
+/**
+ * Read the provider's verdict FIRST, and only ask it to re-verify when the domain is not verified.
+ *
+ * ⚠️ It used to POST /verify and then GET straight away. A verify request makes Resend start a fresh
+ * check and RESET the domain to 'pending' for ~45 seconds, so the GET always landed inside that
+ * window: the Check DNS button reset the status it was about to read, and could never come back
+ * verified — not even for a domain Resend had already verified. Found 2026-10-05 on Be More Swan's
+ * own mail.bemoreswan.com (verified at Resend, 'pending' in the app after every click).
+ *
+ * Now: verified → report it, and leave it alone. Otherwise → read what Resend has, kick off a fresh
+ * check for next time, and report the read — a later click picks up the result.
+ */
 export async function checkSendingDomain(providerDomainId: string): Promise<SendingDomainResult> {
     if (!providerDomainId) return { ok: false, error: 'This domain has not been registered with the mail provider yet.' };
-    await call(`/domains/${encodeURIComponent(providerDomainId)}/verify`, { method: 'POST' }).catch(() => ({ status: 0, body: {} }));
-    const { status, body } = await call(`/domains/${encodeURIComponent(providerDomainId)}`, { method: 'GET' });
+    const path = `/domains/${encodeURIComponent(providerDomainId)}`;
+    const { status, body } = await call(path, { method: 'GET' });
     if (status < 200 || status >= 300) return classify(status, body);
+    const current = normaliseStatus(body?.status ?? body?.data?.status);
+    if (current !== 'verified') {
+        await call(`${path}/verify`, { method: 'POST' }).catch(() => ({ status: 0, body: {} }));
+    }
     return {
         ok: true,
         providerDomainId,
-        status: normaliseStatus(body?.status ?? body?.data?.status),
+        status: current,
         records: readRecords(body),
     };
 }
