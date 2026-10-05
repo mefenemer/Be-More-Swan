@@ -42,8 +42,8 @@
     <div class="absolute top-0 left-0 w-full h-2 bg-emerald-700"></div>
 
     <div class="text-center mb-8">
-      <h1 class="text-3xl font-extrabold text-gray-900 tracking-tight mb-2">Create Your Account</h1>
-      <p class="text-gray-500 font-medium">Let's get your digital workspace provisioned.</p>
+      <h1 id="registerTitle" class="text-3xl font-extrabold text-gray-900 tracking-tight mb-2">Create Your Account</h1>
+      <p id="registerSubtitle" class="text-gray-500 font-medium">Let's get your digital workspace provisioned.</p>
     </div>
 
     <form id="registrationForm" onsubmit="handleRegistration(event)" class="space-y-5">
@@ -161,6 +161,18 @@
     if (refParam) sessionStorage.setItem('referral_ref', refParam.toUpperCase());
   });
 
+  // Beta testers arrive on register.html?beta=1 (the link in their welcome email). The edge lets that
+  // through while sign-ups are locked; register.ts checks the email really applied through /beta and
+  // gives the workspace the free beta plan. Never carries a paid plan choice — there is no checkout.
+  const IS_BETA = new URLSearchParams(window.location.search).get('beta') === '1';
+  if (IS_BETA) {
+    try { sessionStorage.removeItem('pending_tier'); } catch (e) {}
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('registerTitle').textContent = 'Create your beta tester account';
+      document.getElementById('registerSubtitle').textContent = 'Use the same email address you applied with. Free while Be More Swan is in beta — no card needed.';
+    });
+  }
+
   async function handleRegistration(event) {
 
     event.preventDefault(); // Stop default form submission
@@ -182,7 +194,7 @@
 
     try {
       sessionStorage.setItem('aura_pending_email', email);
-      const planTier = sessionStorage.getItem('pending_tier');
+      const planTier = IS_BETA ? null : sessionStorage.getItem('pending_tier');
       const response = await fetch('/.netlify/functions/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -205,6 +217,12 @@
         // If the verification email couldn't be sent (emailSent === false), flag it so check-email
         // prompts the user to resend rather than waiting for an email that never arrived.
         window.location.href = data.emailSent === false ? '/check-email.html?send=failed' : '/check-email.html';
+      } else if (response.status === 403 && data.waitlist && IS_BETA) {
+        // A beta sign-up with an email that did not apply: say so here — sending them to the
+        // waitlist would read as "your beta place is gone".
+        errorMessage.innerHTML = 'We could not find a beta tester application for that email address. Please use the address you applied with, or <a href="/beta.html" class="underline font-bold">apply to be a beta tester</a>.';
+        errorMessage.classList.remove('hidden');
+        resetButton();
       } else if (response.status === 403 && data.waitlist) {
         // Registration is locked (testing) — the edge normally redirects before this page loads,
         // but it fails open, so the server's answer is what we trust.

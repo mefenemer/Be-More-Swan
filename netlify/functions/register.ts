@@ -3,10 +3,11 @@ import { Handler } from '@netlify/functions';
 import { eq, and } from 'drizzle-orm';
 import * as crypto from 'crypto';
 import { getDb } from '../../db/client';
-import { users, organisations, userOrganisations, userProfiles, userReferrals, referralInvites } from '../../db/schema';
+import { users, organisations, userOrganisations, userProfiles, userReferrals, referralInvites, plans } from '../../db/schema';
 import { sendMagicLinkEmail } from '../../src/utils/email';
 import { checkRateLimit, getClientIp } from '../../src/utils/rate-limit';
 import { isRegistrationLocked } from '../../src/utils/platform-config';
+import { BETA_PLAN_TYPE, getBetaMasterPlan, isBetaApplicant } from '../../src/utils/beta-testers';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { businessDomainOf } from '../../src/utils/email-domain';
 import { findPaidDomainWorkspace } from '../../src/utils/domain-workspace';
@@ -53,13 +54,6 @@ export default withLambda(async (event) => {
             };
         }
 
-        // US-ADM-3.2.1: New registration lock
-        if (await isRegistrationLocked()) {
-            // `waitlist: true` sends register.html on to /waitlist — the edge redirect is the first
-            // line, but it fails open, so this is the one that actually holds.
-            return { statusCode: 403, body: JSON.stringify({ error: 'New registrations are temporarily paused. Please check back soon.', waitlist: true }) };
-        }
-
         phase = 'parse-validate';
         const body = JSON.parse(event.body || '{}');
 
@@ -68,7 +62,7 @@ export default withLambda(async (event) => {
         const firstName = body.firstName?.trim();
         const lastName = body.lastName?.trim();
         const businessName = body.businessName?.trim() || `${firstName}'s Workspace`;
-        const planTier = body.planTier?.trim() || null;
+        let planTier = body.planTier?.trim() || null;
         const attributionRef = body.attributionRef?.trim() || null; // US-AUD-5.3.1 SC5
         const referralRef = body.referralRef?.trim() || null;        // US-GAP-8.2: workspace referral code
         // US4 (Domain Consolidation): set once the user has seen the consolidation prompt and
@@ -78,6 +72,30 @@ export default withLambda(async (event) => {
 
         if (!email || !firstName || !lastName) {
             return { statusCode: 400, body: JSON.stringify({ error: 'Missing required fields.' }) };
+        }
+
+        // BETA TESTERS (src/utils/beta-testers.ts): whoever applied through /beta may register even
+        // while registration is locked, and gets the free beta plan instead of a checkout. Checked
+        // on the email AFTER parsing, which is why the lock check moved down here from the top.
+        phase = 'beta-check';
+        let isBeta = false;
+        try { isBeta = await isBetaApplicant(db, email); }
+        catch (err) { console.error('[register] beta applicant check failed (treated as not beta):', err); }
+        if (isBeta) planTier = null;   // never route a beta tester to checkout
+
+        // US-ADM-3.2.1: New registration lock
+        if (!isBeta && await isRegistrationLocked()) {
+            // `waitlist: true` sends register.html on to /waitlist — the edge redirect is the first
+            // line, but it fails open, so this is the one that actually holds. The beta hint is for
+            // the beta sign-up link (register.html?beta=1), which is let past the edge.
+            return { statusCode: 403, body: JSON.stringify({
+                error: 'New registrations are temporarily paused. If you applied to be a beta tester, use the same email address you applied with.',
+                waitlist: true,
+            }) };
+        }
+        const betaPlan = isBeta ? await getBetaMasterPlan(db) : null;
+        if (isBeta && !betaPlan) {
+            console.error('[register] beta applicant but no master_plans tier "beta" — apply db/beta-tester-plan.sql. Account will have no plan.');
         }
 
         // Resolve the verification-link origin up front — BEFORE any DB writes — so a missing
@@ -218,6 +236,18 @@ export default withLambda(async (event) => {
                 await tx.insert(userOrganisations).values({
                     userId: newUser.id, organisationId: orgId, role: 'owner',
                 });
+                // Beta tester: the free beta plan, so there is no checkout to pass. No Stripe ids —
+                // plan_type 'beta' is what billing and reconcile-billing recognise it by.
+                if (betaPlan) {
+                    await tx.insert(plans).values({
+                        userId: newUser.id,
+                        organisationId: orgId,
+                        masterPlanId: betaPlan.id,
+                        planName: betaPlan.name,
+                        planType: BETA_PLAN_TYPE,
+                        status: 'active',
+                    });
+                }
             }
 
             // 4. Update User with Org ID

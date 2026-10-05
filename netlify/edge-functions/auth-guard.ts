@@ -152,7 +152,11 @@ export default async (request: Request, context: Context) => {
             // While locked, a would-be sign-up lands on the waitlist (waitlist.html, which embeds Be
             // More Swan's own Email Marketing form) rather than on a login page that never said why
             // it was there. Existing users are untouched: only /register is gated, never /login.
-            if (cfg.registrationLocked && path === '/register') {
+            //
+            // ?beta=1 is the beta-tester sign-up link (emailed to applicants) and is let through to
+            // the page. That is safe because it grants nothing: register.ts only accepts an email
+            // that applied through /beta (src/utils/beta-testers.ts) and 403s everyone else.
+            if (cfg.registrationLocked && path === '/register' && url.searchParams.get('beta') !== '1') {
                 return Response.redirect(new URL('/waitlist.html', request.url), 302);
             }
         }

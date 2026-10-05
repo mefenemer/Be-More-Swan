@@ -1910,6 +1910,12 @@
           </div>
         </div>
       </div>
+      <div class="mt-4">
+        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1" for="nl-reply-to">Replies go to</label>
+        <input type="email" id="nl-reply-to" value="${esc(domain.replyTo || '')}" placeholder="you@yourbusiness.com"
+          class="w-full px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm">
+        <p class="text-[11px] text-gray-400 mt-1">An inbox you read. Without one, replies go to the From address above — which only receives mail if you have set that up.</p>
+      </div>
 
       <div class="flex flex-wrap items-center justify-end gap-2 mt-6">
         <button type="button" id="nl-domain-remove" class="btn-destructive px-3 py-2 text-xs font-bold border rounded-lg cursor-pointer">Remove</button>
@@ -1940,21 +1946,25 @@
         // refuses what is left if it is empty. Mid-word that is a real state, not a mistake.
         const local = ($('nl-from-local') ? $('nl-from-local').value : '').replace(/[^a-z0-9._-]/gi, '');
         if (!local) return null;
+        // Half-typed addresses are not saved (and not complained about) — same rule as the mailbox part.
+        const replyTo = ($('nl-reply-to') ? $('nl-reply-to').value : '').trim();
+        if (replyTo && !/^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(replyTo)) return null;
         const res = await api(DOMAIN_API, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'update', id: domain.id,
             fromName: $('nl-from-name') ? $('nl-from-name').value : '',
             fromLocalPart: local,
+            replyTo,
           }),
         });
         // ⚠️ NOT renderSending(res.domain) — that rebuilds this whole panel, including the field
         // being typed into. Keep the local copy in step instead; the next open reads the server.
-        if (res.domain) { domain.fromName = res.domain.fromName; domain.fromLocalPart = res.domain.fromLocalPart; }
+        if (res.domain) { domain.fromName = res.domain.fromName; domain.fromLocalPart = res.domain.fromLocalPart; domain.replyTo = res.domain.replyTo; }
         return res;
       },
     });
-    ['nl-from-name', 'nl-from-local'].forEach((k) => {
+    ['nl-from-name', 'nl-from-local', 'nl-reply-to'].forEach((k) => {
       $(k)?.addEventListener('input', () => domainSaver.schedule());
       $(k)?.addEventListener('blur', () => domainSaver.flush());
       $(k)?.addEventListener('change', () => domainSaver.flush());
@@ -2161,7 +2171,20 @@
     const completed = Number(seqState.enrolments.completed || 0);
     const formOpen = !seqState.steps.length || seqState.formOpen;
 
+    const isFormSeq = seq.triggerEvent === 'form';
     body.innerHTML = `
+      ${isFormSeq ? `<div class="mb-4">
+        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1" for="nl-seq-name">Campaign name</label>
+        <div class="flex items-center gap-2">
+          <input type="text" id="nl-seq-name" maxlength="80" value="${esc(seq.name || '')}"
+            class="flex-1 px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm font-bold">
+          <span id="nl-seq-name-status" class="text-xs text-gray-500 shrink-0"></span>
+        </div>
+        <p class="text-[11px] text-gray-400 mt-1">Only you see this. Who receives these emails is set by the sign-up form you link it to.</p>
+      </div>` : `<div class="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 mb-4 text-sm text-sky-900">
+        <p class="font-bold">This is your welcome sequence.</p>
+        <p>It goes to <strong>everyone who joins your list</strong>, from any sign-up form that is not linked to a campaign of its own. For one group only — such as beta testers — create a separate campaign with <strong>New email campaign → People who fill in a form</strong>, and link it to that group’s form.</p>
+      </div>`}
       <div class="flex items-center justify-between rounded-xl border border-gray-200 p-4 mb-4">
         <div>
           <span class="inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border ${seq.isEnabled
@@ -2258,6 +2281,33 @@
     mountSeqDesign(seqState.editing.design);
     renderSeqWordCount();
     recomputeSeqFindings();
+
+    // Rename on blur / Enter. Bound per render like the rest of this form (the input is new each time).
+    const nameInput = $('nl-seq-name');
+    const saveName = async () => {
+      const name = (nameInput.value || '').trim();
+      if (!name || name === seq.name) { nameInput.value = seq.name || ''; return; }
+      const status = $('nl-seq-name-status');
+      if (status) status.textContent = 'Saving…';
+      try {
+        const res = await seqApi({
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'rename', name }),
+        });
+        seq.name = res.sequence?.name || name;
+        const listed = seqState.sequences.find((x) => x.id === seq.id);
+        if (listed) listed.name = seq.name;
+        renderSeqPicker();
+        loadAutoList();   // the Studio's campaign list shows the name
+        if (status) { status.textContent = 'Saved ✓'; setTimeout(() => { if (status) status.textContent = ''; }, 1500); }
+      } catch (err) {
+        if (status) status.textContent = '';
+        nameInput.value = seq.name || '';
+        window.showToast(err.message);
+      }
+    };
+    nameInput?.addEventListener('blur', saveName);
+    nameInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); nameInput.blur(); } });
 
     $('nl-seq-cancel')?.addEventListener('click', async () => {
       if (seqSaver) await seqSaver.flush();

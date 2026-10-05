@@ -4,6 +4,7 @@
 //   GET                            → the org's sequence, its steps, and live enrolment counts
 //   POST { action: 'create' }      → start one (disabled, with no steps)
 //   POST { action: 'importCampaign' } → save a whole chat-drafted campaign as its steps (stays off)
+//   POST { action: 'rename', name }   → rename a campaign (a label only; allowed while it is on)
 //   POST { action: 'saveStep' }    → add or edit a step; re-renders its snapshot
 //   POST { action: 'deleteStep' }  → remove a step
 //   POST { action: 'deleteSequence' } → delete the whole series (must be switched off; owner/admin)
@@ -281,6 +282,18 @@ export default withLambda(async (event: HandlerEvent) => {
             seqId ? eq(newsletterSequences.id, seqId) : eq(newsletterSequences.triggerEvent, 'subscribed'),
         )).limit(1);
     if (!sequence) return json(404, { error: seqId ? 'That email campaign no longer exists.' : 'No welcome sequence yet.' });
+
+    // Rename. A name is only a label — it is not what decides who receives the emails (the trigger
+    // does) — so it may change while the campaign is on, by anyone who can edit its emails.
+    if (action === 'rename') {
+        const name = String(body.name || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 80);
+        if (!name) return json(400, { error: 'Give the campaign a name.' });
+        const [updated] = await db.update(newsletterSequences)
+            .set({ name, updatedAt: new Date() })
+            .where(and(eq(newsletterSequences.id, sequence.id), eq(newsletterSequences.organisationId, orgId)))
+            .returning();
+        return json(200, { sequence: updated });
+    }
 
     if (action === 'saveStep') {
         const stepNumber = Number(body.stepNumber || 0);
