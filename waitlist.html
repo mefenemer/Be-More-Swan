@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Join the Waitlist | Be More Swan</title>
+  <meta name="description" content="Be More Swan is in private testing. Join the waitlist and we'll email you the moment your place opens.">
+  <!-- Temporary page for the testing period — keep it out of the index. -->
+  <meta name="robots" content="noindex,follow">
+  <link href="./style.css" rel="stylesheet">
+  <link rel="icon" href="/favicon/favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
+  <link rel="manifest" href="/favicon/manifest.json">
+  <script src="/waitlist-mode.js" defer></script>
+</head>
+<body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
+
+<div id="nav-placeholder"></div>
+
+<!--
+  The waitlist IS a Be More Swan Email Marketing sign-up form, in Be More Swan's own workspace.
+  This page only mounts it: subscribe.js draws the form, /api/audience/subscribe writes the contact,
+  and the form's linked email campaign sends the "you're on the list" email. Nothing here talks to
+  the waitlist directly — that is the point, it tests the customer path end to end.
+
+  Which form: platform_config `waitlist_form_key` (Admin Portal ▸ Emergency Controls), read through
+  platform-config-public. No key → the fallback below, never a broken page.
+-->
+<main class="flex-grow flex items-center justify-center px-4 py-12 w-full">
+  <div class="bg-white p-8 md:p-12 rounded-3xl shadow-xl border border-gray-100 w-full max-w-lg relative overflow-hidden">
+    <div class="absolute top-0 left-0 w-full h-2 bg-emerald-700"></div>
+
+    <div class="text-center">
+      <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold uppercase tracking-wider mb-5">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Private testing
+      </span>
+      <h1 class="text-3xl font-extrabold text-gray-900 tracking-tight mb-3">Your AI team is almost ready</h1>
+      <p class="text-base text-gray-600 leading-relaxed mb-8">
+        We're putting Be More Swan's assistants through their final checks with a small group of customers.
+        Join the waitlist and we'll email you the moment your place opens.
+      </p>
+    </div>
+
+    <div id="bms-subscribe" aria-live="polite"></div>
+
+    <div id="waitlist-loading" class="flex justify-center py-6">
+      <span class="animate-spin" role="status" aria-label="Loading" style="display:inline-block;box-sizing:border-box;width:28px;height:28px;border-radius:9999px;border:3px solid #eae4d7;border-top-color:#ff007f;"></span>
+    </div>
+
+    <div id="waitlist-fallback" class="hidden text-center bg-gray-50 rounded-xl p-5 border border-gray-200 text-sm text-gray-600">
+      <p class="font-bold text-gray-800 mb-1">The waitlist form isn't available right now.</p>
+      <p>Please <a href="/contact.html" class="text-emerald-700 font-bold underline underline-offset-2">get in touch</a> and we'll add you ourselves.</p>
+    </div>
+
+    <div id="waitlist-open" class="hidden text-center bg-emerald-50 rounded-xl p-5 border border-emerald-100 text-sm text-emerald-800">
+      <p class="font-bold mb-2">Good news — sign-ups are open.</p>
+      <a href="/register.html" class="btn-primary inline-block px-6 py-2.5 rounded-lg font-bold">Create your account</a>
+    </div>
+
+    <p class="text-center text-sm text-gray-500 mt-8">
+      Already a customer? <a href="/login.html" class="text-emerald-700 font-bold hover:text-emerald-800">Log in</a>
+    </p>
+  </div>
+</main>
+
+<div id="footer-placeholder"></div>
+
+<script>
+  async function loadComponent(placeholderId, filePath) {
+    try {
+      const response = await fetch(filePath);
+      if (response.ok) document.getElementById(placeholderId).innerHTML = await response.text();
+    } catch (error) {
+      console.error(`Error loading component ${filePath}:`, error);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    loadComponent('nav-placeholder', './components/nav.html');
+    loadComponent('footer-placeholder', './components/footer.html');
+
+    const loading = document.getElementById('waitlist-loading');
+    const s = window.BmsWaitlist ? await window.BmsWaitlist.state() : { locked: false, formKey: null };
+    loading.remove();
+
+    if (!s.locked) {
+      document.getElementById('waitlist-open').classList.remove('hidden');
+      return;
+    }
+    if (!s.formKey) {
+      document.getElementById('waitlist-fallback').classList.remove('hidden');
+      return;
+    }
+    // The same snippet a customer pastes into their own site. Injected rather than written into
+    // the HTML because the key is admin-set at runtime; subscribe.js reads its own attributes from
+    // document.currentScript, which a dynamically inserted classic script still has.
+    const tag = document.createElement('script');
+    tag.src = '/subscribe.js';
+    tag.setAttribute('data-bms-form', s.formKey);
+    tag.onerror = () => document.getElementById('waitlist-fallback').classList.remove('hidden');
+    document.body.appendChild(tag);
+  });
+</script>
+</body>
+</html>

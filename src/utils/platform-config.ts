@@ -18,6 +18,10 @@ export const CONFIG_KEYS = {
     MAINTENANCE_MODE:       'maintenance_mode',            // boolean
     MAINTENANCE_MESSAGE:    'maintenance_message',         // string — shown to users
     NEW_REGISTRATION_LOCK:  'new_registration_lock',       // boolean — blocks new sign-ups
+    // string — public key (aud_…) of the Email Marketing sign-up form that /waitlist renders while
+    // registration is locked. A form in Be More Swan's OWN workspace, so the waitlist runs through
+    // the same form → contact → email campaign path a customer's does, end to end.
+    WAITLIST_FORM_KEY:      'waitlist_form_key',
     // Per-workspace rate limit overrides are stored as a JSON map under this key:
     //   { [workspaceId: string]: { limit: number, expiresAt?: string } }
     WORKSPACE_RATE_LIMITS:  'workspace_rate_limits',

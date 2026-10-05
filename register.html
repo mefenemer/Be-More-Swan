@@ -205,6 +205,10 @@
         // If the verification email couldn't be sent (emailSent === false), flag it so check-email
         // prompts the user to resend rather than waiting for an email that never arrived.
         window.location.href = data.emailSent === false ? '/check-email.html?send=failed' : '/check-email.html';
+      } else if (response.status === 403 && data.waitlist) {
+        // Registration is locked (testing) — the edge normally redirects before this page loads,
+        // but it fails open, so the server's answer is what we trust.
+        window.location.href = '/waitlist.html';
       } else {
         errorMessage.innerText = data.error || "An error occurred during registration.";
         errorMessage.classList.remove('hidden');

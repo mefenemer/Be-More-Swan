@@ -19,6 +19,7 @@
     .icon-yellow { background: #fefce8; color: #ca8a04; }
     .icon-red    { background: #fef2f2; color: #dc2626; }
   </style>
+  <script src="/waitlist-mode.js" defer></script>
 </head>
 <body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen overflow-x-hidden">
 
@@ -79,10 +80,15 @@ async function loadComponent(id, path) {
 
 // Copy is DB-driven, so every field below is optional — a role whose copy an admin hasn't filled in
 // yet renders without those sections rather than showing an empty card or the string "null".
+// Registration locked for testing (waitlist-mode.js) and nobody signed in: "Hire Role" becomes
+// "Join the waitlist". Signed-in users — existing customers — still hire as normal.
+let _waitlistGate = false;
+
 function renderRoleDetail(roleKey, c) {
   const iconSvg = ICONS[c.iconKey] || ICONS.document;
   const iconClass = `icon-${c.iconColor || 'blue'}`;
-  const hireHref = `assistant-setup.html?roleKey=${encodeURIComponent(roleKey)}`;
+  const hireHref = _waitlistGate ? '/waitlist.html' : `assistant-setup.html?roleKey=${encodeURIComponent(roleKey)}`;
+  const hireLabel = _waitlistGate ? 'Join the waitlist' : 'Hire Role';
 
   const features = (c.keyFeatures || []).map(f => `
     <li class="flex items-start gap-2 text-sm text-gray-600">
@@ -117,7 +123,7 @@ function renderRoleDetail(roleKey, c) {
 
   const cta = c.comingSoon
     ? `<a href="assistant-catalogue.html" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold transition">Join the Waitlist</a>`
-    : `<a href="${hireHref}" class="btn-golive px-4 py-2 rounded-lg text-sm font-semibold transition">Hire Role</a>`;
+    : `<a href="${hireHref}" class="btn-golive px-4 py-2 rounded-lg text-sm font-semibold transition">${hireLabel}</a>`;
 
   return `
     <!-- Hero -->
@@ -171,7 +177,7 @@ function renderRoleDetail(roleKey, c) {
       </div>
       ${c.comingSoon
         ? `<a href="assistant-catalogue.html" class="btn-primary flex-shrink-0 px-6 py-3 rounded-xl font-bold shadow-sm transition">Join the Waitlist</a>`
-        : `<a href="${hireHref}" class="btn-golive flex-shrink-0 px-6 py-3 rounded-xl font-bold shadow-sm transition">Hire Role</a>`}
+        : `<a href="${hireHref}" class="btn-golive flex-shrink-0 px-6 py-3 rounded-xl font-bold shadow-sm transition">${hireLabel}</a>`}
     </div>`;
 }
 
@@ -188,6 +194,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (!content) {
     document.getElementById('role-detail-error').classList.remove('hidden');
     return;
+  }
+
+  if (window.BmsWaitlist && await window.BmsWaitlist.isOn()) {
+    let loggedIn = false;
+    try { loggedIn = (await fetch('/.netlify/functions/check-capacity')).ok; } catch (e) {}
+    _waitlistGate = !loggedIn;
   }
 
   document.title = `${content.name} | Be More Swan`;
