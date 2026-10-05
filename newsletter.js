@@ -1742,6 +1742,66 @@
     }
   }
 
+  // ── DNS records: copy, full names, provider help ────────────────────────────
+  //
+  // Found 2026-10-05 setting up Be More Swan's own sending domain, i.e. exactly what a customer does:
+  //   1. no way to copy a value — people retyped a ~200-character DKIM key, where one wrong
+  //      character fails verification;
+  //   2. Netlify pre-fills Name with "@" (the bare domain) — saving an MX record there would have
+  //      put a second mail server on the customer's MAIN domain, next to their real inbox;
+  //   3. no help for "what goes in Name" per provider — some append the domain, some want it whole.
+
+  /** Records currently on screen, so a copy button carries an index, not a 200-character value. */
+  let dnsRowsOnScreen = [];
+
+  /**
+   * The zone the provider's record names are relative to. Resend names records relative to the
+   * registrable domain ("resend._domainkey.mail" for mail.example.com), so the zone is the sending
+   * domain minus the labels the names already end with. No overlap → the domain IS the zone.
+   */
+  function dnsZoneFor(domain, records) {
+    const labels = String(domain || '').toLowerCase().split('.');
+    for (const r of records) {
+      const name = String(r.name || '').toLowerCase().split('.');
+      for (let k = Math.min(name.length, labels.length - 2); k >= 1; k--) {
+        if (name.slice(-k).join('.') === labels.slice(0, k).join('.')) return labels.slice(k).join('.');
+      }
+    }
+    return labels.join('.');
+  }
+
+  /** Per-record state from the provider after a check: present it only when it says something. */
+  function dnsRowBadge(status) {
+    const st = String(status || '').toLowerCase();
+    if (st === 'verified') return '<span class="whitespace-nowrap inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">Found</span>';
+    if (st === 'failed' || st === 'failure') return '<span class="whitespace-nowrap inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700">Wrong value</span>';
+    if (st === 'pending' || st === 'not_started') return '<span class="whitespace-nowrap inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">Not found yet</span>';
+    return '';
+  }
+
+  const DNS_PROVIDER_HELP = [
+    ['Netlify', 'Domains ▸ your domain ▸ DNS settings ▸ Add new record. Netlify fills Name with “@” — replace it with the Name shown here. For the MX record, enter the Priority in its own box.'],
+    ['Cloudflare', 'Your domain ▸ DNS ▸ Records ▸ Add record. Enter the Name shown here. For the CNAME record, set Proxy status to “DNS only” (grey cloud) — a proxied record will not verify.'],
+    ['GoDaddy', 'My Products ▸ your domain ▸ DNS ▸ Add New Record. Enter the Name shown here in the Name box — GoDaddy adds your domain itself.'],
+    ['Anyone else', 'Look for “DNS settings”, “DNS records” or “Zone editor”. If the domain appears after the Name box, enter the short Name shown here. If it does not, use the full name underneath. Paste each value as one line, without adding quotes.'],
+  ];
+
+  // Bound once, at load, on document — never from renderSending(), which rebuilds the panel.
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest && e.target.closest('[data-nl-dns-copy]');
+    if (!btn) return;
+    const [i, field] = String(btn.getAttribute('data-nl-dns-copy')).split(':');
+    const row = dnsRowsOnScreen[Number(i)];
+    if (!row) return;
+    const text = field === 'full' ? row.fullName : field === 'name' ? row.name : row.value;
+    try {
+      await navigator.clipboard.writeText(text);
+      const was = btn.textContent;
+      btn.textContent = 'Copied ✓';
+      setTimeout(() => { btn.textContent = was; }, 1500);
+    } catch { window.prompt('Copy this:', text); }
+  });
+
   function renderSending(domains) {
     const body = $('nl-sending-body');
     const domain = domains[0] || null;
@@ -1778,6 +1838,15 @@
 
     const verified = domain.status === 'verified';
     const records = Array.isArray(domain.dnsRecords) ? domain.dnsRecords : [];
+    const zone = dnsZoneFor(domain.domain, records);
+    dnsRowsOnScreen = records.map((r) => {
+      const name = String(r.name || '');
+      return {
+        type: String(r.type || ''), name, value: String(r.value || ''),
+        priority: r.priority ?? null, status: r.status || '',
+        fullName: name ? `${name}.${zone}` : zone,
+      };
+    });
 
     body.innerHTML = `
       <div class="flex items-center gap-2 mb-4">
@@ -1788,8 +1857,12 @@
       </div>
 
       ${verified ? '' : `
-        <p class="text-sm text-gray-600 mb-3">Add these records at whoever manages your DNS, then check again. It usually takes a few minutes, occasionally a few hours.</p>
-        <div class="overflow-x-auto rounded-xl border border-gray-200 mb-4">
+        <p class="text-sm text-gray-600 mb-3">Add these ${records.length || ''} records at whoever manages your DNS, then check again. It usually takes a few minutes, occasionally a few hours.</p>
+        <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 mb-3 text-sm text-amber-900">
+          <p class="font-bold mb-1">Put the Name in exactly as shown — never “@”.</p>
+          <p>“@” means your main domain. A record saved there, especially the MX one, can interfere with the email you already receive. Most providers add <span class="font-mono">${esc(zone)}</span> themselves; if yours asks for the whole name, use the full name under each one.</p>
+        </div>
+        <div class="overflow-x-auto rounded-xl border border-gray-200 mb-3">
           <table class="min-w-full text-xs">
             <thead class="bg-gray-50 border-b border-gray-200"><tr>
               <th class="px-3 py-2 text-left font-bold text-gray-500 uppercase">Type</th>
@@ -1797,13 +1870,29 @@
               <th class="px-3 py-2 text-left font-bold text-gray-500 uppercase">Value</th>
             </tr></thead>
             <tbody class="divide-y divide-gray-100">
-              ${records.length ? records.map((r) => `<tr>
-                <td class="px-3 py-2 font-mono">${esc(r.type || '')}</td>
-                <td class="px-3 py-2 font-mono break-all">${esc(r.name || '')}</td>
-                <td class="px-3 py-2 font-mono break-all">${esc(r.value || '')}</td>
+              ${records.length ? dnsRowsOnScreen.map((r, i) => `<tr class="align-top">
+                <td class="px-3 py-2 font-mono">${esc(r.type)}${r.priority != null ? `<div class="text-[10px] text-gray-500 font-sans mt-1">Priority ${esc(String(r.priority))}</div>` : ''}<div class="mt-1">${dnsRowBadge(r.status)}</div></td>
+                <td class="px-3 py-2" style="min-width:13rem">
+                  <div class="flex items-start gap-2"><span class="font-mono font-bold">${esc(r.name)}</span>
+                    <button type="button" data-nl-dns-copy="${i}:name" class="shrink-0 text-[11px] font-bold text-emerald-700 hover:underline cursor-pointer">Copy</button></div>
+                  <div class="text-[10px] text-gray-400 mt-1 break-all">Full name: <span class="font-mono">${esc(r.fullName)}</span>
+                    <button type="button" data-nl-dns-copy="${i}:full" class="text-[10px] font-bold text-emerald-700 hover:underline cursor-pointer">Copy</button></div>
+                </td>
+                <td class="px-3 py-2">
+                  <div class="flex items-start gap-2"><span class="font-mono break-all">${esc(r.value)}</span>
+                    <button type="button" data-nl-dns-copy="${i}:value" class="shrink-0 btn-utility px-2 py-1 text-[11px] font-bold border rounded-lg cursor-pointer">Copy</button></div>
+                </td>
               </tr>`).join('') : '<tr><td colspan="3" class="px-3 py-4 text-center text-gray-500">No records returned yet — check again in a moment.</td></tr>'}
             </tbody>
           </table>
+        </div>
+        <details class="rounded-xl border border-gray-200 px-4 py-3 mb-4 text-sm text-gray-700">
+          <summary class="font-bold text-gray-900 cursor-pointer">Step-by-step for your DNS provider</summary>
+          <ul class="mt-3 space-y-2">
+            ${DNS_PROVIDER_HELP.map(([who, how]) => `<li><span class="font-bold">${esc(who)}:</span> ${esc(how)}</li>`).join('')}
+          </ul>
+          <p class="text-[11px] text-gray-500 mt-3">Not sure who manages your DNS? It is usually where you bought the domain, or wherever your website is hosted.</p>
+        </details>
         </div>`}
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1838,7 +1927,7 @@
         });
         window.showToast(res.verified
           ? 'Verified — your newsletter now sends from your own domain.'
-          : 'Not visible yet. DNS can take a few hours to spread.');
+          : 'Not all records are visible yet — each row now says which. New records can take a few hours to spread.', { duration: 7000 });
         renderSending([res.domain]);
       } catch (err) { window.showToast(err.message); }
       finally { if (btn) { btn.disabled = false; btn.textContent = 'Check DNS'; } }
