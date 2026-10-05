@@ -221,7 +221,10 @@ export default withLambda(async (event: HandlerEvent) => {
         if (reuse?.isEnabled) {
             return json(409, {
                 code: 'SEQUENCE_ENABLED',
-                error: 'Your welcome sequence is switched on, so it cannot be replaced from here — people part way through it would get the new emails. Switch it off under Email Campaigns in the Email Studio first, then save this again.',
+                // Reached when a campaign is saved as "everyone who subscribes" — i.e. AS the welcome
+                // sequence. Usually that was not the intent (a beta-tester campaign was filed this
+                // way), so the way out that is almost always wanted comes first.
+                error: 'Not saved — these emails were set to go to everyone who subscribes, which would replace your welcome sequence, and that is switched on and already emailing people. If they are for one sign-up form (such as beta testers), choose “People who fill in a form” and save again. To replace the welcome sequence itself, switch it off under Email Campaigns first.',
             });
         }
         if (!formTrigger && current.length && body.replace !== true) {

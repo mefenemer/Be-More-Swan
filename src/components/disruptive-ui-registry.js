@@ -1739,16 +1739,27 @@
     const trigger = ui.trigger && typeof ui.trigger === 'object' ? ui.trigger : {};
     // Re-derived rather than trusted, same as the server: 'subscribed' (the welcome sequence) and
     // 'form' (an email campaign a sign-up form starts) start by themselves; anything else does not.
-    const event = trigger.event === 'subscribed' || trigger.event === 'form' ? trigger.event : 'custom';
+    // ⚠️ The model's guess is only the STARTING choice for an automatic series. It once filed a
+    // "beta testers" campaign as the welcome sequence — Save then tried to overwrite the LIVE
+    // waitlist welcome sequence, and the user had no way to say "no, this is for a form". The card
+    // now asks (data-ncd-who), and everything below reads the current answer.
+    let event = trigger.event === 'subscribed' || trigger.event === 'form' ? trigger.event : 'custom';
     const automatic = event !== 'custom';
-    const isForm = event === 'form';
+    let isForm = event === 'form';
+    const whoName = `ncd-who-${Math.random().toString(36).slice(2, 9)}`;
     const name = typeof ui.name === 'string' && ui.name.trim() ? ui.name.trim() : 'Email sequence';
     const goal = typeof ui.goal === 'string' ? ui.goal.trim() : '';
     const warnings = (Array.isArray(ui.warnings) ? ui.warnings : []).filter((w) => typeof w === 'string' && w.trim());
     const lastDay = Number(emails[emails.length - 1].sendDay) || 1;
     const typeLabel = CAMPAIGN_TYPE_LABELS[ui.campaignType] || 'Custom';
     const n = emails.length;
-    const saveLabel = isForm ? 'Save as form email campaign' : automatic ? 'Save as welcome sequence' : `Save as ${n} draft ${n === 1 ? 'email' : 'emails'}`;
+    const saveLabelFor = () => isForm ? 'Save as form email campaign' : automatic ? 'Save as welcome sequence' : `Save as ${n} draft ${n === 1 ? 'email' : 'emails'}`;
+    const startsLabelFor = () => isForm ? 'Starts when someone fills in a form' : 'Starts when someone subscribes';
+    const statusFor = () => isForm
+      ? 'Saving creates this email campaign under Email Campaigns in the Email Studio, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on — nobody is emailed by saving.'
+      : automatic
+        ? 'Saving makes this your welcome sequence, under Email Campaigns in the Email Studio. It stays switched off until you turn it on there — nobody is emailed by saving.'
+        : 'Saving puts each email in your Emails tab as a draft. Nothing is sent to anyone: you send each one to the right people on the right day from the Email Studio.';
     const eyebrow = (s) => `${isDraft ? 'Email campaign draft' : 'Email campaign plan'} · ${s}`;
 
     const el = document.createElement('div');
@@ -1767,10 +1778,21 @@
         <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-white border border-indigo-200 text-indigo-700">${esc(typeLabel)}</span>
         <span class="text-[11px] font-semibold text-gray-500">${esc(`${n} ${n === 1 ? 'email' : 'emails'} over ${lastDay} ${lastDay === 1 ? 'day' : 'days'}`)}</span>
         ${automatic
-          ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 border-emerald-200 text-emerald-800">${isForm ? 'Starts when someone fills in a form' : 'Starts when someone subscribes'}</span>`
+          ? `<span data-ncd-starts class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 border-emerald-200 text-emerald-800">${esc(startsLabelFor())}</span>`
           : '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-amber-50 border-amber-200 text-amber-900">Won’t start by itself</span>'}
       </div>
       ${trigger.description ? `<p class="text-xs text-gray-600 mb-3 break-words">Who it’s for: ${esc(trigger.description)}</p>` : ''}
+      ${automatic && isDraft ? `<fieldset class="bg-white border border-indigo-100 rounded-lg p-3 mb-3" data-ncd-who>
+        <legend class="text-[11px] font-bold text-gray-700 px-1">Who gets these emails?</legend>
+        <label class="flex items-start gap-2 text-sm text-gray-800 cursor-pointer mb-1.5">
+          <input type="radio" name="${whoName}" value="form" class="mt-1" ${isForm ? 'checked' : ''}>
+          <span>Only people who fill in a particular sign-up form <span class="text-gray-500">— e.g. beta testers. You link the form afterwards.</span></span>
+        </label>
+        <label class="flex items-start gap-2 text-sm text-gray-800 cursor-pointer">
+          <input type="radio" name="${whoName}" value="subscribed" class="mt-1" ${isForm ? '' : 'checked'}>
+          <span>Everyone who joins your list <span class="text-gray-500">— this becomes your welcome sequence, replacing the one you have.</span></span>
+        </label>
+      </fieldset>` : ''}
 
       <ol class="space-y-2 mb-3">
         ${emails.map((e, i) => {
@@ -1801,17 +1823,13 @@
 
       ${isDraft ? `<div class="flex flex-wrap items-center gap-2" data-ncd-actions>
         <button type="button" data-ncd-save
-          class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(saveLabel)}</button>
+          class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(saveLabelFor())}</button>
         <button type="button" data-ncd-discard
           class="btn-destructive px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Discard</button>
       </div>` : ''}
       <p class="mt-2 text-xs font-semibold text-indigo-700" data-ncd-status>${!isDraft
         ? 'This is the plan, not the emails yet. Tell me what to change — more or fewer emails, different days — or say “write it” and I’ll draft every one.'
-        : isForm
-          ? 'Saving creates this email campaign under Email Campaigns in the Email Studio, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on — nobody is emailed by saving.'
-        : automatic
-          ? 'Saving makes this your welcome sequence, under Email Campaigns in the Email Studio. It stays switched off until you turn it on there — nobody is emailed by saving.'
-          : 'Saving puts each email in your Emails tab as a draft. Nothing is sent to anyone: you send each one to the right people on the right day from the Email Studio.'}</p>
+        : esc(statusFor())}</p>
     `;
     if (!isDraft) return el;
 
@@ -1862,6 +1880,12 @@
             }
             // There is only one welcome sequence. One that already has emails is replaced only on
             // an explicit yes — somebody's hand-written welcome must not vanish behind a chat card.
+            if (code === 'SEQUENCE_ENABLED') {
+              setBusy(false);
+              setEyebrow('Not saved yet');
+              say('Not saved — your welcome sequence is switched on and already emailing new subscribers, so it can’t be overwritten from here. If these emails are for one sign-up form (such as beta testers), choose “Only people who fill in a particular sign-up form” above and save again.', 'error');
+              return;
+            }
             if (code === 'SEQUENCE_HAS_STEPS' && !replace) {
               const ok2 = typeof window.confirmModal === 'function'
                 ? await window.confirmModal(
@@ -1881,6 +1905,19 @@
         },
       }));
     }
+
+    // The "who gets these emails?" answer re-points everything that describes where Save goes.
+    el.addEventListener('change', (e) => {
+      const pick = e.target.closest && e.target.closest(`input[name="${whoName}"]`);
+      if (!pick) return;
+      event = pick.value === 'form' ? 'form' : 'subscribed';
+      isForm = event === 'form';
+      const btn = el.querySelector('[data-ncd-save]');
+      if (btn) btn.textContent = saveLabelFor();
+      const starts = el.querySelector('[data-ncd-starts]');
+      if (starts) starts.textContent = startsLabelFor();
+      say(statusFor());
+    });
 
     el.addEventListener('click', (e) => {
       if (e.target.closest('[data-ncd-discard]')) {
