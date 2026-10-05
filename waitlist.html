@@ -12,6 +12,7 @@
   <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
   <link rel="manifest" href="/favicon/manifest.json">
   <script src="/waitlist-mode.js" defer></script>
+  <script src="/src/public/assistant-content.js" defer></script>
 </head>
 <body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
 
@@ -34,7 +35,7 @@
       <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold uppercase tracking-wider mb-5">
         <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Private testing
       </span>
-      <h1 class="text-3xl font-extrabold text-gray-900 tracking-tight mb-3">Your AI team is almost ready</h1>
+      <h1 id="waitlist-title" class="text-3xl font-extrabold text-gray-900 tracking-tight mb-3">Your AI team is almost ready</h1>
       <p class="text-base text-gray-600 leading-relaxed mb-8">
         We're putting Be More Swan's assistants through their final checks with a small group of customers.
         Join the waitlist and we'll email you the moment your place opens.
@@ -57,7 +58,10 @@
       <a href="/register.html" class="btn-primary inline-block px-6 py-2.5 rounded-lg font-bold">Create your account</a>
     </div>
 
-    <p class="text-center text-sm text-gray-500 mt-8">
+    <p class="text-center text-sm text-gray-600 mt-8">
+      Want to try it sooner? <a href="/beta.html" class="text-emerald-700 font-bold hover:text-emerald-800">Become a beta tester →</a>
+    </p>
+    <p class="text-center text-sm text-gray-500 mt-2">
       Already a customer? <a href="/login.html" class="text-emerald-700 font-bold hover:text-emerald-800">Log in</a>
     </p>
   </div>
@@ -91,14 +95,27 @@
       document.getElementById('waitlist-fallback').classList.remove('hidden');
       return;
     }
-    // The same snippet a customer pastes into their own site. Injected rather than written into
-    // the HTML because the key is admin-set at runtime; subscribe.js reads its own attributes from
-    // document.currentScript, which a dynamically inserted classic script still has.
-    const tag = document.createElement('script');
-    tag.src = '/subscribe.js';
-    tag.setAttribute('data-bms-form', s.formKey);
-    tag.onerror = () => document.getElementById('waitlist-fallback').classList.remove('hidden');
-    document.body.appendChild(tag);
+    // AREA OF INTEREST. /waitlist.html?role=<roleKey> comes from one assistant's card or page:
+    // pre-select that assistant in the form's "which assistant" choice. Anywhere else (nav, footer,
+    // homepage) means every assistant, so pre-select "All assistants". The choice saves to the
+    // contact as a TAG — set on the form's field in the builder — which is what segments use, so
+    // future marketing can target "everyone waiting for the Lead Generation Assistant". The
+    // visitor sees the choice and can change it; nothing is recorded behind their back.
+    const ALL = 'All assistants';
+    let preselect = [ALL];
+    const roleKey = (new URLSearchParams(location.search).get('role') || '').trim();
+    if (roleKey && window.AssistantContent) {
+      try {
+        await window.AssistantContent.load();
+        const a = window.AssistantContent.get(roleKey);
+        if (a && a.name) {
+          preselect = [a.name, roleKey];
+          document.getElementById('waitlist-title').textContent = `The ${a.name} is almost ready`;
+        }
+      } catch (e) { /* unknown role → all assistants */ }
+    }
+    window.BmsWaitlist.mount(s.formKey, preselect,
+      () => document.getElementById('waitlist-fallback').classList.remove('hidden'));
   });
 </script>
 </body>

@@ -141,10 +141,36 @@
   }
 
   /**
+   * Pre-tick choices from the page the form sits on — e.g. the waitlist opened from one assistant's
+   * card pre-selects that assistant. Matched case-insensitively on an option's value OR its label,
+   * only on choice fields. It sets what the visitor SEES, nothing more: they can change it, and the
+   * server validates the submitted answer against the definition exactly as if they had clicked it.
+   */
+  function applyPreselect(shadow, fields, wanted) {
+    if (!wanted || !wanted.length) return;
+    var want = {};
+    for (var w = 0; w < wanted.length; w++) want[String(wanted[w]).trim().toLowerCase()] = true;
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i];
+      if (f.type !== 'select' && f.type !== 'radio' && f.type !== 'checkbox') continue;
+      var opts = f.options || [];
+      for (var j = 0; j < opts.length; j++) {
+        if (!want[String(opts[j].value).toLowerCase()] && !want[String(opts[j].label).toLowerCase()]) continue;
+        var els = shadow.querySelectorAll('[name="' + f.id.replace(/"/g, '') + '"]');
+        for (var k = 0; k < els.length; k++) {
+          if (els[k].tagName === 'SELECT') { els[k].value = opts[j].value; }
+          else if (els[k].value === opts[j].value) { els[k].checked = true; }
+        }
+        if (f.type !== 'checkbox') break;   // one answer for a select / radio — first match wins
+      }
+    }
+  }
+
+  /**
    * Draw a form.
    * @param def   the public definition
    * @param host  the element to render into (gets a shadow root)
-   * @param opts  { surface: 'embed'|'hosted'|'preview', key, slug, apiBase, preview }
+   * @param opts  { surface: 'embed'|'hosted'|'preview', key, slug, apiBase, preview, preselect: string[] }
    */
   function render(def, host, opts) {
     opts = opts || {};
@@ -188,6 +214,8 @@
         '<p class="bms-m" role="status" aria-live="polite"></p>' +
         (face === 'hosted' ? '<p class="bms-foot">Powered by Be More Swan</p>' : '') +
       '</div>';
+
+    applyPreselect(shadow, fields, opts.preselect);
 
     var shownAt = Date.now();
     var form = shadow.querySelector('form');
@@ -305,7 +333,13 @@
     }
     fetch(apiBase + '/api/audience/form/' + encodeURIComponent(key))
       .then(function (res) { if (!res.ok) throw new Error('form ' + res.status); return res.json(); })
-      .then(function (cfg) { render(cfg.definition || cfg, host, { surface: 'embed', key: key, apiBase: apiBase }); })
+      .then(function (cfg) {
+        // data-bms-preselect="Choice A, Choice B" — see applyPreselect.
+        var pre = (script.getAttribute('data-bms-preselect') || '').split(',');
+        var clean = [];
+        for (var i = 0; i < pre.length; i++) if (pre[i].trim()) clean.push(pre[i].trim());
+        render(cfg.definition || cfg, host, { surface: 'embed', key: key, apiBase: apiBase, preselect: clean });
+      })
       .catch(function (err) { console.error('[bms-subscribe] could not load the form', err); });
   });
 })();

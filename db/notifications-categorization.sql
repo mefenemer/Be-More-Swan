@@ -62,6 +62,7 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'instagram_token_refresh_failed' THEN 'suggested_action'
     WHEN 'instagram_rate_limited' THEN 'suggested_action'
     WHEN 'integration_alert' THEN 'suggested_action'
+    WHEN 'newsletter_sequence_blocked' THEN 'suggested_action'  -- automated emails queued, no way to send
     WHEN 'post_publish_failed' THEN 'suggested_action'
     WHEN 'post_missed' THEN 'suggested_action'
     WHEN 'post_generation_failed' THEN 'suggested_action'

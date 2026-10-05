@@ -462,7 +462,7 @@ function renderCard(a) {
   const cta = _isLoggedIn
     ? `<button onclick="hireAssistant('${escAttr(a.roleKey)}')" class="btn-golive px-4 py-2 rounded-lg text-sm font-semibold transition">Hire Assistant</button>`
     : _waitlistOn
-    ? `<a href="/waitlist.html" onclick="rememberIntendedRole('${escAttr(a.roleKey)}')" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold transition">Join the waitlist</a>`
+    ? `<a href="/waitlist.html?role=${encodeURIComponent(a.roleKey)}" onclick="rememberIntendedRole('${escAttr(a.roleKey)}')" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold transition">Join the waitlist</a>`
     : `<a href="pricing.html" onclick="rememberIntendedRole('${escAttr(a.roleKey)}')" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold transition">Get Started</a>`;
 
   // Every card opens the detail modal on click (buttons/links excluded). This used to be gated on
@@ -774,7 +774,8 @@ function openAssistantDetail(roleKey) {
   window.AssistantDetailModal.open(roleKey, _isLoggedIn
     ? { ctaLabel: 'Hire Role', ctaHref: `assistant-setup.html?roleKey=${encodeURIComponent(roleKey)}` }
     : _waitlistOn
-    ? { ctaLabel: 'Join the waitlist', ctaHref: '/waitlist.html' }
+    // ?role= records this assistant as their area of interest (pre-selected in the waitlist form).
+    ? { ctaLabel: 'Join the waitlist', ctaHref: `/waitlist.html?role=${encodeURIComponent(roleKey)}` }
     : { ctaLabel: 'Get Started', ctaHref: 'pricing.html' });
 }
 

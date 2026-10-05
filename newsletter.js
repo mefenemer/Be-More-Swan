@@ -1902,6 +1902,10 @@
     selectedId: null, sequences: [],
     editing: { stepNumber: 1, design: null, revision: null },
     designer: null,
+    // Is the step form showing? Only while there is something to write: always when the series has
+    // no emails yet, otherwise only after "Add another email" or an email's Edit. A blank form
+    // permanently under the list read as "your email is empty" when it was saved in the list above.
+    formOpen: false,
   };
 
   /** The sequences endpoint, addressed at the series the dialog is showing. */
@@ -1957,6 +1961,7 @@
       seqState.editing.stepNumber = seqState.steps.length + 1;
       seqState.editing.design = null;
       seqState.editing.revision = null;
+      seqState.formOpen = false;
       renderWelcome();
     } catch (err) {
       body.innerHTML = `<p class="text-sm text-red-600">${esc(err.message)}</p>`;
@@ -1993,6 +1998,9 @@
       if (seqSaver) await seqSaver.flush();
       const st = seqState.steps.find((x) => x.stepNumber === n);
       if (!st) return;
+      seqState.formOpen = true;
+      show($('nl-seq-editor'), 'block');
+      hide($('nl-seq-add'));
       $('nl-seq-form-title').textContent = `Edit email ${n}`;
       $('nl-seq-step-number').value = String(n);
       $('nl-seq-subject').value = st.subject || '';
@@ -2062,6 +2070,7 @@
 
     const active = Number(seqState.enrolments.active || 0);
     const completed = Number(seqState.enrolments.completed || 0);
+    const formOpen = !seqState.steps.length || seqState.formOpen;
 
     body.innerHTML = `
       <div class="flex items-center justify-between rounded-xl border border-gray-200 p-4 mb-4">
@@ -2081,8 +2090,12 @@
 
       <div class="space-y-2 mb-4" id="nl-seq-list"></div>
 
-      <div class="rounded-xl border border-gray-200 p-4">
-        <p class="text-sm font-bold text-gray-900 mb-3" id="nl-seq-form-title">Add an email</p>
+      <button type="button" id="nl-seq-add"
+        class="${formOpen ? 'hidden ' : ''}w-full px-4 py-3 text-sm font-bold text-emerald-700 hover:bg-gray-50 rounded-xl border border-dashed border-gray-300 cursor-pointer"
+        ${formOpen ? 'style="display:none"' : ''}>+ Add another email</button>
+
+      <div id="nl-seq-editor" class="${formOpen ? '' : 'hidden '}rounded-xl border border-gray-200 p-4" ${formOpen ? '' : 'style="display:none"'}>
+        <p class="text-sm font-bold text-gray-900 mb-3" id="nl-seq-form-title">${seqState.steps.length ? 'Add another email' : 'Add an email'}</p>
         <input type="hidden" id="nl-seq-step-number" value="${seqState.steps.length + 1}">
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
           <div class="sm:col-span-2">
@@ -2141,6 +2154,7 @@
                this one alone and start a new one", and it says that. Deleting is the row above. -->
           <span id="nl-seq-status" class="mr-auto"></span>
           <button type="button" id="nl-seq-cancel" class="hidden px-4 py-2 text-sm font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer" style="display:none">Add another email</button>
+          ${seqState.steps.length ? '<button type="button" id="nl-seq-done" class="btn-secondary px-4 py-2 text-sm font-bold border rounded-lg cursor-pointer">Done</button>' : ''}
         </div>
       </div>
       <div class="flex justify-end mt-4">
@@ -2159,6 +2173,21 @@
     $('nl-seq-cancel')?.addEventListener('click', async () => {
       if (seqSaver) await seqSaver.flush();
       seqState.editing = { stepNumber: seqState.steps.length + 1, design: null, revision: null };
+      seqState.formOpen = true;
+      renderWelcome();
+      $('nl-seq-subject')?.focus();
+    });
+    $('nl-seq-add')?.addEventListener('click', () => {
+      seqState.editing = { stepNumber: seqState.steps.length + 1, design: null, revision: null };
+      seqState.formOpen = true;
+      renderWelcome();
+      $('nl-seq-subject')?.focus();
+    });
+    // Saving is automatic; Done just puts the form away once what is written is safely saved.
+    $('nl-seq-done')?.addEventListener('click', async () => {
+      if (seqSaver) await seqSaver.flush();
+      seqState.editing = { stepNumber: seqState.steps.length + 1, design: null, revision: null };
+      seqState.formOpen = false;
       renderWelcome();
     });
 
@@ -2272,7 +2301,7 @@
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'enable', enabled: turningOn }),
         });
-        if (res.note) window.showToast(res.note, { duration: 7000 });
+        if (res.note) window.showToast(res.note, { duration: res.sendBlocked ? 12000 : 7000, ...(res.sendBlocked ? { icon: '⚠️' } : {}) });
         await openWelcomeModal();
       } catch (err) { window.showToast(err.message); }
     });

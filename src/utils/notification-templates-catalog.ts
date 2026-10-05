@@ -792,6 +792,20 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        // Written by processDueSequenceSteps when a welcome sequence / email campaign has no way to
+        // send (no verified sending domain, no connected mailbox). It used to stop silently.
+        templateKey: 'newsletter_sequence_blocked',
+        name: 'Automated emails cannot send',
+        category: 'Content',
+        type: 'newsletter_sequence_blocked',
+        title: 'Emails from {{sequence.name}} are waiting to send',
+        message: 'New subscribers are queued for {{sequence.name}}, but {{reason}}',
+        variables: [
+            v('sequence.name', 'Sequence or campaign, as a phrase', 'your welcome sequence'),
+            v('reason', 'What is wrong and how to fix it', 'there is no way to send them yet. Verify a sending domain or connect a mailbox in Email Studio ▸ Sending.'),
+        ],
+    },
+    {
         templateKey: 'blog_content_decay',
         name: 'Blog traffic decay',
         category: 'Content',

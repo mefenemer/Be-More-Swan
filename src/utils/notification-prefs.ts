@@ -272,6 +272,8 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         types: [
             'social_oauth_revoked', 'instagram_token_refresh_failed', 'instagram_rate_limited',
             'instagram_connected', 'linkedin_connected', 'x_connected', 'integration_alert',
+            // No sending domain / mailbox connected, so automated emails are queued, not sent.
+            'newsletter_sequence_blocked',
         ],
     },
     {

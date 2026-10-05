@@ -118,6 +118,10 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     // is PARKED work that DECAYS — a warm reply loses value by the day, and nothing else in the
     // product will answer it. It is not a completed run reporting what it found.
     lead_reply_received: 'suggested_action',
+    // A welcome sequence / email campaign has subscribers queued and no way to send (no verified
+    // domain, no mailbox). suggested_action: it is blocked on the owner, and each queued person
+    // gives up after NO_ROUTE_WAIT_DAYS — work that decays.
+    newsletter_sequence_blocked: 'suggested_action',
     // Leads that will leave the Outreach queue on the retention clock. LAPSING, by definition —
     // the whole point of the notification is the deadline.
     leads_expiring_soon: 'suggested_action',

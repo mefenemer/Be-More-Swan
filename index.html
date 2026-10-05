@@ -111,6 +111,18 @@
 <section class="bg-white py-20 lg:py-24">
     <div class="max-w-7xl mx-auto px-4 flex flex-col md:flex-row items-center gap-12">
         <div class="md:w-1/2 text-left">
+            <!-- Beta notice — shown only while sign-ups are locked for testing (waitlist-mode.js
+                 reveals [data-waitlist-show]). Ships hidden so it never flashes on a live launch. -->
+            <div data-waitlist-show style="display:none"
+               class="hidden flex items-start gap-3 mb-6 p-4 rounded-xl bg-emerald-50 border border-emerald-100">
+                <span class="shrink-0 px-2 py-0.5 rounded-full bg-emerald-700 text-white text-xs font-bold uppercase tracking-wider">Beta</span>
+                <span class="text-sm text-gray-700">
+                    <strong class="text-gray-900">Be More Swan is in beta and we're looking for testers.</strong>
+                    Be one of the first businesses to put an AI team to work —
+                    <a href="/beta.html" class="font-bold text-emerald-700 hover:underline whitespace-nowrap">become a beta tester →</a>
+                    or <a href="/waitlist.html" class="font-bold text-emerald-700 hover:underline whitespace-nowrap">join the waitlist</a> to hear when places open.
+                </span>
+            </div>
             <div class="inline-block px-4 py-1.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold text-sm mb-6 border border-emerald-100">
                 ✨ Your Instant, Autonomous Digital Workforce
             </div>
@@ -126,7 +138,7 @@
             </p>
             <!-- Converted from bg-emerald-700 (Pink) to bg-green-600 (Neon Green) -->
             <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-                <a href="pricing.html" class="btn-golive px-8 py-4 text-lg font-bold rounded-lg shadow-lg hover:shadow-xl transition">
+                <a href="pricing.html" data-waitlist-label="Become a Beta Tester" data-waitlist-href="/beta.html" class="btn-golive px-8 py-4 text-lg font-bold rounded-lg shadow-lg hover:shadow-xl transition">
                     Hire Your Assistant
                 </a>
                 <!-- Launch PLG loop: route browsers straight into the intent-capture catalog -->
