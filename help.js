@@ -276,6 +276,12 @@
         const qs = new URLSearchParams(window.location.search);
         const issueId = qs.get('issue');
         if (issueId) window.addEventListener('load', () => setTimeout(() => window.routeToIssueReport(Number(issueId)), 600));
+        // ?help=<tab> — a direct link to one Help & Support tab, e.g. the beta testers' welcome
+        // email's "share feedback" link (?help=issues / ?help=features). Same timing as ?issue.
+        const helpTab = qs.get('help');
+        if (helpTab && TABS.includes(helpTab)) {
+            window.addEventListener('load', () => setTimeout(() => window.openHelpTab(helpTab), 600));
+        }
     } catch { /* noop */ }
 
     // ── Support tickets ──────────────────────────────────────────────────────────────────────────

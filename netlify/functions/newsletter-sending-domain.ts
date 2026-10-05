@@ -181,7 +181,8 @@ export default withLambda(async (event: HandlerEvent) => {
         }
         if ('replyTo' in body) {
             const reply = String(body.replyTo || '').trim().slice(0, 200);
-            if (reply && !reply.includes('@')) return json(400, { error: 'Reply-to must be an email address.' });
+            // One plain address — no display name, no spaces, no line breaks.
+            if (reply && !/^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(reply)) return json(400, { error: 'Reply-to must be a single email address, like hello@yourbusiness.com.' });
             patch.replyTo = reply || null;
         }
         const [row] = await db.update(newsletterSendingDomains).set(patch)

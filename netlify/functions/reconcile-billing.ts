@@ -12,13 +12,14 @@
 // Mismatches trigger a superadmin in-app notification.
 
 import type { Handler } from '@netlify/functions';
-import { eq, and, inArray, sql } from 'drizzle-orm';
+import { eq, and, inArray, sql, ne } from 'drizzle-orm';
 import Stripe from 'stripe';
 import { getDb } from '../../db/client';
 import {
     plans, organisations, masterPlans, users,
     billingReconciliationLog, usageCounters, taskRuns,
 } from '../../db/schema';
+import { BETA_PLAN_TYPE } from '../../src/utils/beta-testers';
 import { createNotifications } from '../../src/utils/notify';
 import { getPeriodStart } from '../../src/utils/atomic-cap-check';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -74,7 +75,9 @@ async function runReconciliation(): Promise<void> {
                 updatedAt: plans.updatedAt,
             })
             .from(plans)
-            .where(eq(plans.status, 'active'));
+            // Beta plans (src/utils/beta-testers.ts) are free and have NO Stripe subscription by
+            // design — left in, every beta tester would be flagged missing_stripe_sub every night.
+            .where(and(eq(plans.status, 'active'), ne(plans.planType, BETA_PLAN_TYPE)));
 
         totalChecked = dbActivePlans.length;
 
