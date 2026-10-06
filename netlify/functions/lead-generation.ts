@@ -79,6 +79,7 @@ import { evaluateDoNotContact } from '../../src/config/do-not-contact';
 // do-not-contact gate reads the card this produces, so the two paths must not drift apart.
 import { normaliseLeadCard, type LeadScoringCard } from '../../src/lib/discovery-scoring';
 import { classifyEmailKind } from '../../src/config/lead-email-kind';
+import { voiceDirective } from '../../src/utils/voice-profile';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /** Chase reminder for an approved+contacted lead: 3 days out at 09:00, nudged off weekends. */
@@ -295,6 +296,9 @@ export default withLambda(async (event) => {
 
 Ideal customer profile (from setup):
 ${icp}
+
+The outreach email's voice:
+${voiceDirective(onboarding.salesTone, { surface: 'outreach', fallback: 'professional' })}
 
 ${EXCLUDE_PROFILE_RULE} ${EXCLUDE_PROFILE_DNC_RULE}
 
@@ -1266,10 +1270,11 @@ ${OUTREACH_SUBJECT_RULES}`;
             let subject = str(draft?.subject as string, 300);
             let bodyText = str(draft?.body as string, 4000);
             if (!bodyText) {
-                const tone = str(onboarding.salesTone, 40) ?? 'professional';
                 const sendSender = await sender();
                 const system =
-`You write a short, personalised cold outreach email to the lead below, in a ${tone} tone. Under 150 words, no placeholders or brackets.
+`You write a short, personalised cold outreach email to the lead below. Under 150 words, no placeholders or brackets.
+
+${voiceDirective(onboarding.salesTone, { surface: 'outreach', fallback: 'professional' })}
 
 WHO THE EMAIL IS FROM:
 ${senderIdentityBlock(sendSender)}

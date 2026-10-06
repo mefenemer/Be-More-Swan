@@ -70,7 +70,9 @@ export default withLambda(async (event) => {
             // trigger_type/content_source are carried for the same reason: they are asked once, in
             // the social wizard's Operational Setup step, and the blueprint reads them from here —
             // so a partial save from any other surface must not erase them.
-            const CARRY_ACROSS = ['publishPolicy', 'trigger_type', 'content_source'];
+            // allowed_post_shapes / allowed_article_types (profile ▸ Content mix) for the same reason:
+            // re-running the setup wizard must not quietly reset which kinds of content are allowed.
+            const CARRY_ACROSS = ['publishPolicy', 'trigger_type', 'content_source', 'allowed_post_shapes', 'allowed_article_types'];
             const mergedContext = { ...newContext };
             const existingCtx = (existingAssistant.onboardingContext as Record<string, unknown> | null) ?? {};
             for (const key of CARRY_ACROSS) {

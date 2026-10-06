@@ -14,7 +14,7 @@
 // worker runs as a scheduled function, on a far longer budget — the same worker this now uses.
 //
 // The shape mirrors generate-post.ts, the social twin, deliberately:
-//   POST { blogPostId, topic, keywords?, notes?, tone? } → 202 { jobId, status, started }
+//   POST { blogPostId, topic, keywords?, notes?, tone?, articleType? } → 202 { jobId, status, started }
 //   GET  ?jobId=<uuid>                                   → 200 { status, resultBlogPostId, errorMessage }
 //
 // The job carries the blogPostId in `result_blog_post_id`, which is what tells the worker to draft
@@ -129,6 +129,8 @@ export default withLambda(async (event: HandlerEvent) => {
             keywords: typeof body.keywords === 'string' ? body.keywords : undefined,
             notes: typeof body.notes === 'string' ? body.notes : undefined,
             tone: typeof body.tone === 'string' ? body.tone : undefined,
+            // Blog Studio's "Type of article" — validated where it is used (articleTypeByKey).
+            articleType: typeof body.articleType === 'string' ? body.articleType : undefined,
         }),
         // ⚠️ THE DISCRIMINATOR. Pre-set to the post already open in the editor, which is what tells
         // process-blog-jobs to draft into it rather than insert a second one.

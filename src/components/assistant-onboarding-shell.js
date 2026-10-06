@@ -15,6 +15,7 @@
  *     assistantName,          // the instance's current name — prefills the naming step
  *     roleLabel,              // the role title (master_assistants.name) — steers name suggestions
  *     askName,                // default true: open with a "Name your assistant" step
+ *     askMandate,             // default true: then ask the Mandate (onboardingContext.problem_statement)
  *   });
  *   shell.getFormState()      // current answers object
  *   shell.destroy()
@@ -42,6 +43,11 @@
   const NAMES_URL = '/.netlify/functions/generate-names';
   const CHECK_NAME_URL = '/.netlify/functions/check-assistant-name';
   const NAME_KEY = '__assistant_name';
+  // The Mandate — the bottleneck the user hired this assistant to fix. Same key the Social Media
+  // wizard writes and the detail page's Profile ▸ Mandate section reads/edits (#edit_problem), so
+  // every role's answer lands in one place. Asked by the shell for EVERY role (not in the per-role
+  // schemas) — the detail page renders schema fields under Operational Setup, which would show it twice.
+  const MANDATE_KEY = 'problem_statement';
   const SWAN_IMG = '/images/BeMoreSwan_SwanAI.png';
   // Used when the AI name generator is unavailable, so the swan always suggests something.
   const FALLBACK_NAMES = ['Aria', 'Nova', 'Echo', 'Sage', 'Luna', 'Atlas', 'Ember', 'Orion', 'Lyra', 'Zara',
@@ -118,7 +124,7 @@
           <div style="position:relative;">
             <input type="text" name="${escapeHtml(name)}" value="${escapeHtml(value ?? '')}" maxlength="50" autocomplete="off"
               placeholder="e.g. Nova" class="${inputClasses()}" style="padding-right:150px;">
-            <button type="button" data-aos-suggest-name class="btn-assistant aos-swan-btn" title="Let Be More Swan suggest a name" aria-label="Suggest a name">
+            <button type="button" data-aos-suggest-name class="btn-swan-link aos-swan-btn" title="Let Be More Swan suggest a name" aria-label="Suggest a name">
               <img src="${SWAN_IMG}" alt=""> Suggest a name
             </button>
           </div>
@@ -128,6 +134,26 @@
           </div>
           <div data-aos-name-results class="hidden flex flex-wrap gap-2 mt-3"></div>
           <span data-aos-name-taken class="hidden text-red-500 text-xs font-bold mt-2 block">You already have an assistant with this name — please choose another.</span>`;
+
+      case 'mandate': {
+        // Quick-start chips from mandate-suggestions.js (the same set the detail page's Mandate
+        // section offers), keyed by roleKey with the social set as the registry's fallback.
+        const registry = window.MandateSuggestions;
+        const chips = registry ? (registry[field.roleKey] || registry.social_media_manager || []) : [];
+        return `${fieldHeader(field)}
+          ${chips.length ? `
+            <p class="text-xs font-bold text-gray-700 mb-2">Quick start suggestions (click to apply):</p>
+            <div class="flex flex-col gap-2 mb-4">
+              ${chips.map((c, i) => `
+                <button type="button" data-aos-mandate-chip="${i}" title="${escapeHtml(c.text)}"
+                  class="btn-secondary text-left text-sm border rounded-lg p-3 transition shadow-sm cursor-pointer">
+                  <span class="font-bold block mb-1">${escapeHtml(c.title)}</span>
+                  ${escapeHtml(c.text)}
+                </button>`).join('')}
+            </div>` : ''}
+          <textarea name="${escapeHtml(name)}" rows="4" placeholder="${escapeHtml(field.placeholder || '')}"
+            class="${inputClasses()} resize-y">${escapeHtml(value ?? '')}</textarea>`;
+      }
 
       case 'text':
         return `${fieldHeader(field)}
@@ -244,6 +270,26 @@
           required: true,
           requiredMessage: 'Please give your assistant a name.',
           defaultValue: assistantName,
+        }],
+      });
+    }
+
+    // Every role asks its Mandate, straight after naming. Skipped only if a schema already carries
+    // the key itself (so it can never be asked twice) or the caller opts out.
+    const schemaAsksMandate = steps.some((step) => step.fields.some((f) => f.key === MANDATE_KEY));
+    if (props.askMandate !== false && !schemaAsksMandate) {
+      steps.splice(props.askName !== false ? 1 : 0, 0, {
+        title: 'What should your assistant fix?',
+        description: 'This is your assistant\'s mandate — the bottleneck or time-drain you are hiring it to solve. It shapes everything it prioritises, and you can change it any time in its profile.',
+        fields: [{
+          key: MANDATE_KEY,
+          type: 'mandate',
+          roleKey,
+          label: 'Your Bottleneck',
+          required: true,
+          requiredMessage: 'Please describe the bottleneck you want your assistant to solve.',
+          helpText: 'Click a suggestion, or describe it in your own words — the more specific, the smarter your assistant.',
+          placeholder: 'e.g. I lose hours every week to repetitive work that I would rather hand off…',
         }],
       });
     }
@@ -482,6 +528,18 @@
       if (theme) { suggestNames(theme.getAttribute('data-aos-name-theme')); return; }
       const pick = e.target.closest('[data-aos-pick-name]');
       if (pick) { applyName(pick.getAttribute('data-aos-pick-name')); return; }
+      const chip = e.target.closest('[data-aos-mandate-chip]');
+      if (chip) {
+        const registry = window.MandateSuggestions || {};
+        const set = registry[roleKey] || registry.social_media_manager || [];
+        const picked = set[Number(chip.getAttribute('data-aos-mandate-chip'))];
+        const ta = formEl.querySelector(`[name="aos_${MANDATE_KEY}"]`);
+        if (picked && ta) {
+          ta.value = picked.text;
+          formEl.querySelector(`[data-aos-error="${MANDATE_KEY}"]`)?.classList.add('hidden');
+        }
+        return;
+      }
       if (e.target.closest('[data-aos-back]') && currentStep > 0 && !saving) {
         captureCurrentStep();
         currentStep--;

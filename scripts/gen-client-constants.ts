@@ -22,6 +22,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PLATFORM_FORMATS, SOCIAL_PLATFORMS } from '../src/config/platform-formats';
 import { POST_FORMATS } from '../src/config/post-formats';
+import { SOCIAL_POST_SHAPES, BLOG_ARTICLE_TYPES } from '../src/utils/content-shapes';
 import { SCHEDULE_ACTIVE_STATUSES } from '../src/config/post-status';
 import { DEAD_CONNECTION_STATUSES } from '../src/config/connection-status';
 import { OVERLAY_ANIM_S, OVERLAY_ANIMS } from '../src/lib/overlay-geometry';
@@ -805,6 +806,14 @@ ${overlayFontRows}
       return this._p;
     },
     _p: null,
+  };
+
+  // Content mix (assistant profile) and Blog Studio's "Type of article", from
+  // src/utils/content-shapes.ts — the SAME keys the generators rotate through, so a setting can never
+  // name a shape the server does not know. Labels only; the prompt text stays server-side.
+  window.ContentShapes = {
+    socialShapes: ${JSON.stringify(SOCIAL_POST_SHAPES.map(sh => ({ key: sh.key, label: sh.label, summary: sh.summary })))},
+    articleTypes: ${JSON.stringify(BLOG_ARTICLE_TYPES.map(t => ({ key: t.key, label: t.label, summary: t.summary })))},
   };
 
   window.BlogFonts = {

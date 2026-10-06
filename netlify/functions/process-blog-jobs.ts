@@ -220,6 +220,7 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
         let keywords: string | undefined;
         let notes: string | undefined;
         let tone: string | undefined;
+        let articleType: string | undefined;
 
         if (interactive) {
             // The author's own words. A brief that won't decode costs the steer, not the draft —
@@ -231,6 +232,7 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
             keywords = brief?.keywords;
             notes = brief?.notes;
             tone = brief?.tone;
+            articleType = brief?.articleType;
             // NOTE: createdPostId stays null on this path, and that is load-bearing. failJob()
             // DELETES the post it is given, which is right for a half-built autopilot draft and
             // catastrophic here — it is the post the author has open.
@@ -325,6 +327,7 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
             keywords,
             notes,
             tone,
+            articleType,
         });
 
         // SEO, while the body is fresh. This used to be reachable ONLY from Blog Studio's

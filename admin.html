@@ -21,6 +21,8 @@
        for these, so they must exist before anything can run. -->
   <script src="/dialogs.js"></script>
   <link href="./style.css" rel="stylesheet">
+  <script src="/site-theme.js"></script>
+  <script src="/src/public/site-theme-core.js"></script>
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <!-- US-COMMS-1.1: Quill WYSIWYG editor for the email template builder (loaded on demand) -->
   <link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet">
@@ -1506,12 +1508,91 @@
             style="min-width:12rem" class="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:border-pink-400">
         </div>
 
+        <!-- Bulk actions. The bar is always there (select-all lives in it); the count and Delete
+             appear once something is ticked. Delete removes a track from the library for good —
+             see admin-music-library.ts for why a post that already uses one keeps playing. -->
         <div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div id="ml-bulk" class="flex items-center gap-3 px-4 sm:px-5 py-2.5 border-b border-gray-100 bg-gray-50">
+            <label class="inline-flex items-center gap-2 text-xs font-bold text-gray-600 cursor-pointer">
+              <input type="checkbox" id="ml-select-all" onchange="mlSelectAll(this.checked)" class="w-4 h-4 cursor-pointer">
+              Select all shown
+            </label>
+            <span id="ml-selected-count" class="text-xs text-gray-500"></span>
+            <div class="ml-auto flex items-center gap-2">
+              <button type="button" id="ml-clear-selection" onclick="mlClearSelection()" style="display:none"
+                class="btn-secondary px-2.5 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Clear</button>
+              <button type="button" id="ml-delete-selected" onclick="mlDeleteSelected()" style="display:none"
+                class="btn-destructive px-2.5 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Delete selected</button>
+            </div>
+          </div>
           <div id="ml-list" class="divide-y divide-gray-100">
             <p class="text-gray-400 text-xs animate-pulse p-5">Loading…</p>
           </div>
         </div>
       </section>
+
+      <!-- ── Site Styles ───────────────────────────────────────────────────────────────────
+           The look of every page — website, workspace and this portal. Edits are a DRAFT, shown on
+           this portal only; "Set as the Be More Swan standard" publishes them, and open pages pick
+           the change up without a refresh (site-theme.js). Logic: loadSiteStyles() below; tokens
+           and the CSS they produce: src/public/site-theme-core.js. -->
+      <section id="view-site-styles" class="admin-view hidden space-y-5 overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div class="min-w-0">
+            <h2 class="text-xl font-extrabold text-gray-900">Site Styles</h2>
+            <p class="text-sm text-gray-500 mt-0.5">Fonts, text, headings, labels, buttons and borders across the website, workspace and admin portal. Your changes preview on this portal only until you set them as the standard.</p>
+            <p id="sst-status" class="text-xs text-gray-500 mt-2"></p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 shrink-0">
+            <button type="button" id="sst-restore" class="btn-utility px-3 py-2 text-xs font-bold border rounded-lg cursor-pointer">Restore original design</button>
+            <button type="button" id="sst-discard" class="btn-secondary px-3 py-2 text-xs font-bold border rounded-lg cursor-pointer">Discard changes</button>
+            <button type="button" id="sst-publish" class="btn-golive px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Set as Be More Swan standard</button>
+          </div>
+        </div>
+
+        <div class="grid gap-5 items-start" style="grid-template-columns:minmax(0,1fr)">
+          <div id="sst-layout" class="grid gap-5 items-start" style="grid-template-columns:minmax(0,1fr)">
+            <div id="sst-controls" class="space-y-3 min-w-0">
+              <p class="text-gray-400 text-xs animate-pulse">Loading…</p>
+            </div>
+            <!-- Preview: the real classes the product uses, so what you see here is what pages get. -->
+            <div id="sst-preview" class="bg-white border border-gray-200 rounded-2xl p-6 space-y-5 min-w-0" style="position:sticky;top:0">
+              <p class="text-[11px] font-bold uppercase tracking-wider text-gray-400">Preview</p>
+              <div>
+                <h1 class="text-3xl font-extrabold text-gray-900">Your assistant, your voice</h1>
+                <h3 class="text-lg font-bold text-gray-900 mt-2">A section heading</h3>
+                <p class="text-sm text-gray-700 mt-2">This is body text — the paragraphs people read on the website and in the workspace. <a href="#" onclick="return false">This is a link.</a></p>
+                <p class="text-sm text-gray-500 mt-1">Secondary text sits under a heading or a field to explain it.</p>
+                <p class="text-xs text-gray-400 mt-1">Faint text — a timestamp, 3 minutes ago.</p>
+              </div>
+              <div>
+                <label class="block text-sm font-bold text-gray-700 mb-1">A form label</label>
+                <input type="text" placeholder="An input with its border" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white">
+              </div>
+              <div class="bg-gray-50 border border-gray-200 rounded-xl p-4">
+                <p class="text-sm font-bold text-gray-900">A card on the page background</p>
+                <p class="text-xs text-gray-500 mt-1">Bordered panel, with an <span class="text-emerald-700 font-bold">accent</span> and a <span class="inline-block px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-100">pill</span>.</p>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" class="btn-assistant px-3 py-2 text-xs font-bold rounded-lg">Assistant</button>
+                <button type="button" class="btn-primary px-3 py-2 text-xs font-bold rounded-lg">Primary</button>
+                <button type="button" class="btn-golive px-3 py-2 text-xs font-bold rounded-lg">Go live</button>
+                <button type="button" class="btn-secondary px-3 py-2 text-xs font-bold border rounded-lg">Secondary</button>
+                <button type="button" class="btn-destructive px-3 py-2 text-xs font-bold rounded-lg">Delete</button>
+                <button type="button" class="btn-utility px-3 py-2 text-xs font-bold border rounded-lg">Utility</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Shown on every OTHER admin page while an unpublished draft is being previewed here. -->
+      <div id="sst-preview-banner" style="display:none;position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:9000"
+        class="bg-gray-900 text-white text-xs font-bold rounded-full shadow-lg px-4 py-2 items-center gap-3">
+        <span>Previewing unpublished site styles</span>
+        <button type="button" onclick="adminNav('site-styles')" class="underline cursor-pointer">Open Site Styles</button>
+        <button type="button" onclick="sstStopPreview()" class="underline cursor-pointer">Stop preview</button>
+      </div>
 
       <section id="view-workspaces" class="admin-view hidden">
         <div class="flex items-center justify-between flex-wrap gap-3 mb-6">
@@ -2583,6 +2664,7 @@ const VIEW_LABELS = {
   'swan-queue': 'Swan Index — Review Queue', 'swan-front-page': 'Swan Index — Front Page',
   'swan-contributors': 'Swan Index — Contributors',
   'music-library': 'Music Library',
+  'site-styles': 'Site Styles',
 };
 
 // Category → child items mapping.
@@ -2651,6 +2733,9 @@ const ADMIN_CATS = {
     { view: 'feature-flags',        icon: '🚩', label: 'Feature Flags',         perm: 'feature_flags',           group: 'Configuration' },
     { view: 'session-timeout',      icon: '⏱️', label: 'Session Timeout',       perm: 'manage_session_timeout',  group: 'Configuration' },
     { view: 'gamification',         icon: '🎮', label: 'Gamification Settings', perm: 'platform_config',         group: 'Configuration' },
+    // Fonts, text, labels, buttons and borders for the whole product — website, workspace and this
+    // portal. platform_config: an existing permission, so no role data changes before it works.
+    { view: 'site-styles',          icon: '🎨', label: 'Site Styles',           perm: 'platform_config',         group: 'Configuration' },
     { view: 'analytics',            icon: '📈', label: 'Analytics',             perm: 'view_analytics',          group: 'Insights' },
     { view: 'reward-audits',        icon: '🏆', label: 'Reward Audits',         perm: 'platform_config',         group: 'Insights' },
     { view: 'systems',              icon: '🛠️', label: 'Systems & Connections', perm: 'view_system_status',      group: 'Operations' },
@@ -2986,6 +3071,7 @@ function adminNav(view) {
   if (view === 'workspaces')          loadWorkspaces();
   if (view === 'blueprint-inspector') initBlueprintInspector();
   if (view === 'publish-pipeline')    loadPublishPipeline();
+  if (view === 'site-styles')         loadSiteStyles();
   if (view === 'sandbox')             loadSandboxPanel();
   if (view === 'systems')             loadSystemStatus();
   if (view === 'email-templates')     loadEmailTemplates();
@@ -4570,7 +4656,7 @@ async function api(url, opts) {
 // Lists music_tracks with a preview, who uses each, and — for community tracks — which workspace
 // shared it and what they asked for (admins only; the library itself never shows either).
 const ML_API = '/.netlify/functions/admin-music-library';
-const _ml = { source: 'all', status: 'all', q: '', items: [], editing: null, playing: null, audio: null, qTimer: null };
+const _ml = { source: 'all', status: 'all', q: '', items: [], editing: null, playing: null, audio: null, qTimer: null, selected: new Set() };
 const _mlEsc = (v) => window.escapeHtml ? window.escapeHtml(String(v ?? '')) : String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const _mlLen = (s) => { const n = Math.round(Number(s) || 0); return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`; };
 
@@ -4603,6 +4689,9 @@ async function loadMusicLibrary() {
     const params = new URLSearchParams({ source: _ml.source, status: _ml.status, q: _ml.q });
     const data = await api(`${ML_API}?${params}`);
     _ml.items = data.items || [];
+    // A filter change can hide a ticked track; never act on something the admin can no longer see.
+    const shownIds = new Set(_ml.items.map((t) => t.id));
+    _ml.selected = new Set([..._ml.selected].filter((id) => shownIds.has(id)));
     const c = data.counts || {};
     const card = (label, n, sub) => `<div class="bg-white border border-gray-200 rounded-xl p-3">
       <p class="text-[11px] font-bold uppercase tracking-wider text-gray-400">${label}</p>
@@ -4610,15 +4699,68 @@ async function loadMusicLibrary() {
     document.getElementById('ml-counts').innerHTML =
       card('Tracks', c.total) + card('Offered', c.active) + card('Withdrawn', c.withdrawn)
       + card('Community', c.community, 'shared by customers') + card('Curated', c.curated, 'licensed packs');
-    _mlRender(data.truncated);
+    _ml.truncated = !!data.truncated;
+    _mlRender();
   } catch (e) {
     if (host) host.innerHTML = `<p class="p-5 text-sm text-red-600">${_mlEsc(e.message)}</p>`;
   }
 }
 
-function _mlRender(truncated) {
+function _mlRenderBulk() {
+  const n = _ml.selected.size;
+  const all = document.getElementById('ml-select-all');
+  if (all) {
+    all.checked = n > 0 && n === _ml.items.length;
+    all.indeterminate = n > 0 && n < _ml.items.length;
+    all.disabled = !_ml.items.length;
+  }
+  const count = document.getElementById('ml-selected-count');
+  if (count) count.textContent = n ? `${n} selected` : '';
+  ['ml-clear-selection', 'ml-delete-selected'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = n ? '' : 'none';
+  });
+}
+
+function mlToggleSelect(id, on) {
+  if (on) _ml.selected.add(id); else _ml.selected.delete(id);
+  _mlRenderBulk();
+}
+function mlSelectAll(on) {
+  _ml.selected = on ? new Set(_ml.items.map((t) => t.id)) : new Set();
+  _mlRender();
+}
+function mlClearSelection() { mlSelectAll(false); }
+
+async function mlDeleteSelected() {
+  const ids = [..._ml.selected];
+  if (!ids.length) return;
+  const chosen = _ml.items.filter((t) => _ml.selected.has(t.id));
+  const used = chosen.filter((t) => t.workspaces > 0);
+  const names = chosen.slice(0, 5).map((t) => `“${_mlEsc(t.title)}”`).join(', ') + (chosen.length > 5 ? ` and ${chosen.length - 5} more` : '');
+  const reason = await window.promptModal(
+    `${names} will be removed from the library permanently. This cannot be undone.`
+      + (used.length
+        ? ` ${used.length} of them ${used.length === 1 ? 'is' : 'are'} already used by a workspace — those posts keep their sound; only the library entry goes.`
+        : ''),
+    { title: `Delete ${ids.length} track${ids.length === 1 ? '' : 's'}?`, confirmLabel: 'Delete', placeholder: 'Why? (kept in the audit log)', multiline: true });
+  if (reason == null) return;
+  if (!reason.trim()) { window.showToast?.('Say why they are being deleted — it goes in the audit log.'); return; }
+  try {
+    const r = await api(ML_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', ids, reason }) });
+    if (_ml.playing && _ml.selected.has(_ml.playing)) { try { _ml.audio.pause(); } catch {} _ml.playing = null; _ml.audio = null; }
+    _ml.selected = new Set();
+    window.showToast?.(`Deleted ${r.deleted} track${r.deleted === 1 ? '' : 's'}.`
+      + (r.filesKept ? ` ${r.filesKept} audio file${r.filesKept === 1 ? ' was' : 's were'} kept because a post still uses ${r.filesKept === 1 ? 'it' : 'them'}.` : ''));
+    loadMusicLibrary();
+  } catch (e) { window.showToast?.(e.message || 'Could not delete.'); }
+}
+
+function _mlRender() {
+  const truncated = _ml.truncated;
   const host = document.getElementById('ml-list');
   if (!host) return;
+  _mlRenderBulk();
   if (!_ml.items.length) {
     host.innerHTML = '<p class="p-8 text-center text-sm text-gray-400">No tracks match.</p>';
     return;
@@ -4643,6 +4785,8 @@ function _mlRender(truncated) {
     return `
     <div class="p-4 sm:p-5 ${t.isActive ? '' : 'bg-gray-50'}">
       <div class="flex items-start gap-3">
+        <input type="checkbox" aria-label="Select ${_mlEsc(t.title)}" ${_ml.selected.has(t.id) ? 'checked' : ''}
+          onchange="mlToggleSelect(${t.id}, this.checked)" class="shrink-0 w-4 h-4 mt-2 cursor-pointer">
         ${t.previewUrl
           ? `<button type="button" onclick="mlTogglePlay(${t.id})" title="${playing ? 'Stop' : 'Listen'}"
                class="shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-white cursor-pointer" style="background:${playing ? '#111827' : '#d6006b'}">${playing ? '&#9632;' : '&#9654;'}</button>`
@@ -4717,6 +4861,213 @@ async function mlRestore(id) {
     loadMusicLibrary();
   } catch (e) { window.showToast?.(e.message || 'Could not restore.'); }
 }
+
+// ── Site Styles ───────────────────────────────────────────────────────────────
+// Edit the site theme (src/public/site-theme-core.js) and publish it as the standard. The draft is
+// autosaved to the server so a half-finished edit survives a reload, and previewed on THIS portal
+// via window.SiteTheme.preview — nobody else sees it until "Set as Be More Swan standard".
+// Handlers are bound once, on document, at load: the controls are re-rendered and a handler bound
+// from a render path is how a control ends up drawn and dead.
+const SST_API = '/.netlify/functions/site-theme';
+const _sst = { loaded: false, standard: null, draft: null, defaults: null, updatedAt: null, updatedBy: null, saveTimer: null, previewing: false };
+const _sstEsc = (v) => _mlEsc(v);
+
+function _sstSame(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+
+async function loadSiteStyles() {
+  const host = document.getElementById('sst-controls');
+  try {
+    const d = await api(SST_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get' }) });
+    _sst.standard = d.standard; _sst.draft = d.draft; _sst.defaults = d.defaults;
+    _sst.updatedAt = d.updatedAt; _sst.updatedBy = d.updatedBy; _sst.loaded = true;
+    _sstLayout();
+    _sstRenderControls();
+    _sstApplyPreview();
+  } catch (e) {
+    if (host) host.innerHTML = `<p class="text-sm text-red-600">${_sstEsc(e.message)}</p>`;
+  }
+}
+
+/** Two columns when there is room for both, one otherwise. */
+function _sstLayout() {
+  const l = document.getElementById('sst-layout');
+  if (l) l.style.gridTemplateColumns = window.innerWidth >= 1100 ? 'minmax(0,1fr) minmax(320px,420px)' : 'minmax(0,1fr)';
+}
+window.addEventListener('resize', _sstLayout);
+
+function _sstControl(t) {
+  const v = _sst.draft[t.key];
+  const isDefault = v === t.default;
+  const differsFromStandard = v !== _sst.standard[t.key];
+  const reset = isDefault ? '' : `<button type="button" data-sst-reset="${t.key}" title="Back to the original design" class="text-[11px] font-bold text-gray-400 hover:text-gray-700 cursor-pointer">↺ Original</button>`;
+  let input;
+  if (t.type === 'color') {
+    input = `<div class="flex items-center gap-2">
+      <input type="color" data-sst="${t.key}" value="${_sstEsc(v)}" class="w-9 h-9 rounded-lg border border-gray-300 cursor-pointer p-0.5 bg-white">
+      <input type="text" data-sst-hex="${t.key}" value="${_sstEsc(v)}" maxlength="7" class="w-24 text-xs font-mono border border-gray-300 rounded-lg px-2 py-2 bg-white">
+    </div>`;
+  } else {
+    const options = t.type === 'font'
+      ? SiteThemeCore.FONTS.map((f) => ({ value: f.value, label: f.label }))
+      : t.options;
+    input = `<select data-sst="${t.key}" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2 bg-white cursor-pointer">
+      ${options.map((o) => `<option value="${_sstEsc(o.value)}" ${String(v ?? '') === o.value ? 'selected' : ''}>${_sstEsc(o.label)}</option>`).join('')}
+    </select>`;
+  }
+  return `<div class="py-2.5">
+    <div class="flex items-center justify-between gap-2 mb-1">
+      <span class="text-xs font-bold text-gray-700">${_sstEsc(t.label)}${differsFromStandard ? ' <span class="ml-1 text-[10px] font-bold text-amber-700">● changed</span>' : ''}</span>
+      ${reset}
+    </div>
+    ${input}
+    ${t.help ? `<p class="text-[11px] text-gray-400 mt-1">${_sstEsc(t.help)}</p>` : ''}
+  </div>`;
+}
+
+function _sstRenderControls() {
+  const host = document.getElementById('sst-controls');
+  if (!host || !_sst.loaded) return;
+  const open = new Set([...host.querySelectorAll('details[open]')].map((d) => d.dataset.group));
+  if (!open.size) open.add('fonts');
+  host.innerHTML = SiteThemeCore.GROUPS.map((g) => {
+    const changes = g.tokens.filter((t) => _sst.draft[t.key] !== _sst.standard[t.key]).length;
+    return `<details data-group="${g.id}" ${open.has(g.id) ? 'open' : ''} class="bg-white border border-gray-200 rounded-xl">
+      <summary class="px-4 py-3 text-sm font-bold text-gray-900 cursor-pointer select-none flex items-center justify-between">
+        <span>${_sstEsc(g.title)}</span>
+        ${changes ? `<span class="text-[11px] font-bold text-amber-700">${changes} unpublished</span>` : ''}
+      </summary>
+      <div class="px-4 pb-2 border-t border-gray-100 ${g.tokens.length > 2 ? 'grid gap-x-5' : ''}" style="${g.tokens.length > 2 ? 'grid-template-columns:repeat(auto-fill,minmax(220px,1fr))' : ''}">
+        ${g.tokens.map(_sstControl).join('')}
+      </div>
+    </details>`;
+  }).join('');
+  _sstStatus();
+}
+
+function _sstStatus() {
+  const el = document.getElementById('sst-status');
+  const dirty = !_sstSame(_sst.draft, _sst.standard);
+  const when = _sst.updatedAt ? new Date(_sst.updatedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : null;
+  if (el) {
+    el.innerHTML = (when ? `Standard set ${_sstEsc(when)}${_sst.updatedBy ? ' by ' + _sstEsc(_sst.updatedBy) : ''}.` : 'The standard is the original Be More Swan design.')
+      + (dirty ? ' <span class="font-bold text-amber-700">You have unpublished changes — only this portal shows them.</span>' : '');
+  }
+  const pub = document.getElementById('sst-publish');
+  if (pub) pub.disabled = !dirty;
+  const dis = document.getElementById('sst-discard');
+  if (dis) dis.disabled = !dirty;
+  const res = document.getElementById('sst-restore');
+  if (res) res.disabled = _sstSame(_sst.draft, _sst.defaults);
+}
+
+/** Show the draft on this portal — or the standard, once they match. */
+function _sstApplyPreview() {
+  if (!window.SiteTheme || !_sst.loaded) return;
+  const dirty = !_sstSame(_sst.draft, _sst.standard);
+  if (dirty) {
+    window.SiteTheme.preview(SiteThemeCore.themeCss(_sst.draft), SiteThemeCore.fontUrl(_sst.draft));
+  } else {
+    window.SiteTheme.endPreview();
+  }
+  _sst.previewing = dirty;
+  _sstBanner();
+}
+
+function _sstBanner() {
+  const b = document.getElementById('sst-preview-banner');
+  if (!b) return;
+  const onPage = !document.getElementById('view-site-styles')?.classList.contains('hidden');
+  b.style.display = _sst.previewing && !onPage ? 'flex' : 'none';
+}
+// The banner follows navigation; adminNav toggles the views' `hidden`, so watch for that.
+new MutationObserver(_sstBanner).observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['class'] });
+
+function sstStopPreview() {
+  _sst.previewing = false;
+  window.SiteTheme && window.SiteTheme.endPreview();
+  _sstBanner();
+}
+
+function _sstSet(key, value) {
+  _sstCommit(SiteThemeCore.normalizeTheme({ ..._sst.draft, [key]: value }));
+}
+
+/** Adopt a whole new draft: preview it, redraw the controls, autosave. */
+function _sstCommit(draft) {
+  _sst.draft = SiteThemeCore.normalizeTheme(draft);
+  _sstApplyPreview();
+  _sstRenderControls();
+  clearTimeout(_sst.saveTimer);
+  _sst.saveTimer = setTimeout(() => {
+    api(SST_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'saveDraft', theme: _sst.draft }) })
+      .catch((e) => window.showToast?.('Draft not saved: ' + e.message));
+  }, 700);
+}
+
+// Colour pickers fire `input` continuously while dragging — preview those without re-rendering the
+// controls underneath the pointer (a re-render mid-drag closes the native picker).
+document.addEventListener('input', (e) => {
+  const c = e.target.closest('input[type="color"][data-sst]');
+  if (!c || !_sst.loaded) return;
+  const key = c.getAttribute('data-sst');
+  _sst.draft = SiteThemeCore.normalizeTheme({ ..._sst.draft, [key]: c.value });
+  const hex = document.querySelector(`[data-sst-hex="${key}"]`);
+  if (hex) hex.value = c.value;
+  _sstApplyPreview();
+});
+document.addEventListener('change', (e) => {
+  if (!_sst.loaded) return;
+  const el = e.target.closest('[data-sst]');
+  if (el) { _sstSet(el.getAttribute('data-sst'), el.value); return; }
+  const hex = e.target.closest('[data-sst-hex]');
+  if (hex) {
+    const v = hex.value.trim();
+    if (!/^#?[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(v)) { window.showToast?.('Use a hex colour, like #d6006b.'); hex.value = _sst.draft[hex.getAttribute('data-sst-hex')]; return; }
+    _sstSet(hex.getAttribute('data-sst-hex'), v.startsWith('#') ? v : '#' + v);
+  }
+});
+document.addEventListener('click', async (e) => {
+  const reset = e.target.closest('[data-sst-reset]');
+  if (reset) { const k = reset.getAttribute('data-sst-reset'); _sstSet(k, _sst.defaults[k] ?? ''); return; }
+  if (e.target.closest('#sst-discard')) {
+    _sstCommit({ ..._sst.standard });
+    return;
+  }
+  if (e.target.closest('#sst-restore')) {
+    const ok = await window.confirmModal('Every setting goes back to the original Be More Swan design in your draft. Nothing changes for anyone else until you set it as the standard.',
+      { title: 'Restore the original design?', confirmLabel: 'Restore', cancelLabel: 'Keep my changes' });
+    if (!ok) return;
+    _sstCommit({ ..._sst.defaults });
+    return;
+  }
+  if (e.target.closest('#sst-publish')) {
+    const changed = SiteThemeCore.TOKENS.filter((t) => _sst.draft[t.key] !== _sst.standard[t.key]);
+    if (!changed.length) return;
+    const ok = await window.confirmModal(
+      `${changed.length} setting${changed.length === 1 ? '' : 's'} will change for every visitor and customer — the website, the workspace and the admin portal. Open pages update within about half a minute, without a refresh.`,
+      { title: 'Set as the Be More Swan standard?', confirmLabel: 'Set as standard', cancelLabel: 'Not yet' });
+    if (!ok) return;
+    const btn = document.getElementById('sst-publish');
+    btn.disabled = true; btn.textContent = 'Publishing…';
+    try {
+      clearTimeout(_sst.saveTimer);
+      const r = await api(SST_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'publish', theme: _sst.draft }) });
+      _sst.standard = { ..._sst.draft };
+      _sst.updatedAt = r.version; _sst.updatedBy = null;
+      _sst.previewing = false;
+      // Adopt it here and broadcast it to every other open tab in this browser straight away.
+      window.SiteTheme && window.SiteTheme.published(r);
+      _sstRenderControls();
+      _sstBanner();
+      window.showToast?.('Set as the Be More Swan standard. Open pages will update shortly.');
+    } catch (err) {
+      window.showToast?.(err.message || 'Could not publish.');
+    } finally {
+      btn.textContent = 'Set as Be More Swan standard';
+      _sstStatus();
+    }
+  }
+});
 
 // ── Issue Reports (Testing) ──────────────────────────────────────────────────
 const IR_API = '/.netlify/functions/admin-issue-reports';

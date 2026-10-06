@@ -43,41 +43,60 @@
     return s.direction === 'inbound' ? '← in' : s.direction === 'two_way' ? '⇄ 2-way' : '→ out';
   }
 
-  // Card action — mirrors integrations.html ctaFor(): connect-first gate, enable, or the
-  // enabled toggle + configure + remove cluster. No tier-3 upvote here (filtered out).
-  function ctaFor(s) {
+  // One recipe = one ROW, in the same list language as the connector rows below it
+  // (integrations.js _connRow — the Social Media Assistant's Connections layout): icon, title,
+  // provider + direction, the ONE control that matters in its state, and Configure / Remove
+  // behind ⋮. Mirrors integrations.html ctaFor()'s states: connect-first gate, enable, or the
+  // enabled switch. No tier-3 upvote here (filtered out). Handlers are delegated (wireOnce).
+  const ROW_BTN = 'shrink-0 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
+
+  function controlFor(s) {
     if (s.active) {
       const on = s.active.isEnabled;
-      const dot = on ? 'bg-emerald-600' : 'bg-gray-400';
-      return '<div class="flex items-center gap-2">' +
-        '<button type="button" data-toggle="' + s.active.id + '" data-enabled="' + (on ? '1' : '0') + '" class="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm font-bold text-gray-700 cursor-pointer"><span class="w-1.5 h-1.5 rounded-full ' + dot + '"></span>' + (on ? 'Enabled' : 'Disabled') + '</button>' +
-        '<button type="button" data-config="' + s.id + '" class="btn-secondary grow px-3 py-2 border text-sm font-bold rounded-lg cursor-pointer">Configure</button>' +
-        '<button type="button" data-remove="' + s.active.id + '" class="px-3 py-2 text-gray-400 hover:text-red-600 text-sm font-bold rounded-lg cursor-pointer" title="Remove">✕</button>' +
-      '</div>';
+      // The click lands on the input (the label forwards it), which carries data-toggle.
+      return '<label class="relative shrink-0 cursor-pointer" title="' + (on ? 'Enabled — click to pause' : 'Paused — click to enable') + '">' +
+        '<input type="checkbox" class="sr-only peer" data-toggle="' + s.active.id + '" data-enabled="' + (on ? '1' : '0') + '" aria-label="' + esc(s.title) + ' enabled"' + (on ? ' checked' : '') + '>' +
+        '<span class="block w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-emerald-700 peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-200 transition-colors after:content-[\'\'] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:shadow-sm after:transition-all peer-checked:after:translate-x-full peer-checked:after:border-white"></span>' +
+      '</label>';
     }
     // Tier-1 recipes need the provider connected first; tier-2 (webhook) and connection-optional
     // (e.g. email) providers enable directly.
     if (s.tier !== 2 && !s.connection && !s.connectionOptional) {
-      return '<a href="/api/oauth/' + esc(s.providerKey) + '/connect" class="block w-full text-center px-4 py-2 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-sm font-bold rounded-lg transition">Connect ' + esc(s.providerName) + ' first</a>';
+      return '<a href="/api/oauth/' + esc(s.providerKey) + '/connect" class="' + ROW_BTN + ' btn-primary border-transparent">Connect ' + esc(s.providerName) + '</a>';
     }
-    return '<button type="button" data-config="' + s.id + '" class="btn-primary w-full px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer">Enable</button>';
+    return '<button type="button" data-config="' + s.id + '" class="' + ROW_BTN + ' btn-primary border-transparent">Enable</button>';
   }
 
   function card(s) {
     const connected = s.active || s.connection || s.connectionOptional || s.tier === 2;
-    const statusPill = s.active
-      ? '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border ' + (s.active.isEnabled ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-100 text-gray-500 border-gray-200') + '">' + (s.active.isEnabled ? '✓ Enabled' : 'Disabled') + '</span>'
-      : connected
-        ? '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-500 border-gray-200">Not enabled</span>'
-        : '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">⚠ Connect ' + esc(s.providerName) + '</span>';
-    return '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">' +
-      '<div class="flex items-start justify-between gap-2">' +
-        '<div class="flex items-center gap-2 flex-wrap">' + statusPill + '<span class="text-xs font-semibold text-gray-400">' + dirLabel(s) + '</span></div>' +
-        '<span class="text-xs font-semibold text-gray-400">' + esc(s.providerName) + '</span>' +
+    const stateText = s.active
+      ? (s.active.isEnabled ? 'Enabled' : 'Paused')
+      : connected ? 'Not enabled' : 'Connect ' + esc(s.providerName) + ' first';
+    const manage = s.active
+      ? '<div class="flex items-center gap-2 flex-wrap">' +
+          '<button type="button" data-config="' + s.id + '" class="' + ROW_BTN + ' btn-secondary">Configure</button>' +
+          '<button type="button" data-remove="' + s.active.id + '" class="' + ROW_BTN + ' btn-destructive">Remove</button>' +
+        '</div>' +
+        '<p class="text-xs text-gray-500 mt-2">' + esc(s.description) + '</p>'
+      : '';
+    const kebab = manage
+      ? '<button type="button" aria-label="Manage ' + esc(s.title) + '" aria-expanded="false"' +
+          ' onclick="var p=this.closest(\'[data-conn-row]\').querySelector(\'[data-conn-manage]\');var o=p.classList.toggle(\'hidden\');this.setAttribute(\'aria-expanded\',String(!o))"' +
+          ' class="shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition cursor-pointer">' +
+          '<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z"/></svg>' +
+        '</button>'
+      : '<span class="shrink-0 w-8"></span>';
+    return '<div data-conn-row="recipe-' + esc(s.id) + '" class="px-4 py-3">' +
+      '<div class="flex items-center gap-3">' +
+        '<div class="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center text-base shrink-0">⚡</div>' +
+        '<div class="flex-1 min-w-0">' +
+          '<p class="text-sm font-bold text-gray-900 truncate" title="' + esc(s.description) + '">' + esc(s.title) + '</p>' +
+          '<p class="text-xs ' + (connected ? 'text-gray-500' : 'text-amber-700') + ' truncate">' + esc(s.providerName) + ' ' + dirLabel(s) + ' · ' + stateText + '</p>' +
+        '</div>' +
+        controlFor(s) +
+        kebab +
       '</div>' +
-      '<div class="grow"><p class="font-bold text-gray-900">' + esc(s.title) + '</p>' +
-        '<p class="text-sm text-gray-500 mt-1">' + esc(s.description) + '</p></div>' +
-      ctaFor(s) +
+      (manage ? '<div data-conn-manage class="hidden mt-2 pl-11">' + manage + '</div>' : '') +
     '</div>';
   }
 
@@ -102,7 +121,7 @@
     // No heading here — the unified "Synced actions" heading lives in assistant-detail.html
     // above this host, so these enable-able recipe cards read as part of that one section.
     h.innerHTML =
-      '<div class="grid grid-cols-1 sm:grid-cols-2 gap-5 items-start">' + list.map(card).join('') + '</div>';
+      '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm divide-y divide-gray-100">' + list.map(card).join('') + '</div>';
   }
 
   async function load() {

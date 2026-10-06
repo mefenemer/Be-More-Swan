@@ -309,6 +309,8 @@
     }).join('');
   }
 
+  const NEW_SEGMENT = '__new_segment';
+
   function fillSegments() {
     const sel = $('nl-segment');
     if (!sel) return;
@@ -320,7 +322,9 @@
     const tags = state.segments.filter((s) => s.kind === 'tag');
     sel.innerHTML = '<option value="">Everyone subscribed</option>'
       + (segs.length ? `<optgroup label="Segments">${segs.map(opt).join('')}</optgroup>` : '')
-      + (tags.length ? `<optgroup label="Tags">${tags.map(opt).join('')}</optgroup>` : '');
+      + (tags.length ? `<optgroup label="Tags">${tags.map(opt).join('')}</optgroup>` : '')
+      // Build the missing audience here instead of leaving the email for the Audience view.
+      + (window.AudienceSegmentBuilder ? `<option value="${NEW_SEGMENT}">+ Create a new segment…</option>` : '');
   }
 
   function renderVarChips() {
@@ -390,6 +394,7 @@
       $('nl-preheader').value = issue.preheader || '';
       $('nl-body').value = issue.bodyMarkdown || '';
       $('nl-segment').value = issue.segmentId ? String(issue.segmentId) : '';
+      $('nl-segment').dataset.prev = $('nl-segment').value;
       state.revision = null;
       hide($('nl-revision'));
       renderPurpose(issue);
@@ -3132,6 +3137,24 @@
     document.querySelectorAll('[data-nl-improve-close]').forEach((el) => el.addEventListener('click', () => hide($('nl-improve-modal'))));
 
     $('nl-segment')?.addEventListener('change', async () => {
+      const sel = $('nl-segment');
+      if (sel.value === NEW_SEGMENT) {
+        // Put the old choice back while the builder is open: cancelling must leave the email
+        // addressed exactly as it was, and nothing may save the sentinel as an audience.
+        sel.value = sel.dataset.prev || '';
+        window.AudienceSegmentBuilder.open({
+          onSaved: (segment) => {
+            if (!segment) return;
+            state.segments = [...state.segments.filter((s) => s.id !== segment.id), segment];
+            fillSegments();
+            sel.value = String(segment.id);
+            sel.dispatchEvent(new Event('change'));
+            window.showToast(`Segment “${segment.name}” created — this email now goes to it.`);
+          },
+        }).catch((err) => window.showToast(err.message || 'Could not open the segment builder.'));
+        return;
+      }
+      sel.dataset.prev = sel.value;
       // Re-ask the server rather than counting locally: the number depends on contact status,
       // which this page does not hold.
       try {

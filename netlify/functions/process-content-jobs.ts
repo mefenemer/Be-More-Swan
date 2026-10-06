@@ -18,6 +18,8 @@ import {
 } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { gatewayGenerate, isUpstreamBlocked } from '../../src/lib/ai-gateway';
+import { voiceDirective } from '../../src/utils/voice-profile';
+import { socialShapeLine } from '../../src/utils/content-shapes';
 import { buildInspoBlock } from '../../src/utils/inspo-profile';
 import { pickInspoTopic } from '../../src/utils/inspo-topics';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmark';
@@ -448,7 +450,9 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // cycling through ALL styles instead of aliasing onto one. On-demand jobs (no slot) stay free.
         const HOOK_STYLES = [
             'a provocative question aimed straight at the target reader',
-            'a surprising statistic or a concrete number',
+            // Was "a surprising statistic or a concrete number" — which the NO INVENTED STATISTICS
+            // standard then forbade, so one slot in seven was told to do the thing it may not do.
+            'one concrete, specific real-life detail (a time, a place, a small moment)',
             'a short, vivid "this is you right now" scenario (one or two lines)',
             'a widely-believed myth stated plainly, then busted',
             'a bold, mildly contrarian claim',
@@ -570,14 +574,29 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // applies without a blueprint recompile; section 6's copy is the fallback.
         const operationalLines = operationalSetupLines(brandCtx, answers);
 
+        // VOICE — the tone setting expanded into concrete writing rules (src/utils/voice-profile.ts).
+        // One bare adjective ("…in a Casual voice") made every tone read the same. Read LIVE from onboardingContext
+        // first, like brand hashtags above: section 5/6 are hire-time snapshots, so an edited tone
+        // otherwise kept drafting in the old voice until the blueprint was recompiled.
+        const liveTone = typeof brandCtx.tone_of_voice === 'string' && brandCtx.tone_of_voice.trim()
+            ? brandCtx.tone_of_voice
+            : tone;
+        const voiceBlock = voiceDirective(liveTone, { surface: 'social', fallback: 'professional' });
+        // SHAPE — which kind of post this slot is (story, short thought, opinion, list…) and how long.
+        // Assigned per slot like the hook, so a feed stops being the same template every day.
+        // Restricted to the shapes the owner allows (profile ▸ Content mix); all of them when unset.
+        const shapeLine = socialShapeLine(job.target_publish_date, brandCtx.allowed_post_shapes);
+
         const baseInstruction = [
             `You are ${assistantName}, a social media assistant for ${businessName}.`,
-            `Generate a ${promptPlatform} post targeting ${audience} in a ${tone} voice.`,
+            `Generate a ${promptPlatform} post targeting ${audience}.`,
+            voiceBlock,
             `Follow all strict and content rules in the system prompt.`,
             // Before the creative direction: these bound what the post may claim, and a constraint
             // stated after the brief reads as an afterthought.
             ...operationalLines,
             formatBlock,
+            shapeLine,
             strategyBlock,
             platformStrategyLine,
             hookLine,

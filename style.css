@@ -5600,4 +5600,11 @@ button:not(:disabled), [role="button"]:not([aria-disabled="true"]), summary {
     opacity: .5;
     cursor: not-allowed;
   }
+
+  /* The swan's "Suggest …" — NOT a pill. The swan icon is pink, so on the assistant's pink fill it
+     disappeared (user, 2026-10-06). Swan + words in brand pink on no background, like a link. */
+  .btn-swan-link { background-color: transparent; color: #d6006b; border-color: transparent; transition: color .15s ease; }
+  .btn-swan-link:hover:not(:disabled) { color: #b0005a; text-decoration: underline; text-underline-offset: 2px; }
+  .btn-swan-link:focus-visible { outline: 2px solid #ff007f; outline-offset: 2px; }
+  .btn-swan-link:disabled { opacity: .5; cursor: not-allowed; }
 }

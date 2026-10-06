@@ -477,9 +477,16 @@ await check('the blog prompt states a length, because layouts made drafts shorte
     // the same number of sections and thinned every one. Without a stated length, adding layouts
     // would have quietly downgraded every blog post the product writes. Deleting this line is a
     // silent content regression, which is why it is pinned here.
+    // The range now varies by ARTICLE TYPE (2026-10-06 — an opinion piece is shorter than a guide),
+    // but it must still be STATED for every type, and the prompt must still point at it.
     const gen = read('src/utils/blog-generate.ts');
-    assert.match(gen, /Write 900–1,200 words in total/);
+    assert.match(gen, /Write the word count the ARTICLE TYPE gives/);
     assert.match(gen, /not a sentence under a heading/);
+    const shapes = read('src/utils/content-shapes.ts');
+    const types = shapes.slice(shapes.indexOf('export const BLOG_ARTICLE_TYPES'), shapes.indexOf('export function blogArticleTypeFor'));
+    const briefs = [...types.matchAll(/brief: '([^']*(?:\\'[^']*)*)'/g)].map((m) => m[1]);
+    assert.ok(briefs.length >= 6, `found ${briefs.length} article types`);
+    for (const b of briefs) assert.match(b, /\d[\d,]*–[\d,]+ words\./, `an article type states no word range: ${b.slice(0, 60)}`);
     // The email side must NOT inherit it — an inbox wants 200–400 words.
     assert.strictEqual(read('src/utils/newsletter-generate.ts').includes('900–1,200'), false);
 });

@@ -26,6 +26,7 @@ import { buildInspoBlock } from './inspo-profile';
 import { currentDatePromptBlock } from './current-date-prompt';
 import { resolvePostingSchedule } from '../config/posting-cadence';
 import { buildBlueprintGuardrailsBlock, DEFAULT_TONE, str } from './blog-generate';
+import { voiceDirective } from './voice-profile';
 import { parseModelJson, salvageStringField } from './model-json';
 import { validateMergeVars } from './email-template';
 import {
@@ -364,7 +365,7 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
             // "as we head into 2025" is visible in every inbox and dates the whole product.
             `${currentDatePromptBlock({ publishDate: issue.scheduledFor, timezone })}\n\n` +
             `You are writing an email newsletter${org?.name ? ` for ${org.name}` : ''}, sent to people who ` +
-            `subscribed to hear from them. Write in a ${tone} tone.\n` +
+            `subscribed to hear from them.\n${voiceDirective(tone, { surface: 'email', fallback: DEFAULT_TONE })}\n` +
             (assistantPrompt ? `Voice guidance: ${assistantPrompt}\n` : '') +
             'Return ONLY a JSON object with exactly these keys:\n' +
             '  "subject"    — the subject line. Under 60 characters, specific, no clickbait, no emoji spam.\n' +
@@ -665,7 +666,7 @@ export async function refineEmailCopy(db: Db, args: {
         max_tokens: 2500,
         system:
             `You are revising an email newsletter that has already been written and read by the `
-            + `person who owns it. Write in a ${tone} tone.\n`
+            + `person who owns it. Keep it in their voice.\n${voiceDirective(tone, { surface: 'email', fallback: DEFAULT_TONE })}\n`
             + (assistantPrompt ? `Voice guidance: ${assistantPrompt}\n` : '')
             + `\nTHE CHANGE THEY ASKED FOR: ${instruction}\n\n`
             // The whole point of the route. Everything below is a prohibition, deliberately.
@@ -809,7 +810,7 @@ export async function draftSequenceEmail(db: Db, opts: SequenceDraftOptions): Pr
         system:
             `You are writing email ${opts.stepNumber} of a welcome series${org?.name ? ` for ${org.name}` : ''}, `
             + `sent automatically to somebody who has just confirmed they want to hear from them. `
-            + `Write in a ${tone} tone.\n`
+            + `${voiceDirective(tone, { surface: 'email', fallback: DEFAULT_TONE })}\n`
             + (assistantPrompt ? `Voice guidance: ${assistantPrompt}\n` : '')
             + (opts.stepNumber === 1
                 ? 'This is the FIRST thing they will ever receive. Thank them once, say who the '

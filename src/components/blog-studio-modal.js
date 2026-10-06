@@ -575,6 +575,10 @@
     + '      <div id="bs-ai-draft-form" class="bs-panel bs-hidden" style="margin-bottom:12px;">'
     + '        <div class="bs-field"><label>Topic</label><input id="bs-ai-topic" placeholder="e.g. AI for small teams"></div>'
     + '        <div class="bs-field"><label>Keywords (optional)</label><input id="bs-ai-keywords" placeholder="comma,separated"></div>'
+    // The kind of article — guide, opinion, true story… (src/utils/content-shapes.ts via the
+    // generated constants). Default lets the assistant rotate through its Content mix, which is
+    // what keeps posts from all sharing one structure; picking one is for "I want a story THIS time".
+    + '        <div class="bs-field"><label>Type of article</label><select id="bs-ai-type">' + articleTypeOptions() + '</select></div>'
     + '        <div class="bs-row" style="margin-top:8px;">'
     + '          <button type="button" id="bs-ai-draft-go" class="bs-btn bs-btn-primary">Draft it</button>'
     + '          <button type="button" id="bs-ai-draft-cancel" class="bs-btn bs-btn-ghost">Cancel</button>'
@@ -824,6 +828,7 @@
       keywords: el('bs-ai-keywords').value.trim(),
       notes: '',
       tone: assistantTone(),
+      articleType: (el('bs-ai-type') && el('bs-ai-type').value) || undefined,
     }) }).then(function (gen) {
       if (!gen.ok || !gen.body || !gen.body.jobId) {
         aiDraftBusy(false);
@@ -2426,7 +2431,15 @@
     ['bs-ai-form', 'bs-pexels-form'].forEach(function (id) { var e = el(id); if (e) e.classList.add('bs-hidden'); });
     ['bs-action-status'].forEach(function (id) { setBanner(id, ''); });
     var f = el('bs-ai-draft-form'); if (f) f.classList.add('bs-hidden');
-    ['bs-ai-topic', 'bs-ai-keywords'].forEach(function (id) { var e = el(id); if (e) e.value = ''; });
+    ['bs-ai-topic', 'bs-ai-keywords', 'bs-ai-type'].forEach(function (id) { var e = el(id); if (e) e.value = ''; });
+  }
+
+  /** <option>s for "Type of article". Empty value = let the assistant choose. */
+  function articleTypeOptions() {
+    var types = (window.ContentShapes && window.ContentShapes.articleTypes) || [];
+    return '<option value="">Let my assistant choose</option>' + types.map(function (t) {
+      return '<option value="' + bsEscape(t.key) + '">' + bsEscape(t.label + ' \u2014 ' + t.summary) + '</option>';
+    }).join('');
   }
 
   /**

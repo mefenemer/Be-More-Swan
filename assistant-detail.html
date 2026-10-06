@@ -10,11 +10,14 @@
   #detail-name-input:focus { border-bottom-style: solid; border-bottom-color: #ff007f; }
   .detail-name-edit { display:inline-flex; align-items:center; color:#9ca3af; cursor:pointer; padding:2px; border-radius:6px; background:none; border:0; }
   .detail-name-edit:hover { color:#374151; background:#f3f4f6; }
-  /* The swan suggests a name — say so in words, not just an icon. Colour from .btn-assistant (the
-     button system); only the pill's shape lives here. */
-  #btn-generate-name { display:inline-flex; align-items:center; gap:4px; padding:3px 9px 3px 5px; border-radius:9999px;
+  /* The swan suggests a name — say so in words, not just an icon. Colour from .btn-swan-link (swan
+     + text in pink, no pill: on a pink fill the pink swan vanished); only the layout lives here. */
+  #btn-generate-name { display:inline-flex; align-items:center; gap:4px; padding:3px 4px; border-radius:6px;
     font-size:12px; font-weight:700; }
   #btn-generate-name { white-space: nowrap; }
+  /* Content mix: a ticked kind gets the brand pink border. has-[:checked]:border-emerald-500 is the
+     compiled option, but emerald 300–600 were never remapped and still render GREEN. */
+  #content-mix-list label:has(:checked) { border-color: #ff007f; }
   /* The avatar opens the letter + colour menu — a pencil badge says it's editable. */
   .detail-avatar-btn { position:relative; display:block; padding:0; border:0; background:none; cursor:pointer; border-radius:0.75rem; }
   .detail-avatar-btn:hover #detail-avatar { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #f9a8d4; }
@@ -174,7 +177,7 @@
               onclick="const i=document.getElementById('detail-name-input'); i.focus(); i.select();">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536M9 13l6.232-6.232a2.5 2.5 0 113.536 3.536L12.536 16.536a4 4 0 01-1.768 1.022L7 19l1.442-3.768A4 4 0 019 13z"/></svg>
             </button>
-            <button id="btn-generate-name" title="Let Be More Swan suggest a name" aria-label="Suggest a name" class="btn-assistant transition-colors cursor-pointer shrink-0" type="button">
+            <button id="btn-generate-name" title="Let Be More Swan suggest a name" aria-label="Suggest a name" class="btn-swan-link cursor-pointer shrink-0" type="button">
               <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="ai-wand-img"> Suggest a name
             </button>
           </div>
@@ -1508,6 +1511,19 @@
       </div>
     </div>
 
+    <!-- Content mix — which KINDS of post (social) or article (blog) this assistant may write.
+         Social Media and Blog assistants only; filled and shown by _renderContentMix() in
+         assistants.js from window.ContentShapes (src/utils/content-shapes.ts via the generated
+         constants), saved as onboardingContext.allowed_post_shapes / allowed_article_types. -->
+    <div id="module-content-mix" class="hidden bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+      <div class="mb-5">
+        <h3 class="text-lg font-bold text-gray-900">Content mix</h3>
+        <p id="content-mix-desc" class="text-sm text-gray-500 mt-1"></p>
+      </div>
+      <div id="content-mix-list" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+      <p class="text-xs text-gray-400 mt-3">Untick anything you never want. Your assistant rotates through the rest so no two posts in a row share a structure — keep a few ticked for a feed that reads like a person wrote it.</p>
+    </div>
+
     <!-- Sales Context — feeds the auto-responder objection playbook + DM reply drafting -->
     <div id="module-sales-context" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="mb-6">
@@ -2053,7 +2069,7 @@
                    is filled in by _syncGoalRationaleAiLabel() (assistants.js) when the builder opens. -->
               <button type="button" id="btn-goal-rationale-ai" onclick="window._suggestGoalRationale(this)"
                 title="Draft this from the goal you're setting — you can edit it afterwards"
-                class="btn-assistant shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold border rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                class="btn-swan-link shrink-0 inline-flex items-center gap-1.5 px-1 py-1 text-xs font-bold rounded-lg cursor-pointer">
                 <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain">
                 Ask <span id="goal-rationale-ai-name">your assistant</span> to suggest
               </button>

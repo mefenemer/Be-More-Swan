@@ -103,7 +103,22 @@ check('the standalone Integrations page keeps its tiles', () => {
 });
 
 check('the rows are wrapped in ONE list in the assistant panel', () => {
-    assert.match(src, /if \(_assistantScoped && \(platformHtml \|\| sourceHtml\)\) \{\s*grid\.insertAdjacentHTML\('beforeend', `<div data-conn-list class="col-span-full/);
+    assert.match(src, /const allHtml = platformHtml \+ sourceHtml \+ otherHtml;\s*if \(_assistantScoped && allHtml\) \{\s*grid\.insertAdjacentHTML\('beforeend', `<div data-conn-list class="col-span-full/);
+});
+
+// Every assistant gets the Social Media Assistant's row layout — not just social platforms. Blog
+// destinations, outreach mailboxes, Search Console and coming-soon categories were still tiles.
+check('every other connector kind renders as a row in the assistant panel, and joins the one list', () => {
+    for (const fn of ['_comingSoonCard', '_mailboxCard', '_searchConsoleCard', '_firstPartyDestCard', '_socialDestCard', '_blogDestCard']) {
+        const at = src.indexOf(`function ${fn}(`);
+        assert.ok(at >= 0, `${fn} not found`);
+        const body = src.slice(at, src.indexOf('\nfunction ', at + 10) > 0 ? src.indexOf('\nfunction ', at + 10) : undefined);
+        assert.match(body, /if \(_assistantScoped\) \{[\s\S]*?return _connRow\(/, `${fn} has no row form`);
+    }
+    for (const part of ['_blogDestinations.map(_blogDestCard)', '_mailboxProviders.map(_mailboxCard)', '_searchConsoleCard(_searchConsole)', 'comingSoon.map(_comingSoonCard)']) {
+        const at = src.indexOf(part);
+        assert.ok(at >= 0 && at < src.indexOf('const allHtml'), `${part} is not part of the list`);
+    }
 });
 
 console.log(`\n${passed} checks passed`);

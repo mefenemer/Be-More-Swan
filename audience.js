@@ -206,6 +206,36 @@
   // Loaded when the builder opens: without the form list there is nothing to choose between, so
   // the "signed up through" condition is only offered once a tenant actually has a form.
   let ruleForms = [];
+  // Set when the builder was opened from somewhere other than the Audience view (the email
+  // composer's "Send to" picker — see window.AudienceSegmentBuilder below). Called with the new
+  // segment instead of repainting a contacts list that is not on screen.
+  let ruleOnSaved = null;
+
+  // The builder's markup lives in audience.html. Opened from another view it is injected for the
+  // one visit and removed on close, so two #aud-rule-modal never coexist when the user later
+  // navigates to Audience.
+  const RULE_MODAL_HTML = `
+    <div id="aud-rule-modal" data-aud-rule-injected class="hidden fixed inset-0 z-50 items-center justify-center p-4" style="display:none">
+      <div class="absolute inset-0 bg-black/40" data-aud-rule-close></div>
+      <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
+        <div class="flex items-start justify-between mb-1">
+          <h2 class="text-lg font-extrabold text-gray-900" id="aud-rule-title">Rule-based segment</h2>
+          <button type="button" data-aud-rule-close class="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 cursor-pointer">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <p class="text-sm text-gray-500 mb-5">Members are worked out from the rule every time, so this segment can never go stale.</p>
+        <div id="aud-rule-body"></div>
+      </div>
+    </div>`;
+
+  function closeRuleModal() {
+    const modal = $('aud-rule-modal');
+    ruleOnSaved = null;
+    if (!modal) return;
+    if (modal.hasAttribute('data-aud-rule-injected')) modal.remove();
+    else hide(modal);
+  }
 
   function openRuleModal(segment) {
     const modal = $('aud-rule-modal');
@@ -354,7 +384,7 @@
       ruleState.conditions.push({ field: 'source', op: 'is', value: 'web_form' });
       renderRuleBuilder(); previewRule();
     });
-    body.querySelectorAll('[data-aud-rule-close]').forEach((el) => el.addEventListener('click', () => hide($('aud-rule-modal'))));
+    body.querySelectorAll('[data-aud-rule-close]').forEach((el) => el.addEventListener('click', closeRuleModal));
     $('aud-rule-save')?.addEventListener('click', saveRuleSegment);
   }
 
@@ -390,12 +420,18 @@
         });
       } else {
         if (!ruleState.name.trim()) { window.showToast('Give the segment a name.'); return; }
-        await api(SEGMENTS_API, {
+        const { segment } = await api(SEGMENTS_API, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'create', name: ruleState.name.trim(), kind: 'dynamic', rules }),
         });
+        if (ruleOnSaved) {
+          const done = ruleOnSaved;
+          closeRuleModal();
+          done(segment);
+          return;
+        }
       }
-      hide($('aud-rule-modal'));
+      closeRuleModal();
       await loadSegments();
       await loadContacts();
     } catch (err) { window.showToast(err.message); }
@@ -1161,7 +1197,7 @@
         await loadContacts();
       } catch (err) { window.showToast(err.message); }
     });
-    document.querySelectorAll('[data-aud-rule-close]').forEach((el) => el.addEventListener('click', () => hide($('aud-rule-modal'))));
+    document.querySelectorAll('[data-aud-rule-close]').forEach((el) => el.addEventListener('click', closeRuleModal));
 
     const newSeg = $('aud-new-segment');
     if (newSeg) {
@@ -1347,6 +1383,23 @@
     const byId = new Map(state.contacts.map((c) => [c.id, c.email]));
     return [...state.selected].map((id) => byId.get(id)).filter(Boolean);
   }
+
+  // Create a rule-based segment without leaving the current view — the email composer's "Send to"
+  // picker opens this so a missing segment no longer means closing the email and going to Audience.
+  // Same builder, same server preview, same validation as the Audience view's "+ Rule-based segment".
+  // onSaved(segment) receives the created { id, name, kind }.
+  window.AudienceSegmentBuilder = {
+    async open({ onSaved } = {}) {
+      if (!$('aud-rule-modal')) {
+        document.body.insertAdjacentHTML('beforeend', RULE_MODAL_HTML);
+        document.querySelectorAll('#aud-rule-modal [data-aud-rule-close]').forEach((el) => el.addEventListener('click', closeRuleModal));
+      }
+      // The builder offers conditions on tags and custom fields, so it needs both lists.
+      await Promise.all([loadCustomFields(), loadSegments()]);
+      openRuleModal(null);
+      ruleOnSaved = typeof onSaved === 'function' ? onSaved : null;
+    },
+  };
 
   window.initAudience = async function initAudience() {
     state.page = 1;

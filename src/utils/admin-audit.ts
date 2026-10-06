@@ -53,6 +53,11 @@ export type AdminAction =
     // Music library: withdrawing a track (often one a customer shared with the community) or
     // correcting how it is listed. Same reasoning as the Index — "who took it down, and why".
     | 'music_library_curation'
+    // Deleting a track outright (bulk, from the admin list). Records whether its file was removed
+    // or kept because a workspace's post still plays it.
+    | 'music_library_delete'
+    // Admin ▸ Site Styles: "Set as the Be More Swan standard" restyles every page for everyone.
+    | 'site_theme_publish'
     // The weekly "What's new" email: approving it emails every customer, so who pressed the button
     // (and what the copy said at that moment) must be answerable afterwards.
     | 'product_update_edit'

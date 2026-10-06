@@ -1,8 +1,8 @@
 // tests/admin-music-library.test.ts
 // Admin → Music Library: the screen that can take a track out of what every workspace is offered.
 //
-// Pinned here: it only ever WITHDRAWS (never deletes — a post that already carries a track must keep
-// it), a withdrawal needs a reason and is audit-logged, it is admin-gated, and the creator of a
+// Pinned here: withdraw/restore/edit never delete (a post that already carries a track must keep
+// it; the separate bulk Delete keeps any file still in use — see admin-music-bulk-delete.test.ts), a withdrawal needs a reason and is audit-logged, it is admin-gated, and the creator of a
 // community track is visible to admins without that ever reaching the library customers browse.
 //
 // Run:  npx tsx tests/admin-music-library.test.ts
@@ -50,9 +50,14 @@ check('tags are cleaned into the vocabulary the picker filters on', () => {
 
 console.log('\nwhat it may and may not do');
 
-check('it never deletes — a withdrawal only stops a track being offered', () => {
-    assert.ok(!/db\.delete\(/.test(fn), 'a row is deleted');
-    assert.ok(!/DeleteObject/.test(fn), 'a file is deleted');
+check('withdraw / restore / edit never delete — a withdrawal only stops a track being offered', () => {
+    // Deleting became an explicit admin action on 2026-10-06 (bulk Delete), and it lives ONLY in
+    // deleteTracks — which keeps any file a post still uses (tests/admin-music-bulk-delete.test.ts).
+    // Everything above it must still never remove a row or a file.
+    const curation = fn.slice(0, fn.indexOf('const DELETE_MAX'));
+    assert.ok(curation.length > 0 && fn.includes('async function deleteTracks('), 'the delete action moved');
+    assert.ok(!/db\.delete\(/.test(curation), 'a row is deleted outside deleteTracks');
+    assert.ok(!/DeleteObject/.test(curation), 'a file is deleted outside deleteTracks');
     assert.ok(fn.includes('set({ isActive, updatedAt: new Date() })'));
     // ...and "not offered" is real: the customer-facing library honours is_active on BOTH paths.
     assert.ok(libraryFn.includes('usableTracks('), 'the picker ignores withdrawal');
