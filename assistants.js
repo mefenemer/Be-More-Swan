@@ -5659,7 +5659,10 @@ function _renderOperationSection(data) {
     const host = document.getElementById('operation-role-fields');
     const generic = document.getElementById('operation-generic');
     if (!host) return;
-    const fields = _roleSchemaFields(data.roleKey);
+    // "Writing voice" (tone_of_voice) is edited in the Voice builder on roles that have one — showing
+    // it here as well gave the same setting two homes that could disagree (2026-10-06).
+    const fields = _roleSchemaFields(data.roleKey)
+        .filter((f) => !(f.key === 'tone_of_voice' && _VB_ROLES.includes(data.roleKey)));
     if (!fields.length) {
         host.innerHTML = '';
         if (generic) generic.classList.remove('hidden');
@@ -6185,7 +6188,8 @@ let _vb = null;
 
 function _vbDefaults() {
     return { personalities: [], formality: 3, playfulness: 3, energy: 3, colour: 3, emoji: 'auto', exclamations: 'auto', spelling: 'auto',
-        neverSay: [...(window.VoiceBuilder?.defaultNeverSay || [])], sample: '' };
+        // Empty by default (2026-10-06) — the clichés are offered as suggestions, not pre-banned.
+        neverSay: [], sample: '' };
 }
 
 function _renderVoiceBuilder(data) {
@@ -6196,7 +6200,15 @@ function _renderVoiceBuilder(data) {
     }
     const stored = (data.context || {}).voice;
     _vb = { ..._vbDefaults(), ...(stored && typeof stored === 'object' ? stored : {}) };
-    if (!Array.isArray(_vb.neverSay)) _vb.neverSay = [...(window.VoiceBuilder.defaultNeverSay || [])];
+    if (!Array.isArray(_vb.neverSay)) _vb.neverSay = [];
+    // No personality picked yet: start from the setup's "Writing voice" answer (tone_of_voice), so
+    // the builder shows the voice the assistant already has rather than a blank slate. The builder
+    // is now where that answer is edited — Operational Setup no longer repeats it.
+    if (!_vb.personalities.length) {
+        const tone = String((data.context || {}).tone_of_voice || '').toLowerCase();
+        const match = window.VoiceBuilder.personalities.filter((p) => tone && (tone.includes(p.key) || tone.includes(p.label.toLowerCase().split(' ')[0]))).slice(0, 2);
+        _vb.personalities = match.map((p) => p.key);
+    }
     card.classList.remove('hidden'); card.style.display = '';
     _vbPaint();
     _vbMirror(false);
@@ -6234,24 +6246,29 @@ function _vbPaint() {
         <label class="block"><span class="block text-sm font-bold text-gray-700 mb-1">Spelling</span>${sel('spelling', [['auto', 'Assistant decides'], ['british', 'British English'], ['american', 'American English']])}</label>
       </div>
       <div>
-        <div class="flex items-center justify-between mb-1">
-          <p class="text-sm font-bold text-gray-700">Never say</p>
-          <button type="button" data-vb-reset-never class="link text-xs font-semibold">Reset to suggested</button>
-        </div>
-        <p class="text-xs text-gray-500 mb-2">Phrases your assistant must never use. Pre-filled with the clichés that make copy sound cheesy — remove any you are happy with, add your own.</p>
-        <div class="flex flex-wrap gap-1.5 mb-2">${_vb.neverSay.map((p, i) => `<span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-full bg-gray-100 border border-gray-200 text-gray-700">${esc(p)}<button type="button" data-vb-remove-never="${i}" aria-label="Remove ${esc(p)}" class="w-4 h-4 inline-flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 cursor-pointer">&times;</button></span>`).join('') || '<span class="text-xs text-gray-400">Nothing banned.</span>'}</div>
+        <p class="text-sm font-bold text-gray-700 mb-1">Never say</p>
+        <p class="text-xs text-gray-500 mb-2">Words and phrases your assistant must never use. Add your own, or pick from the suggestions below.</p>
+        <div class="flex flex-wrap gap-1.5 mb-2">${_vb.neverSay.map((p, i) => `<span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-full bg-gray-100 border border-gray-200 text-gray-700">${esc(p)}<button type="button" data-vb-remove-never="${i}" aria-label="Remove ${esc(p)}" class="w-4 h-4 inline-flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 cursor-pointer">&times;</button></span>`).join('') || '<span class="text-xs text-gray-400">Nothing banned yet.</span>'}</div>
         <div class="flex gap-2"><input type="text" data-vb-never-input maxlength="60" placeholder="Add a word or phrase, then Enter" class="flex-1 border border-gray-300 rounded-lg p-2 text-sm">
           <button type="button" data-vb-add-never class="btn-secondary px-3 py-2 text-xs font-bold border rounded-lg cursor-pointer">Add</button></div>
+        ${(() => {
+            const have = new Set(_vb.neverSay.map((x) => x.toLowerCase()));
+            const left = (window.VoiceBuilder.defaultNeverSay || []).filter((x) => !have.has(x.toLowerCase()));
+            return left.length ? `<p class="text-[11px] text-gray-500 mt-3 mb-1.5">Suggestions — phrases that often make copy sound cheesy. Click to ban one, or <button type="button" data-vb-add-all-never class="link font-semibold">ban them all</button>.</p>
+              <div class="flex flex-wrap gap-1.5">${left.map((x) => `<button type="button" data-vb-suggest-never="${esc(x)}" class="px-2.5 py-1 text-xs rounded-full border border-dashed border-gray-300 text-gray-500 hover:text-gray-800 hover:border-gray-400 cursor-pointer">+ ${esc(x)}</button>`).join('')}</div>` : '';
+        })()}
       </div>
       <div>
-        <p class="text-sm font-bold text-gray-700 mb-1">Write like this <span class="font-normal text-gray-400">— optional</span></p>
-        <textarea data-vb-sample rows="3" maxlength="1500" placeholder="Paste a paragraph you wrote yourself — an email, a post, your About page. Your assistant matches its rhythm and word choice, not its content." class="w-full border border-gray-300 rounded-lg p-3 text-sm resize-y">${esc(_vb.sample || '')}</textarea>
+        <p class="text-sm font-bold text-gray-700 mb-1">Write like this <span class="font-normal text-gray-400">— optional style reference</span></p>
+        <textarea data-vb-sample rows="3" maxlength="1500" placeholder="Paste something you wrote yourself — an email, a post, your About page. Your assistant copies its rhythm and word choice, not its words." class="w-full border border-gray-300 rounded-lg p-3 text-sm resize-y">${esc(_vb.sample || '')}</textarea>
       </div>
       <div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
-        <div class="flex items-center justify-between gap-3 flex-wrap">
-          <p class="text-sm text-gray-700">Hear two short samples about your business in this voice.</p>
+        <p class="text-sm font-bold text-gray-700 mb-1">Preview</p>
+        <p class="text-xs text-gray-500 mb-2">Try the voice on your own words — your assistant rewrites them in this voice and writes one fresh example. Leave it empty for two fresh examples. Nothing here is saved.</p>
+        <textarea id="vb-try-text" rows="3" maxlength="1200" placeholder="e.g. We help small businesses get their admin done so they can focus on customers." class="w-full border border-gray-300 rounded-lg p-3 text-sm resize-y bg-white mb-2"></textarea>
+        <div class="flex justify-end">
           <button type="button" data-vb-hear class="btn-assistant inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg cursor-pointer">
-            <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="ai-wand-img w-4 h-4 object-contain"> Hear it</button>
+            <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="ai-wand-img w-4 h-4 object-contain"> Preview</button>
         </div>
         <div id="vb-samples" class="space-y-3 mt-3"></div>
       </div>`;
@@ -6271,7 +6288,24 @@ document.addEventListener('click', async (e) => {
     const rm = e.target.closest('[data-vb-remove-never]');
     if (rm) { _vb.neverSay.splice(Number(rm.dataset.vbRemoveNever), 1); _vbPaint(); _vbMirror(true); return; }
     if (e.target.closest('[data-vb-add-never]')) { _vbAddNever(); return; }
-    if (e.target.closest('[data-vb-reset-never]')) { _vb.neverSay = [...(window.VoiceBuilder?.defaultNeverSay || [])]; _vbPaint(); _vbMirror(true); return; }
+    const sug = e.target.closest('[data-vb-suggest-never]');
+    if (sug) { _vb.neverSay.push(sug.dataset.vbSuggestNever); _vbPaint(); _vbMirror(true); return; }
+    if (e.target.closest('[data-vb-add-all-never]')) {
+        const have = new Set(_vb.neverSay.map((x) => x.toLowerCase()));
+        _vb.neverSay.push(...(window.VoiceBuilder?.defaultNeverSay || []).filter((x) => !have.has(x.toLowerCase())));
+        _vbPaint(); _vbMirror(true); return;
+    }
+    const say = e.target.closest('[data-vb-say]');
+    if (say) {
+        // "Read aloud" — the browser's own speech, so the owner can literally hear the voice.
+        try {
+            window.speechSynthesis.cancel();
+            const u = new SpeechSynthesisUtterance(say.closest('[data-vb-sample-card]')?.querySelector('[data-vb-sample-text]')?.textContent || '');
+            u.lang = _vb.spelling === 'american' ? 'en-US' : 'en-GB';
+            window.speechSynthesis.speak(u);
+        } catch { window.showToast?.('This browser cannot read text aloud.'); }
+        return;
+    }
     const hear = e.target.closest('[data-vb-hear]');
     if (hear) {
         const out = document.getElementById('vb-samples');
@@ -6281,14 +6315,17 @@ document.addEventListener('click', async (e) => {
         try {
             const res = await fetch('/.netlify/functions/voice-preview', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ assistantId: window._detailCurrentData?.id, tone: document.getElementById('edit_tone')?.value || undefined, voice: _vb }),
+                body: JSON.stringify({ assistantId: window._detailCurrentData?.id, tone: document.getElementById('edit_tone')?.value || undefined, voice: _vb, text: document.getElementById('vb-try-text')?.value || undefined }),
             });
             const d = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(d.error || 'Could not write a preview.');
-            if (out) out.innerHTML = (d.samples || []).map((s) => `<div class="bg-white border border-gray-200 rounded-lg p-3">
-                ${s.shape ? `<p class="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1">${_escapeHtml(s.shape)}</p>` : ''}
-                <p class="text-sm text-gray-800 whitespace-pre-line">${_escapeHtml(s.text)}</p></div>`).join('')
-                + '<p class="text-[11px] text-gray-500">Not quite right? Move a slider or add the words that grate to Never say, then hear it again.</p>';
+            if (out) out.innerHTML = (d.samples || []).map((s) => `<div class="bg-white border border-gray-200 rounded-lg p-3" data-vb-sample-card>
+                <div class="flex items-center justify-between gap-2 mb-1">
+                  <p class="text-[11px] font-bold uppercase tracking-wide text-gray-400">${_escapeHtml(s.shape || 'Sample')}</p>
+                  ${'speechSynthesis' in window ? '<button type="button" data-vb-say class="link text-xs font-semibold">🔊 Read aloud</button>' : ''}
+                </div>
+                <p class="text-sm text-gray-800 whitespace-pre-line" data-vb-sample-text>${_escapeHtml(s.text)}</p></div>`).join('')
+                + '<p class="text-[11px] text-gray-500">Not quite right? Move a slider or add the words that grate to Never say, then preview again.</p>';
         } catch (err) {
             if (out) out.innerHTML = `<p class="text-xs text-red-600">${_escapeHtml(err.message)}</p>`;
         } finally {

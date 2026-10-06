@@ -42,15 +42,22 @@ check('the campaign API returns settings (forms + segments) and standard stats, 
     assert.match(ui, /\$\{renderSeqSettings\(seq\)\}\s*\$\{renderSeqStats\(seqState\.stats\)\}/);
 });
 
-check('Voice builder: settings become rules; the default never-say list applies to everyone', () => {
+check('Voice builder: settings become rules; never-say is ONLY what the owner adds', () => {
     const d = voiceDirective('', { surface: 'social', voice: { personalities: ['professional'], energy: 1, exclamations: 'never', spelling: 'british' } });
     assert.match(d, /PROFESSIONAL means:/);
     assert.match(d, /Understated: calm and matter-of-fact/);
     assert.match(d, /No exclamation marks at all\./);
     assert.match(d, /British English spelling/);
-    assert.match(voiceDirective('Casual', { surface: 'blog' }), /NEVER use these words or phrases[^\n]*"game-changer"/);
-    assert.doesNotMatch(voiceDirective('Casual', { surface: 'blog', voice: { neverSay: [] } }), /NEVER use these words/);
-    assert.deepStrictEqual(findNeverSay('A real game-changer for you', null), ['game-changer']);
+    // Empty by default (2026-10-06): suggestions are offered in the builder, never applied unseen.
+    assert.doesNotMatch(voiceDirective('Casual', { surface: 'blog' }), /NEVER use these words/);
+    assert.match(voiceDirective('Casual', { surface: 'blog', voice: { neverSay: ['synergy'] } }), /NEVER use these words or phrases[^\n]*"synergy"/);
+    assert.deepStrictEqual(findNeverSay('A real game-changer for you', null), []);
+    assert.deepStrictEqual(findNeverSay('A real game-changer for you', { neverSay: ['game-changer'] }), ['game-changer']);
+    // Picked personalities ARE the voice — the setup's one-word tone no longer leaks back in.
+    const d2 = voiceDirective('Friendly', { surface: 'email', voice: { personalities: ['witty'] } });
+    assert.match(d2, /WITTY & PLAYFUL means:/);
+    assert.doesNotMatch(d2, /FRIENDLY & WARM means:/);
+    assert.match(d2, /described the voice as: "Witty & playful"/);
     assert.strictEqual(normaliseVoice({ formality: 99, personalities: ['x', 'witty', 'casual', 'bold'] })!.formality, 3);
     assert.deepStrictEqual(normaliseVoice({ personalities: ['x', 'witty', 'casual', 'bold'] })!.personalities, ['witty', 'casual']);
     assert.ok(DEFAULT_NEVER_SAY.length >= 10);
@@ -78,6 +85,32 @@ check('the Swan Index byline stays editable; the connection does not', () => {
     const i = read('integrations.js');
     assert.match(i, /if \(_assistantScoped\) grid\.insertAdjacentHTML\('beforeend', _swanBylineCard\(_swanDest\)\);/);
     assert.match(i, /function _swanBylineCard\(d\) \{\s*if \(!d \|\| !d\.connected \|\| !d\.profile\) return '';/);
+});
+
+check('the preview can rewrite the owner\'s own words, and refuses invented claims', () => {
+    const fn = read('netlify/functions/voice-preview.ts');
+    assert.match(fn, /Sample 1 is the owner's text below REWRITTEN in this voice/);
+    assert.match(fn, /ONLY use facts stated in the business description above or in the owner's text/);
+    const a = read('assistants.js');
+    assert.match(a, /text: document\.getElementById\('vb-try-text'\)\?\.value \|\| undefined/);
+    assert.match(a, /neverSay: \[\], sample: '' \};/);
+    assert.match(a, /data-vb-suggest-never=/);
+    assert.match(a, /new SpeechSynthesisUtterance\(/);
+    // Writing voice lives in the builder now, not twice.
+    assert.match(a, /\.filter\(\(f\) => !\(f\.key === 'tone_of_voice' && _VB_ROLES\.includes\(data\.roleKey\)\)\);/);
+});
+
+check('header quick switcher, Emails/Campaigns labels, welcome rename, header spacing', () => {
+    const w = read('workspace.html');
+    assert.match(w, /id="nav-assistant-switcher-btn"/);
+    assert.match(w, /window\.routeToAssistantDetail\?\.\(a\.getAttribute\('data-switcher-assistant'\)\)/);
+    assert.match(read('src/components/assistant-dashboard-registry.js'), /reviewQueue: \{ kind: 'newsletter', source: 'newsletter_issues', label: 'Emails' \},/);
+    assert.match(read('src/components/assistant-email-campaigns.js'), /setTabCount\('email-campaigns-tab-label', 'Campaigns'/);
+    const n = read('newsletter.js');
+    assert.ok(n.indexOf('id="nl-seq-name"') > 0 && !/\$\{isFormSeq \? `<div class="mb-4">/.test(n), 'the welcome sequence still has no name field');
+    const nav = read('components/nav.html');
+    assert.match(nav, /#nav-public-links > a, #nav-app-links > a \{ white-space: nowrap; \}/);
+    assert.match(nav, /@media \(max-width: 1023px\)/);
 });
 
 console.log(`\n${passed} checks passed`);
