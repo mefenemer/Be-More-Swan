@@ -304,6 +304,9 @@ export default withLambda(async (event: HandlerEvent) => {
                 recipientCount: newsletterIssues.recipientCount,
                 deliveredCount: newsletterIssues.deliveredCount,
                 openedCount: newsletterIssues.openedCount,
+                // For the assistant page's Sent column, which states each email's results.
+                clickedCount: newsletterIssues.clickedCount,
+                bouncedCount: newsletterIssues.bouncedCount,
                 isAutonomous: newsletterIssues.isAutonomous,
                 generationReason: newsletterIssues.generationReason,
                 purpose: newsletterIssues.purpose,

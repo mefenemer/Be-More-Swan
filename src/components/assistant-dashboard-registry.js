@@ -228,6 +228,9 @@
       primaryAction: { kind: 'newsletter_studio', label: 'Write Email' },
       defaultMainTab: 'review-queue',
       reviewQueue: { kind: 'newsletter', source: 'newsletter_issues' },
+      // The Campaigns tab (assistant-email-campaigns.js): the automatic series, beside the one-off
+      // emails moving through Review → Scheduled → Sent.
+      emailCampaignsTab: true,
       hideDataHub: true,
       hubTab: {
         id: 'datahub',
