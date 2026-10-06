@@ -192,19 +192,16 @@ async function submitDpaAcceptance(btn) {
       </div>
     </div>
     <div class="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-5 max-h-48 overflow-y-auto text-sm text-gray-700 leading-relaxed">
-      <p class="font-bold mb-2">Key updates in Terms v2.0</p>
+      <p class="font-bold mb-2">What changed in Terms v2.1 (6 October 2026)</p>
       <ul class="list-disc list-inside space-y-1">
-        <li>Strengthened confidentiality protections for AI system prompts (clause 11.5)</li>
-        <li>Prohibited use clause extended — reverse engineering and prompt extraction prohibited (clause 11.4)</li>
-        <li>Human-in-the-loop mandate for Tier-2 publishing integrations (clause 10.5)</li>
-        <li>EU AI Act Article 50 compliance obligations clarified (section 13)</li>
-        <li>Liability allocation clarified for AI-generated content (section 10)</li>
+        <li>The Swan Index (clause 11.9): blog posts you publish are submitted to our editorial magazine under your author byline, with a link back to your site as the original. You keep ownership.</li>
+        <li>To opt out, email support@bemoreswan.com — we stop submitting your posts and take down any already published within 5 working days. Your own blog is not affected.</li>
       </ul>
       <p class="mt-3">Full terms available at <a href="/terms_of_service.html" target="_blank" class="text-emerald-700 underline">bemoreswan.com/terms</a>.</p>
     </div>
     <label class="flex items-start gap-3 mb-6 cursor-pointer">
       <input type="checkbox" id="tos-agree-checkbox" class="mt-0.5 h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500">
-      <span class="text-sm text-gray-700">I have read and agree to the updated <a href="/terms_of_service.html" target="_blank" class="text-emerald-700 underline font-medium">Terms of Service</a> (v2.0).</span>
+      <span class="text-sm text-gray-700">I have read and agree to the updated <a href="/terms_of_service.html" target="_blank" class="text-emerald-700 underline font-medium">Terms of Service</a> (v2.1).</span>
     </label>
     <button id="btn-tos-accept" onclick="submitTosAcceptance(this)"
       class="btn-primary w-full py-3 font-bold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed"
@@ -222,8 +219,15 @@ document.addEventListener('DOMContentLoaded', function () {
     const btn = document.getElementById('btn-tos-accept');
     if (cb && btn) cb.addEventListener('change', () => { btn.disabled = !cb.checked; });
 
-    // NOTE: no longer auto-checked on login — surfaced on demand from the Setup Wizard's
+    // NOTE: a NEW user is not prompted on login — first acceptance happens in the Setup Wizard's
     // "Compliance & data use" step (window.showComplianceModals).
+    // ⚠️ But someone who accepted an OLDER version must be asked again when the Terms change
+    // (2026-10-06): without this a version bump reached nobody, and the only effect was that hiring
+    // a new assistant quietly blocked on 'tos_required'. check-tos reports the latest version they
+    // accepted as `version`; only then is the modal shown here.
+    fetch('/.netlify/functions/check-tos').then((r) => (r.ok ? r.json() : null)).then((d) => {
+        if (d && d.version && !d.upToDate) checkTosAcceptance(true);
+    }).catch(() => { /* never block the workspace on this */ });
 });
 
 async function checkTosAcceptance(force) {
