@@ -227,7 +227,9 @@
       // in assistants.js because both are bespoke pipelines rather than a chat intake.
       primaryAction: { kind: 'newsletter_studio', label: 'Write Email' },
       defaultMainTab: 'review-queue',
-      reviewQueue: { kind: 'newsletter', source: 'newsletter_issues' },
+      // "Emails", like the Social Media Assistant's "Posts" and the Blog Writer's "Blogs" — without a
+      // label this tab fell back to "Review" and read as a different kind of thing (2026-10-06).
+      reviewQueue: { kind: 'newsletter', source: 'newsletter_issues', label: 'Emails' },
       // The Campaigns tab (assistant-email-campaigns.js): the automatic series, beside the one-off
       // emails moving through Review → Scheduled → Sent.
       emailCampaignsTab: true,

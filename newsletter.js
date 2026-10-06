@@ -2034,7 +2034,7 @@
     host.innerHTML = `
       <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1" for="nl-seq-pick">Showing</label>
       <select id="nl-seq-pick" class="w-full sm:w-auto px-3 py-2 rounded-lg border border-gray-300 text-sm mb-4">
-        ${opt('', 'Welcome sequence — everyone who subscribes')}
+        ${opt('', `${(seqState.sequences.find((x) => x.triggerEvent === 'subscribed') || {}).name || 'Welcome sequence'} — everyone who subscribes`)}
         ${forms.map((x) => opt(x.id, `${x.name} — started by a sign-up form · ${x.isEnabled ? 'On' : 'Off'}`)).join('')}
       </select>`;
   }
@@ -2257,15 +2257,16 @@
 
     const isFormSeq = seq.triggerEvent === 'form';
     body.innerHTML = `
-      ${isFormSeq ? `<div class="mb-4">
+      <div class="mb-4">
         <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1" for="nl-seq-name">Campaign name</label>
         <div class="flex items-center gap-2">
           <input type="text" id="nl-seq-name" maxlength="80" value="${esc(seq.name || '')}"
             class="flex-1 px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm font-bold">
           <span id="nl-seq-name-status" class="text-xs text-gray-500 shrink-0"></span>
         </div>
-        <p class="text-[11px] text-gray-400 mt-1">Only you see this. Who receives these emails is set by the sign-up form you link it to.</p>
-      </div>` : `<div class="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 mb-4 text-sm text-sky-900">
+        <p class="text-[11px] text-gray-400 mt-1">Only you see this.${isFormSeq ? ' Who receives these emails is set by the sign-up form you link it to.' : ''}</p>
+      </div>
+      ${isFormSeq ? '' : `<div class="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 mb-4 text-sm text-sky-900">
         <p class="font-bold">This is your welcome sequence.</p>
         <p>It goes to <strong>everyone who joins your list</strong>, from any sign-up form that is not linked to a campaign of its own. For one group only — such as beta testers — create a separate campaign with <strong>New email campaign → People who fill in a form</strong>, and link it to that group’s form.</p>
       </div>`}

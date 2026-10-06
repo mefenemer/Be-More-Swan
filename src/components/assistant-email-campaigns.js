@@ -22,6 +22,8 @@
   const host = () => document.getElementById('email-campaigns-host');
 
   function setBadge() {
+    // How many campaigns, on the label — the same "Name (n)" every other tab uses.
+    window.AssistantDashboardRegistry?.setTabCount('email-campaigns-tab-label', 'Campaigns', (state.campaigns || []).length);
     // Amber count = campaigns that are written but switched off — the ones waiting on the owner.
     const b = document.getElementById('email-campaigns-badge');
     if (!b) return;

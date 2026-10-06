@@ -191,8 +191,9 @@ const TRAITS: Trait[] = [
 export const VOICE_PERSONALITIES = TRAITS.map((t) => ({ key: t.key, label: t.label }));
 
 /**
- * The stock phrases that make copy read as "AI marketing". Applied to EVERY assistant by default;
- * the builder pre-fills its Never-say list with these and the owner edits from there.
+ * The stock phrases that make copy read as "AI marketing" — offered as one-click SUGGESTIONS in the
+ * builder's Never-say section. ⚠️ Not applied unless the owner adds them (2026-10-06: "this should
+ * be empty by default"); a ban the owner cannot see on the screen is not theirs to control.
  */
 export const DEFAULT_NEVER_SAY = [
     'game-changer', 'game changer', 'unlock', 'unleash', 'elevate', 'supercharge', 'level up',
@@ -213,7 +214,7 @@ export interface VoiceSettings {
     emoji?: 'none' | 'few' | 'auto';
     exclamations?: 'never' | 'rarely' | 'auto';
     spelling?: 'british' | 'american' | 'auto';
-    /** Phrases the copy must never contain. Absent = DEFAULT_NEVER_SAY. */
+    /** Phrases the copy must never contain. Absent = none. */
     neverSay?: string[];
     /** A short sample of the owner's own writing to match (style, not content). */
     sample?: string;
@@ -268,7 +269,7 @@ export function normaliseVoice(raw: unknown): VoiceSettings | null {
 
 /** Phrases from the Never-say list that appear in `text` (case-insensitive). For post-checks. */
 export function findNeverSay(text: string, voice?: VoiceSettings | null): string[] {
-    const list = voice?.neverSay ?? DEFAULT_NEVER_SAY;
+    const list = voice?.neverSay ?? [];
     const t = String(text || '').toLowerCase();
     return list.filter((p) => p && t.includes(p.toLowerCase()));
 }
@@ -312,9 +313,18 @@ export function voiceDirective(toneText: unknown, opts: { surface: VoiceSurface;
     const voice = normaliseVoice(opts.voice);
     const chosen = voice?.personalities ?? [];
     const chosenLabels = TRAITS.filter((t) => chosen.includes(t.key)).map((t) => t.label);
-    const tone = raw || (chosenLabels.length ? chosenLabels.join(' and ') : '') || opts.fallback || 'friendly and professional';
+    // With personalities picked, THEY name the voice. The stored tone is kept as extra detail only
+    // when it says more than a one-word preset (a setup answer of "Friendly" would otherwise be
+    // quoted back after the owner un-ticked Friendly in the builder).
+    const rawIsPreset = !raw || raw.split(/\s+/).length <= 2;
+    const tone = chosenLabels.length
+        ? chosenLabels.join(' and ') + (rawIsPreset ? '' : ` — in their own words: ${raw}`)
+        : (raw || opts.fallback || 'friendly and professional');
     const noun = SURFACE_NOUN[opts.surface];
-    const keys = [...new Set([...chosen, ...detectVoiceTraits(raw || tone)])];
+    // Personalities picked in the builder ARE the voice; the free-text / setup tone is only read for
+    // traits when none are picked. Merging the two meant un-ticking "Friendly" in the builder did
+    // nothing while the setup answer still said "Friendly" (2026-10-06).
+    const keys = chosen.length ? chosen : detectVoiceTraits(raw || tone);
     const traits = TRAITS.filter((t) => keys.includes(t.key));
 
     const lines: string[] = [
@@ -366,9 +376,9 @@ export function voiceDirective(toneText: unknown, opts: { surface: VoiceSurface;
         }
     }
 
-    // Never say — the owner's list, or the default anti-cliché list for everyone else. This is the
-    // part that answers "it sounds cheesy": the clichés are named and banned, not hoped away.
-    const never = voice?.neverSay ?? DEFAULT_NEVER_SAY;
+    // Never say — exactly the owner's list (empty unless they add to it). This is the part that
+    // answers "it sounds cheesy": the clichés they pick are named and banned, not hoped away.
+    const never = voice?.neverSay ?? [];
     if (never.length) {
         lines.push('', `NEVER use these words or phrases, or close variants of them: ${never.map((p) => `"${p}"`).join(', ')}. They read as generic AI marketing copy.`);
     }

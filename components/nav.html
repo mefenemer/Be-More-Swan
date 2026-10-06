@@ -1,3 +1,23 @@
+<!-- Header spacing (2026-10-06): seven links + Log In + the CTA did not fit one row from 768px up —
+     "How it Works" wrapped to two lines, the buttons went tall, and waitlist mode's longer "Join the
+     waitlist" made it worse. Links never wrap; gaps tighten below 1280px, where the page subtitle
+     also steps aside; below 1024px the hamburger menu takes over. A <style> here because this file
+     is innerHTML-injected (styles apply, scripts would not) and the prebuilt style.css has none of
+     the responsive gap utilities — unlayered, so it outranks the md: display utilities. -->
+<style>
+  #nav-public-links, #nav-app-links { column-gap: 2rem; }
+  #nav-public-links > a, #nav-app-links > a { white-space: nowrap; }
+  #nav-login-btn, #nav-signup-btn { line-height: 1.25rem; }
+  @media (max-width: 1279px) {
+    #nav-public-links, #nav-app-links { column-gap: 1.25rem; }
+    #nav-page-title { display: none; }
+  }
+  @media (min-width: 1024px) { #mobile-menu { display: none !important; } }
+  @media (max-width: 1023px) {
+    .bms-nav-desktop { display: none !important; }
+    .bms-nav-burger { display: flex !important; }
+  }
+</style>
 <nav class="bg-white shadow-sm sticky top-0 z-50 w-full relative">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
     <div class="flex justify-between h-16 items-center w-full">
@@ -9,8 +29,8 @@
         <span id="nav-page-title" class="text-base font-medium text-gray-400 ml-2 transition-opacity duration-300"></span>
       </div>
 
-      <div class="hidden md:flex items-center">
-        <div id="nav-public-links" class="flex items-center space-x-8">
+      <div class="bms-nav-desktop hidden md:flex items-center">
+        <div id="nav-public-links" class="flex items-center">
           <a href="index.html#how-it-works" class="text-gray-600 hover:text-emerald-700 font-medium transition" data-i18n="nav.how_it_works">How it Works</a>
           <a href="assistants.html" class="text-gray-600 hover:text-emerald-700 font-medium transition" data-i18n="nav.assistant_library">Assistant Library</a>
           <a href="pricing.html" class="text-gray-600 hover:text-emerald-700 font-medium transition" data-i18n="nav.pricing">Pricing</a>
@@ -31,14 +51,14 @@
              onclick="try{if(localStorage.getItem('bms_known_user')==='1')this.href='login.html';}catch(e){}"
              class="btn-primary px-5 py-2 text-sm font-bold rounded-lg transition shadow-sm" data-i18n="nav.get_started">Get Started</a>
         </div>
-        <div id="nav-app-links" class="hidden flex items-center space-x-8">
+        <div id="nav-app-links" class="hidden flex items-center">
           <a href="dashboard.html" id="nav-link-dashboard" class="text-gray-600 hover:text-emerald-700 font-medium transition" data-i18n="nav.dashboard">Dashboard</a>
           <a href="billing.html" id="nav-link-billing" class="text-gray-600 hover:text-emerald-700 font-medium transition" data-i18n="nav.billing">Billing</a>
           <a href="logout.html" class="px-5 py-2 text-sm font-bold text-red-700 bg-red-50 hover:bg-red-100 rounded-lg border border-red-100 transition shadow-sm" data-i18n="nav.log_out">Log Out</a>
         </div>
       </div>
 
-      <div class="flex items-center md:hidden">
+      <div class="bms-nav-burger flex items-center md:hidden">
         <button id="mobile-menu-button" class="focus:outline-none p-2" aria-label="Toggle menu" style="cursor: pointer;">
           <svg style="width: 28px; height: 28px; stroke: #1f1e1b;" fill="none" viewBox="0 0 24 24">
             <path id="menu-icon-path" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
@@ -49,7 +69,7 @@
     </div>
   </div>
 
-  <div id="mobile-menu" class="md:hidden border-t border-gray-100 bg-white absolute w-full left-0 shadow-xl z-50" style="display: none; top: 100%;">
+  <div id="mobile-menu" class="border-t border-gray-100 bg-white absolute w-full left-0 shadow-xl z-50" style="display: none; top: 100%;">
     <div class="px-4 pt-4 pb-6 space-y-2">
 
       <div id="mobile-public-links" style="display: flex; flex-direction: column; gap: 8px;">
