@@ -2056,6 +2056,9 @@
       // just built (openWelcomeModal is also how the modal reloads after every save).
       if (seqState.designer) { seqState.designer.destroy(); seqState.designer = null; }
       seqState.sequence = data.sequence;
+      // The welcome sequence is "no id" to the picker and to seqApi(); a deep link by its real id
+      // (the assistant page's Campaigns tab) is folded back into that.
+      if (data.sequence && data.sequence.triggerEvent === 'subscribed') seqState.selectedId = null;
       seqState.sequences = data.sequences || [];
       renderSeqPicker();
       loadAutoList();   // the Studio's card shows On/Off and counts — keep it in step
@@ -3319,5 +3322,14 @@
     const wanted = window._newsletterInitialIssueId;
     window._newsletterInitialIssueId = null;
     await loadIssues(wanted || undefined);
+    // From the assistant page's Campaigns tab: open that campaign, or start a new one. Consumed on
+    // read, like the issue deep link above. The welcome sequence is addressed by its id too —
+    // seqApi() passes ?sequenceId=, which the GET resolves for either kind.
+    const wantedSeq = window._newsletterInitialSequenceId;
+    window._newsletterInitialSequenceId = null;
+    const newCampaign = window._newsletterOpenNewCampaign;
+    window._newsletterOpenNewCampaign = false;
+    if (wantedSeq) { seqState.selectedId = wantedSeq; openWelcomeModal(); }
+    else if (newCampaign) openCampaignModal();
   };
 })();

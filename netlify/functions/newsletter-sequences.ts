@@ -71,6 +71,11 @@ export default withLambda(async (event: HandlerEvent) => {
             }).from(newsletterSequences)
                 .where(eq(newsletterSequences.organisationId, ctx.organisationId))
                 .orderBy(asc(newsletterSequences.createdAt));
+            // ?summary=1 — every campaign with its headline numbers, for the Email Marketing
+            // Assistant's Campaigns tab (assistant-email-campaigns.js). One request, not one per row.
+            if (event.queryStringParameters?.summary === '1') {
+                return json(200, { campaigns: await campaignSummaries(db, ctx.organisationId, sequences) });
+            }
             const wantId = Number(event.queryStringParameters?.sequenceId || '') || null;
             const [sequence] = await db.select().from(newsletterSequences)
                 .where(and(
@@ -652,4 +657,59 @@ async function sequenceStats(db: Db, sequenceId: number, enrolments: Record<stri
             clickToOpenRate: rate(r.clicked, r.opened),
         })),
     };
+}
+
+/**
+ * Headline numbers for every campaign at once: enrolment by state, unsubscribes, and the send
+ * ledger's sent / delivered / unique opens / unique clicks / bounces. Rates as in sequenceStats.
+ * The ledger part degrades to zeros when db/newsletter-sequence-sends.sql is not applied.
+ */
+async function campaignSummaries(
+    db: Db,
+    organisationId: number,
+    sequences: Array<{ id: number; name: string; triggerEvent: string; isEnabled: boolean; steps: number }>,
+) {
+    const enrol = await db
+        .select({
+            sequenceId: newsletterSequenceEnrolments.sequenceId,
+            enrolled: sql<number>`count(*)::int`,
+            active: sql<number>`count(*) filter (where ${newsletterSequenceEnrolments.state} = 'active')::int`,
+            completed: sql<number>`count(*) filter (where ${newsletterSequenceEnrolments.state} = 'completed')::int`,
+            unsubscribed: sql<number>`count(*) filter (where ${newsletterSequenceEnrolments.haltReason} = 'unsubscribed')::int`,
+        })
+        .from(newsletterSequenceEnrolments)
+        .where(eq(newsletterSequenceEnrolments.organisationId, organisationId))
+        .groupBy(newsletterSequenceEnrolments.sequenceId);
+    let sends: Array<{ sequenceId: number; sent: number; delivered: number; opened: number; clicked: number; bounced: number }> = [];
+    try {
+        sends = await db
+            .select({
+                sequenceId: newsletterSequenceSends.sequenceId,
+                sent: sql<number>`count(*)::int`,
+                delivered: sql<number>`count(*) filter (where ${newsletterSequenceSends.status} in ('delivered','complained') or ${newsletterSequenceSends.openedAt} is not null)::int`,
+                opened: sql<number>`count(${newsletterSequenceSends.openedAt})::int`,
+                clicked: sql<number>`count(${newsletterSequenceSends.clickedAt})::int`,
+                bounced: sql<number>`count(*) filter (where ${newsletterSequenceSends.status} = 'bounced')::int`,
+            })
+            .from(newsletterSequenceSends)
+            .where(eq(newsletterSequenceSends.organisationId, organisationId))
+            .groupBy(newsletterSequenceSends.sequenceId);
+    } catch (err) {
+        const code = (err as { code?: string; cause?: { code?: string } })?.code ?? (err as { cause?: { code?: string } })?.cause?.code;
+        if (code !== '42P01') throw err;
+    }
+    const rate = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 1000) / 10 : null);
+    return sequences.map((q) => {
+        const e = enrol.find((x) => x.sequenceId === q.id);
+        const s = sends.find((x) => x.sequenceId === q.id);
+        const sent = s?.sent ?? 0;
+        const base = s ? (s.delivered || Math.max(0, sent - s.bounced)) : 0;
+        return {
+            ...q,
+            enrolled: e?.enrolled ?? 0, inProgress: e?.active ?? 0, completed: e?.completed ?? 0, unsubscribed: e?.unsubscribed ?? 0,
+            sent, opened: s?.opened ?? 0, clicked: s?.clicked ?? 0, bounced: s?.bounced ?? 0,
+            openRate: rate(s?.opened ?? 0, base), clickRate: rate(s?.clicked ?? 0, base),
+            unsubscribeRate: rate(e?.unsubscribed ?? 0, e?.enrolled ?? 0),
+        };
+    });
 }

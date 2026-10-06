@@ -910,6 +910,7 @@ window._activateMainTab = function(name) {
     // Campaigns renders lazily for the same reason — init() already fetched, because the count
     // feeds both the tab badge and the control strip above the tab bar.
     if (name === 'campaigns') window.AssistantCampaigns?.activate();
+    if (name === 'email-campaigns') window.AssistantEmailCampaigns?.activate();
     // Conversations already fetched at init() — its thread total feeds the tab's own count, so it
     // cannot wait for the tab to be opened. activate() repaints from that result rather than
     // refetching. (This comment used to say the opposite and was stale: the prefetch landed when
@@ -3435,7 +3436,10 @@ const _RQ_NEWSLETTER_STATUS = {
     // 'sending' sits with the sent column rather than scheduled: from the reader's point of view it
     // has left, and it can no longer be edited or stopped from here.
     posted: ['sending', 'sent'],
-    archived: ['archived', 'failed', 'rejected'],
+    // A failed send is something to act on, not history: it belongs in Needs attention (the column
+    // was on screen for emails with nothing mapped to it, while failures hid under Archived).
+    attention: ['failed'],
+    archived: ['archived', 'rejected'],
 };
 
 function _rqNewsletterActions(issue, statusKey) {
@@ -3459,9 +3463,27 @@ function _detailRqNewsletterCard(issue, statusKey) {
           <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">${_rqEsc(issue.status)}</span>
           ${when ? `<span class="text-[11px] font-semibold text-gray-400">${_rqEsc(when)}</span>` : ''}
         </div>
+        ${issue.status === 'sent' ? _rqNewsletterResults(issue) : ''}
       </div>
       ${_rqNewsletterActions(issue, statusKey)}
     </div>`;
+}
+
+// A sent email's results on its card: delivered, unique open and click rates, bounces. Rates over
+// delivered (or recipients until delivery events arrive). Opens are indicative — see the KPI card.
+function _rqNewsletterResults(i) {
+    const recipients = Number(i.recipientCount || 0);
+    if (!recipients) return '';
+    const delivered = Number(i.deliveredCount || 0);
+    const base = delivered || recipients;
+    const r = (n) => `${Math.round((Number(n || 0) / base) * 1000) / 10}%`;
+    const item = (label, value) => `<span class="text-[11px] text-gray-500">${label} <strong class="text-gray-800">${value}</strong></span>`;
+    return `<div class="flex items-center gap-3 flex-wrap mt-2">
+        ${item('Delivered', delivered ? `${delivered.toLocaleString()} of ${recipients.toLocaleString()}` : '—')}
+        ${item('Opened', r(i.openedCount))}
+        ${item('Clicked', r(i.clickedCount))}
+        ${Number(i.bouncedCount || 0) ? item('Bounced', Number(i.bouncedCount).toLocaleString()) : ''}
+      </div>`;
 }
 
 // The Studio is a view, not a modal, so this routes rather than opening a dialog.
@@ -3483,24 +3505,47 @@ async function _detailRqRenderNewsletter(statusKey) {
     if (!aid) { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">No assistant selected.</p>'; return; }
     if (!wanted.length) { container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Emails don’t have this state.</p>'; return; }
 
-    let issues = [];
+    // The WHOLE list, once: every column's count comes from it (like the Blog Writer's queue), so
+    // an email visibly moves Review → Approved → Scheduled → Sent instead of only Review ever
+    // carrying a number (2026-10-06).
+    let all = [];
     try {
         const res = await fetch(`/.netlify/functions/newsletter-issues?assistantId=${aid}`);
         if (!res.ok) throw new Error();
-        issues = ((await res.json()).issues || []).filter((i) => wanted.includes(i.status));
+        all = (await res.json()).issues || [];
     } catch { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">Failed to load.</p>'; return; }
+    _detailRqPaintNewsletterCounts(all);
+    const issues = all.filter((i) => wanted.includes(i.status));
 
-    if (statusKey === 'review') {
-        const colBadge = document.getElementById('detail-rq-col-count-review');
-        if (colBadge) { colBadge.textContent = issues.length || ''; colBadge.classList.toggle('hidden', !issues.length); }
-        _setDetailRqTabBadge(issues.length);
-        window._setPendingReviewCount?.(issues.length);
-        window._updateOpSignals?.({ pendingReview: issues.length });
-    }
+    // Campaigns written but switched off are work waiting on the owner too — say so where they
+    // look for that, and point at the Campaigns tab where they live.
+    const waiting = statusKey === 'review' ? (window.AssistantEmailCampaigns?.waiting() || []) : [];
+    const waitingNote = waiting.length
+        ? `<div class="my-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-center justify-between gap-3 flex-wrap">
+             <span>${waiting.length === 1 ? `The campaign <strong>${_rqEsc(waiting[0].name)}</strong> is written but switched off.` : `${waiting.length} campaigns are written but switched off.`}</span>
+             <button type="button" onclick="window._activateMainTab('email-campaigns')" class="link text-sm font-semibold">Review campaigns →</button>
+           </div>`
+        : '';
 
-    container.innerHTML = issues.length
+    container.innerHTML = waitingNote + (issues.length
         ? `<div class="divide-y divide-gray-100">${issues.map((i) => _detailRqNewsletterCard(i, statusKey)).join('')}</div>`
-        : `<p class="text-sm text-gray-400 py-10 text-center">${statusKey === 'review' ? 'No emails awaiting review.' : 'Nothing here yet.'}</p>`;
+        : `<p class="text-sm text-gray-400 py-10 text-center">${statusKey === 'review' ? 'No emails awaiting review.' : 'Nothing here yet.'}</p>`);
+}
+
+/** Every visible column's count from one list of the assistant's emails — see _detailRqPaintBlogCounts. */
+function _detailRqPaintNewsletterCounts(all) {
+    let review = 0;
+    for (const key of Object.keys(_DETAIL_RQ_COLUMNS)) {
+        const btn = document.querySelector(`.detail-rq-col[data-status="${key}"]`);
+        if (!btn || btn.classList.contains('hidden')) continue;
+        const wanted = _RQ_NEWSLETTER_STATUS[key] || [];
+        const n = wanted.length ? all.filter((i) => wanted.includes(i.status)).length : 0;
+        _detailRqSetColumnBadge(key, n);
+        if (key === 'review') review = n;
+    }
+    _setDetailRqTabBadge(review);
+    window._setPendingReviewCount?.(review);
+    window._updateOpSignals?.({ pendingReview: review });
 }
 
 /**
@@ -5286,12 +5331,15 @@ function _applyDashboardRegistry(data) {
     // for someone to press Send now or for its scheduled time — hiding the column would hide every
     // issue sitting in exactly that state.
     toggle('detail-rq-col-approved', rqIsRecords || rqIsNewsletter);
+    // "Sent" for emails (set below); every other role keeps "Posted".
+    setText('detail-rq-col-label-posted', 'Posted');
     if (rqIsBlog) {
         setText('detail-rq-primary-label', 'Write Blog Post');
         const rqBtn = document.getElementById('detail-rq-primary-btn');
         if (rqBtn) rqBtn.onclick = () => { window.openBlogStudio?.({ assistantId: data.id }); };
     } else if (rqIsNewsletter) {
         setText('detail-rq-primary-label', 'Write Email');
+        setText('detail-rq-col-label-posted', 'Sent');
         const rqBtn = document.getElementById('detail-rq-primary-btn');
         if (rqBtn) rqBtn.onclick = () => { window._newsletterAssistantId = window._currentAssistantId || null; window.loadView?.('newsletter'); };
     } else if (!rqIsRecords) {
@@ -5454,6 +5502,10 @@ function _applyDashboardRegistry(data) {
     // counts drive both the tab badge AND the Budget & Control strip, which sits above the tab bar
     // and is therefore visible from tabs that never activate this one. The panel itself renders
     // lazily on first _activateMainTab('campaigns').
+    // Email campaigns — the Email Marketing Assistant's automatic series (emailCampaignsTab).
+    toggle('maintab-btn-email-campaigns', !!cfg.emailCampaignsTab);
+    if (cfg.emailCampaignsTab) window.AssistantEmailCampaigns?.init({ assistantId: data.id });
+
     const campaignsTab = cfg.campaignsTab;
     toggle('maintab-btn-campaigns', !!campaignsTab);
     if (campaignsTab) {
