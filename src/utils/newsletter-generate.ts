@@ -198,8 +198,9 @@ export async function loadAssistantVoice(
     assistantId: number | null | undefined,
     organisationId: number,
     fallbackTone = '',
-): Promise<{ tone: string; assistantPrompt: string; timezone: string }> {
+): Promise<{ tone: string; assistantPrompt: string; timezone: string; voice: unknown }> {
     let tone = str(fallbackTone, 200);
+    let voice: unknown = undefined;
     let assistantPrompt = '';
     let timezone = resolvePostingSchedule(null).timezone;
     if (assistantId) {
@@ -212,8 +213,9 @@ export async function loadAssistantVoice(
         if (typeof actx.tone_of_voice === 'string' && actx.tone_of_voice.trim()) tone = actx.tone_of_voice.trim();
         if (assistant?.systemPrompt) assistantPrompt = assistant.systemPrompt.slice(0, 2000);
         timezone = resolvePostingSchedule(actx).timezone;
+        voice = actx.voice; // the owner's Voice builder settings, when set
     }
-    return { tone: tone || DEFAULT_TONE, assistantPrompt, timezone };
+    return { tone: tone || DEFAULT_TONE, assistantPrompt, timezone, voice };
 }
 
 /**
@@ -306,7 +308,7 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
         .limit(1);
     if (!issue) throw new IssueNotFoundError(issueId);
 
-    const { tone, assistantPrompt, timezone } = await loadAssistantVoice(db, issue.assistantId, organisationId, opts.tone);
+    const { tone, assistantPrompt, timezone, voice } = await loadAssistantVoice(db, issue.assistantId, organisationId, opts.tone);
 
     const [org] = await db
         .select({
@@ -365,7 +367,7 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
             // "as we head into 2025" is visible in every inbox and dates the whole product.
             `${currentDatePromptBlock({ publishDate: issue.scheduledFor, timezone })}\n\n` +
             `You are writing an email newsletter${org?.name ? ` for ${org.name}` : ''}, sent to people who ` +
-            `subscribed to hear from them.\n${voiceDirective(tone, { surface: 'email', fallback: DEFAULT_TONE })}\n` +
+            `subscribed to hear from them.\n${voiceDirective(tone, { surface: 'email', fallback: DEFAULT_TONE, voice })}\n` +
             (assistantPrompt ? `Voice guidance: ${assistantPrompt}\n` : '') +
             'Return ONLY a JSON object with exactly these keys:\n' +
             '  "subject"    — the subject line. Under 60 characters, specific, no clickbait, no emoji spam.\n' +
@@ -655,7 +657,7 @@ export async function refineEmailCopy(db: Db, args: {
     const { organisationId, userId } = args;
     const issue = { subject: args.subject, preheader: args.preheader, bodyMarkdown: args.bodyMarkdown, purpose: args.purpose };
     const instruction = args.instruction;
-    const { tone, assistantPrompt } = await loadAssistantVoice(db, args.assistantId, organisationId);
+    const { tone, assistantPrompt, voice } = await loadAssistantVoice(db, args.assistantId, organisationId);
 
     const customFields = await loadCustomFieldDefs(db, organisationId);
     const customKeys = customFields.map((f) => f.key);
@@ -666,7 +668,7 @@ export async function refineEmailCopy(db: Db, args: {
         max_tokens: 2500,
         system:
             `You are revising an email newsletter that has already been written and read by the `
-            + `person who owns it. Keep it in their voice.\n${voiceDirective(tone, { surface: 'email', fallback: DEFAULT_TONE })}\n`
+            + `person who owns it. Keep it in their voice.\n${voiceDirective(tone, { surface: 'email', fallback: DEFAULT_TONE, voice })}\n`
             + (assistantPrompt ? `Voice guidance: ${assistantPrompt}\n` : '')
             + `\nTHE CHANGE THEY ASKED FOR: ${instruction}\n\n`
             // The whole point of the route. Everything below is a prohibition, deliberately.
@@ -770,7 +772,7 @@ export interface SequenceDraftOptions {
 
 export async function draftSequenceEmail(db: Db, opts: SequenceDraftOptions): Promise<GenerateIssueResult> {
     const { organisationId, userId } = opts;
-    const { tone, assistantPrompt } = await loadAssistantVoice(db, opts.assistantId, organisationId);
+    const { tone, assistantPrompt, voice } = await loadAssistantVoice(db, opts.assistantId, organisationId);
 
     const [org] = await db
         .select({
@@ -810,7 +812,7 @@ export async function draftSequenceEmail(db: Db, opts: SequenceDraftOptions): Pr
         system:
             `You are writing email ${opts.stepNumber} of a welcome series${org?.name ? ` for ${org.name}` : ''}, `
             + `sent automatically to somebody who has just confirmed they want to hear from them. `
-            + `${voiceDirective(tone, { surface: 'email', fallback: DEFAULT_TONE })}\n`
+            + `${voiceDirective(tone, { surface: 'email', fallback: DEFAULT_TONE, voice })}\n`
             + (assistantPrompt ? `Voice guidance: ${assistantPrompt}\n` : '')
             + (opts.stepNumber === 1
                 ? 'This is the FIRST thing they will ever receive. Thank them once, say who the '

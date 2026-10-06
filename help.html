@@ -293,7 +293,7 @@ function renderList(searchTerm) {
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         ${articles.map(a => `
           <button data-id="${a.id}" class="btn-secondary article-card text-left border rounded-xl p-4 hover:shadow-sm transition group">
-            <h3 class="text-sm font-semibold text-gray-900 group-hover:text-emerald-700 transition leading-snug">${escHtml(a.title)}</h3>
+            <h3 class="text-sm font-semibold text-gray-900 leading-snug">${escHtml(a.title)}</h3>
             <p class="text-xs text-gray-400 mt-1">${escHtml(cat)}</p>
           </button>
         `).join('')}

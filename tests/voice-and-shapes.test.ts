@@ -131,7 +131,7 @@ check('the profile setting is saved under the keys the generators read, and surv
     const a = read('assistants.js');
     assert.match(a, /key: 'allowed_post_shapes'/);
     assert.match(a, /key: 'allowed_article_types'/);
-    assert.match(read('netlify/functions/update-assistant-context.ts'), /'allowed_post_shapes', 'allowed_article_types'\]/);
+    assert.match(read('netlify/functions/update-assistant-context.ts'), /'allowed_post_shapes', 'allowed_article_types', 'voice'\]/);
     assert.match(read('src/generated/platform-constants.js'), /window\.ContentShapes = \{/);
 });
 

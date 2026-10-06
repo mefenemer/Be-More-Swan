@@ -183,6 +183,96 @@ const TRAITS: Trait[] = [
     },
 ];
 
+// ── Voice builder (profile ▸ Voice builder, 2026-10-06) ──────────────────────────────────────────
+// A user reported drafts read as "cheesy" and wanted control. The builder stores
+// onboardingContext.voice; every generator passes it here beside the free-text tone.
+
+/** The personalities the builder offers — the trait keys above, by label. Generated to the client. */
+export const VOICE_PERSONALITIES = TRAITS.map((t) => ({ key: t.key, label: t.label }));
+
+/**
+ * The stock phrases that make copy read as "AI marketing". Applied to EVERY assistant by default;
+ * the builder pre-fills its Never-say list with these and the owner edits from there.
+ */
+export const DEFAULT_NEVER_SAY = [
+    'game-changer', 'game changer', 'unlock', 'unleash', 'elevate', 'supercharge', 'level up',
+    "let's dive in", 'dive into', 'deep dive', "in today's fast-paced world", 'in the ever-evolving',
+    'look no further', 'take it to the next level', 'revolutionise', 'revolutionize', 'seamless',
+    'cutting-edge', 'best-kept secret', "here's the thing", 'buckle up', 'the secret sauce',
+    'Ever wondered', "Let's face it", 'Picture this', 'Imagine a world',
+];
+
+export interface VoiceSettings {
+    /** Up to two TRAITS keys. Combined with any traits detected in the free-text tone. */
+    personalities?: string[];
+    /** 1–5 sliders; 3 = no steer. */
+    formality?: number;   // 1 very formal … 5 very casual
+    playfulness?: number; // 1 completely serious … 5 very playful
+    energy?: number;      // 1 understated … 5 high energy
+    colour?: number;      // 1 plain … 5 colourful
+    emoji?: 'none' | 'few' | 'auto';
+    exclamations?: 'never' | 'rarely' | 'auto';
+    spelling?: 'british' | 'american' | 'auto';
+    /** Phrases the copy must never contain. Absent = DEFAULT_NEVER_SAY. */
+    neverSay?: string[];
+    /** A short sample of the owner's own writing to match (style, not content). */
+    sample?: string;
+}
+
+const SLIDERS: Record<'formality' | 'playfulness' | 'energy' | 'colour', Record<number, string>> = {
+    formality: {
+        1: 'Very formal: complete sentences, no contractions, no slang, no fragments.',
+        2: 'Leaning formal: mostly complete sentences, few contractions, nothing chatty.',
+        4: 'Leaning casual: contractions and everyday words; the odd fragment is fine.',
+        5: 'Very casual: write like a message to a friend — contractions, short bursts, plain talk.',
+    },
+    playfulness: {
+        1: 'Completely serious: no jokes, puns, wordplay or winks of any kind.',
+        2: 'Mostly serious: a light touch at most, never a joke for its own sake.',
+        4: 'Playful: a wry aside or a little humour is welcome where it fits.',
+        5: 'Very playful: real humour and personality in most pieces — still clear and useful.',
+    },
+    energy: {
+        1: 'Understated: calm and matter-of-fact. No hype words, no urgency, no superlatives.',
+        2: 'Measured: confident but quiet; let the facts carry it.',
+        4: 'Upbeat: positive and lively, without overselling.',
+        5: 'High energy: enthusiastic and punchy — but every claim still has to be true and specific.',
+    },
+    colour: {
+        1: 'Plain: literal language only — no metaphors, no imagery, no flourishes.',
+        2: 'Mostly plain: one concrete image at most.',
+        4: 'Colourful: vivid, concrete detail and the occasional fresh metaphor (never a cliché).',
+        5: 'Very colourful: rich imagery and striking word choice — fresh, never purple or clichéd.',
+    },
+};
+
+/** A clean, bounded VoiceSettings from anything (it is stored from the browser). */
+export function normaliseVoice(raw: unknown): VoiceSettings | null {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const r = raw as Record<string, unknown>;
+    const lvl = (v: unknown) => { const n = Math.round(Number(v)); return n >= 1 && n <= 5 ? n : 3; };
+    const pick = <T extends string>(v: unknown, opts: readonly T[], d: T): T => (opts as readonly string[]).includes(String(v)) ? (v as T) : d;
+    const keys = new Set(TRAITS.map((t) => t.key));
+    return {
+        personalities: (Array.isArray(r.personalities) ? r.personalities : []).map(String).filter((k) => keys.has(k)).slice(0, 2),
+        formality: lvl(r.formality), playfulness: lvl(r.playfulness), energy: lvl(r.energy), colour: lvl(r.colour),
+        emoji: pick(r.emoji, ['none', 'few', 'auto'] as const, 'auto'),
+        exclamations: pick(r.exclamations, ['never', 'rarely', 'auto'] as const, 'auto'),
+        spelling: pick(r.spelling, ['british', 'american', 'auto'] as const, 'auto'),
+        neverSay: Array.isArray(r.neverSay)
+            ? r.neverSay.map((x) => String(x).replace(/\s+/g, ' ').trim().slice(0, 60)).filter(Boolean).slice(0, 60)
+            : undefined,
+        sample: typeof r.sample === 'string' ? r.sample.trim().slice(0, 1500) : '',
+    };
+}
+
+/** Phrases from the Never-say list that appear in `text` (case-insensitive). For post-checks. */
+export function findNeverSay(text: string, voice?: VoiceSettings | null): string[] {
+    const list = voice?.neverSay ?? DEFAULT_NEVER_SAY;
+    const t = String(text || '').toLowerCase();
+    return list.filter((p) => p && t.includes(p.toLowerCase()));
+}
+
 /** Words that, near a trait word, invert it ("not salesy", "never formal"). Kept deliberately small. */
 const NEGATORS = ['not', 'never', 'no', 'avoid', 'avoiding', 'without', 'less', "don't", 'dont', 'non'];
 
@@ -217,11 +307,14 @@ const SURFACE_NOUN: Record<VoiceSurface, string> = {
  *
  * `fallback` is used only when `toneText` is empty (e.g. 'professional' for a role with no setting).
  */
-export function voiceDirective(toneText: unknown, opts: { surface: VoiceSurface; fallback?: string }): string {
+export function voiceDirective(toneText: unknown, opts: { surface: VoiceSurface; fallback?: string; voice?: unknown }): string {
     const raw = typeof toneText === 'string' ? toneText.trim().slice(0, 300) : '';
-    const tone = raw || opts.fallback || 'friendly and professional';
+    const voice = normaliseVoice(opts.voice);
+    const chosen = voice?.personalities ?? [];
+    const chosenLabels = TRAITS.filter((t) => chosen.includes(t.key)).map((t) => t.label);
+    const tone = raw || (chosenLabels.length ? chosenLabels.join(' and ') : '') || opts.fallback || 'friendly and professional';
     const noun = SURFACE_NOUN[opts.surface];
-    const keys = detectVoiceTraits(tone);
+    const keys = [...new Set([...chosen, ...detectVoiceTraits(raw || tone)])];
     const traits = TRAITS.filter((t) => keys.includes(t.key));
 
     const lines: string[] = [
@@ -249,6 +342,35 @@ export function voiceDirective(toneText: unknown, opts: { surface: VoiceSurface;
             '',
             'Before writing, turn that description into four or five CONCRETE habits — typical sentence length, contractions or not, punctuation (exclamation marks? fragments?), emoji or not, humour or not, how the reader is addressed, how the piece ends — and follow them consistently.',
         );
+    }
+
+    // The builder's fine-tuning. Each slider at its middle says nothing; either end is a hard rule.
+    if (voice) {
+        const tuning: string[] = [];
+        (['formality', 'playfulness', 'energy', 'colour'] as const).forEach((k) => {
+            const rule = SLIDERS[k][voice[k] ?? 3];
+            if (rule) tuning.push(rule);
+        });
+        if (voice.emoji === 'none' && opts.surface !== 'blog') tuning.push('No emoji at all.');
+        if (voice.emoji === 'few' && opts.surface === 'social') tuning.push('At most one or two emoji, and only where they add meaning.');
+        if (voice.exclamations === 'never') tuning.push('No exclamation marks at all.');
+        if (voice.exclamations === 'rarely') tuning.push('At most one exclamation mark in the whole piece.');
+        if (voice.spelling === 'british') tuning.push('British English spelling and vocabulary (colour, organise, favourite).');
+        if (voice.spelling === 'american') tuning.push('American English spelling and vocabulary (color, organize, favorite).');
+        if (tuning.length) {
+            lines.push('', 'FINE-TUNING — set by the owner, and these win over anything above:', ...tuning.map((r) => `- ${r}`));
+        }
+        if (voice.sample) {
+            lines.push('', "WRITE LIKE THIS — a sample of the owner's own writing. Match its rhythm, sentence length, vocabulary and attitude. Do NOT copy its words or topic:",
+                `<sample>${voice.sample}</sample>`);
+        }
+    }
+
+    // Never say — the owner's list, or the default anti-cliché list for everyone else. This is the
+    // part that answers "it sounds cheesy": the clichés are named and banned, not hoped away.
+    const never = voice?.neverSay ?? DEFAULT_NEVER_SAY;
+    if (never.length) {
+        lines.push('', `NEVER use these words or phrases, or close variants of them: ${never.map((p) => `"${p}"`).join(', ')}. They read as generic AI marketing copy.`);
     }
 
     lines.push(

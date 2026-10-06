@@ -763,6 +763,13 @@
     articleTypes: [{"key":"guide","label":"Practical guide","summary":"Teaches the reader to do one thing"},{"key":"opinion","label":"Opinion piece","summary":"Argues one clear position"},{"key":"story","label":"True story","summary":"A real situation, told as a narrative"},{"key":"list","label":"List article","summary":"Numbered items with real substance"},{"key":"myth","label":"Myth-busting","summary":"Common beliefs, taken apart"},{"key":"qa","label":"Questions answered","summary":"Real customer questions, answered"},{"key":"behind_scenes","label":"Behind the scenes","summary":"An honest look at how you work"},{"key":"comparison","label":"Comparison","summary":"Helps the reader choose between options"}],
   };
 
+  // Voice builder (assistant profile), from src/utils/voice-profile.ts — the SAME personality keys and
+  // default never-say list the generators apply, so the builder can never offer one they ignore.
+  window.VoiceBuilder = {
+    personalities: [{"key":"professional","label":"Professional"},{"key":"authoritative","label":"Authoritative"},{"key":"casual","label":"Casual"},{"key":"friendly","label":"Friendly & warm"},{"key":"confident","label":"Confident & direct"},{"key":"witty","label":"Witty & playful"},{"key":"inspirational","label":"Uplifting & energetic"},{"key":"empathetic","label":"Empathetic & calm"},{"key":"educational","label":"Clear & educational"},{"key":"luxury","label":"Refined & premium"}],
+    defaultNeverSay: ["game-changer","game changer","unlock","unleash","elevate","supercharge","level up","let's dive in","dive into","deep dive","in today's fast-paced world","in the ever-evolving","look no further","take it to the next level","revolutionise","revolutionize","seamless","cutting-edge","best-kept secret","here's the thing","buckle up","the secret sauce","Ever wondered","Let's face it","Picture this","Imagine a world"],
+  };
+
   window.BlogFonts = {
     all: BLOG_FONTS,
     categories: ["System","Sans serif","Serif","Display","Monospace"],

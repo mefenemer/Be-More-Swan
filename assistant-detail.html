@@ -406,7 +406,7 @@
       <div class="mt-4 pt-4 border-t border-gray-100 flex flex-wrap gap-x-10 gap-y-2">
         <button type="button" onclick="window._activateMainTab && window._activateMainTab('review-queue')" class="text-left cursor-pointer group">
           <p class="text-xl font-black text-gray-900"><span id="autopilot-pending">0</span></p>
-          <p class="text-xs font-semibold text-gray-500 group-hover:text-emerald-700 transition">Waiting for your review</p>
+          <p class="link text-xs font-semibold">Waiting for your review</p>
         </button>
         <div id="autopilot-horizon-stat">
           <p class="text-xl font-black text-gray-900"><span id="autopilot-horizon">7</span> days</p>
@@ -1509,6 +1509,20 @@
           <p class="text-xs text-gray-400 mt-1">Separate topics with commas — up to 5. Each becomes a discrete pillar your posts are categorised under.</p>
         </div>
       </div>
+    </div>
+
+    <!-- Voice builder — the owner tunes HOW the assistant sounds (personalities, sliders, never-say,
+         a sample of their writing) and hears it before it drafts. Social Media, Blog and Email
+         Marketing assistants; rendered by _renderVoiceBuilder() in assistants.js, saved as
+         onboardingContext.voice through the hidden #edit_voice_json (so the profile's autosave
+         picks it up), read by voiceDirective() in src/utils/voice-profile.ts. -->
+    <div id="module-voice-builder" class="hidden bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+      <div class="mb-5">
+        <h3 class="text-lg font-bold text-gray-900">Voice builder</h3>
+        <p class="text-sm text-gray-500 mt-1">Fine-tune how your assistant sounds, then hear it. These settings sit on top of the Brand Voice &amp; Tone description and win where they disagree.</p>
+      </div>
+      <input type="hidden" id="edit_voice_json" value="">
+      <div id="voice-builder-body" class="space-y-6"></div>
     </div>
 
     <!-- Content mix — which KINDS of post (social) or article (blog) this assistant may write.

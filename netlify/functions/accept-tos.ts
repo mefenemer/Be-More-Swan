@@ -12,7 +12,9 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { retryBlockedAssistants } from '../../src/utils/retry-provisioning';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const CURRENT_TOS_VERSION = '2.0';
+// 2.1 (2026-10-06): clause 11.9 — published blog posts go to The Swan Index by default; opt out by
+// email. Bumping this asks every signed-in user to accept again (workspace check-tos modal).
+export const CURRENT_TOS_VERSION = '2.1';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -36,7 +38,10 @@ export default withLambda(async (event) => {
     let body: { version?: string } = {};
     try { body = JSON.parse(event.body || '{}'); } catch { /* use defaults */ }
 
-    const version = body.version || CURRENT_TOS_VERSION;
+    // Always the CURRENT version. The client used to send a hard-coded '2.0', so after a bump it
+    // recorded acceptance of the OLD terms and the re-accept prompt came back on every load.
+    void body.version;
+    const version = CURRENT_TOS_VERSION;
     const ipAddress = event.headers['x-forwarded-for']?.split(',')[0]?.trim() || event.headers['client-ip'] || null;
     const userAgent = event.headers['user-agent'] || null;
 

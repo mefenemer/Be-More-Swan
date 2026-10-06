@@ -72,7 +72,7 @@ export default withLambda(async (event) => {
             // so a partial save from any other surface must not erase them.
             // allowed_post_shapes / allowed_article_types (profile ▸ Content mix) for the same reason:
             // re-running the setup wizard must not quietly reset which kinds of content are allowed.
-            const CARRY_ACROSS = ['publishPolicy', 'trigger_type', 'content_source', 'allowed_post_shapes', 'allowed_article_types'];
+            const CARRY_ACROSS = ['publishPolicy', 'trigger_type', 'content_source', 'allowed_post_shapes', 'allowed_article_types', 'voice'];
             const mergedContext = { ...newContext };
             const existingCtx = (existingAssistant.onboardingContext as Record<string, unknown> | null) ?? {};
             for (const key of CARRY_ACROSS) {

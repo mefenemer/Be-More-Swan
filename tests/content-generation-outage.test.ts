@@ -182,8 +182,9 @@ check('the drain opts in, and counts the near-duplicate re-ask separately', () =
     // Opt-in on purpose: about a dozen callers already log for themselves, and making it
     // unconditional would double-count every one of them.
     assert.ok(drain.includes('const jobUsage = {'), 'drafting is unmetered again');
-    assert.strictEqual(drain.split('usage: jobUsage').length - 1, 2,
-        'one of the two billable calls per post is still invisible');
+    // Three since 2026-10-06: the draft, the near-duplicate re-ask, and the never-say re-ask.
+    assert.strictEqual(drain.split('usage: jobUsage').length - 1, 3,
+        'one of the three billable calls per post is still invisible');
     assert.ok(drain.includes('workspaceId: job.organisation_id'), 'the cost is not attributed to a workspace');
 });
 

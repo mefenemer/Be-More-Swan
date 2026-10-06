@@ -24,7 +24,7 @@
 
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { audienceContacts, leadOptOuts, newsletterIssues, newsletterSends } from '../../db/schema';
+import { audienceContacts, leadOptOuts, newsletterIssues, newsletterSends, newsletterSequenceSends } from '../../db/schema';
 import { setContactStatus } from '../../src/utils/audience-store';
 import { normaliseEmail } from '../../src/utils/audience-contacts';
 import { haltEnrolmentsForContact } from '../../src/utils/newsletter-sequence';
@@ -84,6 +84,14 @@ export default withLambda(async (event) => {
                 status: newsletterSends.status,
             }).from(newsletterSends).where(eq(newsletterSends.providerMessageId, messageId)).limit(1)
             : [];
+
+        // A CAMPAIGN email (welcome / form sequence) has no newsletter_sends row — it is recorded in
+        // newsletter_sequence_sends. Same events, same first-touch rule, so a campaign reports
+        // delivery, opens, clicks, bounces and complaints like a one-off email does.
+        if (!row && messageId) {
+            const handled = await handleSequenceEvent(db, { type, data, messageId, fallbackEmail: email });
+            if (handled) return { statusCode: 200, body: handled };
+        }
 
         if (!row) {
             // Not ours, or an event for a message sent before this table existed. 200 so the
@@ -241,3 +249,81 @@ export default withLambda(async (event) => {
         return { statusCode: 500, body: 'error' };
     }
 });
+
+/**
+ * Apply one provider event to a campaign email. Returns null when the message is not a campaign
+ * email either (or the table is not there yet), so the caller can answer "unmatched".
+ */
+async function handleSequenceEvent(
+    db: ReturnType<typeof getDb>,
+    ev: { type: string; data: any; messageId: string; fallbackEmail: string | null },
+): Promise<string | null> {
+    let seqRow: { id: number; organisationId: number; email: string; status: string } | undefined;
+    try {
+        [seqRow] = await db.select({
+            id: newsletterSequenceSends.id,
+            organisationId: newsletterSequenceSends.organisationId,
+            email: newsletterSequenceSends.email,
+            status: newsletterSequenceSends.status,
+        }).from(newsletterSequenceSends).where(eq(newsletterSequenceSends.providerMessageId, ev.messageId)).limit(1);
+    } catch (err) {
+        const code = (err as { code?: string; cause?: { code?: string } })?.code ?? (err as { cause?: { code?: string } })?.cause?.code;
+        if (code === '42P01') return null; // db/newsletter-sequence-sends.sql not applied yet
+        throw err;
+    }
+    if (!seqRow) return null;
+    const now = new Date();
+    // ⚠️ Raw sql`` templates bind an ISO string, never a Date — postgres-js rejects a Date in Bind.
+    const nowIso = now.toISOString();
+    const address = seqRow.email || ev.fallbackEmail || '';
+
+    if (ev.type === 'email.delivered') {
+        await db.update(newsletterSequenceSends).set({ status: 'delivered', updatedAt: now })
+            .where(and(eq(newsletterSequenceSends.id, seqRow.id), eq(newsletterSequenceSends.status, 'sent')));
+        return 'ok';
+    }
+    if (ev.type === 'email.bounced') {
+        const bounceType = String(ev.data?.bounce?.type || ev.data?.type || '').toLowerCase();
+        const hard = HARD_BOUNCE_TYPES.has(bounceType) || !bounceType;
+        await db.update(newsletterSequenceSends)
+            .set({ status: 'bounced', error: String(ev.data?.bounce?.message || '').slice(0, 500), updatedAt: now })
+            .where(eq(newsletterSequenceSends.id, seqRow.id));
+        if (hard) {
+            await setContactStatus(db, {
+                organisationId: seqRow.organisationId, email: address, status: 'bounced', event: 'bounced', channel: 'webhook',
+                evidence: `Hard bounce on a campaign email${bounceType ? ` (${bounceType})` : ''}.`,
+            });
+            await haltEnrolmentsForContact(db, { organisationId: seqRow.organisationId, email: address, reason: 'bounced' });
+        }
+        return 'ok';
+    }
+    if (ev.type === 'email.complained') {
+        await db.update(newsletterSequenceSends).set({ status: 'complained', updatedAt: now })
+            .where(eq(newsletterSequenceSends.id, seqRow.id));
+        await setContactStatus(db, {
+            organisationId: seqRow.organisationId, email: address, status: 'complained', event: 'complained', channel: 'webhook',
+            evidence: 'Reported a campaign email as spam.',
+        });
+        await haltEnrolmentsForContact(db, { organisationId: seqRow.organisationId, email: address, reason: 'complained' });
+        try {
+            await db.insert(leadOptOuts).values({
+                organisationId: seqRow.organisationId, email: address, reason: 'spam_complaint', source: 'bounce',
+                matchedRule: 'newsletter_complaint', evidence: 'Recipient reported a campaign email as spam.',
+            }).onConflictDoNothing();
+        } catch (err) {
+            console.error('[newsletter-webhook] campaign complaint NOT recorded in lead_opt_outs', { orgId: seqRow.organisationId }, err);
+        }
+        return 'ok';
+    }
+    if (ev.type === 'email.opened' || ev.type === 'email.clicked') {
+        const isClick = ev.type === 'email.clicked';
+        const link = String(ev.data?.click?.link || ev.data?.link || '').slice(0, 500) || null;
+        // First touch sets the timestamp; every touch counts. Rates use the timestamps.
+        await db.update(newsletterSequenceSends).set(isClick
+            ? { clickedAt: sql`coalesce(${newsletterSequenceSends.clickedAt}, ${nowIso}::timestamp)`, clickCount: sql`${newsletterSequenceSends.clickCount} + 1`, lastClickedUrl: link, updatedAt: now }
+            : { openedAt: sql`coalesce(${newsletterSequenceSends.openedAt}, ${nowIso}::timestamp)`, openCount: sql`${newsletterSequenceSends.openCount} + 1`, updatedAt: now })
+            .where(eq(newsletterSequenceSends.id, seqRow.id));
+        return 'ok';
+    }
+    return 'ignored';
+}

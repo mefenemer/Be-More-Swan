@@ -174,9 +174,9 @@ window._buildAssistantCardGoals = function (assistant) {
     if (total === 0) {
         return `
         <button type="button" onclick="${goalsTab}"
-            class="flex items-center gap-2 text-xs font-semibold text-gray-400 hover:text-emerald-700 mb-5 cursor-pointer transition-colors text-left">
+            class="link flex items-center gap-2 text-xs font-semibold mb-5 text-left">
             <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v8m4-4H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-            No goals set yet — <span class="underline">add goals to track performance</span>
+            No goals set yet — add goals to track performance
         </button>`;
     }
 
@@ -435,7 +435,7 @@ window.generateAssistantCardHTML = function(assistant) {
             </div>
             ${statusHtml}
         </div>
-        <h3 class="text-lg font-bold text-gray-900 group-hover:text-emerald-700 transition-colors">${assistant.name}</h3>
+        <h3 class="text-lg font-bold text-gray-900">${assistant.name}</h3>
         <p class="text-sm text-gray-500 mb-4">${role}</p>
         ${goalsHtml}
         ${metricsHtml}
@@ -443,7 +443,7 @@ window.generateAssistantCardHTML = function(assistant) {
         <div class="mt-auto pt-4 border-t border-gray-50 flex justify-between items-center">
             <button type="button" onclick="event.stopPropagation(); window.openAssistantChatModal ? window.openAssistantChatModal('${assistant.id}', '${(assistant.name || 'Your assistant').replace(/'/g, '&#39;')}', '${role.replace(/'/g, '&#39;')}', '${(assistant.roleKey || '').replace(/'/g, '&#39;')}', { resume: true }) : (window.location.href = 'assistant-chat.html?assistantId=${assistant.id}')"
                class="btn-assistant px-3.5 py-1.5 text-xs font-bold border rounded-lg transition cursor-pointer">💬 Chat</button>
-            <span class="text-sm font-bold text-gray-900 group-hover:text-emerald-700 transition-colors">View Details &rarr;</span>
+            <span class="link text-sm font-bold">View Details &rarr;</span>
         </div>
     </div>`;
 };
@@ -1390,7 +1390,7 @@ function _detailRqGroupSection(g, items, render, statusKey, total) {
     return `<section class="border-b border-gray-100 last:border-0">
       <button onclick="_detailRqToggleGroup('${g.key}')" class="w-full flex items-center gap-2 py-3 text-left cursor-pointer group">
         <svg class="detail-rq-group-chevron-${g.key} w-4 h-4 text-gray-400 transition-transform ${open ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-        <span class="text-sm font-bold text-gray-900 group-hover:text-emerald-700">${g.label}</span>
+        <span class="text-sm font-bold text-gray-900">${g.label}</span>
         <span class="rq-group-count text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">${_detailRqCountLabel(items.length, total)}</span>
       </button>
       <div class="detail-rq-group-body-${g.key} ${open ? '' : 'hidden'} pb-1">${body}</div>
@@ -2478,7 +2478,7 @@ function _detailRqRecordCard(r, statusKey) {
         class="w-full flex items-start gap-3 text-left py-2 cursor-pointer group">
         <svg class="rq-card-chevron w-4 h-4 mt-0.5 shrink-0 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
         <span class="min-w-0 flex-1">
-          <span class="block text-sm font-bold text-gray-900 truncate group-hover:text-emerald-800">${_rqEsc(r.title)}</span>
+          <span class="block text-sm font-bold text-gray-900 truncate">${_rqEsc(r.title)}</span>
           <span class="flex flex-wrap items-center gap-2 mt-1">
             ${_rqCardChips(r)}
             ${_rqRetentionChip(r, statusKey)}
@@ -3844,7 +3844,7 @@ async function _initAssistantNotifPrefs() {
                 ${toggleHtml(cat, 'email', !!cat.email.value)}
                 ${toggleHtml(cat, 'push', !!(cat.push && cat.push.value))}
                 <button type="button" data-reset-cat="${cat.key}"
-                  class="${custom ? '' : 'hidden '}text-xs font-semibold text-gray-400 hover:text-emerald-700 underline decoration-dotted cursor-pointer">Reset to workspace default</button>
+                  class="${custom ? '' : 'hidden '}link text-xs font-semibold">Reset to workspace default</button>
               </div>
             </div>`;
         }).join('');
@@ -5726,6 +5726,7 @@ function _detailHydrate(data) {
     _detailSetVal('edit_audience', ctx.target_audience || '');
     _detailSetVal('edit_tone', ctx.tone_of_voice || '');
     _renderContentMix(data);
+    _renderVoiceBuilder(data);
     _detailSetVal('edit_pillars', Array.isArray(ctx.content_pillars) ? ctx.content_pillars.join(', ') : (ctx.content_pillars || ''));
     _renderPillarChips();
     // Sales context — feeds the auto-responder objection playbook (P4) and DM drafting.
@@ -6116,6 +6117,154 @@ document.addEventListener('change', (e) => {
     }
 });
 
+// ── Voice builder (Social Media, Blog, Email Marketing) ─────────────────────────────────────────
+// Personalities, four sliders, emoji/exclamation/spelling, a never-say list and a writing sample,
+// plus "Hear it". State lives in _vb; every change is mirrored into the hidden #edit_voice_json and
+// a `change` is dispatched on it, which is how the profile's [id^="edit_"] autosave picks it up.
+// Handlers are bound ONCE on document — the body re-renders on every change.
+const _VB_ROLES = ['social_media_manager', 'blog_writer', 'newsletter_editor'];
+const _VB_SLIDERS = [
+    ['formality', 'Formality', 'Very formal', 'Very casual'],
+    ['playfulness', 'Humour', 'Completely serious', 'Very playful'],
+    ['energy', 'Energy', 'Understated', 'High energy'],
+    ['colour', 'Language', 'Plain', 'Colourful'],
+];
+let _vb = null;
+
+function _vbDefaults() {
+    return { personalities: [], formality: 3, playfulness: 3, energy: 3, colour: 3, emoji: 'auto', exclamations: 'auto', spelling: 'auto',
+        neverSay: [...(window.VoiceBuilder?.defaultNeverSay || [])], sample: '' };
+}
+
+function _renderVoiceBuilder(data) {
+    const card = document.getElementById('module-voice-builder');
+    if (!card) return;
+    if (!_VB_ROLES.includes(data?.roleKey) || !window.VoiceBuilder) {
+        card.classList.add('hidden'); card.style.display = 'none'; return;
+    }
+    const stored = (data.context || {}).voice;
+    _vb = { ..._vbDefaults(), ...(stored && typeof stored === 'object' ? stored : {}) };
+    if (!Array.isArray(_vb.neverSay)) _vb.neverSay = [...(window.VoiceBuilder.defaultNeverSay || [])];
+    card.classList.remove('hidden'); card.style.display = '';
+    _vbPaint();
+    _vbMirror(false);
+}
+
+function _vbMirror(notify) {
+    const h = document.getElementById('edit_voice_json');
+    if (!h || !_vb) return;
+    h.value = JSON.stringify(_vb);
+    if (notify) h.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function _vbPaint() {
+    const host = document.getElementById('voice-builder-body');
+    if (!host || !_vb) return;
+    const esc = _escapeHtml;
+    // Selected = brand pink border, set inline: border-emerald-700 is not in the prebuilt style.css.
+    const chip = (on) => `px-3 py-1.5 text-xs font-bold rounded-full border cursor-pointer ${on ? 'bg-emerald-50 text-emerald-800" style="border-color:#ff007f' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`;
+    const sel = (key, opts) => `<select data-vb-select="${key}" class="w-full border border-gray-300 rounded-lg p-2 text-sm bg-white">${opts.map(([v, l]) => `<option value="${v}" ${_vb[key] === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+    host.innerHTML = `
+      <div>
+        <p class="text-sm font-bold text-gray-700 mb-1">Personality <span class="font-normal text-gray-400">— pick up to two</span></p>
+        <div class="flex flex-wrap gap-2">${window.VoiceBuilder.personalities.map((p) => `<button type="button" data-vb-personality="${esc(p.key)}" class="${chip(_vb.personalities.includes(p.key))}">${esc(p.label)}</button>`).join('')}</div>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+        ${_VB_SLIDERS.map(([k, label, lo, hi]) => `<div>
+          <p class="text-sm font-bold text-gray-700 mb-1">${label}</p>
+          <input type="range" min="1" max="5" step="1" value="${Number(_vb[k]) || 3}" data-vb-slider="${k}" class="w-full cursor-pointer" style="accent-color:#d6006b" aria-label="${label}">
+          <div class="flex justify-between text-[11px] text-gray-500"><span>${lo}</span><span>Balanced</span><span>${hi}</span></div>
+        </div>`).join('')}
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <label class="block"><span class="block text-sm font-bold text-gray-700 mb-1">Emoji</span>${sel('emoji', [['auto', 'Assistant decides'], ['none', 'None'], ['few', 'One or two at most']])}</label>
+        <label class="block"><span class="block text-sm font-bold text-gray-700 mb-1">Exclamation marks</span>${sel('exclamations', [['auto', 'Assistant decides'], ['never', 'Never'], ['rarely', 'One at most']])}</label>
+        <label class="block"><span class="block text-sm font-bold text-gray-700 mb-1">Spelling</span>${sel('spelling', [['auto', 'Assistant decides'], ['british', 'British English'], ['american', 'American English']])}</label>
+      </div>
+      <div>
+        <div class="flex items-center justify-between mb-1">
+          <p class="text-sm font-bold text-gray-700">Never say</p>
+          <button type="button" data-vb-reset-never class="link text-xs font-semibold">Reset to suggested</button>
+        </div>
+        <p class="text-xs text-gray-500 mb-2">Phrases your assistant must never use. Pre-filled with the clichés that make copy sound cheesy — remove any you are happy with, add your own.</p>
+        <div class="flex flex-wrap gap-1.5 mb-2">${_vb.neverSay.map((p, i) => `<span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-full bg-gray-100 border border-gray-200 text-gray-700">${esc(p)}<button type="button" data-vb-remove-never="${i}" aria-label="Remove ${esc(p)}" class="w-4 h-4 inline-flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 cursor-pointer">&times;</button></span>`).join('') || '<span class="text-xs text-gray-400">Nothing banned.</span>'}</div>
+        <div class="flex gap-2"><input type="text" data-vb-never-input maxlength="60" placeholder="Add a word or phrase, then Enter" class="flex-1 border border-gray-300 rounded-lg p-2 text-sm">
+          <button type="button" data-vb-add-never class="btn-secondary px-3 py-2 text-xs font-bold border rounded-lg cursor-pointer">Add</button></div>
+      </div>
+      <div>
+        <p class="text-sm font-bold text-gray-700 mb-1">Write like this <span class="font-normal text-gray-400">— optional</span></p>
+        <textarea data-vb-sample rows="3" maxlength="1500" placeholder="Paste a paragraph you wrote yourself — an email, a post, your About page. Your assistant matches its rhythm and word choice, not its content." class="w-full border border-gray-300 rounded-lg p-3 text-sm resize-y">${esc(_vb.sample || '')}</textarea>
+      </div>
+      <div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <p class="text-sm text-gray-700">Hear two short samples about your business in this voice.</p>
+          <button type="button" data-vb-hear class="btn-assistant inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg cursor-pointer">
+            <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="ai-wand-img w-4 h-4 object-contain"> Hear it</button>
+        </div>
+        <div id="vb-samples" class="space-y-3 mt-3"></div>
+      </div>`;
+}
+
+document.addEventListener('click', async (e) => {
+    if (!_vb) return;
+    const p = e.target.closest('[data-vb-personality]');
+    if (p) {
+        const k = p.dataset.vbPersonality;
+        const on = _vb.personalities.includes(k);
+        if (on) _vb.personalities = _vb.personalities.filter((x) => x !== k);
+        else if (_vb.personalities.length >= 2) { window.showToast?.('Pick up to two — untick one first.'); return; }
+        else _vb.personalities = [..._vb.personalities, k];
+        _vbPaint(); _vbMirror(true); return;
+    }
+    const rm = e.target.closest('[data-vb-remove-never]');
+    if (rm) { _vb.neverSay.splice(Number(rm.dataset.vbRemoveNever), 1); _vbPaint(); _vbMirror(true); return; }
+    if (e.target.closest('[data-vb-add-never]')) { _vbAddNever(); return; }
+    if (e.target.closest('[data-vb-reset-never]')) { _vb.neverSay = [...(window.VoiceBuilder?.defaultNeverSay || [])]; _vbPaint(); _vbMirror(true); return; }
+    const hear = e.target.closest('[data-vb-hear]');
+    if (hear) {
+        const out = document.getElementById('vb-samples');
+        hear.disabled = true;
+        hear.querySelector('img')?.classList.add('is-casting');
+        if (out) out.innerHTML = '<p class="text-xs text-gray-500">Writing samples…</p>';
+        try {
+            const res = await fetch('/.netlify/functions/voice-preview', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assistantId: window._detailCurrentData?.id, tone: document.getElementById('edit_tone')?.value || undefined, voice: _vb }),
+            });
+            const d = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(d.error || 'Could not write a preview.');
+            if (out) out.innerHTML = (d.samples || []).map((s) => `<div class="bg-white border border-gray-200 rounded-lg p-3">
+                ${s.shape ? `<p class="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1">${_escapeHtml(s.shape)}</p>` : ''}
+                <p class="text-sm text-gray-800 whitespace-pre-line">${_escapeHtml(s.text)}</p></div>`).join('')
+                + '<p class="text-[11px] text-gray-500">Not quite right? Move a slider or add the words that grate to Never say, then hear it again.</p>';
+        } catch (err) {
+            if (out) out.innerHTML = `<p class="text-xs text-red-600">${_escapeHtml(err.message)}</p>`;
+        } finally {
+            hear.disabled = false;
+            hear.querySelector('img')?.classList.remove('is-casting');
+        }
+    }
+});
+document.addEventListener('change', (e) => {
+    if (!_vb) return;
+    const sl = e.target.closest('[data-vb-slider]');
+    if (sl) { _vb[sl.dataset.vbSlider] = Number(sl.value); _vbMirror(true); return; }
+    const se = e.target.closest('[data-vb-select]');
+    if (se) { _vb[se.dataset.vbSelect] = se.value; _vbMirror(true); return; }
+    if (e.target.closest('[data-vb-sample]')) { _vb.sample = e.target.value.slice(0, 1500); _vbMirror(true); }
+});
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.closest?.('[data-vb-never-input]')) { e.preventDefault(); _vbAddNever(); }
+});
+function _vbAddNever() {
+    const input = document.querySelector('[data-vb-never-input]');
+    const v = (input?.value || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    if (!v) return;
+    if (!_vb.neverSay.some((x) => x.toLowerCase() === v.toLowerCase())) _vb.neverSay.push(v);
+    _vbPaint(); _vbMirror(true);
+    document.querySelector('[data-vb-never-input]')?.focus();
+}
+
 function _collectContentMix(currentData) {
     const cfg = _CONTENT_MIX_ROLES[currentData?.roleKey];
     const boxes = [...document.querySelectorAll('#content-mix-list [data-content-mix]')];
@@ -6180,6 +6329,11 @@ function _detailCollect(currentData) {
     // kind", so a shape added to the product later is included rather than silently left out.
     const mix = _collectContentMix(currentData);
     if (mix) newContext[mix.key] = mix.value;
+    // Voice builder — only when its card is on the page; otherwise the stored value rides through.
+    const vb = document.getElementById('edit_voice_json');
+    if (vb && vb.value && !document.getElementById('module-voice-builder')?.classList.contains('hidden')) {
+        try { newContext.voice = JSON.parse(vb.value); } catch { /* keep the stored value */ }
+    }
 
     // Role-specific onboarding answers (schema-driven roles) — inputs in the Operational Setup
     // section (#operation-role-fields) carry data-onboarding-key; write each back under its
@@ -9689,7 +9843,7 @@ function _buildGoalProgressTile(g) {
         <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
-                    <p class="text-sm font-bold text-gray-900 truncate group-hover:text-emerald-700 transition-colors">${_escapeHtml(g.title || label)}</p>
+                    <p class="text-sm font-bold text-gray-900 truncate">${_escapeHtml(g.title || label)}</p>
                     ${g.isPrimary ? '<span class="text-[10px] font-bold uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded">Primary</span>' : ''}
                 </div>
                 <p class="text-[11px] text-gray-400 mt-0.5 truncate">${_escapeHtml(label)}${due ? ' · by ' + due : ''}</p>

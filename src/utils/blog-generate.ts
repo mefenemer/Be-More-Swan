@@ -223,6 +223,8 @@ export async function generateBlogBody(
     let timezone = resolvePostingSchedule(null).timezone;
     // The assistant's Content mix (profile) — which article types it may rotate through.
     let allowedTypes: unknown = undefined;
+    // The owner's Voice builder settings (profile), when set.
+    let voiceSettings: unknown = undefined;
     if (post.assistantId) {
         const [assistant] = await db
             .select({ onboardingContext: aiAssistants.onboardingContext, systemPrompt: aiAssistants.systemPrompt })
@@ -233,6 +235,7 @@ export async function generateBlogBody(
         if (typeof actx.tone_of_voice === 'string' && actx.tone_of_voice.trim()) tone = actx.tone_of_voice.trim();
         if (assistant?.systemPrompt) assistantPrompt = assistant.systemPrompt.slice(0, 2000);
         allowedTypes = actx.allowed_article_types;
+        voiceSettings = actx.voice;
         timezone = resolvePostingSchedule(actx).timezone;
     }
     if (!tone) tone = DEFAULT_TONE;
@@ -313,7 +316,7 @@ export async function generateBlogBody(
             // on the customer's own domain. Leads the prompt, as on the social path.
             `${currentDatePromptBlock({ publishDate: post.publishDate, timezone })}\n\n` +
             `You are a blog writer${org?.name ? ` for ${org.name}` : ''}.\n` +
-            `${voiceDirective(tone, { surface: 'blog', fallback: DEFAULT_TONE })}\n` +
+            `${voiceDirective(tone, { surface: 'blog', fallback: DEFAULT_TONE, voice: voiceSettings })}\n` +
             (assistantPrompt ? `Further voice guidance: ${assistantPrompt}\n` : '') +
             'Produce a complete, publish-ready blog post with a single level-1 heading as the title. ' +
             'Weave the target keywords in naturally — never keyword-stuff.\n' +

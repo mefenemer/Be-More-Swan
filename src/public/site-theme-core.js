@@ -87,7 +87,7 @@
             // admin portal and workspace. See LINK_SELECTOR for what counts as one.
             id: 'links', title: 'Links',
             tokens: [
-                { key: 'linkColor', label: 'Link colour', type: 'color', default: '#ff007f', help: 'Every text link: plain links, and coloured links that underline.' },
+                { key: 'linkColor', label: 'Link colour', type: 'color', default: '#d6006b', help: 'Every text link — "View details →", "Manage assistants →", links in articles.' },
                 { key: 'linkHoverColor', label: 'Link hover colour', type: 'color', default: '#d6006b' },
                 { key: 'linkUnderline', label: 'Underline', type: 'select', default: null,
                     options: opts([['', 'As designed'], ['none', 'Never'], ['hover', 'On hover'], ['always', 'Always']]) },
@@ -226,6 +226,8 @@
         'a:not([class])',
         ':is(a,button)[class*="underline"]:not([class*="btn-"]):is([class*="text-emerald-"],[class*="text-pink-"],[class*="text-blue-"],[class*="text-indigo-"],[class*="text-sky-"])',
         '.prose a',
+        // The shared text-link class (input.css) and the dashboard widgets' own link classes.
+        '.link', '.dw-link', '.cc-link',
     ];
     var LINK_SELECTOR = LINK_PARTS.join(',');
     var LINK_HOVER_SELECTOR = LINK_PARTS.map(function (x) { return x + ':hover'; }).join(',');

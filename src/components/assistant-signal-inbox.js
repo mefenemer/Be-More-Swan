@@ -222,7 +222,7 @@
     // open nothing.
     const title = s.assistantRecordId
       ? `<button type="button" data-si-lead="${esc(s.assistantRecordId)}" title="Open this lead"
-           class="font-semibold text-gray-900 text-sm text-left hover:text-emerald-800 hover:underline cursor-pointer">${esc(s.title)}</button>`
+           class="font-semibold text-gray-900 text-sm text-left hover:underline cursor-pointer">${esc(s.title)}</button>`
       : `<p class="font-semibold text-gray-900 text-sm">${esc(s.title)}</p>`;
 
     // ⚠️ Only the DECIDED states get a chip. Every row here is a lead awaiting a decision — that is

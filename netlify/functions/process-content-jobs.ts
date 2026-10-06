@@ -18,7 +18,7 @@ import {
 } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { gatewayGenerate, isUpstreamBlocked } from '../../src/lib/ai-gateway';
-import { voiceDirective } from '../../src/utils/voice-profile';
+import { voiceDirective, findNeverSay, normaliseVoice } from '../../src/utils/voice-profile';
 import { socialShapeLine } from '../../src/utils/content-shapes';
 import { buildInspoBlock } from '../../src/utils/inspo-profile';
 import { pickInspoTopic } from '../../src/utils/inspo-topics';
@@ -581,7 +581,8 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         const liveTone = typeof brandCtx.tone_of_voice === 'string' && brandCtx.tone_of_voice.trim()
             ? brandCtx.tone_of_voice
             : tone;
-        const voiceBlock = voiceDirective(liveTone, { surface: 'social', fallback: 'professional' });
+        // …plus the owner's Voice builder settings (profile), when they have set any.
+        const voiceBlock = voiceDirective(liveTone, { surface: 'social', fallback: 'professional', voice: brandCtx.voice });
         // SHAPE — which kind of post this slot is (story, short thought, opinion, list…) and how long.
         // Assigned per slot like the hook, so a feed stops being the same template every day.
         // Restricted to the shapes the owner allows (profile ▸ Content mix); all of them when unset.
@@ -773,6 +774,35 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             }
         } catch (err) {
             console.warn(`[process-content-jobs] job ${job.job_id}: near-duplicate check skipped:`, err instanceof Error ? err.message : err);
+        }
+
+        // ── Never-say gate (Voice builder, 2026-10-06) ────────────────────────────────────────
+        // The prompt bans the owner's never-say phrases (or the default anti-cliché list); this
+        // checks the caption obeyed. On a hit: ONE corrective re-ask naming the phrases, same shape
+        // and same fail-open rule as the near-duplicate gate above — we keep whichever is cleaner.
+        try {
+            const voiceForCheck = normaliseVoice(brandCtx.voice);
+            const hits = findNeverSay(`${generated.caption ?? ''} ${generated.captionShort ?? ''}`, voiceForCheck);
+            if (hits.length) {
+                console.warn(`[process-content-jobs] job ${job.job_id}: never-say phrases ${JSON.stringify(hits)} — re-asking once`);
+                const retry = await gatewayGenerate({
+                    system: systemPrompt,
+                    messages: [
+                        ...messages,
+                        { role: 'assistant', content: JSON.stringify(generated) },
+                        { role: 'user', content: `Your caption uses phrases the owner has banned: ${hits.map((h) => `"${h}"`).join(', ')}. Rewrite only the sentences that contain them, in the same voice, and return the same JSON shape.` },
+                    ],
+                    maxTokens: 4096,
+                    usage: jobUsage,
+                });
+                const reparsed = parseModelJson<typeof generated>(retry.text);
+                if (reparsed?.caption && String(reparsed.caption).trim()
+                    && findNeverSay(`${reparsed.caption} ${reparsed.captionShort ?? ''}`, voiceForCheck).length < hits.length) {
+                    generated = reparsed;
+                }
+            }
+        } catch (err) {
+            console.warn(`[process-content-jobs] job ${job.job_id}: never-say check skipped:`, err instanceof Error ? err.message : err);
         }
 
         // The raw model caption, WITHOUT the footer — kept for orchestration hand-off and as the

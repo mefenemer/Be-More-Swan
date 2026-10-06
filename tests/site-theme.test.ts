@@ -104,7 +104,7 @@ check('a button border colour shows even on buttons with no border width', () =>
 check('the link setting reaches styled links, hover included, and leaves .btn-* alone', () => {
     const css = themeCss({ ...defaults(), linkColor: '#0000ff', linkHoverColor: '#000088', linkUnderline: 'hover' });
     assert.match(css, /:is\(a,button\)\[class\*="underline"\]:not\(\[class\*="btn-"\]\)/);
-    assert.match(css, /\[class\*="text-sky-"\]\):hover,\.prose a:hover\{color:#000088;text-decoration:underline/);
+    assert.match(css, /\[class\*="text-sky-"\]\):hover,\.prose a:hover,\.link:hover,\.dw-link:hover,\.cc-link:hover\{color:#000088;text-decoration:underline/);
     assert.doesNotMatch(css, /\]:hover,\[class/, 'a :hover landed inside :is()');
 });
 
@@ -119,6 +119,23 @@ check('the white-on-pink CTA is a real button type, used on every pink banner', 
 
 check('the home page CTAs are Primary, not Go live', () => {
     assert.doesNotMatch(read('index.html'), /class="btn-golive /);
+});
+
+check('text links share one class: pink at rest, underline on hover — and headings do not turn pink', () => {
+    for (const f of ['input.css', 'style.css']) {
+        assert.match(read(f), /\.link \{ color: var\(--color-emerald-800, #d6006b\);/, f);
+        assert.match(read(f), /\.link:hover \{ text-decoration: underline; \}/, f);
+    }
+    const a = read('assistants.js');
+    assert.match(a, /<span class="link text-sm font-bold">View Details &rarr;<\/span>/);
+    assert.match(a, /<h3 class="text-lg font-bold text-gray-900">\$\{assistant\.name\}<\/h3>/);
+    assert.match(a, /class="link flex items-center gap-2 text-xs font-semibold mb-5 text-left">/);
+    assert.match(read('dashboard-content.html'), /\.dw-link \{[^}]*color: var\(--color-emerald-800, #d6006b\)/);
+});
+
+check('the About and Logout CTAs are the right button types', () => {
+    assert.match(read('about.html'), /<a href="pricing\.html" class="btn-inverse /);
+    assert.match(read('logout.html'), /<a href="login\.html" class="btn-primary /);
 });
 
 console.log(`\n${passed} checks passed`);
