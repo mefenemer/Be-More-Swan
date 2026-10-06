@@ -404,7 +404,9 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // or array value). Every generated post MUST be categorised under exactly one of them so
         // the 90-day calendar stays balanced. We parse the captured value into a discrete list and
         // pass it to the model; the model echoes back the chosen pillar, which we persist on the post.
-        const rawPillars = answers['content_pillars'];
+        // Read LIVE from the profile first (like brand hashtags): `answers` is the compiled snapshot,
+        // and a job queued before a pillar was added carries the old list until it is drafted.
+        const rawPillars = brandCtx.content_pillars ?? answers['content_pillars'];
         const pillarList = (Array.isArray(rawPillars) ? rawPillars : String(rawPillars ?? ''))
             .toString()
             .split(/[,;\n]/)
@@ -433,9 +435,32 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
 
         // An inspo slot sets its own subject, so it is not also pinned to the rotated pillar (the
         // "Do NOT drift" line would fight the brief); it is still categorised under one pillar.
-        const rotatedPillar = (pillarList.length && job.target_publish_date && !inspoTopic)
-            ? pillarList[Math.floor(new Date(job.target_publish_date).getTime() / 86_400_000) % pillarList.length]
-            : null;
+        // ⚠️ BALANCED, not just date-rotated (2026-10-06). A customer had 4 pillars and one ("Food")
+        // never appeared: the day-of-epoch rotation is blind to what was actually published — inspo
+        // slots are not pinned, older queued jobs carried an older pillar list, and the model's own
+        // pick on unpinned slots favours the strongest pillar — so nothing ever corrected a pillar
+        // that fell behind. Now: count each pillar over the assistant's recent posts, take the ones
+        // used LEAST, and spread same-batch siblings across them by the slot's day (as before).
+        let rotatedPillar: string | null = null;
+        if (pillarList.length && job.target_publish_date && !inspoTopic) {
+            const dayIndex = Math.floor(new Date(job.target_publish_date).getTime() / 86_400_000);
+            let candidates = pillarList;
+            try {
+                const used = await db
+                    .select({ pillar: scheduledPosts.pillar, n: sql<number>`count(*)::int` })
+                    .from(scheduledPosts)
+                    .where(and(
+                        eq(scheduledPosts.assistantId, job.assistant_id),
+                        isNotNull(scheduledPosts.pillar),
+                        sql`${scheduledPosts.createdAt} > now() - interval '60 days'`,
+                    ))
+                    .groupBy(scheduledPosts.pillar);
+                const count = (p: string) => used.find((u) => u.pillar === p)?.n ?? 0;
+                const least = Math.min(...pillarList.map(count));
+                candidates = pillarList.filter((p) => count(p) === least);
+            } catch { /* fall back to plain rotation */ }
+            rotatedPillar = candidates[dayIndex % candidates.length];
+        }
         const pillarLine = rotatedPillar
             ? `Content Pillar for THIS post — write it under this pillar and return it verbatim in the "pillar" field: "${rotatedPillar}". Do NOT drift to another pillar; rotating pillars across the calendar is what keeps the feed varied.`
             : (pillarList.length

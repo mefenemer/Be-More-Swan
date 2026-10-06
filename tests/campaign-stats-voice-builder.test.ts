@@ -91,6 +91,11 @@ check('the preview can rewrite the owner\'s own words, and refuses invented clai
     const fn = read('netlify/functions/voice-preview.ts');
     assert.match(fn, /Sample 1 is the owner's text below REWRITTEN in this voice/);
     assert.match(fn, /ONLY use facts stated in the business description above or in the owner's text/);
+    // …and the rewrite is checked against the original, once, with anything added taken out.
+    assert.match(fn, /const fixed = await checkRewrite\(anthropic, own, texts\[0\], ctx\);/);
+    assert.match(fn, /async function checkRewrite\([\s\S]*?temperature: 0,/);
+    assert.match(fn, /temperature: own \? 0\.4 : 0\.9/);
+    assert.match(read('assistants.js'), /\$\{s\.note \? `<p class="text-\[11px\] text-gray-500 mt-2">✓/);
     const a = read('assistants.js');
     assert.match(a, /text: document\.getElementById\('vb-try-text'\)\?\.value \|\| undefined/);
     assert.match(a, /neverSay: \[\], sample: '' \};/);
