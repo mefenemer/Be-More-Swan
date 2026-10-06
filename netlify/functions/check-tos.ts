@@ -5,7 +5,7 @@
 
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { tosAcceptances } from '../../db/schema';
 import { CURRENT_TOS_VERSION } from './accept-tos';
@@ -36,7 +36,8 @@ export default withLambda(async (event) => {
     const [latest] = await db.select({ version: tosAcceptances.version, acceptedAt: tosAcceptances.acceptedAt })
         .from(tosAcceptances)
         .where(eq(tosAcceptances.userId, userId))
-        .orderBy(tosAcceptances.acceptedAt)
+        // Newest first — this is "the version they last accepted" (it read the OLDEST until 2026-10-06).
+        .orderBy(desc(tosAcceptances.acceptedAt))
         .limit(1);
 
     // Check if current version is accepted

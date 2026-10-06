@@ -79,6 +79,10 @@ check('Terms 2.1: a version bump that users can actually accept', () => {
     assert.doesNotMatch(read('workspace.html'), /version: '2\.0'/);
     assert.match(read('terms_of_service.html'), /Version 2\.1 &middot;/);
     assert.match(read('terms_of_service.html'), /Within 5 working days of receiving your request/);
+    // A version bump must reach people who accepted an older version — at login, not only in setup.
+    assert.match(read('workspace.html'), /if \(d && d\.version && !d\.upToDate\) checkTosAcceptance\(true\);/);
+    assert.match(read('workspace.html'), /What changed in Terms v2\.1/);
+    assert.match(read('netlify/functions/check-tos.ts'), /\.orderBy\(desc\(tosAcceptances\.acceptedAt\)\)/);
 });
 
 check('the Swan Index byline stays editable; the connection does not', () => {
