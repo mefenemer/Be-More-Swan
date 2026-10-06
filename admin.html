@@ -1581,6 +1581,13 @@
                 <button type="button" class="btn-destructive px-3 py-2 text-xs font-bold rounded-lg">Delete</button>
                 <button type="button" class="btn-utility px-3 py-2 text-xs font-bold border rounded-lg">Utility</button>
               </div>
+              <p class="text-sm text-gray-700">A styled link, as used across the portal and workspace:
+                <a href="#" onclick="return false" class="text-sm text-emerald-700 hover:underline font-semibold">View details</a></p>
+              <!-- The pink banner the On-colour button lives on (blog / FAQ / pricing footers). -->
+              <div class="rounded-xl bg-emerald-700 p-4 flex items-center justify-between gap-3">
+                <span class="text-sm font-bold text-white">On a pink banner</span>
+                <button type="button" class="btn-inverse px-4 py-2 text-xs font-bold rounded-lg shadow-sm">See plans</button>
+              </div>
             </div>
           </div>
         </div>
@@ -2919,6 +2926,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 let _activeCategory = null;
 let _activeView = 'dashboard';
+const ADMIN_LAST_VIEW_KEY = 'bms_admin_last_view';
 
 function adminCatNav(cat) {
   const secondary = document.getElementById('admin-secondary-nav');
@@ -3029,10 +3037,15 @@ function adminNav(view) {
   document.getElementById('view-' + view)?.classList.remove('hidden');
   document.getElementById('admin-page-title').textContent = VIEW_LABELS[view] || view;
 
-  // Update URL without triggering a full navigation
+  // Update URL without triggering a full navigation. `section` is DROPPED: it is the legacy alias an
+  // old email link arrives with (?section=bias-audit), and the boot reads it — left in the URL it
+  // outlived every navigation, so a refresh from any page went back to Bias Audit.
   const newUrl = new URL(location.href);
   newUrl.searchParams.set('view', view);
+  newUrl.searchParams.delete('section');
   history.pushState({ view }, '', newUrl.toString());
+  // Remembered for a load with no ?view= at all (a bookmark of /admin) — see bootAdmin().
+  try { localStorage.setItem(ADMIN_LAST_VIEW_KEY, view); } catch { /* private mode */ }
 
   // Highlight active child in secondary panel
   document.querySelectorAll('.admin-child-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view));
@@ -10889,9 +10902,13 @@ async function swanToggleSuspend(id, next, handle, livePieces) {
 // the only top-level statement that CALLS into the code above rather than declaring it.
 (function bootAdmin() {
   const params = new URLSearchParams(location.search);
-  // ?section= is what older emails link with (the quarterly bias reminder said ?section=bias-audit);
-  // treat it as ?view= so those links land where they say.
-  const initialView = params.get('section') || params.get('view') || 'dashboard';
+  // Where to open, in order: the URL's ?view= (the page you were on — adminNav keeps it current),
+  // then ?section= (what older emails link with — the quarterly bias reminder said
+  // ?section=bias-audit), then the last page this browser was on, then the Dashboard.
+  // ⚠️ view BEFORE section: the other way round, a stale ?section= beat every later navigation.
+  let remembered = null;
+  try { remembered = localStorage.getItem(ADMIN_LAST_VIEW_KEY); } catch { /* private mode */ }
+  const initialView = params.get('view') || params.get('section') || remembered || 'dashboard';
   if (_catOwning(initialView) && initialView !== 'dashboard') adminGoTo(initialView);
   else adminCatNav('dashboard');
 })();

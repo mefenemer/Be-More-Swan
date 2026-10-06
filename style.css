@@ -5562,6 +5562,7 @@ button:not(:disabled), [role="button"]:not([aria-disabled="true"]), summary {
      .btn-secondary    Back, Cancel, Close, View, Manage, Edit
      .btn-destructive  Delete, Remove, Revoke, Disconnect, Reject, Discard
      .btn-utility      Copy, Refresh, Export, Upload, Preview, Help — quiet tools
+     .btn-inverse      The white call-to-action on a pink banner (marketing footers)
    Colour only: padding, size and radius stay on the element's own utilities.
 
    In @layer components, BELOW Tailwind's utilities layer, on purpose: a control that restyles
@@ -5589,6 +5590,12 @@ button:not(:disabled), [role="button"]:not([aria-disabled="true"]), summary {
   .btn-secondary:hover:not(:disabled)   { background-color: #eae4d7; border-color: #d9d1bf; }
   .btn-destructive:hover:not(:disabled) { background-color: #b91c1c; }
   .btn-utility:hover:not(:disabled)     { background-color: #f6f3eb; color: #1f1e1b; }
+  /* On-colour: the white button that sits ON a pink banner (blog/FAQ/pricing footer CTAs). It used
+     to be hand-written utilities on each page, which Site Styles could not reach (2026-10-06). */
+  .btn-inverse     { background-color: #ffffff; color: #ff007f; border-color: transparent; transition: background-color .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease; }
+  .btn-inverse:hover:not(:disabled)     { background-color: #fff0f5; }
+  .btn-inverse:focus-visible { outline: 2px solid #ffffff; outline-offset: 2px; }
+  .btn-inverse:disabled { opacity: .5; cursor: not-allowed; }
 
   .btn-assistant:focus-visible, .btn-primary:focus-visible, .btn-golive:focus-visible,
   .btn-secondary:focus-visible, .btn-destructive:focus-visible, .btn-utility:focus-visible {

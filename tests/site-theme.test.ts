@@ -96,4 +96,29 @@ check('the admin page publishes through the endpoint and previews only itself', 
     assert.match(a, /view: 'site-styles'/);
 });
 
+check('a button border colour shows even on buttons with no border width', () => {
+    const css = themeCss({ ...defaults(), btn_destructive_border: '#ff007f' });
+    assert.match(css, /\.btn-destructive:not\(\.border\):not\(\.border-2\)\{outline:1px solid #ff007f;outline-offset:-1px\}/);
+});
+
+check('the link setting reaches styled links, hover included, and leaves .btn-* alone', () => {
+    const css = themeCss({ ...defaults(), linkColor: '#0000ff', linkHoverColor: '#000088', linkUnderline: 'hover' });
+    assert.match(css, /:is\(a,button\)\[class\*="underline"\]:not\(\[class\*="btn-"\]\)/);
+    assert.match(css, /\[class\*="text-sky-"\]\):hover,\.prose a:hover\{color:#000088;text-decoration:underline/);
+    assert.doesNotMatch(css, /\]:hover,\[class/, 'a :hover landed inside :is()');
+});
+
+check('the white-on-pink CTA is a real button type, used on every pink banner', () => {
+    for (const f of ['input.css', 'style.css']) assert.match(read(f), /\.btn-inverse\s+\{ background-color: #ffffff; color: #ff007f;/, f);
+    for (const f of ['blog.html', 'faq.html', 'contact.html', 'pricing.html', 'trust.html']) {
+        assert.match(read(f), /class="btn-inverse /, `${f} lost its On-colour button`);
+        assert.doesNotMatch(read(f), /bg-white text-emerald-700[^"]*hover:bg-emerald-50/, `${f} still hand-colours its banner button`);
+    }
+    assert.ok(TOKENS.some((t) => t.key === 'btn_inverse_bg'));
+});
+
+check('the home page CTAs are Primary, not Go live', () => {
+    assert.doesNotMatch(read('index.html'), /class="btn-golive /);
+});
+
 console.log(`\n${passed} checks passed`);

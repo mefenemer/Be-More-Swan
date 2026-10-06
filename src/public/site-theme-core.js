@@ -80,7 +80,18 @@
                 { key: 'faintColor', label: 'Faint text colour', type: 'color', default: '#9ca3af', help: 'Timestamps, hints, placeholders.' },
                 { key: 'paragraphLeading', label: 'Paragraph line spacing', type: 'select', default: null,
                     options: opts([['', 'As designed'], ['1.4', 'Compact'], ['1.6', 'Comfortable'], ['1.75', 'Airy']]) },
-                { key: 'linkColor', label: 'Link colour', type: 'color', default: '#d6006b', help: 'Plain text links (styled buttons keep their own colours).' },
+            ],
+        },
+        {
+            // Text links — the "Open X", "View details", "Learn more" kind, in body copy and in the
+            // admin portal and workspace. See LINK_SELECTOR for what counts as one.
+            id: 'links', title: 'Links',
+            tokens: [
+                { key: 'linkColor', label: 'Link colour', type: 'color', default: '#ff007f', help: 'Every text link: plain links, and coloured links that underline.' },
+                { key: 'linkHoverColor', label: 'Link hover colour', type: 'color', default: '#d6006b' },
+                { key: 'linkUnderline', label: 'Underline', type: 'select', default: null,
+                    options: opts([['', 'As designed'], ['none', 'Never'], ['hover', 'On hover'], ['always', 'Always']]) },
+                { key: 'linkWeight', label: 'Link weight', type: 'select', default: null, options: opts([['', 'As designed'], ['400', 'Regular']].concat(WEIGHTS)) },
             ],
         },
         {
@@ -135,6 +146,8 @@
         ['secondary', 'Secondary', '#f6f3eb', '#1f1e1b', '#eae4d7', '#eae4d7'],
         ['destructive', 'Destructive', '#dc2626', '#ffffff', '#b91c1c', '#dc2626'],
         ['utility', 'Utility', '#ffffff', '#5c564b', '#f6f3eb', '#ffffff'],
+        // The white button on a pink banner (marketing footer CTAs) — .btn-inverse in input.css.
+        ['inverse', 'On-colour (white on pink)', '#ffffff', '#ff007f', '#fff0f5', '#ffffff'],
     ];
     BUTTONS.forEach(function (b) {
         var id = b[0];
@@ -209,6 +222,14 @@
         return 'https://fonts.googleapis.com/css2?' + families.map(function (g) { return 'family=' + g; }).join('&') + '&display=swap';
     }
 
+    var LINK_PARTS = [
+        'a:not([class])',
+        ':is(a,button)[class*="underline"]:not([class*="btn-"]):is([class*="text-emerald-"],[class*="text-pink-"],[class*="text-blue-"],[class*="text-indigo-"],[class*="text-sky-"])',
+        '.prose a',
+    ];
+    var LINK_SELECTOR = LINK_PARTS.join(',');
+    var LINK_HOVER_SELECTOR = LINK_PARTS.map(function (x) { return x + ':hover'; }).join(',');
+
     var TEXT_SIZES = { 'xl': 1.25, '2xl': 1.5, '3xl': 1.875, '4xl': 2.25, '5xl': 3, '6xl': 3.75 };
     var RADII = { 'sm': 0.25, 'md': 0.375, 'lg': 0.5, 'xl': 0.75, '2xl': 1, '3xl': 1.5 };
 
@@ -262,7 +283,20 @@
         if (headingDecl.length) rules.push('h1,h2,h3,h4,h5,h6{' + headingDecl.join(';') + '}');
         if (t.headingWeight) rules.push('h1,h2,h3{font-weight:' + t.headingWeight + '}');
         if (t.paragraphLeading) rules.push('p{line-height:' + t.paragraphLeading + '}');
-        if (changed('linkColor')) rules.push('a:not([class]){color:' + t.linkColor + '}');
+        // A "text link" is an unstyled <a>, a coloured <a>/<button> that underlines (always or on
+        // hover — the pattern every "View details"/"Open" link in the product uses), or a link in
+        // rendered article prose. Grey underlined links are deliberately muted ("skip", "not now")
+        // and are left alone, as is anything that is a .btn-*.
+        var linkDecl = [];
+        if (changed('linkColor')) linkDecl.push('color:' + t.linkColor);
+        if (t.linkWeight) linkDecl.push('font-weight:' + t.linkWeight);
+        if (t.linkUnderline === 'none' || t.linkUnderline === 'hover') linkDecl.push('text-decoration:none');
+        if (t.linkUnderline === 'always') linkDecl.push('text-decoration:underline;text-underline-offset:2px');
+        if (linkDecl.length) rules.push(LINK_SELECTOR + '{' + linkDecl.join(';') + '}');
+        var hoverDecl = [];
+        if (changed('linkHoverColor')) hoverDecl.push('color:' + t.linkHoverColor);
+        if (t.linkUnderline === 'hover' || t.linkUnderline === 'always') hoverDecl.push('text-decoration:underline;text-underline-offset:2px');
+        if (hoverDecl.length) rules.push(LINK_HOVER_SELECTOR + '{' + hoverDecl.join(';') + '}');
         // Form labels only — `label.block` is the field-label pattern; a label wrapping a whole
         // toggle row is not a "label" in the sense the admin means, and must not go UPPERCASE.
         var labelDecl = [];
@@ -278,7 +312,14 @@
             var decl = [];
             if (changed('btn_' + id + '_bg')) decl.push('background-color:' + t['btn_' + id + '_bg']);
             if (changed('btn_' + id + '_text')) decl.push('color:' + t['btn_' + id + '_text']);
-            if (changed('btn_' + id + '_border')) decl.push('border-color:' + t['btn_' + id + '_border']);
+            if (changed('btn_' + id + '_border')) {
+                decl.push('border-color:' + t['btn_' + id + '_border']);
+                // Most buttons have NO border width (only Secondary/Utility carry the `border`
+                // class), so a border colour alone paints nothing. An inset outline draws the line
+                // without changing the button's size or overriding its drop shadow; a button that
+                // does have a border keeps its real one.
+                rules.push(sel + ':not(.border):not(.border-2){outline:1px solid ' + t['btn_' + id + '_border'] + ';outline-offset:-1px}');
+            }
             if (t.buttonRadius) decl.push('border-radius:' + t.buttonRadius);
             if (t.buttonWeight) decl.push('font-weight:' + t.buttonWeight);
             if (decl.length) rules.push(sel + '{' + decl.join(';') + '}');
