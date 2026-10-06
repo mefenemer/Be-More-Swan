@@ -453,6 +453,20 @@ window.NotifKit = (function () {
         document.head.appendChild(s);
     }
 
+    // Phone layout. A card is one flex row — avatar, text, then the CTA and read toggle, both
+    // `shrink-0 whitespace-nowrap`. At 375px those buttons alone are ~260px wide, so the text column
+    // was squeezed to a word or two per line and the title ran out under the CTA. Below `sm` the
+    // buttons drop to their own line, indented to the text by --notif-indent (set per renderer).
+    if (!document.getElementById('notif-row-style')) {
+        const s = document.createElement('style');
+        s.id = 'notif-row-style';
+        s.textContent = '@media (max-width:639px){'
+            + '.notif-row{flex-wrap:wrap;align-items:flex-start}'
+            + '.notif-row-actions{order:3;flex-basis:100%;padding-left:var(--notif-indent,52px)}'
+            + '.notif-title-row{flex-wrap:wrap}}';
+        document.head.appendChild(s);
+    }
+
     const fmtDate = (d) => new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     // Human-readable label for a notif.type, e.g. "billing_payment_failed" -> "Billing Payment Failed".
     const typeLabel = (type) => (type || 'other').split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
@@ -637,12 +651,13 @@ window.initNotifications = async function() {
         const resolved = isResolved(notif);
         const seen = notif.isRead && !resolved; // clicked/seen but not yet completed
         const li = document.createElement('li');
-        li.className = `flex items-center gap-3 p-4 ${resolved ? 'opacity-60' : (seen ? 'opacity-90' : '')}`;
+        li.className = `notif-row flex items-center gap-3 p-4 ${resolved ? 'opacity-60' : (seen ? 'opacity-90' : '')}`;
+        li.style.setProperty('--notif-indent', '52px'); // avatar 40 + gap-3 12
         li.innerHTML = `
             ${avatarHTML(notif, st)}
             <div class="flex-1 min-w-0">
                 ${actorEyebrowHTML(notif)}
-                <div class="flex items-center gap-2">
+                <div class="notif-title-row flex items-center gap-2">
                     <p class="text-sm ${seen ? 'font-semibold text-gray-700' : 'font-bold text-gray-900'}">${sanitizeText(notif.title)}</p>
                     ${critical && !resolved ? '<span class="text-xs font-bold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">Urgent</span>' : ''}
                     ${resolved ? '<span class="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">Done</span>' : ''}
@@ -650,8 +665,10 @@ window.initNotifications = async function() {
                 ${notif.message ? `<p class="text-sm text-gray-500 mt-0.5 line-clamp-2">${sanitizeText(notif.message)}</p>` : ''}
                 <p class="text-xs text-gray-400 mt-1">${fmtDate(notif.createdAt)}</p>
             </div>
-            ${resolved ? '' : `<button type="button" class="action-cta px-4 py-2 ${st.cta} text-sm font-bold rounded-lg transition shrink-0 whitespace-nowrap">${action.label}</button>`}
-            ${resolved ? '' : `<button type="button" class="action-toggle-read shrink-0 text-xs font-semibold px-2.5 py-1 rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-700 whitespace-nowrap">${notif.isRead ? 'Mark as unread' : 'Mark as read'}</button>`}
+            ${resolved ? '' : `<div class="notif-row-actions flex items-center gap-3 shrink-0">
+                <button type="button" class="action-cta px-4 py-2 ${st.cta} text-sm font-bold rounded-lg transition shrink-0 whitespace-nowrap">${action.label}</button>
+                <button type="button" class="action-toggle-read shrink-0 text-xs font-semibold px-2.5 py-1 rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-700 whitespace-nowrap">${notif.isRead ? 'Mark as unread' : 'Mark as read'}</button>
+            </div>`}
             ${dismissBtnHTML(notif)}
         `;
         li.querySelector('.action-cta')?.addEventListener('click', (e) => {
@@ -687,7 +704,9 @@ window.initNotifications = async function() {
         const textClass = notif.isRead ? 'text-gray-600 font-normal' : 'text-gray-900 font-bold';
         const dot = notif.isRead ? '' : `<div class="w-2.5 h-2.5 rounded-full bg-emerald-600 shrink-0 mt-1.5"></div>`;
         // Celebratory items get the animated gradient border (AC1.3).
-        li.className = `group p-5 transition-colors flex gap-4 ${st.celebrate ? 'notif-celebrate' : bgClass}`;
+        li.className = `notif-row group p-5 transition-colors flex gap-4 ${st.celebrate ? 'notif-celebrate' : bgClass}`;
+        // avatar 40 + gap-4 16, plus the unread dot 10 + gap-4 16 when it is drawn
+        li.style.setProperty('--notif-indent', notif.isRead ? '56px' : '82px');
         li.innerHTML = `
             ${dot}
             ${avatarHTML(notif, st)}
@@ -698,9 +717,11 @@ window.initNotifications = async function() {
                 <p class="text-xs text-gray-400 mt-2">${fmtDate(notif.createdAt)}</p>
                 ${action ? `<button type="button" class="update-cta mt-2 inline-flex items-center gap-1 text-sm font-bold text-emerald-700 hover:text-emerald-800">${action.label}<span aria-hidden="true">&rarr;</span></button>` : ''}
             </div>
-            <button type="button" class="update-toggle-read shrink-0 self-start text-xs font-semibold px-2.5 py-1 rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-700 whitespace-nowrap">
-                ${notif.isRead ? 'Mark as unread' : 'Mark as read'}
-            </button>
+            <div class="notif-row-actions shrink-0 self-start">
+                <button type="button" class="update-toggle-read text-xs font-semibold px-2.5 py-1 rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-700 whitespace-nowrap">
+                    ${notif.isRead ? 'Mark as unread' : 'Mark as read'}
+                </button>
+            </div>
             ${dismissBtnHTML(notif)}
         `;
         // Actionable updates (invoice, ticket) keep their link — navigate, and mark read since acting implies seen.

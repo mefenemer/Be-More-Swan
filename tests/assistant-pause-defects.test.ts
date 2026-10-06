@@ -96,7 +96,7 @@ check('an upgrade to an UNLIMITED plan releases as well', () => {
     // ⚠️ My first version sat as an `else` inside `if (assistantLimit !== null)`, so the most
     // generous change a customer can make — upgrading to a plan with no assistant cap — skipped the
     // whole block and released nothing.
-    const guard = WEBHOOK.indexOf("newMasterPlan?.assistantLimit !== null");
+    const guard = WEBHOOK.indexOf("if (newMasterPlan && assistantLimit !== null)");
     const release = WEBHOOK.indexOf('releasePausedLimit(db, userId');
     const blockEnd = WEBHOOK.indexOf('if (newMasterPlan && !pausedForLimit)');
     assert.ok(guard > 0 && release > 0 && blockEnd > 0);
@@ -108,6 +108,46 @@ check('a downgrade does not hand back the seats it just took', () => {
     assert.match(WEBHOOK, /let pausedForLimit = false;/);
     assert.match(WEBHOOK, /pausedForLimit = true;/);
     assert.match(WEBHOOK, /if \(newMasterPlan && !pausedForLimit\)/);
+});
+
+// ── 1b. the webhook enforces OUR limit, not the subscription's metadata (2026-10-06) ───────────
+// Org 41 was moved to a 10-assistant plan through Admin ▸ Override Subscription, which swapped the
+// price but left masterPlanId=2 on the Stripe subscription. The next ordinary subscription update
+// paused one of their three assistants against plan 2's limit.
+
+const OVERRIDE = read('netlify/functions/admin-billing-override.ts');
+
+check('the downgrade pause reads the limit from the plan record', () => {
+    assert.match(WEBHOOK, /resolveAssistantLimit\(db, userId, uo\.organisationId\)/);
+    assert.ok(!/newMasterPlan\.assistantLimit/.test(WEBHOOK),
+        'the metadata plan\'s assistantLimit must not decide what gets paused');
+});
+
+check('the pause and the release resolve the limit the same way', () => {
+    assert.match(RELEASE, /export async function resolveAssistantLimit/);
+    assert.match(RELEASE, /const limit = await resolveAssistantLimit\(db, userId, organisationId\)/);
+});
+
+check('archived assistants are not counted toward the pause either', () => {
+    const i = WEBHOOK.indexOf('const activeAssistants = await db');
+    assert.ok(i > 0);
+    assert.match(WEBHOOK.slice(i, i + 500), /isNull\(aiAssistants\.archivedAt\)/);
+});
+
+check('an unresolvable limit pauses nothing', () => {
+    const i = WEBHOOK.indexOf('resolveAssistantLimit(db, userId');
+    assert.ok(i > 0);
+    assert.match(WEBHOOK.slice(i, i + 500), /return null;/);
+});
+
+check('an admin tier change moves the subscription metadata with the price', () => {
+    const i = OVERRIDE.indexOf("case 'upgrade_tier':");
+    const j = OVERRIDE.indexOf("case 'extend_trial':");
+    assert.ok(i > 0 && j > i);
+    const block = OVERRIDE.slice(i, j);
+    assert.match(block, /masterPlanId: String\(newMasterId\)/);
+    assert.ok(block.indexOf('let newMasterId') < block.indexOf('stripe.subscriptions.update('),
+        'the new plan must be resolved BEFORE the Stripe update that carries it');
 });
 
 check('releasing never fails the action that triggered it', () => {

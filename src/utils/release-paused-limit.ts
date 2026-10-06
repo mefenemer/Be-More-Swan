@@ -36,6 +36,33 @@ export interface ReleaseResult {
 const NOTHING: ReleaseResult = { resumed: [], remaining: null };
 
 /**
+ * The assistant limit this user's plan actually grants, from OUR plan record.
+ *
+ * The same resolution manage-assistant.ts uses for its capacity gate: a "new subscribers only"
+ * frozen snapshot wins over the live master limit, and referral bonus seats stack on top. Resolving
+ * it differently on any surface would let one hand back a seat another refuses — or, as the Stripe
+ * webhook did until 2026-10-06, take one away. null = uncapped. Throws on a db error.
+ */
+export async function resolveAssistantLimit(db: Db, userId: number, organisationId: number): Promise<number | null> {
+    const [planRow] = await db
+        .select({ assistantLimit: masterPlans.assistantLimit, featureOverrides: plans.featureOverrides })
+        .from(plans)
+        .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
+        .where(and(eq(plans.userId, userId), inArray(plans.status, ['active', 'past_due'])))
+        .limit(1);
+
+    let limit: number | null = effectiveLimit(
+        planRow?.featureOverrides as FeatureOverrides | null, 'assistantLimit', planRow?.assistantLimit ?? null);
+    if (limit !== null) {
+        const [org] = await db
+            .select({ bonusAssistants: organisations.bonusAssistants })
+            .from(organisations).where(eq(organisations.id, organisationId)).limit(1);
+        limit += org?.bonusAssistants ?? 0;
+    }
+    return limit;
+}
+
+/**
  * Resume `paused_limit` assistants up to whatever the plan now allows.
  *
  * Call after anything that can resolve the over-limit condition: an assistant being archived, or a
@@ -43,25 +70,7 @@ const NOTHING: ReleaseResult = { resumed: [], remaining: null };
  */
 export async function releasePausedLimit(db: Db, userId: number, organisationId: number): Promise<ReleaseResult> {
     try {
-        // The same resolution manage-assistant.ts uses for its capacity gate: a "new subscribers
-        // only" frozen snapshot wins over the live master limit, and referral bonus seats stack on
-        // top. Resolving it differently here would let one surface hand back a seat the other
-        // refuses to accept.
-        const [planRow] = await db
-            .select({ assistantLimit: masterPlans.assistantLimit, featureOverrides: plans.featureOverrides })
-            .from(plans)
-            .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
-            .where(and(eq(plans.userId, userId), inArray(plans.status, ['active', 'past_due'])))
-            .limit(1);
-
-        let limit: number | null = effectiveLimit(
-            planRow?.featureOverrides as FeatureOverrides | null, 'assistantLimit', planRow?.assistantLimit ?? null);
-        if (limit !== null) {
-            const [org] = await db
-                .select({ bonusAssistants: organisations.bonusAssistants })
-                .from(organisations).where(eq(organisations.id, organisationId)).limit(1);
-            limit += org?.bonusAssistants ?? 0;
-        }
+        const limit = await resolveAssistantLimit(db, userId, organisationId);
 
         // ⚠️ `archivedAt IS NULL` as well as isActive, matching the enrichment sweep's reasoning: an
         // archived assistant sits in its reinstate window still flagged active, so counting on
