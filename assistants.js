@@ -6324,7 +6324,8 @@ document.addEventListener('click', async (e) => {
                   <p class="text-[11px] font-bold uppercase tracking-wide text-gray-400">${_escapeHtml(s.shape || 'Sample')}</p>
                   ${'speechSynthesis' in window ? '<button type="button" data-vb-say class="link text-xs font-semibold">🔊 Read aloud</button>' : ''}
                 </div>
-                <p class="text-sm text-gray-800 whitespace-pre-line" data-vb-sample-text>${_escapeHtml(s.text)}</p></div>`).join('')
+                <p class="text-sm text-gray-800 whitespace-pre-line" data-vb-sample-text>${_escapeHtml(s.text)}</p>
+                ${s.note ? `<p class="text-[11px] text-gray-500 mt-2">✓ ${_escapeHtml(s.note)}</p>` : ''}</div>`).join('')
                 + '<p class="text-[11px] text-gray-500">Not quite right? Move a slider or add the words that grate to Never say, then preview again.</p>';
         } catch (err) {
             if (out) out.innerHTML = `<p class="text-xs text-red-600">${_escapeHtml(err.message)}</p>`;

@@ -135,4 +135,11 @@ check('the profile setting is saved under the keys the generators read, and surv
     assert.match(read('src/generated/platform-constants.js'), /window\.ContentShapes = \{/);
 });
 
+check('pillars are read live and balanced by actual use, so none can be starved', () => {
+    const jobs = read('netlify/functions/process-content-jobs.ts');
+    assert.match(jobs, /const rawPillars = brandCtx\.content_pillars \?\? answers\['content_pillars'\];/);
+    assert.match(jobs, /const least = Math\.min\(\.\.\.pillarList\.map\(count\)\);\s*candidates = pillarList\.filter\(\(p\) => count\(p\) === least\);/);
+    assert.match(jobs, /rotatedPillar = candidates\[dayIndex % candidates\.length\];/);
+});
+
 console.log(`\n${passed} checks passed`);
