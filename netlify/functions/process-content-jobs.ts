@@ -20,6 +20,7 @@ import { createNotification } from '../../src/utils/notify';
 import { gatewayGenerate, isUpstreamBlocked } from '../../src/lib/ai-gateway';
 import { voiceDirective, findNeverSay, normaliseVoice } from '../../src/utils/voice-profile';
 import { socialShapeLine } from '../../src/utils/content-shapes';
+import { parsePillars } from '../../src/public/content-pillars.js';
 import { buildInspoBlock } from '../../src/utils/inspo-profile';
 import { pickInspoTopic } from '../../src/utils/inspo-topics';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmark';
@@ -407,12 +408,9 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // Read LIVE from the profile first (like brand hashtags): `answers` is the compiled snapshot,
         // and a job queued before a pillar was added carries the old list until it is drafted.
         const rawPillars = brandCtx.content_pillars ?? answers['content_pillars'];
-        const pillarList = (Array.isArray(rawPillars) ? rawPillars : String(rawPillars ?? ''))
-            .toString()
-            .split(/[,;\n]/)
-            .map(p => p.trim())
-            .filter(Boolean)
-            .slice(0, 5);
+        // The SHARED splitter (src/public/content-pillars.js) — the profile's chips use the same one,
+        // so what the owner sees as five pillars is what drafting rotates through.
+        const pillarList = parsePillars(rawPillars);
         // Variety: rotate the pillar by the slot's calendar day instead of letting every slot pick the
         // same (strongest) pillar. Day-of-epoch % pillarCount walks the pillars across the calendar, so
         // consecutive scheduled posts land on different themes with no cross-job coordination needed.
