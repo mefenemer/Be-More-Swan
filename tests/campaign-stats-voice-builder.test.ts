@@ -92,7 +92,10 @@ check('the preview can rewrite the owner\'s own words, and refuses invented clai
     assert.match(fn, /Sample 1 is the owner's text below REWRITTEN in this voice/);
     assert.match(fn, /ONLY use facts stated in the business description above or in the owner's text/);
     // …and the rewrite is checked against the original, once, with anything added taken out.
-    assert.match(fn, /const fixed = await checkRewrite\(anthropic, own, texts\[0\], ctx\);/);
+    // Every sample is checked: the rewrite against the owner's original, each fresh example against
+    // the business's own description (+ the owner's text) — in parallel, one call each, fail-open.
+    assert.match(fn, /\? await checkRewrite\(anthropic, own, t, ctx\)\s*: await checkFresh\(anthropic, facts, t, ctx\);/);
+    assert.match(fn, /async function checkFresh\([\s\S]*?temperature: 0,[\s\S]*?Presenting something as NEW/);
     assert.match(fn, /async function checkRewrite\([\s\S]*?temperature: 0,/);
     assert.match(fn, /temperature: own \? 0\.4 : 0\.9/);
     assert.match(read('assistants.js'), /\$\{s\.note \? `<p class="text-\[11px\] text-gray-500 mt-2">✓/);
