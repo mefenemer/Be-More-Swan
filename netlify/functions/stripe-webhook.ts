@@ -1,6 +1,6 @@
 import { Handler } from '@netlify/functions';
 import Stripe from 'stripe';
-import { eq, and, inArray, desc, sql } from 'drizzle-orm';
+import { eq, and, inArray, desc, isNull, sql } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
 import { payments, plans, aiAssistants, onboardingDrafts, notifications, users, masterPlans, invoices, processedWebhookEvents, userReferrals, platformConfig, stripeDisputes, userOrganisations, userProfiles } from '../../db/schema';
 import { createNotification, createNotifications } from '../../src/utils/notify';
@@ -10,7 +10,7 @@ import { recordCardFingerprint } from '../../src/utils/billing-fingerprint';
 import { sendNewSubscriberAlert } from '../../src/utils/founder-alerts';
 import { grantXCredits } from '../../src/utils/ai-credits';
 import { withLambda } from '@netlify/aws-lambda-compat';
-import { releasePausedLimit } from '../../src/utils/release-paused-limit';
+import { releasePausedLimit, resolveAssistantLimit } from '../../src/utils/release-paused-limit';
 import { backfillLivePlanForOrg } from '../../src/utils/plan-stripe-refs';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' });
@@ -939,18 +939,46 @@ export default withLambda(async (event) => {
                 // Set when this event pauses assistants, so the release below can tell a downgrade
                 // that just took seats away from a plan change that gave them back.
                 let pausedForLimit = false;
-                if (newMasterPlan?.assistantLimit !== null && newMasterPlan?.assistantLimit !== undefined) {
-                    // Count currently active assistants
+
+                // Same lookup the dispute path uses — membership, not an owner column.
+                const [uo] = await db.select({ organisationId: userOrganisations.organisationId })
+                    .from(userOrganisations).where(eq(userOrganisations.userId, userId)).limit(1);
+
+                // ⚠️ The limit comes from OUR plan record, never from `sub.metadata.masterPlanId`.
+                // That metadata is only rewritten by billing-upgrade and the downgrade schedule —
+                // an Admin ▸ Override Subscription tier change moved the price and the plans row
+                // but left the old id on the subscription. Restorative Futures (org 41) was moved to
+                // The Digital Employee (10 assistants) that way while Stripe still said plan 2, so
+                // an ordinary subscription update on 2026-09-17 paused one of their three
+                // assistants. A scheduled downgrade has already flipped the plans row above, so the
+                // row is the truth by the time we get here.
+                const [subPlan] = await db.select({ masterPlanId: plans.masterPlanId })
+                    .from(plans).where(eq(plans.stripeSubscriptionId, sub.id)).limit(1);
+                if (subPlan && subPlan.masterPlanId !== newMasterPlanId) {
+                    console.warn(`[stripe-webhook] ${sub.id} metadata says masterPlanId ${newMasterPlanId}, plans row says ${subPlan.masterPlanId} — enforcing the plans row`);
+                }
+                const assistantLimit = uo?.organisationId
+                    ? await resolveAssistantLimit(db, userId, uo.organisationId).catch((err) => {
+                        // Unknown limit → take nothing away. Wrongly pausing a paying customer's
+                        // assistants is worse than one missed enforcement.
+                        console.warn('[stripe-webhook] could not resolve the assistant limit (non-blocking):', err);
+                        return null;
+                    })
+                    : null;
+
+                if (newMasterPlan && assistantLimit !== null) {
+                    // Count currently active assistants. Archived ones sit in their reinstate window
+                    // still flagged active — the same exclusion releasePausedLimit makes.
                     const activeAssistants = await db
                         .select({ id: aiAssistants.id, name: aiAssistants.name, createdAt: aiAssistants.createdAt })
                         .from(aiAssistants)
-                        .where(and(eq(aiAssistants.userId, userId), eq(aiAssistants.isActive, true)))
+                        .where(and(eq(aiAssistants.userId, userId), eq(aiAssistants.isActive, true), isNull(aiAssistants.archivedAt)))
                         .orderBy(desc(aiAssistants.createdAt)); // newest first → pause oldest
 
-                    const excess = activeAssistants.length - newMasterPlan.assistantLimit;
+                    const excess = activeAssistants.length - assistantLimit;
                     if (excess > 0) {
                         // Pause the oldest (last in desc-sorted list) excess assistants
-                        const toPause = activeAssistants.slice(newMasterPlan.assistantLimit);
+                        const toPause = activeAssistants.slice(assistantLimit);
                         const pauseIds = toPause.map(a => a.id);
                         const pausedNames = toPause.map(a => a.name).join(', ');
                         pausedForLimit = true;
@@ -961,11 +989,11 @@ export default withLambda(async (event) => {
 
                         await createNotification(db, 'assistants_paused_downgrade', {
                             userId,
-                            context: { plan: { assistant_limit: newMasterPlan.assistantLimit }, paused: {
+                            context: { plan: { assistant_limit: assistantLimit }, paused: {
                                 assistant_phrase: excess > 1 ? 'assistants have' : 'assistant has',
                                 names: pausedNames,
                             } },
-                            metadata: { pausedIds: pauseIds, newLimit: newMasterPlan.assistantLimit },
+                            metadata: { pausedIds: pauseIds, newLimit: assistantLimit },
                         });
                     }
                 }
@@ -983,9 +1011,6 @@ export default withLambda(async (event) => {
                 // Skipped only when this same event just paused assistants: that is a downgrade
                 // taking seats away, and handing them straight back would undo it.
                 if (newMasterPlan && !pausedForLimit) {
-                    // Same lookup the dispute path uses — membership, not an owner column.
-                    const [uo] = await db.select({ organisationId: userOrganisations.organisationId })
-                        .from(userOrganisations).where(eq(userOrganisations.userId, userId)).limit(1);
                     if (uo?.organisationId) {
                         const released = await releasePausedLimit(db, userId, uo.organisationId);
                         if (released.resumed.length) {

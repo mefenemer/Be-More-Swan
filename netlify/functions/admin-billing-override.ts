@@ -156,11 +156,6 @@ export default withLambda(async (event) => {
                     return { statusCode: 500, body: JSON.stringify({ error: 'Could not find Stripe subscription item.' }) };
                 }
 
-                await stripe.subscriptions.update(activePlan.stripeSubscriptionId!, {
-                    items: [{ id: existingItemId, price: newPriceId }],
-                    proration_behavior: 'create_prorations',
-                });
-
                 // Look up the new master plan if tierKey provided
                 let newMasterId = activePlan.masterPlanId;
                 if (newTierKey) {
@@ -168,6 +163,21 @@ export default withLambda(async (event) => {
                         .from(masterPlans).where(eq(masterPlans.tierKey, newTierKey)).limit(1);
                     if (mp) newMasterId = mp.id;
                 }
+
+                // ⚠️ The subscription's metadata must move WITH the price — billing-upgrade.ts does
+                // the same. This path used to swap only the price, so Stripe kept the OLD
+                // masterPlanId/tier forever, and stripe-webhook enforced that stale plan's assistant
+                // limit on every later subscription update (org 41, 2026-09-17: one of three
+                // assistants paused on a 10-assistant plan).
+                await stripe.subscriptions.update(activePlan.stripeSubscriptionId!, {
+                    items: [{ id: existingItemId, price: newPriceId }],
+                    proration_behavior: 'create_prorations',
+                    ...(newMasterId ? { metadata: {
+                        ...sub.metadata,
+                        masterPlanId: String(newMasterId),
+                        ...(newTierKey ? { tier: newTierKey } : {}),
+                    } } : {}),
+                });
 
                 await db.update(plans)
                     .set({
