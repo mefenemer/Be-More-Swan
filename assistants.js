@@ -822,32 +822,29 @@ window._syncScheduleOutcome = function () {
 
 // Content Pillars are stored as a discrete array. Parse the comma/semicolon/newline-separated
 // entry field into a deduped, trimmed list of up to 5 themes.
+// The shared splitter (src/public/content-pillars.js), so these chips are exactly the pillars the
+// post writer rotates through. The inline fallback only covers the script failing to load.
 function _parsePillars(raw) {
-    const seen = new Set();
-    return (Array.isArray(raw) ? raw : String(raw ?? ''))
-        .toString()
-        .split(/[,;\n]/)
-        .map(p => p.trim())
-        .filter(p => {
-            if (!p) return false;
-            const key = p.toLowerCase();
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-        })
-        .slice(0, 5);
+    if (window.ContentPillars) return window.ContentPillars.parsePillars(raw);
+    return String(Array.isArray(raw) ? raw.join(',') : raw ?? '').split(/[,;\n·•|]/).map(p => p.trim()).filter(Boolean).slice(0, 5);
 }
 
 // Render a live chip preview of the discrete pillars below the entry field.
 function _renderPillarChips() {
     const host = document.getElementById('pillars-chips');
     if (!host) return;
-    const pillars = _parsePillars(document.getElementById('edit_pillars')?.value);
+    const raw = document.getElementById('edit_pillars')?.value;
+    const pillars = _parsePillars(raw);
     if (!pillars.length) { host.innerHTML = ''; return; }
     const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // Warnings in words the owner can act on — one long "pillar" is the shape that made a pillar
+    // never appear (2026-10-06): the assistant had one theme to rotate, not four.
+    const warnings = window.ContentPillars ? window.ContentPillars.pillarWarnings(raw) : [];
     host.innerHTML = pillars.map(p =>
         `<span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">${esc(p)}</span>`
-    ).join('');
+    ).join('') + (warnings.length
+        ? `<p class="w-full text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-1">${warnings.map(esc).join(' ')}</p>`
+        : '');
 }
 
 // Brief fields that auto-grow with their content. These can hold a lot of text (especially the
