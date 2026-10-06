@@ -116,16 +116,29 @@ export default withLambda(async (event: HandlerEvent) => {
         // inverted a fact ("without oversight" — every email IS approved by a person). A second,
         // small call compares it with the original and returns a corrected version with anything
         // new taken out. One check, no loop; if the check itself fails, the rewrite is shown as is.
-        let checkNote: string | null = null;
-        if (own && texts[0]) {
-            const fixed = await checkRewrite(anthropic, own, texts[0], ctx);
+        // …and every FRESH example is checked against what the business has actually stated (its
+        // description, plus the owner's text when given). A fresh example invented "connect your
+        // tools in two clicks" and "no learning new software" even with the grounding rule above.
+        // All checks run in parallel; each is one call, no loop, and fails open.
+        const facts = [org?.businessDescription ? String(org.businessDescription).slice(0, 1500) : '', own].filter(Boolean).join('\n\n');
+        const shown = texts.slice(0, labels.length);
+        const notes: (string | null)[] = shown.map(() => null);
+        await Promise.all(shown.map(async (t, i) => {
+            const isRewrite = own && i === 0;
+            const fixed = isRewrite
+                ? await checkRewrite(anthropic, own, t, ctx)
+                : await checkFresh(anthropic, facts, t, ctx);
             if (fixed && fixed.text) {
-                texts[0] = fixed.text;
-                if (fixed.removed.length) checkNote = `Checked against your original — removed: ${fixed.removed.join('; ')}.`;
+                shown[i] = fixed.text;
+                if (fixed.removed.length) {
+                    notes[i] = isRewrite
+                        ? `Checked against your original — removed: ${fixed.removed.join('; ')}.`
+                        : `Checked against your business description — removed: ${fixed.removed.join('; ')}.`;
+                }
             }
-        }
+        }));
         return json(200, {
-            samples: texts.slice(0, labels.length).map((text, i) => ({ shape: labels[i] || '', text, ...(i === 0 && checkNote ? { note: checkNote } : {}) })),
+            samples: shown.map((text, i) => ({ shape: labels[i] || '', text, ...(notes[i] ? { note: notes[i] } : {}) })),
         });
     } catch (err) {
         console.error('[voice-preview] failed', err);
@@ -169,6 +182,49 @@ async function checkRewrite(
         return { text, removed };
     } catch (err) {
         console.warn('[voice-preview] rewrite check skipped:', err instanceof Error ? err.message : err);
+        return null;
+    }
+}
+
+/**
+ * Check a FRESH example against what the business has stated (`facts`) and remove any specific
+ * claim about the business it does not support — features, integrations, numbers, timeframes,
+ * prices, results, promises. Talk about the reader's situation is fine and is left alone.
+ * Returns the corrected text and what was removed, or null when the check could not run.
+ */
+async function checkFresh(
+    anthropic: Anthropic,
+    facts: string,
+    text: string,
+    ctx: { userId: number; organisationId: number },
+): Promise<{ text: string; removed: string[] } | null> {
+    try {
+        const res = await anthropic.messages.create({
+            model: MODEL,
+            max_tokens: 500,
+            temperature: 0,
+            system: [
+                'You check a short marketing sample for claims about the business that its own facts do not support.',
+                'The FACTS are everything the business has stated about itself. Anything in them may be said, in any wording.',
+                'An UNSUPPORTED claim is a specific statement about the business or its product that the FACTS do not make: a feature, integration, number, timeframe, price, result, guarantee or promise. A paraphrase of a fact is supported.',
+                'Presenting something as NEW, just launched, recently changed, or bigger/better than before ("you can now…", "way more tools", "our new…") is also a claim — unsupported unless the FACTS say it is new. Keep the underlying fact, drop the "new".',
+                'Statements about the READER (their situation, feelings, problems) and greetings or sign-offs are not claims — leave them alone. Never change the voice, tone or wording otherwise.',
+                'Return the sample with only the unsupported claims removed (delete the words, or soften to what the facts say). If there are none, return it unchanged with an empty list.',
+                'Return ONLY JSON: {"removed": ["the claim, in under 8 words", ...], "text": "the corrected sample"}',
+            ].join('\n'),
+            messages: [{ role: 'user', content: `<facts>${facts || '(none stated)'}</facts>\n<sample>${text}</sample>` }],
+        });
+        void logAiUsage({
+            userId: ctx.userId, workspaceId: ctx.organisationId, model: MODEL,
+            inputTokens: res.usage?.input_tokens ?? 0, outputTokens: res.usage?.output_tokens ?? 0,
+        });
+        const parsed = parseModelJson<{ removed?: unknown; text?: unknown }>((res.content[0] as { text?: string })?.text ?? '');
+        const out = typeof parsed?.text === 'string' ? parsed.text.trim() : '';
+        if (!out) return null;
+        const removed = Array.isArray(parsed?.removed) ? parsed!.removed.map((r) => String(r).trim()).filter(Boolean).slice(0, 5) : [];
+        return { text: out, removed };
+    } catch (err) {
+        console.warn('[voice-preview] fresh-example check skipped:', err instanceof Error ? err.message : err);
         return null;
     }
 }
