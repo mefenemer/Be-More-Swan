@@ -4860,6 +4860,37 @@ export const newsletterSequenceEnrolments = pgTable("newsletter_sequence_enrolme
   check("newsletter_sequence_enrolments_halt_check", sql`${t.haltReason} IS NULL OR ${t.haltReason} IN ('unsubscribed','bounced','complained','suppressed','consent_check_failed','no_route','send_failed','sequence_disabled','no_steps','manual')`),
 ]);
 
+// One row per email a campaign (sequence) sends to one person — db/newsletter-sequence-sends.sql.
+// The campaign twin of newsletterSends: matched by providerMessageId in newsletter-webhook.ts, so a
+// campaign can report delivery, opens, clicks, bounces and complaints per email.
+export const newsletterSequenceSends = pgTable("newsletter_sequence_sends", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  sequenceId: integer("sequence_id").notNull().references(() => newsletterSequences.id, { onDelete: "cascade" }),
+  stepId: integer("step_id").references(() => newsletterSequenceSteps.id, { onDelete: "set null" }),
+  stepNumber: integer("step_number").notNull(),
+  enrolmentId: integer("enrolment_id").references(() => newsletterSequenceEnrolments.id, { onDelete: "cascade" }),
+  contactId: integer("contact_id").references(() => audienceContacts.id, { onDelete: "set null" }),
+  email: text("email").notNull(),
+  provider: text("provider"),
+  providerMessageId: text("provider_message_id"),
+  status: text("status").notNull().default("sent"),
+  openedAt: timestamp("opened_at"),
+  clickedAt: timestamp("clicked_at"),
+  openCount: integer("open_count").notNull().default(0),
+  clickCount: integer("click_count").notNull().default(0),
+  lastClickedUrl: text("last_clicked_url"),
+  error: text("error"),
+  sentAt: timestamp("sent_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("newsletter_sequence_sends_enrolment_step_uidx").on(t.enrolmentId, t.stepNumber),
+  index("newsletter_sequence_sends_provider_idx").on(t.providerMessageId),
+  index("newsletter_sequence_sends_sequence_step_idx").on(t.sequenceId, t.stepNumber),
+  check("newsletter_sequence_sends_status_check", sql`${t.status} IN ('sent','delivered','bounced','complained')`),
+]);
+
 // Relational-query definitions for the chat tables live in db/relations.ts
 // (drizzle-orm v2 `defineRelations` API — this drizzle version has no per-table
 // `relations()` export).

@@ -55,6 +55,15 @@ export default withLambda(async (event: HandlerEvent) => {
         return json(409, { error: `${adapter.label} is not available yet.` });
     }
 
+    // The Swan Index is managed by Be More Swan, not the workspace (2026-10-06): every workspace
+    // syndicates to it by default, and opting out is by email — an admin then withdraws the profile
+    // on Admin ▸ The Swan Index ▸ Opt-outs (see the Terms). The card is gone from the product; this
+    // stops a stale tab or a crafted request from flipping it anyway. The author byline
+    // (save-profile) is left alone — it changes nothing about WHETHER posts go there.
+    if (adapter.authKind === 'firstparty' && ['disconnect', 'connect', 'setmode'].includes(String(body.action))) {
+        return json(403, { error: 'The Swan Index is managed by Be More Swan. To stop your posts being sent to it, email support@bemoreswan.com.' });
+    }
+
     if (body.action === 'disconnect') {
         await deleteBlogDestination(db, ctx.organisationId, body.provider);
         logAuditEvent({ userId: ctx.userId, actionType: 'DELETE', resourceType: 'blog_destination', resourceId: body.provider });

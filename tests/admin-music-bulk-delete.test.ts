@@ -28,7 +28,12 @@ check('delete is dispatched before the single-id lookup (it takes ids, not id)',
 
 check('a file still carried by any content_assets row is never deleted', () => {
     assert.match(del, /selectDistinct\(\{ key: contentAssets\.storageKey \}\)[\s\S]*?inArray\(contentAssets\.storageKey, keys\)/);
-    assert.match(del, /const keep = inUse\.has\(r\.storageKey\);\s*const removed = keep \? false : await deleteR2Object\(r\.storageKey\);/);
+    assert.match(del, /const removed = keep \? false : await deleteR2Object\(r\.storageKey\);/);
+    // …and its ROW stays too, withdrawn — deleting it made an in-use track vanish from the list
+    // while the toast said it was kept (2026-10-06).
+    assert.match(del, /const removable = rows\.filter\(\(r\) => !inUse\.has\(r\.storageKey\)\);/);
+    assert.match(del, /db\.delete\(musicTracks\)\.where\(inArray\(musicTracks\.id, removable\.map/);
+    assert.match(del, /db\.update\(musicTracks\)\.set\(\{ isActive: false, updatedAt: new Date\(\) \}\)\.where\(inArray\(musicTracks\.id, kept\.map/);
 });
 
 check('rows are deleted before any file', () => {
@@ -39,7 +44,7 @@ check('rows are deleted before any file', () => {
 check('a reason is required, the batch is bounded, and every track is audit-logged', () => {
     assert.match(del, /if \(!reason\) return json\(400/);
     assert.match(del, /ids\.length > DELETE_MAX/);
-    assert.match(del, /action: 'music_library_delete'/);
+    assert.match(del, /action: keep \? 'music_library_curation' : 'music_library_delete'/);
     assert.match(readFileSync(join(root, 'src/utils/admin-audit.ts'), 'utf8'), /\| 'music_library_delete'/);
 });
 

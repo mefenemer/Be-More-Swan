@@ -19,8 +19,8 @@
 import { and, asc, eq, gte, isNull, lte, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
-    audienceContacts, newsletterSequenceEnrolments, newsletterSequenceSteps, newsletterSequences,
-    notifications, organisations,
+    audienceContacts, newsletterSequenceEnrolments, newsletterSequenceSends, newsletterSequenceSteps,
+    newsletterSequences, notifications, organisations,
 } from '../../db/schema';
 import { checkAudienceConsentBulk } from './audience-consent';
 import { renderForRecipient, newsletterUnsubscribeUrl, type IssueSnapshot } from './newsletter-render';
@@ -191,9 +191,11 @@ async function deliverStep(
     route: SendRoute,
     organisationId: number,
     msg: { to: string; subject: string; html: string; text: string; listUnsubscribe: string | null },
-): Promise<void> {
+): Promise<string | null> {
+    // Returns the provider's message id where there is one (Resend) — the key the webhook matches
+    // opens, clicks, bounces and complaints on. A mailbox send has none, so it is tracked as sent only.
     if (route.provider === 'resend') {
-        await sendEmail({
+        const data = await sendEmail({
             to: msg.to,
             subject: msg.subject,
             html: msg.html,
@@ -204,14 +206,35 @@ async function deliverStep(
                 ? { 'List-Unsubscribe': msg.listUnsubscribe, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }
                 : undefined,
         });
-        return;
+        return (data as { id?: string } | null)?.id ?? null;
     }
     const common = {
         to: msg.to, subject: msg.subject, body: msg.text, html: msg.html,
         listUnsubscribe: msg.listUnsubscribe || undefined,
     };
-    if (route.provider === 'outlook') { await sendOutlookMessage(db, organisationId, common); return; }
+    if (route.provider === 'outlook') { await sendOutlookMessage(db, organisationId, common); return null; }
     await sendGmailMessage(db, organisationId, common);
+    return null;
+}
+
+let _sendsTableMissingLogged = false;
+/**
+ * Record one campaign email in newsletter_sequence_sends. NEVER throws: the email has already gone,
+ * and a missing table (db/newsletter-sequence-sends.sql not applied yet) or a duplicate from a retry
+ * must not turn a delivered email into a "failed" step that sends again.
+ */
+async function recordSequenceSend(db: Db, row: typeof newsletterSequenceSends.$inferInsert): Promise<void> {
+    try {
+        await db.insert(newsletterSequenceSends).values(row).onConflictDoNothing();
+    } catch (err) {
+        const code = (err as { code?: string; cause?: { code?: string } })?.code ?? (err as { cause?: { code?: string } })?.cause?.code;
+        if (code === '42P01') {
+            if (!_sendsTableMissingLogged) console.warn('[newsletter-sequence] newsletter_sequence_sends missing — apply db/newsletter-sequence-sends.sql for campaign stats');
+            _sendsTableMissingLogged = true;
+            return;
+        }
+        console.error('[newsletter-sequence] could not record a campaign send (email WAS sent)', err);
+    }
 }
 
 export interface SequenceSweepResult {
@@ -438,12 +461,23 @@ export async function processDueSequenceSteps(
                 postalAddress: org?.postalAddress ?? null,
             });
 
-            await deliverStep(db, routed.route, row.organisationId, {
+            const messageId = await deliverStep(db, routed.route, row.organisationId, {
                 to: row.email,
                 subject: step.subject,
                 html: rendered.html,
                 text: rendered.text,
                 listUnsubscribe: rendered.listUnsubscribe,
+            });
+            await recordSequenceSend(db, {
+                organisationId: row.organisationId,
+                sequenceId: row.sequenceId,
+                stepId: step.id,
+                stepNumber: step.stepNumber,
+                enrolmentId: row.id,
+                contactId: row.contactId,
+                email: row.email,
+                provider: routed.route.provider,
+                providerMessageId: messageId,
             });
 
             // Schedule the one after this, using ITS delay. Null when there is nothing further,

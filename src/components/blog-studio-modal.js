@@ -1709,13 +1709,15 @@
     setStatus('bs-dist-status', 'Checking connected platforms…');
     var selected = selectedDestinations(post);
     api('connect-blog-destination', { method: 'GET' }).then(function (res) {
-      var connected = ((res.ok && res.body.destinations) || []).filter(function (d) { return d.connected; });
+      // The Swan Index is not a per-post choice (it ignores this list at publish — see
+      // syndicate.ts), so it is not offered as a box to untick here either.
+      var connected = ((res.ok && res.body.destinations) || []).filter(function (d) { return d.connected && !d.firstParty; });
       if (!connected.length) {
         // Names only what the Connections tab can actually offer today — see
         // WITHHELD_BLOG_DESTINATIONS. Listing a platform here that has no card there sends the
         // author looking for a button that is not on the screen.
-        setStatus('bs-dist-status', 'No other platforms connected yet. Connect LinkedIn or '
-          + 'The Swan Index from your assistant\u2019s Connections tab and they\u2019ll appear here.');
+        setStatus('bs-dist-status', 'No other platforms connected yet. Connect LinkedIn from your '
+          + 'assistant\u2019s Connections tab and it\u2019ll appear here.');
         return;
       }
       connected.forEach(function (d) {

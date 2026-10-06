@@ -135,7 +135,8 @@ test('the gate is bounded to a single re-ask', () => {
     const src = require('node:fs').readFileSync(
         new URL('../netlify/functions/process-content-jobs.ts', import.meta.url), 'utf8');
     const start = src.indexOf('Near-duplicate gate');
-    const end = landmark(src, 'The raw model caption', start);
+    // Ends at the never-say gate (2026-10-06), which sits between this one and the caption.
+    const end = landmark(src, 'Never-say gate', start);
     const block = src.slice(start, end);
     assert.ok(start > 0 && end > start, 'gate block not found');
     assert.equal((block.match(/gatewayGenerate\(/g) || []).length, 1, 'exactly one re-ask');

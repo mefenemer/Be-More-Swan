@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { PLATFORM_FORMATS, SOCIAL_PLATFORMS } from '../src/config/platform-formats';
 import { POST_FORMATS } from '../src/config/post-formats';
 import { SOCIAL_POST_SHAPES, BLOG_ARTICLE_TYPES } from '../src/utils/content-shapes';
+import { VOICE_PERSONALITIES, DEFAULT_NEVER_SAY } from '../src/utils/voice-profile';
 import { SCHEDULE_ACTIVE_STATUSES } from '../src/config/post-status';
 import { DEAD_CONNECTION_STATUSES } from '../src/config/connection-status';
 import { OVERLAY_ANIM_S, OVERLAY_ANIMS } from '../src/lib/overlay-geometry';
@@ -814,6 +815,13 @@ ${overlayFontRows}
   window.ContentShapes = {
     socialShapes: ${JSON.stringify(SOCIAL_POST_SHAPES.map(sh => ({ key: sh.key, label: sh.label, summary: sh.summary })))},
     articleTypes: ${JSON.stringify(BLOG_ARTICLE_TYPES.map(t => ({ key: t.key, label: t.label, summary: t.summary })))},
+  };
+
+  // Voice builder (assistant profile), from src/utils/voice-profile.ts — the SAME personality keys and
+  // default never-say list the generators apply, so the builder can never offer one they ignore.
+  window.VoiceBuilder = {
+    personalities: ${JSON.stringify(VOICE_PERSONALITIES)},
+    defaultNeverSay: ${JSON.stringify(DEFAULT_NEVER_SAY)},
   };
 
   window.BlogFonts = {

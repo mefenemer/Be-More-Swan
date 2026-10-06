@@ -5597,6 +5597,13 @@ button:not(:disabled), [role="button"]:not([aria-disabled="true"]), summary {
   .btn-inverse:focus-visible { outline: 2px solid #ffffff; outline-offset: 2px; }
   .btn-inverse:disabled { opacity: .5; cursor: not-allowed; }
 
+  /* A TEXT LINK — "View details →", "Manage assistants →", "Review", "Back to…". Pink at rest,
+     underlined on hover (2026-10-06: the user's rule; black-that-turns-pink-on-hover read as a
+     label, not a link). Deep pink rather than neon so small link text passes WCAG AA. Admin ▸ Site
+     Styles ▸ Links restyles it with everything else that counts as a link. */
+  .link { color: var(--color-emerald-800, #d6006b); background: none; border: 0; cursor: pointer; text-underline-offset: 2px; }
+  .link:hover { text-decoration: underline; }
+
   .btn-assistant:focus-visible, .btn-primary:focus-visible, .btn-golive:focus-visible,
   .btn-secondary:focus-visible, .btn-destructive:focus-visible, .btn-utility:focus-visible {
     outline: 2px solid #ff007f;

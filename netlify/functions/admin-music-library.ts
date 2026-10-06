@@ -251,27 +251,33 @@ async function deleteTracks(
             .filter((k): k is string => !!k),
     );
 
-    await db.delete(musicTracks).where(inArray(musicTracks.id, rows.map((r) => r.id)));
+    // ⚠️ A track a workspace's post still plays is WITHDRAWN, not deleted (2026-10-06). Deleting its
+    // row while keeping its file made it vanish from this list while the toast said it was "kept" —
+    // an admin who deleted all but one track saw one, was told two more survived, and could find
+    // neither. Withdrawn, it stays listed (marked, filterable, restorable) and is no longer offered.
+    const removable = rows.filter((r) => !inUse.has(r.storageKey));
+    const kept = rows.filter((r) => inUse.has(r.storageKey));
+    if (removable.length) await db.delete(musicTracks).where(inArray(musicTracks.id, removable.map((r) => r.id)));
+    if (kept.length) await db.update(musicTracks).set({ isActive: false, updatedAt: new Date() }).where(inArray(musicTracks.id, kept.map((r) => r.id)));
 
     let filesRemoved = 0;
-    let filesKept = 0;
     for (const r of rows) {
-        // Delete the row first, the file second: a crash in between leaves an unlisted file, which
-        // is harmless; the other order would leave a listed track that plays silence.
         const keep = inUse.has(r.storageKey);
+        // Row first, file second: a crash in between leaves an unlisted file, which is harmless.
         const removed = keep ? false : await deleteR2Object(r.storageKey);
-        if (removed) filesRemoved++; else filesKept++;
+        if (removed) filesRemoved++;
         void insertAdminAuditLog({
             adminId,
-            action: 'music_library_delete',
+            action: keep ? 'music_library_curation' : 'music_library_delete',
             targetType: 'music_track',
             targetId: String(r.id),
-            previousState: { title: r.title, artist: r.artist, storageKey: r.storageKey, isActive: r.isActive, source: r.source },
-            newState: { deleted: true, fileRemoved: removed, fileKeptBecauseInUse: keep },
+            // The WHOLE row, so a deletion can be reversed from the log if it ever has to be.
+            previousState: { ...r, createdAt: r.createdAt, updatedAt: r.updatedAt },
+            newState: keep ? { isActive: false, withdrawnInsteadOfDeleted: true } : { deleted: true, fileRemoved: removed },
             reason,
             ipAddress: getAdminIp(event.headers as Record<string, string | undefined>),
             userAgent: (event.headers as Record<string, string | undefined>)['user-agent'],
         });
     }
-    return json(200, { ok: true, deleted: rows.length, filesRemoved, filesKept });
+    return json(200, { ok: true, deleted: removable.length, withdrawn: kept.length, filesRemoved });
 }

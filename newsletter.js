@@ -2061,6 +2061,8 @@
       loadAutoList();   // the Studio's card shows On/Off and counts — keep it in step
       seqState.steps = data.steps || [];
       seqState.enrolments = data.enrolments || {};
+      seqState.forms = data.forms || [];
+      seqState.stats = data.stats || null;
       if (!seqState.editing) seqState.editing = { stepNumber: 1, design: null, revision: null };
       seqState.editing.stepNumber = seqState.steps.length + 1;
       seqState.editing.design = null;
@@ -2143,6 +2145,80 @@
 
   }
 
+  // ── Campaign settings + performance (2026-10-06) ─────────────────────────────────────────────
+  // Editing a campaign used to show only its emails: nothing said WHO it reaches (which sign-up
+  // forms start it, and the segment each form adds people to), when it was switched on, or how it
+  // was performing. Settings are read-only here because linking is done on the form itself.
+  function renderSeqSettings(seq) {
+    const forms = seqState.forms || [];
+    const since = seq.enabledAt ? new Date(seq.enabledAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : null;
+    const formLine = (f) => `<li class="flex items-center justify-between gap-2 py-1.5">
+        <span class="min-w-0"><span class="font-semibold text-gray-900">${esc(f.name)}</span>${f.status !== 'active' ? ' <span class="text-[11px] text-amber-700">(switched off)</span>' : ''}
+          <span class="block text-[11px] text-gray-500">${f.segmentName ? `Adds people to the segment <strong>${esc(f.segmentName)}</strong>` : 'Does not add people to a segment'}</span></span>
+        <button type="button" data-seq-open-forms class="link text-xs font-semibold shrink-0">Edit form</button>
+      </li>`;
+    const who = seq.triggerEvent === 'form'
+      ? (forms.length
+        ? `<p class="text-sm text-gray-700">Starts when someone fills in ${forms.length === 1 ? 'this sign-up form' : 'any of these sign-up forms'}:</p><ul class="mt-1 divide-y divide-gray-100">${forms.map(formLine).join('')}</ul>`
+        : `<p class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">No sign-up form starts this campaign yet, so nobody will receive it. Link one in <button type="button" data-seq-open-forms class="link font-semibold">Audience ▸ Sign-up forms</button> (the form's "Email campaign" setting).</p>`)
+      : `<p class="text-sm text-gray-700">Starts when someone joins your list through a form that is not linked to a campaign of its own${forms.length ? ':' : '.'}</p>${forms.length ? `<ul class="mt-1 divide-y divide-gray-100">${forms.map(formLine).join('')}</ul>` : ''}`;
+    return `<div class="rounded-xl border border-gray-200 p-4 mb-4">
+      <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Campaign settings</p>
+      <dl class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mb-3">
+        <div><dt class="text-[11px] text-gray-500">Type</dt><dd class="font-semibold text-gray-900">${seq.triggerEvent === 'form' ? 'Started by a sign-up form' : 'Welcome sequence'}</dd></div>
+        <div><dt class="text-[11px] text-gray-500">Status</dt><dd class="font-semibold text-gray-900">${seq.isEnabled ? `On${since ? ` since ${esc(since)}` : ''}` : 'Off'}</dd></div>
+        <div><dt class="text-[11px] text-gray-500">Emails</dt><dd class="font-semibold text-gray-900">${seqState.steps.length} · over ${seqState.steps.reduce((a, s) => a + Number(s.delayDays || 0), 0)} days</dd></div>
+      </dl>
+      <p class="text-[11px] text-gray-500 mb-1">Who receives it</p>
+      ${who}
+    </div>`;
+  }
+
+  function renderSeqStats(stats) {
+    if (!stats) {
+      return `<div class="rounded-xl border border-gray-200 p-4 mb-4 text-sm text-gray-500">Performance figures start with the next email this campaign sends.</div>`;
+    }
+    const t = stats.totals;
+    const pct = (v) => (v == null ? '—' : `${v}%`);
+    const tile = (label, value, sub, title) => `<div class="rounded-lg bg-gray-50 border border-gray-100 p-3" ${title ? `title="${esc(title)}"` : ''}>
+        <p class="text-[11px] font-bold uppercase tracking-wide text-gray-500">${label}</p>
+        <p class="text-xl font-extrabold text-gray-900 mt-0.5">${value}</p>
+        ${sub ? `<p class="text-[11px] text-gray-500">${sub}</p>` : ''}</div>`;
+    const untracked = t.sent - t.trackedSends;
+    return `<div class="rounded-xl border border-gray-200 p-4 mb-4">
+      <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Performance</p>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
+        ${tile('Enrolled', t.enrolled.toLocaleString(), `${t.inProgress.toLocaleString()} in progress · ${t.completed.toLocaleString()} finished`)}
+        ${tile('Emails sent', t.sent.toLocaleString(), `${pct(t.deliveryRate)} delivered`)}
+        ${tile('Open rate', pct(t.openRate), `${t.opened.toLocaleString()} unique opens`, 'Unique opens ÷ delivered')}
+        ${tile('Click rate', pct(t.clickRate), `${t.clicked.toLocaleString()} unique clicks · ${pct(t.clickToOpenRate)} of openers`, 'Unique clicks ÷ delivered. The second figure is click-to-open.')}
+        ${tile('Unsubscribed', t.unsubscribed.toLocaleString(), pct(t.unsubscribeRate) + ' of enrolled')}
+        ${tile('Bounced', t.bounced.toLocaleString(), pct(t.bounceRate) + ' of sent')}
+        ${tile('Spam reports', t.complained.toLocaleString(), pct(t.complaintRate) + ' of sent')}
+        ${tile('Completed', pct(t.completionRate), 'reached the last email')}
+      </div>
+      ${untracked > 0 ? `<p class="text-[11px] text-amber-700 mb-2">${untracked.toLocaleString()} email${untracked === 1 ? ' was' : 's were'} sent from a connected mailbox, which cannot report opens or clicks — verify a sending domain in Sending to track them.</p>` : ''}
+      ${stats.steps.length ? `<table class="w-full text-xs mt-1">
+        <thead><tr class="text-left text-gray-500"><th class="py-1 font-semibold">Email</th><th class="py-1 font-semibold text-right">Sent</th><th class="py-1 font-semibold text-right">Opens</th><th class="py-1 font-semibold text-right">Clicks</th><th class="py-1 font-semibold text-right">Bounced</th></tr></thead>
+        <tbody>${stats.steps.map((r) => {
+          const st = seqState.steps.find((x) => x.stepNumber === r.stepNumber);
+          return `<tr class="border-t border-gray-100"><td class="py-1.5 pr-2 text-gray-900 truncate" style="max-width:14rem">${r.stepNumber}. ${esc(st ? st.subject : '(removed)')}</td>
+            <td class="py-1.5 text-right">${r.sent.toLocaleString()}</td>
+            <td class="py-1.5 text-right">${pct(r.openRate)}</td>
+            <td class="py-1.5 text-right">${pct(r.clickRate)}</td>
+            <td class="py-1.5 text-right">${r.bounced.toLocaleString()}</td></tr>`;
+        }).join('')}</tbody></table>` : ''}
+    </div>`;
+  }
+
+  // "Edit form" / "Sign-up forms" — the forms live on the Audience view.
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('[data-seq-open-forms]')) return;
+    if (seqSaver) seqSaver.flush();
+    hide($('nl-welcome-modal'));
+    window.loadView && window.loadView('audience');
+  });
+
   function renderWelcome() {
     const body = $('nl-welcome-body');
     const seq = seqState.sequence;
@@ -2205,6 +2281,10 @@
             : 'btn-primary'}">${seq.isEnabled ? 'Switch off' : 'Switch on'}</button>
       </div>
 
+      ${renderSeqSettings(seq)}
+      ${renderSeqStats(seqState.stats)}
+
+      <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">The emails</p>
       <div class="space-y-2 mb-4" id="nl-seq-list"></div>
 
       <button type="button" id="nl-seq-add"

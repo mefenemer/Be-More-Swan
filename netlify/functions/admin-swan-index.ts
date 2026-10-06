@@ -27,8 +27,10 @@ import jwt from 'jsonwebtoken';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
-    users, blogPosts, swanIndexPosts, swanIndexProfiles, swanIndexSections,
+    users, blogPosts, swanIndexPosts, swanIndexProfiles, swanIndexSections, organisations,
 } from '../../db/schema';
+import { ensureProfile, getProfileByOrg } from '../../src/utils/swan-index/profile';
+import { deleteBlogDestination } from '../../src/utils/blog-destinations/store';
 import { hasPermission } from '../../src/utils/rbac';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import {
@@ -158,6 +160,70 @@ export default withLambda(async (event) => {
             .orderBy(desc(swanIndexPosts.liveAt))
             .limit(50);
         return json(200, { items: rows, eligible, baseUrl });
+    }
+
+    // ── Opt-outs (2026-10-06) ───────────────────────────────────────────────────────────────────
+    // Every workspace's published blog posts go to The Swan Index by default, and the workspace has
+    // no control for it any more: opting out is by email (see the Terms), and an editor records it
+    // here. Opt-out = the SAME withdrawal an author's Disconnect used to perform (profile and live
+    // pieces → 'withdrawn'), so the default-on provisioner never reactivates it. Opting back in
+    // reactivates the profile; pieces withdrawn on the way out stay withdrawn, as they did when an
+    // author reconnected.
+    //
+    // GET  ?resource=optouts                             → every workspace + its Swan Index status
+    // POST ?resource=optout { organisationId, optOut, reason }
+    if (event.httpMethod === 'GET' && resource === 'optouts') {
+        const rows = await db
+            .select({
+                organisationId: organisations.id,
+                name: organisations.name,
+                profileId: swanIndexProfiles.id,
+                handle: swanIndexProfiles.handle,
+                status: swanIndexProfiles.status,
+                updatedAt: swanIndexProfiles.updatedAt,
+                publishedPosts: sql<number>`(select count(*)::int from ${blogPosts} bp where bp.organisation_id = ${organisations.id} and bp.status = 'published')`,
+            })
+            .from(organisations)
+            .leftJoin(swanIndexProfiles, eq(swanIndexProfiles.organisationId, organisations.id))
+            .orderBy(organisations.name);
+        return json(200, { items: rows, baseUrl });
+    }
+
+    if (event.httpMethod === 'POST' && resource === 'optout') {
+        let body: { organisationId?: unknown; optOut?: unknown; reason?: unknown };
+        try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON.' }); }
+        const orgId = Number(body.organisationId);
+        if (!Number.isInteger(orgId) || orgId <= 0) return json(400, { error: 'organisationId is required.' });
+        const optOut = body.optOut === true;
+        const reason = String(body.reason || '').trim().slice(0, 500);
+        // An opt-out is the customer's request, made by email — the note is the record of it.
+        if (optOut && !reason) return json(400, { error: 'Say when and how the customer asked (e.g. "Email from jane@acme.com, 6 Oct").' });
+        const [org] = await db.select({ id: organisations.id, name: organisations.name }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+        if (!org) return json(404, { error: 'No such workspace.' });
+
+        const before = await getProfileByOrg(db, orgId);
+        if (optOut) {
+            // A workspace that never had a profile still needs one, marked withdrawn — otherwise the
+            // default-on provisioner creates an ACTIVE one on its next publish.
+            await ensureProfile(db, orgId);
+            await deleteBlogDestination(db, orgId, 'swanindex');
+        } else {
+            const profile = await ensureProfile(db, orgId);
+            await db.update(swanIndexProfiles).set({ status: 'active', updatedAt: new Date() }).where(eq(swanIndexProfiles.id, profile.id));
+        }
+        const after = await getProfileByOrg(db, orgId);
+        void insertAdminAuditLog({
+            adminId: admin.id,
+            action: 'swan_index_profile_change',
+            targetType: 'organisation',
+            targetId: String(orgId),
+            previousState: { status: before?.status ?? 'none' },
+            newState: { status: after?.status ?? 'none', optedOut: optOut },
+            reason: reason || (optOut ? undefined : 'Opted back in'),
+            ipAddress: getAdminIp(event.headers as Record<string, string | undefined>),
+            userAgent: (event.headers as Record<string, string | undefined>)['user-agent'],
+        });
+        return json(200, { ok: true, status: after?.status ?? null, name: org.name });
     }
 
     // ── GET ?resource=contributors ─────────────────────────────────────────────────────────────
@@ -451,7 +517,7 @@ export default withLambda(async (event) => {
                 return json(400, { error: "Profile status must be 'active' or 'suspended'." });
             }
             if (current.status === 'withdrawn') {
-                return json(422, { error: 'This contributor disconnected The Swan Index themselves. They reinstate it from Blog Studio.' });
+                return json(422, { error: 'This workspace has opted out of The Swan Index. Opt it back in on the Opt-outs page.' });
             }
             patch.status = body.status;
         }

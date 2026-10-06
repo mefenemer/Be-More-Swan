@@ -378,6 +378,9 @@ let _assistantSelectedIds = new Set();
 // + src/utils/blog-destinations) and are connected by a paste form (or OAuth for WordPress.com), so
 // they get their own loader/cards/handlers rather than riding the _userConnections path above.
 let _blogDestinations = [];
+// The Swan Index entry, kept apart from _blogDestinations: it is not a connector the workspace
+// controls any more, but the author still owns their byline (see _swanBylineCard).
+let _swanDest = null;
 // The `cms` category is live for this assistant (blog writer) — the server marks it available.
 function _cmsIsLive() {
     return _supportedTools.some(t => t && t.key === 'cms' && t.available === true);
@@ -698,6 +701,7 @@ async function _loadConnections() {
     } else {
         grid.insertAdjacentHTML('beforeend', allHtml);
     }
+    if (_assistantScoped) grid.insertAdjacentHTML('beforeend', _swanBylineCard(_swanDest));
 
     _queueConnectPermissionPrompts(platforms);
 }
@@ -928,12 +932,18 @@ window._intDisconnectSearchConsole = async function () {
 // the category is live for this assistant. Populates _blogDestinations for the grid + status card.
 async function _loadBlogDestinations() {
     _blogDestinations = [];
+    _swanDest = null;
     if (!_cmsIsLive()) return;
     try {
         const res = await fetch('/.netlify/functions/connect-blog-destination');
         if (!res.ok) return;
         const data = await res.json();
-        _blogDestinations = Array.isArray(data.destinations) ? data.destinations : [];
+        // The Swan Index (firstParty) is not shown or configurable here any more (2026-10-06): every
+        // workspace syndicates to it by default and opts out by emailing us — an admin withdraws the
+        // profile on Admin ▸ The Swan Index ▸ Opt-outs. _firstPartyDestCard stays for the record.
+        const all = Array.isArray(data.destinations) ? data.destinations : [];
+        _blogDestinations = all.filter(d => !d.firstParty);
+        _swanDest = all.find(d => d.firstParty) || null;
     } catch (e) {
         console.warn('Could not load blog destinations:', e);
     }
@@ -980,11 +990,32 @@ function _swanProfileField(label, key, value, opts) {
     </label>`;
 }
 
+// The author's byline on The Swan Index — the one part of it the workspace still controls
+// (2026-10-06). No connect / disconnect / mode: syndication is Be More Swan-managed and opting out
+// is by email (Terms 11.9). Shown only while the workspace is sending (an opted-out profile is
+// `withdrawn`, which the server reports as not connected), and only where a profile exists yet.
+function _swanBylineCard(d) {
+    if (!d || !d.connected || !d.profile) return '';
+    const p = d.profile;
+    const byline = [p.roleTitle, p.companyName].filter(Boolean).join(' at ');
+    return `
+      <div class="col-span-full bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+        <div class="flex items-start gap-3">
+          <span class="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center text-base shrink-0">🦢</span>
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-bold text-gray-900">Your author byline</p>
+            <p class="text-xs text-gray-500 mt-0.5">Your published blog posts are submitted to The Swan Index, our editorial magazine, under this name — with a link back to your site as the original. Currently: <span class="font-semibold text-gray-700">${_esc(p.displayName || '')}${byline ? ', ' + _esc(byline) : ''}</span>.</p>
+            <div class="mt-2">${_swanProfileForm(d)}</div>
+          </div>
+        </div>
+      </div>`;
+}
+
 function _swanProfileForm(d) {
     const p = d.profile;
     if (!p) return '';
     const socials = p.socials || {};
-    return `<details class="mt-1"><summary class="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 select-none">Edit your author profile</summary>
+    return `<details class="mt-1"><summary class="link text-xs font-semibold select-none">Edit your name and byline</summary>
       <div class="mt-3 pt-3 border-t border-gray-100 grid gap-3">
         <p class="text-xs text-gray-500">This is the byline on every piece you syndicate. Your handle
           <span class="font-bold text-gray-700">@${_esc(p.handle)}</span> is fixed — it is the address your published pieces already live at.</p>

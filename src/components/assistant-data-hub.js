@@ -2829,7 +2829,7 @@
         <button type="button" data-deleted-toggle
           class="w-full flex items-center gap-2 px-4 py-3 text-left cursor-pointer group">
           <svg class="w-4 h-4 text-gray-400 transition-transform ${open ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-          <span class="text-sm font-bold text-gray-900 group-hover:text-emerald-700">Deleted</span>
+          <span class="text-sm font-bold text-gray-900">Deleted</span>
           <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">${rows.length}</span>
         </button>
         <div class="${open ? '' : 'hidden'}" data-deleted-body>

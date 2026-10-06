@@ -27,8 +27,8 @@ import { HandlerEvent } from '@netlify/functions';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
-    aiAssistants, newsletterSequenceEnrolments, newsletterSequenceSteps, newsletterSequences,
-    organisations,
+    aiAssistants, audienceForms, audienceSegments, newsletterSequenceEnrolments, newsletterSequenceSends,
+    newsletterSequenceSteps, newsletterSequences, organisations,
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { renderForRecipient, renderIssueSnapshot } from '../../src/utils/newsletter-render';
@@ -93,7 +93,36 @@ export default withLambda(async (event: HandlerEvent) => {
             const enrolments: Record<string, number> = {};
             for (const c of counts) enrolments[c.state] = c.n;
 
-            return json(200, { sequence, steps, enrolments, sequences });
+            // Halted, by reason — "unsubscribed" is the campaign's unsubscribe count.
+            const haltRows = await db
+                .select({ reason: newsletterSequenceEnrolments.haltReason, n: sql<number>`count(*)::int` })
+                .from(newsletterSequenceEnrolments)
+                .where(and(eq(newsletterSequenceEnrolments.sequenceId, sequence.id), eq(newsletterSequenceEnrolments.state, 'halted')))
+                .groupBy(newsletterSequenceEnrolments.haltReason);
+            const halted: Record<string, number> = {};
+            for (const h of haltRows) halted[h.reason || 'other'] = h.n;
+
+            // ── Settings the campaign does not store itself (2026-10-06) ─────────────────────────
+            // Who it reaches is decided by the sign-up forms: a form campaign by the forms linked to
+            // it, the welcome sequence by every active form NOT linked to a campaign of its own. Each
+            // form may also put people into a segment. Shown read-only; linking lives on the form.
+            const formRows = await db
+                .select({
+                    id: audienceForms.id, name: audienceForms.name, status: audienceForms.status,
+                    slug: audienceForms.slug, segmentId: audienceForms.segmentId, segmentName: audienceSegments.name,
+                })
+                .from(audienceForms)
+                .leftJoin(audienceSegments, eq(audienceSegments.id, audienceForms.segmentId))
+                .where(and(
+                    eq(audienceForms.organisationId, ctx.organisationId),
+                    sequence.triggerEvent === 'form'
+                        ? eq(audienceForms.sequenceId, sequence.id)
+                        : sql`${audienceForms.sequenceId} IS NULL AND ${audienceForms.status} = 'active'`,
+                ))
+                .orderBy(asc(audienceForms.name));
+
+            const stats = await sequenceStats(db, sequence.id, enrolments, halted);
+            return json(200, { sequence, steps, enrolments, halted, forms: formRows, stats, sequences });
         } catch (err) {
             const code = (err as { code?: string; cause?: { code?: string } })?.code
                 ?? (err as { cause?: { code?: string } })?.cause?.code;
@@ -560,3 +589,67 @@ export default withLambda(async (event: HandlerEvent) => {
 
     return json(400, { error: `Unknown action: ${action}` });
 });
+
+type Db = ReturnType<typeof getDb>;
+
+/**
+ * Campaign performance, the industry-standard set: sent, delivered, unique opens, unique clicks,
+ * bounces, spam complaints, unsubscribes — overall and per email. Rates are over DELIVERED (falling
+ * back to sent before delivery events arrive), click-to-open over opens. Opens and clicks only exist
+ * for emails sent through a verified sending domain (the provider reports them); a mailbox send is
+ * counted as sent and nothing more, so `trackedSends` says how many the engagement numbers cover.
+ * null when db/newsletter-sequence-sends.sql has not been applied.
+ */
+async function sequenceStats(db: Db, sequenceId: number, enrolments: Record<string, number>, halted: Record<string, number>) {
+    let rows: Array<{ stepNumber: number; sent: number; delivered: number; opened: number; clicked: number; bounced: number; complained: number; tracked: number }>;
+    try {
+        rows = await db.select({
+            stepNumber: newsletterSequenceSends.stepNumber,
+            sent: sql<number>`count(*)::int`,
+            delivered: sql<number>`count(*) filter (where ${newsletterSequenceSends.status} in ('delivered','complained') or ${newsletterSequenceSends.openedAt} is not null)::int`,
+            opened: sql<number>`count(${newsletterSequenceSends.openedAt})::int`,
+            clicked: sql<number>`count(${newsletterSequenceSends.clickedAt})::int`,
+            bounced: sql<number>`count(*) filter (where ${newsletterSequenceSends.status} = 'bounced')::int`,
+            complained: sql<number>`count(*) filter (where ${newsletterSequenceSends.status} = 'complained')::int`,
+            tracked: sql<number>`count(*) filter (where ${newsletterSequenceSends.provider} = 'resend')::int`,
+        }).from(newsletterSequenceSends)
+            .where(eq(newsletterSequenceSends.sequenceId, sequenceId))
+            .groupBy(newsletterSequenceSends.stepNumber)
+            .orderBy(asc(newsletterSequenceSends.stepNumber));
+    } catch (err) {
+        const code = (err as { code?: string; cause?: { code?: string } })?.code ?? (err as { cause?: { code?: string } })?.cause?.code;
+        if (code === '42P01') return null;
+        throw err;
+    }
+    const sum = (k: keyof (typeof rows)[number]) => rows.reduce((a, r) => a + Number(r[k] || 0), 0);
+    const rate = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 1000) / 10 : null);
+    const enrolled = Object.values(enrolments).reduce((a, n) => a + Number(n || 0), 0);
+    const totals = {
+        enrolled,
+        inProgress: Number(enrolments.active || 0),
+        completed: Number(enrolments.completed || 0),
+        unsubscribed: Number(halted.unsubscribed || 0),
+        sent: sum('sent'), delivered: sum('delivered'), opened: sum('opened'), clicked: sum('clicked'),
+        bounced: sum('bounced'), complained: sum('complained'), trackedSends: sum('tracked'),
+    };
+    const base = (r: { delivered: number; sent: number; bounced: number }) => r.delivered || Math.max(0, r.sent - r.bounced);
+    return {
+        totals: {
+            ...totals,
+            deliveryRate: rate(totals.sent - totals.bounced, totals.sent),
+            openRate: rate(totals.opened, base(totals)),
+            clickRate: rate(totals.clicked, base(totals)),
+            clickToOpenRate: rate(totals.clicked, totals.opened),
+            bounceRate: rate(totals.bounced, totals.sent),
+            complaintRate: rate(totals.complained, totals.sent),
+            unsubscribeRate: rate(totals.unsubscribed, enrolled),
+            completionRate: rate(totals.completed, enrolled),
+        },
+        steps: rows.map((r) => ({
+            ...r,
+            openRate: rate(r.opened, base(r)),
+            clickRate: rate(r.clicked, base(r)),
+            clickToOpenRate: rate(r.clicked, r.opened),
+        })),
+    };
+}

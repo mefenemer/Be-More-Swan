@@ -149,7 +149,10 @@ export async function syndicatePublishedPost(
     // keep unproven code away from a customer's public blog. See WITHHELD_BLOG_DESTINATIONS.
     const connected = (await listBlogDestinations(db, organisationId))
         .filter((d) => d.connected)
-        .filter((d) => selected === null || selected.includes(d.id))
+        // The Swan Index is not a per-post choice (2026-10-06): authors cannot see or untick it —
+        // a workspace opts out by emailing us, and an admin withdraws its profile, which makes it
+        // not-connected above. So it ignores the per-post list, which may well predate that rule.
+        .filter((d) => d.firstParty || selected === null || selected.includes(d.id))
         .filter((d) => !opts.only || opts.only.includes(d.id));
     if (!connected.length) return {};
 

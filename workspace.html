@@ -248,7 +248,8 @@ async function submitTosAcceptance(btn) {
         const res = await fetch('/.netlify/functions/accept-tos', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ version: '2.0' }),
+            // No version: the server records the CURRENT one (see accept-tos.ts).
+            body: JSON.stringify({}),
         });
         if (!res.ok) throw new Error('Failed');
         const modal = document.getElementById('modal-tos-required');
@@ -415,7 +416,7 @@ window.showComplianceModals = function showComplianceModals(force) {
 
     <!-- ── Mode: Work with AI (on-demand generate flow, reached from the write panel's link) ── -->
     <div id="gp-mode-ai" class="hidden">
-    <button type="button" onclick="gpChooseMode('write')" class="mb-3 inline-flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-emerald-700 transition cursor-pointer">
+    <button type="button" onclick="gpChooseMode('write')" class="link mb-3 inline-flex items-center gap-1 text-xs font-semibold">
       <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
       Back to writing your own
     </button>
@@ -4677,7 +4678,7 @@ function formatCurrency(amount, currency) {
           } else {
             action = `<div class="flex items-center gap-3">
                 <span class="text-xs font-semibold text-emerald-700">Accepted — no further action</span>
-                <button type="button" data-review="${a.key}" class="text-xs font-medium text-gray-400 hover:text-emerald-700 hover:underline cursor-pointer">Review</button>
+                <button type="button" data-review="${a.key}" class="link text-xs font-medium">Review</button>
               </div>`;
           }
 
@@ -5918,7 +5919,7 @@ function rqGroupSection(g, items, render, statusKey, total) {
     return `<section class="border-b border-gray-100 last:border-0">
       <button onclick="rqToggleGroup('${g.key}')" class="w-full flex items-center gap-2 py-3 text-left cursor-pointer group">
         <svg class="rq-group-chevron-${g.key} w-4 h-4 text-gray-400 transition-transform ${open ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-        <span class="text-sm font-bold text-gray-900 group-hover:text-emerald-700">${g.label}</span>
+        <span class="text-sm font-bold text-gray-900">${g.label}</span>
         <span class="rq-group-count text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">${rqGroupCountLabel(items.length, total)}</span>
       </button>
       <div class="rq-group-body-${g.key} ${open ? '' : 'hidden'} pb-1">${body}</div>

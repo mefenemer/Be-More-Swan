@@ -1489,6 +1489,27 @@
         </div>
       </section>
 
+      <!-- ── The Swan Index — Opt-outs ───────────────────────────────────────────────────────
+           Every workspace syndicates its published blog posts to the Index by default and has no
+           control for it in the product. A customer who wants out emails us; an editor records it
+           here (loadSwanOptouts / admin-swan-index.ts ?resource=optouts). -->
+      <section id="view-swan-optouts" class="admin-view hidden space-y-5 overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div>
+          <h2 class="text-xl font-extrabold text-gray-900">The Swan Index — Opt-outs</h2>
+          <p class="text-sm text-gray-500 mt-0.5">Every workspace's published blog posts are submitted to The Swan Index for review. When a customer emails to opt out, record it here: it takes their pieces off the Index and stops new ones being sent.</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <div id="swan-optout-filter" class="flex gap-1"></div>
+          <input type="search" id="swan-optout-q" placeholder="Search workspace or handle" style="min-width:12rem"
+            class="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:border-pink-400">
+        </div>
+        <div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div id="swan-optouts-list" class="divide-y divide-gray-100">
+            <p class="text-gray-400 text-xs animate-pulse p-5">Loading…</p>
+          </div>
+        </div>
+      </section>
+
       <!-- ── Music Library ──────────────────────────────────────────────────────────────────
            Every track the post editor's "Browse music" offers: the curated packs and the tracks
            customers shared with the community. Withdraw stops a track being OFFERED; posts that
@@ -2669,7 +2690,7 @@ const VIEW_LABELS = {
   systems: 'Systems & Connections',
   'issue-reports': 'Issue Reports', 'feature-roadmap': 'Feature Requests',
   'swan-queue': 'Swan Index — Review Queue', 'swan-front-page': 'Swan Index — Front Page',
-  'swan-contributors': 'Swan Index — Contributors',
+  'swan-contributors': 'Swan Index — Contributors', 'swan-optouts': 'Swan Index — Opt-outs',
   'music-library': 'Music Library',
   'site-styles': 'Site Styles',
 };
@@ -2730,6 +2751,8 @@ const ADMIN_CATS = {
     { view: 'swan-queue',        icon: '📥', label: 'Review Queue',  perm: 'curate_swan_index', group: 'The Swan Index' },
     { view: 'swan-front-page',   icon: '🗞️', label: 'Front Page',    perm: 'curate_swan_index', group: 'The Swan Index' },
     { view: 'swan-contributors', icon: '✍️', label: 'Contributors',  perm: 'curate_swan_index', group: 'The Swan Index' },
+    // Customers opt out by email (Terms); this is where an editor records it.
+    { view: 'swan-optouts',      icon: '🚫', label: 'Opt-outs',      perm: 'curate_swan_index', group: 'The Swan Index' },
     // What the post editor offers as music — and the only place a community-shared track that
     // should not be in the library can be taken out. platform_config: an existing permission, so no
     // role data has to change before it works.
@@ -3095,6 +3118,7 @@ function adminNav(view) {
   if (view === 'swan-queue')          loadSwanQueue();
   if (view === 'swan-front-page')     loadSwanFrontPage();
   if (view === 'swan-contributors')   loadSwanContributors();
+  if (view === 'swan-optouts')        loadSwanOptouts();
   if (view === 'music-library')       loadMusicLibrary();
 }
 
@@ -4754,7 +4778,7 @@ async function mlDeleteSelected() {
   const reason = await window.promptModal(
     `${names} will be removed from the library permanently. This cannot be undone.`
       + (used.length
-        ? ` ${used.length} of them ${used.length === 1 ? 'is' : 'are'} already used by a workspace — those posts keep their sound; only the library entry goes.`
+        ? ` ${used.length} of them ${used.length === 1 ? 'is' : 'are'} used in a workspace's posts, so ${used.length === 1 ? 'it is' : 'they are'} <strong>withdrawn instead</strong> — kept in this list, no longer offered, and the posts keep their sound.`
         : ''),
     { title: `Delete ${ids.length} track${ids.length === 1 ? '' : 's'}?`, confirmLabel: 'Delete', placeholder: 'Why? (kept in the audit log)', multiline: true });
   if (reason == null) return;
@@ -4764,7 +4788,7 @@ async function mlDeleteSelected() {
     if (_ml.playing && _ml.selected.has(_ml.playing)) { try { _ml.audio.pause(); } catch {} _ml.playing = null; _ml.audio = null; }
     _ml.selected = new Set();
     window.showToast?.(`Deleted ${r.deleted} track${r.deleted === 1 ? '' : 's'}.`
-      + (r.filesKept ? ` ${r.filesKept} audio file${r.filesKept === 1 ? ' was' : 's were'} kept because a post still uses ${r.filesKept === 1 ? 'it' : 'them'}.` : ''));
+      + (r.withdrawn ? ` ${r.withdrawn} in use ${r.withdrawn === 1 ? 'was' : 'were'} withdrawn instead — see the Withdrawn filter.` : ''));
     loadMusicLibrary();
   } catch (e) { window.showToast?.(e.message || 'Could not delete.'); }
 }
@@ -4874,6 +4898,101 @@ async function mlRestore(id) {
     loadMusicLibrary();
   } catch (e) { window.showToast?.(e.message || 'Could not restore.'); }
 }
+
+// ── The Swan Index — Opt-outs ─────────────────────────────────────────────────
+// Customers can no longer switch the Index off themselves; they email us, and it is recorded here.
+// Bound once at load (the list re-renders on every filter and action).
+const _swo = { items: [], filter: 'all', q: '' };
+
+async function loadSwanOptouts() {
+  const host = document.getElementById('swan-optouts-list');
+  const chips = document.getElementById('swan-optout-filter');
+  if (chips) {
+    chips.innerHTML = [['all', 'All'], ['in', 'Sending'], ['out', 'Opted out']].map(([v, l]) => {
+      const on = _swo.filter === v;
+      return `<button type="button" data-swo-filter="${v}" class="px-2.5 py-1 rounded-full text-xs font-bold border cursor-pointer"
+        style="${on ? 'background:#d6006b;border-color:#d6006b;color:#fff' : 'background:#fff;border-color:#e5e7eb;color:#6b7280'}">${l}</button>`;
+    }).join('');
+  }
+  try {
+    const d = await api(`${SWAN_API}?resource=optouts`);
+    _swo.items = d.items || [];
+    _swoRender();
+  } catch (e) {
+    if (host) host.innerHTML = `<p class="p-5 text-sm text-red-600">${_swanEsc(e.message)}</p>`;
+  }
+}
+
+function _swoState(r) {
+  if (r.status === 'withdrawn') return { key: 'out', label: 'Opted out', cls: 'bg-gray-200 text-gray-600' };
+  if (r.status === 'suspended') return { key: 'in', label: 'Suspended by an editor', cls: 'bg-red-100 text-red-700' };
+  if (r.status === 'active') return { key: 'in', label: 'Sending', cls: 'bg-emerald-100 text-emerald-700' };
+  // No profile yet: one is created on the workspace's next publish, so it IS opted in.
+  return { key: 'in', label: 'Sending (from first publish)', cls: 'bg-emerald-50 text-emerald-700' };
+}
+
+function _swoRender() {
+  const host = document.getElementById('swan-optouts-list');
+  if (!host) return;
+  const q = _swo.q.toLowerCase();
+  const rows = _swo.items.filter((r) => {
+    const st = _swoState(r);
+    if (_swo.filter !== 'all' && st.key !== _swo.filter) return false;
+    return !q || String(r.name || '').toLowerCase().includes(q) || String(r.handle || '').toLowerCase().includes(q);
+  });
+  if (!rows.length) { host.innerHTML = '<p class="p-8 text-center text-sm text-gray-400">No workspaces match.</p>'; return; }
+  host.innerHTML = rows.map((r) => {
+    const st = _swoState(r);
+    return `<div class="p-4 sm:p-5 flex items-center justify-between gap-4 flex-wrap">
+      <div class="min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="font-bold text-gray-900">${_swanEsc(r.name)}</span>
+          <span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${st.cls}">${st.label}</span>
+        </div>
+        <p class="text-xs text-gray-400 mt-1">Workspace #${r.organisationId}${r.handle ? ` · @${_swanEsc(r.handle)}` : ''} · ${r.publishedPosts} published blog post${r.publishedPosts === 1 ? '' : 's'}</p>
+      </div>
+      ${st.key === 'out'
+        ? `<button type="button" data-swo-in="${r.organisationId}" class="btn-secondary shrink-0 px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Opt back in</button>`
+        : `<button type="button" data-swo-out="${r.organisationId}" class="btn-destructive shrink-0 px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Opt out</button>`}
+    </div>`;
+  }).join('');
+}
+
+async function _swoSet(orgId, optOut) {
+  const r = _swo.items.find((x) => x.organisationId === orgId);
+  const name = _swanEsc(r ? r.name : '#' + orgId);
+  let reason = '';
+  if (optOut) {
+    reason = await window.promptModal(
+      `<strong>${name}</strong>'s pieces come off The Swan Index straight away, and their future blog posts will not be sent to it. Their own blog is untouched.`,
+      { title: 'Opt this workspace out?', confirmLabel: 'Opt out', placeholder: 'How they asked — e.g. "Email from jane@acme.com, 6 Oct"', multiline: true });
+    if (reason == null) return;
+    if (!reason.trim()) { window.showToast?.('Record how the customer asked — it goes in the audit log.'); return; }
+  } else {
+    const ok = await window.confirmModal(`${name}'s future published blog posts will be sent to The Swan Index for review again. Pieces taken down when they opted out stay down.`,
+      { title: 'Opt back in?', confirmLabel: 'Opt back in', cancelLabel: 'Cancel' });
+    if (!ok) return;
+  }
+  try {
+    await api(`${SWAN_API}?resource=optout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ organisationId: orgId, optOut, reason }) });
+    window.showToast?.(optOut ? 'Opted out.' : 'Opted back in.', { icon: '✅' });
+    loadSwanOptouts();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+document.addEventListener('click', (e) => {
+  const f = e.target.closest('[data-swo-filter]');
+  if (f) { _swo.filter = f.getAttribute('data-swo-filter'); loadSwanOptouts(); return; }
+  const o = e.target.closest('[data-swo-out]');
+  if (o) { _swoSet(Number(o.getAttribute('data-swo-out')), true); return; }
+  const i = e.target.closest('[data-swo-in]');
+  if (i) { _swoSet(Number(i.getAttribute('data-swo-in')), false); }
+});
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'swan-optout-q') return;
+  _swo.q = e.target.value.trim();
+  _swoRender();
+});
 
 // ── Site Styles ───────────────────────────────────────────────────────────────
 // Edit the site theme (src/public/site-theme-core.js) and publish it as the standard. The draft is
@@ -10833,12 +10952,12 @@ async function loadSwanContributors() {
                 class="w-16 text-xs border border-gray-300 rounded-lg px-2 py-1 disabled:opacity-40 disabled:bg-gray-50">
             </label>
             <button onclick="swanToggleTier(${c.id}, ${c.frontPageTier ? 'false' : 'true'})"
-              ${c.status === 'withdrawn' ? 'disabled title="This contributor has disconnected The Swan Index."' : ''}
+              ${c.status === 'withdrawn' ? 'disabled title="This workspace has opted out of The Swan Index."' : ''}
               class="btn-secondary px-2.5 py-1.5 text-xs font-bold border rounded-lg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
               ${c.frontPageTier ? 'Remove tier' : 'Grant tier'}
             </button>
             ${c.status === 'withdrawn'
-              ? '<span class="text-xs text-gray-400 px-2">Disconnected by the author</span>'
+              ? '<span class="text-xs text-gray-400 px-2">Opted out — see Opt-outs</span>'
               : `<button onclick="swanToggleSuspend(${c.id}, '${c.status === 'suspended' ? 'active' : 'suspended'}', '${_swanEsc(c.handle)}', ${c.livePieces})"
                   class="px-2.5 py-1.5 text-xs font-bold rounded-lg cursor-pointer ${c.status === 'suspended'
                     ? 'btn-primary'
