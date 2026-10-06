@@ -43,6 +43,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJson, stripCodeFences } from '../../src/utils/model-json';
 
 import { liveRoleLabel } from '../../src/utils/live-role-label';
+import { voiceDirective } from '../../src/utils/voice-profile';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -1304,7 +1305,9 @@ Support policy (from setup):
 - Helpdesk platform: ${platform ?? 'not specified'} — refer to it by name when talking about tickets and queues.
 - Auto-resolve confidence threshold: ${threshold ?? 75}% — only mark a ticket Resolved when your confidence is at or above this; below it, escalate.
 - Escalation email: ${escalationEmail ?? 'not specified'} — escalated tickets are flagged for this inbox.
-- Support tone: ${supportTone ?? 'professional'}.
+- Support tone: ${supportTone ?? 'professional'} — the voice rules below apply to every customer-facing reply (draftReply), never to your notes to the user.
+
+${voiceDirective(supportTone, { surface: 'support', fallback: 'professional' })}
 
 MANDATORY escalation triggers — regardless of confidence, set status to "Escalated" when the query contains angry or abusive language, a refund demand, a request for a manager/human, or a legal/complaint threat. Set escalationReason to a short plain-English explanation of which trigger (or low confidence) fired; use null when the ticket is Resolved.
 

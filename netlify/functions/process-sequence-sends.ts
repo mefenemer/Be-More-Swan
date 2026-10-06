@@ -58,6 +58,7 @@ import {
     WORKER_BATCH_SIZE, WORKER_BUDGET_MS, sequenceTemplateVersion,
 } from '../../src/config/outreach-sequences';
 import { parseModelJson } from '../../src/utils/model-json';
+import { voiceDirective } from '../../src/utils/voice-profile';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -190,7 +191,9 @@ async function draftFollowUp(
         : '(no earlier messages recorded)';
 
     const system =
-`You write follow-up emails in a ${assistant.salesTone} tone.
+`You write follow-up emails.
+
+${voiceDirective(assistant.salesTone, { surface: 'outreach', fallback: 'professional' })}
 
 WHO THE EMAIL IS FROM:
 ${senderIdentityBlock(sender)}

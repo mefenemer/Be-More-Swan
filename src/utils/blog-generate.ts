@@ -17,6 +17,8 @@ import { aiAssistants, aiBlueprints, blogPostAssets, blogPosts, organisations } 
 import { logAiUsage } from './ai-usage';
 import { buildInspoBlock } from './inspo-profile';
 import { currentDatePromptBlock } from './current-date-prompt';
+import { voiceDirective } from './voice-profile';
+import { articleTypeByKey, blogArticleTypeBlock, blogArticleTypeFor } from './content-shapes';
 import { resolvePostingSchedule } from '../config/posting-cadence';
 import { assembleBlueprint } from './blueprint';
 import { ASSISTANT_DRAFT_REASON } from './blog-ai-assisted';
@@ -154,6 +156,11 @@ export interface GenerateBlogBodyOptions {
     notes?: string;
     /** Fallback voice, used only when the authoring assistant has no tone_of_voice of its own. */
     tone?: string;
+    /**
+     * The kind of article the author picked in Blog Studio ('guide', 'story', …). Absent or
+     * unknown = let the assistant choose, rotating through its allowed types.
+     */
+    articleType?: string;
 }
 
 export interface GenerateBlogBodyResult {
@@ -214,6 +221,8 @@ export async function generateBlogBody(
     // The account's own zone, for the date block below. Defaults when there is no authoring
     // assistant — a blog post can be drafted without one.
     let timezone = resolvePostingSchedule(null).timezone;
+    // The assistant's Content mix (profile) — which article types it may rotate through.
+    let allowedTypes: unknown = undefined;
     if (post.assistantId) {
         const [assistant] = await db
             .select({ onboardingContext: aiAssistants.onboardingContext, systemPrompt: aiAssistants.systemPrompt })
@@ -223,9 +232,31 @@ export async function generateBlogBody(
         const actx = (assistant?.onboardingContext as Record<string, unknown> | null) ?? {};
         if (typeof actx.tone_of_voice === 'string' && actx.tone_of_voice.trim()) tone = actx.tone_of_voice.trim();
         if (assistant?.systemPrompt) assistantPrompt = assistant.systemPrompt.slice(0, 2000);
+        allowedTypes = actx.allowed_article_types;
         timezone = resolvePostingSchedule(actx).timezone;
     }
     if (!tone) tone = DEFAULT_TONE;
+
+    // Article type — guide, opinion, true story, list, myth-bust, Q&A, behind the scenes, comparison.
+    // Rotated by how many posts this assistant (or, with none, this organisation) drafted before
+    // this one, so consecutive posts never share a structure. Was one hard-coded structure for every
+    // post (intro → 3–6 sections → conclusion), which the user saw as "the same blog every time".
+    // A count, not a stored column: nothing to migrate, and a re-draft of the same post keeps its type.
+    let sequence = post.id;
+    try {
+        const [row] = await db
+            .select({ n: sql<number>`count(*)::int` })
+            .from(blogPosts)
+            .where(and(
+                eq(blogPosts.organisationId, organisationId),
+                post.assistantId ? eq(blogPosts.assistantId, post.assistantId) : sql`true`,
+                sql`${blogPosts.id} < ${post.id}`,
+            ));
+        sequence = Number(row?.n ?? post.id);
+    } catch { /* fall back to the id — still varies, just less evenly */ }
+    // A type the author chose for THIS post wins — even one outside the assistant's usual mix,
+    // because they asked for it by name.
+    const articleType = articleTypeByKey(opts.articleType) ?? blogArticleTypeFor(sequence, allowedTypes);
 
     // Business grounding (cheap, materially improves relevance).
     const [org] = await db
@@ -281,17 +312,20 @@ export async function generateBlogBody(
             // format a blog writer reaches for unprompted, and an H1 with a stale year is visible
             // on the customer's own domain. Leads the prompt, as on the social path.
             `${currentDatePromptBlock({ publishDate: post.publishDate, timezone })}\n\n` +
-            `You are a blog writer${org?.name ? ` for ${org.name}` : ''}. Write in a ${tone} tone. ` +
-            (assistantPrompt ? `Voice guidance: ${assistantPrompt}\n` : '') +
-            'Produce a complete, publish-ready blog post: a single level-1 heading as the title, a ' +
-            'short hook intro, 3–6 level-2 sections with substantive paragraphs, and a brief ' +
-            'conclusion. Weave the target keywords in naturally — never keyword-stuff.\n' +
+            `You are a blog writer${org?.name ? ` for ${org.name}` : ''}.\n` +
+            `${voiceDirective(tone, { surface: 'blog', fallback: DEFAULT_TONE })}\n` +
+            (assistantPrompt ? `Further voice guidance: ${assistantPrompt}\n` : '') +
+            'Produce a complete, publish-ready blog post with a single level-1 heading as the title. ' +
+            'Weave the target keywords in naturally — never keyword-stuff.\n' +
+            `${blogArticleTypeBlock(articleType)}\n` +
             // ⚠️ THE LENGTH TARGET IS LOAD-BEARING, and it was measured rather than guessed. Asking
             // for a layout instead of a wall of Markdown made drafts ~30% SHORTER on the same brief
             // (mean 773 words against 1,101 over two runs each): the model keeps the same number of
             // sections and thins every one of them, spending its budget on structure. Without this
             // line, adding layouts would have quietly downgraded every blog post the product writes.
-            'Write 900–1,200 words in total. Each section needs real substance — two or three full ' +
+            // The range now comes from the ARTICLE TYPE (each states one — an opinion piece is
+            // shorter than a guide), but it is still always stated, for the reason above.
+            'Write the word count the ARTICLE TYPE gives. Each section needs real substance — full ' +
             'paragraphs, examples, specifics — not a sentence under a heading.\n' +
             'Return ONLY a JSON object with one key, "layout", SET OUT as described under LAYOUT ' +
             'below.\n' +

@@ -685,17 +685,19 @@ async function _loadConnections() {
         const conn = _userConnections.find(c => String(c.serviceName).toLowerCase() === source.id);
         return _sourceCard(source, conn);
     }).join('');
-    // In the assistant panel those are ROWS (see _connRow) — one list spanning the grid, so they
-    // read as a list rather than as rows scattered through grid cells. The standalone page keeps tiles.
-    if (_assistantScoped && (platformHtml || sourceHtml)) {
-        grid.insertAdjacentHTML('beforeend', `<div data-conn-list class="col-span-full bg-white rounded-2xl border border-gray-200 shadow-sm divide-y divide-gray-100">${platformHtml}${sourceHtml}</div>`);
+    const otherHtml = _blogDestinations.map(_blogDestCard).join('')
+        + _mailboxProviders.map(_mailboxCard).join('')
+        + (_searchConsole ? _searchConsoleCard(_searchConsole) : '')
+        + comingSoon.map(_comingSoonCard).join('');
+    // In the assistant panel EVERY connector is a ROW (see _connRow) — social platforms, sources,
+    // blog destinations, mailboxes, Search Console and coming-soon alike — in one list spanning the
+    // grid, so every assistant's Connections section reads the same. The standalone page keeps tiles.
+    const allHtml = platformHtml + sourceHtml + otherHtml;
+    if (_assistantScoped && allHtml) {
+        grid.insertAdjacentHTML('beforeend', `<div data-conn-list class="col-span-full bg-white rounded-2xl border border-gray-200 shadow-sm divide-y divide-gray-100">${allHtml}</div>`);
     } else {
-        grid.insertAdjacentHTML('beforeend', platformHtml + sourceHtml);
+        grid.insertAdjacentHTML('beforeend', allHtml);
     }
-    _blogDestinations.forEach(dest => grid.insertAdjacentHTML('beforeend', _blogDestCard(dest)));
-    _mailboxProviders.forEach(m => grid.insertAdjacentHTML('beforeend', _mailboxCard(m)));
-    if (_searchConsole) grid.insertAdjacentHTML('beforeend', _searchConsoleCard(_searchConsole));
-    comingSoon.forEach(tool => grid.insertAdjacentHTML('beforeend', _comingSoonCard(tool)));
 
     _queueConnectPermissionPrompts(platforms);
 }
@@ -704,6 +706,13 @@ async function _loadConnections() {
 // _platformCard shell (same grid cell size/rounding) but is non-interactive and
 // badged "Coming soon" — it advertises what the assistant is built to use.
 function _comingSoonCard(tool) {
+    if (_assistantScoped) {
+        return _connRow({
+            key: tool.key, iconBg: 'bg-gray-100', iconText: 'text-gray-400', emoji: '🔌',
+            label: tool.label, sub: _esc(tool.description || 'Not yet available'),
+            control: _rowPill('Coming soon', 'none'), manageHtml: '',
+        });
+    }
     return `
       <div class="bg-white border border-gray-200 border-dashed rounded-2xl p-5 flex flex-col gap-3 opacity-90">
         <div class="flex items-center gap-3">
@@ -758,6 +767,27 @@ function _mailboxCard(m) {
                </div>
            </details>`
         : '';
+
+    // Assistant panel: a row, like the social platforms above it — see _connRow.
+    if (_assistantScoped) {
+        const broken = !connected && !!m.status;
+        return _connRow({
+            key: `mailbox-${m.provider}`, iconBg: meta.iconBg, iconText: meta.iconText, emoji: meta.emoji,
+            label: meta.label,
+            sub: connected ? (m.accountName ? `Sending as ${_esc(m.accountName)}` : 'Connected')
+                : broken ? 'Needs reconnecting' : `Send outreach from ${_esc(meta.account)}`,
+            subTone: broken ? 'warn' : '',
+            control: connected
+                ? _rowPill('Connected')
+                : `<a href="${connectUrl}" class="${_ROW_BTN} btn-primary border-transparent">${broken ? 'Reconnect' : 'Connect'}</a>`,
+            manageHtml: connected
+                ? `<div class="flex items-center gap-2 flex-wrap">
+                       <a href="${connectUrl}" class="${ghostPill} btn-secondary">Reconnect</a>
+                       <button type="button" onclick="window._intDisconnectMailbox('${_esc(m.provider)}', '${_esc(meta.label)}')" class="${ghostPill} btn-destructive">Disconnect</button>
+                   </div>`
+                : '',
+        });
+    }
 
     return `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
@@ -833,6 +863,26 @@ function _searchConsoleCard(sc) {
                </div>
            </details>`
         : '';
+
+    if (_assistantScoped) {
+        const broken = !connected && !!sc.status;
+        return _connRow({
+            key: 'searchconsole', iconBg: 'bg-blue-50', iconText: 'text-blue-700', emoji: '🔍',
+            label: 'Google Search Console',
+            sub: connected ? (sc.accountName ? `Reading ${_esc(sc.accountName)}` : 'Connected — read-only')
+                : broken ? 'Needs reconnecting' : 'Read-only: search impressions and clicks for your posts',
+            subTone: broken ? 'warn' : '',
+            control: connected
+                ? _rowPill('Connected')
+                : `<a href="${connectUrl}" class="${_ROW_BTN} btn-primary border-transparent">${broken ? 'Reconnect' : 'Connect'}</a>`,
+            manageHtml: connected
+                ? `<div class="flex items-center gap-2 flex-wrap">
+                       <a href="${connectUrl}" class="${ghostPill} btn-secondary">Reconnect</a>
+                       <button type="button" onclick="window._intDisconnectSearchConsole()" class="${ghostPill} btn-destructive">Disconnect</button>
+                   </div>`
+                : '',
+        });
+    }
 
     return `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
@@ -1043,6 +1093,27 @@ function _firstPartyDestCard(d) {
                <p class="mt-2 text-xs text-gray-500">No login needed — we’ll create your author profile and pick a handle from your workspace name.</p>
            </div>`;
 
+    if (_assistantScoped) {
+        return _connRow({
+            key: `blog-${d.id}`, iconBg: 'bg-emerald-50', iconText: 'text-emerald-700', emoji: '🦢',
+            label: d.label,
+            sub: connected ? `Publishing as ${_esc(d.accountLabel || '')}` : 'Our own magazine — your byline, a link back to your site',
+            control: connected
+                ? _rowPill('Connected')
+                : `<button onclick="window._blogDestConnectFirstParty('${d.id}')" class="${_ROW_BTN} btn-primary border-transparent" type="button">Connect</button>`,
+            manageHtml: connected
+                ? `${profileUrl ? `<a href="${_esc(profileUrl)}" target="_blank" rel="noopener" class="text-xs font-bold text-emerald-700 hover:text-emerald-800 underline w-fit">View your profile page</a>` : ''}
+                   ${modeControl}
+                   ${_swanProfileForm(d)}
+                   <div class="mt-2 flex items-center gap-2 flex-wrap">
+                       <button onclick="window._blogDestDisconnect('${d.id}', true)" class="${ghostPill} btn-destructive" type="button">Disconnect</button>
+                   </div>
+                   <p class="mt-2 text-xs text-gray-500">Disconnecting withdraws your published pieces from the magazine. Your own blog is untouched.</p>`
+                : '',
+            extraHtml: connected ? '' : `<div id="blogdest-err-${d.id}" class="hidden text-xs font-semibold text-red-600"></div>`,
+        });
+    }
+
     return `
       <div class="bg-white border border-gray-200 rounded-2xl p-5 flex flex-col gap-2">
         <div class="flex items-center justify-between gap-2">
@@ -1101,6 +1172,24 @@ function _socialDestCard(d) {
            </div>`;
     }
 
+    if (_assistantScoped) {
+        const btn = (call, text) => `<button onclick="${call}" class="${_ROW_BTN} btn-primary border-transparent" type="button">${text}</button>`;
+        return _connRow({
+            key: `blog-${d.id}`, iconBg: 'bg-blue-700', iconText: 'text-white', emoji: '💼',
+            label: `${d.label} (blog posts)`,
+            sub: enabled ? (d.accountLabel ? `Posting as ${_esc(d.accountLabel)}` : 'Enabled')
+                : linked ? `Connected — blog posts are not shared to ${_esc(d.label)} yet` : 'Not connected',
+            control: enabled ? _rowPill('Enabled')
+                : linked ? btn(`window._blogDestConnectSocial('${d.id}')`, 'Enable')
+                : btn(`window.location.href='${_esc(_withAssistantId(d.connectUrl || '#'))}'`, 'Connect'),
+            manageHtml: enabled
+                ? `<p class="text-xs text-gray-500">On publish, posted to your feed with a link back to the full post.</p>
+                   <div class="mt-2"><button onclick="window._blogDestDisconnect('${d.id}', false, true)" class="${ghostPill} btn-destructive" type="button">Turn off</button></div>`
+                : '',
+            extraHtml: enabled ? '' : `<div id="blogdest-err-${d.id}" class="hidden text-xs font-semibold text-red-600"></div>`,
+        });
+    }
+
     return `
       <div class="bg-white border border-gray-200 rounded-2xl p-5 flex flex-col gap-2">
         <div class="flex items-center justify-between gap-2">
@@ -1157,6 +1246,19 @@ function _blogDestCard(d) {
            </details>`
         : `<div class="mt-auto pt-4 border-t border-gray-100">${connectBtn}</div>
            <div id="blogdest-form-${d.id}" class="hidden mt-3"></div>`;
+
+    if (_assistantScoped) {
+        return _connRow({
+            key: `blog-${d.id}`, iconBg: 'bg-emerald-50', iconText: 'text-emerald-700', emoji: '✍️',
+            label: d.label,
+            sub: connected ? (d.accountLabel ? `Connected as ${_esc(d.accountLabel)}` : 'Connected') : 'Not connected',
+            control: connected
+                ? _rowPill('Connected')
+                : `<button onclick="${d.oauth ? `window.location.href='${_esc(d.connectUrl || '#')}'` : `window._blogDestToggleForm('${d.id}')`}" class="${_ROW_BTN} btn-primary border-transparent" type="button">Connect</button>`,
+            manageHtml: connected ? `${modeControl}<div class="mt-2">${disconnectBtn}</div>` : '',
+            extraHtml: connected ? '' : `<div id="blogdest-form-${d.id}" class="hidden"></div>`,
+        });
+    }
 
     return `
       <div class="bg-white border border-gray-200 rounded-2xl p-5 flex flex-col gap-2">
@@ -1573,6 +1675,10 @@ function _healthBadge(health) {
 // auto-responder, troubleshooting, the X usage gauge) moved behind the row's ⋮, unchanged.
 // The standalone Integrations page keeps its tiles.
 const _ROW_BTN = 'shrink-0 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
+/** A row's status pill, for connections with no per-assistant switch (mailbox, Search Console, blog). */
+function _rowPill(label, tone) {
+    return `<span class="shrink-0">${_healthBadge({ key: tone || 'ok', label })}</span>`;
+}
 
 /** The row's switch. Same input + handler the tile used, minus the box around it. */
 function _useSwitch(connId, checked, label) {
@@ -1586,7 +1692,7 @@ function _useSwitch(connId, checked, label) {
  * One connection row. `manageHtml` (may be '') sits behind the ⋮ button, which toggles it with an
  * inline handler — nothing to bind, so a re-render can never leave a dead button.
  */
-function _connRow({ key, iconBg, iconText, emoji, label, sub, subTone, control, manageHtml }) {
+function _connRow({ key, iconBg, iconText, emoji, label, sub, subTone, control, manageHtml, extraHtml }) {
     const subCls = subTone === 'warn' ? 'text-amber-700' : 'text-gray-500';
     const kebab = manageHtml
         ? `<button type="button" aria-label="Manage ${_esc(label)} connection" aria-expanded="false"
@@ -1607,6 +1713,7 @@ function _connRow({ key, iconBg, iconText, emoji, label, sub, subTone, control, 
                 ${kebab}
             </div>
             ${manageHtml ? `<div data-conn-manage class="hidden mt-2 pl-11">${manageHtml}</div>` : ''}
+            ${extraHtml ? `<div class="mt-2 pl-11">${extraHtml}</div>` : ''}
         </div>`;
 }
 

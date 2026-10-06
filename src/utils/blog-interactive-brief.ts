@@ -23,6 +23,8 @@ export type InteractiveBlogBrief = {
     keywords?: string;
     notes?: string;
     tone?: string;
+    /** The article type picked in Blog Studio ('guide', 'story', …). Absent = the assistant chooses. */
+    articleType?: string;
 };
 
 function clip(value: unknown): string {
@@ -39,6 +41,8 @@ export function encodeInteractiveBrief(brief: InteractiveBlogBrief): string {
         keywords: clip(brief.keywords),
         notes: clip(brief.notes),
         tone: clip(brief.tone),
+        // Optional, so v stays 1: an older worker simply ignores the key.
+        articleType: clip(brief.articleType) || undefined,
     });
 }
 
@@ -63,5 +67,6 @@ export function decodeInteractiveBrief(raw: string | null | undefined): Interact
         keywords: clip(obj.keywords) || undefined,
         notes: clip(obj.notes) || undefined,
         tone: clip(obj.tone) || undefined,
+        articleType: clip(obj.articleType) || undefined,
     };
 }

@@ -5725,6 +5725,7 @@ function _detailHydrate(data) {
     _detailSetVal('edit_incentive', ctx.incentive || inputs.incentive || '');
     _detailSetVal('edit_audience', ctx.target_audience || '');
     _detailSetVal('edit_tone', ctx.tone_of_voice || '');
+    _renderContentMix(data);
     _detailSetVal('edit_pillars', Array.isArray(ctx.content_pillars) ? ctx.content_pillars.join(', ') : (ctx.content_pillars || ''));
     _renderPillarChips();
     // Sales context — feeds the auto-responder objection playbook (P4) and DM drafting.
@@ -6066,6 +6067,63 @@ function _collectPublishPolicy(prior) {
     return out;
 }
 
+// ── Content mix (Social Media + Blog assistants) ────────────────────────────────────────────────
+// Which kinds of post / article the assistant may rotate through. The generators read the same keys
+// (src/utils/content-shapes.ts — allowedSocialShapes / allowedArticleTypes), and an empty or unknown
+// list falls back to all of them there too, so this card can never leave a slot with no shape.
+const _CONTENT_MIX_ROLES = {
+    social_media_manager: {
+        key: 'allowed_post_shapes', list: () => window.ContentShapes?.socialShapes || [],
+        desc: 'The kinds of post your assistant can write. Each scheduled post gets a different one — a short thought one day, a story the next — so your feed never repeats the same template.',
+    },
+    blog_writer: {
+        key: 'allowed_article_types', list: () => window.ContentShapes?.articleTypes || [],
+        desc: 'The kinds of article your assistant can write. It rotates through these so no two posts in a row share a structure. You can still pick a specific type for one post in Blog Studio.',
+    },
+};
+
+function _renderContentMix(data) {
+    const card = document.getElementById('module-content-mix');
+    const host = document.getElementById('content-mix-list');
+    if (!card || !host) return;
+    const cfg = _CONTENT_MIX_ROLES[data?.roleKey];
+    const items = cfg ? cfg.list() : [];
+    if (!cfg || !items.length) { card.classList.add('hidden'); card.style.display = 'none'; host.innerHTML = ''; return; }
+    const stored = (data.context || {})[cfg.key];
+    const allowed = Array.isArray(stored) && stored.some((k) => items.some((i) => i.key === k)) ? new Set(stored) : null;
+    const esc = _escapeHtml;
+    document.getElementById('content-mix-desc').textContent = cfg.desc;
+    host.innerHTML = items.map((i) => `
+        <label class="flex items-start gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 has-[:checked]:bg-emerald-50">
+            <input type="checkbox" id="edit_mix_${esc(i.key)}" data-content-mix="${esc(i.key)}" ${!allowed || allowed.has(i.key) ? 'checked' : ''}
+                class="mt-0.5 h-4 w-4 rounded text-emerald-700 focus:ring-emerald-700 border-gray-300">
+            <span class="min-w-0">
+                <span class="block text-sm font-bold text-gray-900">${esc(i.label)}</span>
+                <span class="block text-xs text-gray-500 mt-0.5">${esc(i.summary)}</span>
+            </span>
+        </label>`).join('');
+    card.classList.remove('hidden');
+    card.style.display = '';
+}
+
+// At least one kind must stay on. Bound once, on document — the list re-renders on every hydrate.
+document.addEventListener('change', (e) => {
+    const box = e.target.closest?.('[data-content-mix]');
+    if (!box || box.checked) return;
+    if (!document.querySelector('#content-mix-list [data-content-mix]:checked')) {
+        box.checked = true;
+        window.showToast?.('Keep at least one kind ticked — your assistant needs something to write.');
+    }
+});
+
+function _collectContentMix(currentData) {
+    const cfg = _CONTENT_MIX_ROLES[currentData?.roleKey];
+    const boxes = [...document.querySelectorAll('#content-mix-list [data-content-mix]')];
+    if (!cfg || !boxes.length) return null;
+    const on = boxes.filter((b) => b.checked).map((b) => b.dataset.contentMix);
+    return { key: cfg.key, value: on.length === boxes.length || !on.length ? null : on };
+}
+
 function _detailCollect(currentData) {
     // Platforms are managed via the dynamic platforms tab — preserve existing values
     const platforms = currentData.context?.primary_platforms || [];
@@ -6116,6 +6174,12 @@ function _detailCollect(currentData) {
             || currentData.context?.content_source || null,
         primary_platforms: platforms,
     };
+
+    // Content mix — only when the card is on the page (Social Media / Blog assistants); otherwise the
+    // stored value rides through untouched on the spread above. All ticked is saved as null = "every
+    // kind", so a shape added to the product later is included rather than silently left out.
+    const mix = _collectContentMix(currentData);
+    if (mix) newContext[mix.key] = mix.value;
 
     // Role-specific onboarding answers (schema-driven roles) — inputs in the Operational Setup
     // section (#operation-role-fields) carry data-onboarding-key; write each back under its

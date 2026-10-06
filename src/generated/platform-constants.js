@@ -755,6 +755,14 @@
     _p: null,
   };
 
+  // Content mix (assistant profile) and Blog Studio's "Type of article", from
+  // src/utils/content-shapes.ts — the SAME keys the generators rotate through, so a setting can never
+  // name a shape the server does not know. Labels only; the prompt text stays server-side.
+  window.ContentShapes = {
+    socialShapes: [{"key":"one_thought","label":"Short thought","summary":"One idea in a few lines"},{"key":"story","label":"Story","summary":"A real moment told as a story"},{"key":"list","label":"List","summary":"A saveable numbered list"},{"key":"opinion","label":"Opinion","summary":"A clear position, argued"},{"key":"question","label":"Question","summary":"A conversation starter"},{"key":"behind_scenes","label":"Behind the scenes","summary":"How the business really works"},{"key":"deep_tip","label":"One tip, in depth","summary":"A single practical tip explained properly"},{"key":"myth","label":"Myth-bust","summary":"A common belief, taken apart"},{"key":"before_after","label":"Before / after","summary":"A concrete contrast"},{"key":"note_to_reader","label":"Note to the reader","summary":"A short personal letter"},{"key":"observation","label":"Observation","summary":"Something noticed, and why it matters"}],
+    articleTypes: [{"key":"guide","label":"Practical guide","summary":"Teaches the reader to do one thing"},{"key":"opinion","label":"Opinion piece","summary":"Argues one clear position"},{"key":"story","label":"True story","summary":"A real situation, told as a narrative"},{"key":"list","label":"List article","summary":"Numbered items with real substance"},{"key":"myth","label":"Myth-busting","summary":"Common beliefs, taken apart"},{"key":"qa","label":"Questions answered","summary":"Real customer questions, answered"},{"key":"behind_scenes","label":"Behind the scenes","summary":"An honest look at how you work"},{"key":"comparison","label":"Comparison","summary":"Helps the reader choose between options"}],
+  };
+
   window.BlogFonts = {
     all: BLOG_FONTS,
     categories: ["System","Sans serif","Serif","Display","Monospace"],
