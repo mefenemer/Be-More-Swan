@@ -2538,6 +2538,28 @@ function formatCurrency(amount, currency) {
 
     // Every navigation shows the shared busy spinner until the new view is fetched, swapped in and
     // initialised — a slow view used to leave the old page on screen with no sign the click landed.
+    // ── Refresh lands where you were ──────────────────────────────────────────────────────────────
+    // The URL never carries the current view (deep links are read once and stripped), so a refresh
+    // always went to the Dashboard. The last view is remembered here instead and reopened on load
+    // (see "Fire the initial landing layout"). Only views that can be rebuilt from a key — plus
+    // an assistant's workspace by its id; a setup checklist's param is an object, so it is skipped.
+    const LAST_VIEW_KEY = 'bms_workspace_last_view';
+    function _rememberView(routeKey, param) {
+      if (routeKey === 'assistant-setup') return;
+      if (routeKey === 'assistant-detail' && !(typeof param === 'string' || typeof param === 'number')) return;
+      try {
+        localStorage.setItem(LAST_VIEW_KEY, JSON.stringify(routeKey === 'assistant-detail' ? { key: routeKey, param: String(param) } : { key: routeKey }));
+      } catch { /* private mode */ }
+    }
+    function _rememberedView() {
+      try {
+        const v = JSON.parse(localStorage.getItem(LAST_VIEW_KEY) || 'null');
+        if (!v || !routes[v.key] || v.key === 'assistant-setup') return null;
+        if (v.key === 'assistant-detail' && !/^\d+$/.test(String(v.param || ''))) return null;
+        return v;
+      } catch { return null; }
+    }
+
     async function loadView(routeKey, param = null) {
       if (!routes[routeKey]) return;
       window.bmsBusy?.(true);
@@ -2636,6 +2658,7 @@ function formatCurrency(amount, currency) {
         // user was when they hit the button.
         window._currentViewKey = routeKey;
         window._currentViewTitle = (route.title || '').replace(/^[|\s]+/, '') || routeKey;
+        _rememberView(routeKey, param);
 
         // ── US-GAP-9.1.1: Capacity gate — block catalog if assistant limit reached ──
         // SC1: Detect limit. SC2: Show next-tier info. SC3: Never show raw error. SC4: Enterprise path. SC5: Direct checkout CTA.
@@ -3440,8 +3463,16 @@ function formatCurrency(amount, currency) {
     // Render locks ASAP on boot (non-blocking).
     refreshOnboardingLock();
 
-    // Fire the initial landing layout
-    await loadView('dashboard');
+    // Fire the initial landing layout: the page you were last on, unless this load is a deep link
+    // (?view=…) or the Stripe return (?payment=…) — those have their own handling just below and
+    // must start from the Dashboard exactly as before. Restricted views still pass the onboarding
+    // guard inside loadView, which falls back to the Dashboard on its own.
+    {
+      const bootQs = new URLSearchParams(window.location.search);
+      const restore = !bootQs.has('view') && !bootQs.has('payment') ? _rememberedView() : null;
+      if (restore && restore.key !== 'dashboard') await loadView(restore.key, restore.param ?? null);
+      else await loadView('dashboard');
+    }
 
     // Arriving from Stripe after successful payment
     const qs = new URLSearchParams(window.location.search);

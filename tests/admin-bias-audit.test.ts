@@ -31,7 +31,10 @@ check('it reads and writes through the existing bias-audit API', () => {
 });
 
 check('?section= lands on the view, so links already sent still work', () => {
-    assert.match(A, /const initialView = params\.get\('section'\) \|\| params\.get\('view'\) \|\| 'dashboard';/);
+    // The email link carries ONLY ?section=, so it still lands here. ?view= is read first because a
+    // stale ?section= used to outlive every navigation and reopen Bias Audit on each refresh
+    // (2026-10-06) — see tests/refresh-lands-on-last-view.test.ts.
+    assert.match(A, /const initialView = params\.get\('view'\) \|\| params\.get\('section'\) \|\| remembered \|\| 'dashboard';/);
 });
 
 check('the reminder email now links with ?view=', () => {
