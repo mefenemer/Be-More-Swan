@@ -48,8 +48,25 @@ check('the block is capped, keeping the newest rules (they come first)', () => {
 });
 
 console.log('scope');
-check('exactly the three chat-only roles read rules in chat', () => {
-    assert.deepEqual([...RULE_READING_ROLES].sort(), ['accounts_receivable_clerk', 'meeting_note_taker', 'tier1_support_agent']);
+check('the three chat-only roles and the two posts roles read rules in chat — not leads or email', () => {
+    assert.deepEqual([...RULE_READING_ROLES].sort(),
+        ['accounts_receivable_clerk', 'blog_writer', 'meeting_note_taker', 'social_media_manager', 'tier1_support_agent']);
+});
+check('a platform-only rule is labelled, a global one is not', () => {
+    const b = formatRulesBlock([
+        { ruleText: 'No hashtags', origin: 'manual', platform: 'linkedin' },
+        { ruleText: 'British English', origin: 'manual', platform: 'global' },
+        { ruleText: 'Short paragraphs', origin: 'manual', platform: null },
+    ])!;
+    assert.ok(b.includes('- No hashtags [only for LinkedIn]'));
+    assert.ok(b.includes('- British English\n'));
+    assert.ok(b.endsWith('- Short paragraphs'));
+});
+check('chat reads the same rule set as autopilot §4: this assistant\'s AND workspace-wide', () => {
+    const src = read('src/utils/assistant-rules-prompt.ts');
+    assert.ok(src.includes('or(eq(contentRules.assistantId, params.assistantId), isNull(contentRules.assistantId))'));
+    const bp = read('src/utils/blueprint.ts');
+    assert.ok(bp.includes('r.assistantId === assistantId || r.assistantId === null'), 'blueprint §4 changed — re-check the chat reader matches');
 });
 check('leads are NOT a feedback record type (they keep their own reasons)', () => {
     assert.ok(!FEEDBACK_RECORD_TYPES.has('lead'));
