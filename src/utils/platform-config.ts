@@ -79,6 +79,11 @@ export const CONFIG_KEYS = {
     // anthropic?: { at, severity } }. Written by check-provider-balances. Lets an escalation
     // (low → down) alert at once while an unchanged incident waits out its cooldown.
     PROVIDER_BALANCE_LAST_ALERT: 'provider_balance.last_alert',
+    // ── Monitor heartbeats ──
+    // { content_generation?: { at, problems, warnings, alertFailed }, provider_balances?: … }.
+    // Stamped by every run of the two checks above, read by platform-watchdog. Without it a check
+    // that stopped running is indistinguishable from one that found nothing. See monitor-heartbeat.ts.
+    MONITOR_HEARTBEAT:         'monitoring.heartbeat',
 } as const;
 
 export type ConfigKey = typeof CONFIG_KEYS[keyof typeof CONFIG_KEYS];

@@ -29,7 +29,9 @@
 // This runs on the same Netlify scheduler as the drain it watches, so a scheduler outage takes both.
 // It catches what actually happened here — an upstream refusing every call — and the ordinary
 // faults: a bad deploy, an exception in the drain, a schedule entry that stopped matching a
-// filename. The uncorrelated watcher is the staging-crons GitHub workflow.
+// filename. The uncorrelated watcher is .github/workflows/prod-watchdog.yml, which reads this
+// check's heartbeat through platform-watchdog.ts and fails (GitHub emails) when it goes stale.
+// ⚠️ NOT staging-crons.yml, which this comment used to name: that pokes STAGING only.
 //
 // ── It alerts the OPERATOR, not the customer ────────────────────────────────────────────────────
 // Customers already get the consequence, in their own words, from the job itself. Telling them our
@@ -42,6 +44,7 @@
 import { getDb } from '../../db/client';
 import { CONFIG_KEYS, getPlatformConfig, setPlatformConfig } from '../../src/utils/platform-config';
 import { sendEmail } from '../../src/utils/email';
+import { recordHeartbeat } from '../../src/utils/monitor-heartbeat';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const FOUNDER_EMAIL = process.env.FOUNDER_ALERT_EMAIL || 'hello@bemoreswan.com';
@@ -79,9 +82,27 @@ export interface ContentHealthResult {
     successes24h: number;
     actionable: boolean;
     alerted: boolean;
+    /** The alert was due and the send threw. */
+    alertFailed?: boolean;
 }
 
+/**
+ * Run the check and stamp its heartbeat. ⚠️ A run that THROWS stamps nothing, deliberately: the
+ * heartbeat goes stale and platform-watchdog reports the check as not running — which it isn't.
+ */
 export async function runContentGenerationHealthCheck(): Promise<ContentHealthResult> {
+    const result = await evaluateContentGenerationHealth();
+    await recordHeartbeat('content_generation', {
+        problems: result.actionable
+            ? [`drafting failing in ${result.organisationsAffected} workspaces — ${result.failedJobs24h} jobs in 24h; top error: ${result.topError ?? 'not recorded'}`]
+            : [],
+        warnings: [],
+        alertFailed: !!result.alertFailed,
+    });
+    return result;
+}
+
+async function evaluateContentGenerationHealth(): Promise<ContentHealthResult> {
     const db = getDb();
     const now = new Date();
 
@@ -158,7 +179,7 @@ once service returns. After that they fail terminally and need requeuing with
         // ⚠️ Swallowed, but LOUDLY — a failed alert must not crash the check, and must not read as
         // a clean run either. See check-optimiser-health.
         console.error('[check-content-generation-health] ALERT SEND FAILED — generation is broken platform-wide and nobody has been told', err);
-        return { ...base, actionable, alerted: false };
+        return { ...base, actionable, alerted: false, alertFailed: true };
     }
 }
 
