@@ -587,8 +587,13 @@ window.fetchAndRenderAssistants = async function(containerId, options) {
 // engagement widget, the welcome heading and the setup-wizard auto-open all lived ONLY in that copy,
 // so while it was being overwritten none of the three ran on the dashboard.
 window.initDashboard = async function() {
-    await window._renderDashboardEngagement?.();
-    await window.fetchAndRenderAssistants('dashboard-assistants-grid');
+    // Independent: the engagement cards (onboarding sync + Time Saved) and the assistants grid share
+    // nothing, and awaiting one before the other put up to four round trips in a row in front of
+    // the grid.
+    await Promise.all([
+        window._renderDashboardEngagement?.(),
+        window.fetchAndRenderAssistants('dashboard-assistants-grid'),
+    ]);
 
     // Show "Welcome." for first-time visitors; "Welcome back." for returning users.
     const welcomeEl = document.getElementById('dash-welcome-heading');
