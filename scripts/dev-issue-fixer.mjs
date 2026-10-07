@@ -49,6 +49,7 @@
 // Run:  npm run dev:issue-fixer
 
 import { spawnSync, spawn } from 'node:child_process';
+import { REQUIRED_CHECKS, promoteCiVerdict } from './promote-ci-verdict.mjs';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir, hostname, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -434,23 +435,68 @@ async function processMerge(job) {
   }
 }
 
-// Promote a staging-verified fix to production by pushing the base branch (staging) onto
-// the prod branch (main) — prod deploys from main. No worktree/checkout needed; the push
-// runs against the remote refs. A non-fast-forward (or any push failure) is reported back
-// as a failure with the git output so a human can resolve it, same shape as a failed merge.
+// Promote a staging-verified fix to production THROUGH A PULL REQUEST, never a push.
+//
+// It used to `git push origin/staging:main`. That only worked because the owner account can bypass
+// main's ruleset, and the bypass is silent, so every "Push to prod" skipped CI entirely. Since
+// 2026-10-07 the ruleset requires the CI checks below and limits the admin bypass to an explicit
+// override on a PR, so a direct push is now REJECTED. The lane does what a person does instead:
+// open (or reuse) the staging → main PR, wait for the required checks, and merge only when they pass.
+//
+// It reports the REAL outcome: "promoted" only after the merge landed, and a failed or stalled CI
+// as a failure naming the PR, so nothing sits open with nobody told. No GitHub auto-merge: that
+// would report success before prod had changed. The wait is async (sleep between polls), so the
+// runner's heartbeat keeps firing while CI runs.
+const PROMOTE_CI_TIMEOUT_MS = 25 * 60 * 1000;
+const PROMOTE_POLL_MS = 30 * 1000;
+
 async function processPromote(job) {
   const id = job.id;
   try {
-    log(`#${id} promoting origin/${BASE_BRANCH} → ${PROD_BRANCH}…`);
+    log(`#${id} promoting ${BASE_BRANCH} → ${PROD_BRANCH} via a pull request…`);
     const fetch = git(['fetch', 'origin', '--quiet']);
     if (!fetch.ok) throw new Error(`git fetch failed: ${fetch.stderr}`);
 
-    const p = git(['push', 'origin', `origin/${BASE_BRANCH}:${PROD_BRANCH}`]);
-    const outcome = (p.stdout || p.stderr || '').trim();
-    if (!p.ok) throw new Error(outcome || `git push origin/${BASE_BRANCH}:${PROD_BRANCH} failed`);
+    const ahead = git(['rev-list', '--count', `origin/${PROD_BRANCH}..origin/${BASE_BRANCH}`]);
+    if (ahead.ok && ahead.stdout === '0') {
+      log(`#${id} ✓ nothing to promote — ${PROD_BRANCH} already has ${BASE_BRANCH}`);
+      await reportPromote(id, { ok: true, outcome: `Nothing to promote: ${PROD_BRANCH} already contains everything on ${BASE_BRANCH}.` });
+      return;
+    }
 
-    log(`#${id} ✓ promoted ${BASE_BRANCH} → ${PROD_BRANCH}`);
-    await reportPromote(id, { ok: true, outcome: outcome || `Pushed ${BASE_BRANCH} → ${PROD_BRANCH}.` });
+    // Reuse an open promote PR rather than failing on "a pull request already exists".
+    const open = run('gh', ['pr', 'list', '--base', PROD_BRANCH, '--head', BASE_BRANCH, '--state', 'open', '--json', 'number', '--jq', '.[0].number // empty'], { cwd: REPO });
+    let pr = open.ok ? open.stdout : '';
+    if (!pr) {
+      const created = run('gh', ['pr', 'create', '--base', PROD_BRANCH, '--head', BASE_BRANCH,
+        '--title', `Promote ${BASE_BRANCH} to ${PROD_BRANCH} (issue #${id})`,
+        '--body', `Opened by the dev-issue-fixer "Push to prod" lane for issue #${id}. It merges itself once the required CI checks pass.`], { cwd: REPO });
+      if (!created.ok) throw new Error(`gh pr create failed: ${created.stderr || created.stdout}`);
+      pr = (created.stdout.match(/\/pull\/(\d+)/) || [])[1] || '';
+      if (!pr) throw new Error(`gh pr create gave no PR number: ${created.stdout}`);
+    }
+    log(`#${id} PR #${pr} — waiting for ${REQUIRED_CHECKS.join(' + ')}…`);
+
+    const deadline = Date.now() + PROMOTE_CI_TIMEOUT_MS;
+    let verdict = { state: 'pending' };
+    while (Date.now() < deadline) {
+      // Exit status is non-zero while checks are pending or failing, so read the JSON, not the code.
+      const c = run('gh', ['pr', 'checks', pr, '--json', 'name,bucket'], { cwd: REPO });
+      let rows = [];
+      try { rows = JSON.parse(c.stdout || '[]'); } catch { rows = []; }
+      verdict = promoteCiVerdict(rows);
+      if (verdict.state !== 'pending') break;
+      await sleep(PROMOTE_POLL_MS);
+    }
+    if (verdict.state === 'fail') throw new Error(`CI failed on PR #${pr} (${verdict.check}) — not merged. Fix ${BASE_BRANCH} and press Push to prod again.`);
+    if (verdict.state !== 'pass') throw new Error(`CI did not finish within ${PROMOTE_CI_TIMEOUT_MS / 60000} minutes on PR #${pr} (waiting on ${verdict.check}) — not merged. It is still open; merge it once green.`);
+
+    const m = run('gh', ['pr', 'merge', pr, '--merge'], { cwd: REPO });
+    const outcome = (m.stdout || m.stderr || '').trim();
+    if (!m.ok) throw new Error(`gh pr merge #${pr} failed: ${outcome}`);
+
+    log(`#${id} ✓ promoted ${BASE_BRANCH} → ${PROD_BRANCH} (PR #${pr})`);
+    await reportPromote(id, { ok: true, outcome: `Merged PR #${pr} into ${PROD_BRANCH} after CI passed.` });
     log(`#${id} ✓ promotion reported`);
   } catch (e) {
     log(`#${id} ✖ promotion failed: ${e.message}`);
