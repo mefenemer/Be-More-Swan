@@ -3237,6 +3237,20 @@ window._detailRqRecordAct = async function (btn, action) {
             return;
         }
         patch.approvalStatus = 'rejected';
+        // Tickets, meeting summaries and invoice chases: ask what was wrong BEFORE rejecting, and
+        // send it as `feedback`. The server saves it as a rule this assistant's chat reads from then
+        // on (src/utils/assistant-rules-prompt.ts), which is the only way these roles can learn.
+        // Optional: a blank answer just rejects. Cancel aborts the reject altogether.
+        const fbRec = _rqRecordsById.get(patch.id);
+        if (fbRec && _RQ_FEEDBACK_NOUNS[fbRec.recordType] && typeof window.promptModal === 'function') {
+            const answer = await window.promptModal(
+                'What should your assistant do differently? It will follow this from now on. Leave it blank to just reject.',
+                { title: `Reject this ${_RQ_FEEDBACK_NOUNS[fbRec.recordType]}?`, confirmLabel: 'Reject', multiline: true,
+                  placeholder: _RQ_FEEDBACK_PLACEHOLDERS[fbRec.recordType] || '' },
+            );
+            if (answer === null) return;
+            if (answer.trim()) patch.feedback = answer.trim();
+        }
         // Queued, not shown: the strip goes up only once the rejection has actually committed, and
         // the card is rebuilt in between. Cleared in the catch below for the same reason the edit
         // strip is — a failed reject has nothing to explain.
@@ -3284,6 +3298,7 @@ window._detailRqRecordAct = async function (btn, action) {
             method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
         });
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Update failed.');
+        const patchResult = patch.feedback ? await res.json().catch(() => ({})) : {};
 
         // Auto-send: when a LEAD is approved and the assistant has an email provider connected,
         // send its outreach email. The whole flow — the compliance gates, the connect offer, the
@@ -3305,6 +3320,10 @@ window._detailRqRecordAct = async function (btn, action) {
                 // action serves both columns.
                 : action === 'review' ? `It's in the ${_rqColumnLabel('review')} column now.${_rqIsLeadQueue() ? ' Nothing has been sent — approve it there to send it.' : ''}`
                 : action === 'backToEnrichment' ? `Moved to ${_rqHubTabLabel()}. It has left the Outreach columns — move it back when it's ready to be emailed. Nothing was looked up: "Send back for enrichment" is the button that researches a lead.`
+                : action === 'reject' && patch.feedback
+                    ? (patchResult.feedbackSaved === false
+                        ? 'Rejected, but your note couldn’t be saved. Add it as a rule on the Rules tab instead.'
+                        : 'Rejected. Your assistant will follow that from now on — it’s listed under Learned Directives on the Rules tab.')
                 : action === 'reject' ? 'Rejected.' : 'Updated.';
             window.showToast?.(toast);
         }
@@ -4383,9 +4402,26 @@ const _RUNBOOK_ORIGIN = {
     tuning:             ['From tuning',   'bg-indigo-100 text-indigo-700'],
 };
 
+// Record types whose assistants learn from a rejection note (tickets, meetings, invoices). Mirrors
+// FEEDBACK_RECORD_TYPES in src/utils/assistant-rules-prompt.ts; the noun is what the reject prompt
+// calls the thing being rejected.
+const _RQ_FEEDBACK_NOUNS = { ticket: 'ticket', meeting: 'meeting summary', invoice: 'invoice chase' };
+const _RQ_FEEDBACK_PLACEHOLDERS = {
+    ticket: 'e.g. Never promise a refund — say a teammate will review it',
+    meeting: 'e.g. Put a name and a due date on every action item',
+    invoice: 'e.g. Don’t chase anything less than 14 days overdue',
+};
+
 /** True where a content_rules row can actually reach a model — see _renderRunbookDirectives(). */
 function _rulesSteerThisAssistant() {
-    return ((window._detailReviewQueue || {}).kind || 'posts') === 'posts';
+    const rq = window._detailReviewQueue || {};
+    return (rq.kind || 'posts') === 'posts' || _rulesReachChat();
+}
+
+/** True for the roles whose records come from chat, whose chat prompt now carries their rules. */
+function _rulesReachChat() {
+    const rq = window._detailReviewQueue || {};
+    return rq.kind === 'records' && !!_RQ_FEEDBACK_NOUNS[rq.recordType];
 }
 
 // ── Assistant Rules: say what the rules actually reach on THIS role (issue #131) ──
@@ -4406,6 +4442,13 @@ function _applyAssistantRulesScope() {
     // bg-amber-50/70, which is not compiled) is the one that exists. Check before changing these.
     const AMBER = ['text-amber-800', 'bg-amber-50', 'border-amber-200'];
 
+    if (_rulesReachChat()) {
+        note.classList.remove(...AMBER);
+        note.classList.add(...EMERALD);
+        text.textContent = "Your assistant follows these rules whenever you ask it for something, along with anything you tell it when you reject its work. Changes apply from your next message.";
+        if (subtitle) subtitle.textContent = 'Custom rules for this assistant. It follows them in every reply, ticket, summary and table it produces for you.';
+        return;
+    }
     if (_rulesSteerThisAssistant()) {
         note.classList.remove(...AMBER);
         note.classList.add(...EMERALD);
@@ -4441,6 +4484,11 @@ window._renderRunbookDirectives = async function(assistantId) {
         card.style.display = steers ? '' : 'none';
     }
     if (!steers) return;
+    // Tuning Sessions work from social drafts, so the button has nothing to offer the chat roles:
+    // their way in is the note they give when rejecting a ticket, meeting summary or invoice chase.
+    const viaChat = _rulesReachChat();
+    const tuneBtn = document.getElementById('btn-start-tuning');
+    if (tuneBtn) { tuneBtn.classList.toggle('hidden', viaChat); tuneBtn.style.display = viaChat ? 'none' : ''; }
 
     const host = document.getElementById('runbook-directives');
     if (!host) return;
@@ -4453,7 +4501,9 @@ window._renderRunbookDirectives = async function(assistantId) {
     } catch { /* non-critical */ }
     rules.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
     if (!rules.length) {
-        host.innerHTML = '<p class="text-sm text-gray-400 text-center py-6">No directives yet. Start a Tuning Session to teach your assistant its first rule.</p>';
+        host.innerHTML = viaChat
+            ? `<p class="text-sm text-gray-400 text-center py-6">No directives yet. When you reject a ${_RQ_FEEDBACK_NOUNS[(window._detailReviewQueue || {}).recordType]} and say what was wrong, it's saved here and your assistant follows it from then on.</p>`
+            : '<p class="text-sm text-gray-400 text-center py-6">No directives yet. Start a Tuning Session to teach your assistant its first rule.</p>';
         return;
     }
     host.innerHTML = rules.map(r => {
