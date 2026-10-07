@@ -5,7 +5,10 @@
 const fs = require('fs');
 const zlib = require('zlib');
 
-const FILE = 'images/BeMoreSwan_SwanAI.png';
+// Operates on the full-resolution master. images/BeMoreSwan_SwanAI.png is a small web copy of it
+// (the 2910px original was being downloaded to draw a 16px icon); re-export it after a change:
+//   sips -Z 320 scripts/assets/BeMoreSwan_SwanAI-master.png --out images/BeMoreSwan_SwanAI.png
+const FILE = 'scripts/assets/BeMoreSwan_SwanAI-master.png';
 const buf = fs.readFileSync(FILE);
 
 // ── decode ──

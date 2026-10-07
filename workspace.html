@@ -2638,6 +2638,36 @@ function formatCurrency(amount, currency) {
       } catch { return null; }
     }
 
+    // ── View partials are fetched once per page load ──────────────────────────────────────────────
+    // Every navigation used to re-fetch its partial: a round trip through the auth-guard edge
+    // function (and the platform-config fetch it makes) for a static file that cannot change until
+    // the next deploy — and a deploy changes VIEW_VERSION, which only a full reload picks up. So the
+    // text is kept here, keyed by file, as a promise: a hover prefetch and the click that follows
+    // share one request. A failed fetch is dropped so the next attempt retries it.
+    const _viewHtml = new Map();
+    function fetchViewHtml(file) {
+      if (!_viewHtml.has(file)) {
+        const p = fetch(`./${file}?v=${VIEW_VERSION}`).then(r => {
+          if (!r.ok) throw new Error('Network component not found');
+          return r.text();
+        });
+        p.catch(() => _viewHtml.delete(file));
+        _viewHtml.set(file, p);
+      }
+      return _viewHtml.get(file);
+    }
+    function prefetchView(routeKey) {
+      const route = routes[routeKey];
+      if (route) fetchViewHtml(route.file).catch(() => { /* retried on the real navigation */ });
+    }
+    // Warm a partial the moment the pointer (or keyboard focus, or a finger) reaches its menu link —
+    // usually 100–300 ms before the click, which is most of the round trip.
+    Object.entries(navLinks).forEach(([key, el]) => {
+      if (!el) return;
+      ['pointerenter', 'focus', 'touchstart'].forEach(ev =>
+        el.addEventListener(ev, () => prefetchView(key), { once: true, passive: true }));
+    });
+
     async function loadView(routeKey, param = null) {
       if (!routes[routeKey]) return;
       window.bmsBusy?.(true);
@@ -2672,8 +2702,7 @@ function formatCurrency(amount, currency) {
       }
 
       try {
-        const response = await fetch(`./${route.file}?v=${VIEW_VERSION}`);
-        if (!response.ok) throw new Error('Network component not found');
+        const viewHtml = await fetchViewHtml(route.file);
 
         // Overlays rendered *inside* a view (the assistant profile drawer) lock page scroll
         // while open, and their close handlers are the only thing that unlocks it. The
@@ -2705,7 +2734,7 @@ function formatCurrency(amount, currency) {
         }
         if (routeKey !== 'assistant-detail') window._currentAssistantId = null;
 
-        contentContainer.innerHTML = await response.text();
+        contentContainer.innerHTML = viewHtml;
 
         // Re-execute any inline <script> blocks injected via innerHTML
         // (browsers do not run scripts set through innerHTML — we must re-create them)
@@ -3550,6 +3579,10 @@ function formatCurrency(amount, currency) {
       const restore = !bootQs.has('view') && !bootQs.has('payment') ? _rememberedView() : null;
       if (restore && restore.key !== 'dashboard') await loadView(restore.key, restore.param ?? null);
       else await loadView('dashboard');
+      // An assistant's workspace is the heaviest partial (~210 KB) and the commonest next stop, but
+      // it is reached from assistant cards rather than a menu link, so no hover warms it. Fetch it
+      // once the landing view has settled and the browser is idle.
+      (window.requestIdleCallback || ((cb) => setTimeout(cb, 1500)))(() => prefetchView('assistant-detail'));
     }
 
     // Arriving from Stripe after successful payment

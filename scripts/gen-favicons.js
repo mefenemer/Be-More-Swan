@@ -6,7 +6,9 @@
 const fs = require('fs');
 const zlib = require('zlib');
 
-const SRC = 'images/BeMoreSwan_SwanAI.png';
+// The full-resolution master, not images/BeMoreSwan_SwanAI.png — that is a 320px web copy, too
+// small to downsample favicons from.
+const SRC = 'scripts/assets/BeMoreSwan_SwanAI-master.png';
 
 // ── PNG decode → {w,h,rgba} ──
 function decode(buf) {
