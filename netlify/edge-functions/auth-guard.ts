@@ -90,20 +90,50 @@ export default async (request: Request, context: Context) => {
         return context.next();
     }
     const jwtSecretBytes = new TextEncoder().encode(jwtSecretRaw);
+    const isProtected = protectedPaths.includes(path);
+
+    // ── View partials fetched by the workspace skip the config check ─────────
+    // workspace.html swaps its views in by fetch()ing partials (dashboard-content.html,
+    // assistant-detail.html, …), and every one of those used to pay a full round trip to
+    // platform-config-public before a static file was served — measured at 3.2 s on a cold
+    // function. A redirect is meaningless to a script fetch anyway: the maintenance page would be
+    // injected into the workspace as if it were a view. Only a top-level navigation can be sent to
+    // /maintenance, so only a navigation is checked. `Sec-Fetch-Dest: empty` is what every browser
+    // sends for fetch()/XHR; a navigation sends `document`. Spoofing it buys nothing — the partials
+    // are public static files. Protected pages and /register are never skipped.
+    const isScriptFetch = request.headers.get('sec-fetch-dest') === 'empty';
+    if (isScriptFetch && !isProtected && path !== '/register') {
+        return context.next();
+    }
+
+    // ── Session pre-check, started BEFORE the config fetch ───────────────────
+    // The JWT verify is local, and the revoked-session lookup only needs its userId — so the lookup
+    // can run alongside the config fetch instead of after it. Nothing is ACTED on here: the
+    // maintenance redirect still takes precedence, exactly as when these ran in sequence.
+    const sessionCookie = isProtected ? context.cookies.get('aura_session') : undefined;
+    let verifiedUserId: number | null = null;
+    let sessionInvalid = false;
+    if (sessionCookie) {
+        try {
+            const { payload } = await jose.jwtVerify(sessionCookie, jwtSecretBytes);
+            if (typeof payload.userId === 'number') verifiedUserId = payload.userId;
+        } catch {
+            sessionInvalid = true;
+        }
+    }
+    const revokedCheck: Promise<boolean> = verifiedUserId === null
+        ? Promise.resolve(false)
+        : fetch(`${url.origin}/.netlify/functions/check-token-revoked?userId=${verifiedUserId}`, { signal: AbortSignal.timeout(1500) })
+            .then(async (r) => r.ok ? !!((await r.json()) as { revoked: boolean }).revoked : false)
+            // Blocklist check failed — fail open so a DB outage doesn't lock out all users
+            .catch(() => false);
 
     // ── US-ADM-3.2.1: Maintenance mode check ─────────────────────────────────
     // Fetch the lightweight config endpoint. Fails open (returns context.next())
     // if the config service is unreachable, to avoid taking down the whole platform.
     try {
-        const configUrl = `${url.origin}/.netlify/functions/platform-config-public`;
-        const configRes = await fetch(configUrl, { signal: AbortSignal.timeout(2000) });
-        if (configRes.ok) {
-            const cfg = await configRes.json() as {
-                maintenanceMode: boolean;
-                maintenanceMessage: string;
-                registrationLocked: boolean;
-                globalAiDisabled: boolean;
-            };
+        const cfg = await getPlatformConfig(url.origin);
+        if (cfg) {
 
             // `!isAlwaysAllowed` preserves the pre-existing exemption. /register now reaches this
             // block (it has to, to be checked against the registration lock below), but it used to
@@ -166,7 +196,7 @@ export default async (request: Request, context: Context) => {
     }
 
     // ── Session guard — protected pages require a valid, signature-verified JWT ─
-    if (protectedPaths.includes(path)) {
+    if (isProtected) {
         // US-ONB-2.1.2 AC9: preserve the current URL as the post-login destination. Built from
         // the RAW pathname, not the normalised one, so the visitor returns to the spelling they
         // actually used. The suppression test is normalised, though: /workspace is the default
@@ -175,7 +205,6 @@ export default async (request: Request, context: Context) => {
         const redirectTarget = url.pathname + url.search;
         const isDefaultDestination = path === '/workspace' && !url.search;
 
-        const sessionCookie = context.cookies.get("aura_session");
         if (!sessionCookie) {
             console.log(`[auth-guard] Blocked unauthorized access to ${url.pathname}`);
             const loginUrl = new URL('/login.html', request.url);
@@ -183,12 +212,9 @@ export default async (request: Request, context: Context) => {
             return Response.redirect(loginUrl);
         }
 
-        // BUG-P0-1: Verify JWT signature — forged tokens are rejected here before any claim is trusted
-        let verifiedUserId: number | null = null;
-        try {
-            const { payload } = await jose.jwtVerify(sessionCookie, jwtSecretBytes);
-            if (typeof payload.userId === 'number') verifiedUserId = payload.userId;
-        } catch {
+        // BUG-P0-1: the JWT signature was verified above — forged tokens are rejected here before
+        // any claim is trusted.
+        if (sessionInvalid) {
             // Invalid signature or expired token — redirect to login
             console.log(`[auth-guard] Rejected invalid/forged JWT for ${url.pathname}`);
             const loginUrl = new URL('/login.html', request.url);
@@ -196,28 +222,47 @@ export default async (request: Request, context: Context) => {
             return Response.redirect(loginUrl);
         }
 
-        // US-ADM-1.3.2: Check JWT blocklist — reject erased/revoked user sessions immediately
-        if (verifiedUserId !== null) {
-            try {
-                const revokeCheckUrl = `${url.origin}/.netlify/functions/check-token-revoked?userId=${verifiedUserId}`;
-                const revokeRes = await fetch(revokeCheckUrl, { signal: AbortSignal.timeout(1500) });
-                if (revokeRes.ok) {
-                    const { revoked } = await revokeRes.json() as { revoked: boolean };
-                    if (revoked) {
-                        console.log(`[auth-guard] Blocked revoked session for userId=${verifiedUserId}`);
-                        const logoutUrl = new URL('/login.html', request.url);
-                        logoutUrl.searchParams.set('error', 'session_revoked');
-                        const response = Response.redirect(logoutUrl.toString(), 302);
-                        // Clear the stale cookie
-                        response.headers.append('Set-Cookie', 'aura_session=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax');
-                        return response;
-                    }
-                }
-            } catch {
-                // Blocklist check failed — fail open so a DB outage doesn't lock out all users
-            }
+        // US-ADM-1.3.2: Check JWT blocklist — reject erased/revoked user sessions immediately.
+        // The lookup was started before the config fetch; this only collects its answer.
+        if (await revokedCheck) {
+            console.log(`[auth-guard] Blocked revoked session for userId=${verifiedUserId}`);
+            const logoutUrl = new URL('/login.html', request.url);
+            logoutUrl.searchParams.set('error', 'session_revoked');
+            const response = Response.redirect(logoutUrl.toString(), 302);
+            // Clear the stale cookie
+            response.headers.append('Set-Cookie', 'aura_session=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax');
+            return response;
         }
     }
 
     return context.next();
 };
+
+type PublicPlatformConfig = {
+    maintenanceMode: boolean;
+    maintenanceMessage: string;
+    registrationLocked: boolean;
+    globalAiDisabled: boolean;
+};
+
+/**
+ * platform-config-public, remembered per isolate for CONFIG_TTL_MS.
+ *
+ * Every page load used to make this fetch afresh — a function invocation (cold, on a quiet site)
+ * in front of every HTML response. The endpoint itself only promises freshness to within ~30 s (a
+ * 30 s process cache behind `max-age=25`), so holding its answer for the same 25 s here changes
+ * nothing about how quickly maintenance mode takes effect. Keyed by origin because one deploy
+ * answers several hostnames. A failed fetch is not cached: the next request tries again.
+ */
+const CONFIG_TTL_MS = 25_000;
+const _configCache = new Map<string, { at: number; cfg: PublicPlatformConfig }>();
+
+async function getPlatformConfig(origin: string): Promise<PublicPlatformConfig | null> {
+    const hit = _configCache.get(origin);
+    if (hit && Date.now() - hit.at < CONFIG_TTL_MS) return hit.cfg;
+    const configRes = await fetch(`${origin}/.netlify/functions/platform-config-public`, { signal: AbortSignal.timeout(2000) });
+    if (!configRes.ok) return null;
+    const cfg = await configRes.json() as PublicPlatformConfig;
+    _configCache.set(origin, { at: Date.now(), cfg });
+    return cfg;
+}

@@ -7201,12 +7201,19 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         });
     }
 
-    // ── Impact & ROI metrics card — fetched first so the card is visible before
-    //    Completed Tasks loads, preserving the DOM order on first render. ─────
-    await _fetchAndRenderAssistantMetrics(assistantId);
-    // Autopilot's post totals (Created/Scheduled/Published) fill from that fetch — clear its
-    // skeleton now that they're in.
-    if (_skelAutopilot) _endCardLoading('autopilot-status-card');
+    // ── Everything below loads CONCURRENTLY ───────────────────────
+    // These fetches used to be awaited one after another — metrics → activity → connections →
+    // workspace defaults → rules → goals — none of which needs another's answer, so opening a
+    // workspace cost the SUM of eight round trips (a cold function each, on a bad day). Each card
+    // has its own skeleton or empty state, so each now fills as its own fetch lands; the function
+    // still awaits them all at the end, so loadView's busy spinner keeps its old meaning.
+    // ⚠️ Metrics is fetched ONCE, here. A second, un-awaited call further down used to fire the
+    // same request again on every visit.
+    const _loads = [];
+    // Autopilot's post totals (Created/Scheduled/Published) fill from the metrics fetch — clear its
+    // skeleton when they're in.
+    _loads.push(_fetchAndRenderAssistantMetrics(assistantId)
+        .finally(() => { if (_skelAutopilot) _endCardLoading('autopilot-status-card'); }));
     // Audience counts hit the platform APIs, so they're deliberately not awaited — the Autopilot
     // card is already complete without them and the block reveals itself when they land.
     // Registry-driven, like metricsSource: a role whose audience isn't social gets its own renderer
@@ -7353,43 +7360,37 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         document.querySelectorAll('.activity-tf-btn').forEach(btn => {
             btn.addEventListener('click', () => loadActivity(btn.dataset.tf));
         });
-        await loadActivity('1d');
+        _loads.push(loadActivity('1d'));
     }
-
-    // ── Impact & ROI metrics card — fire immediately so it appears at the top of
-    // Overview without waiting behind connections/integrations/goals fetches ──────
-    _fetchAndRenderAssistantMetrics(assistantId);
 
     // Performance Metrics is no longer loaded from here — it is fired, un-awaited, near the top of
     // this function alongside the other skeleton setup. Awaiting it here put a cold-start plus a
     // post_insights join in front of Connections, Synced actions and the onboarding answers.
 
     // ── Connections (full connect/manage UI, scoped to this assistant) ──
-    await window.initAssistantConnections(assistantId, currentData);
     // No _endCardLoading here: the connections card never starts a skeleton now (see above). It
     // still renders from this call — that is what decides whether it shows at all for a non-social
     // role — but it no longer BLOCKS on it.
-    // Synced actions — this assistant's Integration Scenario Library recipes, in the same tab.
-    // Reads relevance from window._detailReviewQueue.recordType (set by the dashboard registry).
-    window.AssistantIntegrations?.init({ assistantId });
-    // Now that supportedTools have loaded, fold them into "Your Onboarding Answers".
-    _renderOnboardingConnections();
-
-    // ── Integrations ──────────────────────────────────────────────
-    await window.fetchAndRenderIntegrations();
+    _loads.push(window.initAssistantConnections(assistantId, currentData).then(() => {
+        // Synced actions — this assistant's Integration Scenario Library recipes, in the same tab.
+        // Reads relevance from window._detailReviewQueue.recordType (set by the dashboard registry).
+        window.AssistantIntegrations?.init({ assistantId });
+        // Now that supportedTools have loaded, fold them into "Your Onboarding Answers".
+        _renderOnboardingConnections();
+    }));
 
     // ── Workspace defaults (Brand Profile) ────────────────────────
-    await _fetchAndRenderWorkspaceDefaults(assistantId, currentData, triggerAutoSave);
+    _loads.push(_fetchAndRenderWorkspaceDefaults(assistantId, currentData, triggerAutoSave));
 
     // ── Per-assistant Assistant Rules (content_rules → this assistant's brief) ──
-    await _fetchAndRenderAssistantRules(assistantId);
+    _loads.push(_fetchAndRenderAssistantRules(assistantId));
 
     // ── Learned Directives (issue #113: lives alongside Assistant Rules) ──
     window._renderRunbookDirectives?.(assistantId);
     window._renderLeadRejectionEvidence?.(assistantId);
 
     // ── SMART Goals (Feature 1) ───────────────────────────────────
-    await _fetchAndRenderGoals(assistantId);
+    _loads.push(_fetchAndRenderGoals(assistantId));
 
     // ── AC6: Daily Relationship-Building Checklist ────────────────
     // Hidden — belongs to a future Engagement/CTA assistant, not SMM.
@@ -7397,6 +7398,11 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
 
     // ── Review Queue tab — prefetch pending count so the badge shows without opening the tab ──
     _prefetchDetailRqBadge(assistantId);
+
+    // allSettled, not all: in the old sequence a throw in one loader stopped every loader after
+    // it. Running together, one failure must not hide the others — log it and let the rest paint.
+    const _results = await Promise.allSettled(_loads);
+    _results.forEach(r => { if (r.status === 'rejected') console.error('[initAssistantDetail] a section failed to load:', r.reason); });
 };
 
 async function _prefetchDetailRqBadge(assistantId) {
