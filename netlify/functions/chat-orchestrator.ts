@@ -44,6 +44,7 @@ import { parseModelJson, stripCodeFences } from '../../src/utils/model-json';
 
 import { liveRoleLabel } from '../../src/utils/live-role-label';
 import { voiceDirective } from '../../src/utils/voice-profile';
+import { RULE_READING_ROLES, loadAssistantRulesBlock } from '../../src/utils/assistant-rules-prompt';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -1964,10 +1965,19 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         inspoBlock,
         leadsSnapshot,
     });
+    // The user's rules, for the roles whose records come ONLY from chat (Tier 1 Support, Meeting
+    // Note Taker, AR Clerk). Their Assistant Rules and rejection feedback reached nothing before:
+    // content_rules otherwise reach a model only through the drafting worker, which these roles
+    // do not have. See src/utils/assistant-rules-prompt.ts. Never throws.
+    const rulesBlock = assistantRow.roleKey && RULE_READING_ROLES.has(assistantRow.roleKey)
+        ? await loadAssistantRulesBlock(db, { assistantId: session.aiAssistantId, organisationId: orgId })
+        : null;
+    const promptWithRules = rulesBlock ? `${rolePrompt}\n\n${rulesBlock}` : rolePrompt;
+
     const system = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
         // which is exactly what must NOT happen when the user is editing a post already.
-        draftTarget ? `${rolePrompt}\n\n${draftTargetPromptBlock(draftTarget.platform)}` : rolePrompt,
+        draftTarget ? `${promptWithRules}\n\n${draftTargetPromptBlock(draftTarget.platform)}` : promptWithRules,
         assistantRow.onboardingContext,
     );
 

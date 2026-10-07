@@ -37,7 +37,8 @@
 import { Handler } from '@netlify/functions';
 import { and, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { actionItems, aiAssistants, assistantRecords, discoveredLeads } from '../../db/schema';
+import { actionItems, aiAssistants, assistantRecords, contentRules, discoveredLeads } from '../../db/schema';
+import { FEEDBACK_RECORD_TYPES } from '../../src/utils/assistant-rules-prompt';
 import { requireTenant } from '../../src/utils/tenant';
 import { enqueueScenarioTrigger, type TriggerSubject } from '../../src/utils/scenario-engine';
 import { recordEvent } from '../../src/utils/revenue-ledger';
@@ -669,7 +670,7 @@ export default withLambda(async (event) => {
         }
 
         if (event.httpMethod === 'PATCH') {
-            let body: { id?: number; ids?: unknown; title?: unknown; status?: unknown; data?: unknown; approvalStatus?: unknown; scheduledFor?: unknown; reason?: unknown };
+            let body: { id?: number; ids?: unknown; title?: unknown; status?: unknown; data?: unknown; approvalStatus?: unknown; scheduledFor?: unknown; reason?: unknown; feedback?: unknown };
             try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
             // ── Bulk REJECT ─────────────────────────────────────────────────────────────
@@ -823,6 +824,12 @@ export default withLambda(async (event) => {
             // When a record FIRST goes live we fire the Integration Scenario Library handoff push —
             // prefetch it here so we can tell a genuine transition from a re-approval / edit.
             let handoffRecord: { id: number; recordType: string; aiAssistantId: number; title: string | null; status: string | null; data: unknown } | null = null;
+            // What the user said was wrong, when rejecting a ticket, meeting or invoice. Saved as a
+            // rejection_feedback rule AFTER the reject commits; the chat that produces these records
+            // reads it from then on (src/utils/assistant-rules-prompt.ts). Leads keep their own
+            // vocabulary (`reason`) and their own consumer, so they never come through here.
+            const feedbackText = typeof body.feedback === 'string' ? body.feedback.replace(/\s+/g, ' ').trim().slice(0, 500) : '';
+            let feedbackRule: { assistantId: number; recordType: string; title: string | null } | null = null;
             if (body.approvalStatus !== undefined) {
                 const next = String(body.approvalStatus);
                 if (!['pending_approval', 'approved', 'scheduled', 'rejected'].includes(next)) {
@@ -858,6 +865,9 @@ export default withLambda(async (event) => {
                     // Only a transition INTO live fires the handoff — not an edit of an already-live record.
                     if (LIVE_APPROVAL.has(next) && prev && !LIVE_APPROVAL.has(prev.approvalStatus ?? '')) {
                         handoffRecord = prev;
+                    }
+                    if (next === 'rejected' && feedbackText && prev && FEEDBACK_RECORD_TYPES.has(prev.recordType)) {
+                        feedbackRule = { assistantId: prev.aiAssistantId, recordType: prev.recordType, title: prev.title };
                     }
 
                     // Revenue ledger (Phase 0) — LEAD records only. assistant_records is shared by
@@ -933,7 +943,27 @@ export default withLambda(async (event) => {
                 await materialiseActionItems(db, orgId, liveRecord);
                 await enqueueHandoffOnApproval(db, orgId, liveRecord);
             }
-            return json(200, { record: row });
+
+            // After the reject has committed: a rule for a rejection that did not happen would teach
+            // the assistant from a decision the user never made. A failed rule write does not undo
+            // the reject; the response says so and the client tells the user.
+            let feedbackSaved = false;
+            if (feedbackRule) {
+                try {
+                    await db.insert(contentRules).values({
+                        assistantId: feedbackRule.assistantId,
+                        workspaceId: orgId,
+                        ruleText: feedbackText,
+                        origin: 'rejection_feedback',
+                        note: `Rejected ${feedbackRule.recordType}${feedbackRule.title ? `: ${feedbackRule.title.slice(0, 200)}` : ''}`,
+                        createdByUserId: userId,
+                    });
+                    feedbackSaved = true;
+                } catch (err) {
+                    console.error('[assistant-records] rejection feedback not saved (reject stands)', err);
+                }
+            }
+            return json(200, { record: row, ...(feedbackRule ? { feedbackSaved } : {}) });
         }
 
         if (event.httpMethod === 'DELETE') {
