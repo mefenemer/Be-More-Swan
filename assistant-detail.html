@@ -2505,6 +2505,20 @@
       </button>
     </div>
     <div class="overflow-y-auto flex-1 px-6 py-6">
+      <!-- Shown only while Meta review is pending (META_REVIEW_PENDING in integrations.js). -->
+      <div id="preconnect-tester" class="hidden mb-6 p-4 rounded-xl border border-amber-200 bg-amber-50">
+        <h3 class="text-sm font-extrabold text-gray-900">Meta is still approving Be More Swan</h3>
+        <p class="text-sm text-gray-700 mt-1 leading-relaxed">Until Meta finishes reviewing our app, Facebook only lets people we've added as testers connect. Anyone else sees a Facebook error page. Send us your Facebook login and we'll add you, then email you when it's done.</p>
+        <label for="preconnect-tester-url" class="block text-xs font-bold text-gray-700 mt-3 mb-1">Your Facebook profile link</label>
+        <div class="flex flex-col sm:flex-row gap-2">
+          <input id="preconnect-tester-url" type="url" inputmode="url" autocomplete="off" placeholder="https://www.facebook.com/your.name"
+            class="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-white">
+          <button id="btn-preconnect-tester" type="button" onclick="window._intRequestMetaTester()"
+            class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Request access</button>
+        </div>
+        <p class="text-xs text-gray-600 mt-2">Open <a href="https://www.facebook.com/me" target="_blank" rel="noopener" class="text-emerald-600 hover:underline font-semibold">facebook.com/me</a> while signed in and copy the address it lands on. Use your personal login, not your business Page's link.</p>
+        <p id="preconnect-tester-status" class="text-sm mt-2" role="status" aria-live="polite"></p>
+      </div>
       <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide mb-4">Set this up in Meta first</h3>
       <ol id="preconnect-steps" class="space-y-3"></ol>
       <div id="preconnect-note" class="hidden mt-4 flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800"></div>
