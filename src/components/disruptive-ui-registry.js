@@ -1753,12 +1753,12 @@
     const lastDay = Number(emails[emails.length - 1].sendDay) || 1;
     const typeLabel = CAMPAIGN_TYPE_LABELS[ui.campaignType] || 'Custom';
     const n = emails.length;
-    const saveLabelFor = () => isForm ? 'Save as form email campaign' : automatic ? 'Save as welcome sequence' : `Save as ${n} draft ${n === 1 ? 'email' : 'emails'}`;
+    const saveLabelFor = () => isForm ? 'Save as form email campaign' : automatic ? 'Save as email campaign' : `Save as ${n} draft ${n === 1 ? 'email' : 'emails'}`;
     const startsLabelFor = () => isForm ? 'Starts when someone fills in a form' : 'Starts when someone subscribes';
     const statusFor = () => isForm
       ? 'Saving creates this email campaign under Email Campaigns in the Email Studio, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on — nobody is emailed by saving.'
       : automatic
-        ? 'Saving makes this your welcome sequence, under Email Campaigns in the Email Studio. It stays switched off until you turn it on there — nobody is emailed by saving.'
+        ? 'Saving makes this a new campaign for everyone who subscribes, under Email Campaigns in the Email Studio. It stays switched off until you turn it on there — nobody is emailed by saving.'
         : 'Saving puts each email in your Emails tab as a draft. Nothing is sent to anyone: you send each one to the right people on the right day from the Email Studio.';
     const eyebrow = (s) => `${isDraft ? 'Email campaign draft' : 'Email campaign plan'} · ${s}`;
 
@@ -1790,7 +1790,7 @@
         </label>
         <label class="flex items-start gap-2 text-sm text-gray-800 cursor-pointer">
           <input type="radio" name="${whoName}" value="subscribed" class="mt-1" ${isForm ? '' : 'checked'}>
-          <span>Everyone who joins your list <span class="text-gray-500">— this becomes your welcome sequence, replacing the one you have.</span></span>
+          <span>Everyone who joins your list <span class="text-gray-500">— saved as a new campaign; your current one is not touched.</span></span>
         </label>
       </fieldset>` : ''}
 
@@ -1846,9 +1846,9 @@
       if (node) node.textContent = eyebrow(text);
     }
 
-    function dispatchSave(replace) {
+    function dispatchSave() {
       setBusy(true);
-      say(replace ? 'Replacing your welcome sequence…' : 'Saving…');
+      say('Saving…');
       el.dispatchEvent(new CustomEvent('newsletter:createCampaign', {
         bubbles: true,
         detail: {
@@ -1858,9 +1858,8 @@
             subject: e.subject, preheader: e.preheader || '', bodyMarkdown: e.bodyMarkdown,
             delayDaysAfterPrevious: Number(e.delayDaysAfterPrevious) || 0,
           })),
-          replace,
           // Re-enabling on every failure is the point: this card holds the only copy.
-          async respond({ ok, deduped, error, code, stepCount, created, replaced }) {
+          async respond({ ok, deduped, error, stepCount, created }) {
             if (ok) {
               setEyebrow('Saved');
               if (isForm) {
@@ -1869,33 +1868,13 @@
                   : `Saved as an email campaign — ${stepCount || n} emails, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on under Email Campaigns.`);
               } else if (automatic) {
                 say(deduped
-                  ? 'Already saved — it is your welcome sequence, under Email Campaigns in the Email Studio.'
-                  : `${replaced ? 'Replaced your welcome sequence' : 'Saved as your welcome sequence'} — ${stepCount || n} emails, switched off. Turn it on under Email Campaigns in the Email Studio when you are ready.`);
+                  ? 'Already saved — it is under Email Campaigns in the Email Studio.'
+                  : `Saved as a new email campaign for everyone who subscribes — ${stepCount || n} emails, switched off. Turn it on under Email Campaigns in the Email Studio when you are ready.`);
               } else {
                 say(deduped
                   ? 'Already saved — these are in your Emails tab.'
                   : `Saved ${created || n} draft ${(created || n) === 1 ? 'email' : 'emails'} to your Emails tab. Send each one from the Email Studio on its day.`);
               }
-              return;
-            }
-            // There is only one welcome sequence. One that already has emails is replaced only on
-            // an explicit yes — somebody's hand-written welcome must not vanish behind a chat card.
-            if (code === 'SEQUENCE_ENABLED') {
-              setBusy(false);
-              setEyebrow('Not saved yet');
-              say('Not saved — your welcome sequence is switched on and already emailing new subscribers, so it can’t be overwritten from here. If these emails are for one sign-up form (such as beta testers), choose “Only people who fill in a particular sign-up form” above and save again.', 'error');
-              return;
-            }
-            if (code === 'SEQUENCE_HAS_STEPS' && !replace) {
-              const ok2 = typeof window.confirmModal === 'function'
-                ? await window.confirmModal(
-                  `Your welcome sequence already has ${stepCount} ${stepCount === 1 ? 'email' : 'emails'}. Replace ${stepCount === 1 ? 'it' : 'them'} with these ${n}? The current ${stepCount === 1 ? 'one is' : 'ones are'} deleted. It stays switched off either way.`,
-                  { title: 'Replace your welcome sequence?', confirmLabel: 'Replace', confirmColor: '#dc2626' })
-                : false;
-              if (ok2) { dispatchSave(true); return; }
-              setBusy(false);
-              setEyebrow('Not saved yet');
-              say('Not saved — your existing welcome sequence is unchanged.');
               return;
             }
             setBusy(false);
@@ -1926,7 +1905,7 @@
         say('Discarded — nothing was saved. Ask me for a different shape any time.');
         return;
       }
-      if (e.target.closest('[data-ncd-save]')) dispatchSave(false);
+      if (e.target.closest('[data-ncd-save]')) dispatchSave();
     });
 
     return el;

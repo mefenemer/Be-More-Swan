@@ -16,7 +16,7 @@
 //    unsubscribing on day two of a five-step series must not receive step three, and the audience
 //    status alone is not enough — an opt-out recorded by the Lead Generator counts too.
 
-import { and, asc, eq, gte, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, isNull, lte, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
     audienceContacts, newsletterSequenceEnrolments, newsletterSequenceSends, newsletterSequenceSteps,
@@ -92,6 +92,9 @@ export async function enrolInSequence(
                     ? eq(newsletterSequences.id, args.sequenceId)
                     : eq(newsletterSequences.triggerEvent, 'subscribed'),
             ))
+            // Several "everyone" campaigns may exist (2026-10-06) — new subscribers join the one
+            // that is ON. At most one can be (unique index), so this is never a coin toss.
+            .orderBy(desc(newsletterSequences.isEnabled), asc(newsletterSequences.createdAt))
             .limit(1);
 
         if (!seq) return { enrolled: false, reason: 'no_sequence' };

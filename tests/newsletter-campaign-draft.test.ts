@@ -223,17 +223,15 @@ await check('a plan has no Save button', () => {
 });
 
 await check('the card says where Save goes before it is pressed, and that nothing is sent', () => {
-    assert.match(CARD, /Save as welcome sequence/);
+    assert.match(CARD, /'Save as email campaign'/);
     assert.match(CARD, /draft \$\{n === 1 \? 'email' : 'emails'\}/);
     assert.match(CARD, /stays switched off until you turn it on/);
     assert.match(CARD, /Nothing is sent to anyone/);
     assert.match(CARD, /Won’t start by itself/);
 });
 
-await check('replacing a welcome sequence that has emails needs an explicit yes', () => {
-    assert.match(CARD, /code === 'SEQUENCE_HAS_STEPS' && !replace/);
-    assert.match(CARD, /window\.confirmModal/);
-    assert.match(CARD, /dispatchSave\(true\)/);
+await check('saving never replaces an existing campaign, and a failure re-enables the buttons', () => {
+    assert.doesNotMatch(CARD, /SEQUENCE_HAS_STEPS|dispatchSave\(true\)|replace/);
     assert.match(CARD, /setBusy\(false\)/, 'a failure must not strand the only copy behind dead buttons');
 });
 
@@ -255,11 +253,11 @@ await check('the client routes by trigger and keeps the 409 question intact', ()
 
 const IMPORT = SEQUENCES.slice(landmark(SEQUENCES, "if (action === 'importCampaign')"), landmark(SEQUENCES, "if (action === 'saveStep')"));
 
-await check('a LIVE welcome sequence is never replaced from a chat card', () => {
-    assert.ok(landmark(IMPORT, "code: 'SEQUENCE_ENABLED'") < landmark(IMPORT, 'db.transaction'),
-        'the refusal has to come before the write');
-    assert.ok(landmark(IMPORT, "code: 'SEQUENCE_HAS_STEPS'") < landmark(IMPORT, 'db.transaction'));
-    assert.match(IMPORT, /body\.replace !== true/);
+await check('an import always creates a NEW campaign — never writes over an existing one', () => {
+    assert.match(IMPORT, /const \[seq\] = await tx\.insert\(newsletterSequences\)/);
+    assert.doesNotMatch(IMPORT, /tx\.delete\(newsletterSequenceSteps\)|body\.replace|SEQUENCE_HAS_STEPS|SEQUENCE_ENABLED/);
+    assert.match(IMPORT, /if \(existing && same\) return json\(200, \{ sequence: existing, deduped: true/);
+    assert.match(IMPORT, /code: 'NEEDS_UPDATE'/, 'the old one-welcome index says so instead of a bare 500');
 });
 
 await check('importing never switches the sequence on', () => {
@@ -267,9 +265,8 @@ await check('importing never switches the sequence on', () => {
     assert.ok(!/enabledAt/.test(IMPORT));
 });
 
-await check('importing the same campaign twice is a no-op, and a re-import replaces rather than merges', () => {
+await check('importing the same campaign twice is a no-op', () => {
     assert.match(IMPORT, /deduped: true/);
-    assert.match(IMPORT, /tx\.delete\(newsletterSequenceSteps\)/);
     assert.match(IMPORT, /renderedPayload: rendered\[i\]/, 'the worker sends the snapshot, so it must be built at save');
     assert.match(IMPORT, /scrubMergeTags/);
 });

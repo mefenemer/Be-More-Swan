@@ -53,7 +53,7 @@
       : c.steps > 0
         ? '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">Off — ready to switch on</span>'
         : '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">Off — no emails yet</span>';
-    const kind = c.triggerEvent === 'subscribed' ? 'Welcome sequence — everyone who subscribes' : 'Started by a sign-up form';
+    const kind = c.triggerEvent === 'subscribed' ? 'Everyone who subscribes' : 'People who fill in a linked sign-up form';
     const stat = (label, value) => `<div><p class="text-[11px] text-gray-500">${label}</p><p class="text-sm font-bold text-gray-900">${value}</p></div>`;
     return `<div class="p-4 sm:p-5">
       <div class="flex items-start justify-between gap-3 flex-wrap">
@@ -89,7 +89,7 @@
     h.innerHTML = head + (state.campaigns.length
       ? `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm divide-y divide-gray-100">${state.campaigns.map(row).join('')}</div>
          <p class="text-[11px] text-gray-500 mt-2">Open and click rates count emails sent through a verified sending domain; a connected mailbox cannot report them.</p>`
-      : '<div class="bg-white rounded-2xl border border-gray-200 p-10 text-center text-sm text-gray-500">No campaigns yet. A welcome sequence is the best first one — it greets everyone who joins your list.</div>');
+      : '<div class="bg-white rounded-2xl border border-gray-200 p-10 text-center text-sm text-gray-500">No campaigns yet. A welcome campaign for everyone who subscribes is the best first one — it greets everyone who joins your list.</div>');
   }
 
   document.addEventListener('click', (e) => {

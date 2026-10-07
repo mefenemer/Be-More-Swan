@@ -92,8 +92,8 @@ await check('the Studio saves through the same two endpoints as the chat card', 
     const save = STUDIO.slice(landmark(STUDIO, 'async function saveCampaign'), landmark(STUDIO, 'function onCampaignReviewInput'));
     assert.match(save, /action: 'importCampaign'/);
     assert.match(save, /action: 'createCampaign'/);
-    assert.match(save, /res\.status === 409 && data\.code === 'SEQUENCE_HAS_STEPS' && !replace/, 'asks before replacing a welcome sequence');
-    assert.match(save, /window\.confirmModal/);
+    // Saving never overwrites an existing campaign (2026-10-07), so there is no replace question.
+    assert.doesNotMatch(save, /SEQUENCE_HAS_STEPS|replace/);
 });
 
 await check('the builder\'s handlers are bound once in wire(), never from a render path', () => {
