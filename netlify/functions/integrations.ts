@@ -11,6 +11,7 @@ import { getXUsage } from '../../src/utils/ai-credits';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { resolveActiveOrg } from '../../src/utils/tenant';
 import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
+import { findDisconnectSharing, planDisconnectRevoke } from '../../src/utils/disconnect-revoke';
 import { X_OAUTH_SCOPE_LIST } from '../../src/config/x-scopes';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -430,6 +431,7 @@ export default withLambda(async (event) => {
                     serviceName: systemConnections.serviceName,
                     organisationId: systemConnections.organisationId,
                     assistantId: systemConnections.assistantId,
+                    metadata: systemConnections.metadata,
                 })
                 .from(systemConnections)
                 .where(and(
@@ -442,15 +444,22 @@ export default withLambda(async (event) => {
             await db.update(systemConnections).set({ status: 'disconnected', isActive: false, updatedAt: new Date() })
                 .where(and(eq(systemConnections.id, connIdInt), eq(systemConnections.userId, currentUserId)));
 
-            // US-SMM-4.1.2: Remote token revocation — fire-and-forget; vault purge follows regardless
+            // US-SMM-4.1.2: Remote token revocation — fire-and-forget.
+            // ⚠️ Only when nothing else shares the token. A Meta token is a USER token, and
+            // DELETE /me/permissions de-authorises the app for that whole Facebook login, so it
+            // would also break every other Page / IG account the same login connected, in any
+            // workspace. See src/utils/disconnect-revoke.ts.
             if (conn?.vaultRefKey) {
+                const svc = conn.serviceName?.toLowerCase() ?? '';
+                const fbUserId = (conn.metadata as { fbUserId?: string | null } | null)?.fbUserId ?? null;
+                const sharing = await findDisconnectSharing(db, { connectionId: connIdInt, serviceName: svc, fbUserId, vaultRefKey: conn.vaultRefKey });
+                const plan = planDisconnectRevoke({ serviceName: svc, fbUserId, ...sharing });
                 const { getSecret } = await import('../../src/utils/vault');
-                const secret = await getSecret(db, conn.vaultRefKey).catch(() => null);
+                const secret = plan.revokeAtProvider ? await getSecret(db, conn.vaultRefKey).catch(() => null) : null;
                 const token = (secret as { token?: string } | null)?.token;
                 if (token) {
-                    const svc = conn.serviceName?.toLowerCase() ?? '';
                     if (svc === 'instagram' || svc === 'facebook') {
-                        // Meta: DELETE /{user-id}/permissions revokes all grants
+                        // Meta: DELETE /me/permissions revokes ALL grants for the login (guarded above)
                         const metaSecret = process.env.META_APP_SECRET;
                         const metaAppId  = process.env.META_APP_ID;
                         if (metaSecret && metaAppId) {
@@ -479,7 +488,7 @@ export default withLambda(async (event) => {
                         }
                     }
                 }
-                await deleteSecret(db, conn.vaultRefKey).catch(() => {});
+                if (plan.deleteVaultSecret) await deleteSecret(db, conn.vaultRefKey).catch(() => {});
             }
 
             // Cancel scheduled posts linked to this connection (AC1.2.2)
