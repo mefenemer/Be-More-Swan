@@ -1,5 +1,14 @@
 // integrations.js — Connections page controller
 
+// ── Meta app review ──────────────────────────────────────────────
+// ⚠️ TRUE while Meta business verification is pending (rejected 2026-09-02, D-U-N-S since
+// obtained). Until it clears, all 8 of our Meta permissions are at Standard access, so ONLY people
+// holding a role on our Meta app can connect Facebook or Instagram. Everyone else lands on Meta's
+// own error page. While true, the pre-connect modal for `metaApp` platforms offers to add the
+// customer as a Tester (request-meta-tester.ts) and demotes Continue to "already added?".
+// Set to false the day Meta grants Advanced Access, and the modal goes back to the plain checklist.
+const META_REVIEW_PENDING = true;
+
 // ── Platform catalogue ───────────────────────────────────────────
 const PLATFORMS = [
     {
@@ -9,6 +18,7 @@ const PLATFORMS = [
         // 'facebook' Page connection, Instagram stores the linked IG account. Without it the
         // callback can't tell them apart and every Meta connect became an Instagram one.
         oauthUrl: '/.netlify/functions/meta-oauth?action=start&platform=facebook',
+        metaApp: true,
         emoji: '📘',
         iconBg: 'bg-blue-600',
         iconText: 'text-white',
@@ -44,6 +54,7 @@ const PLATFORMS = [
         id: 'Instagram',
         oauthPlatform: true,
         oauthUrl: '/.netlify/functions/meta-oauth?action=start&platform=instagram',
+        metaApp: true,
         emoji: '📸',
         iconBg: 'bg-gradient-to-br from-purple-600 via-pink-500 to-orange-400',
         iconText: 'text-white',
@@ -486,6 +497,15 @@ function _withAssistantId(url) {
 function _oauthUrl(platform) {
     return _withAssistantId(platform.oauthUrl);
 }
+
+// The connect URL for a lowercase platform key ('facebook', 'instagram', 'linkedin', 'x'), for
+// callers outside this page's own cards: the tenant-collision "Move it here" button (workspace.html)
+// re-runs the connect once the account has been freed. Skips the pre-connect checklist on purpose:
+// the person has just been through it.
+window._intOAuthUrlFor = function (platformKey) {
+    const platform = PLATFORMS.find(p => p.oauthPlatform && p.id.toLowerCase() === String(platformKey || '').toLowerCase());
+    return platform ? _oauthUrl(platform) : null;
+};
 
 // Instagram Business accounts authenticate via Meta's Facebook Login (there is no
 // separate Instagram-only OAuth dialog), so "Connect with Instagram" lands on a
@@ -2125,14 +2145,62 @@ window._intOpenPreConnect = function (platformId) {
         }
     }
 
+    // While Meta review is pending, a customer who is not yet a Tester cannot get through Meta's
+    // dialog at all, so the main action becomes "request access" and Continue is for people we have
+    // already added.
+    const testerMode = META_REVIEW_PENDING && !!platform.metaApp;
+    const testerEl = document.getElementById('preconnect-tester');
+    if (testerEl) {
+        testerEl.classList.toggle('hidden', !testerMode);
+        testerEl.style.display = testerMode ? '' : 'none';
+        testerEl.dataset.platform = platform.id.toLowerCase();
+        const input = document.getElementById('preconnect-tester-url');
+        if (input) input.value = '';
+        const status = document.getElementById('preconnect-tester-status');
+        if (status) { status.textContent = ''; status.className = 'text-sm mt-2'; }
+        const sendBtn = document.getElementById('btn-preconnect-tester');
+        if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = 'Request access'; }
+    }
+
     const continueBtn = document.getElementById('btn-preconnect-continue');
     if (continueBtn) {
         continueBtn.setAttribute('href', _oauthUrl(platform));
-        continueBtn.textContent = `I've done all this — continue to ${platform.label}`;
+        continueBtn.textContent = testerMode
+            ? `Already added as a tester? Continue to ${platform.label}`
+            : `I've done all this — continue to ${platform.label}`;
+        continueBtn.classList.toggle('btn-primary', !testerMode);
+        continueBtn.classList.toggle('btn-secondary', testerMode);
     }
 
     _closeDrawerForModal();
     document.getElementById('modal-preconnect')?.classList.remove('hidden');
+};
+
+// Sends the customer's Facebook login link so we can add them as a Meta Tester.
+window._intRequestMetaTester = async function () {
+    const box = document.getElementById('preconnect-tester');
+    const input = document.getElementById('preconnect-tester-url');
+    const status = document.getElementById('preconnect-tester-status');
+    const btn = document.getElementById('btn-preconnect-tester');
+    if (!box || !input || !status || !btn) return;
+    const say = (text, ok) => { status.textContent = text; status.className = `text-sm mt-2 ${ok ? 'text-gray-700' : 'text-red-600'}`; };
+    if (!input.value.trim()) { say('Paste the link from facebook.com/me first.', false); input.focus(); return; }
+
+    btn.disabled = true; btn.textContent = 'Sending…';
+    try {
+        const res = await fetch('/.netlify/functions/request-meta-tester', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ platform: box.dataset.platform || 'facebook', profileUrl: input.value.trim() }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not send your request. Please try again.');
+        say("Request sent. We'll email you once you've been added. Then accept the invite in your Facebook notifications and come back here to connect.", true);
+        btn.textContent = 'Request sent';
+    } catch (err) {
+        say(err.message, false);
+        btn.disabled = false; btn.textContent = 'Request access';
+    }
 };
 
 // ── Open connect modal ────────────────────────────────────────────

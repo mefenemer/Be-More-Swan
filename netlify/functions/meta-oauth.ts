@@ -19,7 +19,7 @@ import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { resolveActionNotifications, CONNECTION_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { restoreConnectionDependents } from '../../src/utils/connection-recovery';
-import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
+import { findTenantCollision, recordCollisionAttempt, collisionParam } from '../../src/utils/connection-collision';
 import { requireTenant } from '../../src/utils/tenant';
 import {
     accountsFor, renderAccountPicker, pendingRefKey, signPickerHandle, parsePickerHandle,
@@ -110,12 +110,12 @@ async function finaliseConnection(db: ReturnType<typeof getDb>, opts: {
 
     // US1 AC1.3: block if this tenant is already live in a different workspace. Checked before
     // any token is persisted, so nothing is stored on rejection.
-    // PARKED: findTenantCollision returns null unless ENFORCE_TENANT_COLLISION is set, so this
-    // branch is dead by default. See src/utils/connection-collision.ts.
+    // Armed by ENFORCE_TENANT_COLLISION. Keyed on the Page / IG account, never the Facebook login,
+    // so one owner connecting two businesses' Pages never lands here. See connection-collision.ts.
     const collision = await findTenantCollision(db, { serviceName, externalUserId, organisationId });
     if (collision) {
-        await recordCollisionAttempt(db, { requestingOrgId: organisationId, existingOrgId: collision.organisationId, serviceName, externalUserId });
-        return { statusCode: 302, headers: { Location: metaErr('tenant_collision') }, body: '' };
+        const attemptId = await recordCollisionAttempt(db, { requestingOrgId: organisationId, existingOrgId: collision.organisationId, serviceName, externalUserId });
+        return { statusCode: 302, headers: { Location: metaErr('tenant_collision') + collisionParam(attemptId) }, body: '' };
     }
 
     // Store token in vault — a separate ref per product so disconnecting one leaves the other's

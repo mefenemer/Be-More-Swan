@@ -21,6 +21,7 @@ import {
     readStabilityBalance, DEFAULT_STABILITY_LOW_BALANCE_CREDITS,
     type FalLockEvidence, type ProviderProblem,
 } from '../../src/utils/provider-balance';
+import { recordHeartbeat } from '../../src/utils/monitor-heartbeat';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const FOUNDER_EMAIL = process.env.FOUNDER_ALERT_EMAIL || 'hello@bemoreswan.com';
@@ -59,7 +60,24 @@ async function readFalEvidence(): Promise<FalLockEvidence> {
     };
 }
 
+/**
+ * Run the check and stamp its heartbeat. ⚠️ A run that THROWS stamps nothing, deliberately: the
+ * heartbeat goes stale and platform-watchdog reports the check as not running.
+ */
 export async function runProviderBalanceCheck() {
+    const result = await evaluateProviderBalances();
+    await recordHeartbeat('provider_balances', {
+        // Every OPEN problem, not just the ones due an email: the watchdog says "still down" even
+        // while this check sits out its cooldown.
+        problems: result.open.filter(p => p.severity === 'down').map(p => p.headline),
+        warnings: result.open.filter(p => p.severity === 'low').map(p => p.headline),
+        alertFailed: result.alertFailed,
+    });
+    const { open: _open, alertFailed: _failed, ...summary } = result;
+    return summary;
+}
+
+async function evaluateProviderBalances() {
     const now = new Date();
     const lowLine = Number(process.env.FAL_LOW_BALANCE_USD) || DEFAULT_FAL_LOW_BALANCE_USD;
     const stabilityLow = Number(process.env.STABILITY_LOW_BALANCE_CREDITS) || DEFAULT_STABILITY_LOW_BALANCE_CREDITS;
@@ -82,7 +100,8 @@ export async function runProviderBalanceCheck() {
     const raw = await getPlatformConfig(CONFIG_KEYS.PROVIDER_BALANCE_LAST_ALERT);
     const log: AlertLog = raw && typeof raw === 'object' ? { ...(raw as AlertLog) } : {};
     const due = problems.filter(p => dueForAlert(p, log, now));
-    if (due.length === 0) return { ...summary, alerted: false };
+    const open = problems;
+    if (due.length === 0) return { ...summary, alerted: false, open, alertFailed: false };
 
     const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const worst = due.some(p => p.severity === 'down') ? 'DOWN' : 'LOW';
@@ -98,10 +117,10 @@ export async function runProviderBalanceCheck() {
         });
         for (const p of due) log[p.provider] = { at: now.toISOString(), severity: p.severity };
         await setPlatformConfig(CONFIG_KEYS.PROVIDER_BALANCE_LAST_ALERT, log);
-        return { ...summary, alerted: true };
+        return { ...summary, alerted: true, open, alertFailed: false };
     } catch (err) {
         console.error('[check-provider-balances] ALERT SEND FAILED — a provider is out and nobody has been told', err);
-        return { ...summary, alerted: false };
+        return { ...summary, alerted: false, open, alertFailed: true };
     }
 }
 

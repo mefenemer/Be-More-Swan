@@ -1,0 +1,78 @@
+# Watches PRODUCTION's monitors from outside Netlify.
+#
+# ── Why ─────────────────────────────────────────────────────────────────────────────────────────
+# check-content-generation-health and check-provider-balances alert by sending an email from inside
+# Netlify. If the schedule stops firing, the function throws before it alerts, or Resend refuses
+# the send, they go quiet, and quiet looks like healthy. (The Anthropic outage of 2026-09-17 ran
+# eleven days with nobody told; the nightly sweeps failed on every run for weeks.)
+#
+# This workflow asks prod's platform-watchdog endpoint for a verdict on the monitors' heartbeats. A
+# non-2xx answer fails the run, and GitHub emails the failure through its own mail, a channel
+# that shares nothing with ours. Low-balance WARNINGS show as annotations and never fail the run.
+#
+# ⚠️ Who gets the email: GitHub notifies about a failed SCHEDULED run to the user who last changed
+# the `cron:` line in this file. Check Settings → Notifications → Actions is on for that account.
+#
+# ⚠️ Cadence: `0 * * * *` is a request. GitHub delivers a fraction of scheduled ticks (see
+# staging-crons.yml / issue #258), worst case a few hours apart. That is still far inside the
+# 13h/30h staleness limits the endpoint applies, and hours rather than eleven days.
+#
+# ── Required setup ──────────────────────────────────────────────────────────────────────────────
+# • Netlify env CRON_TRIGGER_SECRET in the PRODUCTION context (the endpoint fails closed). As of
+#   2026-10-07 it is one value set for ALL contexts, so the repo secret CRON_TRIGGER_SECRET that
+#   staging-crons.yml already uses matches prod too. If prod ever gets its own value, this
+#   workflow needs its own repo secret.
+# A mismatch shows as HTTP 401 and fails the run. That is deliberate: a watchdog that cannot
+# authenticate is not watching.
+
+name: Prod watchdog
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: prod-watchdog
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ask prod whether its monitors are running
+        env:
+          URL: "https://bemoreswan.com/.netlify/functions/platform-watchdog"
+          SECRET: ${{ secrets.CRON_TRIGGER_SECRET }}
+        run: |
+          set -uo pipefail
+          if [ -z "${SECRET:-}" ]; then
+            echo "::error::Repo secret CRON_TRIGGER_SECRET is not set — prod's monitors are unwatched."
+            exit 1
+          fi
+
+          # A timeout leaves -w's "000" behind; `|| true` keeps bash -e from dying before we report.
+          CODE=$(curl -sS -o body.json -w "%{http_code}" --max-time 30 --retry 2 --retry-delay 10 \
+            -H "Authorization: Bearer ${SECRET}" "$URL" || true)
+          CODE=${CODE:-000}
+          echo "HTTP ${CODE}"
+          cat body.json 2>/dev/null || true
+          echo
+
+          # Annotations: every failure as an error and every warning as a warning, so the run's summary page
+          # reads on a phone without opening the log.
+          jq -r '(.failures // [])[] | "::error::" + .' body.json 2>/dev/null || true
+          jq -r '(.warnings // [])[] | "::warning::" + .' body.json 2>/dev/null || true
+
+          {
+            echo "### Prod watchdog — HTTP ${CODE}"
+            jq -r '(.failures // [])[] | "- ❌ " + .' body.json 2>/dev/null || true
+            jq -r '(.warnings // [])[] | "- ⚠️ " + .' body.json 2>/dev/null || true
+            jq -r '(.monitors // {}) | to_entries[] | "- \(.key): last ran \(.value.lastRun // "never") (\(.value.ageHours // "?")h ago)"' body.json 2>/dev/null || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          case "$CODE" in
+            2*) exit 0 ;;
+            *)  echo "::error::platform-watchdog returned HTTP ${CODE}"; exit 1 ;;
+          esac
