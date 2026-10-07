@@ -627,12 +627,9 @@
     }
 
     // A whole campaign from the campaign card. Two destinations, chosen by the trigger exactly as
-    // the card told the user before they pressed Save (disruptive-ui-registry.js): 'subscribed'
-    // becomes the welcome sequence, anything else becomes one draft issue per email.
-    //
-    // ⚠️ A 409 is not a failure here. SEQUENCE_HAS_STEPS is the server asking a question — "there
-    // is already a welcome sequence, replace it?" — and the card asks it. It is passed back with
-    // its code intact, not flattened into an error string.
+    // the card told the user before they pressed Save (disruptive-ui-registry.js): 'subscribed' and
+    // 'form' become a new email campaign, anything else becomes one draft issue per email.
+    // A 409's code is passed back intact, not flattened into an error string.
     function onNewsletterCampaignCreate(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -641,13 +638,13 @@
         return;
       }
       const emails = Array.isArray(d.newsletters) ? d.newsletters : [];
-      // The welcome sequence ('subscribed') and form-started email campaigns ('form') are both
+      // Everyone-who-subscribes ('subscribed') and form-started email campaigns ('form') are both
       // automatic series; anything else becomes draft emails.
       const trigger = d.trigger && (d.trigger.event === 'subscribed' || d.trigger.event === 'form') ? d.trigger.event : null;
       const toSequence = !!trigger;
       const request = toSequence
         ? { url: '/.netlify/functions/newsletter-sequences', body: {
-            action: 'importCampaign', assistantId, name: d.name, replace: d.replace === true, trigger,
+            action: 'importCampaign', assistantId, name: d.name, trigger,
             steps: emails.map((m) => ({
               subject: m.subject, preheader: m.preheader, bodyMarkdown: m.bodyMarkdown,
               // Days since the PREVIOUS email — what delay_days stores. The normaliser recomputed it.

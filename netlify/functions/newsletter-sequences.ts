@@ -24,7 +24,7 @@
 // with nobody reading them again.
 
 import { HandlerEvent } from '@netlify/functions';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, ne, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     aiAssistants, audienceForms, audienceSegments, newsletterSequenceEnrolments, newsletterSequenceSends,
@@ -77,11 +77,15 @@ export default withLambda(async (event: HandlerEvent) => {
                 return json(200, { campaigns: await campaignSummaries(db, ctx.organisationId, sequences) });
             }
             const wantId = Number(event.queryStringParameters?.sequenceId || '') || null;
+            // No id = the "everyone who subscribes" campaign that is ON (else the oldest one) — how
+            // callers from before campaigns had ids still find "the welcome sequence".
             const [sequence] = await db.select().from(newsletterSequences)
                 .where(and(
                     eq(newsletterSequences.organisationId, ctx.organisationId),
                     wantId ? eq(newsletterSequences.id, wantId) : eq(newsletterSequences.triggerEvent, 'subscribed'),
-                )).limit(1);
+                ))
+                .orderBy(desc(newsletterSequences.isEnabled), asc(newsletterSequences.createdAt))
+                .limit(1);
             if (!sequence) return json(200, { sequence: null, steps: [], enrolments: {}, sequences });
 
             const steps = await db.select().from(newsletterSequenceSteps)
@@ -165,16 +169,18 @@ export default withLambda(async (event: HandlerEvent) => {
     }
 
     if (action === 'create') {
-        // ⚠️ IDEMPOTENT. Every read in this file and in the enrolment path resolves the org's
-        // sequence with `LIMIT 1` and no ordering, so a second row is not a duplicate the tenant
-        // can see — it is a coin toss over which sequence their steps attach to and which one
-        // enrols new subscribers. A double-clicked button was enough to create it.
-        const [existing] = await db.select().from(newsletterSequences)
-            .where(and(
-                eq(newsletterSequences.organisationId, orgId),
-                eq(newsletterSequences.triggerEvent, 'subscribed'),
-            )).limit(1);
-        if (existing) return json(200, { sequence: existing });
+        // An "everyone who subscribes" campaign. Any number may exist since 2026-10-06 (only one may
+        // be ON — see db/newsletter-sequences-everyone-campaigns.sql). Without `newCampaign` this is
+        // the old "Create a welcome sequence" button, which stays idempotent: a double click must
+        // not make two.
+        if (body.newCampaign !== true) {
+            const [existing] = await db.select().from(newsletterSequences)
+                .where(and(
+                    eq(newsletterSequences.organisationId, orgId),
+                    eq(newsletterSequences.triggerEvent, 'subscribed'),
+                )).orderBy(desc(newsletterSequences.isEnabled), asc(newsletterSequences.createdAt)).limit(1);
+            if (existing) return json(200, { sequence: existing });
+        }
 
         const assistantId = Number(body.assistantId || '') || null;
         if (assistantId) {
@@ -192,18 +198,11 @@ export default withLambda(async (event: HandlerEvent) => {
     }
 
     // A whole campaign from the chat card (src/utils/newsletter-campaign-chat-draft.ts), saved as
-    // the welcome sequence in one go. Above the "no sequence yet" lookup because it may create one.
-    //
-    // ⚠️ THREE OUTCOMES BEFORE ANYTHING IS WRITTEN, each a decision that belongs to a person:
-    //  • The sequence is ON → refused. Replacing live steps changes what everyone part way through
-    //    receives next, with nobody reading it. Switching it off is the place that already asks
-    //    about those people (newsletter.js), so the user is sent there rather than past it.
-    //  • It is off but HAS steps → 409 SEQUENCE_HAS_STEPS, and the card asks before resending with
-    //    `replace: true`. There is only one welcome sequence; somebody's hand-written welcome email
-    //    must not vanish because they pressed Save on a chat card.
+    // a NEW campaign in one go (never over an existing one's emails). Above the "no sequence yet"
+    // lookup because it creates one.
     //  • The same campaign is already there → deduped. A stored card re-renders its Save button on
     //    every reload of the conversation, so it WILL be pressed twice.
-    // The sequence is never switched on here. Enabling stays owner/admin only, in the Studio.
+    // The campaign is never switched on here. Enabling stays owner/admin only, in the Studio.
     if (action === 'importCampaign') {
         const raw = Array.isArray(body.steps) ? body.steps : [];
         if (!raw.length) return json(400, { error: 'There are no emails in this campaign to save.' });
@@ -227,16 +226,16 @@ export default withLambda(async (event: HandlerEvent) => {
             if (!a) return json(404, { error: 'Assistant not found.' });
         }
 
-        // A campaign started by a sign-up form is a NEW sequence every time (there is no "the" form
-        // campaign to replace) — matched by name only to make a second press of Save a no-op.
+        // Every saved campaign is a NEW campaign (2026-10-06) — "everyone who subscribes" included, which
+        // used to REPLACE the one welcome sequence's emails. Matched by trigger + name + identical
+        // emails only, so a second press of Save is a no-op rather than a duplicate.
         const formTrigger = body.trigger === 'form';
         const campaignName = String(body.name || '').trim().slice(0, 80) || (formTrigger ? 'Form email campaign' : 'Welcome sequence');
         const [existing] = await db.select().from(newsletterSequences)
             .where(and(
                 eq(newsletterSequences.organisationId, orgId),
-                formTrigger
-                    ? and(eq(newsletterSequences.triggerEvent, 'form'), eq(newsletterSequences.name, campaignName))
-                    : eq(newsletterSequences.triggerEvent, 'subscribed'),
+                eq(newsletterSequences.triggerEvent, formTrigger ? 'form' : 'subscribed'),
+                eq(newsletterSequences.name, campaignName),
             )).limit(1);
         const current = existing
             ? await db.select({
@@ -250,21 +249,7 @@ export default withLambda(async (event: HandlerEvent) => {
         const same = current.length === steps.length && current.every((cur, i) =>
             cur.subject === steps[i].subject && cur.bodyMarkdown === steps[i].bodyMarkdown && cur.delayDays === steps[i].delayDays);
         if (existing && same) return json(200, { sequence: existing, deduped: true, stepCount: steps.length });
-        // A same-named form campaign with DIFFERENT emails is a different campaign, not a replacement.
-        const reuse = formTrigger ? (existing && same ? existing : null) : existing;
-
-        if (reuse?.isEnabled) {
-            return json(409, {
-                code: 'SEQUENCE_ENABLED',
-                // Reached when a campaign is saved as "everyone who subscribes" — i.e. AS the welcome
-                // sequence. Usually that was not the intent (a beta-tester campaign was filed this
-                // way), so the way out that is almost always wanted comes first.
-                error: 'Not saved — these emails were set to go to everyone who subscribes, which would replace your welcome sequence, and that is switched on and already emailing people. If they are for one sign-up form (such as beta testers), choose “People who fill in a form” and save again. To replace the welcome sequence itself, switch it off under Email Campaigns first.',
-            });
-        }
-        if (!formTrigger && current.length && body.replace !== true) {
-            return json(409, { code: 'SEQUENCE_HAS_STEPS', stepCount: current.length });
-        }
+        // A same-named campaign with DIFFERENT emails is a different campaign, not a replacement.
 
         const [org] = await db.select({ name: organisations.name }).from(organisations)
             .where(eq(organisations.id, orgId)).limit(1);
@@ -279,17 +264,21 @@ export default withLambda(async (event: HandlerEvent) => {
             baseUrl,
         })));
 
-        const sequence = await db.transaction(async (tx) => {
-            const seq = reuse ?? (await tx.insert(newsletterSequences).values({
+        // Until db/newsletter-sequences-everyone-campaigns.sql is applied, the OLD one-welcome-per-org
+        // index refuses a second "everyone" campaign (23505) — say so instead of a bare 500.
+        const isOldIndex = (err: unknown) => {
+            const e = err as { code?: string; cause?: { code?: string; constraint_name?: string }; constraint_name?: string };
+            return (e?.code ?? e?.cause?.code) === '23505' && /welcome_uidx/.test(String(e?.constraint_name ?? e?.cause?.constraint_name ?? err));
+        };
+        let sequence;
+        try { sequence = await db.transaction(async (tx) => {
+            const [seq] = await tx.insert(newsletterSequences).values({
                 organisationId: orgId,
                 assistantId,
                 triggerEvent: formTrigger ? 'form' : 'subscribed',
                 name: campaignName,
                 createdBy: ctx.userId,
-            }).returning())[0];
-            // Replace, not merge: a 3-email campaign over an old 5-step sequence must not leave
-            // steps 4 and 5 trailing after it.
-            await tx.delete(newsletterSequenceSteps).where(eq(newsletterSequenceSteps.sequenceId, seq.id));
+            }).returning();
             await tx.insert(newsletterSequenceSteps).values(steps.map((st: any, i: number) => ({
                 organisationId: orgId,
                 sequenceId: seq.id,
@@ -301,10 +290,12 @@ export default withLambda(async (event: HandlerEvent) => {
                 design: null,
                 renderedPayload: rendered[i],
             })));
-            await tx.update(newsletterSequences).set({ updatedAt: new Date() }).where(eq(newsletterSequences.id, seq.id));
             return seq;
-        });
-        return json(200, { sequence, deduped: false, replaced: !formTrigger && current.length > 0, stepCount: steps.length });
+        }); } catch (err) {
+            if (isOldIndex(err)) return json(409, { code: 'NEEDS_UPDATE', error: 'You already have a campaign for everyone who subscribes, and this workspace is not yet set up for a second one. Save these emails as "People who fill in a form" for now.' });
+            throw err;
+        }
+        return json(200, { sequence, deduped: false, replaced: false, stepCount: steps.length });
     }
 
     // Every action below works on ONE sequence: the one named by sequenceId (an email campaign a form
@@ -314,7 +305,9 @@ export default withLambda(async (event: HandlerEvent) => {
         .where(and(
             eq(newsletterSequences.organisationId, orgId),
             seqId ? eq(newsletterSequences.id, seqId) : eq(newsletterSequences.triggerEvent, 'subscribed'),
-        )).limit(1);
+        ))
+        .orderBy(desc(newsletterSequences.isEnabled), asc(newsletterSequences.createdAt))
+        .limit(1);
     if (!sequence) return json(404, { error: seqId ? 'That email campaign no longer exists.' : 'No welcome sequence yet.' });
 
     // Rename. A name is only a label — it is not what decides who receives the emails (the trigger
@@ -549,9 +542,33 @@ export default withLambda(async (event: HandlerEvent) => {
         return json(200, { deleted: true });
     }
 
+    // Who receives it — "everyone who subscribes" or "people who fill in a linked sign-up form".
+    // The welcome sequence is just a campaign with the first audience (2026-10-06). Moving an ON
+    // campaign to "everyone" while another "everyone" one is on is refused, as switching on is.
+    if (action === 'setTrigger') {
+        const to = body.trigger === 'form' ? 'form' : body.trigger === 'subscribed' ? 'subscribed' : null;
+        if (!to) return json(400, { error: 'Choose who receives this campaign.' });
+        if (to === sequence.triggerEvent) return json(200, { sequence });
+        if (to === 'subscribed' && sequence.isEnabled) {
+            const [other] = await db.select({ name: newsletterSequences.name }).from(newsletterSequences)
+                .where(and(
+                    eq(newsletterSequences.organisationId, orgId),
+                    eq(newsletterSequences.triggerEvent, 'subscribed'),
+                    eq(newsletterSequences.isEnabled, true),
+                    ne(newsletterSequences.id, sequence.id),
+                )).limit(1);
+            if (other) return json(409, { code: 'ANOTHER_EVERYONE_ON', error: `"${other.name}" is already on for everyone who subscribes. Switch it off first, or switch this campaign off before changing who receives it.` });
+        }
+        const [updated] = await db.update(newsletterSequences)
+            .set({ triggerEvent: to, updatedAt: new Date() })
+            .where(and(eq(newsletterSequences.id, sequence.id), eq(newsletterSequences.organisationId, orgId)))
+            .returning();
+        return json(200, { sequence: updated });
+    }
+
     if (action === 'enable') {
         if (!ENABLE_ROLES.includes(ctx.role)) {
-            return json(403, { error: 'Only an owner or admin can switch the welcome sequence on.' });
+            return json(403, { error: 'Only an owner or admin can switch an email campaign on.' });
         }
         const enable = body.enabled !== false;
 
@@ -568,12 +585,48 @@ export default withLambda(async (event: HandlerEvent) => {
             if (!n) return json(400, { error: 'Write at least one email before switching this on.' });
         }
 
-        const [updated] = await db.update(newsletterSequences).set({
-            isEnabled: enable,
-            enabledAt: enable ? new Date() : null,
-            enabledBy: enable ? ctx.userId : null,
-            updatedAt: new Date(),
-        }).where(eq(newsletterSequences.id, sequence.id)).returning();
+        // Only ONE "everyone who subscribes" campaign may be on (the database enforces it too). If
+        // another is on, ask — `takeOver: true` switches that one off and this one on, together.
+        let other: { id: number; name: string } | undefined;
+        if (enable && sequence.triggerEvent === 'subscribed') {
+            [other] = await db.select({ id: newsletterSequences.id, name: newsletterSequences.name })
+                .from(newsletterSequences)
+                .where(and(
+                    eq(newsletterSequences.organisationId, orgId),
+                    eq(newsletterSequences.triggerEvent, 'subscribed'),
+                    eq(newsletterSequences.isEnabled, true),
+                    ne(newsletterSequences.id, sequence.id),
+                )).limit(1);
+            if (other && body.takeOver !== true) {
+                return json(409, {
+                    code: 'ANOTHER_EVERYONE_ON', otherId: other.id, otherName: other.name,
+                    error: `"${other.name}" already goes to everyone who subscribes. Only one such campaign can be on at a time.`,
+                });
+            }
+        }
+
+        let updated;
+        try { [updated] = await db.transaction(async (tx) => {
+            if (other) {
+                await tx.update(newsletterSequences)
+                    .set({ isEnabled: false, enabledAt: null, enabledBy: null, updatedAt: new Date() })
+                    .where(eq(newsletterSequences.id, other.id));
+            }
+            return tx.update(newsletterSequences).set({
+                isEnabled: enable,
+                enabledAt: enable ? new Date() : null,
+                enabledBy: enable ? ctx.userId : null,
+                updatedAt: new Date(),
+            }).where(eq(newsletterSequences.id, sequence.id)).returning();
+        }); } catch (err) {
+            // Another "everyone" campaign was switched on between the check above and this write —
+            // the partial unique index refused it. Same answer as the check, not a bare 500.
+            const e = err as { code?: string; cause?: { code?: string } };
+            if ((e?.code ?? e?.cause?.code) === '23505') {
+                return json(409, { code: 'ANOTHER_EVERYONE_ON', error: 'Another campaign for everyone who subscribes was just switched on. Reload and try again.' });
+            }
+            throw err;
+        }
 
         // Say what switching off does NOT do: existing enrolments stop at their next step (the
         // worker re-reads this flag), but nothing already delivered is recalled.

@@ -4797,9 +4797,9 @@ export const newsletterSequences = pgTable("newsletter_sequences", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
-  // ONE welcome sequence per org and per assistant; any number of form-triggered ones (db/form-builder.sql).
-  uniqueIndex("newsletter_sequences_org_welcome_uidx").on(t.organisationId).where(sql`trigger_event = 'subscribed'`),
-  uniqueIndex("newsletter_sequences_assistant_welcome_uidx").on(t.assistantId).where(sql`assistant_id IS NOT NULL AND trigger_event = 'subscribed'`),
+  // Any number of "everyone who subscribes" campaigns; at most ONE switched on per org
+  // (db/newsletter-sequences-everyone-campaigns.sql — replaced the one-welcome-per-org indexes).
+  uniqueIndex("newsletter_sequences_org_everyone_on_uidx").on(t.organisationId).where(sql`trigger_event = 'subscribed' AND is_enabled`),
   check("newsletter_sequences_trigger_check", sql`${t.triggerEvent} IN ('subscribed', 'form')`),
 ]);
 

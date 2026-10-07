@@ -264,14 +264,15 @@
     if (!host) return;
     try {
       const data = await api('/.netlify/functions/newsletter-sequences');
-      const list = (data.sequences || []).slice().sort((a, b) => (a.triggerEvent === 'subscribed' ? -1 : 0) - (b.triggerEvent === 'subscribed' ? -1 : 0));
+      // Every campaign alike (2026-10-06): its own name, its id, its audience. Ones that are ON first.
+      const list = (data.sequences || []).slice().sort((a, b) => Number(b.isEnabled) - Number(a.isEnabled));
       host.innerHTML = list.length ? list.map((x) => `<li>
-          <button type="button" data-auto-seq="${x.triggerEvent === 'subscribed' ? '' : x.id}" class="w-full text-left px-4 py-3 hover:bg-gray-50 cursor-pointer">
+          <button type="button" data-auto-seq="${x.id}" class="w-full text-left px-4 py-3 hover:bg-gray-50 cursor-pointer">
             <div class="flex items-start justify-between gap-2">
-              <p class="text-sm font-bold text-gray-900 truncate">${esc(x.triggerEvent === 'subscribed' ? 'Welcome sequence' : x.name)}</p>
+              <p class="text-sm font-bold text-gray-900 truncate">${esc(x.name)}</p>
               <span class="shrink-0 inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border ${x.isEnabled ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-gray-100 text-gray-600 border-gray-200'}">${x.isEnabled ? 'On' : 'Off'}</span>
             </div>
-            <p class="text-xs text-gray-500 mt-0.5">${esc(String(x.steps || 0))} email${x.steps === 1 ? '' : 's'} · ${x.triggerEvent === 'subscribed' ? 'when someone subscribes' : 'when someone fills in a linked form'}</p>
+            <p class="text-xs text-gray-500 mt-0.5">${esc(String(x.steps || 0))} email${x.steps === 1 ? '' : 's'} · ${x.triggerEvent === 'subscribed' ? 'everyone who subscribes' : 'people who fill in a linked form'}</p>
           </button></li>`).join('')
         : '<li class="px-4 py-4 text-xs text-gray-500">None yet. Use <span class="font-bold">New email campaign</span> to create one.</li>';
     } catch { host.innerHTML = ''; }
@@ -2024,18 +2025,17 @@
     return api(SEQ_API, opts);
   }
 
-  /** The series picker above the dialog — only when there is more than the welcome sequence. */
+  /** The campaign picker above the dialog — every campaign, by name and audience, when there are two or more. */
   function renderSeqPicker() {
     const host = $('nl-seq-picker');
     if (!host) return;
-    const forms = seqState.sequences.filter((x) => x.triggerEvent === 'form');
-    if (!forms.length) { host.innerHTML = ''; return; }
-    const opt = (value, label) => `<option value="${esc(value)}" ${String(seqState.selectedId || '') === String(value) ? 'selected' : ''}>${esc(label)}</option>`;
+    if (seqState.sequences.length < 2) { host.innerHTML = ''; return; }
+    const current = String(seqState.selectedId || (seqState.sequence && seqState.sequence.id) || '');
+    const opt = (x) => `<option value="${esc(x.id)}" ${current === String(x.id) ? 'selected' : ''}>${esc(`${x.name} — ${x.triggerEvent === 'subscribed' ? 'everyone who subscribes' : 'a linked sign-up form'} · ${x.isEnabled ? 'On' : 'Off'}`)}</option>`;
     host.innerHTML = `
       <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1" for="nl-seq-pick">Showing</label>
       <select id="nl-seq-pick" class="w-full sm:w-auto px-3 py-2 rounded-lg border border-gray-300 text-sm mb-4">
-        ${opt('', `${(seqState.sequences.find((x) => x.triggerEvent === 'subscribed') || {}).name || 'Welcome sequence'} — everyone who subscribes`)}
-        ${forms.map((x) => opt(x.id, `${x.name} — started by a sign-up form · ${x.isEnabled ? 'On' : 'Off'}`)).join('')}
+        ${seqState.sequences.map(opt).join('')}
       </select>`;
   }
 
@@ -2056,9 +2056,8 @@
       // just built (openWelcomeModal is also how the modal reloads after every save).
       if (seqState.designer) { seqState.designer.destroy(); seqState.designer = null; }
       seqState.sequence = data.sequence;
-      // The welcome sequence is "no id" to the picker and to seqApi(); a deep link by its real id
-      // (the assistant page's Campaigns tab) is folded back into that.
-      if (data.sequence && data.sequence.triggerEvent === 'subscribed') seqState.selectedId = null;
+      // Every campaign is addressed by its id from here on — the welcome sequence included.
+      if (data.sequence) seqState.selectedId = data.sequence.id;
       seqState.sequences = data.sequences || [];
       renderSeqPicker();
       loadAutoList();   // the Studio's card shows On/Off and counts — keep it in step
@@ -2168,7 +2167,11 @@
     return `<div class="rounded-xl border border-gray-200 p-4 mb-4">
       <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Campaign settings</p>
       <dl class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mb-3">
-        <div><dt class="text-[11px] text-gray-500">Type</dt><dd class="font-semibold text-gray-900">${seq.triggerEvent === 'form' ? 'Started by a sign-up form' : 'Welcome sequence'}</dd></div>
+        <div><dt class="text-[11px] text-gray-500">Who receives it</dt><dd>
+          <select id="nl-seq-trigger" class="mt-0.5 w-full px-2 py-1.5 rounded-lg border border-gray-300 text-sm font-semibold text-gray-900 bg-white cursor-pointer">
+            <option value="subscribed" ${seq.triggerEvent === 'subscribed' ? 'selected' : ''}>Everyone who subscribes</option>
+            <option value="form" ${seq.triggerEvent === 'form' ? 'selected' : ''}>People who fill in a linked form</option>
+          </select></dd></div>
         <div><dt class="text-[11px] text-gray-500">Status</dt><dd class="font-semibold text-gray-900">${seq.isEnabled ? `On${since ? ` since ${esc(since)}` : ''}` : 'Off'}</dd></div>
         <div><dt class="text-[11px] text-gray-500">Emails</dt><dd class="font-semibold text-gray-900">${seqState.steps.length} · over ${seqState.steps.reduce((a, s) => a + Number(s.delayDays || 0), 0)} days</dd></div>
       </dl>
@@ -2231,10 +2234,10 @@
     if (!seq) {
       body.innerHTML = `
         <div class="text-center py-8">
-          <p class="text-sm text-gray-600 mb-1">You do not have a welcome sequence yet.</p>
+          <p class="text-sm text-gray-600 mb-1">You do not have a campaign for everyone who subscribes yet.</p>
           <p class="text-xs text-gray-400 mb-4">Right now a new subscriber hears nothing until your next email.</p>
           <button type="button" id="nl-seq-create"
-            class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Create a welcome sequence</button>
+            class="btn-primary px-4 py-2 text-sm font-bold rounded-lg cursor-pointer">Create a welcome campaign</button>
         </div>`;
       $('nl-seq-create')?.addEventListener('click', async () => {
         try {
@@ -2267,8 +2270,8 @@
         <p class="text-[11px] text-gray-400 mt-1">Only you see this.${isFormSeq ? ' Who receives these emails is set by the sign-up form you link it to.' : ''}</p>
       </div>
       ${isFormSeq ? '' : `<div class="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 mb-4 text-sm text-sky-900">
-        <p class="font-bold">This is your welcome sequence.</p>
-        <p>It goes to <strong>everyone who joins your list</strong>, from any sign-up form that is not linked to a campaign of its own. For one group only — such as beta testers — create a separate campaign with <strong>New email campaign → People who fill in a form</strong>, and link it to that group’s form.</p>
+        <p class="font-bold">This campaign goes to everyone who subscribes.</p>
+        <p>It goes to <strong>everyone who joins your list</strong>, from any sign-up form that is not linked to a campaign of its own. For one group only — such as beta testers — create a separate campaign with <strong>New email campaign → People who fill in a form</strong>, and link it to that group’s form. Only one campaign for everyone can be on at a time — switching another on offers to swap them.</p>
       </div>`}
       <div class="flex items-center justify-between rounded-xl border border-gray-200 p-4 mb-4">
         <div>
@@ -2360,7 +2363,7 @@
       </div>
       <div class="flex justify-end mt-4">
         <button type="button" data-seq-delete-all
-          class="btn-destructive px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Delete this ${seq.triggerEvent === 'form' ? 'campaign' : 'welcome sequence'}</button>
+          class="btn-destructive px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer">Delete this campaign</button>
       </div>`;
 
     // Every label that names the assistant, including the two just rendered into this modal.
@@ -2517,21 +2520,43 @@
           ? (seq.triggerEvent === 'form'
             ? 'From now on, everyone who fills in a sign-up form linked to this campaign (and confirms) will receive these emails automatically, without anyone reading them again first.'
             : 'From now on, everyone who confirms their subscription will receive these emails automatically, without anyone reading them again first.')
-          : `Switch off ${seq.triggerEvent === 'form' ? 'this email campaign' : 'the welcome sequence'}? ${active.toLocaleString()} ${active === 1 ? 'person is' : 'people are'} part way through and will not receive the rest.`,
+          : `Switch off "${seq.name}"? ${active.toLocaleString()} ${active === 1 ? 'person is' : 'people are'} part way through and will not receive the rest.`,
         {
-          title: turningOn ? (seq.triggerEvent === 'form' ? `Switch on "${seq.name}"?` : 'Switch on the welcome sequence?') : 'Switch it off?',
+          title: turningOn ? `Switch on "${seq.name}"?` : 'Switch it off?',
           confirmLabel: turningOn ? 'Switch on' : 'Switch off',
           confirmColor: turningOn ? '#059669' : '#dc2626',
         });
       if (!ok) return;
       try {
-        const res = await seqApi({
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'enable', enabled: turningOn }),
+        const send = (takeOver) => fetch(SEQ_API, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+          body: JSON.stringify({ action: 'enable', enabled: turningOn, sequenceId: seq.id, ...(takeOver ? { takeOver: true } : {}) }),
         });
+        let r = await send(false);
+        let res = await r.json().catch(() => ({}));
+        // Only one "everyone who subscribes" campaign can be on — offer the swap (2026-10-06).
+        if (r.status === 409 && res.code === 'ANOTHER_EVERYONE_ON') {
+          const swap = await window.confirmModal(
+            `"${res.otherName}" is on and already goes to everyone who subscribes. Only one such campaign can be on at a time. Switch "${res.otherName}" off and this one on? People part way through "${res.otherName}" will not receive the rest of it.`,
+            { title: 'Swap campaigns?', confirmLabel: 'Swap', cancelLabel: 'Keep as it is' });
+          if (!swap) return;
+          r = await send(true);
+          res = await r.json().catch(() => ({}));
+        }
+        if (!r.ok) throw new Error(res.error || `Could not switch it ${turningOn ? 'on' : 'off'}.`);
         if (res.note) window.showToast(res.note, { duration: res.sendBlocked ? 12000 : 7000, ...(res.sendBlocked ? { icon: '⚠️' } : {}) });
         await openWelcomeModal();
       } catch (err) { window.showToast(err.message); }
+    });
+
+    // Who receives it — the welcome sequence is just a campaign with the "everyone" audience.
+    $('nl-seq-trigger')?.addEventListener('change', async (e) => {
+      const to = e.target.value;
+      try {
+        await seqApi({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'setTrigger', trigger: to }) });
+        window.showToast(to === 'subscribed' ? 'This campaign now goes to everyone who subscribes.' : 'This campaign now goes to people who fill in a linked sign-up form.');
+        await openWelcomeModal();
+      } catch (err) { window.showToast(err.message); e.target.value = seq.triggerEvent; }
     });
   }
 
@@ -2813,7 +2838,7 @@
       .map((c) => tile(cmp.type === c.type, c.label, c.description, `data-cmp-kind="${esc(c.type)}"`)).join('');
     $('nl-cmp-who').innerHTML =
       tile(cmp.who === 'subscribed', 'Everyone who subscribes',
-        'Starts by itself the moment someone joins your list. Saved as your welcome sequence, switched off until you turn it on.', 'data-cmp-who="subscribed"')
+        'Starts by itself the moment someone joins your list. Saved as a new campaign, switched off until you turn it on.', 'data-cmp-who="subscribed"')
       + tile(cmp.who === 'form', 'People who fill in a form',
         'Starts by itself when someone fills in a sign-up form you link it to — a guide download, a waitlist, a purchase registration. Switched off until you turn it on.', 'data-cmp-who="form"')
       + tile(cmp.who === 'custom', 'A group I choose',
@@ -2893,7 +2918,7 @@
     $('nl-cmp-review-note').textContent = isForm
       ? `${n} emails over ${d.newsletters[n - 1].sendDay} days. Edit anything, then save — it becomes an email campaign under Email Campaigns, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on. Nobody is emailed by saving.`
       : automatic
-      ? `${n} emails over ${d.newsletters[n - 1].sendDay} days. Edit anything, then save — it becomes your welcome sequence, switched off until you turn it on under Email Campaigns. Nobody is emailed by saving.`
+      ? `${n} emails over ${d.newsletters[n - 1].sendDay} days. Edit anything, then save — it becomes a campaign for everyone who subscribes, switched off until you turn it on under Email Campaigns. Nobody is emailed by saving.`
       : `${n} emails over ${d.newsletters[n - 1].sendDay} days. Edit anything, then save — each email becomes a draft you send to the right people on its day. Nothing is sent by saving.`;
     const warn = $('nl-cmp-warnings');
     if (d.warnings && d.warnings.length) {
@@ -2914,10 +2939,10 @@
           class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none text-sm font-mono">${esc(e.bodyMarkdown)}</textarea>
         ${e.callToAction ? `<p class="text-xs text-gray-600 mt-1">Asks them to: <span class="font-bold">${esc(e.callToAction.label)}</span>${e.callToAction.url ? '' : ' <span class="text-amber-700 font-bold">· needs a link — add it to the copy</span>'}</p>` : ''}
       </div>`).join('');
-    $('nl-cmp-save').textContent = isForm ? 'Save as form email campaign' : automatic ? 'Save as welcome sequence' : `Save as ${n} draft ${n === 1 ? 'email' : 'emails'}`;
+    $('nl-cmp-save').textContent = isForm ? 'Save as form email campaign' : automatic ? 'Save as email campaign' : `Save as ${n} draft ${n === 1 ? 'email' : 'emails'}`;
   }
 
-  async function saveCampaign(replace = false) {
+  async function saveCampaign() {
     const d = state.campaign.draft;
     const emails = d.newsletters.map((e) => ({
       subject: e.subject, preheader: e.preheader, bodyMarkdown: e.bodyMarkdown, delayDays: e.delayDaysAfterPrevious,
@@ -2930,23 +2955,13 @@
     const btn = $('nl-cmp-save');
     btn.disabled = true;
     try {
-      // Raw fetch, not api(): a 409 here is a QUESTION ("replace the welcome sequence you have?"),
-      // and api() would flatten its code into an error string.
       const res = await fetch(automatic ? SEQ_API : ISSUES_API, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
         body: JSON.stringify(automatic
-          ? { action: 'importCampaign', assistantId: state.assistant.id, name: d.name, replace, steps: emails, trigger: d.trigger.event }
+          ? { action: 'importCampaign', assistantId: state.assistant.id, name: d.name, steps: emails, trigger: d.trigger.event }
           : { action: 'createCampaign', assistantId: state.assistant.id, emails }),
       });
       const data = await res.json().catch(() => ({}));
-      if (res.status === 409 && data.code === 'SEQUENCE_HAS_STEPS' && !replace) {
-        const ok = await window.confirmModal(
-          `Your welcome sequence already has ${data.stepCount} ${data.stepCount === 1 ? 'email' : 'emails'}. Replace ${data.stepCount === 1 ? 'it' : 'them'} with these ${emails.length}? The current ${data.stepCount === 1 ? 'one is' : 'ones are'} deleted. It stays switched off either way.`,
-          { title: 'Replace your welcome sequence?', confirmLabel: 'Replace', confirmColor: '#dc2626' });
-        btn.disabled = false;
-        if (ok) await saveCampaign(true);
-        return;
-      }
       if (!res.ok) throw new Error(data.error || `Could not save (HTTP ${res.status}).`);
       hide($('nl-campaign-modal'));
       state.campaign = null;
@@ -2954,7 +2969,7 @@
       if (d.trigger.event === 'form') {
         window.showToast(data.deduped ? 'Already saved — it is under Email Campaigns.' : 'Saved as an email campaign, switched off. Link it to a sign-up form in Audience → Sign-up forms, then turn it on under Email Campaigns.');
       } else if (automatic) {
-        window.showToast(data.deduped ? 'Already saved — it is your welcome sequence.' : 'Saved as your welcome sequence, switched off. Turn it on under Email Campaigns when you are ready.');
+        window.showToast(data.deduped ? 'Already saved — it is under Email Campaigns.' : 'Saved as an email campaign for everyone who subscribes, switched off. Turn it on under Email Campaigns when you are ready.');
       } else {
         window.showToast(data.deduped ? 'Already saved — these are in your list.' : `Saved ${data.created} draft ${data.created === 1 ? 'email' : 'emails'}. Send each one on its day.`);
         await refreshList();
@@ -3014,21 +3029,20 @@
     const seq = seqState.sequence;
     if (!seq) return;
     const isForm = seq.triggerEvent === 'form';
-    const label = isForm ? `"${seq.name}"` : 'your welcome sequence';
     if (seq.isEnabled) {
-      window.showToast(`Switch ${isForm ? 'this campaign' : 'the welcome sequence'} off first — then you can delete it.`);
+      window.showToast('Switch this campaign off first — then you can delete it.');
       return;
     }
     const ok = await window.confirmModal(
-      `Delete ${label} and its ${seqState.steps.length} ${seqState.steps.length === 1 ? 'email' : 'emails'}? This cannot be undone.${isForm ? ' Any sign-up form linked to it will send new sign-ups your welcome sequence instead.' : ''}`,
-      { title: `Delete ${isForm ? 'this campaign' : 'the welcome sequence'}?`, confirmLabel: 'Delete', confirmColor: '#dc2626' });
+      `Delete "${seq.name}" and its ${seqState.steps.length} ${seqState.steps.length === 1 ? 'email' : 'emails'}? This cannot be undone.${isForm ? ' Any sign-up form linked to it will send new sign-ups to your "everyone who subscribes" campaign instead.' : ''}`,
+      { title: 'Delete this campaign?', confirmLabel: 'Delete', confirmColor: '#dc2626' });
     if (!ok) return;
     if (seqSaver) seqSaver.cancel();
     try {
       await seqApi({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'deleteSequence' }) });
       seqState.selectedId = null;
       hide($('nl-welcome-modal'));
-      window.showToast(isForm ? 'Campaign deleted.' : 'Welcome sequence deleted.');
+      window.showToast('Campaign deleted.');
       loadAutoList();
     } catch (err) {
       window.showToast(err.message);
