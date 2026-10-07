@@ -108,7 +108,10 @@
   // grid so it can drop duplicate "coming soon" cards. One-way: the grid never calls back.
   function publishCoveredCategories(list) {
     window._syncedActionCategories = new Set(list.map((s) => PROVIDER_CATEGORY[s.providerKey]).filter(Boolean));
-    if (typeof window._intLoadConnections === 'function') window._intLoadConnections();
+    // Redraw, not reload: the grid's data is already loaded (or about to be — its own load draws
+    // again when it lands). Reloading here fetched integrations a second time on every page.
+    if (typeof window._intRenderConnections === 'function') window._intRenderConnections();
+    else if (typeof window._intLoadConnections === 'function') window._intLoadConnections();
   }
 
   function render() {

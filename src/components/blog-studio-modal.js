@@ -152,7 +152,7 @@
   function blogStudioAvailable(assistants) { return activeBlogWriters(assistants).length > 0; }
   // Async convenience for the entry points: resolve the org's first active Blog Writer (or null).
   function resolveBlogWriter() {
-    return fetch('/.netlify/functions/get-assistants', { credentials: 'same-origin' })
+    return (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants', { credentials: 'same-origin' }))
       .then(function (r) { return r.ok ? r.json() : { assistants: [] }; })
       .then(function (d) { return activeBlogWriters(d && d.assistants) [0] || null; })
       .catch(function () { return null; });
@@ -676,7 +676,7 @@
   function resolveAssistantMeta(id) {
     if (metaCache[id]) return Promise.resolve(metaCache[id]);
     var fallback = { name: 'Your assistant', role: 'Digital Assistant', roleKey: null };
-    return fetch('/.netlify/functions/get-assistants', { credentials: 'same-origin' })
+    return (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants', { credentials: 'same-origin' }))
       .then(function (r) { return r.ok ? r.json() : { assistants: [] }; })
       .then(function (d) {
         var a = (d.assistants || []).filter(function (x) { return Number(x.id) === Number(id); })[0];

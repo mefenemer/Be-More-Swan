@@ -160,7 +160,7 @@
         })
         .catch(function () { return null; });
     }
-    return fetch('/.netlify/functions/get-assistants', { credentials: 'same-origin' })
+    return (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants', { credentials: 'same-origin' }))
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         var a = data && (data.assistants || []).find(function (x) { return x.id === assistantId; });

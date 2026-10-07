@@ -333,7 +333,7 @@ async function _loadAndRender() {
         const [postsRes, actRes, asstRes, blogRes, nlRes] = await Promise.all([
             fetch(`/.netlify/functions/scheduled-posts?from=${from.toISOString()}&to=${to.toISOString()}`),
             fetch(`/.netlify/functions/get-calendar-activity?from=${from.toISOString()}&to=${to.toISOString()}`),
-            _assistants.length ? Promise.resolve(null) : fetch('/.netlify/functions/get-assistants'),
+            _assistants.length ? Promise.resolve(null) : (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants')),
             fetch(`/.netlify/functions/blog-posts?from=${from.toISOString()}&to=${to.toISOString()}`),
             // The from/to branch of newsletter-issues.ts, NOT its list response — that one carries
             // segments, custom fields, templates and the brand theme, and this refetches on every

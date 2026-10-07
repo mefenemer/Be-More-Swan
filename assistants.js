@@ -507,7 +507,11 @@ window.fetchAndRenderAssistants = async function(containerId, options) {
         // (The merged-away workspace.html copy omitted the period, which is how the two grids could
         // flip back to a week window after an archive/pause re-render.)
         const [res, ipRes] = await Promise.all([
-            fetch('/.netlify/functions/get-assistants?period=all'),
+            // Shared, write-invalidated cache (src/components/cached-fetch.js): the dashboard and the
+            // directory both open on this list. The provisioning poll passes { fresh: true }.
+            window.bmsCachedFetch
+                ? window.bmsCachedFetch.assistants({ fresh: !!(options && options.fresh) })
+                : fetch('/.netlify/functions/get-assistants?period=all'),
             fetch('/.netlify/functions/get-in-progress-assistants'),
         ]);
         if (!res.ok) throw new Error("Failed to fetch");
@@ -9401,7 +9405,7 @@ async function _toggleCopyRulesButton() {
     if (!btn) return;
     btn.style.display = 'none'; // default hidden until we confirm another assistant exists
     try {
-        const res = await fetch('/.netlify/functions/get-assistants');
+        const res = await (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants'));
         if (!res.ok) return;
         const data = await res.json();
         const others = (data.assistants || []).filter(a =>
@@ -9565,7 +9569,7 @@ window._openCopyRules = async function () {
     document.getElementById('modal-copy-rules')?.classList.remove('hidden');
 
     try {
-        const res = await fetch('/.netlify/functions/get-assistants');
+        const res = await (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants'));
         const data = res.ok ? await res.json() : {};
         const list = (data.assistants || data || []).filter(a => a && a.id && parseInt(a.id) !== _rulesAssistantId);
         if (!sel) return;

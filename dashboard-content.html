@@ -752,7 +752,7 @@
     }
     async function renderTeamStatus(el) {
       try {
-        const d = await (await fetch('/.netlify/functions/get-assistants')).json();
+        const d = await (await (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants'))).json();
         const a = d.assistants || [];
         const working = a.filter(x => x.lifecycleStatus === 'working').length;
         el.innerHTML = `<div class="dw-stat">${working}<span style="font-size:15px;color:#94a3b8;font-weight:600"> / ${a.length} working</span></div>

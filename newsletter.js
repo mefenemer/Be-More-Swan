@@ -179,7 +179,7 @@
     const hinted = Number(window._newsletterAssistantId || 0) || null;
     if (state.assistant.name != null && state.assistant.id === hinted) { applyAssistantNaming(); return; }
     try {
-      const res = await fetch('/.netlify/functions/get-assistants', { credentials: 'same-origin' });
+      const res = await (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants', { credentials: 'same-origin' }));
       const data = res.ok ? await res.json() : { assistants: [] };
       const all = data.assistants || [];
       const pick = (hinted && all.find((a) => Number(a.id) === hinted))

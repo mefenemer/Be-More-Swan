@@ -9,6 +9,9 @@
        handler can reach for them. Not deferred — a deferred script runs after parsing, and an
        inline block that calls one of these at load time would find nothing there. -->
   <script src="/dialogs.js"></script>
+  <!-- Short-lived, write-invalidated GET cache (window.bmsCachedFetch). Early, so its fetch wrapper
+       sees every write. -->
+  <script src="/src/components/cached-fetch.js"></script>
   <script src="./session-timeout.js" defer></script>
   <script src="/src/i18n.js"></script>
   <meta charset="UTF-8">
@@ -5050,7 +5053,9 @@ function formatCurrency(amount, currency) {
     clearTimeout(_provPollTimer);
     if (validationIds.size > 0) {
       // Re-render in 15s; self-stops once the view changes (container disappears) or nothing is pending.
-      _provPollTimer = setTimeout(() => window.fetchAndRenderAssistants(containerId), 15000);
+      // { fresh: true }: this poll exists to see provisioning finish, so it must not be answered
+      // from the shared assistants cache (src/components/cached-fetch.js).
+      _provPollTimer = setTimeout(() => window.fetchAndRenderAssistants(containerId, { fresh: true }), 15000);
     }
   };
 
@@ -19609,7 +19614,7 @@ async function gpResolveAssistantMeta(id) {
     if (_gpAssistantMetaCache[id]) return _gpAssistantMetaCache[id];
     let meta = { name: 'Your assistant', role: 'Digital Assistant', roleKey: null };
     try {
-        const res = await fetch('/.netlify/functions/get-assistants');
+        const res = await (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants'));
         const data = res.ok ? await res.json() : { assistants: [] };
         const a = (data.assistants || []).find(x => Number(x.id) === Number(id));
         if (a) meta = { name: a.name || meta.name, role: a.role || meta.role, roleKey: a.roleKey || null };
@@ -21487,7 +21492,7 @@ async function gpSubmitReject() {
   async function load() {
     if (cache && Date.now() - cachedAt < 60000) return;
     try {
-      const d = await (await fetch('/.netlify/functions/get-assistants')).json();
+      const d = await (await (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants'))).json();
       cache = (d.assistants || []).filter((a) => a.lifecycleStatus !== 'archived').sort((x, y) => String(x.name).localeCompare(String(y.name)));
       cachedAt = Date.now();
     } catch { cache = cache || []; }
