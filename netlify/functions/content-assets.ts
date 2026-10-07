@@ -288,15 +288,18 @@ export default withLambda(async (event) => {
             const grouped: Record<string, AssetWithUsage[]> = {
                 pending: [], scheduled: [], posted: [], rejected: [],
             };
+            // The URL signing and the two post lookups below each need only `rows`, so they run
+            // together rather than one after another.
+            //
             // Resolve a displayable URL for visual assets (thumbnails in My Content).
-            const enriched = await Promise.all(rows.map(async r => {
+            const enrichedP = Promise.all(rows.map(async r => {
                 if (r.purgedAt) return r;
                 return { ...r, storageUrl: await resolveAssetDisplayUrl(r) };
             }));
 
             // One read covering drafts AND committed posts: the delete warning wants the drafts,
             // the status derivation wants both. Asking twice would be two scans of the same table.
-            const usageMap = await findActivePostsByAsset(db, orgId, enriched.map(r => r.id), RELEVANT_POST_STATUSES);
+            const usageMapP = findActivePostsByAsset(db, orgId, rows.map(r => r.id), RELEVANT_POST_STATUSES);
 
             // ── Unused-brand-card countdown ─────────────────────────────────────────────────────
             // A generated card that was never attached to a post and never opened in the card
@@ -311,10 +314,14 @@ export default withLambda(async (event) => {
             // card attached to a post that was later cancelled was still USED, and must not expire
             // as though it had been generated into a void. findEverAttachedAssetIds is the same
             // helper content-retention.ts purges by, so the badge and the purge always agree.
-            const cardIds = enriched.filter(r => r.provider === BRAND_CARD_PROVIDER && !r.purgedAt).map(r => r.id);
-            const everAttached = cardIds.length
-                ? await findEverAttachedAssetIds(db, orgId ? [orgId] : [], cardIds)
-                : new Set<number>();
+            const cardIds = rows.filter(r => r.provider === BRAND_CARD_PROVIDER && !r.purgedAt).map(r => r.id);
+            const [enriched, usageMap, everAttached] = await Promise.all([
+                enrichedP,
+                usageMapP,
+                cardIds.length
+                    ? findEverAttachedAssetIds(db, orgId ? [orgId] : [], cardIds)
+                    : Promise.resolve(new Set<number>()),
+            ]);
 
             enriched.forEach(r => {
                 if (r.purgedAt) return; // hide physically purged records

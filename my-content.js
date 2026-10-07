@@ -159,6 +159,23 @@ async function _loadAssets() {
     _startPollingIfNeeded();
 }
 
+/**
+ * A thumbnail-sized URL for the 56px tile. Pexels hotlinks are stored at 940×650 (~60 KB each), so a
+ * library of stock photos downloaded tens of MB to draw postage stamps; the Pexels CDN resizes on
+ * request, so ask it for a 2× crop. Every other URL is returned untouched — R2 has no resizer, and
+ * the lightbox (_mcViewAsset) still opens the full-size storageUrl.
+ */
+function _mcThumbUrl(url) {
+    try {
+        const u = new URL(url);
+        if (u.hostname !== 'images.pexels.com') return url;
+        u.searchParams.set('w', '112');
+        u.searchParams.set('h', '112');
+        u.searchParams.set('fit', 'crop');
+        return u.toString();
+    } catch { return url; }
+}
+
 // ── Smart polling ─────────────────────────────────────────────────
 // While there are recently-uploaded pending assets, poll every 12s so the UI
 // picks up any status transitions (pending → scheduled, scheduled → posted, etc.)
@@ -173,6 +190,11 @@ function _startPollingIfNeeded() {
     // Poll while there are young pending assets or any scheduled ones (could publish soon)
     if (recentPending.length > 0 || scheduledCount > 0) {
         _pollTimer = setTimeout(async () => {
+            // The workspace swaps views without unloading this script, so the timer outlived the
+            // page: leaving My Content kept re-reading the whole library (~1 MB, ~1.7 s) every 12 s
+            // on every other view, for as long as anything was scheduled. Stop once the view is gone;
+            // initMyContent starts it again on the next visit.
+            if (!document.getElementById('content-sections')) return;
             await _loadAssets();
         }, 12_000);
     }
@@ -542,8 +564,10 @@ function _assetRow(asset, sec) {
     const sourceChip = source
         ? `<span title="${source.label}" class="absolute bottom-0 right-1 w-4 h-4 rounded-full ${source.chipClass} shadow flex items-center justify-center pointer-events-none">${source.icon}</span>`
         : '';
+    // Lazy: a library holds hundreds of rows (772 in one workspace), and without it the browser
+    // downloaded every thumbnail on the page the moment it rendered.
     const thumbInner = (asset.assetType === 'image' && asset.storageUrl)
-        ? `<img src="${asset.storageUrl}" alt="" class="w-full h-full object-cover rounded-lg">${playOverlay}${sourceChip}`
+        ? `<img src="${_mcThumbUrl(asset.storageUrl)}" alt="" loading="lazy" decoding="async" class="w-full h-full object-cover rounded-lg">${playOverlay}${sourceChip}`
         : (asset.assetType === 'video' && asset.storageUrl)
             ? `<video src="${asset.storageUrl}" class="w-full h-full object-cover rounded-lg" preload="metadata" muted playsinline></video>${playOverlay}${sourceChip}`
             : `<div class="w-full h-full flex items-center justify-center text-gray-400">${icon}</div>${playOverlay}${sourceChip}`;

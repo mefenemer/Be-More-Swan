@@ -15,20 +15,43 @@ import { getSecret, storeSecret } from './vault';
 import { WORKSPACE_BACKED_PLATFORMS } from './live-social-connections';
 import { getFreshAccessToken, IntegrationError, type IntegrationProvider } from './workspace-integrations';
 
+// One client per process. Presigning is local crypto, but building an S3Client is not free, and a
+// list endpoint presigns once per row — My Content's GET built ~340 clients per call for one
+// workspace. The R2 env vars cannot change within a process, so sharing it changes nothing else.
+let _r2: S3Client | null = null;
 function r2Client(): S3Client {
-    return new S3Client({
-        region: 'auto',
-        endpoint: process.env.R2_ENDPOINT,
-        credentials: {
-            accessKeyId: process.env.R2_ACCESS_KEY_ID!,
-            secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
-        },
-    });
+    if (!_r2) {
+        _r2 = new S3Client({
+            region: 'auto',
+            endpoint: process.env.R2_ENDPOINT,
+            credentials: {
+                accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+                secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+            },
+        });
+    }
+    return _r2;
 }
 
-export async function presignR2Get(key: string, expiresSec = 600): Promise<string> {
-    return getSignedUrl(r2Client(), new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key }), { expiresIn: expiresSec });
+/**
+ * Presign a GET for a private R2 object, valid for at least `expiresSec`.
+ *
+ * `stableWindowSec` makes the URL IDENTICAL for every call inside the same window: the signature
+ * is dated at the start of the window and its lifetime is stretched by the window's length, so it
+ * still never has less than `expiresSec` left. Without it every call mints a new signature, every
+ * URL is new to the browser, and a page that re-reads its list (My Content polls every 12 s)
+ * downloads every private image again on every read.
+ */
+export async function presignR2Get(key: string, expiresSec = 600, opts: { stableWindowSec?: number } = {}): Promise<string> {
+    const command = new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key });
+    const w = opts.stableWindowSec;
+    if (!w) return getSignedUrl(r2Client(), command, { expiresIn: expiresSec });
+    const windowStart = new Date(Math.floor(Date.now() / (w * 1000)) * w * 1000);
+    return getSignedUrl(r2Client(), command, { expiresIn: expiresSec + w, signingDate: windowStart });
 }
+
+/** How long a display URL from resolveAssetDisplayUrl stays byte-identical (see presignR2Get). */
+const DISPLAY_URL_WINDOW_SEC = 20 * 60;
 
 // Resolve a displayable URL for a stored asset: S3 uploads already carry a public
 // storageUrl; AI-generated images live in the private R2 bucket with only a storageKey,
@@ -50,7 +73,9 @@ export async function resolveAssetDisplayUrl(asset: {
     const isStored = asset.assetType === 'image' || asset.assetType === 'video' || asset.assetType === 'audio';
     if (!isStored) return asset.externalUrl || null;
     if (asset.storageKey) {
-        try { return await presignR2Get(asset.storageKey); } catch { /* fall through to externalUrl */ }
+        // Stable within a window so a re-read list hands the browser the same URLs it already has
+        // cached; still never less than the 600 s it always guaranteed.
+        try { return await presignR2Get(asset.storageKey, 600, { stableWindowSec: DISPLAY_URL_WINDOW_SEC }); } catch { /* fall through to externalUrl */ }
     }
     return asset.externalUrl || null;
 }

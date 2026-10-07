@@ -5399,15 +5399,17 @@ function formatCurrency(amount, currency) {
     // get-onboarding-status reads to unlock the gated nav items (review-queue/calendar/
     // my-content). No widget, and no "setup complete" toast — celebrating 3-of-9 here would
     // disagree with the wizard's 8-step go-live, so that's left entirely to the wizard.
-    try {
+    // The gating sync and the Time Saved card are independent, so they run together — they used
+    // to be awaited one after the other, two round trips in front of the dashboard's assistants.
+    const gatingSync = (async () => { try {
       await fetch('/.netlify/functions/get-onboarding-progress');
       document.getElementById('onboarding-widget-container')?.classList.add('hidden');
       // Re-sync nav locks in case the flag just flipped (non-blocking, no-op if unchanged).
       window.refreshOnboardingLock?.();
-    } catch (e) { console.warn('Onboarding gating sync failed:', e); }
+    } catch (e) { console.warn('Onboarding gating sync failed:', e); } })();
 
     // ── Time Saved card ──
-    try {
+    const timeSaved = (async () => { try {
       const res = await fetch('/.netlify/functions/get-time-saved');
       if (res.ok) {
         const d = await res.json();
@@ -5422,7 +5424,9 @@ function formatCurrency(amount, currency) {
           `<div class="flex justify-between text-sm"><span class="text-gray-600">${b.label}</span><span class="font-semibold text-gray-900">${b.hours} h</span></div>`).join('');
         if (card) card.classList.remove('hidden');
       }
-    } catch (e) { console.warn('Time saved failed:', e); }
+    } catch (e) { console.warn('Time saved failed:', e); } })();
+
+    await Promise.all([gatingSync, timeSaved]);
 
     // Milestones are evaluated server-side inside get-time-saved above — celebrate a new one
     // here so it runs regardless of which initDashboard path invoked this render.
