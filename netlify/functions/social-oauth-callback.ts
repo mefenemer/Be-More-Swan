@@ -14,7 +14,7 @@ import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { resolveActionNotifications, CONNECTION_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { restoreConnectionDependents } from '../../src/utils/connection-recovery';
-import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
+import { findTenantCollision, recordCollisionAttempt, collisionParam } from '../../src/utils/connection-collision';
 import { X_OAUTH_SCOPES } from '../../src/config/x-scopes';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -104,12 +104,13 @@ export default withLambda(async (event) => {
             return { statusCode: 302, headers: { Location: `/workspace.html?oauth_error=token_exchange&platform=linkedin` }, body: '' };
         }
 
-        // US1 AC1.3: reject if this LinkedIn tenant is already live in another workspace (before storing the token).
-        // PARKED by default — see src/utils/connection-collision.ts (ENFORCE_TENANT_COLLISION).
+        // US1 AC1.3: LinkedIn is EXEMPT (COLLISION_EXEMPT_SERVICES) — its id is the person's own member
+        // profile, which one owner legitimately uses for several businesses — so this never fires.
+        // Kept so a future business-page (organisation) connection is checked by default.
         const linkedinCollision = await findTenantCollision(db, { serviceName: 'linkedin', externalUserId: linkedinId, organisationId });
         if (linkedinCollision) {
-            await recordCollisionAttempt(db, { requestingOrgId: organisationId, existingOrgId: linkedinCollision.organisationId, serviceName: 'linkedin', externalUserId: linkedinId });
-            return { statusCode: 302, headers: { Location: `/workspace.html?oauth_error=tenant_collision&platform=linkedin` }, body: '' };
+            const attemptId = await recordCollisionAttempt(db, { requestingOrgId: organisationId, existingOrgId: linkedinCollision.organisationId, serviceName: 'linkedin', externalUserId: linkedinId });
+            return { statusCode: 302, headers: { Location: `/workspace.html?oauth_error=tenant_collision&platform=linkedin${collisionParam(attemptId)}` }, body: '' };
         }
 
         const refKey = `aura/org-${organisationId}/linkedin-token`;
@@ -184,12 +185,12 @@ export default withLambda(async (event) => {
         const xUsername = meData.data?.username ?? '';
 
         // US1 AC1.3: reject if this X tenant is already live in another workspace (before storing the token).
-        // PARKED by default — see src/utils/connection-collision.ts (ENFORCE_TENANT_COLLISION).
+        // Armed by ENFORCE_TENANT_COLLISION — see src/utils/connection-collision.ts.
         // Keyed on the stable user id (matches externalUserId = xUsername || xUserId).
         const xCollision = await findTenantCollision(db, { serviceName: 'x', externalUserId: xUsername || xUserId, organisationId });
         if (xCollision) {
-            await recordCollisionAttempt(db, { requestingOrgId: organisationId, existingOrgId: xCollision.organisationId, serviceName: 'x', externalUserId: xUsername || xUserId });
-            return { statusCode: 302, headers: { Location: `/workspace.html?oauth_error=tenant_collision&platform=x` }, body: '' };
+            const attemptId = await recordCollisionAttempt(db, { requestingOrgId: organisationId, existingOrgId: xCollision.organisationId, serviceName: 'x', externalUserId: xUsername || xUserId });
+            return { statusCode: 302, headers: { Location: `/workspace.html?oauth_error=tenant_collision&platform=x${collisionParam(attemptId)}` }, body: '' };
         }
 
         const refKey = `aura/org-${organisationId}/x-token`;

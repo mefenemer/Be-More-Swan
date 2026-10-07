@@ -498,6 +498,15 @@ function _oauthUrl(platform) {
     return _withAssistantId(platform.oauthUrl);
 }
 
+// The connect URL for a lowercase platform key ('facebook', 'instagram', 'linkedin', 'x'), for
+// callers outside this page's own cards: the tenant-collision "Move it here" button (workspace.html)
+// re-runs the connect once the account has been freed. Skips the pre-connect checklist on purpose:
+// the person has just been through it.
+window._intOAuthUrlFor = function (platformKey) {
+    const platform = PLATFORMS.find(p => p.oauthPlatform && p.id.toLowerCase() === String(platformKey || '').toLowerCase());
+    return platform ? _oauthUrl(platform) : null;
+};
+
 // Instagram Business accounts authenticate via Meta's Facebook Login (there is no
 // separate Instagram-only OAuth dialog), so "Connect with Instagram" lands on a
 // facebook.com screen asking the user to log into Facebook and pick the linked Page.

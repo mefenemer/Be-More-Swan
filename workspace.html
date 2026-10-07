@@ -1876,7 +1876,10 @@ window.showComplianceModals = function showComplianceModals(force) {
       <h3 class="text-lg font-bold text-gray-900">Account already connected</h3>
     </div>
     <p id="collision-modal-msg" class="text-sm text-gray-600 mb-5"></p>
+    <!-- Shown only when move-connection says the caller owns/administers the holding workspace. -->
+    <p id="collision-move-detail" class="hidden text-sm text-gray-600 -mt-3 mb-5"></p>
     <div id="collision-modal-actions" class="flex flex-col gap-2">
+      <button id="collision-move-btn" type="button" class="hidden btn-primary w-full px-4 py-2.5 text-sm font-bold rounded-lg transition cursor-pointer">Move it here</button>
       <button id="collision-request-btn" type="button" class="btn-primary w-full px-4 py-2.5 text-sm font-bold rounded-lg transition cursor-pointer">Request Access to Existing Workspace</button>
       <button type="button" onclick="window._closeCollisionModal()" class="btn-secondary w-full px-4 py-2.5 border text-sm font-bold rounded-lg transition cursor-pointer">Cancel</button>
     </div>
@@ -1885,18 +1888,67 @@ window.showComplianceModals = function showComplianceModals(force) {
 </div>
 <script>
   window._closeCollisionModal = function () { document.getElementById('collision-modal')?.classList.add('hidden'); };
-  window._showCollisionModal = function (label, platform) {
+  window._showCollisionModal = function (label, platform, collisionId, assistantId) {
     const m = document.getElementById('collision-modal');
     if (!m) return;
-    document.getElementById('collision-modal-msg').textContent =
+    const msg = document.getElementById('collision-modal-msg');
+    msg.textContent =
       `This ${label} account is already connected to another Be More Swan workspace. To use it, you must join the existing workspace or disconnect it from the other account.`;
     const btn = document.getElementById('collision-request-btn');
     const done = document.getElementById('collision-modal-done');
     const actions = document.getElementById('collision-modal-actions');
+    const moveBtn = document.getElementById('collision-move-btn');
+    const moveDetail = document.getElementById('collision-move-detail');
     done.classList.add('hidden');
     actions.classList.remove('hidden');
+    moveBtn.classList.add('hidden'); moveBtn.style.display = 'none';
+    moveDetail.classList.add('hidden');
+    btn.classList.remove('hidden'); btn.style.display = '';
     btn.disabled = false;
     btn.textContent = 'Request Access to Existing Workspace';
+
+    // The way out when the caller owns BOTH workspaces: move the account here. The server decides
+    // (move-connection.ts re-checks memberships against the recorded attempt); this only asks.
+    if (collisionId) {
+      fetch(`/.netlify/functions/move-connection?attempt=${encodeURIComponent(collisionId)}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+          if (!d || !d.canMove) return;
+          const from = d.fromWorkspace || 'your other workspace';
+          msg.textContent = `This ${label} account is connected to your workspace “${from}”. An account can be live in one workspace at a time.`;
+          const n = Number(d.scheduledPosts || 0);
+          moveDetail.textContent = `Moving it disconnects it from “${from}”` +
+            (n > 0 ? `, and the ${n} post${n === 1 ? '' : 's'} scheduled there for this account will be cancelled.` : '.');
+          moveDetail.classList.remove('hidden');
+          moveBtn.classList.remove('hidden'); moveBtn.style.display = '';
+          // Requesting access to a workspace you already run is meaningless.
+          btn.classList.add('hidden'); btn.style.display = 'none';
+          moveBtn.disabled = false;
+          moveBtn.textContent = 'Move it here';
+          moveBtn.onclick = async () => {
+            moveBtn.disabled = true;
+            moveBtn.textContent = 'Moving…';
+            try {
+              const r = await fetch('/.netlify/functions/move-connection', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ attemptId: Number(collisionId) }),
+              });
+              if (!r.ok) throw new Error();
+              // The account is free now: run the connect again, which lands here this time. Meta
+              // usually remembers the consent, so this is one hop.
+              let next = window._intOAuthUrlFor?.(platform);
+              if (!next) throw new Error();
+              if (assistantId && !/[?&]assistantId=/.test(next)) next += `${next.includes('?') ? '&' : '?'}assistantId=${encodeURIComponent(assistantId)}`;
+              moveDetail.textContent = `Disconnected from “${from}”. Connecting it here…`;
+              window.location.href = next;
+            } catch {
+              moveBtn.disabled = false;
+              moveBtn.textContent = 'Move it here';
+              window.showToast?.('Could not move the account. Please try again.', { icon: '⚠️' });
+            }
+          };
+        })
+        .catch(() => {});
+    }
     btn.onclick = async () => {
       btn.disabled = true;
       btn.textContent = 'Sending…';
@@ -3813,7 +3865,11 @@ function formatCurrency(amount, currency) {
       if (!errorParam) return;
       const platform = qs.get('platform');
       const assistantId = qs.get('assistantId');
+      // A tenant collision carries the recorded attempt's id, so the modal can ask move-connection
+      // whether the caller may move the account here. Only an id: the server re-derives the rest.
+      const collisionId = qs.get('collision');
       const url = new URL(window.location.href);
+      url.searchParams.delete('collision');
       url.searchParams.delete('error');
       url.searchParams.delete('oauth_error');
       url.searchParams.delete('meta_error');
@@ -3874,7 +3930,7 @@ function formatCurrency(amount, currency) {
       // US2 AC2.1: a tenant collision gets a richer modal with a "Request Access" path,
       // not just a toast.
       if (errorParam === 'tenant_collision') {
-        window._showCollisionModal?.(label, (platform || '').toLowerCase());
+        window._showCollisionModal?.(label, (platform || '').toLowerCase(), collisionId, assistantId);
         fetch('/.netlify/functions/client-log', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ event: 'oauth_error', error: errorParam, path: window.location.pathname }),

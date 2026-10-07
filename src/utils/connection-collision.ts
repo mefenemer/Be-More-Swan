@@ -8,13 +8,25 @@
 // can reject the attempt before persisting a token. The DB also enforces this with a partial unique
 // index (db/connection-tenant-uniqueness.sql) as the race-proof backstop.
 //
-// ── TEMPORARILY DISABLED ──────────────────────────────────────────────────────────────────────
-// The block is OFF by default: findTenantCollision() short-circuits to null unless
-// ENFORCE_TENANT_COLLISION is set truthy. Real accounts were being locked out of reconnecting
-// (a stale active row in another workspace is indistinguishable from genuine abuse), so the gate
-// is parked rather than deleted. To turn it back on: set ENFORCE_TENANT_COLLISION=true AND
-// re-apply db/connection-tenant-uniqueness.sql (the DB backstop index is dropped by
-// db/system-connections-drop-provider-tenant-unique.sql, so the flag alone is not enough).
+// ── What counts as "the same account" ─────────────────────────────────────────────────────────
+// The BUSINESS account, never the login used to reach it. Facebook is keyed on the Page id and
+// Instagram on the IG business account id (src/utils/meta-accounts.ts), so one person who owns two
+// businesses signs in with the same Facebook login in both workspaces, picks a different Page in
+// each, and never collides. That is the intended case: Love Cat Studio and Be More Swan share an
+// owner and must both connect.
+//
+// ⚠️ LinkedIn is EXEMPT. We post as a personal MEMBER profile (w_member_social), so its id is the
+// person, not a business, and an owner posting for two businesses from their own profile is
+// legitimate. Blocking it would lock that owner out of one of their own workspaces.
+//
+// ── When it does collide: move, don't lock out ────────────────────────────────────────────────
+// Parked 2026-09-01 because a real owner was locked out of their own Page (a stray row left in
+// their OTHER workspace by the pre-picker reconnect bug). Re-armed with a way out: a caller who is
+// an owner/admin of the workspace holding the account can move it (src/utils/connection-move.ts,
+// netlify/functions/move-connection.ts). Anyone else gets the request-to-join flow.
+//
+// Still behind ENFORCE_TENANT_COLLISION. To arm it: apply db/system-connections-tenant-unique-v2.sql
+// (the race backstop, which excludes LinkedIn) AFTER deploying this code, then set the env var.
 
 import { and, eq, ne } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -29,6 +41,9 @@ export type TenantCollision = { connectionId: number; organisationId: number };
  * to two workspaces, which is exactly what this module exists to prevent.
  */
 const canonicalService = (serviceName: string): string => serviceName.toLowerCase();
+
+/** Services whose external id is a PERSON rather than a business account. Never collide. */
+export const COLLISION_EXEMPT_SERVICES: ReadonlySet<string> = new Set(['linkedin']);
 
 /**
  * Kill switch for the whole US1 block. Unset/false — the current default — means every OAuth
@@ -50,6 +65,7 @@ export async function findTenantCollision(
     params: { serviceName: string; externalUserId: string | null | undefined; organisationId: number },
 ): Promise<TenantCollision | null> {
     if (!tenantCollisionEnforced()) return null;
+    if (COLLISION_EXEMPT_SERVICES.has(canonicalService(params.serviceName))) return null;
 
     const tenantId = params.externalUserId;
     if (!tenantId) return null;
@@ -74,22 +90,29 @@ export const UNIQUE_VIOLATION = '23505';
 
 /**
  * US2: persist a rejected connection attempt so the requester can later ask to join the workspace
- * that already holds this tenant. Best-effort — never let a logging failure break the OAuth redirect.
+ * that already holds this tenant — or, as its owner/admin, move the account (connection-move.ts).
+ * Returns the attempt id for the redirect, or null if it could not be written. Best-effort — never
+ * let a logging failure break the OAuth redirect.
  */
 export async function recordCollisionAttempt(
     db: PostgresJsDatabase<any>,
     params: { requestingOrgId: number; existingOrgId: number; serviceName: string; externalUserId: string },
-): Promise<void> {
+): Promise<number | null> {
     try {
-        await db.insert(connectionCollisionAttempts).values({
+        const [row] = await db.insert(connectionCollisionAttempts).values({
             requestingOrgId: params.requestingOrgId,
             existingOrgId: params.existingOrgId,
             // request-workspace-access.ts matches this column against a lowercased `platform`.
             serviceName: canonicalService(params.serviceName),
             externalUserId: params.externalUserId,
             status: 'pending',
-        });
+        }).returning({ id: connectionCollisionAttempts.id });
+        return row?.id ?? null;
     } catch (e) {
         console.warn('[connection-collision] failed to record attempt (non-blocking):', e);
+        return null;
     }
 }
+
+/** The `&collision=<id>` suffix for a tenant_collision redirect; empty when the attempt was not recorded. */
+export const collisionParam = (attemptId: number | null): string => (attemptId ? `&collision=${attemptId}` : '');
