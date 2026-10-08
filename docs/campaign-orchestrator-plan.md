@@ -641,3 +641,10 @@ deleting a lesson does not delete the rules it became (said in the UI). Guarded 
 Each step lands with: DDL in an idempotent `db/*.sql` applied to both envs **before** the code
 (`requireCampaign` selects every column), the drizzle mirror, the GUI control, the chat card and
 prompt text (§9.0), and the prompt-surfaces test extended.
+
+## 10. Brand Designer (proposed 2026-10-08)
+
+Planned as its own assistant (`brand_designer`) — see [brand-designer-plan.md](./brand-designer-plan.md).
+What it adds here: a new order action **`commission_visuals`**, priced and approved like every other
+order, delivered when its brief has approved visuals (which then land in `campaign_assets`, §9.3).
+A brief handed to a person reuses §9.5 human tasks. Not built.
