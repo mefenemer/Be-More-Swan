@@ -887,8 +887,12 @@
   // ── Built-in: Campaign Strategy Proposal Card ───────────────────────────────
   // Renderer for the campaign_orchestrator route's wire shape (chat-orchestrator.ts):
   //   { type: 'campaign_strategy_proposal', objective, outcomeMetric, targetValue?,
-  //     maxWorkItems?, endsAt?, rationale?,
-  //     orders?: [{ action, assignedRole, quantity? }] }
+  //     maxWorkItems?, endsAt?, rationale?, campaignId?,
+  //     orders?: [{ action, assignedRole, quantity?, angle?, audience?, idea?, discoveryCampaignId? }] }
+  //
+  // Two modes. Without campaignId it saves a NEW draft campaign with its plan attached; with one it
+  // files more work for a campaign that already exists. Either way the briefs become a PENDING plan
+  // the user approves on the Campaigns tab — the card itself never places an order (§9.1).
   //
   // Same indigo "awaiting your approval" language as the discovery card above, and for the same
   // reason: approving here SAVES A DRAFT. It commissions nothing, spends nothing and briefs
@@ -915,17 +919,31 @@
     const outcomeLabel = C ? C.outcomeLabel(outcomeMetric) : outcomeMetric;
     const targetValue = Number.isFinite(Number(ui.targetValue)) ? Number(ui.targetValue) : null;
     const maxWorkItems = Number.isFinite(Number(ui.maxWorkItems)) ? Number(ui.maxWorkItems) : null;
+    const campaignId = Number.isInteger(Number(ui.campaignId)) && Number(ui.campaignId) > 0 ? Number(ui.campaignId) : null;
 
     // Only render orders the client can name. An unknown action or role means the model invented
     // one, and listing it would promise the user work no assistant will ever be asked to do.
+    //
+    // The orders SENT are exactly the orders SHOWN: `raw` rides along with each rendered row, so an
+    // order the card hid can never be saved behind the user's back. The server re-validates all of it.
+    const actionSpec = (a) => (C && Array.isArray(C.orderActions) ? C.orderActions.find((x) => x.key === a) : null);
     const orders = (Array.isArray(ui.orders) ? ui.orders : [])
-      .filter((o) => o && typeof o === 'object' && ROLE_LABEL[o.assignedRole])
-      .map((o) => ({
-        label: C ? C.orderActionLabel(o.action) : String(o.action || ''),
-        role: ROLE_LABEL[o.assignedRole],
-        qty: Number.isFinite(Number(o.quantity)) && Number(o.quantity) > 1 ? Number(o.quantity) : null,
-      }))
-      .filter((o) => o.label);
+      .filter((o) => o && typeof o === 'object' && ROLE_LABEL[o.assignedRole] && actionSpec(o.action))
+      .map((o) => {
+        const spec = actionSpec(o.action);
+        const qty = spec.takesQuantity && Number.isFinite(Number(o.quantity))
+          ? Math.max(1, Math.min(spec.maxQuantity, Math.floor(Number(o.quantity)))) : 1;
+        const detail = [o.angle, o.idea].find((v) => typeof v === 'string' && v.trim());
+        return {
+          raw: o,
+          label: spec.label,
+          role: ROLE_LABEL[o.assignedRole],
+          qty: qty > 1 ? qty : null,
+          detail: detail ? String(detail).trim() : '',
+          tasks: (spec.workItemsPerUnit || 0) * qty,
+        };
+      });
+    const planTasks = orders.reduce((n, o) => n + o.tasks, 0);
 
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
@@ -933,7 +951,7 @@
       <div class="flex items-start gap-3 mb-3">
         <div class="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-xl shrink-0">🎯</div>
         <div class="min-w-0">
-          <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Campaign plan · Approval needed</p>
+          <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${campaignId ? 'More work for a campaign' : 'Campaign plan'} · Approval needed</p>
           <p class="font-bold text-gray-900 break-words">${esc(objective || 'Untitled campaign')}</p>
         </div>
       </div>
@@ -945,20 +963,22 @@
         <p class="text-xs font-bold text-indigo-700 uppercase tracking-wide mb-1">Who I'd brief</p>
         <ul class="mb-3 space-y-1">
           ${orders.map((o) => `
-            <li class="text-xs text-gray-600">• ${esc(o.label)}${o.qty ? ` ×${esc(String(o.qty))}` : ''} — ${esc(o.role)}</li>
+            <li class="text-xs text-gray-600">• ${esc(o.label)}${o.qty ? ` ×${esc(String(o.qty))}` : ''} — ${esc(o.role)}${o.detail ? `<span class="block pl-3 text-gray-500 italic break-words">${esc(o.detail)}</span>` : ''}</li>
           `).join('')}
         </ul>` : ''}
 
       <ul class="mb-4 space-y-1">
-        <li class="text-xs text-gray-600">• Counts ${esc(String(outcomeLabel).toLowerCase())}${targetValue ? `, aiming for ${esc(String(targetValue))}` : ''}</li>
-        ${maxWorkItems ? `<li class="text-xs text-gray-600">• Uses at most ${esc(String(maxWorkItems))} tasks from your monthly allowance</li>` : ''}
+        ${campaignId ? '' /* the campaign's own measure is not on the wire — a default here would misstate it */ : `<li class="text-xs text-gray-600">• Counts ${esc(String(outcomeLabel).toLowerCase())}${targetValue ? `, aiming for ${esc(String(targetValue))}` : ''}</li>`}
+        ${!campaignId && maxWorkItems ? `<li class="text-xs text-gray-600">• Uses at most ${esc(String(maxWorkItems))} tasks from your monthly allowance</li>` : ''}
+        ${planTasks ? `<li class="text-xs text-gray-600">• ${campaignId ? 'These briefs use' : 'The first briefs use'} ${esc(String(planTasks))} tasks from your monthly allowance</li>` : ''}
+        <li class="text-xs text-gray-600">• Nothing is briefed until you approve the plan on the Campaigns tab</li>
         <li class="text-xs text-gray-600">• You approve every piece of work before it goes out</li>
       </ul>
 
       <div class="flex items-center gap-2" data-csp-actions>
         <button type="button" data-csp-approve
           class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
-          Save this campaign
+          ${campaignId ? 'Save this plan' : 'Save this campaign'}
         </button>
         <button type="button" data-csp-decline
           class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
@@ -987,6 +1007,32 @@
         say('Plan declined.');
         return;
       }
+      if (campaignId) {
+        if (!orders.length) {
+          setBusy(true);
+          say('This plan has no work an assistant can do, so there is nothing to save.', 'error');
+          return;
+        }
+        setBusy(true);
+        say('Saving…');
+        el.dispatchEvent(new CustomEvent('campaign:proposePlan', {
+          bubbles: true,
+          detail: {
+            campaignId,
+            orders: orders.map((o) => o.raw),
+            respond({ ok, error }) {
+              if (ok) {
+                say('Plan saved — approve it on that campaign in your Campaigns tab to brief your assistants.');
+                return;
+              }
+              setBusy(false);
+              say(error || 'Could not save that plan — please try again.', 'error');
+            },
+          },
+        }));
+        return;
+      }
+
       if (!objective) {
         setBusy(true);
         say('This plan has no objective, so it cannot be saved.', 'error');
@@ -1003,6 +1049,7 @@
           targetValue,
           maxWorkItems,
           endsAt: typeof ui.endsAt === 'string' ? ui.endsAt : null,
+          orders: orders.map((o) => o.raw),
           // The success line is built from the SERVER's answer, never from the model's intent —
           // chat-claims-drafts-it-never-saved is a reply that announced drafts which were never
           // written. Re-enabling on failure lets a transient error be retried instead of
@@ -1014,7 +1061,9 @@
               // so this copy cannot drift off the tab silently.
               say(deduped
                 ? 'Already saved — it is in your Campaigns tab.'
-                : 'Saved as a draft — press "Start" on it in your Campaigns tab to begin.');
+                : (orders.length
+                  ? 'Saved as a draft with its plan — press "Approve plan & start" on it in your Campaigns tab to begin.'
+                  : 'Saved as a draft — press "Start" on it in your Campaigns tab to begin.'));
               return;
             }
             setBusy(false);
@@ -1029,6 +1078,96 @@
 
   register('campaign_strategy_proposal', renderCampaignStrategyProposalCard);
   register('CampaignStrategyProposalCard', renderCampaignStrategyProposalCard);
+
+  // ── Built-in: Campaign Edit Proposal Card ───────────────────────────────────
+  // { type: 'campaign_edit_proposal', campaignId, objective?, outcomeMetric?, targetValue?, endsAt? }
+  //
+  // The chat twin of the row's "Edit" button (§9.0 — every capability is reachable both ways).
+  // ⚠️ It carries NO budget field and never will: a chat turn may not raise a ceiling (§1.3), and
+  // campaigns.ts refuses budget fields on the viaChat path even if a crafted card sent them.
+  function renderCampaignEditProposalCard(ui, esc) {
+    const C = window.CampaignConstants;
+    const campaignId = Number.isInteger(Number(ui.campaignId)) && Number(ui.campaignId) > 0 ? Number(ui.campaignId) : null;
+    const changes = {};
+    const rows = [];
+    if (typeof ui.objective === 'string' && ui.objective.trim()) {
+      changes.objective = ui.objective.trim();
+      rows.push(['Objective', changes.objective]);
+    }
+    if (typeof ui.outcomeMetric === 'string' && C && C.selectableOutcomes.indexOf(ui.outcomeMetric) !== -1) {
+      changes.outcomeMetric = ui.outcomeMetric;
+      rows.push(['Counts', C.outcomeLabel(ui.outcomeMetric)]);
+    }
+    if (Number.isFinite(Number(ui.targetValue)) && Number(ui.targetValue) > 0) {
+      changes.targetValue = Math.floor(Number(ui.targetValue));
+      rows.push(['Aiming for', String(changes.targetValue)]);
+    }
+    if (typeof ui.endsAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(ui.endsAt)) {
+      changes.endsAt = ui.endsAt;
+      rows.push(['Ends', ui.endsAt]);
+    }
+
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <div class="flex items-start gap-3 mb-3">
+        <div class="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-xl shrink-0">✏️</div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Change a campaign · Approval needed</p>
+          <p class="font-bold text-gray-900">Proposed changes</p>
+        </div>
+      </div>
+      ${rows.length ? `
+        <ul class="mb-4 space-y-1">
+          ${rows.map(([k, v]) => `<li class="text-xs text-gray-600 break-words"><span class="font-bold text-gray-700">${esc(k)}:</span> ${esc(v)}</li>`).join('')}
+        </ul>` : '<p class="text-xs text-gray-500 mb-4">There is nothing here to change.</p>'}
+      <div class="flex items-center gap-2">
+        <button type="button" data-cep-approve ${rows.length && campaignId ? '' : 'disabled'}
+          class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          Save these changes
+        </button>
+        <button type="button" data-cep-decline
+          class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          Not now
+        </button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-cep-status></p>
+    `;
+
+    const status = el.querySelector('[data-cep-status]');
+    function say(text, tone) {
+      status.textContent = text;
+      status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`;
+    }
+    function setBusy(busy) {
+      el.querySelectorAll('[data-cep-approve], [data-cep-decline]').forEach((b) => { b.disabled = busy; });
+    }
+
+    el.addEventListener('click', (e) => {
+      const approve = e.target.closest('[data-cep-approve]');
+      const decline = e.target.closest('[data-cep-decline]');
+      if (!approve && !decline) return;
+      setBusy(true);
+      if (decline) { say('Left as it is.'); return; }
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('campaign:edit', {
+        bubbles: true,
+        detail: {
+          campaignId,
+          changes,
+          respond({ ok, error }) {
+            if (ok) { say('Saved — the campaign in your Campaigns tab now shows these changes.'); return; }
+            setBusy(false);
+            say(error || 'Could not save those changes — please try again.', 'error');
+          },
+        },
+      }));
+    });
+
+    return el;
+  }
+
+  register('campaign_edit_proposal', renderCampaignEditProposalCard);
 
   // ── Built-in: Action Item Assignment Card ───────────────────────────────────
   // Renderer for the meeting-note-taker route's wire shape (chat-orchestrator.ts):

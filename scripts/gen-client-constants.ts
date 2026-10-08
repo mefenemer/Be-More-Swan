@@ -328,11 +328,14 @@ ${formatRows}
   var UNAVAILABLE_OUTCOME_METRICS = ${JSON.stringify(UNAVAILABLE_OUTCOME_METRICS)};
   var CAMPAIGN_LINK_MEDIUMS = ${JSON.stringify(CAMPAIGN_LINK_MEDIUMS)};
   var PAUSE_REASON_LABELS = ${JSON.stringify(PAUSE_REASON_LABELS)};
-  // Only the fields the browser renders. artefactKind/assignedRole stay server-side — the client
-  // has no business routing an order, and shipping the routing table would invite it to try.
+  // Only the fields the browser renders. artefactKind/roleKey stay server-side — the client has no
+  // business routing an order, and shipping the routing table would invite it to try. Which
+  // actions this workspace can use comes from campaigns.ts list (availableOrderActions).
   var ORDER_ACTIONS = ${JSON.stringify(
       Object.entries(ORDER_ACTION_SPECS).map(([key, s]) => ({
           key, label: s.label, description: s.description,
+          // Pricing, not routing: the Add work form states the cost before the click.
+          takesQuantity: s.takesQuantity, maxQuantity: s.maxQuantity, workItemsPerUnit: s.workItemsPerUnit,
       })),
   )};
 

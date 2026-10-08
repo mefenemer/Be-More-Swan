@@ -79,7 +79,7 @@ export interface PlaceOrderResult {
  * reconstruct. The Orders table showing a failed order is a feature.
  */
 export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResult> {
-    const { db, organisationId, campaignId, action, brief } = input;
+    const { db, organisationId, campaignId, action } = input;
     const spec = ORDER_ACTION_SPECS[action];
     if (!spec) return { orderId: null, status: 'failed', workItems: 0, message: 'Unknown order type.' };
 
@@ -90,6 +90,12 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
     }
 
     const workItems = orderWorkItems(action, input.quantity);
+    // The executors read the count from `brief.quantity`, while the ledger prices `input.quantity`.
+    // Written here, from the priced number, so the two can never disagree: before this a plan
+    // priced at six posts arrived with no brief.quantity and drafted one.
+    const brief = spec.takesQuantity
+        ? { ...input.brief, quantity: Math.max(1, Math.floor(Number(input.quantity) || 1)) }
+        : input.brief;
 
     // Resolve the colleague. An order to an assistant the org has not hired is a real and common
     // case (the orchestrator proposes a blog pillar in a workspace with no Blog Writer), so it is

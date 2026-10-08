@@ -128,6 +128,11 @@ export interface OrderActionSpec {
     workItemsPerUnit: number;
     /** Does `brief.quantity` mean anything for this action? */
     takesQuantity: boolean;
+    /**
+     * The most one order may ask for. Must match the clamp inside this action's executor in
+     * campaign-orders.ts — pricing more than the executor writes charges for work nobody gets.
+     */
+    maxQuantity: number;
     /** What comes back, matching campaign_orders.artefact_kind. */
     artefactKind: 'scheduled_post' | 'blog_post' | 'discovery_campaign' | null;
 }
@@ -139,6 +144,7 @@ export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = 
         description: 'Queues extra posts for the Social Media Assistant to draft, on this campaign’s message. They land in its Posts queue for your approval like any other draft.',
         workItemsPerUnit: 1,
         takesQuantity: true,
+        maxQuantity: 20,
         artefactKind: 'scheduled_post',
     },
     draft_blog_pillar: {
@@ -149,6 +155,7 @@ export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = 
         // point of a shared unit is that the orchestrator can compare unlike things.
         workItemsPerUnit: 6,
         takesQuantity: true,
+        maxQuantity: 5,
         artefactKind: 'blog_post',
     },
     run_lead_search: {
@@ -157,6 +164,7 @@ export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = 
         description: 'Creates a saved search for the Lead Generation Assistant aimed at this campaign’s audience. Created as a draft — starting it is a separate, human click, because a run costs money and reaches real strangers.',
         workItemsPerUnit: 4,
         takesQuantity: false,
+        maxQuantity: 1,
         artefactKind: 'discovery_campaign',
     },
     narrow_targeting: {
@@ -165,6 +173,7 @@ export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = 
         description: 'Edits an existing saved search — tightens the ideal-customer description and adds negative keywords — so it stops finding the wrong kind of company.',
         workItemsPerUnit: 0,
         takesQuantity: false,
+        maxQuantity: 1,
         artefactKind: 'discovery_campaign',
     },
     adjust_messaging: {
@@ -173,6 +182,7 @@ export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = 
         description: 'Changes the angle this campaign asks for. Applies to work drafted from now on; it does not rewrite drafts that already exist.',
         workItemsPerUnit: 0,
         takesQuantity: false,
+        maxQuantity: 1,
         artefactKind: null,
     },
 };

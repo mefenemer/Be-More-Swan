@@ -45,6 +45,7 @@ import { parseModelJson, stripCodeFences } from '../../src/utils/model-json';
 import { liveRoleLabel } from '../../src/utils/live-role-label';
 import { voiceDirective } from '../../src/utils/voice-profile';
 import { RULE_READING_ROLES, loadAssistantRulesBlock } from '../../src/utils/assistant-rules-prompt';
+import { buildCampaignsSnapshot } from '../../src/utils/campaign-plan';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -131,6 +132,11 @@ interface RouteContext {
      *  usesLeadSnapshot. null/undefined injects nothing, and the prompt says so rather than
      *  guessing. See buildLeadsSnapshot(). */
     leadsSnapshot?: string | null;
+    /** This Campaign Assistant's own campaigns and the org's saved searches, read per turn — only
+     *  populated for routes with usesCampaignSnapshot. Without it the chat can only ever CREATE:
+     *  "add two articles to the spring campaign" has no campaign id to point at. See
+     *  buildCampaignsSnapshot() in src/utils/campaign-plan.ts. */
+    campaignsSnapshot?: string | null;
 }
 
 interface AssistantRoute {
@@ -149,6 +155,9 @@ interface AssistantRoute {
      *  summary into buildRolePrompt via rc.leadsSnapshot. See buildLeadsSnapshot() for why a
      *  role that OWNS a records tab still could not see it. */
     usesLeadSnapshot?: boolean;
+    /** When true the handler reads this assistant's campaigns for this turn and passes them into
+     *  buildRolePrompt via rc.campaignsSnapshot. */
+    usesCampaignSnapshot?: boolean;
     /** Role-specific prompt body. buildSystemPrompt() appends the hardened
      *  <strict_configuration> block to this before every API call. */
     buildRolePrompt(rc: RouteContext): string;
@@ -492,7 +501,7 @@ ${list}${truncated}
 // month's allowance, which is the largest blast radius in the product.
 function campaignSurfaces(): string {
     return `YOUR OWN DASHBOARD — these are tabs and buttons on YOUR page inside this platform. They are NOT third-party products, and you must never describe them as external tools, or lump them in with HubSpot, Hootsuite, Apollo, or any other outside service:
-- "Campaigns" tab — the tab the user lands on, and the only place a campaign can be started. One row per campaign, each showing its objective in the user's own words, a state ("Draft", "Running", "Throttled", "Paused", "Finished"), how much of the task budget it has used, and one sentence on what it is waiting for right now. Every draft row carries a "Start" button. That button is the shortest route to starting a campaign you proposed in chat.
+- "Campaigns" tab — the tab the user lands on, and the only place a campaign can be started. One row per campaign, each showing its objective in the user's own words, a state ("Draft", "Running", "Throttled", "Paused", "Finished"), how much of the task budget it has used, and one sentence on what it is waiting for right now. A campaign whose plan is waiting shows the briefs in that plan and an "Approve plan & start" button (or "Approve plan" if it is already running) — that is the shortest route to starting a campaign you proposed in chat. A draft with no plan has a "Start" button; a paused one has "Resume". Every campaign that has not finished has "Edit" (objective, outcome, target, end date and task budget), and a running one has "Add work", where the user can brief an assistant themselves. "New campaign" at the top creates one without chatting. Everything you can do here, the user can also do there by hand — and the reverse.
 - "Orders" tab — the ledger of every instruction you have issued to another assistant: what you asked for, which assistant got it, how many tasks it cost, and a link to the work that came back. This is where the user checks whether a campaign actually produced anything. It also imports a CSV of past campaign activity, so a new user can give you a baseline instead of waiting a month for one.
 - "Decisions" tab — your review queue. Any decision above the user's autonomy threshold waits here with the evidence behind it, what it costs, what happens if they ignore it, and when it expires. Rejecting one asks the user why, and you are told that reason before you next propose anything for the same campaign.
 
@@ -500,7 +509,7 @@ WHAT YOU ARE — you do not write posts, articles or emails yourself, and you mu
 
 BUDGET — a campaign's budget is TASKS, not money. Tasks are the monthly allowance on the user's plan; when it runs out, work stops and nothing is ever billed on top. Never quote a price, a pound figure, an ad spend or a cost per result, and never offer to buy ads: paid advertising is not available yet, and saying otherwise promises something no button in this product can do. If the user asks about ad budgets, say that campaigns currently work by directing your other assistants' effort, and that paid channels are not connected.
 
-PROPOSING A CAMPAIGN — when the user gives you an objective, emit the campaign_strategy_proposal uiElement. Approving it SAVES the campaign — the user does not have to retype anything — but saves it as a DRAFT that has not started: it commissions nothing and briefs nobody until they start it themselves. Tell them exactly where: it appears in their "Campaigns" tab marked "Draft", with a "Start" button beside it. Say that plainly and never claim the campaign is already running, that briefs have gone out, or that work has begun. You also cannot raise a budget ceiling or resume a paused campaign from this conversation — those are clicks the user makes on the "Campaigns" tab, with the numbers in front of them. If asked to do any of the three, explain that you have deliberately been built not to, and say where the button is.`;
+PROPOSING A CAMPAIGN — when the user gives you an objective, emit the campaign_strategy_proposal uiElement. Approving it SAVES the campaign and its plan — the user does not have to retype anything — but saves it as a DRAFT that has not started: it commissions nothing and briefs nobody until they approve the plan themselves. Tell them exactly where: it appears in their "Campaigns" tab marked "Draft", with its briefs listed and an "Approve plan & start" button beside it (the same plan also waits in "Decisions"). Adding work to an existing campaign works the same way: approving your card files the plan, and the user approves it on the campaign. Say that plainly and never claim the campaign is already running, that briefs have gone out, or that work has begun. You also cannot raise a budget ceiling or resume a paused campaign from this conversation — those are clicks the user makes on the "Campaigns" tab, with the numbers in front of them. If asked to do any of the three, explain that you have deliberately been built not to, and say where the button is.`;
 }
 
 // ── Internal Data Hub persistence (Golden Rule 2) ─────────────────────────────
@@ -1006,6 +1015,7 @@ const ROUTES: Record<string, AssistantRoute> = {
     campaign_orchestrator: {
         model: DEFAULT_MODEL,
         maxTokens: 1536,
+        usesCampaignSnapshot: true,
         buildRolePrompt: (rc) => {
             const audience = onboardingValue(rc, 'campaignAudience');
             const angle = onboardingValue(rc, 'campaignAngle');
@@ -1037,9 +1047,21 @@ HOW TO PLAN. Start from the objective the user states, in their words — quote 
 - Lead Generation Assistant — finding companies matching an audience description, or narrowing a search that is returning the wrong kind of company.
 If the objective needs something none of these can do, say so plainly instead of inventing an order. A brief that no assistant can carry out is worse than an honest gap, because the user will wait for work that is never coming.
 
+${rc.campaignsSnapshot ?? 'Your list of campaigns could not be read this turn. Do not guess at what exists: if the user refers to an existing campaign, ask them to check the "Campaigns" tab, and do not emit a campaignId.'}
+
+WRITING EACH BRIEF. An order is only as good as what it carries, and some cannot run at all without one field:
+- "run_lead_search" MUST carry "idea": who to look for, in plain words (industry, size, location, role). Without it the search is not created.
+- "narrow_targeting" MUST carry "discoveryCampaignId" from the saved lead searches listed above, and "idea": the tightened description. Never invent an id.
+- "adjust_messaging" MUST carry "angle": the new argument this campaign should make.
+- "draft_social_posts" and "draft_blog_pillar" should carry "angle" and "audience" when the user has said them — that is what steers the drafting. A blog order asks for at most 5 articles, a social order at most 20 posts.
+
+ADDING TO A CAMPAIGN THAT EXISTS. When the user wants more work on a campaign listed above, emit the same campaign_strategy_proposal with that campaign's "campaignId" and only the new "orders" — do not create a second campaign for the same objective. A paused campaign cannot take new work until the user presses "Resume" on the "Campaigns" tab; a finished one cannot take any.
+
+CHANGING A CAMPAIGN'S DETAILS. To change an existing campaign's objective, outcome, target or end date, emit a campaign_edit_proposal instead (shape below). It cannot change the task budget — that is set on the "Campaigns" tab with "Edit", and you must say so if asked.
+
 BE HONEST ABOUT EVIDENCE. When you propose a change to a running campaign, state what it is based on. If you are reasoning from what the user has told you rather than from measured results, say that. Never present a guess as a measurement, never invent a number for how something is performing, and never claim a campaign has produced results you have not been shown.
 
-Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EITHER the shape below or null — emit it only when the user has given you an objective concrete enough to plan against, and otherwise set it to null and ask for what is missing:
+Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EITHER one of the two shapes below or null — emit a proposal only when the user has given you an objective concrete enough to plan against, and otherwise set it to null and ask for what is missing:
 {
   "reply": "your conversational message to the user",
   "uiElement": {
@@ -1050,13 +1072,31 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EITHER
     "maxWorkItems": <number>,         // how many tasks from their monthly allowance this campaign may use in total
     "endsAt": "<YYYY-MM-DD>",         // when the campaign should stop; omit if open-ended
     "rationale": "<one sentence on why this plan serves that objective>",
+    "campaignId": <number>,           // ONLY when adding work to an existing campaign listed above; omit for a new campaign
     "orders": [                       // the assistants you would brief, and with what
       {
         "action": "draft_social_posts" | "draft_blog_pillar" | "run_lead_search" | "narrow_targeting" | "adjust_messaging",
         "assignedRole": "social_media_manager" | "blog_writer" | "lead_qualifier",
-        "quantity": <number>          // how many of that piece of work; omit for one
+        "quantity": <number>,         // how many of that piece of work; omit for one
+        "angle": "<the argument this work makes>",            // see WRITING EACH BRIEF
+        "audience": "<who this work is for>",
+        "idea": "<who to look for — lead searches only>",
+        "discoveryCampaignId": <number>                        // narrow_targeting only, from the list above
       }
     ]
+  }
+}
+
+or, to change an existing campaign's details:
+{
+  "reply": "your conversational message to the user",
+  "uiElement": {
+    "type": "campaign_edit_proposal",
+    "campaignId": <number>,           // from the list above — never invented
+    "objective": "<new objective>",   // include only the fields that change
+    "outcomeMetric": "leads" | "replies" | "published_content",
+    "targetValue": <number>,
+    "endsAt": "<YYYY-MM-DD>"
   }
 }`,
             ].filter(Boolean).join('\n\n');
@@ -1954,6 +1994,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         ? await buildLeadsSnapshot(db, orgId, session.aiAssistantId)
         : null;
 
+    // Per turn, for the same reason as the leads snapshot: a plan approved on the Campaigns tab a
+    // moment ago must be visible to the next message, not the one that opened the conversation.
+    const campaignsSnapshot = route.usesCampaignSnapshot
+        ? await buildCampaignsSnapshot(db, orgId, session.aiAssistantId)
+        : null;
+
     const rolePrompt = route.buildRolePrompt({
         assistantName: assistantRow.name,
         jobRole: assistantRow.jobRole,
@@ -1964,6 +2010,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         mediaSources: assistantRow.mediaSources,
         inspoBlock,
         leadsSnapshot,
+        campaignsSnapshot,
     });
     // The user's rules (their Assistant Rules, learned directives and workspace-wide rules) for the
     // roles in RULE_READING_ROLES: the chat-only records roles, whose rules reached nothing before,

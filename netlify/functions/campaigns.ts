@@ -4,8 +4,10 @@
 //
 //   POST { action: 'list',        assistantId }            → campaigns + budgets + live state
 //   POST { action: 'create',      assistantId, objective, outcomeMetric, targetValue?,
-//                                 maxWorkItems?, endsAt?, asDraft? }
-//   POST { action: 'edit',        campaignId, ...fields }
+//                                 maxWorkItems?, endsAt?, asDraft?, orders?[] }
+//                                 → orders become a PENDING strategy decision, never placed here
+//   POST { action: 'edit',        campaignId, ...fields, viaChat? }
+//   POST { action: 'propose_plan', campaignId, orders[] }    → pending strategy decision (chat)
 //   POST { action: 'start',       campaignId }             → draft|paused → active
 //   POST { action: 'pause',       campaignId, reason }
 //   POST { action: 'stop_all',    assistantId }            → pause every live campaign
@@ -37,15 +39,19 @@
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
     adVariants, aiAssistants, auditLogs, campaignAttributions, campaignBudgets,
-    campaignClickEvents, campaignDecisions, campaignLinks, campaignOrders, campaigns,
+    campaignClickEvents, campaignDecisions, campaignLinks, campaignOrders, campaigns, discoveryCampaigns,
 } from '../../db/schema';
 import { getDb } from '../../db/client';
 import { requireTenant } from '../../src/utils/tenant';
 import { campaignSpendTotals, fitsBudget, readPlanTaskGate } from '../../src/utils/campaign-ledger';
 import { placeOrder, recompileCampaignTargets } from '../../src/utils/campaign-orders';
 import { settleDecisionMirror } from '../../src/utils/campaign-mirror';
+import { hiredRoleKeys } from '../../src/utils/campaign-proposer';
 import {
-    CREATABLE_CAMPAIGN_MODES, LIVE_CAMPAIGN_STATUSES,
+    PLANNABLE_STATUSES, fileStrategyPlan, normalisePlanOrders, pendingPlanFor, planProblem, planWorkItems,
+} from '../../src/utils/campaign-plan';
+import {
+    CAMPAIGN_ORDER_ACTIONS, CREATABLE_CAMPAIGN_MODES, LIVE_CAMPAIGN_STATUSES, ORDER_ACTION_SPECS,
     isLinkMedium, isOrderAction, isSelectableOutcomeMetric, orderWorkItems,
 } from '../../src/config/campaign-vocab';
 import { isSafeDestination, mintLinkToken } from '../../src/utils/campaign-attribution';
@@ -74,6 +80,11 @@ function str(v: unknown, max: number): string | null {
 
 /** Active tracked links one campaign may hold. A real campaign runs a handful of creatives. */
 const MAX_LINKS_PER_CAMPAIGN = 50;
+
+/** Absent, null or an empty string — "not set", which is different from zero. */
+function isBlank(v: unknown): boolean {
+    return v === undefined || v === null || (typeof v === 'string' && !v.trim());
+}
 
 /** Clamp an untrusted integer into a sane range, falling back to a default. */
 function int(v: unknown, min: number, max: number, dflt: number): number {
@@ -170,7 +181,10 @@ export default withLambda(async (event) => {
                 })
                 .from(campaignOrders)
                 .where(eq(campaignOrders.campaignId, r.id));
-            items.push({ ...r, ...totals, orders: live ?? { open: 0, inReview: 0, delivered: 0 } });
+            // The plan waiting on this campaign, if any. Without it on the row, a campaign agreed
+            // in chat shows a bare Start button that would start it with NOTHING commissioned.
+            const pendingPlan = await pendingPlanFor(db, r.id);
+            items.push({ ...r, ...totals, orders: live ?? { open: 0, inReview: 0, delivered: 0 }, pendingPlan });
         }
 
         // The plan gate travels with the list so the Budget & Control strip can render in one
@@ -222,7 +236,20 @@ export default withLambda(async (event) => {
             selectedAccountUrn: adsReadiness?.ready ? adsReadiness.connection.selectedAccountUrn : null,
         };
 
-        return json(200, { campaigns: items, planGate, optimiserHealth, paid });
+        // What "Add work" may offer. Only the assistants this workspace has actually hired — an
+        // order to one it has not is refused by placeOrder anyway, and offering it would be a
+        // button that always fails. Saved searches feed the "Narrow the targeting" picker, which
+        // has to name WHICH search to tighten.
+        const hired = await hiredRoleKeys(db, orgId);
+        const availableOrderActions = CAMPAIGN_ORDER_ACTIONS.filter((a) => hired.has(ORDER_ACTION_SPECS[a].roleKey));
+        const savedSearches = await db
+            .select({ id: discoveryCampaigns.id, name: discoveryCampaigns.name, idea: discoveryCampaigns.idea })
+            .from(discoveryCampaigns)
+            .where(and(eq(discoveryCampaigns.organisationId, orgId), sql`${discoveryCampaigns.status} <> 'archived'`))
+            .orderBy(desc(discoveryCampaigns.createdAt))
+            .limit(25);
+
+        return json(200, { campaigns: items, planGate, optimiserHealth, paid, availableOrderActions, savedSearches });
     }
 
     // ── create ────────────────────────────────────────────────────────────────
@@ -246,7 +273,23 @@ export default withLambda(async (event) => {
 
         const outcomeMetric = isSelectableOutcomeMetric(body.outcomeMetric) ? body.outcomeMetric : 'leads';
         const maxWorkItems = int(body.maxWorkItems, 1, 1000, 100);
-        const targetValue = Number.isFinite(Number(body.targetValue)) ? int(body.targetValue, 1, 100000, 10) : null;
+        // The chat card's briefs. Filed below as a PENDING strategy decision — placing them here
+        // would be starting the campaign from a chat click (§1.3). Checked against the campaign's
+        // own ceiling up front, because a plan that cannot fit its budget would only fail later,
+        // at approval, after the user had been told it was saved.
+        const planOrders = normalisePlanOrders(body.orders);
+        const planNeeds = planWorkItems(planOrders);
+        const problem = planProblem(planOrders);
+        if (problem) return json(400, { error: `${problem} Ask for the plan again with that filled in.` });
+        if (planNeeds > maxWorkItems) {
+            return json(400, {
+                error: `This plan needs ${planNeeds} tasks but the campaign may only use ${maxWorkItems}. Ask for a smaller plan, or a larger task budget.`,
+            });
+        }
+        // `Number(null)` and `Number('')` are both 0, which is finite — so without the blank check
+        // a card with no target (it sends null) saved "aiming for 1".
+        const targetValue = isBlank(body.targetValue) || !Number.isFinite(Number(body.targetValue))
+            ? null : int(body.targetValue, 1, 100000, 10);
         const endsAt = typeof body.endsAt === 'string' && body.endsAt ? new Date(body.endsAt) : null;
 
         // Invariant 1. `asDraft` is the chat path: a proposal the user approved in conversation
@@ -292,7 +335,11 @@ export default withLambda(async (event) => {
             autonomyThresholdWork: int(body.autonomyThresholdWork, 0, 50, 0),
         });
 
-        return json(200, { campaignId: created.id, status: 'draft' });
+        const planDecisionId = await fileStrategyPlan(db, {
+            id: created.id, organisationId: orgId, aiAssistantId: assistantId, objective, status: 'draft',
+        }, planOrders);
+
+        return json(200, { campaignId: created.id, status: 'draft', planDecisionId });
     }
 
     // ── edit ──────────────────────────────────────────────────────────────────
@@ -302,12 +349,23 @@ export default withLambda(async (event) => {
         if (Number(body.maxSpendGbp) > 0) {
             return json(400, { error: 'This campaign cannot be given a money budget yet.' });
         }
+        if (['finished', 'archived'].includes(campaign.status)) {
+            return json(400, { error: `This campaign is ${campaign.status}, so it can no longer be changed.` });
+        }
+        // §1.3: a chat turn may never raise a ceiling. The chat edit card sends viaChat, and the
+        // budget fields are refused outright on that path rather than compared — "lowering only"
+        // would still let the model choose a number the user only half-read.
+        if (body.viaChat === true && (body.maxWorkItems !== undefined || body.autonomyThresholdWork !== undefined)) {
+            return json(400, { error: 'A campaign\'s task budget is changed on the Campaigns tab, with the numbers in front of you — not from the chat.' });
+        }
 
         const patch: Record<string, unknown> = { updatedAt: new Date() };
         const objective = str(body.objective, 500);
         if (objective) patch.objective = objective;
         if (isSelectableOutcomeMetric(body.outcomeMetric)) patch.outcomeMetric = body.outcomeMetric;
-        if (body.targetValue !== undefined) patch.targetValue = int(body.targetValue, 1, 100000, 10);
+        if (body.targetValue !== undefined) {
+            patch.targetValue = isBlank(body.targetValue) ? null : int(body.targetValue, 1, 100000, 10);
+        }
         if (typeof body.endsAt === 'string') {
             const d = new Date(body.endsAt);
             patch.endsAt = Number.isNaN(d.getTime()) ? null : d;
@@ -424,6 +482,38 @@ export default withLambda(async (event) => {
         return json(200, { ok: true, stopped: live.length });
     }
 
+    // ── propose_plan ──────────────────────────────────────────────────────────
+    // The chat's way to add work to a campaign that already exists. It FILES the plan; it never
+    // places it. Placing is `decide` (a human approval) or `place_order` (a human click on the
+    // Campaigns tab) — the GUI and the chat reach the same orders by the same gate.
+    if (action === 'propose_plan') {
+        const campaign = await requireCampaign(Number(body.campaignId));
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+        if (!PLANNABLE_STATUSES.includes(campaign.status as never)) {
+            return json(400, {
+                error: campaign.status === 'paused'
+                    ? 'This campaign is paused. Resume it on the Campaigns tab first, then add work to it.'
+                    : `This campaign is ${campaign.status}, so it cannot take on new work.`,
+            });
+        }
+        const orders = normalisePlanOrders(body.orders);
+        if (!orders.length) return json(400, { error: 'This plan has no work an assistant can do.' });
+        const problem = planProblem(orders);
+        if (problem) return json(400, { error: problem });
+
+        const [budget] = await db.select({ maxWorkItems: campaignBudgets.maxWorkItems })
+            .from(campaignBudgets).where(eq(campaignBudgets.campaignId, campaign.id)).limit(1);
+        const verdict = fitsBudget(await campaignSpendTotals(db, campaign.id), budget?.maxWorkItems ?? 0, planWorkItems(orders));
+        if (!verdict.allowed) return json(400, { error: verdict.message });
+
+        const decisionId = await fileStrategyPlan(db, {
+            id: campaign.id, organisationId: orgId, aiAssistantId: campaign.aiAssistantId,
+            objective: campaign.objective, status: campaign.status,
+        }, orders);
+        if (!decisionId) return json(500, { error: 'The plan could not be saved — please try again.' });
+        return json(200, { decisionId, campaignId: campaign.id, status: campaign.status });
+    }
+
     // ── list_orders ───────────────────────────────────────────────────────────
     if (action === 'list_orders') {
         const campaign = await requireCampaign(Number(body.campaignId));
@@ -443,11 +533,17 @@ export default withLambda(async (event) => {
         if (!LIVE_CAMPAIGN_STATUSES.includes(campaign.status as never)) {
             return json(400, { error: 'This campaign is not running, so it cannot commission work.' });
         }
-        const orderAction = body.orderAction;
-        if (!isOrderAction(orderAction)) return json(400, { error: 'Unknown order type.' });
-
-        const quantity = int(body.quantity, 1, 20, 1);
-        const workItems = orderWorkItems(orderAction, quantity);
+        // The same normaliser the chat plan goes through, so a brief typed into the Campaigns tab
+        // and one agreed in chat are validated, capped and priced identically.
+        const [order] = normalisePlanOrders([{
+            ...((body.brief && typeof body.brief === 'object') ? body.brief as Record<string, unknown> : {}),
+            action: body.orderAction,
+            quantity: body.quantity,
+        }]);
+        if (!order) return json(400, { error: 'Unknown order type.' });
+        const problem = planProblem([order]);
+        if (problem) return json(400, { error: problem });
+        const workItems = orderWorkItems(order.action, order.quantity);
 
         const [budget] = await db.select({ maxWorkItems: campaignBudgets.maxWorkItems })
             .from(campaignBudgets).where(eq(campaignBudgets.campaignId, campaign.id)).limit(1);
@@ -455,14 +551,21 @@ export default withLambda(async (event) => {
         const verdict = fitsBudget(totals, budget?.maxWorkItems ?? 0, workItems);
         if (!verdict.allowed) return json(400, { error: verdict.message });
 
+        // The plan gate, as `start` reads it: a workspace at its monthly cap cannot do the work.
+        const gate = await readPlanTaskGate(db, orgId);
+        if (gate.noPlan) return json(402, { error: 'Choose a plan to commission work.' });
+        if (gate.atCap) {
+            return json(429, { error: 'This workspace has used its monthly task allowance, so your assistants cannot take on new work until it resets. Nothing has been charged.' });
+        }
+
         const result = await placeOrder({
             db, organisationId: orgId, userId,
             campaignId: campaign.id,
             orchestratorAssistantId: campaign.aiAssistantId,
             campaignObjective: campaign.objective,
-            action: orderAction,
-            brief: (body.brief && typeof body.brief === 'object') ? body.brief as Record<string, unknown> : {},
-            quantity,
+            action: order.action,
+            brief: order.brief,
+            quantity: order.quantity,
         });
         if (result.status === 'failed') return json(400, { error: result.message ?? 'The order could not be placed.' });
         return json(200, { orderId: result.orderId, status: result.status, workItems: result.workItems });
@@ -1111,6 +1214,44 @@ export default withLambda(async (event) => {
         // human's approval and execution — re-asking it here would mean the user approved one
         // thing and something else happened.
         const proposed = (decision.proposed ?? {}) as { orders?: Array<Record<string, unknown>> };
+
+        // A strategy decision commits a whole plan at once, so it is checked as a whole BEFORE
+        // anything is placed. Refusing here leaves the decision pending and approvable once the
+        // reason is fixed; placing order by order until one failed would half-run a plan.
+        if (decision.kind === 'strategy') {
+            if (!PLANNABLE_STATUSES.includes(campaign.status as never)) {
+                return json(400, {
+                    error: campaign.status === 'paused'
+                        ? 'This campaign is paused. Resume it on the Campaigns tab first, then approve the plan.'
+                        : `This campaign is ${campaign.status}, so it cannot take on new work.`,
+                });
+            }
+            const gate = await readPlanTaskGate(db, orgId);
+            if (gate.noPlan) return json(402, { error: 'Choose a plan to start running campaigns.' });
+            if (gate.atCap) {
+                return json(429, {
+                    error: 'This workspace has used its monthly task allowance, so your assistants cannot take on new work until it resets. Nothing has been charged — the allowance is a stop, not a bill.',
+                });
+            }
+            const [budget] = await db.select({ maxWorkItems: campaignBudgets.maxWorkItems })
+                .from(campaignBudgets).where(eq(campaignBudgets.campaignId, campaign.id)).limit(1);
+            const verdict = fitsBudget(
+                await campaignSpendTotals(db, campaign.id),
+                budget?.maxWorkItems ?? 0,
+                planWorkItems(normalisePlanOrders(proposed.orders)),
+            );
+            if (!verdict.allowed) return json(400, { error: verdict.message });
+
+            // ⚠️ Activate BEFORE placing. Each order recompiles its target assistant's blueprint,
+            // and section 13 only reads LIVE campaigns — placing first would compile every brief
+            // against a draft and steer nothing until some unrelated recompile.
+            if (campaign.status === 'draft') {
+                await db.update(campaigns)
+                    .set({ status: 'active', startsAt: campaign.startsAt ?? new Date(), updatedAt: new Date() })
+                    .where(eq(campaigns.id, campaign.id));
+            }
+        }
+
         const placed: Array<{ orderId: number | null; status: string; message?: string }> = [];
         for (const o of (proposed.orders ?? []).slice(0, 10)) {
             if (!isOrderAction(o.action)) continue;
@@ -1131,13 +1272,8 @@ export default withLambda(async (event) => {
         }).where(eq(campaignDecisions.id, decision.id));
         await settleDecisionMirror(db, decision.id, 'approved');
 
-        // A strategy decision is the campaign's own go-ahead, so approving it starts the campaign.
-        // Every other kind acts on a campaign that is already running.
-        if (decision.kind === 'strategy' && campaign.status === 'draft') {
-            await db.update(campaigns)
-                .set({ status: 'active', startsAt: new Date(), updatedAt: new Date() })
-                .where(eq(campaigns.id, campaign.id));
-        }
+        // A strategy decision is the campaign's own go-ahead: it was started above, before its
+        // orders were placed. Every other kind acts on a campaign that is already running.
 
         // Report what actually happened per order rather than a blanket success. Some orders fail
         // for legitimate reasons (the workspace has not hired that assistant), and the user needs

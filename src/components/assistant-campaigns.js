@@ -10,6 +10,13 @@
  *   • start    → POST campaigns { action:'start', campaignId }
  *   • pause    → POST campaigns { action:'pause', campaignId, reason }
  *   • stop_all → POST campaigns { action:'stop_all', assistantId }
+ *   • create / edit / place_order / decide — the §9.1 controls: "New campaign", "Edit",
+ *     "Add work", and "Approve plan & start" on a campaign whose chat plan is waiting.
+ *
+ * ── GUI and chat reach the same things (plan §9.0) ───────────────────────────
+ * Every control here has a chat twin, and both hit the same campaigns.ts action. A plan agreed in
+ * chat is filed PENDING and lands on its row here; nothing the chat does places an order. Writes
+ * made from the chat dispatch campaign:created / campaign:updated, which reload this tab.
  *
  * ── Saying what is happening ─────────────────────────────────────────────────
  * Copied deliberately from assistant-signal-inbox.js, whose lesson was learned the expensive way:
@@ -62,6 +69,16 @@
     adAccounts: null,
     /** Chosen targeting entities, per campaign: { locations: [{urn,name}], ... }. */
     targeting: {},
+    /** Order actions this workspace can use — the server filters by which assistants are hired. */
+    availableOrderActions: [],
+    /** Saved lead searches, for "Narrow the targeting". */
+    savedSearches: [],
+    /** The create/edit form: null, { mode: 'create' } or { mode: 'edit', id }. */
+    form: null,
+    /** Per campaign: { open, action } for the Add work panel. */
+    addWork: {},
+    /** Decision id whose "Turn down" reason picker is open. */
+    rejectingPlan: null,
   };
 
   function esc(v) {
@@ -121,7 +138,10 @@
     if (o.inReview) return `Waiting on you — ${o.inReview} ${o.inReview === 1 ? 'piece' : 'pieces'} of work ${o.inReview === 1 ? 'is' : 'are'} in a review queue.`;
     if (o.open) return `Running — ${o.open} ${o.open === 1 ? 'brief is' : 'briefs are'} with your other assistants.`;
     if (c.status === 'throttled') return 'Throttled — it has stopped commissioning new work while it waits for results from what it already sent.';
-    return 'Running, but nothing is currently commissioned. It will brief your assistants as it decides what to do next.';
+    // This used to promise "it will brief your assistants as it decides what to do next". Nothing
+    // does that — the daily run only proposes escalations and halts on work that already exists —
+    // so an empty running campaign waited for ever on a promise. Say what actually moves it.
+    return 'Running, but nothing is commissioned yet. Use "Add work", or ask your Campaign Assistant for a plan.';
   }
 
   // ── Burn bar ───────────────────────────────────────────────────────────────
@@ -165,8 +185,14 @@
     // Start is offered for a draft OR a pause, matching the server's own guard. A paused campaign
     // offering no way back is the bug connection-pause-needs-a-resume is named after, so the label
     // says which of the two this is rather than showing a bare "Start" on a campaign that ran once.
-    const canStart = c.status === 'draft' || c.status === 'paused';
+    // A draft whose plan is waiting gets "Approve plan & start" instead of a bare Start: starting
+    // it without the plan would run a campaign that commissions nothing, which is exactly how
+    // prod's first campaign sat idle for eight days.
+    const plan = c.pendingPlan || null;
+    const canStart = (c.status === 'draft' && !plan) || c.status === 'paused';
     const canPause = c.status === 'active' || c.status === 'throttled';
+    const canEdit = c.status !== 'finished' && c.status !== 'archived';
+    const canAddWork = (c.status === 'active' || c.status === 'throttled') && state.availableOrderActions.length > 0;
     return `
       <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5" data-cmp-row="${esc(String(c.id))}">
         <div class="flex items-start justify-between gap-4 mb-2">
@@ -191,7 +217,19 @@
               class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
               Pause
             </button>` : ''}
+          ${canAddWork ? `
+            <button type="button" data-cmp-addwork="${esc(String(c.id))}"
+              class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+              ${state.addWork[c.id] && state.addWork[c.id].open ? 'Close' : 'Add work'}
+            </button>` : ''}
+          ${canEdit ? `
+            <button type="button" data-cmp-edit="${esc(String(c.id))}"
+              class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition">
+              Edit
+            </button>` : ''}
         </div>
+        ${plan ? planBlock(c, plan) : ''}
+        ${canAddWork ? addWorkPanel(c) : ''}
         <p class="hidden mt-2 text-xs font-semibold text-gray-600" data-cmp-status="${esc(String(c.id))}"></p>
 
         <div class="flex flex-wrap items-center gap-3 mt-3">
@@ -221,9 +259,9 @@
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center">
         <p class="text-sm font-bold text-gray-700">No campaigns yet</p>
         <p class="text-xs text-gray-500 mt-2 max-w-md mx-auto leading-relaxed">
-          A campaign turns one objective into briefs for your other assistants. Tell this assistant
-          what you are trying to achieve and it will propose a plan — you approve it, and nothing
-          starts until you press Start here.
+          A campaign turns one objective into briefs for your other assistants. Press
+          "New campaign" to set one up yourself, or tell this assistant what you are trying to
+          achieve and it will propose a plan. Either way, nothing starts until you approve it here.
         </p>
       </div>`;
   }
@@ -238,8 +276,179 @@
         <p class="text-xs text-amber-900 leading-relaxed">
           <span class="font-bold">Nothing has started yet.</span>
           ${list.length === 1 ? 'This campaign is' : 'These campaigns are'} saved but not running —
-          no briefs have gone out and no work has been done. Press Start when you are ready.
+          no briefs have gone out and no work has been done. Approve the plan, or press Start, when you are ready.
         </p>
+      </div>`;
+  }
+
+  // ── The plan waiting on a campaign ─────────────────────────────────────────
+  // A plan agreed in chat (or proposed by the daily run) lands here as well as in Decisions. This
+  // is the row the user is already looking at, and approving from it means the decision and the
+  // campaign it starts are on one screen. Turning it down asks why — that reason is written into
+  // the campaign's constraints and restated in the next proposal, the same as in Decisions.
+  function planBlock(c, plan) {
+    const id = esc(String(plan.decisionId));
+    const rejecting = Number(state.rejectingPlan) === Number(plan.decisionId);
+    const reasons = (C() && C().rejectReasons) || [];
+    return `
+      <div class="mt-4 bg-indigo-50/60 border border-indigo-200 rounded-xl p-4">
+        <p class="text-[11px] font-bold text-indigo-700 uppercase tracking-wide">Plan waiting for you</p>
+        <ul class="mt-2 space-y-1">
+          ${plan.orders.map((o) => `
+            <li class="text-xs text-gray-700">• ${esc(o.label)}${o.quantity > 1 ? ` ×${esc(String(o.quantity))}` : ''} — ${esc(o.role)}
+              <span class="text-gray-400">(${esc(String(o.workItems))} ${o.workItems === 1 ? 'task' : 'tasks'})</span></li>`).join('')}
+        </ul>
+        <p class="text-xs text-gray-500 mt-2">
+          Uses ${esc(String(plan.workItems))} tasks.
+          ${c.status === 'draft' ? 'Approving starts the campaign and briefs these assistants.' : 'Approving briefs these assistants.'}
+          Their work still comes back to you for approval.
+        </p>
+        ${rejecting ? `
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <select data-cmp-plan-reason="${id}" data-keep="plan-reason-${id}" class="text-xs border border-gray-300 rounded-lg px-2 py-1.5">
+              <option value="">Why not?</option>
+              ${reasons.map((r) => `<option value="${esc(r)}">${esc(C().rejectReasonLabel(r))}</option>`).join('')}
+            </select>
+            <input type="text" data-cmp-plan-note="${id}" data-keep="plan-note-${id}" maxlength="280" placeholder="Anything else? (optional)"
+              class="text-xs border border-gray-300 rounded-lg px-2 py-1.5 flex-1 min-w-0">
+            <button type="button" data-cmp-plan-reject="${id}" data-cmp-plan-campaign="${esc(String(c.id))}"
+              class="btn-destructive px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Turn down</button>
+            <button type="button" data-cmp-plan-reject-cancel
+              class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition">Cancel</button>
+          </div>` : `
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button" data-cmp-plan-approve="${id}" data-cmp-plan-campaign="${esc(String(c.id))}"
+              data-cmp-plan-tasks="${esc(String(plan.workItems))}" data-cmp-plan-starts="${c.status === 'draft' ? '1' : ''}"
+              class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+              ${c.status === 'draft' ? 'Approve plan &amp; start' : 'Approve plan'}
+            </button>
+            <button type="button" data-cmp-plan-reject-open="${id}"
+              class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+              Turn down
+            </button>
+          </div>`}
+      </div>`;
+  }
+
+  // ── Add work ───────────────────────────────────────────────────────────────
+  // The GUI twin of a chat plan for a running campaign. A human click here PLACES the order
+  // straight away (place_order) — this is the campaign surface, with the cost in front of them,
+  // which is exactly where §1.3 says a commitment may be made. The chat can only file a plan.
+  //
+  // The text field changes meaning with the action, because each executor reads a different brief
+  // field (campaign-plan.ts BRIEF_TEXT_FIELDS): a lead search needs WHO to look for, messaging
+  // needs the new ANGLE, drafting work takes an optional angle.
+  const BRIEF_PROMPTS = {
+    draft_social_posts: { field: 'angle', label: 'Angle (optional)', placeholder: 'What these posts should argue', required: false },
+    draft_blog_pillar: { field: 'angle', label: 'Angle (optional)', placeholder: 'What the article should argue', required: false },
+    run_lead_search: { field: 'idea', label: 'Who to look for', placeholder: 'e.g. UK accountancy firms with 10–50 staff', required: true },
+    narrow_targeting: { field: 'idea', label: 'Tightened description (optional)', placeholder: 'Who the search should find instead', required: false },
+    adjust_messaging: { field: 'angle', label: 'New angle', placeholder: 'The argument this campaign should make from now on', required: true },
+  };
+
+  function actionSpec(key) {
+    const list = (C() && C().orderActions) || [];
+    return list.find((a) => a.key === key) || null;
+  }
+
+  function addWorkPanel(c) {
+    const st = state.addWork[c.id];
+    if (!st || !st.open) return '';
+    const id = esc(String(c.id));
+    const actions = state.availableOrderActions.map(actionSpec).filter(Boolean);
+    if (!st.action || !actions.some((a) => a.key === st.action)) st.action = actions[0] ? actions[0].key : null;
+    const spec = actionSpec(st.action);
+    if (!spec) return '';
+    const prompt = BRIEF_PROMPTS[spec.key] || null;
+    const needsSearch = spec.key === 'narrow_targeting';
+    return `
+      <div class="mt-4 bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
+        <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Add work to this campaign</p>
+        <select data-cmp-aw-action="${id}" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2">
+          ${actions.map((a) => `<option value="${esc(a.key)}" ${a.key === spec.key ? 'selected' : ''}>${esc(a.label)}</option>`).join('')}
+        </select>
+        <p class="text-xs text-gray-500">${esc(spec.description)}</p>
+        ${spec.takesQuantity ? `
+          <label class="block text-xs font-bold text-gray-600">How many (up to ${esc(String(spec.maxQuantity))})
+            <input type="number" min="1" max="${esc(String(spec.maxQuantity))}" value="1" data-cmp-aw-qty="${id}" data-keep="aw-qty-${id}-${esc(spec.key)}"
+              class="mt-1 w-24 text-sm border border-gray-300 rounded-lg px-3 py-1.5 font-normal">
+          </label>` : ''}
+        ${needsSearch ? (state.savedSearches.length ? `
+          <label class="block text-xs font-bold text-gray-600">Which saved search
+            <select data-cmp-aw-search="${id}" data-keep="aw-search-${id}" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+              ${state.savedSearches.map((x) => `<option value="${esc(String(x.id))}">${esc(x.name || x.idea.slice(0, 80))}</option>`).join('')}
+            </select>
+          </label>` : '<p class="text-xs text-amber-700">There are no saved lead searches to narrow yet — use "Run a lead search" first.</p>') : ''}
+        ${prompt ? `
+          <label class="block text-xs font-bold text-gray-600">${esc(prompt.label)}
+            <textarea rows="2" maxlength="1000" data-cmp-aw-text="${id}" data-keep="aw-text-${id}-${esc(spec.key)}" placeholder="${esc(prompt.placeholder)}"
+              class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal"></textarea>
+          </label>` : ''}
+        <div class="flex items-center justify-between gap-3">
+          <p class="text-xs text-gray-500" data-cmp-aw-cost="${id}">${spec.workItemsPerUnit ? `Uses ${esc(String(spec.workItemsPerUnit))} ${spec.takesQuantity ? 'tasks each' : 'tasks'}.` : 'Uses no tasks — it changes what future work is asked for.'}</p>
+          <button type="button" data-cmp-aw-submit="${id}" ${needsSearch && !state.savedSearches.length ? 'disabled' : ''}
+            class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+            Brief the assistant
+          </button>
+        </div>
+      </div>`;
+  }
+
+  // ── New campaign / Edit ────────────────────────────────────────────────────
+  // The GUI twin of the chat's proposal and edit cards. Unlike the chat, this form MAY set the
+  // task budget — the number is in front of the user, on the campaign surface (§1.3). It never
+  // starts anything: a campaign created here is a draft until Start.
+  function formHtml() {
+    const f = state.form;
+    if (!f) return '';
+    const c = f.mode === 'edit' ? state.campaigns.find((x) => Number(x.id) === Number(f.id)) : null;
+    if (f.mode === 'edit' && !c) return '';
+    const outcomes = (C() && C().selectableOutcomes) || ['leads'];
+    const v = (key, dflt) => (c && c[key] != null ? c[key] : dflt);
+    const ends = c && c.endsAt ? String(c.endsAt).slice(0, 10) : '';
+    return `
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-4 space-y-3" data-cmp-form>
+        <p class="text-sm font-bold text-gray-900">${f.mode === 'edit' ? 'Edit campaign' : 'New campaign'}</p>
+        <label class="block text-xs font-bold text-gray-600">What should this campaign achieve?
+          <textarea rows="2" maxlength="500" data-cmpf="objective" data-keep="f-objective"
+            placeholder="e.g. 50 new leads from UK accountancy firms by the end of March"
+            class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">${esc(v('objective', ''))}</textarea>
+        </label>
+        <div class="flex flex-wrap gap-3">
+          <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">What counts as success
+            <select data-cmpf="outcomeMetric" data-keep="f-outcome" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+              ${outcomes.map((m) => `<option value="${esc(m)}" ${m === v('outcomeMetric', 'leads') ? 'selected' : ''}>${esc(C() ? C().outcomeLabel(m) : m)}</option>`).join('')}
+            </select>
+          </label>
+          <label class="block text-xs font-bold text-gray-600">Aiming for (optional)
+            <input type="number" min="1" data-cmpf="targetValue" data-keep="f-target" value="${esc(v('targetValue', ''))}"
+              class="mt-1 w-28 text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+          </label>
+          <label class="block text-xs font-bold text-gray-600">Ends (optional)
+            <input type="date" data-cmpf="endsAt" data-keep="f-ends" value="${esc(ends)}"
+              class="mt-1 text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+          </label>
+          <label class="block text-xs font-bold text-gray-600">Task budget
+            <input type="number" min="1" max="1000" data-cmpf="maxWorkItems" data-keep="f-budget" value="${esc(v('maxWorkItems', 50))}"
+              class="mt-1 w-28 text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+          </label>
+        </div>
+        <p class="text-xs text-gray-500">The task budget is the most of your monthly allowance this campaign may commission. At the cap it stops — it never bills you extra.</p>
+        <div class="flex items-center gap-2">
+          <button type="button" data-cmpf-save class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+            ${f.mode === 'edit' ? 'Save changes' : 'Save as draft'}
+          </button>
+          <button type="button" data-cmpf-cancel class="btn-utility px-4 py-2 text-sm font-bold rounded-lg transition">Cancel</button>
+        </div>
+        <p class="hidden text-xs font-semibold" data-cmpf-status></p>
+      </div>`;
+  }
+
+  function toolbarHtml() {
+    if (state.form) return '';
+    return `
+      <div class="flex justify-end mb-4">
+        <button type="button" data-cmp-new class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">New campaign</button>
       </div>`;
   }
 
@@ -770,13 +979,27 @@
       host.innerHTML = '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center"><p class="text-sm text-gray-400">Loading campaigns…</p></div>';
       return;
     }
-    if (!state.campaigns.length) { host.innerHTML = emptyState(); return; }
+    // render() rewrites the whole tab, and it runs on its own whenever the funnel or a link list
+    // arrives — so without this, anything typed into "New campaign" or "Add work" vanished
+    // mid-sentence. Fields opt in with data-keep; their values are carried across the rewrite.
+    const kept = {};
+    host.querySelectorAll('[data-keep]').forEach((el) => { kept[el.dataset.keep] = el.value; });
 
-    host.innerHTML = `
-      ${optimiserHealthHtml()}
-      ${funnelHtml()}
-      ${neverLaunchedNote(state.campaigns)}
-      <div class="space-y-4">${state.campaigns.map(campaignRow).join('')}</div>`;
+    if (!state.campaigns.length) {
+      host.innerHTML = `${toolbarHtml()}${formHtml()}${state.form ? '' : emptyState()}`;
+    } else {
+      host.innerHTML = `
+        ${toolbarHtml()}
+        ${formHtml()}
+        ${optimiserHealthHtml()}
+        ${funnelHtml()}
+        ${neverLaunchedNote(state.campaigns)}
+        <div class="space-y-4">${state.campaigns.map(campaignRow).join('')}</div>`;
+    }
+
+    host.querySelectorAll('[data-keep]').forEach((el) => {
+      if (Object.prototype.hasOwnProperty.call(kept, el.dataset.keep)) el.value = kept[el.dataset.keep];
+    });
   }
 
   function rerender() {
@@ -807,6 +1030,8 @@
       // Null is meaningful for both: "nothing to report" rather than "healthy" / "available".
       state.optimiserHealth = data.optimiserHealth || null;
       state.paid = data.paid || null;
+      state.availableOrderActions = Array.isArray(data.availableOrderActions) ? data.availableOrderActions : [];
+      state.savedSearches = Array.isArray(data.savedSearches) ? data.savedSearches : [];
       state.loadError = null;
     } catch (err) {
       console.error('[AssistantCampaigns] load failed:', err);
@@ -1337,6 +1562,197 @@
     if (state.rendered) render();
   }
 
+  // ── §9.1 controls: form, plan, Add work ────────────────────────────────────
+  // A third listener, for the same reason the link listener is separate: the start/pause handler
+  // early-returns on anything else, and these have their own failure handling. Each write RELOADS
+  // from the server on success and does NOT re-render on failure — a re-render would wipe what
+  // the user typed, and the server's sentence is shown where they are looking instead.
+  function formSay(text, tone) {
+    const el = document.querySelector('[data-cmpf-status]');
+    if (!el) return;
+    el.textContent = text;
+    el.className = `text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-gray-600'}`;
+  }
+
+  document.addEventListener('change', (e) => {
+    const sel = e.target.closest('[data-cmp-aw-action]');
+    if (!sel) return;
+    const id = Number(sel.dataset.cmpAwAction);
+    const st = state.addWork[id] || (state.addWork[id] = { open: true, action: null });
+    st.action = sel.value;
+    if (state.rendered) render();
+  });
+
+  document.addEventListener('click', async (e) => {
+    const newBtn = e.target.closest('[data-cmp-new]');
+    const editBtn = e.target.closest('[data-cmp-edit]');
+    const save = e.target.closest('[data-cmpf-save]');
+    const cancel = e.target.closest('[data-cmpf-cancel]');
+    const approve = e.target.closest('[data-cmp-plan-approve]');
+    const rejectOpen = e.target.closest('[data-cmp-plan-reject-open]');
+    const rejectCancel = e.target.closest('[data-cmp-plan-reject-cancel]');
+    const reject = e.target.closest('[data-cmp-plan-reject]');
+    const awToggle = e.target.closest('[data-cmp-addwork]');
+    const awSubmit = e.target.closest('[data-cmp-aw-submit]');
+    if (!newBtn && !editBtn && !save && !cancel && !approve && !rejectOpen && !rejectCancel && !reject && !awToggle && !awSubmit) return;
+
+    if (newBtn || editBtn) {
+      state.form = newBtn ? { mode: 'create' } : { mode: 'edit', id: Number(editBtn.dataset.cmpEdit) };
+      if (state.rendered) render();
+      document.querySelector('[data-cmp-form]')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      return;
+    }
+    if (cancel) { state.form = null; if (state.rendered) render(); return; }
+    if (rejectOpen) { state.rejectingPlan = Number(rejectOpen.dataset.cmpPlanRejectOpen); if (state.rendered) render(); return; }
+    if (rejectCancel) { state.rejectingPlan = null; if (state.rendered) render(); return; }
+    if (awToggle) {
+      const id = Number(awToggle.dataset.cmpAddwork);
+      const st = state.addWork[id] || (state.addWork[id] = { open: false, action: null });
+      st.open = !st.open;
+      if (state.rendered) render();
+      return;
+    }
+
+    if (state.busy) return;
+
+    // ── Save the form ──
+    if (save) {
+      const host = document.querySelector('[data-cmp-form]');
+      const val = (k) => (host?.querySelector(`[data-cmpf="${k}"]`)?.value ?? '').trim();
+      const objective = val('objective');
+      if (!objective) { formSay('Say what this campaign should achieve.', 'error'); return; }
+      const payload = {
+        objective,
+        outcomeMetric: val('outcomeMetric'),
+        // Blank means "no target" / "no end date" — sent as null, never as 0.
+        targetValue: val('targetValue') ? Number(val('targetValue')) : null,
+        endsAt: val('endsAt') || null,
+        maxWorkItems: Number(val('maxWorkItems')) || 50,
+      };
+      const f = state.form;
+      state.busy = true;
+      save.disabled = true;
+      formSay('Saving…');
+      try {
+        if (f.mode === 'edit') {
+          // `endsAt: ''` clears the date server-side; null would be ignored as "unchanged".
+          await post({ action: 'edit', campaignId: f.id, ...payload, endsAt: payload.endsAt || '' });
+          window.showToast?.('Campaign updated.', 'success');
+        } else {
+          await post({ action: 'create', assistantId: state.assistantId, ...payload });
+          window.showToast?.('Saved as a draft. Press Start on it when you are ready, or use Add work once it is running.', 'success');
+        }
+      } catch (err) {
+        formSay(err.message || 'That did not save — please try again.', 'error');
+        save.disabled = false;
+        state.busy = false;
+        return;
+      }
+      state.busy = false;
+      state.form = null;
+      await load();
+      return;
+    }
+
+    // ── Approve a plan ──
+    if (approve) {
+      const decisionId = Number(approve.dataset.cmpPlanApprove);
+      const campaignId = Number(approve.dataset.cmpPlanCampaign);
+      const tasks = approve.dataset.cmpPlanTasks;
+      const starts = approve.dataset.cmpPlanStarts === '1';
+      const ok = window.confirm(
+        `${starts ? 'Start this campaign and brief' : 'Brief'} your assistants with this plan?\n\n`
+        + `It uses ${tasks} tasks from your monthly allowance. Everything they draft still comes back `
+        + 'to you for approval, and you can pause the campaign at any time.',
+      );
+      if (!ok) return;
+      state.busy = true;
+      approve.disabled = true;
+      say(campaignId, starts ? 'Starting…' : 'Briefing…');
+      try {
+        const data = await post({ action: 'decide', decisionId, verdict: 'approve' });
+        // Counted from the server's answer, not the click: an order to an assistant this
+        // workspace has not hired fails on its own while the rest go out.
+        const placed = (data.orders || []).filter((o) => o.status !== 'failed');
+        const failed = (data.orders || []).filter((o) => o.status === 'failed');
+        window.showToast?.(
+          failed.length
+            ? `${placed.length} ${placed.length === 1 ? 'brief' : 'briefs'} sent; ${failed.length} could not be: ${failed.map((o) => o.message).filter(Boolean).join(' ')}`
+            : `${placed.length} ${placed.length === 1 ? 'brief' : 'briefs'} sent to your assistants.`,
+          failed.length ? 'error' : 'success',
+        );
+      } catch (err) {
+        say(campaignId, err.message || 'That did not work — please try again.', 'error');
+        approve.disabled = false;
+        state.busy = false;
+        return;
+      }
+      state.busy = false;
+      await load();
+      return;
+    }
+
+    // ── Turn a plan down ──
+    if (reject) {
+      const decisionId = Number(reject.dataset.cmpPlanReject);
+      const campaignId = Number(reject.dataset.cmpPlanCampaign);
+      const reason = document.querySelector(`[data-cmp-plan-reason="${decisionId}"]`)?.value || '';
+      const note = (document.querySelector(`[data-cmp-plan-note="${decisionId}"]`)?.value || '').trim();
+      if (!reason) { say(campaignId, 'Pick a reason — it is what stops the same plan coming back.', 'error'); return; }
+      state.busy = true;
+      reject.disabled = true;
+      try {
+        await post({ action: 'decide', decisionId, verdict: 'reject', reason, note: note || undefined });
+      } catch (err) {
+        say(campaignId, err.message || 'That did not work — please try again.', 'error');
+        reject.disabled = false;
+        state.busy = false;
+        return;
+      }
+      state.busy = false;
+      state.rejectingPlan = null;
+      window.showToast?.('Plan turned down. Your reason goes into the next proposal.', 'success');
+      await load();
+      return;
+    }
+
+    // ── Add work ──
+    if (awSubmit) {
+      const id = Number(awSubmit.dataset.cmpAwSubmit);
+      const st = state.addWork[id];
+      const spec = st && actionSpec(st.action);
+      if (!spec) return;
+      const prompt = BRIEF_PROMPTS[spec.key];
+      const text = (document.querySelector(`[data-cmp-aw-text="${id}"]`)?.value || '').trim();
+      if (prompt && prompt.required && !text) { say(id, `${prompt.label} is needed for this.`, 'error'); return; }
+      const brief = {};
+      if (prompt && text) brief[prompt.field] = text;
+      if (spec.key === 'narrow_targeting') {
+        brief.discoveryCampaignId = Number(document.querySelector(`[data-cmp-aw-search="${id}"]`)?.value) || null;
+      }
+      const quantity = spec.takesQuantity
+        ? Math.max(1, Math.min(spec.maxQuantity, Number(document.querySelector(`[data-cmp-aw-qty="${id}"]`)?.value) || 1))
+        : 1;
+      const tasks = (spec.workItemsPerUnit || 0) * quantity;
+      if (tasks && !window.confirm(`${spec.label}${quantity > 1 ? ` ×${quantity}` : ''}?\n\nThis uses ${tasks} tasks from this campaign's budget. The work comes back to you for approval.`)) return;
+      state.busy = true;
+      awSubmit.disabled = true;
+      say(id, 'Briefing…');
+      try {
+        await post({ action: 'place_order', campaignId: id, orderAction: spec.key, quantity, brief });
+      } catch (err) {
+        say(id, err.message || 'That did not work — please try again.', 'error');
+        awSubmit.disabled = false;
+        state.busy = false;
+        return;
+      }
+      state.busy = false;
+      st.open = false;
+      window.showToast?.(`${spec.label} — briefed. It is listed in Orders.`, 'success');
+      await load();
+    }
+  });
+
   // ── Writes made from outside this tab ──────────────────────────────────────
   /**
    * A campaign created from the chat window (CampaignStrategyProposalCard → chat-session.js) writes
@@ -1349,6 +1765,12 @@
    * only the one this tab belongs to should reload.
    */
   document.addEventListener('campaign:created', (e) => {
+    const id = e.detail && e.detail.assistantId;
+    if (!state.assistantId || Number(id) !== Number(state.assistantId)) return;
+    load();
+  });
+  // A plan or an edit saved from the chat (chat-session.js). Same reason, same check.
+  document.addEventListener('campaign:updated', (e) => {
     const id = e.detail && e.detail.assistantId;
     if (!state.assistantId || Number(id) !== Number(state.assistantId)) return;
     load();
