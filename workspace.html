@@ -22,7 +22,7 @@
   <!-- Markdown rendering for the in-workspace Help Center article reader (merged from help.html) -->
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
-  <script src="./explainers.js?v=20261008-campaign-explainers" defer></script>
+  <script src="./explainers.js?v=20261008-brand-designer" defer></script>
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
   <!-- The APP manifest, not favicon/manifest.json (which is only an icon set — no start_url, no
@@ -5621,6 +5621,8 @@ function formatCurrency(amount, currency) {
      that sits above the tab bar and is therefore visible from every tab (campaigns.ts). Starting a
      campaign is the only spend-committing click in the product that a chat turn cannot make. -->
 <script src="/src/components/assistant-campaigns.js"></script>
+<!-- Briefs tab (brand_designer) — briefs, a grid of options, approve into the library (brand-briefs.ts). -->
+<script src="/src/components/assistant-briefs.js"></script>
 <!-- Email Marketing Assistant ▸ Campaigns tab (welcome + form-started series, with results). -->
 <script src="/src/components/assistant-email-campaigns.js"></script>
 <!-- Signal Inbox tab (lead_qualifier) — everything that came IN before it became a lead;

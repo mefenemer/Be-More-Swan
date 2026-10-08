@@ -46,6 +46,8 @@ import { liveRoleLabel } from '../../src/utils/live-role-label';
 import { voiceDirective } from '../../src/utils/voice-profile';
 import { RULE_READING_ROLES, loadAssistantRulesBlock } from '../../src/utils/assistant-rules-prompt';
 import { buildCampaignsSnapshot } from '../../src/utils/campaign-plan';
+import { buildBriefsSnapshot } from '../../src/utils/visual-briefs';
+import { BRIEF_PURPOSES, BRIEF_ASPECT_RATIOS, REJECT_REASONS, SOURCE_SPECS } from '../../src/config/visual-brief-vocab';
 import { FUNNEL_STAGES, FUNNEL_STAGE_DESCRIPTIONS, stageOutcomes } from '../../src/config/campaign-vocab';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
@@ -138,6 +140,9 @@ interface RouteContext {
      *  "add two articles to the spring campaign" has no campaign id to point at. See
      *  buildCampaignsSnapshot() in src/utils/campaign-plan.ts. */
     campaignsSnapshot?: string | null;
+    /** This Brand Designer's briefs and the options awaiting a decision, by id — read per turn for
+     *  routes with usesBriefsSnapshot. Without it "use the second one" has no option to point at. */
+    briefsSnapshot?: string | null;
 }
 
 interface AssistantRoute {
@@ -159,6 +164,8 @@ interface AssistantRoute {
     /** When true the handler reads this assistant's campaigns for this turn and passes them into
      *  buildRolePrompt via rc.campaignsSnapshot. */
     usesCampaignSnapshot?: boolean;
+    /** When true the handler reads this assistant's briefs for this turn (rc.briefsSnapshot). */
+    usesBriefsSnapshot?: boolean;
     /** Role-specific prompt body. buildSystemPrompt() appends the hardened
      *  <strict_configuration> block to this before every API call. */
     buildRolePrompt(rc: RouteContext): string;
@@ -511,6 +518,12 @@ WHAT YOU ARE — you do not write posts, articles or emails yourself, and you mu
 BUDGET — a campaign's budget is TASKS, not money. Tasks are the monthly allowance on the user's plan; when it runs out, work stops and nothing is ever billed on top. Never quote a price, a pound figure, an ad spend or a cost per result, and never offer to buy ads: paid advertising is not available yet, and saying otherwise promises something no button in this product can do. If the user asks about ad budgets, say that campaigns currently work by directing your other assistants' effort, and that paid channels are not connected.
 
 PROPOSING A CAMPAIGN — when the user gives you an objective, emit the campaign_strategy_proposal uiElement. Approving it SAVES the campaign and its plan — the user does not have to retype anything — but saves it as a DRAFT that has not started: it commissions nothing and briefs nobody until they approve the plan themselves. Tell them exactly where: it appears in their "Campaigns" tab marked "Draft", with its briefs listed and an "Approve plan & start" button beside it (the same plan also waits in "Decisions"). Adding work to an existing campaign works the same way: approving your card files the plan, and the user approves it on the campaign. Say that plainly and never claim the campaign is already running, that briefs have gone out, or that work has begun. You also cannot raise a budget ceiling or resume a paused campaign from this conversation — those are clicks the user makes on the "Campaigns" tab, with the numbers in front of them. If asked to do any of the three, explain that you have deliberately been built not to, and say where the button is.`;
+}
+
+function brandDesignerSurfaces(): string {
+    return `YOUR OWN DASHBOARD — tabs and buttons on YOUR page inside this platform, never outside tools:
+- "Briefs" tab — the tab the user lands on. One card per brief: what it is for, a sentence on what it is waiting for, and its options as a grid. Each option has "Use this" (it goes into their library) and "Not this" (they pick a reason). Each brief has "Make options" / "Make more options" (the button shows what a round costs), "Edit brief" and "Cancel brief". "New brief" at the top writes one without chatting. Everything you can do here, the user can also do there by hand.
+- Their content library ("My Content") — where every approved picture goes, and where their other assistants pick pictures from for posts and articles.`;
 }
 
 // ── Internal Data Hub persistence (Golden Rule 2) ─────────────────────────────
@@ -1166,6 +1179,74 @@ or, to change an existing campaign's details:
     "detachAssets": [ { "id": <assetId>, "name": "..." } ],   // pictures to remove from it
     "parentCampaignId": <number> | 0, // move it inside this umbrella, or 0 to take it out of one
     "alwaysOn": true | false
+  }
+}`,
+            ].filter(Boolean).join('\n\n');
+        },
+        parseResponse: parseStructuredReply,
+    },
+
+    // Brand Designer (docs/brand-designer-plan.md §4). Turns "I need a picture for…" into a BRIEF,
+    // and "use the second one" into a decision on a real option. Wire shapes: visual_brief_proposal
+    // and visual_option_review, matching the renderers in disruptive-ui-registry.js.
+    //
+    // ⚠️ The chat never makes options, spends a credit or approves anything. Every card is a
+    // proposal; the user's click on it calls the same brand-briefs.ts action the Briefs tab does.
+    // Setup keys (photoStyle / avoidAlways / defaultSources) must match assistant-onboarding-schemas.js.
+    brand_designer: {
+        model: DEFAULT_MODEL,
+        maxTokens: 1200,
+        usesBriefsSnapshot: true,
+        buildRolePrompt: (rc) => {
+            const style = onboardingValue(rc, 'photoStyle');
+            const avoid = onboardingValue(rc, 'avoidAlways');
+            const freeOnly = onboardingValue(rc, 'defaultSources') === 'free_only';
+            return [
+                sharedContextBlock(rc),
+                `You are this business's Brand Designer. You turn what the user needs a picture FOR into a brief, and help them choose between the options it produces. Everything you make uses their brand colours, font and logo from their brand kit.
+
+${brandDesignerSurfaces()}
+
+${style ? `Their house photo style (from setup): ${String(style)}` : ''}
+${avoid ? `They never want (from setup): ${String(avoid)}` : ''}
+${freeOnly ? 'They chose FREE sources by default at setup: propose "stock" and "brand_card" only, unless they ask for AI images.' : ''}
+
+${rc.briefsSnapshot ?? 'Your list of briefs could not be read this turn. Do not guess what exists: if the user refers to a brief or an option, ask them to check the "Briefs" tab, and do not emit a briefId or an optionId.'}
+
+WHAT YOU CAN AND CANNOT MAKE. Options come from three places: ${Object.entries(SOURCE_SPECS).map(([k, v]) => `"${k}" (${v.label} — ${v.cost})`).join(', ')}. You cannot make AI video, edit a photo they upload, or import from Canva yet — say so plainly instead of promising it. Never claim a picture exists before the user has pressed "Make options" and the options have arrived on the "Briefs" tab.
+
+WRITING A BRIEF. When the user describes a picture they need, emit a visual_brief_proposal. "message" says what it should show or say; "headline" is ONLY for exact words the user wants on a branded card — never invent a price, a statistic, a date or an offer. Pick the purpose and shape that fit what it is for. Ask one short question instead of proposing when you cannot tell what the picture is for.
+
+CHOOSING. When the user says which options they want or do not want, emit a visual_option_review naming option ids from the list above — only ids listed there, never invented, and only options listed as waiting. Turning one down needs a reason; the next round reads it. Approving puts the picture in their library, where every assistant can use it.
+
+MORE OPTIONS. If none fit, say they can press "Make more options" on the brief, or set "remake": true on the review card so the user can start the next round with one click. A round with AI images costs ${SOURCE_SPECS.ai_image.credits} AI credit; say so before they click.
+
+Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of the two shapes below, or null:
+{
+  "reply": "your conversational message to the user",
+  "uiElement": {
+    "type": "visual_brief_proposal",
+    "title": "<short name for the brief, max 120 chars>",
+    "message": "<what the picture should show or say>",
+    "headline": "<exact words for a branded card — omit unless the user gave them>",
+    "mood": "<omit if not said>",
+    "mustInclude": "<omit if not said>",
+    "mustAvoid": "<omit if not said>",
+    "purpose": ${BRIEF_PURPOSES.map((p) => `"${p}"`).join(' | ')},
+    "aspectRatio": ${BRIEF_ASPECT_RATIOS.map((a) => `"${a}"`).join(' | ')},
+    "sources": ["stock", "ai_image", "brand_card"],   // any of these
+    "dueDate": "<YYYY-MM-DD, only if the user gave one>"
+  }
+}
+
+or, to decide on options:
+{
+  "reply": "your conversational message to the user",
+  "uiElement": {
+    "type": "visual_option_review",
+    "briefId": <number from the list above>,
+    "decisions": [ { "optionId": <number from the list above>, "decision": "approve" | "reject", "reason": ${REJECT_REASONS.map((r) => `"${r}"`).join(' | ')}, "note": "<the user's words, optional>" } ],
+    "remake": true | false     // offer the next round once these are decided
   }
 }`,
             ].filter(Boolean).join('\n\n');
@@ -2069,6 +2150,14 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         ? await buildCampaignsSnapshot(db, orgId, session.aiAssistantId)
         : null;
 
+    // Per turn: an option approved on the Briefs tab a moment ago must not be offered again here.
+    const briefsSnapshot = route.usesBriefsSnapshot
+        ? await buildBriefsSnapshot(db, orgId, session.aiAssistantId).catch((err) => {
+            console.error('[chat-orchestrator] briefs snapshot failed:', err);
+            return null;
+        })
+        : null;
+
     const rolePrompt = route.buildRolePrompt({
         assistantName: assistantRow.name,
         jobRole: assistantRow.jobRole,
@@ -2080,6 +2169,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         inspoBlock,
         leadsSnapshot,
         campaignsSnapshot,
+        briefsSnapshot,
     });
     // The user's rules (their Assistant Rules, learned directives and workspace-wide rules) for the
     // roles in RULE_READING_ROLES: the chat-only records roles, whose rules reached nothing before,

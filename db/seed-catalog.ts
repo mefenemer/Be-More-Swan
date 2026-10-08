@@ -104,6 +104,22 @@ const CATALOG = [
         isActive: true,
     },
     {
+        // docs/brand-designer-plan.md. Turns a brief into options from stock, AI and branded cards,
+        // and the user approves one into the library. It owns no generation of its own.
+        //
+        // ⚠️ db/z-brand-designer.sql inserts this row on existing databases (and grants it AI
+        // images) — this entry is for a FRESH database. Both are insert-only; go-live is the admin
+        // flip in Master Data → Assistants, never an edit here.
+        roleKey: 'brand_designer',
+        name: 'Brand Designer',
+        description: 'Turns a brief into on-brand pictures — stock photos, AI images and branded cards made from your colours, font and logo — and puts the options in front of you to approve. Nothing you approve needs Canva; anything you approve lands in your library for every assistant to use.',
+        category: 'Marketing & Sales',
+        iconKey: 'lightning',
+        iconColor: 'pink',
+        comingSoon: true,
+        isActive: true,
+    },
+    {
         roleKey: 'social_media_manager',
         name: 'Social Media Assistant',
         description: 'Plans, writes, and schedules branded content across all your social channels — consistent pipeline generation without the daily grind.',

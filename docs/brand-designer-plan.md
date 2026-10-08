@@ -54,9 +54,12 @@ visuals are briefed, generated, reviewed and approved — and an assistant that 
    approved visuals are `content_assets` rows.
 2. **No 1 / 3 / 10 task tiers.** That would be a second price list for the same thing next to AI
    credits. Keep AI credits (open decision D1). Stock stays free to search; importing costs nothing.
-3. **"Generate 4, pick 1" is a setting, not a rule.** Four videos is 20 credits per brief. Defaults:
-   stock 4–8 options (free), AI image 2 (max 4), AI video 1 with a re-roll button. The cost is shown
-   on the button before the click.
+3. **"Generate 4, pick 1" costs 4× only for video.** For images it is already free of that problem:
+   `generate-ai-image` charges **1 credit for a grid of 4 FLUX variations** (corrected 2026-10-08 —
+   this line first said 1 credit per image). Built defaults (`src/config/visual-brief-vocab.ts`):
+   stock 4 (free), AI image 4 for 1 credit, branded cards 2 (free). Video (Phase 4) stays 1 per
+   round with a re-roll button, since four videos is 20 credits. The cost is on the button before
+   the click.
 4. **Midjourney is out** — no official API. **DALL·E 3 is out** — a second image provider adds a
    bill, a key and a failure mode for no clear gain over FLUX. **Runway / Luma / Sora** are revisited
    only if Hailuo quality is the complaint customers actually make (open decision D3).
@@ -89,9 +92,10 @@ Briefs come from four places:
 | Social Media Manager / Blog Writer | A draft with no usable media can raise a brief instead of auto-picking stock |
 | A person | "Someone on my team will make it" → a §9.5 human task (Jira/Asana optional); their upload answers the brief |
 
-Storage: open decision D2 — either a `visual_briefs` table, or `assistant_records` with
-`recordType = 'visual_brief'` (which would also need adding to `READ_RECORD_TYPES`, see
-`tests/campaign-tabs-load.test.ts`).
+Storage (D2, decided 2026-10-08): own tables, `visual_briefs` + `visual_brief_options`
+(`db/z-brand-designer.sql`). Options are deliberately NOT `content_assets` rows — My Content lists
+every one of those, so a dozen candidates per brief would bury the user's real pictures; an option
+becomes a library asset only when approved.
 
 ### 4.3 Sources per brief
 
@@ -168,6 +172,18 @@ generation returns.
    `tests/provider-balances.test.ts` (rules) and `tests/media-failure-evidence.test.ts` (the SQL, on
    real Postgres in the CI rls job).
 1. **Role + briefs + review queue** (GUI and chat together), stock + AI image + brand card sources.
+   ✅ **Built 2026-10-08.** `db/z-brand-designer.sql` (tables, catalogue row `coming_soon=true`,
+   `ai_image_generation` grant — apply to both DBs BEFORE deploy). Engine `src/utils/visual-briefs.ts`;
+   API `brand-briefs.ts` (list / create / edit / generate / decide / cancel / performance); worker
+   `generate-brief-options-background.ts`; tab `assistant-briefs.js`; chat route `brand_designer` with
+   `visual_brief_proposal` + `visual_option_review` cards; setup asks house photo style, "never show"
+   and default sources. A round holds its AI credit at the click and is settled ONCE (worker, or the
+   10-minute sweep on `list`) — proven on real Postgres in `tests/visual-briefs-db.test.ts`.
+   ⚠️ A chat card may only start a round whose sources are all free; a brief with AI images is saved
+   from chat and its round is started on the Briefs tab, where the cost is on the button.
+   Not done in Phase 1: the sidebar Review badge does not count briefs (the tab badge does); stock
+   search is not filtered by orientation; the chat sees options by id and source, not the pictures;
+   AI options left undecided on a finished brief stay in R2 until the brief is cancelled.
 2. **Brand guidelines** fields on `brand_kit`, fed into prompts and cards.
 3. **`commission_visuals`** campaign order + delivery judgement in the reconciler.
 4. **AI video + human-made + Canva** as sources in the same queue.
@@ -180,10 +196,10 @@ code, the drizzle mirror, the GUI control, the chat card and prompt text, explai
 ## 7. Open decisions (the user's)
 
 - **D1 — Pricing:** keep AI credits (recommended), or move imagery onto the task allowance?
-- **D2 — Storage of briefs:** own `visual_briefs` table, or `assistant_records` rows?
+- ~~**D2 — Storage of briefs**~~ — decided: own tables (§4.2).
 - **D3 — Video provider:** stay on Hailuo, or add a premium option (Runway / Luma / Veo) at a higher
   credit price?
-- **D4 — Options per brief:** the defaults in §3.3, or different?
+- **D4 — Options per brief:** built with the §3.3 defaults (4 stock, 4 AI for 1 credit, 2 cards) — change in `SOURCE_SPECS`.
 - **D5 — Plans:** which tiers get the Brand Designer, and is it its own hire or part of a bundle?
 
 ## 8. Selling it — what can and cannot be claimed

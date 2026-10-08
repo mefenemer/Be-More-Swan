@@ -588,6 +588,53 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // Brand Designer: "Save brief" on a visual_brief_proposal card — brand-briefs.ts `create`, the
+    // same action as "New brief" on the Briefs tab. `generate` arrives true only for a brief with no
+    // AI source (the card enforces it, and so does this line): a chat card never spends a credit.
+    function onBriefCreate(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const b = d.brief || {};
+      const generate = d.generate === true && !(Array.isArray(b.sources) && b.sources.includes('ai_image'));
+      fetch('/.netlify/functions/brand-briefs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ action: 'create', assistantId, ...b, origin: 'chat', generate }),
+      })
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `Save failed (HTTP ${res.status}).`);
+          respond({ ok: true, roundStarted: data.roundStarted === true, error: data.roundError ? (data.roundError.error || 'it could not start') : null });
+          document.dispatchEvent(new CustomEvent('brief:changed', { detail: { assistantId } }));
+        })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
+    // "Confirm" on a visual_option_review card: one `decide` per option, in order, each reported —
+    // a stale option id fails on its own without hiding the ones that worked.
+    async function onBriefReview(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const results = [];
+      for (const x of Array.isArray(d.decisions) ? d.decisions : []) {
+        try {
+          const res = await fetch('/.netlify/functions/brand-briefs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ action: 'decide', optionId: x.optionId, decision: x.decision, reason: x.reason, note: x.note }),
+          });
+          const data = await res.json().catch(() => ({}));
+          results.push(res.ok ? { optionId: x.optionId, ok: true } : { optionId: x.optionId, ok: false, error: data.error || `HTTP ${res.status}` });
+        } catch (err) {
+          results.push({ optionId: x.optionId, ok: false, error: err.message });
+        }
+      }
+      respond({ results });
+      document.dispatchEvent(new CustomEvent('brief:changed', { detail: { assistantId } }));
+    }
+
     // "Save these changes" on a campaign_edit_proposal card. Sends ONLY the descriptive fields,
     // and marks the call viaChat so the server refuses any budget field outright — a chat turn
     // may never raise a ceiling, whatever a card happens to carry.
@@ -825,6 +872,8 @@
     container.addEventListener('campaign:edit', onCampaignEdit);
     container.addEventListener('campaign:taskUpdate', onCampaignTaskUpdate);
     container.addEventListener('campaign:saveLearning', onCampaignSaveLearning);
+    container.addEventListener('brief:create', onBriefCreate);
+    container.addEventListener('brief:review', onBriefReview);
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
     container.addEventListener('newsletter:createDraft', onNewsletterDraftCreate);
     container.addEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
@@ -860,6 +909,8 @@
         container.removeEventListener('campaign:edit', onCampaignEdit);
         container.removeEventListener('campaign:taskUpdate', onCampaignTaskUpdate);
         container.removeEventListener('campaign:saveLearning', onCampaignSaveLearning);
+        container.removeEventListener('brief:create', onBriefCreate);
+        container.removeEventListener('brief:review', onBriefReview);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
         container.removeEventListener('newsletter:createDraft', onNewsletterDraftCreate);
         container.removeEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);

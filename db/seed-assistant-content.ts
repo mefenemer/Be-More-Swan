@@ -283,6 +283,21 @@ const AUTHORED: RoleContent[] = [
         integrations: [],
         worksWith: ['social_media_manager', 'blog_writer', 'lead_qualifier'],
     },
+    // Brand Designer (docs/brand-designer-plan.md). Mirrors db/z-brand-designer.sql, which wrote the
+    // same copy onto existing databases. Standalone in Phase 1: approved pictures reach the other
+    // assistants through the shared library, not through a hand-off — say "works with" only when
+    // Phase 3 (a campaign commissioning visuals) ships.
+    {
+        roleKey: 'brand_designer',
+        tagline: 'Say what the picture is for. Approve the one that fits.',
+        keyFeatures: [
+            'Briefs, Not Prompts',
+            'Stock, AI and Branded Cards Side by Side',
+            'Nothing Is Used Until You Approve It',
+        ],
+        integrations: [],
+        worksWith: ['standalone'],
+    },
 ];
 
 const CONTENT: RoleContent[] = [...MIGRATED, ...AUTHORED];

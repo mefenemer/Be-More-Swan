@@ -401,7 +401,10 @@
     'campaign-tracked-links': { term: 'Tracked links', emoji: '🔗', plain: "Special links that point to your own pages but tell the campaign when someone clicks and later signs up. Use one in a post, an email or an advert, and that sign-up counts towards this campaign." },
     'campaign-year': { term: 'Campaign year', emoji: '🗓️', plain: "Every campaign on one timeline. Bars are each campaign's dates, pale bands are always-on campaigns, small marks are the posts and articles it produced, and campaigns inside an umbrella sit indented under it." },
     'campaign-orders': { term: 'Orders', emoji: '📦', plain: "Every piece of work your Campaign Assistant has asked your other assistants (or your team) to do — what it asked for, who got it, how many tasks it used, and what came back." },
-    'campaign-decisions': { term: 'Decisions', emoji: '⚖️', plain: "Plans and changes your Campaign Assistant wants to make, each with the evidence behind it. Approving one briefs your assistants; turning one down asks why, so it doesn't suggest the same thing again." }
+    'campaign-decisions': { term: 'Decisions', emoji: '⚖️', plain: "Plans and changes your Campaign Assistant wants to make, each with the evidence behind it. Approving one briefs your assistants; turning one down asks why, so it doesn't suggest the same thing again." },
+    'brand-briefs': { term: 'Briefs', emoji: '🎨', plain: "A brief says what a picture is for — what it should show, the mood, what to avoid. Your Brand Designer turns it into options from stock photos, AI images and branded cards, and nothing is used anywhere until you approve one." },
+    'brand-brief-sources': { term: 'Where options come from', emoji: '🧺', plain: "Stock photos come free from Pexels, and branded cards are drawn free in your own colours, font and logo. AI images use one AI credit for a round of four. Untick a source and that brief never uses it." },
+    'brand-art-direction': { term: 'How the designer read your brief', emoji: '🔍', plain: "The words your Brand Designer actually used: the description given to the AI, the stock search, and the words put on the cards. If a round missed, this shows why — then turn options down with a reason and the next round reads it." }
   };
 
   /* ----------------------------------------------------------------------

@@ -1273,3 +1273,10 @@ node_bundler = "esbuild"
 # comes back as a bare gateway error after part of the chunk is already done.
 [functions.assistant-records]
   timeout = 26
+
+# The Brand Designer's API (docs/brand-designer-plan.md). `list` reads briefs, options, the credit
+# balance and the AI feature gate and signs a URL per option — several round trips to a database on
+# the other side of the Atlantic (functions-region-vs-db-region), which the 10 s default does not
+# always cover. The round itself runs in generate-brief-options-background, not here.
+[functions.brand-briefs]
+  timeout = 26

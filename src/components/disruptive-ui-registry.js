@@ -1462,6 +1462,134 @@
 
   register('campaign_learning_proposal', renderCampaignLearningProposalCard);
 
+  // ── Built-in: Visual Brief Proposal Card (Brand Designer) ──────────────────
+  // { type: 'visual_brief_proposal', title, message?, headline?, mood?, mustInclude?, mustAvoid?,
+  //   purpose?, aspectRatio?, sources?: string[], dueDate? }
+  //
+  // The chat twin of "New brief" on the Briefs tab — same server action (brand-briefs.ts create).
+  // ⚠️ A card may only MAKE OPTIONS when every source is free. A brief that includes AI images is
+  // saved here and its round is started on the Briefs tab, where the button states the credit cost:
+  // a chat turn never spends (the Campaign Assistant's rule, and the user's).
+  function renderVisualBriefProposalCard(ui, esc) {
+    const clean = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
+    const brief = {
+      title: clean(ui.title, 120), message: clean(ui.message, 1000), headline: clean(ui.headline, 120),
+      mood: clean(ui.mood, 300), mustInclude: clean(ui.mustInclude, 500), mustAvoid: clean(ui.mustAvoid, 500),
+      purpose: clean(ui.purpose, 40), aspectRatio: clean(ui.aspectRatio, 8),
+      sources: Array.isArray(ui.sources) ? ui.sources.filter((x) => ['stock', 'ai_image', 'brand_card'].includes(x)) : ['stock', 'ai_image', 'brand_card'],
+      dueDate: /^\d{4}-\d{2}-\d{2}$/.test(String(ui.dueDate || '')) ? String(ui.dueDate) : '',
+    };
+    if (!brief.sources.length) brief.sources = ['stock', 'brand_card'];
+    const free = !brief.sources.includes('ai_image');
+    const SOURCE = { stock: 'Stock photos', ai_image: 'AI images', brand_card: 'Branded cards' };
+    const row = (label, v) => (v ? `<p class="text-xs text-gray-700 mt-1"><span class="font-bold">${label}:</span> ${esc(v)}</p>` : '');
+    const runnable = !!brief.title && !!(brief.message || brief.headline);
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">New brief · Approval needed</p>
+      <p class="text-sm font-bold text-gray-900 mt-2 break-words">${brief.title ? esc(brief.title) : '<span class="text-amber-700">No name was given.</span>'}</p>
+      ${row('Shows', brief.message)}
+      ${row('Words on the card', brief.headline)}
+      ${row('Mood', brief.mood)}
+      ${row('Must include', brief.mustInclude)}
+      ${row('Must avoid', brief.mustAvoid)}
+      ${row('Shape', brief.aspectRatio)}
+      ${row('Due', brief.dueDate)}
+      <p class="text-xs text-gray-700 mt-1"><span class="font-bold">Options from:</span> ${brief.sources.map((x) => esc(SOURCE[x])).join(', ')}</p>
+      <p class="text-xs text-gray-600 mt-2">${free
+        ? 'Stock photos and branded cards are free. Nothing is used anywhere until you approve it.'
+        : 'Saved to your Briefs tab. Press "Make options" there — that button shows what the AI images cost before anything is spent.'}</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${free ? `<button type="button" data-vbp-save="generate" ${runnable ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save and make options</button>` : ''}
+        <button type="button" data-vbp-save="save" ${runnable ? '' : 'disabled'} class="${free ? 'btn-secondary border' : 'btn-primary'} px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save brief</button>
+        <button type="button" data-vbp-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-vbp-status></p>`;
+    const status = el.querySelector('[data-vbp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      const save = e.target.closest('[data-vbp-save]');
+      if (e.target.closest('[data-vbp-cancel]')) { setBusy(true); say('Not saved.'); return; }
+      if (!save) return;
+      setBusy(true);
+      const generate = save.dataset.vbpSave === 'generate' && free;
+      say(generate ? 'Saving and starting…' : 'Saving…');
+      el.dispatchEvent(new CustomEvent('brief:create', {
+        bubbles: true,
+        detail: {
+          brief, generate,
+          respond({ ok, error, roundStarted }) {
+            if (!ok) { setBusy(false); say(error || 'Could not save that — please try again.', 'error'); return; }
+            say(generate && roundStarted
+              ? 'Saved. Options are being made — they appear on the Briefs tab in about a minute.'
+              : (error ? `Saved, but options could not start: ${error}` : 'Saved to your Briefs tab.'));
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('visual_brief_proposal', renderVisualBriefProposalCard);
+
+  // ── Built-in: Visual Option Review Card (Brand Designer) ───────────────────
+  // { type: 'visual_option_review', briefId, decisions: [{ optionId, decision, reason?, note? }], remake? }
+  //
+  // The chat twin of "Use this" / "Not this" on the Briefs tab — the same brand-briefs.ts `decide`.
+  // Option ids come from the per-turn snapshot; a stale or invented one is refused by the server and
+  // the card says which, rather than claiming it was done.
+  function renderVisualOptionReviewCard(ui, esc) {
+    const decisions = (Array.isArray(ui.decisions) ? ui.decisions : [])
+      .map((d) => ({
+        optionId: Number(d && d.optionId),
+        decision: d && d.decision === 'approve' ? 'approve' : d && d.decision === 'reject' ? 'reject' : null,
+        reason: typeof (d && d.reason) === 'string' ? d.reason : 'other',
+        note: typeof (d && d.note) === 'string' ? d.note.slice(0, 300) : '',
+      }))
+      .filter((d) => Number.isInteger(d.optionId) && d.optionId > 0 && d.decision)
+      .slice(0, 12);
+    const label = (r) => String(r || 'other').replace(/_/g, ' ');
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Choose options · Approval needed</p>
+      ${decisions.length ? `<ul class="mt-2 space-y-1">${decisions.map((d) => `
+        <li class="text-sm text-gray-900">${d.decision === 'approve' ? '✓ Use' : '✗ Turn down'} option ${esc(d.optionId)}${d.decision === 'reject' ? ` <span class="text-xs text-gray-600">— ${esc(label(d.reason))}${d.note ? `: ${esc(d.note)}` : ''}</span>` : ''}</li>`).join('')}</ul>`
+        : '<p class="text-sm text-amber-700 mt-2">No options were named.</p>'}
+      <p class="text-xs text-gray-600 mt-2">Approved pictures go into your library for every assistant to use. Turned-down ones are deleted, and the next round reads why.${ui.remake === true ? ' For a new round, press "Make more options" on the brief in your Briefs tab.' : ''}</p>
+      <div class="flex items-center gap-2 mt-3">
+        <button type="button" data-vor-confirm ${decisions.length ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Confirm</button>
+        <button type="button" data-vor-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-vor-status></p>`;
+    const status = el.querySelector('[data-vor-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-vor-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-vor-confirm]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('brief:review', {
+        bubbles: true,
+        detail: {
+          decisions,
+          respond({ results }) {
+            const failed = (results || []).filter((r) => !r.ok);
+            const done = (results || []).length - failed.length;
+            if (!failed.length) { say(`Done — ${done} ${done === 1 ? 'option' : 'options'} decided.`); return; }
+            say(`${done} done. Not done: ${failed.map((r) => `option ${r.optionId} (${r.error})`).join('; ')}`, 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('visual_option_review', renderVisualOptionReviewCard);
+
   // ── Built-in: Action Item Assignment Card ───────────────────────────────────
   // Renderer for the meeting-note-taker route's wire shape (chat-orchestrator.ts):
   // { type: 'action_item_assignment', meetingSummary, decisionsMade?: string[],

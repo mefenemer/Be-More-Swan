@@ -64,3 +64,6 @@ jobs:
       # It also runs in test:all, where it skips — it refuses any database that is not on localhost.
       - name: Media failure evidence query
         run: npx tsx tests/media-failure-evidence.test.ts
+      # The Brand Designer's settle-once credit SQL (src/utils/visual-briefs.ts endRound), same schema.
+      - name: Brand Designer credit settlement
+        run: npx tsx tests/visual-briefs-db.test.ts

@@ -5211,3 +5211,69 @@ export const productUpdateSends = pgTable("product_update_sends", {
 }, (t) => [
   uniqueIndex("product_update_sends_digest_user_uidx").on(t.digestId, t.userId),
 ]);
+
+// ── Brand Designer (db/z-brand-designer.sql, docs/brand-designer-plan.md §4) ───────────────────
+// A brief says what a picture is FOR; each round of generation adds options; the user approves.
+// Options are NOT content_assets: the library lists every content_assets row, so candidates would
+// bury real pictures. Approving an option is what creates the content_assets row.
+export const visualBriefs = pgTable("visual_briefs", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  title: text().notNull(),
+  purpose: text().notNull().default("social_post"),
+  aspectRatio: text("aspect_ratio").notNull().default("1:1"),
+  mediaType: text("media_type").notNull().default("image"),
+  message: text(),
+  headline: text(),
+  mood: text(),
+  mustInclude: text("must_include"),
+  mustAvoid: text("must_avoid"),
+  sources: jsonb().notNull().default(["stock", "ai_image", "brand_card"]),
+  status: text().notNull().default("open"),
+  origin: text().notNull().default("user"),
+  dueDate: date("due_date"),
+  rounds: integer().notNull().default(0),
+  artDirection: jsonb("art_direction"),
+  // Credits held by the round in flight; settled and zeroed in ONE update, so only once.
+  creditHold: integer("credit_hold").notNull().default(0),
+  generationStartedAt: timestamp("generation_started_at"),
+  generationNote: text("generation_note"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("visual_briefs_assistant_status_idx").on(t.organisationId, t.aiAssistantId, t.status),
+  check("visual_briefs_purpose_check", sql`${t.purpose} IN ('social_post','blog_header','ad','email_header','story','other')`),
+  check("visual_briefs_aspect_ratio_check", sql`${t.aspectRatio} IN ('1:1','4:5','16:9','9:16')`),
+  check("visual_briefs_media_type_check", sql`${t.mediaType} IN ('image','video')`),
+  check("visual_briefs_status_check", sql`${t.status} IN ('open','generating','in_review','approved','cancelled')`),
+  check("visual_briefs_origin_check", sql`${t.origin} IN ('user','chat')`),
+]);
+
+export const visualBriefOptions = pgTable("visual_brief_options", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  briefId: integer("brief_id").notNull().references(() => visualBriefs.id, { onDelete: "cascade" }),
+  round: integer().notNull(),
+  source: text().notNull(),
+  status: text().notNull().default("proposed"),
+  storageKey: text("storage_key"),
+  externalUrl: text("external_url"),
+  mimeType: text("mime_type"),
+  width: integer(),
+  height: integer(),
+  prompt: text(),
+  providerAssetId: text("provider_asset_id"),
+  attributionName: text("attribution_name"),
+  attributionUrl: text("attribution_url"),
+  renderParams: jsonb("render_params"),
+  rejectReason: text("reject_reason"),
+  contentAssetId: integer("content_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
+  decidedAt: timestamp("decided_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("visual_brief_options_brief_idx").on(t.briefId, t.round),
+  check("visual_brief_options_source_check", sql`${t.source} IN ('stock','ai_image','brand_card')`),
+  check("visual_brief_options_status_check", sql`${t.status} IN ('proposed','approved','rejected')`),
+]);

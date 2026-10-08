@@ -31,6 +31,9 @@ export const CAMPAIGN_ORCHESTRATOR_ROLE_KEY = 'campaign_orchestrator';
 /** The Email Marketing Assistant (user-facing name). The role key predates the rename and stays. */
 export const NEWSLETTER_ROLE_KEY = 'newsletter_editor';
 
+/** The Brand Designer — briefs, a review grid of options, approved pictures into the library. */
+export const BRAND_DESIGNER_ROLE_KEY = 'brand_designer';
+
 /**
  * The roles the Campaign Assistant is allowed to issue orders to, and nothing else.
  *

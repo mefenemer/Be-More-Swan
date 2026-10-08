@@ -12,7 +12,7 @@
 //     'brand_card'). Costs no AI credits — nothing is generated, only drawn.
 
 import crypto from 'crypto';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { contentAssets } from '../../db/schema';
 import { generateImages, falConfigured, type AspectRatio } from './fal-gateway';
 import { renderBrandCard, type CardVariant } from './brand-card';
@@ -90,6 +90,26 @@ export async function putR2Object(params: { key: string; bytes: Buffer; contentT
         credentials: { accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY! },
     });
     await s3.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: params.key, Body: params.bytes, ContentType: params.contentType }));
+}
+
+/**
+ * Delete one object. Best-effort by contract: it never throws, because every caller is tidying up
+ * after a decision that has already been saved (a rejected brief option), and a failed delete must
+ * not undo or block that decision. Returns whether the delete was sent successfully.
+ */
+export async function deleteR2Object(key: string): Promise<boolean> {
+    if (!r2Configured || !key) return false;
+    try {
+        const s3 = new S3Client({
+            region: 'auto', endpoint: R2_ENDPOINT,
+            credentials: { accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY! },
+        });
+        await s3.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+        return true;
+    } catch (err) {
+        console.error('[media-persist] R2 delete failed (left in place):', key, err instanceof Error ? err.message : err);
+        return false;
+    }
 }
 
 export async function persistBufferToR2(params: {
