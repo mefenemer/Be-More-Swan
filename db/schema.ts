@@ -3984,6 +3984,14 @@ export const campaigns = pgTable("campaigns", {
   haltedAt: timestamp("halted_at"),
   haltedBy: integer("halted_by").references(() => users.id, { onDelete: "set null" }),
 
+  // ── Audience (db/z-campaign-audience.sql, plan §9.2) ──
+  // { persona?, description?, excludeDomains? } — CampaignAudience in src/config/campaign-audience.ts.
+  // NULL = not said yet; the directive omits the line rather than inventing an audience.
+  audience: jsonb(),
+  // Leave companies already marked "won" out of this campaign's lead searches. Default ON: an
+  // acquisition campaign hunting existing customers wastes the budget it was given.
+  excludeExistingCustomers: boolean("exclude_existing_customers").notNull().default(true),
+
   // ── Paid rails (db/campaign-paid.sql). NULL on every organic campaign, which is all of them. ──
   adNetwork: text("ad_network"),
   externalCampaignId: text("external_campaign_id"),

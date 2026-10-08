@@ -12,6 +12,7 @@
 // real steering weight but an assistant without them is fully configured, so none counts toward
 // completeness.
 
+import { audienceLine } from '../config/campaign-audience';
 import { eq, and, desc, isNull, inArray, sql } from 'drizzle-orm';
 import * as crypto from 'crypto';
 import { getDb } from '../../db/client';
@@ -603,6 +604,7 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
             outcomeMetric: campaigns.outcomeMetric,
             endsAt: campaigns.endsAt,
             constraints: campaigns.constraints,
+            audience: campaigns.audience,
             updatedAt: campaigns.updatedAt,
             brief: campaignOrders.brief,
         })
@@ -638,7 +640,10 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
         objective: liveCampaign.objective,
         outcomeMetric: liveCampaign.outcomeMetric as CampaignOutcomeMetric,
         angle: typeof campaignBrief.angle === 'string' ? campaignBrief.angle : null,
-        audience: typeof campaignBrief.audience === 'string' ? campaignBrief.audience : null,
+        // The order's own audience wins (one campaign can brief two assistants for two personas);
+        // otherwise the campaign's. Slow-moving by construction — it changes only on an edit,
+        // which recompiles (campaigns.ts edit → recompileCampaignTargets).
+        audience: audienceLine(liveCampaign.audience, campaignBrief.audience),
         // Pace is not computed here on purpose: it needs live outcome counts, and this section
         // must stay slow-moving. It is 'unknown' until the Phase 2 outcome attribution lands,
         // and the directive omits the pace line entirely rather than guessing.

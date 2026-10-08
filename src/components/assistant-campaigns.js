@@ -179,6 +179,23 @@
       : esc(label);
   }
 
+  // ── Who it is for (§9.2) ───────────────────────────────────────────────────
+  // Stated on every row, including when it is missing: "no audience" is the single most common
+  // reason a campaign drafts generic work, and a blank line would hide that.
+  function audienceHtml(c) {
+    const a = c.audience && typeof c.audience === 'object' ? c.audience : {};
+    const who = [a.persona, a.description].filter((v) => typeof v === 'string' && v.trim()).join(' — ');
+    const extra = Array.isArray(a.excludeDomains) ? a.excludeDomains : [];
+    const exclusion = c.excludeExistingCustomers === false
+      ? '<span class="font-bold text-amber-700">Includes existing customers.</span>'
+      : `Leaves out companies marked won${extra.length ? ` and ${esc(String(extra.length))} more (${esc(extra.slice(0, 3).join(', '))}${extra.length > 3 ? '…' : ''})` : ''}.`;
+    return `
+      <p class="text-xs text-gray-600 mt-1 break-words">${who
+        ? `<span class="font-bold text-gray-700">For:</span> ${esc(who)}`
+        : '<span class="text-amber-700">No audience set — use Edit to say who this is for.</span>'}</p>
+      <p class="text-xs text-gray-500 mt-0.5">${exclusion}</p>`;
+  }
+
   // ── Rows ───────────────────────────────────────────────────────────────────
   function campaignRow(c) {
     const chip = chipFor(c);
@@ -199,6 +216,7 @@
           <div class="min-w-0">
             <p class="font-bold text-gray-900 break-words">${esc(c.objective)}</p>
             <p class="text-xs text-gray-500 mt-0.5">${outcomeLine(c)}</p>
+            ${audienceHtml(c)}
           </div>
           <span class="${chip.cls} shrink-0">${esc(chip.label)}</span>
         </div>
@@ -379,6 +397,12 @@
               ${state.savedSearches.map((x) => `<option value="${esc(String(x.id))}">${esc(x.name || x.idea.slice(0, 80))}</option>`).join('')}
             </select>
           </label>` : '<p class="text-xs text-amber-700">There are no saved lead searches to narrow yet — use "Run a lead search" first.</p>') : ''}
+        ${spec.key === 'draft_social_posts' || spec.key === 'draft_blog_pillar' ? `
+          <label class="block text-xs font-bold text-gray-600">For a different audience (optional)
+            <input type="text" maxlength="300" data-cmp-aw-audience="${id}" data-keep="aw-aud-${id}-${esc(spec.key)}"
+              placeholder="Leave blank to write for this campaign's audience"
+              class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+          </label>` : ''}
         ${prompt ? `
           <label class="block text-xs font-bold text-gray-600">${esc(prompt.label)}
             <textarea rows="2" maxlength="1000" data-cmp-aw-text="${id}" data-keep="aw-text-${id}-${esc(spec.key)}" placeholder="${esc(prompt.placeholder)}"
@@ -406,6 +430,8 @@
     const outcomes = (C() && C().selectableOutcomes) || ['leads'];
     const v = (key, dflt) => (c && c[key] != null ? c[key] : dflt);
     const ends = c && c.endsAt ? String(c.endsAt).slice(0, 10) : '';
+    const aud = c && c.audience && typeof c.audience === 'object' ? c.audience : {};
+    const excludeCustomers = !c || c.excludeExistingCustomers !== false;
     return `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-4 space-y-3" data-cmp-form>
         <p class="text-sm font-bold text-gray-900">${f.mode === 'edit' ? 'Edit campaign' : 'New campaign'}</p>
@@ -434,6 +460,26 @@
           </label>
         </div>
         <p class="text-xs text-gray-500">The task budget is the most of your monthly allowance this campaign may commission. At the cap it stops — it never bills you extra.</p>
+        <p class="text-xs font-bold text-gray-700 pt-2">Who is it for?</p>
+        <div class="flex flex-wrap gap-3">
+          <label class="block text-xs font-bold text-gray-600 min-w-[12rem]">Persona
+            <input type="text" maxlength="80" data-cmpf="persona" data-keep="f-persona" value="${esc(aud.persona || '')}"
+              placeholder="e.g. SMB founders" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+          </label>
+          <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">Who they are and what they care about
+            <input type="text" maxlength="500" data-cmpf="audienceDescription" data-keep="f-aud-desc" value="${esc(aud.description || '')}"
+              placeholder="e.g. owners of 5–50 person firms who handle their own marketing" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+          </label>
+        </div>
+        <label class="flex items-start gap-2 text-xs text-gray-700">
+          <input type="checkbox" data-cmpf="excludeExistingCustomers" data-keep="f-excl" ${excludeCustomers ? 'checked' : ''} class="mt-0.5">
+          <span><span class="font-bold">Leave out existing customers.</span> Lead searches for this campaign skip companies you have marked as won in Conversations. Untick it only for a campaign aimed at your customers.</span>
+        </label>
+        <label class="block text-xs font-bold text-gray-600">Also leave out (optional)
+          <textarea rows="2" data-cmpf="excludeDomains" data-keep="f-excl-domains"
+            placeholder="Customers or partners not in the platform, as web addresses — acme.co.uk, example.com"
+            class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">${esc((aud.excludeDomains || []).join(', '))}</textarea>
+        </label>
         <div class="flex items-center gap-2">
           <button type="button" data-cmpf-save class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
             ${f.mode === 'edit' ? 'Save changes' : 'Save as draft'}
@@ -983,7 +1029,7 @@
     // arrives — so without this, anything typed into "New campaign" or "Add work" vanished
     // mid-sentence. Fields opt in with data-keep; their values are carried across the rewrite.
     const kept = {};
-    host.querySelectorAll('[data-keep]').forEach((el) => { kept[el.dataset.keep] = el.value; });
+    host.querySelectorAll('[data-keep]').forEach((el) => { kept[el.dataset.keep] = el.type === 'checkbox' ? el.checked : el.value; });
 
     if (!state.campaigns.length) {
       host.innerHTML = `${toolbarHtml()}${formHtml()}${state.form ? '' : emptyState()}`;
@@ -998,7 +1044,9 @@
     }
 
     host.querySelectorAll('[data-keep]').forEach((el) => {
-      if (Object.prototype.hasOwnProperty.call(kept, el.dataset.keep)) el.value = kept[el.dataset.keep];
+      if (!Object.prototype.hasOwnProperty.call(kept, el.dataset.keep)) return;
+      if (el.type === 'checkbox') el.checked = kept[el.dataset.keep];
+      else el.value = kept[el.dataset.keep];
     });
   }
 
@@ -1628,6 +1676,14 @@
         targetValue: val('targetValue') ? Number(val('targetValue')) : null,
         endsAt: val('endsAt') || null,
         maxWorkItems: Number(val('maxWorkItems')) || 50,
+        // Sent whole on purpose: this form shows every audience field, so what is on screen IS the
+        // audience — clearing a field here clears it (unlike the chat, which only ever adds).
+        audience: {
+          persona: val('persona'),
+          description: val('audienceDescription'),
+          excludeDomains: val('excludeDomains'),
+        },
+        excludeExistingCustomers: !!host?.querySelector('[data-cmpf="excludeExistingCustomers"]')?.checked,
       };
       const f = state.form;
       state.busy = true;
@@ -1727,6 +1783,9 @@
       if (prompt && prompt.required && !text) { say(id, `${prompt.label} is needed for this.`, 'error'); return; }
       const brief = {};
       if (prompt && text) brief[prompt.field] = text;
+      // An order's own audience beats the campaign's for that order's work (§9.2).
+      const forWho = (document.querySelector(`[data-cmp-aw-audience="${id}"]`)?.value || '').trim();
+      if (forWho) brief.audience = forWho;
       if (spec.key === 'narrow_targeting') {
         brief.discoveryCampaignId = Number(document.querySelector(`[data-cmp-aw-search="${id}"]`)?.value) || null;
       }

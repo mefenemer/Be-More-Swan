@@ -7,6 +7,8 @@
 //                                 maxWorkItems?, endsAt?, asDraft?, orders?[] }
 //                                 → orders become a PENDING strategy decision, never placed here
 //   POST { action: 'edit',        campaignId, ...fields, viaChat? }
+//                                 fields include audience { persona, description, excludeDomains }
+//                                 and excludeExistingCustomers (§9.2)
 //   POST { action: 'propose_plan', campaignId, orders[] }    → pending strategy decision (chat)
 //   POST { action: 'start',       campaignId }             → draft|paused → active
 //   POST { action: 'pause',       campaignId, reason }
@@ -47,6 +49,7 @@ import { campaignSpendTotals, fitsBudget, readPlanTaskGate } from '../../src/uti
 import { placeOrder, recompileCampaignTargets } from '../../src/utils/campaign-orders';
 import { settleDecisionMirror } from '../../src/utils/campaign-mirror';
 import { hiredRoleKeys } from '../../src/utils/campaign-proposer';
+import { normaliseAudience, type CampaignAudience } from '../../src/config/campaign-audience';
 import {
     PLANNABLE_STATUSES, fileStrategyPlan, normalisePlanOrders, pendingPlanFor, planProblem, planWorkItems,
 } from '../../src/utils/campaign-plan';
@@ -154,6 +157,8 @@ export default withLambda(async (event) => {
                 // reword freely, and connection-status-vocabulary-drift is what it costs when a
                 // surface guesses a state instead of reading one.
                 haltedBy: campaigns.haltedBy,
+                audience: campaigns.audience,
+                excludeExistingCustomers: campaigns.excludeExistingCustomers,
                 createdAt: campaigns.createdAt,
                 maxWorkItems: campaignBudgets.maxWorkItems,
                 maxSpendGbp: campaignBudgets.maxSpendGbp,
@@ -323,6 +328,9 @@ export default withLambda(async (event) => {
             mode: 'organic',
             status: 'draft',
             endsAt: endsAt && !Number.isNaN(endsAt.getTime()) ? endsAt : null,
+            audience: normaliseAudience(body.audience),
+            // Only an explicit false turns it off. Absent means the safe default (§9.2).
+            excludeExistingCustomers: body.excludeExistingCustomers !== false,
         }).returning({ id: campaigns.id });
 
         await db.insert(campaignBudgets).values({
@@ -359,7 +367,28 @@ export default withLambda(async (event) => {
             return json(400, { error: 'A campaign\'s task budget is changed on the Campaigns tab, with the numbers in front of you — not from the chat.' });
         }
 
+        // §9.0: the chat may only ever NARROW who a campaign reaches. Turning the customer
+        // exclusion off widens it to people the business already sells to — a human decision, made
+        // on the Campaigns tab with the toggle in front of them.
+        if (body.viaChat === true && body.excludeExistingCustomers === false) {
+            return json(400, { error: 'Including existing customers is switched on from the Campaigns tab ("Edit"), not from the chat.' });
+        }
+
         const patch: Record<string, unknown> = { updatedAt: new Date() };
+        if (body.audience !== undefined) {
+            const next = normaliseAudience(body.audience);
+            if (body.viaChat === true) {
+                // Merged, never replaced, on the chat path: a card that names a new persona must
+                // not silently drop the "also leave out" list the user typed on the tab. Domains
+                // only ever accumulate here.
+                const prev = (normaliseAudience(campaign.audience) ?? {}) as CampaignAudience;
+                const domains = [...new Set([...(prev.excludeDomains ?? []), ...(next?.excludeDomains ?? [])])];
+                patch.audience = normaliseAudience({ ...prev, ...(next ?? {}), excludeDomains: domains });
+            } else {
+                patch.audience = next;
+            }
+        }
+        if (typeof body.excludeExistingCustomers === 'boolean') patch.excludeExistingCustomers = body.excludeExistingCustomers;
         const objective = str(body.objective, 500);
         if (objective) patch.objective = objective;
         if (isSelectableOutcomeMetric(body.outcomeMetric)) patch.outcomeMetric = body.outcomeMetric;
@@ -372,7 +401,8 @@ export default withLambda(async (event) => {
         }
         await db.update(campaigns).set(patch).where(eq(campaigns.id, campaign.id));
         // The objective and end date are what the directive says; an edit must reach drafting.
-        if (patch.objective !== undefined || patch.outcomeMetric !== undefined || patch.endsAt !== undefined) {
+        if (patch.objective !== undefined || patch.outcomeMetric !== undefined || patch.endsAt !== undefined
+            || patch.audience !== undefined) {
             await recompileCampaignTargets(db, campaign.id, 'campaign-edited');
         }
 

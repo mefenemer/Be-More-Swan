@@ -920,6 +920,15 @@
     const targetValue = Number.isFinite(Number(ui.targetValue)) ? Number(ui.targetValue) : null;
     const maxWorkItems = Number.isFinite(Number(ui.maxWorkItems)) ? Number(ui.maxWorkItems) : null;
     const campaignId = Number.isInteger(Number(ui.campaignId)) && Number(ui.campaignId) > 0 ? Number(ui.campaignId) : null;
+    // Who it is for (§9.2). Shown as well as sent: the user is approving an audience, and an
+    // audience saved without being seen is a decision made for them.
+    const aud = ui.audience && typeof ui.audience === 'object' ? ui.audience : null;
+    const persona = aud && typeof aud.persona === 'string' ? aud.persona.trim() : '';
+    const audDesc = aud && typeof aud.description === 'string' ? aud.description.trim() : '';
+    const excludeDomains = aud && Array.isArray(aud.excludeDomains)
+      ? aud.excludeDomains.filter((d) => typeof d === 'string' && d.trim()).map((d) => d.trim()) : [];
+    // Only an explicit false includes customers — the same default the server applies.
+    const excludeCustomers = ui.excludeExistingCustomers !== false;
 
     // Only render orders the client can name. An unknown action or role means the model invented
     // one, and listing it would promise the user work no assistant will ever be asked to do.
@@ -934,12 +943,14 @@
         const qty = spec.takesQuantity && Number.isFinite(Number(o.quantity))
           ? Math.max(1, Math.min(spec.maxQuantity, Math.floor(Number(o.quantity)))) : 1;
         const detail = [o.angle, o.idea].find((v) => typeof v === 'string' && v.trim());
+        const forWho = typeof o.audience === 'string' && o.audience.trim() ? o.audience.trim() : '';
         return {
           raw: o,
           label: spec.label,
           role: ROLE_LABEL[o.assignedRole],
           qty: qty > 1 ? qty : null,
           detail: detail ? String(detail).trim() : '',
+          forWho,
           tasks: (spec.workItemsPerUnit || 0) * qty,
         };
       });
@@ -959,11 +970,20 @@
       ${rationale ? `
         <p class="text-sm text-gray-700 mb-3"><span class="font-bold text-indigo-900">Why:</span> ${esc(rationale)}</p>` : ''}
 
+      ${!campaignId ? `
+        <p class="text-sm text-gray-700 mb-1 break-words"><span class="font-bold text-indigo-900">For:</span>
+          ${persona || audDesc ? `${esc(persona)}${persona && audDesc ? ' — ' : ''}${esc(audDesc)}` : '<span class="text-amber-700">no audience given yet</span>'}</p>
+        <p class="text-xs mb-3 ${excludeCustomers ? 'text-gray-600' : 'text-amber-700 font-bold'}">
+          ${excludeCustomers
+            ? `Leaves out companies you have marked as won${excludeDomains.length ? `, plus ${esc(String(excludeDomains.length))} more you named` : ''}.`
+            : 'Includes your existing customers — for a campaign aimed at them.'}
+        </p>` : ''}
+
       ${orders.length ? `
         <p class="text-xs font-bold text-indigo-700 uppercase tracking-wide mb-1">Who I'd brief</p>
         <ul class="mb-3 space-y-1">
           ${orders.map((o) => `
-            <li class="text-xs text-gray-600">• ${esc(o.label)}${o.qty ? ` ×${esc(String(o.qty))}` : ''} — ${esc(o.role)}${o.detail ? `<span class="block pl-3 text-gray-500 italic break-words">${esc(o.detail)}</span>` : ''}</li>
+            <li class="text-xs text-gray-600">• ${esc(o.label)}${o.qty ? ` ×${esc(String(o.qty))}` : ''} — ${esc(o.role)}${o.detail ? `<span class="block pl-3 text-gray-500 italic break-words">${esc(o.detail)}</span>` : ''}${o.forWho ? `<span class="block pl-3 text-gray-500 break-words">For: ${esc(o.forWho)}</span>` : ''}</li>
           `).join('')}
         </ul>` : ''}
 
@@ -1049,6 +1069,8 @@
           targetValue,
           maxWorkItems,
           endsAt: typeof ui.endsAt === 'string' ? ui.endsAt : null,
+          audience: aud ? { persona, description: audDesc, excludeDomains } : null,
+          excludeExistingCustomers: excludeCustomers,
           orders: orders.map((o) => o.raw),
           // The success line is built from the SERVER's answer, never from the model's intent —
           // chat-claims-drafts-it-never-saved is a reply that announced drafts which were never
@@ -1105,6 +1127,24 @@
     if (typeof ui.endsAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(ui.endsAt)) {
       changes.endsAt = ui.endsAt;
       rows.push(['Ends', ui.endsAt]);
+    }
+    const a = ui.audience && typeof ui.audience === 'object' ? ui.audience : null;
+    if (a) {
+      const persona = typeof a.persona === 'string' ? a.persona.trim() : '';
+      const description = typeof a.description === 'string' ? a.description.trim() : '';
+      const excludeDomains = Array.isArray(a.excludeDomains) ? a.excludeDomains.filter((d) => typeof d === 'string' && d.trim()) : [];
+      if (persona || description || excludeDomains.length) {
+        changes.audience = { persona, description, excludeDomains };
+        if (persona || description) rows.push(['For', `${persona}${persona && description ? ' — ' : ''}${description}`]);
+        // The server MERGES these on the chat path, so the card says "also" — it never replaces
+        // the list the user typed on the tab.
+        if (excludeDomains.length) rows.push(['Also leave out', excludeDomains.join(', ')]);
+      }
+    }
+    // Only ever ON from a card (§9.0). A card carrying false shows nothing and sends nothing.
+    if (ui.excludeExistingCustomers === true) {
+      changes.excludeExistingCustomers = true;
+      rows.push(['Existing customers', 'left out of lead searches']);
     }
 
     const el = document.createElement('div');

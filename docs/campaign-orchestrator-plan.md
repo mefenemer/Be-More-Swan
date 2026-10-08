@@ -430,6 +430,20 @@ Marketing Assistant), a `brief.persona` slot on orders that nothing populates.
   outcomes / CRM contacts at discovery time, default ON for awareness/consideration/conversion
   campaigns, OFF for retention (where customers ARE the audience).
 
+**✅ Built 2026-10-08 (not yet deployed). ⚠️ Needs `db/z-campaign-audience.sql` applied to BOTH
+envs BEFORE the code deploys** (`requireCampaign` selects every column). `campaigns.audience`
+(persona, description, excludeDomains) + `exclude_existing_customers` (default TRUE until §9.6
+sets it per stage). Pure helpers in `src/config/campaign-audience.ts`. Drafting: blueprint §13
+reads `audienceLine(campaign.audience, order.brief.audience)` — the order's own audience wins.
+Lead searches: `src/utils/customer-exclusion.ts` resolves, on every run, the domains of leads
+marked WON in Conversations plus the campaign's "also leave out" list, for searches a campaign
+order points at only (hand-built searches untouched); merged into a COPY of the guardrails.
+Customers the platform never saw can only be excluded by domain — there is no tenant customer
+list to read. Segment ids are deferred to §9.7. GUI: form fields, an audience line on every row
+("No audience set" when missing), per-brief audience on Add work. Chat: proposal + edit cards
+show and send the audience; the chat can switch the exclusion ON but never OFF, and its domain
+list is merged, never replaced. Guarded by `tests/campaign-audience.test.ts`.
+
 ### 9.3 Creative assets & campaign tone
 
 **Exists:** `content_assets`, brand kit (`brand-kit.ts`), brand cards, AI image generation.

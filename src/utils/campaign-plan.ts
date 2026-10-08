@@ -27,6 +27,7 @@ import { campaignBudgets, campaignDecisions, campaigns, discoveryCampaigns } fro
 import { persistProposal, type LiveCampaign, type ProposedDecision } from './campaign-proposer';
 import { settleDecisionMirror } from './campaign-mirror';
 import { campaignSpendTotals } from './campaign-ledger';
+import { audienceLine } from '../config/campaign-audience';
 import {
     CAMPAIGN_STATUS_LABELS, ORDER_ACTION_SPECS, isOrderAction, orderWorkItems,
     type CampaignOrderAction, type CampaignStatus,
@@ -267,6 +268,8 @@ export async function buildCampaignsSnapshot(
                 targetValue: campaigns.targetValue,
                 outcomeMetric: campaigns.outcomeMetric,
                 endsAt: campaigns.endsAt,
+                audience: campaigns.audience,
+                excludeExistingCustomers: campaigns.excludeExistingCustomers,
                 maxWorkItems: campaignBudgets.maxWorkItems,
             })
             .from(campaigns)
@@ -302,11 +305,14 @@ export async function buildCampaignsSnapshot(
             const plan = await pendingPlanFor(db, r.id);
             const used = t.spentWork + t.committedWork;
             const label = CAMPAIGN_STATUS_LABELS[r.status as CampaignStatus] ?? r.status;
+            const who = audienceLine(r.audience);
             lines.push(
                 `- campaignId ${r.id}: "${r.objective}" — ${label}`
                 + `${r.targetValue ? `, aiming for ${r.targetValue} ${r.outcomeMetric}` : ''}`
                 + `${r.endsAt ? `, ends ${r.endsAt.toISOString().slice(0, 10)}` : ''}`
                 + `, ${used} of ${r.maxWorkItems ?? 0} tasks used or committed`
+                + `, ${who ? `for: ${who}` : 'no audience set'}`
+                + `, ${r.excludeExistingCustomers ? 'leaves existing customers out of its lead searches' : 'INCLUDES existing customers'}`
                 + `${plan ? `, a plan of ${plan.orders.length} briefs is waiting for the user's approval` : ''}`,
             );
         }
