@@ -2043,28 +2043,37 @@ function _platformCard(platform, conn) {
 
 // ── US-SMM-4.3.2: Load grouped LLM message for all failed checks (AC3.2.1) ──
 // Called once per connection when failed checks are present — generates a single combined message.
+//
+// ⚠️ It is called from the card RENDERER, and the grid is drawn on every assistant-page visit (twice:
+// once when it loads, once when the Synced actions list redraws it). Each call was a Claude Haiku
+// request (social-troubleshoot-chat), 1.6–3.2 s and billed, for the same unchanged checks — measured
+// on prod 2026-10-08. So the answer is kept for the session, keyed by the failing checks themselves:
+// a different set of failures (one fixed, a new one) is a different key and is asked afresh. Only a
+// real message is kept; a failure or a rate-limit answer is dropped so the next draw tries again.
+const _groupedTroubleshoot = new Map(); // key → Promise<{ message?, rateLimited? } | null>
 window._intLoadGroupedTroubleshoot = async function (connId, platform, failedChecks) {
-    const msgEl = document.getElementById(`trouble-grouped-${connId}`);
-    if (!msgEl || !failedChecks?.length) return;
-    try {
-        const res = await fetch('/.netlify/functions/social-troubleshoot-chat', {
+    if (!document.getElementById(`trouble-grouped-${connId}`) || !failedChecks?.length) return;
+    const key = [platform, connId, ...failedChecks.map(c => `${c.id}:${c.detail ?? ''}`).sort()].join('|');
+    let pending = _groupedTroubleshoot.get(key);
+    if (!pending) {
+        pending = fetch('/.netlify/functions/social-troubleshoot-chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 platform,
                 checks: failedChecks.map(c => ({ checkId: c.id, checkLabel: c.label, checkDetail: c.detail })),
             }),
-        });
-        if (res.ok) {
-            const data = await res.json();
-            if (data.message) msgEl.textContent = data.message;
-            else if (data.rateLimited) msgEl.textContent = 'Daily check limit reached — try again tomorrow.';
-        } else {
-            msgEl.classList.add('hidden');
-        }
-    } catch {
-        msgEl.classList.add('hidden');
+        }).then(res => (res.ok ? res.json() : null)).catch(() => null);
+        _groupedTroubleshoot.set(key, pending);
+        pending.then(d => { if (!d || !d.message) _groupedTroubleshoot.delete(key); });
     }
+    const data = await pending;
+    // Looked up AFTER the wait: a redraw in the meantime replaces the element with a new one.
+    const msgEl = document.getElementById(`trouble-grouped-${connId}`);
+    if (!msgEl) return;
+    if (!data) msgEl.classList.add('hidden');
+    else if (data.message) msgEl.textContent = data.message;
+    else if (data.rateLimited) msgEl.textContent = 'Daily check limit reached — try again tomorrow.';
 };
 
 // ── US-SMM-4.3.2: Verify a single pre-flight check ───────────────
