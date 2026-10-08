@@ -83,6 +83,11 @@
     pictures: {},
     /** Per campaign: { open, loading, data, error } for the Summary panel (§9.8). */
     summaries: {},
+    /** Jira/Asana options for "File in…" (§9.5): null until first needed. */
+    ticketOptions: null,
+    ticketOptionsError: null,
+    /** Per task order id: { open, provider, projectId } for its "File in…" picker. */
+    filing: {},
     /** Lessons kept from past campaigns; null until loaded. */
     learnings: null,
     /** The org's library for the picker; null until first opened. */
@@ -732,6 +737,7 @@
               <p class="text-xs mt-0.5 ${overdue ? 'text-amber-700 font-bold' : 'text-gray-500'}">
                 ${t.status === 'blocked' ? 'Not started — waiting for earlier work. ' : ''}${t.dueDate ? `${overdue ? 'Overdue — was due' : 'Due'} ${esc(t.dueDate)}. ` : ''}${t.waiting ? `${esc(String(t.waiting))} ${t.waiting === 1 ? 'piece' : 'pieces'} of work waiting on this. ` : ''}${t.assigneeEmail ? `Tell them at ${esc(t.assigneeEmail)} — nothing is sent automatically.` : 'Nothing is sent to them automatically.'}
               </p>
+              ${ticketLine(t, c)}
             </div>
             ${t.status === 'issued' ? `
               <div class="flex items-center gap-2 shrink-0">
@@ -744,6 +750,114 @@
         }).join('')}
       </div>`;
   }
+
+  // ── A task's ticket (§9.5) ─────────────────────────────────────────────────
+  // Filed: a link, and the promise that closing it finishes the task. Failed: the reason, and a way
+  // to file by hand. Neither: "File in…", which opens a picker of the CONNECTED tools' projects —
+  // a tool that is not connected says where to connect it rather than vanishing.
+  function ticketLine(t, c) {
+    const id = esc(String(t.orderId));
+    if (t.ticket && t.ticket.id) {
+      const label = t.ticket.provider === 'jira' ? 'Jira' : 'Asana';
+      const link = t.ticket.url
+        ? `<a href="${esc(t.ticket.url)}" target="_blank" rel="noopener" class="font-bold underline">${label} ${esc(t.ticket.id)}</a>`
+        : `<span class="font-bold">${label} ${esc(t.ticket.id)}</span>`;
+      return `<p class="text-xs text-gray-600 mt-1">${link} — closing that ticket marks this done and starts anything waiting on it.${t.ticketReachable === false ? ' <span class="text-amber-700">We could not check it last time; it stays open until we can.</span>' : ''}</p>`;
+    }
+    const st = state.filing[t.orderId];
+    const err = t.ticketError ? `<p class="text-xs text-amber-700 mt-1">The ticket was not filed: ${esc(t.ticketError)}</p>` : '';
+    if (!st || !st.open) {
+      return `${err}<button type="button" data-cmp-ticket-open="${id}" class="mt-1 text-xs font-bold text-gray-500 hover:text-gray-700 underline">File in Jira or Asana</button>`;
+    }
+    if (state.ticketOptionsError) return `${err}<p class="text-xs text-red-600 mt-1">${esc(state.ticketOptionsError)}</p>`;
+    if (!state.ticketOptions) return `${err}<p class="text-xs text-gray-400 mt-1">Checking your connected tools…</p>`;
+    const connected = state.ticketOptions.filter((o) => o.connected);
+    if (!connected.length) {
+      return `${err}<p class="text-xs text-gray-600 mt-1">Connect Jira or Asana on the <a href="/integrations.html" class="font-bold underline">Integrations</a> page, then file it from here.</p>`;
+    }
+    if (!st.provider || !connected.some((o) => o.provider === st.provider)) st.provider = connected[0].provider;
+    const opt = connected.find((o) => o.provider === st.provider);
+    if (!st.projectId) st.projectId = (opt.defaultProject && opt.defaultProject.id) || (opt.projects[0] && opt.projects[0].id) || '';
+    return `${err}
+      <div class="mt-2 flex flex-wrap items-center gap-2">
+        <select data-cmp-ticket-provider="${id}" class="text-xs border border-gray-300 rounded-lg px-2 py-1.5">
+          ${connected.map((o) => `<option value="${esc(o.provider)}" ${o.provider === st.provider ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+        </select>
+        ${opt.error ? `<span class="text-xs text-red-600">${esc(opt.error)}</span>` : `
+          <select data-cmp-ticket-project="${id}" class="text-xs border border-gray-300 rounded-lg px-2 py-1.5 min-w-0">
+            ${opt.projects.map((p) => `<option value="${esc(p.id)}" ${p.id === st.projectId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+          </select>`}
+        <label class="flex items-center gap-1 text-xs text-gray-600">
+          <input type="checkbox" data-cmp-ticket-remember="${id}" ${opt.defaultProject ? '' : 'checked'}> Use this project next time
+        </label>
+        <button type="button" data-cmp-ticket-file="${id}" data-cmp-task-campaign="${esc(String(c.id))}" ${opt.error || !opt.projects.length ? 'disabled' : ''}
+          class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">File</button>
+        <button type="button" data-cmp-ticket-cancel="${id}" class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg">Cancel</button>
+      </div>`;
+  }
+
+  async function loadTicketOptions() {
+    try {
+      const data = await post({ action: 'ticket_options' });
+      state.ticketOptions = Array.isArray(data.providers) ? data.providers : [];
+      state.ticketOptionsError = null;
+    } catch (err) {
+      state.ticketOptionsError = err.message || 'Could not check your connected tools.';
+    }
+    if (state.rendered) render();
+  }
+
+  document.addEventListener('change', (e) => {
+    const prov = e.target.closest('[data-cmp-ticket-provider]');
+    const proj = e.target.closest('[data-cmp-ticket-project]');
+    if (!prov && !proj) return;
+    const id = Number((prov || proj).dataset[prov ? 'cmpTicketProvider' : 'cmpTicketProject']);
+    const st = state.filing[id];
+    if (!st) return;
+    if (prov) { st.provider = prov.value; st.projectId = ''; if (state.rendered) render(); }
+    else st.projectId = proj.value;
+  });
+
+  document.addEventListener('click', async (e) => {
+    const open = e.target.closest('[data-cmp-ticket-open]');
+    const cancel = e.target.closest('[data-cmp-ticket-cancel]');
+    const file = e.target.closest('[data-cmp-ticket-file]');
+    if (!open && !cancel && !file) return;
+    if (open) {
+      const id = Number(open.dataset.cmpTicketOpen);
+      state.filing[id] = { open: true, provider: null, projectId: '' };
+      if (state.rendered) render();
+      if (!state.ticketOptions) await loadTicketOptions();
+      return;
+    }
+    if (cancel) { delete state.filing[Number(cancel.dataset.cmpTicketCancel)]; if (state.rendered) render(); return; }
+    if (state.busy) return;
+    const id = Number(file.dataset.cmpTicketFile);
+    const st = state.filing[id];
+    if (!st) return;
+    const opt = (state.ticketOptions || []).find((o) => o.provider === st.provider);
+    const proj = opt && opt.projects.find((p) => p.id === st.projectId);
+    state.busy = true;
+    file.disabled = true;
+    try {
+      const data = await post({
+        action: 'file_ticket', orderId: id, provider: st.provider, projectId: st.projectId,
+        projectName: proj ? proj.name : null,
+        remember: !!document.querySelector(`[data-cmp-ticket-remember="${id}"]`)?.checked,
+      });
+      window.showToast?.(`Filed as ${st.provider === 'jira' ? 'Jira' : 'Asana'} ${data.ticket.id}. Closing it there marks the task done.`, 'success');
+      delete state.filing[id];
+      // A remembered project changes what the next picker preselects — re-read it next time.
+      state.ticketOptions = null;
+    } catch (err) {
+      say(Number(file.dataset.cmpTaskCampaign), err.message || 'Could not file the ticket.', 'error');
+      file.disabled = false;
+      state.busy = false;
+      return;
+    }
+    state.busy = false;
+    await load();
+  });
 
   // "Hold this until …" — any Add work item can wait for an open task on the same campaign.
   function waitForField(c, id) {
@@ -775,7 +889,14 @@
             class="mt-1 text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
         </label>
       </div>
-      <p class="text-xs text-gray-500">Nothing is sent to them — you let them know. Mark it done here when it is, and any work waiting on it starts.</p>`;
+      <label class="block text-xs font-bold text-gray-600">Also file it as a ticket (optional)
+        <select data-cmp-aw-filein="${id}" data-keep="aw-filein-${id}" class="mt-1 text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+          <option value="">No</option>
+          <option value="jira">In Jira — the project you last chose</option>
+          <option value="asana">In Asana — the project you last chose</option>
+        </select>
+      </label>
+      <p class="text-xs text-gray-500">Nothing is sent to them — you let them know. Mark it done here when it is (or close its ticket), and any work waiting on it starts.</p>`;
   }
 
   // ── Add work ───────────────────────────────────────────────────────────────
@@ -2371,6 +2492,8 @@
         if (email) brief.assigneeEmail = email;
         const due = document.querySelector(`[data-cmp-aw-due="${id}"]`)?.value || '';
         if (due) brief.dueDate = due;
+        const fileIn = document.querySelector(`[data-cmp-aw-filein="${id}"]`)?.value || '';
+        if (fileIn) brief.fileIn = fileIn;
       }
       const waitFor = document.querySelector(`[data-cmp-aw-waitfor="${id}"]`)?.value || '';
       if (spec.key === 'draft_email_campaign') {

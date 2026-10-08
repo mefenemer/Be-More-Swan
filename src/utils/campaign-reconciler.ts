@@ -50,6 +50,7 @@ import {
 } from '../../db/schema';
 import { EMAIL_ORDER_ACTION, findStrandedEmailOrders } from './campaign-email-order';
 import { triggerCampaignEmailDraft } from './trigger-campaign-email-draft';
+import { checkTaskTickets } from './campaign-tickets';
 import { isScheduleActive } from '../config/post-status';
 import { recordCampaignSpend } from './campaign-ledger';
 import { mirrorOrder } from './campaign-mirror';
@@ -90,6 +91,8 @@ export interface ReconcileResult {
     refundedWork: number;
     /** Email orders whose drafting wake-up was lost, woken again (§9.7). */
     emailRedispatched: number;
+    /** People's tasks settled because their Jira/Asana ticket closed (§9.5). */
+    ticketsClosed: number;
 }
 
 /** What the artefacts behind one order add up to. */
@@ -505,7 +508,7 @@ export async function settleOrderNow(
     if (!order || !['issued', 'in_review'].includes(order.status)) return false;
     const result: ReconcileResult = {
         examined: 0, toReview: 0, delivered: 0, rejected: 0, failed: 0,
-        unblocked: 0, finished: 0, refundedWork: 0, emailRedispatched: 0,
+        unblocked: 0, finished: 0, refundedWork: 0, emailRedispatched: 0, ticketsClosed: 0,
     };
     await settleOrder(db, order, verdict, result);
     return true;
@@ -562,7 +565,7 @@ async function sweepExpiredCampaigns(db: Db, result: ReconcileResult): Promise<v
 export async function reconcileCampaigns(db: Db): Promise<ReconcileResult> {
     const result: ReconcileResult = {
         examined: 0, toReview: 0, delivered: 0, rejected: 0, failed: 0,
-        unblocked: 0, finished: 0, refundedWork: 0, emailRedispatched: 0,
+        unblocked: 0, finished: 0, refundedWork: 0, emailRedispatched: 0, ticketsClosed: 0,
     };
 
     // 'issued' and 'in_review' are the two non-terminal states with work outstanding. in_review is
@@ -622,5 +625,11 @@ export async function reconcileCampaigns(db: Db): Promise<ReconcileResult> {
     } catch (err) {
         console.error('[campaign-reconciler] email redispatch failed', err);
     }
+
+    // People's tasks filed in Jira/Asana (§9.5): a closed ticket is the person saying it is done.
+    // Recording that is this file's mandate — what already happened elsewhere — and delivering the
+    // task releases the work that was waiting on it, through the one settlement path.
+    const tickets = await checkTaskTickets(db, (orderId, summary) => settleOrderNow(db, orderId, { kind: 'delivered', summary }));
+    result.ticketsClosed = tickets.closed;
     return result;
 }

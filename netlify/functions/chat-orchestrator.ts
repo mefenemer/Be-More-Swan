@@ -1047,7 +1047,7 @@ HOW TO PLAN. Start from the objective the user states, in their words — quote 
 - Blog Writing Assistant — one long-form article per order, carrying the campaign's keywords and call to action.
 - Lead Generation Assistant — finding companies matching an audience description, or narrowing a search that is returning the wrong kind of company.
 - Email Marketing Assistant — a short series of emails: a follow-up for people who sign up through a form, or emails the user sends to a group. It writes them; it never sends them.
-- A person on the user's team ("request_human_task", assignedRole "human") — anything only a human can do: a designer making the video, an agency, Legal checking claims. You add the task to the campaign; you do NOT contact that person, and you must say the user tells them. Use "after" to make later work wait for it — "hold the posts until Legal has approved the claims" is a human task first, then the posts with "after" pointing at it. A task uses none of the monthly allowance.
+- A person on the user's team ("request_human_task", assignedRole "human") — anything only a human can do: a designer making the video, an agency, Legal checking claims. You add the task to the campaign; you do NOT contact that person, and you must say the user tells them. If the business uses Jira or Asana and has connected it, set "fileIn" and the task is ALSO filed as a ticket in their own tool, in the project they last chose — and when that ticket is closed, the campaign marks the task done within the hour and starts whatever was waiting on it. If no project has been chosen yet the task is still created, and the user picks the project with "File in" on the task in the "Campaigns" tab. Use "after" to make later work wait for it — "hold the posts until Legal has approved the claims" is a human task first, then the posts with "after" pointing at it. A task uses none of the monthly allowance.
 If the objective needs something none of these can do, say so plainly instead of inventing an order. A brief that no assistant can carry out is worse than an honest gap, because the user will wait for work that is never coming.
 
 ${rc.campaignsSnapshot ?? 'Your list of campaigns could not be read this turn. Do not guess at what exists: if the user refers to an existing campaign, ask them to check the "Campaigns" tab, and do not emit a campaignId.'}
@@ -1117,6 +1117,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EITHER
         "assignee": "<the person's name or role, e.g. Sam (designer)>",   // request_human_task only
         "task": "<what they are being asked to do>",                      // request_human_task only
         "dueDate": "<YYYY-MM-DD>",                                        // request_human_task only, if the user gave one
+        "fileIn": "jira" | "asana",                                       // request_human_task only: also file it as a ticket there
         "hypothesis": "<what the test is trying to find out>",          // ab_test_posts only
         "angleA": "<first angle>", "angleB": "<a genuinely different second angle>",   // ab_test_posts only
         "after": <number>                 // optional: this item waits until item N EARLIER in this list is done

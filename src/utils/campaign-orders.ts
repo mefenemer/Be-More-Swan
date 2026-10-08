@@ -29,6 +29,7 @@
 // * It cannot reach a role outside ORCHESTRATABLE_ROLE_KEYS.
 
 import { triggerCampaignEmailDraft } from './trigger-campaign-email-draft';
+import { fileTaskTicket, isPmProvider } from './campaign-tickets';
 import { randomUUID } from 'crypto';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
@@ -154,6 +155,23 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
     });
 }
 
+/**
+ * File a person's task in Jira/Asana if its brief asked to (`fileIn`, §9.5) — into the project
+ * the workspace remembered. A failure is RECORDED on the brief (the row shows it, with a button to
+ * file by hand) and never fails the task: the task exists whether or not the ticket does.
+ */
+async function fileIfAsked(db: Db, organisationId: number, orderId: number, brief: Record<string, unknown>): Promise<void> {
+    if (!isPmProvider(brief.fileIn)) return;
+    try {
+        await fileTaskTicket(db, { organisationId, orderId, provider: brief.fileIn });
+    } catch (err) {
+        const message = err instanceof Error ? err.message : 'Could not file the ticket.';
+        await db.update(campaignOrders)
+            .set({ brief: sql`${campaignOrders.brief} || ${JSON.stringify({ ticketError: message.slice(0, 300) })}::jsonb`, updatedAt: new Date() })
+            .where(eq(campaignOrders.id, orderId));
+    }
+}
+
 /** "Waiting on Sam (Legal) — due 14 Oct". The row's one sentence for a person's task. */
 export function humanTaskSummary(brief: Record<string, unknown>): string {
     const who = typeof brief.assignee === 'string' && brief.assignee.trim() ? brief.assignee.trim() : 'someone on your team';
@@ -183,13 +201,19 @@ async function placeHumanTask(input: PlaceOrderInput): Promise<PlaceOrderResult>
         blockedOnOrderId: input.blockedOnOrderId ?? null,
     }).returning({ id: campaignOrders.id });
     if (!order) return { orderId: null, status: 'failed', workItems: 0, message: 'Could not record the task.' };
-    if (blocked) return { orderId: order.id, status: 'blocked', workItems: 0 };
+    if (blocked) {
+        // Filed now even though it is not started: the person can see it coming. The ticket is not
+        // read until the task is released (campaign-tickets.ts checks 'issued' only).
+        await fileIfAsked(input.db, input.organisationId, order.id, input.brief);
+        return { orderId: order.id, status: 'blocked', workItems: 0 };
+    }
     await issueHumanTask(input.db, order.id, {
         organisationId: input.organisationId,
         orchestratorAssistantId: input.orchestratorAssistantId,
         campaignObjective: input.campaignObjective,
         brief: input.brief,
     });
+    await fileIfAsked(input.db, input.organisationId, order.id, input.brief);
     return { orderId: order.id, status: 'issued', workItems: 0 };
 }
 

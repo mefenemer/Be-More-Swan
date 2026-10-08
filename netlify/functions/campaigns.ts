@@ -14,6 +14,7 @@
 //   POST { action: 'pause',       campaignId, reason }
 //   POST { action: 'stop_all',    assistantId }            → pause every live campaign
 //   POST { action: 'complete_task', orderId, outcome: 'done'|'wont_happen', note? }   (§9.5)
+//   POST { action: 'ticket_options' } / { action: 'file_ticket', orderId, provider, projectId?, projectName?, remember? }
 //   POST { action: 'summary', campaignId }                  → facts, tests, candidate lessons (§9.8)
 //   POST { action: 'save_learning', campaignId?, text, source, applyToDrafting }
 //   POST { action: 'list_learnings', assistantId } / { action: 'delete_learning', learningId }
@@ -62,6 +63,7 @@ import { countCampaignOutcome } from '../../src/utils/campaign-outcomes';
 import { MAX_CAMPAIGN_ASSETS, normaliseAssetIds, normaliseTone } from '../../src/config/campaign-creative';
 import { resolveAssetDisplayUrl } from '../../src/utils/social-publish';
 import { buildCampaignSummary, experimentResults, saveLearning } from '../../src/utils/campaign-learning';
+import { fileTaskTicket, isPmProvider, ticketOptions } from '../../src/utils/campaign-tickets';
 import {
     PLANNABLE_STATUSES, fileStrategyPlan, normalisePlanOrders, pendingPlanFor, planProblem, planWorkItems,
 } from '../../src/utils/campaign-plan';
@@ -309,6 +311,9 @@ export default withLambda(async (event) => {
                     assigneeEmail: typeof b.assigneeEmail === 'string' ? b.assigneeEmail : null,
                     task: typeof b.task === 'string' ? b.task : null,
                     dueDate: typeof b.dueDate === 'string' ? b.dueDate : null,
+                    ticket: b.ticket && typeof b.ticket === 'object' ? b.ticket : null,
+                    ticketError: typeof b.ticketError === 'string' ? b.ticketError : null,
+                    ticketReachable: b.ticketReachable === false ? false : true,
                 };
             });
             const assets = await campaignAssetsFor(r.id);
@@ -855,6 +860,26 @@ export default withLambda(async (event) => {
             eq(campaignAssets.contentAssetId, Number(body.assetId)),
         ));
         return json(200, { ok: true });
+    }
+
+    // ── tickets for people's tasks (§9.5) ─────────────────────────────────────
+    if (action === 'ticket_options') {
+        return json(200, { providers: await ticketOptions(db, orgId) });
+    }
+
+    if (action === 'file_ticket') {
+        if (!isPmProvider(body.provider)) return json(400, { error: 'Choose Jira or Asana.' });
+        try {
+            const ticket = await fileTaskTicket(db, {
+                organisationId: orgId, orderId: Number(body.orderId), provider: body.provider,
+                projectId: str(body.projectId, 120), projectName: str(body.projectName, 200),
+                remember: body.remember === true,
+            });
+            return json(200, { ticket });
+        } catch (err) {
+            // The provider's own words where it gave them — "project does not exist" is actionable.
+            return json(400, { error: err instanceof Error ? err.message : 'Could not file the ticket.' });
+        }
     }
 
     // ── complete_task ─────────────────────────────────────────────────────────

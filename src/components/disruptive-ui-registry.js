@@ -1001,7 +1001,7 @@
           : '';
         // A person's task (§9.5) names who, says nothing is sent to them, and shows what waits.
         const humanNote = o.action === 'request_human_task'
-          ? `${typeof o.assignee === 'string' && o.assignee.trim() ? o.assignee.trim() : 'Someone on your team'}${typeof o.dueDate === 'string' && o.dueDate ? ` · due ${o.dueDate}` : ''} — you tell them; nothing is sent`
+          ? `${typeof o.assignee === 'string' && o.assignee.trim() ? o.assignee.trim() : 'Someone on your team'}${typeof o.dueDate === 'string' && o.dueDate ? ` · due ${o.dueDate}` : ''} — you tell them; nothing is sent${o.fileIn === 'jira' || o.fileIn === 'asana' ? ` · also filed as a ${o.fileIn === 'jira' ? 'Jira' : 'Asana'} ticket` : ''}`
           : '';
         // Named, not numbered: the card hides items it cannot show, so a bare "item 4" would not
         // match anything the user can see. Same positions as the server (raw list, backwards only).

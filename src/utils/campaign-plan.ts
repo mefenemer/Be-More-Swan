@@ -92,6 +92,9 @@ const BRIEF_TEXT_FIELDS: Record<string, number> = {
 const BRIEF_ENUM_FIELDS: Record<string, readonly string[]> = {
     emailKind: CAMPAIGN_TYPES,
     emailTrigger: EMAIL_TRIGGERS,
+    // request_human_task (§9.5): also file it as a ticket in the business's own tool, in the
+    // project it remembered. Filing failing never fails the task.
+    fileIn: ['jira', 'asana'],
 };
 
 function cleanBrief(rec: Record<string, unknown>): Record<string, unknown> {
@@ -338,8 +341,11 @@ async function openTasksLine(db: Db, campaignId: number): Promise<string> {
     if (!rows.length) return '';
     const items = rows.map((t) => {
         const b = (t.brief ?? {}) as Record<string, unknown>;
+        const tk = b.ticket as { provider?: string; id?: string } | undefined;
         return `orderId ${t.id}: ${String(b.assignee ?? 'someone')} — "${String(b.task ?? '').slice(0, 120)}"`
-            + `${b.dueDate ? ` (due ${b.dueDate})` : ''}${t.status === 'blocked' ? ' [not started — waiting for earlier work]' : ''}`;
+            + `${b.dueDate ? ` (due ${b.dueDate})` : ''}${t.status === 'blocked' ? ' [not started — waiting for earlier work]' : ''}`
+            + `${tk?.id ? ` [ticket ${tk.provider} ${tk.id} — it is marked done automatically when that ticket closes]` : ''}`
+            + `${typeof b.ticketError === 'string' ? ` [filing its ticket failed: ${b.ticketError}]` : ''}`;
     });
     return `. Open tasks for people: ${items.join('; ')}`;
 }

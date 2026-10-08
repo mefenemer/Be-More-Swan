@@ -54,6 +54,9 @@ import { publishThreads, THREADS_TEXT_MAX, publishYouTube, YOUTUBE_TITLE_MAX, YO
 import { sendGmailMessage } from '../../src/utils/gmail';
 import { injectAiFooter } from '../../src/utils/ai-email-footer';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import {
+    createAsanaTask as createAsanaTaskShared, createJiraIssue as createJiraIssueShared, type TicketRef,
+} from '../../src/utils/pm-tickets';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -816,34 +819,10 @@ interface LedgerRow { id: number; description: string; assignee: string | null; 
 // by a re-approval, never auto-retried, so it is excluded here.
 const SYNCABLE_STATUSES = ['pending', 'failed'];
 
-/** Minimal Atlassian Document Format doc — one paragraph per line (empty line → blank para). */
-function adfDoc(lines: string[]): Record<string, unknown> {
-    return {
-        type: 'doc',
-        version: 1,
-        content: lines.map((line) => line
-            ? { type: 'paragraph', content: [{ type: 'text', text: line }] }
-            : { type: 'paragraph', content: [] }),
-    };
-}
-
-/** Best-effort parse of a free-text due date to YYYY-MM-DD. Returns null for unparseable
- *  phrases ("by Friday") — we never guess a date the meeting didn't state. ISO strings are taken
- *  verbatim and non-ISO values formatted from local parts, so the calendar date never shifts by
- *  a timezone (new Date() parses ISO as UTC but slash/word dates as local). */
-function parseDueDate(raw: string | null): string | null {
-    if (!raw) return null;
-    const s = raw.trim();
-    const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
-    const d = new Date(s);
-    if (isNaN(d.getTime())) return null;
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
+// The Jira/Asana request shapes live in src/utils/pm-tickets.ts, shared with the Campaign
+// Assistant's tasks for people (§9.5) — one copy of each provider's request, not two.
 // A created ticket, normalised across providers: external id + a browse URL (null when the
 // provider gives none) to stamp onto the ledger row.
-interface TicketRef { id: string; url: string | null }
 
 /** The owner/due/attribution lines shared by both providers' ticket bodies. Assignees are
  *  free-text meeting names (not provider account ids), so the owner is surfaced in the body and
@@ -858,61 +837,21 @@ function ticketBodyLines(row: LedgerRow): string[] {
     ];
 }
 
-/** Create one Jira issue for an action item. Throws with a readable message on rejection so the
- *  caller can stamp it onto the ledger row. */
+/** Create one Jira issue for an action item — the shared request, fed from this recipe's payload. */
 async function createJiraIssue(accessToken: string, cloudId: string | null, siteUrl: string, payload: CreateTasksPayload, row: LedgerRow): Promise<TicketRef> {
-    if (!cloudId) throw new Error('Jira site is missing — reconnect Jira.');
     const projectKey = typeof payload.projectKey === 'string' ? payload.projectKey.trim() : '';
     if (!projectKey) throw new Error('No Jira project key is configured for this recipe.');
-    const issueType = typeof payload.issueType === 'string' && payload.issueType.trim() ? payload.issueType.trim() : 'Task';
-
-    const fields: Record<string, unknown> = {
-        project: { key: projectKey },
-        summary: row.description.slice(0, 250),
-        issuetype: { name: issueType },
-        description: adfDoc(ticketBodyLines(row)),
-    };
-    const due = parseDueDate(row.dueDate);
-    if (due) fields.duedate = due;
-
-    const res = await fetch(`https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issue`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ fields }),
-    });
-    const data: { key?: string; errorMessages?: string[]; errors?: Record<string, string> } = await res.json().catch(() => ({}));
-    if (!res.ok || !data.key) {
-        const detail = data.errorMessages?.join('; ') || (data.errors ? Object.values(data.errors).join('; ') : '') || `Jira returned ${res.status}`;
-        throw new Error(detail);
-    }
-    return { id: data.key, url: siteUrl ? `${siteUrl}/browse/${data.key}` : null };
+    return createJiraIssueShared(accessToken, cloudId, siteUrl,
+        { projectKey, issueType: typeof payload.issueType === 'string' ? payload.issueType : null },
+        { summary: row.description, lines: ticketBodyLines(row), dueDate: row.dueDate });
 }
 
-/** Create one Asana task for an action item, in the recipe's configured project. Asana infers
- *  the workspace from the project, so none is sent (avoids a project/workspace mismatch). */
+/** Create one Asana task for an action item, in the recipe's configured project. */
 async function createAsanaTask(accessToken: string, payload: CreateTasksPayload, row: LedgerRow): Promise<TicketRef> {
     const projectGid = typeof payload.asanaProjectGid === 'string' ? payload.asanaProjectGid.trim() : '';
     if (!projectGid) throw new Error('No Asana project is configured for this recipe.');
-
-    const data: Record<string, unknown> = {
-        name: row.description.slice(0, 250),
-        notes: ticketBodyLines(row).join('\n'),
-        projects: [projectGid],
-    };
-    const due = parseDueDate(row.dueDate);
-    if (due) data.due_on = due;
-
-    const res = await fetch('https://app.asana.com/api/1.0/tasks', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ data }),
-    });
-    const body: { data?: { gid?: string; permalink_url?: string }; errors?: Array<{ message?: string }> } = await res.json().catch(() => ({}));
-    if (!res.ok || !body.data?.gid) {
-        const detail = body.errors?.map((e) => e.message).filter(Boolean).join('; ') || `Asana returned ${res.status}`;
-        throw new Error(detail);
-    }
-    return { id: body.data.gid, url: body.data.permalink_url ?? null };
+    return createAsanaTaskShared(accessToken, projectGid,
+        { summary: row.description, lines: ticketBodyLines(row), dueDate: row.dueDate });
 }
 
 async function handleCreateTasks(

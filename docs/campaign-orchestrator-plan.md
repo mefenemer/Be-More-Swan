@@ -525,9 +525,17 @@ prerequisite was dropped is SKIPPED, never run early. "Add work" can "Hold this 
 instead of cancelling it for having no assistant); "Won't happen" rejects (cancelling what waited).
 Chat: plans can include people + `after`; a `campaign_task_update` card marks a task done through
 the same `complete_task`. Rows show open tasks, overdue, and how much work waits on each.
-**Not built (the automatic half):** filing a Jira/Asana ticket (needs a per-tenant project picker —
-the Meeting Note Taker's `createJiraIssue`/`createAsanaTask` are the code to reuse) and closing the
-task when the ticket closes (webhooks or polling); asset upload on "Mark done" waits for §9.3.
+**✅ Automatic half built 2026-10-08 (no DDL).** A person's task can be filed as a Jira issue or
+Asana task — "File in Jira or Asana" on the task (project picker, "use this project next time"
+remembered per workspace in the integration's metadata, MERGED), "Also file it as a ticket" in Add
+work, or `fileIn` on a chat plan item (uses the remembered project; a failure is recorded on the
+task, never fails it). The ticket ref lives on the order's brief. The hourly reconciler asks each
+ISSUED task's ticket whether it is done (Jira: status CATEGORY 'done'; Asana: `completed`) and
+delivers the task when it is — releasing the work waiting on it. Polling, not webhooks. "Could not
+tell" (deleted, disconnected, network) is never done. The provider requests moved into
+`src/utils/pm-tickets.ts`, which the Meeting Note Taker now uses too. Not done: assigning the
+ticket to a named person (assignees are free text, not provider account ids — the name is in the
+ticket body); asset upload on "Mark done". Guarded by `tests/campaign-tickets.test.ts`.
 Guarded by `tests/campaign-human-tasks.test.ts`.
 
 ### 9.6 Funnel stage & differentiated KPIs
