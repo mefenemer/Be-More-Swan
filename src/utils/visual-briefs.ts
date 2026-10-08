@@ -26,6 +26,7 @@ import { FalContentPolicyError, FalError, falConfigured, generateImages, type As
 import { renderBrandCard, type CardVariant } from '../lib/brand-card';
 import { deleteR2Object, persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured } from '../lib/media-persist';
 import { normalizeBrandKit, type BrandKit } from './brand-kit';
+import { guidelinesPromptLines, hasGuidelines, normaliseGuidelines, readBrandGuidelines, type BrandGuidelines } from './brand-guidelines';
 import { holdCredits, settleHold, getBalance, IMAGE_CREDIT_COST } from './ai-credits';
 import { orgHasAssistantFeature } from './assistant-capabilities';
 import { PexelsRateLimitError, searchUniqueImages } from './pexels';
@@ -49,9 +50,13 @@ const CARD_VARIANTS: CardVariant[] = ['light', 'bold'];
 
 export interface BriefContext {
     kit: BrandKit; orgName: string; industry: string | null; description: string | null;
-    /** From the Brand Designer's setup (assistant-onboarding-schemas.js `brand_designer`). */
-    photoStyle: string | null;
-    avoidAlways: string | null;
+    /**
+     * The workspace's picture guidelines (src/utils/brand-guidelines.ts) — the same ones every
+     * automatic AI image reads. Phase 1 asked the Brand Designer's own setup for a photo style and a
+     * "never show"; those answers still fill a guideline the workspace has left EMPTY, so nobody who
+     * answered them loses the steer when Phase 2 lands.
+     */
+    guidelines: BrandGuidelines;
 }
 
 /** One setup answer, as a trimmed string or null. A plain lookup — the keys match the schema. */
@@ -83,6 +88,7 @@ export async function readBriefContext(db: Db, orgId: number, assistantId: numbe
         db.select({
             name: organisations.name, industry: organisations.industry,
             description: organisations.businessDescription, brandKit: organisations.brandKit,
+            guidelines: organisations.brandGuidelines,
         }).from(organisations).where(eq(organisations.id, orgId)).limit(1),
         db.select({ onboardingContext: aiAssistants.onboardingContext }).from(aiAssistants)
             .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId))).limit(1),
@@ -92,8 +98,16 @@ export async function readBriefContext(db: Db, orgId: number, assistantId: numbe
         orgName: org?.name ?? '',
         industry: org?.industry ?? null,
         description: org?.description ?? null,
-        photoStyle: setupAnswer(assistant?.onboardingContext, 'photoStyle'),
-        avoidAlways: setupAnswer(assistant?.onboardingContext, 'avoidAlways'),
+        guidelines: withSetupFallback(normaliseGuidelines(org?.guidelines), assistant?.onboardingContext),
+    };
+}
+
+/** Phase 1 setup answers fill only the guidelines the workspace left empty — never override one. */
+export function withSetupFallback(g: BrandGuidelines, onboardingContext: unknown): BrandGuidelines {
+    return {
+        ...g,
+        photoStyle: g.photoStyle ?? setupAnswer(onboardingContext, 'photoStyle'),
+        mustAvoid: g.mustAvoid ?? setupAnswer(onboardingContext, 'avoidAlways'),
     };
 }
 
@@ -109,7 +123,7 @@ function clip(s: string | null | undefined, n: number): string {
 export function fallbackArtDirection(
     brief: Pick<BriefRow, 'title' | 'message' | 'headline' | 'mood' | 'mustInclude' | 'mustAvoid'>,
     kit: BrandKit,
-    house: { photoStyle?: string | null; avoidAlways?: string | null } = {},
+    house: Partial<Pick<BrandGuidelines, 'photoStyle' | 'mustInclude' | 'mustAvoid'>> = {},
 ): ArtDirection {
     const subject = clip(brief.message, 400) || clip(brief.headline, 200) || clip(brief.title, 120);
     const imagePrompt = [
@@ -117,8 +131,9 @@ export function fallbackArtDirection(
         brief.mood ? `Mood: ${clip(brief.mood, 200)}.` : '',
         brief.mustInclude ? `Include: ${clip(brief.mustInclude, 200)}.` : '',
         brief.mustAvoid ? `Avoid: ${clip(brief.mustAvoid, 200)}.` : '',
-        house.avoidAlways ? `Never show: ${clip(house.avoidAlways, 200)}.` : '',
+        house.mustAvoid ? `Never show: ${clip(house.mustAvoid, 200)}.` : '',
         house.photoStyle ? `Style: ${clip(house.photoStyle, 300)}.` : '',
+        house.mustInclude ? `Where it fits, include: ${clip(house.mustInclude, 200)}.` : '',
         `Colour accents close to ${kit.primaryColor}.`,
         'Photographic, natural light, no text, no lettering, no logos.',
     ].filter(Boolean).join(' ');
@@ -148,8 +163,7 @@ export function artDirectionUserPrompt(brief: BriefRow, ctx: BriefContext, rejec
         `BUSINESS: ${clip(ctx.orgName, 120)}${ctx.industry ? ` (${clip(ctx.industry, 80)})` : ''}`,
         ctx.description ? `ABOUT THEM: ${clip(ctx.description, 400)}` : '',
         `BRAND COLOURS: accent ${ctx.kit.primaryColor}, ink ${ctx.kit.textColor}, background ${ctx.kit.backgroundColor}.`,
-        ctx.photoStyle ? `HOUSE PHOTO STYLE (applies to every brief): ${clip(ctx.photoStyle, 500)}` : '',
-        ctx.avoidAlways ? `THIS BUSINESS NEVER WANTS (applies to every brief): ${clip(ctx.avoidAlways, 300)}` : '',
+        ...guidelinesPromptLines(ctx.guidelines),
         `BRIEF: "${clip(brief.title, 120)}" — a ${purpose.toLowerCase()} in ${brief.aspectRatio}.`,
         brief.message ? `WHAT IT SHOULD SHOW OR SAY: ${clip(brief.message, 1000)}` : '',
         brief.headline ? `EXACT WORDS FOR THE CARD: ${clip(brief.headline, 120)}` : '',
@@ -184,7 +198,7 @@ export function parseArtDirection(raw: string, fallback: ArtDirection, exactHead
 }
 
 export async function writeArtDirection(brief: BriefRow, ctx: BriefContext, rejections: PastRejection[]): Promise<ArtDirection> {
-    const fallback = fallbackArtDirection(brief, ctx.kit, ctx);
+    const fallback = fallbackArtDirection(brief, ctx.kit, ctx.guidelines);
     try {
         const res = await gatewayGenerate({
             system: artDirectionSystemPrompt(),
@@ -605,7 +619,16 @@ export async function buildBriefsSnapshot(db: Db, orgId: number, assistantId: nu
     const briefs = (await listBriefs(db, orgId, assistantId, 15)).filter((b) => b.status !== 'cancelled');
     let credits = '';
     try { credits = `AI credits left this month: ${(await getBalance(db, orgId)).balance}.`; } catch { /* unknown is said as unknown */ }
-    if (!briefs.length) return `YOUR BRIEFS: none yet. ${credits}`.trim();
+    // The workspace's picture guidelines, verbatim, so a change the user asks for in chat is written
+    // as the WHOLE new text (the card replaces a field, it does not append to it).
+    let guide = 'PICTURE GUIDELINES: could not be read this turn — do not propose a change to them.';
+    try {
+        const g = await readBrandGuidelines(db, orgId);
+        guide = hasGuidelines(g)
+            ? `PICTURE GUIDELINES (current, workspace-wide):\n${guidelinesPromptLines(g).map((l) => `- ${l}`).join('\n')}`
+            : 'PICTURE GUIDELINES: none set yet.';
+    } catch { /* stated above */ }
+    if (!briefs.length) return `YOUR BRIEFS: none yet. ${credits}\n${guide}`.trim();
     const lines = briefs.map((b) => {
         const waiting = b.options.filter((o) => o.status === 'proposed');
         const approved = b.options.filter((o) => o.status === 'approved').length;
@@ -613,5 +636,5 @@ export async function buildBriefsSnapshot(db: Db, orgId: number, assistantId: nu
         const rows = waiting.map((o, i) => `    • option ${o.id} (#${i + 1} waiting) — ${SOURCE_SPECS[o.source as keyof typeof SOURCE_SPECS]?.label.replace(/s$/, '').toLowerCase() ?? o.source}${o.prompt ? `: ${clip(o.prompt, 90)}` : ''}`);
         return [head, ...rows].join('\n');
     });
-    return `YOUR BRIEFS (newest first; option ids are the only ones you may name):\n${lines.join('\n')}\n${credits}`.trim();
+    return `YOUR BRIEFS (newest first; option ids are the only ones you may name):\n${lines.join('\n')}\n${credits}\n${guide}`.trim();
 }

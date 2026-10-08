@@ -34,6 +34,8 @@
     aiAvailable: false,
     /** What a new brief ticks — from the assistant's setup (all sources, or free ones only). */
     defaultSources: null,
+    /** The workspace's picture guidelines; undefined until loaded, null if unreadable. */
+    guidelines: undefined,
     loaded: false,
     loadError: null,
     rendered: false,
@@ -87,6 +89,7 @@
       state.credits = data.credits ?? null;
       state.aiAvailable = !!data.aiAvailable;
       state.defaultSources = Array.isArray(data.defaultSources) ? data.defaultSources : null;
+      state.guidelines = data.guidelines === undefined ? undefined : data.guidelines;
       state.loadError = null;
     } catch (err) {
       console.error('[AssistantBriefs] load failed:', err);
@@ -302,6 +305,29 @@
       </div>`;
   }
 
+  /**
+   * What every round is told, on top of the brief — the workspace's picture guidelines. Edited on
+   * Business Information ▸ Brand Assets, or from chat; read by EVERY assistant's AI images.
+   */
+  function guidelinesHtml() {
+    const g = state.guidelines;
+    if (g === undefined) return '';
+    const link = '<a href="#" data-brief-edit-guidelines class="font-bold underline">Edit</a>';
+    if (g === null) return `<p class="text-xs text-gray-500 mb-4">Your picture guidelines could not be read just now. ${link}</p>`;
+    const parts = [
+      g.photoStyle ? `<span class="font-bold">Style:</span> ${esc(g.photoStyle)}` : '',
+      g.mustInclude ? `<span class="font-bold">Include:</span> ${esc(g.mustInclude)}` : '',
+      g.mustAvoid ? `<span class="font-bold">Never show:</span> ${esc(g.mustAvoid)}` : '',
+      g.secondaryColors && g.secondaryColors.length ? `<span class="font-bold">Extra colours:</span> ${g.secondaryColors.map(esc).join(', ')}` : '',
+    ].filter(Boolean);
+    return `
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 mb-4">
+        <p class="text-xs font-bold text-gray-700"><span data-explain="brand-guidelines">Picture guidelines</span> · ${link}</p>
+        <p class="text-xs text-gray-600 mt-1">${parts.length ? parts.join(' · ') : 'None set yet. Add a photo style and anything pictures must never show — every round reads them, and so do your other assistants\' AI images.'}</p>
+        ${parts.length && g.mustAvoid ? '<p class="text-[11px] text-gray-500 mt-1">Stock photo search can\'t filter by these — check stock picks yourself.</p>' : ''}
+      </div>`;
+  }
+
   function emptyState() {
     return `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center">
@@ -336,6 +362,7 @@
     const cancelled = state.briefs.filter((b) => b.status === 'cancelled');
     host.innerHTML = `
       ${toolbarHtml()}
+      ${guidelinesHtml()}
       ${formHtml()}
       ${!live.length && !state.form ? emptyState() : ''}
       <div class="space-y-4">${live.map(briefCard).join('')}</div>
@@ -380,6 +407,14 @@
     const t = (sel) => e.target.closest(sel);
 
     if (t('[data-brief-new]')) { state.form = { mode: 'create' }; render(); return; }
+    if (t('[data-brief-edit-guidelines]')) {
+      e.preventDefault();
+      // Business Information opens on its profile tab; this hint (read once by assets.html) opens it
+      // on Brand Assets, where the guidelines are.
+      window._bizinfoInitialTab = 'assets';
+      if (window.loadView) window.loadView('assets');
+      return;
+    }
     if (t('[data-brief-form-close]')) { state.form = null; render(); return; }
     if (t('[data-brief-toggle-cancelled]')) { state.showCancelled = !state.showCancelled; render(); return; }
     if (t('[data-brief-reject-cancel]')) { state.rejecting = null; render(); return; }

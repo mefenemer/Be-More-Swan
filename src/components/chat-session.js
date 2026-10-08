@@ -611,6 +611,25 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // "Save guidelines" on a brand_guideline_proposal card — brand-kit.ts `save_guidelines`, the same
+    // save as Business Information ▸ Brand Assets ▸ Picture guidelines.
+    function onBrandSaveGuidelines(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      fetch('/.netlify/functions/brand-kit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ action: 'save_guidelines', guidelines: d.guidelines || {} }),
+      })
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `Save failed (HTTP ${res.status}).`);
+          respond({ ok: true });
+        })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     // "Confirm" on a visual_option_review card: one `decide` per option, in order, each reported —
     // a stale option id fails on its own without hiding the ones that worked.
     async function onBriefReview(e) {
@@ -874,6 +893,7 @@
     container.addEventListener('campaign:saveLearning', onCampaignSaveLearning);
     container.addEventListener('brief:create', onBriefCreate);
     container.addEventListener('brief:review', onBriefReview);
+    container.addEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
     container.addEventListener('newsletter:createDraft', onNewsletterDraftCreate);
     container.addEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
@@ -911,6 +931,7 @@
         container.removeEventListener('campaign:saveLearning', onCampaignSaveLearning);
         container.removeEventListener('brief:create', onBriefCreate);
         container.removeEventListener('brief:review', onBriefReview);
+        container.removeEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
         container.removeEventListener('newsletter:createDraft', onNewsletterDraftCreate);
         container.removeEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);

@@ -404,6 +404,7 @@
     'campaign-decisions': { term: 'Decisions', emoji: '⚖️', plain: "Plans and changes your Campaign Assistant wants to make, each with the evidence behind it. Approving one briefs your assistants; turning one down asks why, so it doesn't suggest the same thing again." },
     'brand-briefs': { term: 'Briefs', emoji: '🎨', plain: "A brief says what a picture is for — what it should show, the mood, what to avoid. Your Brand Designer turns it into options from stock photos, AI images and branded cards, and nothing is used anywhere until you approve one." },
     'brand-brief-sources': { term: 'Where options come from', emoji: '🧺', plain: "Stock photos come free from Pexels, and branded cards are drawn free in your own colours, font and logo. AI images use one AI credit for a round of four. Untick a source and that brief never uses it." },
+    'brand-guidelines': { term: 'Picture guidelines', emoji: '📐', plain: "Your house rules for pictures: the style, what to include, what never to show and any extra colours. Every AI image your assistants make reads them. Stock photo search can't filter by them, so check stock picks yourself." },
     'brand-art-direction': { term: 'How the designer read your brief', emoji: '🔍', plain: "The words your Brand Designer actually used: the description given to the AI, the stock search, and the words put on the cards. If a round missed, this shows why — then turn options down with a reason and the next round reads it." }
   };
 

@@ -68,6 +68,9 @@ export const organisations = pgTable('organisations', {
   // the assistant's onboardingContext; this is the half a renderer needs. Shape + defaults in
   // src/utils/brand-kit.ts, never read raw. db/brand-kit.sql.
   brandKit: jsonb('brand_kit'),
+  // Picture guidelines — photo style, include / never show, extra colours (src/utils/brand-guidelines.ts,
+  // db/z-brand-guidelines.sql). NOT inside brand_kit: website extraction replaces that wholesale.
+  brandGuidelines: jsonb('brand_guidelines'),
   socialLinks: text('social_links'),
   // Per-platform social handles/URLs captured on Business Information, keyed by
   // lowercase platform slug ({ instagram, facebook, linkedin, x, tiktok, ... }).

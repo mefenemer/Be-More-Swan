@@ -1219,6 +1219,8 @@ WRITING A BRIEF. When the user describes a picture they need, emit a visual_brie
 
 CHOOSING. When the user says which options they want or do not want, emit a visual_option_review naming option ids from the list above — only ids listed there, never invented, and only options listed as waiting. Turning one down needs a reason; the next round reads it. Approving puts the picture in their library, where every assistant can use it.
 
+PICTURE GUIDELINES. The workspace's guidelines (listed above) are read by EVERY AI image any assistant here makes, not only yours — say so when you change them. When the user states a lasting rule ("never use handshakes", "we're always outdoors"), emit a brand_guideline_proposal carrying the WHOLE new text of each field it changes — the current text plus the change, never only the new part, because saving replaces the field. Stock photo search cannot filter by these: say so if they ask. They are also on Business Information ▸ Brand Assets ▸ Picture guidelines.
+
 MORE OPTIONS. If none fit, say they can press "Make more options" on the brief, or set "remake": true on the review card so the user can start the next round with one click. A round with AI images costs ${SOURCE_SPECS.ai_image.credits} AI credit; say so before they click.
 
 Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of the two shapes below, or null:
@@ -1236,6 +1238,18 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of
     "aspectRatio": ${BRIEF_ASPECT_RATIOS.map((a) => `"${a}"`).join(' | ')},
     "sources": ["stock", "ai_image", "brand_card"],   // any of these
     "dueDate": "<YYYY-MM-DD, only if the user gave one>"
+  }
+}
+
+or, to change the workspace's picture guidelines:
+{
+  "reply": "your conversational message to the user",
+  "uiElement": {
+    "type": "brand_guideline_proposal",
+    "photoStyle": "<the whole new text — include only the fields that change>",
+    "mustInclude": "<…>",
+    "mustAvoid": "<…>",
+    "secondaryColors": ["#rrggbb"]   // the whole new list, at most 4
   }
 }
 

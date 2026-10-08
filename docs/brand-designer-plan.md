@@ -119,12 +119,28 @@ from a campaign, a `campaign_assets` link. Rejected AI options are not kept in t
 
 The Review sidebar badge counts briefs waiting on the user, like every other review queue.
 
-### 4.5 Brand guidelines (fields on `brand_kit`)
+### 4.5 Brand guidelines (`organisations.brand_guidelines`)
 
-Added to `BrandKit`: `secondaryColors[]`, `photoStyle` (e.g. "bright, natural light, real people"),
-`illustrationStyle`, `mustInclude[]`, `mustAvoid[]` (e.g. "no stock handshakes"), `toneWords[]`.
-All optional; existing extraction keeps filling the current fields. Every AI prompt and every card
-render reads them, so output is on-brand by default.
+✅ Built 2026-10-08 (Phase 2). **Changed from the first draft, which said "fields on `brand_kit`":**
+website extraction replaces `brand_kit` WHOLESALE (two writers — `brand-kit.ts` extract and the lazy
+path in `brand-extract-fetch.ts`), so a guideline a person typed would be wiped the next time the
+colours were re-read; and every branded card copies the whole kit into its `render_params`. So they
+are a column of their own (`db/z-brand-guidelines.sql`) — still no new table — and saving them does
+not mark the kit `manual`, so colour extraction carries on.
+
+Fields (`src/utils/brand-guidelines.ts`): `photoStyle`, `mustInclude`, `mustAvoid`,
+`secondaryColors[]` (max 4). `illustrationStyle` and `toneWords` from the first draft were dropped:
+nothing generates illustrations, and tone of WORDS belongs to the writing assistants' brand voice.
+
+Who reads them: every AUTOMATIC AI image — `generateAndPersistImage`, the one function the post
+editor's regenerate, autopilot drafting and media suggestions all go through — and the Brand
+Designer's art direction (Phase 1 setup answers only fill a guideline the workspace left empty).
+NOT the manual "Generate with AI" box (the user wrote that prompt), NOT branded cards (the renderer
+draws three kit colours), and NOT stock search (Pexels has no exclusion filter — the UI says so).
+
+Edited on Business Information ▸ Brand Assets ▸ Picture guidelines, or from the Brand Designer's chat
+(`brand_guideline_proposal` card, which replaces whole fields — the chat is shown the current text).
+The Briefs tab shows them with a link straight to that tab. Guarded by `tests/brand-guidelines.test.ts`.
 
 ### 4.6 GUI and chat parity
 
@@ -184,7 +200,7 @@ generation returns.
    Not done in Phase 1: the sidebar Review badge does not count briefs (the tab badge does); stock
    search is not filtered by orientation; the chat sees options by id and source, not the pictures;
    AI options left undecided on a finished brief stay in R2 until the brief is cancelled.
-2. **Brand guidelines** fields on `brand_kit`, fed into prompts and cards.
+2. **Brand guidelines** — ✅ built 2026-10-08 as `organisations.brand_guidelines`, not kit fields (§4.5).
 3. **`commission_visuals`** campaign order + delivery judgement in the reconciler.
 4. **AI video + human-made + Canva** as sources in the same queue.
 5. **SMM / Blog Writer raise briefs** instead of auto-picking media when nothing fits.

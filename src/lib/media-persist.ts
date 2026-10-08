@@ -17,6 +17,7 @@ import { contentAssets } from '../../db/schema';
 import { generateImages, falConfigured, type AspectRatio } from './fal-gateway';
 import { renderBrandCard, type CardVariant } from './brand-card';
 import type { BrandKit } from '../utils/brand-kit';
+import { applyGuidelinesToImagePrompt, readBrandGuidelines } from '../utils/brand-guidelines';
 import type { getDb } from '../../db/client';
 
 type Db = ReturnType<typeof getDb>;
@@ -130,6 +131,11 @@ export async function persistBufferToR2(params: {
 /**
  * Generate a single image and store it as a content_asset. Returns the new asset id.
  * Throws FalContentPolicyError / FalError on generation failure (caller refunds the credit hold).
+ *
+ * The workspace's picture guidelines (src/utils/brand-guidelines.ts) are applied HERE, because this
+ * is the one function every automatic AI image goes through — the post editor's regenerate,
+ * autopilot drafting and the media suggestions. A failed read is logged and the prompt used as
+ * written: a missing style note must never cost the user their picture.
  */
 export async function generateAndPersistImage(db: Db, params: {
     orgId: number;
@@ -138,8 +144,14 @@ export async function generateAndPersistImage(db: Db, params: {
     aspectRatio: AspectRatio;
     generationJobId?: number | null;
 }): Promise<number> {
+    let prompt = params.prompt;
+    try {
+        prompt = applyGuidelinesToImagePrompt(params.prompt, await readBrandGuidelines(db, params.orgId));
+    } catch (err) {
+        console.error('[media-persist] picture guidelines unreadable — prompt used as written:', err instanceof Error ? err.message : err);
+    }
     const image = falConfigured()
-        ? (await generateImages({ prompt: params.prompt, aspectRatio: params.aspectRatio, numImages: 1 }))[0]
+        ? (await generateImages({ prompt, aspectRatio: params.aspectRatio, numImages: 1 }))[0]
         : { url: `https://picsum.photos/seed/aura-auto-${Date.now()}/1024/1024`, width: 1024, height: 1024, contentType: 'image/jpeg' };
 
     const mimeType = image.contentType || 'image/png';
@@ -162,7 +174,8 @@ export async function generateAndPersistImage(db: Db, params: {
         name: `AI image — ${params.prompt.slice(0, 60)}`,
         assetType: 'image', mimeType,
         fileSize, storageKey, externalUrl,
-        provider: 'fal', prompt: params.prompt, aspectRatio: params.aspectRatio,
+        // The prompt actually sent, guidelines included — so the library shows what made the picture.
+        provider: 'fal', prompt, aspectRatio: params.aspectRatio,
         // fal already returns the real dimensions; they were being discarded. Storing them lets the
         // platform preview verify the generated image actually matches the slot's ratio rather than
         // assuming it does because we asked for it.

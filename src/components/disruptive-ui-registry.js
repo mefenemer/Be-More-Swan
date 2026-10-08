@@ -1590,6 +1590,61 @@
 
   register('visual_option_review', renderVisualOptionReviewCard);
 
+  // ── Built-in: Brand Guideline Proposal Card (Brand Designer) ───────────────
+  // { type: 'brand_guideline_proposal', photoStyle?, mustInclude?, mustAvoid?, secondaryColors? }
+  //
+  // The chat twin of "Save picture guidelines" on Business Information ▸ Brand Assets — the same
+  // brand-kit.ts `save_guidelines`. Each field present REPLACES that guideline, so the card shows the
+  // whole new text, and says plainly that every assistant's AI images read it.
+  function renderBrandGuidelineProposalCard(ui, esc) {
+    const clean = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : undefined);
+    const changes = {};
+    const p = clean(ui.photoStyle, 500); if (p !== undefined) changes.photoStyle = p || null;
+    const i = clean(ui.mustInclude, 300); if (i !== undefined) changes.mustInclude = i || null;
+    const a = clean(ui.mustAvoid, 300); if (a !== undefined) changes.mustAvoid = a || null;
+    if (Array.isArray(ui.secondaryColors)) changes.secondaryColors = ui.secondaryColors.map((c) => String(c).trim()).filter(Boolean).slice(0, 4);
+    const LABEL = { photoStyle: 'Photo style', mustInclude: 'Include where it fits', mustAvoid: 'Never show', secondaryColors: 'Extra colours' };
+    const keys = Object.keys(changes);
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Picture guidelines · Approval needed</p>
+      ${keys.length ? keys.map((k) => {
+        const v = changes[k];
+        const shown = Array.isArray(v) ? (v.length ? v.join(', ') : '(none)') : (v || '(cleared)');
+        return `<p class="text-xs text-gray-700 mt-2"><span class="font-bold">${esc(LABEL[k])}:</span> ${esc(shown)}</p>`;
+      }).join('') : '<p class="text-sm text-amber-700 mt-2">No change was written.</p>'}
+      <p class="text-xs text-gray-600 mt-2">Replaces what is there now. Every AI image your assistants make reads these — not only your Brand Designer's. You can change them any time on Business Information ▸ Brand Assets.</p>
+      <div class="flex items-center gap-2 mt-3">
+        <button type="button" data-bgp-save ${keys.length ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save guidelines</button>
+        <button type="button" data-bgp-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-bgp-status></p>`;
+    const status = el.querySelector('[data-bgp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-bgp-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-bgp-save]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('brand:saveGuidelines', {
+        bubbles: true,
+        detail: {
+          guidelines: changes,
+          respond({ ok, error }) {
+            if (ok) { say('Saved. New AI images will follow these.'); return; }
+            setBusy(false);
+            say(error || 'Could not save that — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('brand_guideline_proposal', renderBrandGuidelineProposalCard);
+
   // ── Built-in: Action Item Assignment Card ───────────────────────────────────
   // Renderer for the meeting-note-taker route's wire shape (chat-orchestrator.ts):
   // { type: 'action_item_assignment', meetingSummary, decisionsMade?: string[],

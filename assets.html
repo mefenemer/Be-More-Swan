@@ -803,6 +803,108 @@
     </div>
   </section>
 
+  <!-- ── Picture guidelines (src/utils/brand-guidelines.ts) ─────────────────
+       What every AUTOMATIC AI image is told, on top of its own subject: the post editor's "Generate
+       with AI", autopilot drafts, media suggestions and the Brand Designer. Stored apart from the
+       brand style above (organisations.brand_guidelines) because website extraction replaces that
+       wholesale. The same save is reachable from the Brand Designer's chat. -->
+  <div class="mb-4">
+    <h2 class="text-lg font-extrabold text-gray-900"><span data-explain="brand-guidelines">Picture guidelines</span></h2>
+    <p class="text-sm text-gray-500 mt-0.5">What your pictures should look like, and what they must never show. Every AI image your assistants make reads these. Stock photo search can't filter by them, so check stock picks yourself.</p>
+  </div>
+
+  <section class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-8">
+    <div class="space-y-4">
+      <div>
+        <label for="bg-photoStyle" class="block text-sm font-bold text-gray-700 mb-1">Photo style</label>
+        <textarea id="bg-photoStyle" maxlength="500" rows="2" placeholder="e.g. Bright and natural, real people at work, never posed. Lots of white space."
+          class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none"></textarea>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label for="bg-mustInclude" class="block text-sm font-bold text-gray-700 mb-1">Include where it fits</label>
+          <input type="text" id="bg-mustInclude" maxlength="300" placeholder="e.g. our pink, a laptop, the Leeds skyline"
+            class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none">
+        </div>
+        <div>
+          <label for="bg-mustAvoid" class="block text-sm font-bold text-gray-700 mb-1">Never show</label>
+          <input type="text" id="bg-mustAvoid" maxlength="300" placeholder="e.g. handshakes, suits, stock-photo smiles"
+            class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none">
+        </div>
+      </div>
+      <div>
+        <label for="bg-secondaryColors" class="block text-sm font-bold text-gray-700 mb-1">Extra colours (optional)</label>
+        <input type="text" id="bg-secondaryColors" spellcheck="false" placeholder="#ffd166, #06d6a0"
+          class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none font-mono">
+        <p class="text-xs text-gray-400 mt-1">Up to 4 hex codes, separated by commas. AI images may use them alongside your accent.</p>
+      </div>
+      <div class="flex items-center gap-3 pt-1">
+        <button type="button" id="guidelines-save"
+          class="btn-primary px-5 py-2.5 rounded-lg text-sm font-bold transition cursor-pointer">
+          Save picture guidelines
+        </button>
+        <span id="guidelines-msg" class="text-xs font-semibold text-gray-500"></span>
+      </div>
+    </div>
+  </section>
+
+  <script>
+  (function () {
+    const el = (id) => document.getElementById(id);
+    const TEXT = ['photoStyle', 'mustInclude', 'mustAvoid'];
+    const setMsg = (text, tone) => {
+      const m = el('guidelines-msg');
+      if (!m) return;
+      m.textContent = text || '';
+      m.className = 'text-xs font-semibold ' + (tone === 'error' ? 'text-red-600' : tone === 'ok' ? 'text-emerald-700' : 'text-gray-500');
+    };
+    const fill = (g) => {
+      for (const f of TEXT) { const i = el('bg-' + f); if (i) i.value = (g && g[f]) || ''; }
+      const c = el('bg-secondaryColors');
+      if (c) c.value = g && Array.isArray(g.secondaryColors) ? g.secondaryColors.join(', ') : '';
+    };
+    async function load() {
+      try {
+        const res = await fetch('/.netlify/functions/brand-kit');
+        if (!res.ok) throw new Error('Could not load your picture guidelines.');
+        fill((await res.json()).guidelines);
+      } catch (e) { setMsg(e.message, 'error'); }
+    }
+    el('guidelines-save')?.addEventListener('click', async () => {
+      const btn = el('guidelines-save');
+      btn.disabled = true;
+      setMsg('Saving…');
+      const guidelines = {};
+      for (const f of TEXT) guidelines[f] = (el('bg-' + f)?.value || '').trim() || null;
+      guidelines.secondaryColors = (el('bg-secondaryColors')?.value || '').split(',').map((x) => x.trim()).filter(Boolean);
+      try {
+        const res = await fetch('/.netlify/functions/brand-kit', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'save_guidelines', guidelines }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not save.');
+        fill(data.guidelines);
+        setMsg('Saved. New AI images will follow these.', 'ok');
+      } catch (e) {
+        setMsg(e.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+    // Same lazy load as the brand style above: only once the Brand Assets tab is first shown.
+    const panel = document.querySelector('.bizinfo-tab-panel[data-panel="assets"]');
+    let loaded = false;
+    const maybeLoad = () => {
+      if (loaded || !panel || panel.classList.contains('hidden')) return;
+      loaded = true;
+      load();
+    };
+    if (panel) new MutationObserver(maybeLoad).observe(panel, { attributes: true, attributeFilter: ['class'] });
+    maybeLoad();
+  })();
+  </script>
+
   <!-- ── Brand assets ─────────────────────────────────────────────────────── -->
   <div class="mb-4">
     <h2 class="text-lg font-extrabold text-gray-900">Brand assets</h2>
@@ -1066,6 +1168,12 @@
       panels.forEach(p => p.classList.toggle('hidden', p.dataset.panel !== name));
     }
     tabs.forEach(t => t.addEventListener('click', () => activate(t.dataset.tab)));
+    // A one-shot hint from a link elsewhere that means a particular tab — the Brand Designer's
+    // "Edit" on its picture guidelines opens straight on Brand Assets. Cleared at once, so the next
+    // ordinary visit opens on the profile as before.
+    const wanted = window._bizinfoInitialTab;
+    window._bizinfoInitialTab = null;
+    if (wanted && tabs.some(t => t.dataset.tab === wanted)) activate(wanted);
   })();
   </script>
 </div>

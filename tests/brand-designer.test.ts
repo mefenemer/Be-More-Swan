@@ -104,7 +104,7 @@ check('the user\'s exact card words survive whatever the model returns', () => {
 });
 
 check('junk from the model falls back to the brief as written, never an empty round', () => {
-    const fb = fallbackArtDirection({ title: 't', message: 'a calm studio', headline: null, mood: 'warm', mustInclude: null, mustAvoid: 'handshakes' }, DEFAULT_BRAND_KIT, { avoidAlways: 'suits' });
+    const fb = fallbackArtDirection({ title: 't', message: 'a calm studio', headline: null, mood: 'warm', mustInclude: null, mustAvoid: 'handshakes' }, DEFAULT_BRAND_KIT, { mustAvoid: 'suits' });
     assert.strictEqual(parseArtDirection('sorry, I cannot', fb, null), fb);
     assert.match(fb.imagePrompt, /handshakes/);
     assert.match(fb.imagePrompt, /suits/, 'the house "never show" applies to every brief');

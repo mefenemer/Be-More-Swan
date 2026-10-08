@@ -23,6 +23,7 @@ import { orgHasAssistantFeature } from '../../src/utils/assistant-capabilities';
 import { BRAND_DESIGNER_ROLE_KEY } from '../../src/constants/roles';
 import { briefVocabForClient, normaliseBrief } from '../../src/config/visual-brief-vocab';
 import { cancelBrief, decideOption, defaultSourcesFor, endRound, listBriefs, startRound, sweepStuckRounds, type BriefRow } from '../../src/utils/visual-briefs';
+import { readBrandGuidelines } from '../../src/utils/brand-guidelines';
 import { triggerBriefRound } from '../../src/utils/trigger-brief-round';
 
 function json(statusCode: number, body: unknown) {
@@ -89,10 +90,11 @@ export default withLambda(async (event) => {
         const designer = await requireDesigner(body.assistantId);
         if (!designer) return json(404, { error: 'Assistant not found.' });
         await sweepStuckRounds(db, orgId);
-        const [briefs, balance, aiAvailable] = await Promise.all([
+        const [briefs, balance, aiAvailable, guidelines] = await Promise.all([
             listBriefs(db, orgId, designer.id),
             getBalance(db, orgId).catch(() => null),
             orgHasAssistantFeature(db, orgId, 'ai_image_generation').catch(() => false),
+            readBrandGuidelines(db, orgId).catch(() => null),
         ]);
         return json(200, {
             briefs,
@@ -102,6 +104,9 @@ export default withLambda(async (event) => {
             // What "New brief" ticks by default — from setup, so a "free only" business is never
             // one unnoticed tick away from spending a credit.
             defaultSources: defaultSourcesFor(designer.onboardingContext),
+            // The workspace's picture guidelines — shown on the tab so the user can see what every
+            // round is told. null = could not be read (said as such), not "none set".
+            guidelines,
         });
     }
 

@@ -268,8 +268,10 @@
     // Brand Designer (docs/brand-designer-plan.md §4). These answers are read on EVERY round's art
     // direction (src/utils/visual-briefs.ts readBriefContext) and by its chat route — the keys must
     // match those lookups exactly, or a typo reads as "never answered" and the steer silently drops.
-    // Phase 2 moves the visual guidelines onto the workspace brand kit, where every assistant can
-    // read them; until then they live here.
+    // Phase 2 (2026-10-08): the workspace's picture guidelines (organisations.brand_guidelines, edited
+    // on Business Information ▸ Brand Assets or from this assistant's chat) are what every AI image
+    // reads. These two answers only fill a guideline the workspace has left EMPTY
+    // (visual-briefs.ts withSetupFallback) — the help text below must keep saying exactly that.
     brand_designer: [
       {
         title: 'Your look',
@@ -281,7 +283,7 @@
             type: 'textarea',
             required: false,
             placeholder: 'e.g. Bright and natural, real people at work, never posed. Lots of white space.',
-            helpText: 'Optional. Applied to AI images and to the stock photo search.',
+            helpText: 'Optional. Used when your workspace has no photo style set under Business Information ▸ Brand Assets — that one applies to every assistant’s AI images.',
           },
           {
             key: 'avoidAlways',
@@ -289,7 +291,7 @@
             type: 'text',
             required: false,
             placeholder: 'e.g. handshakes, suits, stock-photo smiles',
-            helpText: 'Optional. Added to every brief as a "must avoid".',
+            helpText: 'Optional. Used when your workspace has no "never show" set under Business Information ▸ Brand Assets.',
           },
         ],
       },
