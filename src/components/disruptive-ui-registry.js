@@ -1004,7 +1004,7 @@
         // click — approving this plan must not read as approving an AI-credit spend.
         const sources = Array.isArray(o.sources) ? o.sources : null;
         const pictureNote = o.action === 'commission_visuals'
-          ? `${sources && !sources.includes('ai_image') ? 'Stock photos and branded cards, made straight away' : 'Stock and branded cards straight away; AI images only when you press "Make options" on its Briefs tab'} — you choose; the picture joins this campaign`
+          ? `${sources && !sources.some((x) => x === 'ai_image' || x === 'ai_video') ? 'Stock and branded cards, made straight away' : 'Stock and branded cards straight away; AI images and video only when you press "Make options" on its Briefs tab'} — you choose; the picture joins this campaign`
           : '';
         // A person's task (§9.5) names who, says nothing is sent to them, and shows what waits.
         const humanNote = o.action === 'request_human_task'
@@ -1484,12 +1484,14 @@
       title: clean(ui.title, 120), message: clean(ui.message, 1000), headline: clean(ui.headline, 120),
       mood: clean(ui.mood, 300), mustInclude: clean(ui.mustInclude, 500), mustAvoid: clean(ui.mustAvoid, 500),
       purpose: clean(ui.purpose, 40), aspectRatio: clean(ui.aspectRatio, 8),
-      sources: Array.isArray(ui.sources) ? ui.sources.filter((x) => ['stock', 'ai_image', 'brand_card'].includes(x)) : ['stock', 'ai_image', 'brand_card'],
+      sources: Array.isArray(ui.sources) ? ui.sources.filter((x) => ['stock', 'ai_image', 'brand_card', 'stock_video', 'ai_video'].includes(x)) : ['stock', 'ai_image', 'brand_card'],
+      waitingOn: clean(ui.waitingOn, 120),
       dueDate: /^\d{4}-\d{2}-\d{2}$/.test(String(ui.dueDate || '')) ? String(ui.dueDate) : '',
     };
     if (!brief.sources.length) brief.sources = ['stock', 'brand_card'];
-    const free = !brief.sources.includes('ai_image');
-    const SOURCE = { stock: 'Stock photos', ai_image: 'AI images', brand_card: 'Branded cards' };
+    // Free = no AI image AND no AI video (PAID_SOURCES in visual-brief-vocab.ts).
+    const free = !brief.sources.some((x) => x === 'ai_image' || x === 'ai_video');
+    const SOURCE = { stock: 'Stock photos', ai_image: 'AI images', brand_card: 'Branded cards', stock_video: 'Stock videos', ai_video: 'AI video' };
     const row = (label, v) => (v ? `<p class="text-xs text-gray-700 mt-1"><span class="font-bold">${label}:</span> ${esc(v)}</p>` : '');
     const runnable = !!brief.title && !!(brief.message || brief.headline);
     const el = document.createElement('div');
@@ -1504,10 +1506,11 @@
       ${row('Must avoid', brief.mustAvoid)}
       ${row('Shape', brief.aspectRatio)}
       ${row('Due', brief.dueDate)}
+      ${row('Someone on your team is making it', brief.waitingOn)}
       <p class="text-xs text-gray-700 mt-1"><span class="font-bold">Options from:</span> ${brief.sources.map((x) => esc(SOURCE[x])).join(', ')}</p>
       <p class="text-xs text-gray-600 mt-2">${free
-        ? 'Stock photos and branded cards are free. Nothing is used anywhere until you approve it.'
-        : 'Saved to your Briefs tab. Press "Make options" there — that button shows what the AI images cost before anything is spent.'}</p>
+        ? 'Stock and branded cards are free. Nothing is used anywhere until you approve it.'
+        : 'Saved to your Briefs tab. Press "Make options" there — that button shows what the AI images or video cost before anything is spent.'}</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         ${free ? `<button type="button" data-vbp-save="generate" ${runnable ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save and make options</button>` : ''}
         <button type="button" data-vbp-save="save" ${runnable ? '' : 'disabled'} class="${free ? 'btn-secondary border' : 'btn-primary'} px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save brief</button>

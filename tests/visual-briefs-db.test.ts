@@ -117,6 +117,24 @@ async function main() {
                 'the worker arriving after the sweep must not charge a round the user was told was free');
             assert.deepStrictEqual(await balance(), { balance: before.balance + 1, held: before.held - 1 });
         });
+        // ── Phase 4: images and a video in one round, settled SEPARATELY ─────────────────────
+        await check('images arriving while the AI video failed: the image credit is charged, the 5 video credits refunded', async () => {
+            const before = await balance();
+            const [row] = await sql.unsafe(
+                `INSERT INTO visual_briefs (organisation_id, ai_assistant_id, title, status, rounds, credit_hold, credit_hold_video, generation_started_at)
+                 VALUES (${ORG}, 1, 't', 'generating', 1, 6, 5, now()) RETURNING id`);
+            await sql.unsafe(`UPDATE ai_credit_balance SET held = held + 6, balance = balance - 6 WHERE organisation_id = ${ORG}`);
+            const ledgerBefore = Number((await sql.unsafe(`SELECT count(*)::int AS n FROM ai_credit_ledger WHERE organisation_id = ${ORG}`))[0].n);
+            assert.strictEqual(await endRound(db, Number(row.id), { chargeAi: true, chargeVideo: false, note: null }), true);
+            assert.deepStrictEqual(await balance(), { balance: before.balance - 1, held: before.held },
+                'net: one image credit spent, the video hold returned to the balance');
+            const ledger = await sql.unsafe(`SELECT delta, reason FROM ai_credit_ledger WHERE organisation_id = ${ORG} ORDER BY id DESC LIMIT 1`);
+            assert.strictEqual(Number((await sql.unsafe(`SELECT count(*)::int AS n FROM ai_credit_ledger WHERE organisation_id = ${ORG}`))[0].n), ledgerBefore + 1, 'one charge, for the images only');
+            assert.strictEqual(ledger[0].reason, 'image_generation');
+            const after = (await sql.unsafe(`SELECT credit_hold, credit_hold_video FROM visual_briefs WHERE id = ${row.id}`))[0];
+            assert.strictEqual(Number(after.credit_hold) + Number(after.credit_hold_video), 0, 'both parts zeroed in the same statement');
+        });
+
         // ── Phase 3: a campaign's picture order, judged from its brief ──────────────────────
         await check('an approved picture DELIVERS the order and joins the campaign once, however often it is judged', async () => {
             const id = await brief('in_review', 0);

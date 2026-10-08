@@ -7,7 +7,7 @@
 // brief means the same thing whichever door it came in by. The browser never keeps its own copy of
 // these lists: brand-briefs.ts sends them with every `list` response.
 
-import { IMAGE_CREDIT_COST } from '../utils/ai-credits';
+import { IMAGE_CREDIT_COST, VIDEO_CREDIT_COST } from '../utils/ai-credits';
 
 export const BRIEF_PURPOSES = ['social_post', 'blog_header', 'ad', 'email_header', 'story', 'other'] as const;
 export type BriefPurpose = typeof BRIEF_PURPOSES[number];
@@ -33,20 +33,44 @@ export const ASPECT_LABELS: Record<BriefAspectRatio, string> = {
 };
 
 /**
- * Where options can come from in Phase 1. AI video, Canva and "a person makes it" are Phase 4.
+ * Where a ROUND's options can come from. Phase 4 added stock video and AI video. "A person makes it"
+ * and Canva are not round sources: they arrive as an "own" option (OWN_SOURCE) through "Add your
+ * own" — an upload, or a library picture, which is where a Canva import lands.
  *
  * ⚠️ The cost line is a promise the card and the tab both print before the click. It must stay true
  * of what generate-brief-options-background.ts charges: AI images are ONE credit per round, and a
  * round returns several variations (the same rule as generate-ai-image — the credit buys the grid).
  */
-export const BRIEF_SOURCES = ['stock', 'ai_image', 'brand_card'] as const;
+export const BRIEF_SOURCES = ['stock', 'ai_image', 'brand_card', 'stock_video', 'ai_video'] as const;
 export type BriefSource = typeof BRIEF_SOURCES[number];
 
 export const SOURCE_SPECS: Record<BriefSource, { label: string; cost: string; optionsPerRound: number; credits: number }> = {
     stock:      { label: 'Stock photos',  cost: 'Free (Pexels)',                                         optionsPerRound: 4, credits: 0 },
     ai_image:   { label: 'AI images',     cost: `${IMAGE_CREDIT_COST} AI credit for 4 images`,          optionsPerRound: 4, credits: IMAGE_CREDIT_COST },
     brand_card: { label: 'Branded cards', cost: 'Free — your colours, font and logo',                   optionsPerRound: 2, credits: 0 },
+    stock_video: { label: 'Stock videos', cost: 'Free (Pexels)',                                         optionsPerRound: 2, credits: 0 },
+    // One clip per round: four clips would be 20 credits for one brief. Saver and Employee plans only
+    // (tierCanGenerateVideo) — the same lock as AI video everywhere else.
+    ai_video:   { label: 'AI video',      cost: `${VIDEO_CREDIT_COST} AI credits for one 6-second clip (Saver and Employee plans)`, optionsPerRound: 1, credits: VIDEO_CREDIT_COST },
 };
+
+/** The sources whose options are VIDEOS. */
+export const VIDEO_SOURCES: readonly BriefSource[] = ['stock_video', 'ai_video'];
+
+/**
+ * An option the user brought: an upload, or a library picture (where a Canva import lands). Not a
+ * round source — nothing generates it — so it is not in BRIEF_SOURCES, but it is a legal option source.
+ */
+export const OWN_SOURCE = 'own' as const;
+export const OPTION_SOURCES = [...BRIEF_SOURCES, OWN_SOURCE] as const;
+export const OWN_SOURCE_LABEL = 'Your own';
+
+/** The sources that spend AI credits. A round without any of these is free. */
+export const PAID_SOURCES: readonly BriefSource[] = ['ai_image', 'ai_video'];
+/** Does this list of sources spend anything? The ONE test every "free, so start it now" path uses. */
+export function sourcesAreFree(sources: readonly string[]): boolean {
+    return !sources.some((s) => (PAID_SOURCES as readonly string[]).includes(s));
+}
 
 /** Credits one round of this brief will hold. Only AI costs anything. */
 export function roundCreditCost(sources: readonly string[]): number {
@@ -87,6 +111,8 @@ export interface NormalisedBrief {
     mustAvoid: string | null;
     sources: BriefSource[];
     dueDate: string | null;
+    /** "Someone on my team is making it" — who, in the user's words. Nothing is sent to them. */
+    waitingOn: string | null;
 }
 
 function text(v: unknown, max: number): string | null {
@@ -131,6 +157,7 @@ export function normaliseBrief(raw: Record<string, unknown>): { ok: true; brief:
             mustAvoid: text(raw.mustAvoid, 500),
             sources,
             dueDate: due,
+            waitingOn: text(raw.waitingOn, 120),
         },
     };
 }
@@ -140,7 +167,8 @@ export function briefVocabForClient() {
     return {
         purposes: BRIEF_PURPOSES.map((k) => ({ key: k, ...PURPOSE_SPECS[k] })),
         aspectRatios: BRIEF_ASPECT_RATIOS.map((k) => ({ key: k, label: ASPECT_LABELS[k] })),
-        sources: BRIEF_SOURCES.map((k) => ({ key: k, ...SOURCE_SPECS[k] })),
+        sources: BRIEF_SOURCES.map((k) => ({ key: k, ...SOURCE_SPECS[k], video: VIDEO_SOURCES.includes(k) })),
+        ownLabel: OWN_SOURCE_LABEL,
         rejectReasons: REJECT_REASONS.map((k) => ({ key: k, label: REJECT_REASON_LABELS[k] })),
         maxRounds: MAX_ROUNDS,
     };

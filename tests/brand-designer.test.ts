@@ -21,7 +21,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-    BRIEF_ASPECT_RATIOS, BRIEF_PURPOSES, BRIEF_SOURCES, REJECT_REASONS, SOURCE_SPECS, normaliseBrief, roundCreditCost,
+    BRIEF_ASPECT_RATIOS, BRIEF_PURPOSES, BRIEF_SOURCES, OPTION_SOURCES, REJECT_REASONS, SOURCE_SPECS, normaliseBrief, roundCreditCost,
 } from '../src/config/visual-brief-vocab';
 import { defaultSourcesFor, fallbackArtDirection, parseArtDirection, setupAnswer } from '../src/utils/visual-briefs';
 import { DEFAULT_BRAND_KIT } from '../src/utils/brand-kit';
@@ -91,7 +91,11 @@ check('the migration\'s CHECKs accept exactly the vocabulary', () => {
     };
     assert.deepStrictEqual(list('purpose'), [...BRIEF_PURPOSES]);
     assert.deepStrictEqual(list('aspect_ratio'), [...BRIEF_ASPECT_RATIOS]);
-    assert.deepStrictEqual(list('source'), [...BRIEF_SOURCES]);
+    // The option source CHECK was widened by the Phase 4 migration — the LATEST definition must
+    // accept every option source the code can write (round sources + "own").
+    const p4 = read('db/z-brand-designer-sources.sql').match(/CHECK \(source IN \(([^)]*)\)\)/)![1].split(',').map((x) => x.trim().replace(/'/g, ''));
+    assert.deepStrictEqual(p4, [...OPTION_SOURCES]);
+    assert.ok(BRIEF_SOURCES.every((x) => (OPTION_SOURCES as readonly string[]).includes(x)));
 });
 
 console.log('\n──── art direction ────');
@@ -153,7 +157,9 @@ check('an option is decided once; approving puts it in the library; a card is ke
     assert.match(fn, /insert\(contentAssets\)/);
     assert.match(fn, /provider: BRAND_CARD_PROVIDER[^}]*libraryKeptAt: new Date\(\)/,
         'without libraryKeptAt the 30-day unused-card sweep deletes an approved card from the library');
-    assert.match(fn, /if \(opt\.storageKey && opt\.source !== 'stock'\) await deleteR2Object/, 'a stock option is a Pexels link — nothing of ours to delete');
+    assert.match(fn, /if \(opt\.storageKey && GENERATED_SOURCES\.has\(opt\.source\)\) await deleteR2Object/,
+        'only files WE generated are deleted — a stock option is a Pexels link, an "own" option is the user\'s library picture');
+    assert.match(engine, /const GENERATED_SOURCES = new Set\(\['ai_image', 'brand_card', 'ai_video'\]\)/);
     assert.match(fn, /status: 'proposed', decidedAt: null/, 'a failed approve gives the option back');
 });
 
@@ -181,10 +187,10 @@ console.log('\n──── the chat ────');
 check('a chat card can never start a round that spends', () => {
     const reg = read('src/components/disruptive-ui-registry.js');
     const card = span(reg, 'function renderVisualBriefProposalCard', "register('visual_brief_proposal'", 'the brief card');
-    assert.match(card, /const free = !brief\.sources\.includes\('ai_image'\)/);
+    assert.match(card, /const free = !brief\.sources\.some\(\(x\) => x === 'ai_image' \|\| x === 'ai_video'\)/, 'AI video is paid too');
     assert.match(card, /\$\{free \? `<button type="button" data-vbp-save="generate"/);
     const session = code(read('src/components/chat-session.js'));
-    assert.match(session, /const generate = d\.generate === true && !\(Array\.isArray\(b\.sources\) && b\.sources\.includes\('ai_image'\)\)/,
+    assert.match(session, /const generate = d\.generate === true && !\(Array\.isArray\(b\.sources\) && b\.sources\.some\(\(x\) => x === 'ai_image' \|\| x === 'ai_video'\)\)/,
         'enforced again where the request is made, not only where the button is drawn');
     assert.match(session, /origin: 'chat'/);
     for (const ev of ['brief:create', 'brief:review']) {
@@ -200,7 +206,8 @@ check('the route reads the briefs every turn and names only real options', () =>
     assert.match(route, /usesBriefsSnapshot: true/);
     assert.match(route, /onboardingValue\(rc, 'photoStyle'\)/);
     assert.match(route, /only ids listed there, never invented/);
-    assert.match(route, /cannot make AI video/i, 'Phase 4 sources must be stated as missing, not promised');
+    assert.match(route, /AI video is ONE 6-second clip per round, only on the Saver and Employee plans/, 'the plan lock is stated, not hidden');
+    assert.match(route, /You cannot upload or import for them from this chat: tell them where the button is/, 'chat cannot upload — it must say so, not pretend');
     assert.match(orch, /route\.usesBriefsSnapshot\s*\? await buildBriefsSnapshot/);
     // The prompt names the tab; the registry names the tab. They must agree.
     const reg = read('src/components/assistant-dashboard-registry.js');

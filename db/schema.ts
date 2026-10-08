@@ -5241,6 +5241,11 @@ export const visualBriefs = pgTable("visual_briefs", {
   artDirection: jsonb("art_direction"),
   // Credits held by the round in flight; settled and zeroed in ONE update, so only once.
   creditHold: integer("credit_hold").notNull().default(0),
+  // The AI-VIDEO part of creditHold (db/z-brand-designer-sources.sql): images and a video succeed
+  // or fail separately, so each part is charged or refunded on its own.
+  creditHoldVideo: integer("credit_hold_video").notNull().default(0),
+  // "Someone on my team is making it" — who. Nothing is sent to them.
+  waitingOn: text("waiting_on"),
   generationStartedAt: timestamp("generation_started_at"),
   generationNote: text("generation_note"),
   // A campaign's commission (db/z-campaign-visuals.sql). SET NULL: an approved picture outlives it.
@@ -5281,6 +5286,6 @@ export const visualBriefOptions = pgTable("visual_brief_options", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
   index("visual_brief_options_brief_idx").on(t.briefId, t.round),
-  check("visual_brief_options_source_check", sql`${t.source} IN ('stock','ai_image','brand_card')`),
+  check("visual_brief_options_source_check", sql`${t.source} IN ('stock','ai_image','brand_card','stock_video','ai_video','own')`),
   check("visual_brief_options_status_check", sql`${t.status} IN ('proposed','approved','rejected')`),
 ]);

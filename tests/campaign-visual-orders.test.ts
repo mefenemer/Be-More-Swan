@@ -101,7 +101,7 @@ check('the executor starts a round ONLY when every source is free', () => {
     assert.match(ex, /artefactKind: 'visual_brief', artefactId: made\.briefId/);
     assert.match(ex, /endRound\(db, made\.briefId, \{ chargeAi: false/, 'a lost wake-up is ended at once, never left spinning');
     const create = span(visual, 'export async function createBriefForOrder', '\n}\n', 'createBriefForOrder');
-    assert.match(create, /allFree: !n\.brief\.sources\.includes\('ai_image'\)/);
+    assert.match(create, /allFree: sourcesAreFree\(n\.brief\.sources\)/, 'one definition of free — AI video counts as paid');
     assert.match(create, /origin: 'campaign', campaignId: ctx\.campaignId, campaignOrderId: orderId/);
     assert.match(create, /normaliseBrief\(/, 'the same normaliser as the tab and the chat');
     assert.match(create, /mood: campaign\.tone/, 'the campaign\'s tone is the picture\'s mood');
@@ -163,7 +163,8 @@ check('the chat is told which orders can run here, and how to write a picture or
 check('the plan card and Add work both say AI images wait for a click', () => {
     const reg = read('src/components/disruptive-ui-registry.js');
     assert.match(reg, /const pictureNote = o\.action === 'commission_visuals'/);
-    assert.match(reg, /AI images only when you press "Make options" on its Briefs tab/);
+    assert.match(reg, /AI images and video only when you press "Make options" on its Briefs tab/);
+    assert.match(reg, /sources && !sources\.some\(\(x\) => x === 'ai_image' \|\| x === 'ai_video'\)/, 'a plan with AI video is not "made straight away"');
     const tab = read('src/components/assistant-campaigns.js');
     assert.match(tab, /commission_visuals: \{ field: 'show'/);
     assert.match(tab, /data-cmp-aw-ai="\$\{id\}"/);

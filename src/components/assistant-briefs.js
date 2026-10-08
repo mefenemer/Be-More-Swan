@@ -32,6 +32,10 @@
     vocab: null,
     credits: null,
     aiAvailable: false,
+    /** Null when AI video can be made here; otherwise why not, in words. */
+    aiVideoUnavailable: null,
+    /** Brief id whose "Add your own" panel is open, with its library list once loaded. */
+    own: { briefId: null, library: null, error: null, selected: new Set(), busy: false, status: '' },
     /** What a new brief ticks — from the assistant's setup (all sources, or free ones only). */
     defaultSources: null,
     /** The workspace's picture guidelines; undefined until loaded, null if unreadable. */
@@ -56,7 +60,7 @@
   }
 
   const V = () => state.vocab || { purposes: [], aspectRatios: [], sources: [], rejectReasons: [], maxRounds: 6 };
-  const sourceLabel = (k) => (V().sources.find((s) => s.key === k) || { label: k }).label;
+  const sourceLabel = (k) => (k === 'own' ? (V().ownLabel || 'Your own') : (V().sources.find((s) => s.key === k) || { label: k }).label);
   const purposeLabel = (k) => (V().purposes.find((p) => p.key === k) || { label: k }).label;
 
   // ── Server ─────────────────────────────────────────────────────────────────
@@ -88,6 +92,7 @@
       state.vocab = data.vocab || null;
       state.credits = data.credits ?? null;
       state.aiAvailable = !!data.aiAvailable;
+      state.aiVideoUnavailable = data.aiVideoUnavailable || null;
       state.defaultSources = Array.isArray(data.defaultSources) ? data.defaultSources : null;
       state.guidelines = data.guidelines === undefined ? undefined : data.guidelines;
       state.loadError = null;
@@ -138,23 +143,36 @@
       return `Done — ${approved} in your library${waiting ? `, and ${waiting} more ${waiting === 1 ? 'option is' : 'options are'} still here if you want ${waiting === 1 ? 'it' : 'them'}` : ''}.`;
     }
     if (waiting) return `${waiting} ${waiting === 1 ? 'option is' : 'options are'} waiting for you. Nothing is used anywhere until you approve it.`;
+    if (b.waitingOn) return `Waiting on ${b.waitingOn} to add their own — they use "Add your own" on this brief. Nothing is sent to them; tell them yourself.`;
     if (b.rounds > 0) return 'Every option so far was turned down. Make another round — it reads why you turned them down.';
     return 'Not started. Press "Make options" when the brief says what you want.';
   }
 
   /** The label on the round button states its cost before the click. */
+  /** Why a paid source cannot run here, or null. The round skips it, so the label must not charge for it. */
+  function sourceBlocked(key) {
+    if (key === 'ai_image' && !state.aiAvailable) return 'not switched on for this workspace';
+    if (key === 'ai_video' && state.aiVideoUnavailable) return state.aiVideoUnavailable;
+    return null;
+  }
+
   function roundButtonLabel(b) {
     const verb = b.rounds > 0 ? 'Make more options' : 'Make options';
-    const ai = b.sources.includes('ai_image') && state.aiAvailable;
-    return ai ? `${verb} (${b.roundCredits} AI credit)` : `${verb} (free)`;
+    const credits = b.sources
+      .filter((k) => !sourceBlocked(k))
+      .reduce((n, k) => n + ((V().sources.find((s) => s.key === k) || {}).credits || 0), 0);
+    return credits ? `${verb} (${credits} AI credit${credits === 1 ? '' : 's'})` : `${verb} (free)`;
   }
 
   function optionTile(b, o) {
     const ratio = String(b.aspectRatio || '1:1').replace(':', ' / ');
-    const img = o.url
+    const isVideo = String(o.mimeType || '').startsWith('video/');
+    const img = o.url && isVideo
+      ? `<video src="${esc(o.url)}" controls muted playsinline preload="metadata" class="w-full h-full object-cover"></video>`
+      : o.url
       ? `<img src="${esc(o.url)}" alt="${esc(sourceLabel(o.source))} option" loading="lazy" class="w-full h-full object-cover">`
       : '<div class="w-full h-full flex items-center justify-center text-xs text-gray-400">No preview</div>';
-    const credit = o.source === 'stock' && o.attributionName
+    const credit = (o.source === 'stock' || o.source === 'stock_video') && o.attributionName
       ? `<p class="text-[11px] text-gray-500 mt-1 truncate">Photo by ${o.attributionUrl ? `<a href="${esc(o.attributionUrl)}" target="_blank" rel="noopener" class="underline">${esc(o.attributionName)}</a>` : esc(o.attributionName)} on Pexels</p>`
       : '';
     let actions = '';
@@ -206,6 +224,44 @@
       </details>`;
   }
 
+  /**
+   * "Add your own" (Phase 4): an upload, or anything already in the library — which is where a Canva
+   * import lands, so this is also how a Canva design joins a brief. Uploads go through My Content's
+   * own three steps (upload URL → R2 → content-assets, with its safety check), so a brief can never
+   * hold a file the library would have refused.
+   */
+  function ownPanelHtml(b) {
+    const o = state.own;
+    if (o.briefId !== b.id) return '';
+    const lib = o.library;
+    return `
+      <div class="mt-3 bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3" data-brief-own-panel="${b.id}">
+        <p class="text-xs font-bold text-gray-700"><span data-explain="brand-brief-own">Add your own</span></p>
+        <label class="block text-xs text-gray-600">Upload a picture or video
+          <input type="file" accept="image/*,video/*" data-brief-own-file="${b.id}" class="block mt-1 text-xs">
+        </label>
+        <p class="text-xs font-bold text-gray-600">…or choose from your library <span class="font-normal text-gray-500">(designs you imported from Canva are here too)</span></p>
+        ${o.error ? `<p class="text-xs text-red-600">${esc(o.error)}</p>`
+          : !lib ? '<p class="text-xs text-gray-400">Loading your library…</p>'
+          : !lib.length ? '<p class="text-xs text-gray-500">Your library is empty.</p>'
+          : `<div class="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-64 overflow-y-auto">${lib.map((a) => `
+              <button type="button" data-brief-own-pick="${a.id}" title="${esc(a.name)}"
+                class="relative rounded-lg overflow-hidden border-2 ${o.selected.has(a.id) ? 'border-emerald-500' : 'border-transparent'} bg-gray-100" style="aspect-ratio:1 / 1">
+                ${a.url ? (a.assetType === 'video'
+                  ? `<video src="${esc(a.url)}" muted preload="metadata" class="w-full h-full object-cover"></video>`
+                  : `<img src="${esc(a.url)}" alt="" loading="lazy" class="w-full h-full object-cover">`)
+                  : '<span class="text-[10px] text-gray-400">No preview</span>'}
+                ${a.fromCanva ? '<span class="absolute bottom-0 left-0 right-0 bg-white/80 text-[10px] font-bold text-gray-700">Canva</span>' : ''}
+              </button>`).join('')}</div>`}
+        ${o.status ? `<p class="text-xs font-semibold text-indigo-700">${esc(o.status)}</p>` : ''}
+        <div class="flex gap-2">
+          <button type="button" data-brief-own-add="${b.id}" ${o.selected.size && !o.busy ? '' : 'disabled'}
+            class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Add ${o.selected.size || ''} to this brief</button>
+          <button type="button" data-brief-own-close class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg">Close</button>
+        </div>
+      </div>`;
+  }
+
   function briefCard(b) {
     const visible = b.options.filter((o) => o.status !== 'rejected');
     const rejected = b.options.length - visible.length;
@@ -231,10 +287,13 @@
         ${visible.length ? `<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">${visible.map((o) => optionTile(b, o)).join('')}</div>` : ''}
         ${rejected ? `<p class="text-[11px] text-gray-500 mt-2">${rejected} turned down — the next round reads why.</p>` : ''}
         ${artDirectionHtml(b)}
+        ${live ? ownPanelHtml(b) : ''}
         ${live ? `
           <div class="flex flex-wrap items-center gap-2 mt-4">
             <button type="button" data-brief-generate="${b.id}" ${b.status === 'generating' || b.rounds >= V().maxRounds ? 'disabled' : ''}
               class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(roundButtonLabel(b))}</button>
+            <button type="button" data-brief-own-open="${b.id}"
+              class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Add your own</button>
             <button type="button" data-brief-edit="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
               class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">Edit brief</button>
             <button type="button" data-brief-cancel="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
@@ -264,6 +323,7 @@
           ${field('Due (optional)', `<input type="date" data-keep="brief-dueDate" name="dueDate" value="${esc(v.dueDate || '')}" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">`)}
           ${field('Must include (optional)', input('mustInclude', v.mustInclude, 'e.g. a laptop, our pink', 500))}
           ${field('Must avoid (optional)', input('mustAvoid', v.mustAvoid, 'e.g. handshakes, suits', 500))}
+          ${field('Someone on my team is making it (optional)', input('waitingOn', v.waitingOn, 'e.g. Sam (designer)', 120), 'brand-brief-own')}
           ${field('What is it for?', `<select data-keep="brief-purpose" name="purpose" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">
             ${V().purposes.map((p) => `<option value="${esc(p.key)}" ${p.key === v.purpose ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select>`)}
           ${field('Shape', `<select data-keep="brief-aspectRatio" name="aspectRatio" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">
@@ -274,10 +334,10 @@
           <legend class="text-xs font-bold text-gray-700"><span data-explain="brand-brief-sources">Where options come from</span></legend>
           <div class="mt-1 space-y-1">
             ${V().sources.map((s) => {
-              const off = s.key === 'ai_image' && !state.aiAvailable;
+              const off = sourceBlocked(s.key);
               return `<label class="flex items-start gap-2 text-sm ${off ? 'text-gray-400' : 'text-gray-700'}">
                 <input type="checkbox" data-keep="brief-src-${esc(s.key)}" name="source" value="${esc(s.key)}" ${v.sources.includes(s.key) && !off ? 'checked' : ''} ${off ? 'disabled' : ''} class="mt-1">
-                <span>${esc(s.label)} <span class="text-xs text-gray-500">— ${esc(off ? 'not switched on for this workspace' : s.cost)}</span></span>
+                <span>${esc(s.label)} <span class="text-xs text-gray-500">— ${esc(off || s.cost)}</span></span>
               </label>`;
             }).join('')}
           </div>
@@ -420,6 +480,29 @@
     if (t('[data-brief-toggle-cancelled]')) { state.showCancelled = !state.showCancelled; render(); return; }
     if (t('[data-brief-reject-cancel]')) { state.rejecting = null; render(); return; }
 
+    const ownOpen = t('[data-brief-own-open]');
+    if (ownOpen) {
+      state.own = { briefId: Number(ownOpen.dataset.briefOwnOpen), library: null, error: null, selected: new Set(), busy: false, status: '' };
+      render();
+      try { state.own.library = (await post({ action: 'list_library' })).assets || []; }
+      catch (err) { state.own.error = err.message; }
+      render();
+      return;
+    }
+    if (t('[data-brief-own-close]')) { state.own = { briefId: null, library: null, error: null, selected: new Set(), busy: false, status: '' }; render(); return; }
+    const pick = t('[data-brief-own-pick]');
+    if (pick) {
+      const id = Number(pick.dataset.briefOwnPick);
+      if (state.own.selected.has(id)) state.own.selected.delete(id); else state.own.selected.add(id);
+      render();
+      return;
+    }
+    const ownAdd = t('[data-brief-own-add]');
+    if (ownAdd) {
+      await addOwn(Number(ownAdd.dataset.briefOwnAdd), [...state.own.selected]);
+      return;
+    }
+
     const edit = t('[data-brief-edit]');
     if (edit) { state.form = { mode: 'edit', id: Number(edit.dataset.briefEdit) }; render(); window.scrollTo?.({ top: 0, behavior: 'smooth' }); return; }
 
@@ -471,6 +554,68 @@
     }
   });
 
+  async function addOwn(briefId, contentAssetIds) {
+    state.own.busy = true;
+    state.own.status = 'Adding…';
+    render();
+    try {
+      const res = await post({ action: 'add_own', briefId, contentAssetIds });
+      const n = (res.added || []).length;
+      state.own = { briefId: null, library: null, error: null, selected: new Set(), busy: false, status: '' };
+      say(briefId, n ? `Added ${n} — choose it below like any other option.` : 'Those are already on this brief.');
+    } catch (err) {
+      state.own.busy = false;
+      state.own.status = '';
+      state.own.error = err.message;
+      render();
+    }
+    await load();
+  }
+
+  /** My Content's own upload: a presigned R2 URL, the PUT, then the library row (with its safety check). */
+  async function uploadToLibrary(file) {
+    const urlRes = await fetch('/.netlify/functions/content-upload-url', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+      body: JSON.stringify({ fileName: file.name, mimeType: file.type, fileSize: file.size }),
+    });
+    const u = await urlRes.json().catch(() => ({}));
+    if (!urlRes.ok) throw new Error(u.error || 'Could not start the upload.');
+    if (u.uploadUrl) {
+      const put = await fetch(u.uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+      if (!put.ok) throw new Error('The upload did not finish — please try again.');
+    }
+    const assetType = file.type.startsWith('video/') ? 'video' : 'image';
+    const res = await fetch('/.netlify/functions/content-assets', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+      body: JSON.stringify({ name: file.name, assetType, mimeType: file.type, fileSize: file.size, storageKey: u.storageKey }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Could not add it to your library.');
+    if (data.rejected) throw new Error(data.asset?.rejectionReason || 'That file did not pass the safety check.');
+    return data.asset.id;
+  }
+
+  document.addEventListener('change', async (e) => {
+    const input = e.target.closest && e.target.closest('[data-brief-own-file]');
+    if (!input || !input.files || !input.files[0]) return;
+    const briefId = Number(input.dataset.briefOwnFile);
+    const file = input.files[0];
+    if (!/^(image|video)\//.test(file.type)) { state.own.error = 'Choose a picture or a video.'; render(); return; }
+    state.own.busy = true;
+    state.own.error = null;
+    state.own.status = `Uploading ${file.name}…`;
+    render();
+    try {
+      const id = await uploadToLibrary(file);
+      await addOwn(briefId, [id]);
+    } catch (err) {
+      state.own.busy = false;
+      state.own.status = '';
+      state.own.error = err.message;
+      render();
+    }
+  });
+
   document.addEventListener('submit', async (e) => {
     const form = e.target.closest && e.target.closest('[data-brief-form]');
     if (!form || !state.assistantId) return;
@@ -483,6 +628,7 @@
       mustInclude: fd.get('mustInclude'), mustAvoid: fd.get('mustAvoid'), purpose: fd.get('purpose'),
       aspectRatio: fd.get('aspectRatio') || undefined, dueDate: fd.get('dueDate') || null,
       sources: fd.getAll('source'),
+      waitingOn: fd.get('waitingOn') || null,
     };
     form.querySelectorAll('button').forEach((b) => { b.disabled = true; });
     try {
@@ -516,6 +662,7 @@
       state.form = null;
       state.rejecting = null;
       state.notes = {};
+      state.own = { briefId: null, library: null, error: null, selected: new Set(), busy: false, status: '' };
       // Eager: the count drives the tab badge, visible from every tab.
       load();
     },

@@ -11,6 +11,11 @@
 //   generate { briefId }                          → one round of options (holds the AI credit)
 //   decide   { optionId, decision, reason?, note? } → approve into the library / reject with a reason
 //   cancel   { briefId }
+//   add_own  { briefId, contentAssetIds }           → the user's own pictures as options (Phase 4): an
+//                                                     upload (made a library asset first, through My
+//                                                     Content's own upload + safety check) or a library
+//                                                     picture — which is where a Canva import lands
+//   list_library {}                                 → the library, for that picker
 
 import { and, eq, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -22,7 +27,10 @@ import { getBalance } from '../../src/utils/ai-credits';
 import { orgHasAssistantFeature } from '../../src/utils/assistant-capabilities';
 import { BRAND_DESIGNER_ROLE_KEY } from '../../src/constants/roles';
 import { briefVocabForClient, normaliseBrief } from '../../src/config/visual-brief-vocab';
-import { cancelBrief, decideOption, defaultSourcesFor, endRound, listBriefs, startRound, sweepStuckRounds, type BriefRow } from '../../src/utils/visual-briefs';
+import {
+    addOwnOptions, cancelBrief, decideOption, defaultSourcesFor, endRound, listBriefs, listLibraryForPicker, startRound,
+    sweepStuckRounds, videoUnavailableReason, type BriefRow,
+} from '../../src/utils/visual-briefs';
 import { readBrandGuidelines } from '../../src/utils/brand-guidelines';
 import { triggerBriefRound } from '../../src/utils/trigger-brief-round';
 
@@ -90,17 +98,21 @@ export default withLambda(async (event) => {
         const designer = await requireDesigner(body.assistantId);
         if (!designer) return json(404, { error: 'Assistant not found.' });
         await sweepStuckRounds(db, orgId);
-        const [briefs, balance, aiAvailable, guidelines] = await Promise.all([
+        const [briefs, balance, aiAvailable, guidelines, videoBlocked] = await Promise.all([
             listBriefs(db, orgId, designer.id),
             getBalance(db, orgId).catch(() => null),
             orgHasAssistantFeature(db, orgId, 'ai_image_generation').catch(() => false),
             readBrandGuidelines(db, orgId).catch(() => null),
+            videoUnavailableReason(db, orgId).catch(() => 'AI video could not be checked just now.'),
         ]);
         return json(200, {
             briefs,
             vocab: briefVocabForClient(),
             credits: balance ? balance.balance : null,
             aiAvailable,
+            // Null when AI video can be made here; otherwise WHY not, in words (feature or plan) —
+            // the form shows it beside the greyed-out tick box rather than a bare "unavailable".
+            aiVideoUnavailable: videoBlocked,
             // What "New brief" ticks by default — from setup, so a "free only" business is never
             // one unnoticed tick away from spending a credit.
             defaultSources: defaultSourcesFor(designer.onboardingContext),
@@ -176,7 +188,7 @@ export default withLambda(async (event) => {
         const merged = {
             title: brief.title, purpose: brief.purpose, aspectRatio: brief.aspectRatio, message: brief.message,
             headline: brief.headline, mood: brief.mood, mustInclude: brief.mustInclude, mustAvoid: brief.mustAvoid,
-            sources: brief.sources, dueDate: brief.dueDate,
+            sources: brief.sources, dueDate: brief.dueDate, waitingOn: brief.waitingOn,
             ...Object.fromEntries(Object.entries(body).filter(([k]) => k !== 'action' && k !== 'briefId')),
         };
         const n = normaliseBrief(merged);
@@ -203,6 +215,17 @@ export default withLambda(async (event) => {
         });
         if (!r.ok) return json(r.status, { error: r.error });
         return json(200, r);
+    }
+
+    if (action === 'add_own') {
+        const ids = Array.isArray(body.contentAssetIds) ? body.contentAssetIds.map(Number) : [];
+        const r = await addOwnOptions(db, { orgId, briefId: Number(body.briefId), contentAssetIds: ids });
+        if (!r.ok) return json(r.status, { error: r.error });
+        return json(200, r);
+    }
+
+    if (action === 'list_library') {
+        return json(200, { assets: await listLibraryForPicker(db, orgId) });
     }
 
     if (action === 'cancel') {

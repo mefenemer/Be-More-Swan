@@ -215,6 +215,23 @@ generation returns.
    which orders this workspace can run (an unhired assistant's order was refused only at placement).
    GUI: Add work → "Commission pictures". Guarded by `tests/campaign-visual-orders.test.ts`.
 4. **AI video + human-made + Canva** as sources in the same queue.
+   ✅ **Built 2026-10-08.** `db/z-brand-designer-sources.sql` (`credit_hold_video`, `waiting_on`,
+   option sources widened, `ai_video_generation` grant — ORG-WIDE, the tier lock still applies).
+   - **Stock video** (Pexels, 2 per round, free) and **AI video** (one 6-second Hailuo clip, 5 credits,
+     Saver/Employee only — same feature + tier locks as My Content, reason shown in the form). The
+     clip is waited for inside the round (8-min deadline, before the 10-min sweep) and copied to R2.
+     The video part of a hold is settled on its own: images arriving while the clip failed charges 1
+     and refunds 5 (proven on Postgres). AI video counts as PAID on every "free, start now" path
+     (`sourcesAreFree`) — chat cards and campaign plans can never start it.
+   - **"Add your own"**: upload (through My Content's own upload + safety check) or pick from the
+     library. A Canva design joins a brief this way — Canva import already lands in the library, so
+     no second Canva path was built. An own option points at the library asset: approving copies
+     nothing, turning it down deletes nothing.
+   - **"Someone on my team is making it"**: `waitingOn` on the brief; nothing is sent to them.
+   Not done: filing that person's task in Jira/Asana (the Campaign Assistant's `request_human_task`
+   does this for campaigns); the chat cannot upload or pick from the library (it says where the
+   button is); Hailuo takes no aspect ratio, so a clip's framing follows the prompt, not the brief's
+   shape. Guarded by `tests/brand-designer-sources.test.ts`.
 5. **SMM / Blog Writer raise briefs** instead of auto-picking media when nothing fits.
 
 Each step lands with: DDL in an idempotent `db/z-*.sql` applied to both environments **before** the

@@ -595,7 +595,8 @@
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
       const b = d.brief || {};
-      const generate = d.generate === true && !(Array.isArray(b.sources) && b.sources.includes('ai_image'));
+      // Free = no AI image AND no AI video (PAID_SOURCES in visual-brief-vocab.ts).
+      const generate = d.generate === true && !(Array.isArray(b.sources) && b.sources.some((x) => x === 'ai_image' || x === 'ai_video'));
       fetch('/.netlify/functions/brand-briefs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

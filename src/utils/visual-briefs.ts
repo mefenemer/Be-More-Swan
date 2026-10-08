@@ -22,18 +22,22 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { aiAssistants, campaigns, contentAssets, mediaGenerationJobs, organisations, visualBriefOptions, visualBriefs } from '../../db/schema';
 import type { getDb } from '../../db/client';
 import { gatewayGenerate } from '../lib/ai-gateway';
-import { FalContentPolicyError, FalError, falConfigured, generateImages, type AspectRatio } from '../lib/fal-gateway';
+import {
+    FalContentPolicyError, FalError, extractVideo, falConfigured, generateImages, result as falResult, status as falStatus,
+    submitVideo, type AspectRatio,
+} from '../lib/fal-gateway';
 import { renderBrandCard, type CardVariant } from '../lib/brand-card';
 import { deleteR2Object, persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured } from '../lib/media-persist';
 import { normalizeBrandKit, type BrandKit } from './brand-kit';
 import { guidelinesPromptLines, hasGuidelines, normaliseGuidelines, readBrandGuidelines, type BrandGuidelines } from './brand-guidelines';
-import { holdCredits, settleHold, getBalance, IMAGE_CREDIT_COST } from './ai-credits';
+import { holdCredits, settleHold, getBalance, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, tierCanGenerateVideo } from './ai-credits';
+import { getActiveTierKeyByOrg } from './plan-features';
 import { orgHasAssistantFeature } from './assistant-capabilities';
-import { PexelsRateLimitError, searchUniqueImages } from './pexels';
+import { PexelsRateLimitError, searchUniqueImages, searchUniqueVideos } from './pexels';
 import { BRAND_CARD_PROVIDER } from './brand-card-lifecycle';
 import { resolveAssetDisplayUrl } from './social-publish';
 import {
-    GENERATION_TIMEOUT_MS, MAX_ROUNDS, PURPOSE_SPECS, REJECT_REASON_LABELS, SOURCE_SPECS,
+    GENERATION_TIMEOUT_MS, MAX_ROUNDS, OWN_SOURCE, OWN_SOURCE_LABEL, PURPOSE_SPECS, REJECT_REASON_LABELS, SOURCE_SPECS,
     type BriefPurpose, type RejectReason,
 } from '../config/visual-brief-vocab';
 
@@ -45,6 +49,22 @@ const IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
 const AI_OPTIONS = SOURCE_SPECS.ai_image.optionsPerRound;
 const STOCK_OPTIONS = SOURCE_SPECS.stock.optionsPerRound;
 const CARD_VARIANTS: CardVariant[] = ['light', 'bold'];
+const VIDEO_MODEL = process.env.FAL_VIDEO_MODEL ?? 'fal-ai/minimax/hailuo-2.3/standard/text-to-video';
+const STOCK_VIDEO_OPTIONS = SOURCE_SPECS.stock_video.optionsPerRound;
+/** How long a round waits for an AI clip. Inside the 15-minute background budget, and inside the
+ *  10-minute sweep (GENERATION_TIMEOUT_MS) — a clip that has not arrived by then is refunded. */
+const VIDEO_POLL_DEADLINE_MS = 8 * 60 * 1000;
+const VIDEO_POLL_INTERVAL_MS = 5000;
+const MOCK_VIDEO_URL = 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4';
+/**
+ * Options whose bytes are OURS (in R2 under content/org-N/briefs) — the only ones deleted when turned
+ * down. A stock option is a Pexels link; an "own" option IS a library picture the user already had.
+ */
+const GENERATED_SOURCES = new Set(['ai_image', 'brand_card', 'ai_video']);
+/** A source label for display, including "Your own". */
+export function sourceLabel(source: string): string {
+    return source === OWN_SOURCE ? OWN_SOURCE_LABEL : (SOURCE_SPECS[source as keyof typeof SOURCE_SPECS]?.label ?? source);
+}
 
 // ── Art direction ───────────────────────────────────────────────────────────────────────────────
 
@@ -73,8 +93,10 @@ export function defaultSourcesFor(onboardingContext: unknown): string[] {
 export interface ArtDirection {
     /** What FLUX is asked for. Never contains words to render — words belong on cards. */
     imagePrompt: string;
-    /** 2–4 words for the Pexels search. */
+    /** 2–4 words for the Pexels search (photos and videos). */
     stockKeywords: string;
+    /** For the AI video model: the image prompt plus motion. Absent from older rounds. */
+    videoPrompt?: string;
     /** Up to two headlines for branded cards — the brief's own words come first. */
     cardHeadlines: string[];
     /** 'model' when Claude wrote it; 'fallback' when it could not and the brief was used as-is. */
@@ -139,6 +161,7 @@ export function fallbackArtDirection(
     ].filter(Boolean).join(' ');
     return {
         imagePrompt: imagePrompt.slice(0, 1000),
+        videoPrompt: `${imagePrompt.slice(0, 850)} Slow, steady camera movement; one continuous shot.`,
         stockKeywords: clip(brief.message, 80) || clip(brief.title, 80),
         cardHeadlines: [clip(brief.headline, 120) || clip(brief.message, 120) || clip(brief.title, 120)].filter(Boolean),
         by: 'fallback',
@@ -146,15 +169,16 @@ export function fallbackArtDirection(
 }
 
 export function artDirectionSystemPrompt(): string {
-    return `You are a brand designer's art director. From a visual brief and a brand kit you write three things, and nothing else:
+    return `You are a brand designer's art director. From a visual brief and a brand kit you write four things, and nothing else:
 
 1. "imagePrompt" — a prompt for an AI image model (FLUX). One paragraph, under 900 characters. Describe the scene, subject, composition, lighting and mood concretely. Steer colour towards the brand colours given. NEVER ask for words, letters, signs, captions or logos in the image — image models render text badly, and the words go on branded cards instead. Never name a real person or a trademark.
 2. "stockKeywords" — 2 to 4 plain words to search a stock photo library (Pexels). Visual nouns, no adjectives about quality, no punctuation.
-3. "cardHeadlines" — one or two short headlines (max 90 characters each) for a typographic card in the brand's colours. If the brief gives exact words, the FIRST headline is those words unchanged. Never invent a price, a statistic, a date or an offer the brief does not state.
+3. "videoPrompt" — a prompt for a 6-second AI video (Hailuo): the same scene with ONE simple motion (a slow push-in, a pan, people moving naturally). One continuous shot, no cuts, no words on screen. Under 900 characters.
+4. "cardHeadlines" — one or two short headlines (max 90 characters each) for a typographic card in the brand's colours. If the brief gives exact words, the FIRST headline is those words unchanged. Never invent a price, a statistic, a date or an offer the brief does not state.
 
-Respect every "must avoid" in the brief in all three. When earlier options were turned down, the reasons are listed: change what the reason names, keep what it does not.
+Respect every "must avoid" in the brief in all four. When earlier options were turned down, the reasons are listed: change what the reason names, keep what it does not.
 
-Return STRICT JSON only: {"imagePrompt": "...", "stockKeywords": "...", "cardHeadlines": ["..."]}`;
+Return STRICT JSON only: {"imagePrompt": "...", "stockKeywords": "...", "videoPrompt": "...", "cardHeadlines": ["..."]}`;
 }
 
 export function artDirectionUserPrompt(brief: BriefRow, ctx: BriefContext, rejections: PastRejection[]): string {
@@ -171,7 +195,7 @@ export function artDirectionUserPrompt(brief: BriefRow, ctx: BriefContext, rejec
         brief.mustInclude ? `MUST INCLUDE: ${clip(brief.mustInclude, 500)}` : '',
         brief.mustAvoid ? `MUST AVOID: ${clip(brief.mustAvoid, 500)}` : '',
         rejections.length
-            ? `TURNED DOWN EARLIER:\n${rejections.slice(-8).map((r) => `- a ${SOURCE_SPECS[r.source as keyof typeof SOURCE_SPECS]?.label.toLowerCase() ?? r.source} option: ${r.reason}${r.note ? ` — "${clip(r.note, 200)}"` : ''}${r.prompt ? ` (it was made from: ${clip(r.prompt, 160)})` : ''}`).join('\n')}`
+            ? `TURNED DOWN EARLIER:\n${rejections.slice(-8).map((r) => `- a ${sourceLabel(r.source).toLowerCase()} option: ${r.reason}${r.note ? ` — "${clip(r.note, 200)}"` : ''}${r.prompt ? ` (it was made from: ${clip(r.prompt, 160)})` : ''}`).join('\n')}`
             : '',
     ].filter(Boolean).join('\n');
 }
@@ -185,6 +209,7 @@ export function parseArtDirection(raw: string, fallback: ArtDirection, exactHead
     } catch { return fallback; }
     const imagePrompt = clip(typeof j.imagePrompt === 'string' ? j.imagePrompt : '', 1000);
     const stockKeywords = clip(typeof j.stockKeywords === 'string' ? j.stockKeywords.replace(/[^\p{L}\p{N}\s-]/gu, ' ') : '', 80);
+    const videoPrompt = clip(typeof j.videoPrompt === 'string' ? j.videoPrompt : '', 1000);
     let heads = Array.isArray(j.cardHeadlines) ? j.cardHeadlines.filter((h): h is string => typeof h === 'string').map((h) => clip(h, 120)).filter(Boolean) : [];
     // The user's exact words are never paraphrased away, whatever the model returned.
     if (exactHeadline) heads = [clip(exactHeadline, 120), ...heads.filter((h) => h !== clip(exactHeadline, 120))];
@@ -192,6 +217,7 @@ export function parseArtDirection(raw: string, fallback: ArtDirection, exactHead
     return {
         imagePrompt: imagePrompt || fallback.imagePrompt,
         stockKeywords: stockKeywords || fallback.stockKeywords,
+        videoPrompt: videoPrompt || fallback.videoPrompt,
         cardHeadlines: (heads.length ? heads : fallback.cardHeadlines).slice(0, CARD_VARIANTS.length),
         by: 'model',
     };
@@ -217,7 +243,7 @@ export async function writeArtDirection(brief: BriefRow, ctx: BriefContext, reje
 // ── Starting and ending a round ─────────────────────────────────────────────────────────────────
 
 export type StartRoundResult =
-    | { ok: true; round: number; aiIncluded: boolean; credits: number }
+    | { ok: true; round: number; aiIncluded: boolean; videoIncluded: boolean; credits: number }
     | { ok: false; status: number; error: string; code?: string; cost?: number; balance?: number };
 
 /**
@@ -234,17 +260,26 @@ export async function startRound(db: Db, args: { orgId: number; brief: BriefRow 
     }
 
     const sources = Array.isArray(brief.sources) ? (brief.sources as string[]) : [];
-    let note: string | null = null;
+    const notes: string[] = [];
     let aiIncluded = sources.includes('ai_image');
     if (aiIncluded && !(await orgHasAssistantFeature(db, orgId, 'ai_image_generation'))) {
         aiIncluded = false;
-        note = 'AI images are not switched on for this workspace, so this round has stock photos and branded cards only.';
+        notes.push('AI images are not switched on for this workspace, so this round has none.');
     }
-    if (!aiIncluded && !sources.some((s) => s === 'stock' || s === 'brand_card')) {
-        return { ok: false, status: 403, error: 'AI images are not switched on for this workspace, and this brief asks for nothing else. Edit it to include stock photos or branded cards.', code: 'feature_unavailable' };
+    // AI video: the assistant-type feature AND the plan tier, exactly as on My Content's video button.
+    let videoIncluded = sources.includes('ai_video');
+    if (videoIncluded) {
+        const why = await videoUnavailableReason(db, orgId);
+        if (why) { videoIncluded = false; notes.push(`${why} This round has no AI video.`); }
     }
+    const free = sources.some((s) => s === 'stock' || s === 'brand_card' || s === 'stock_video');
+    if (!aiIncluded && !videoIncluded && !free) {
+        return { ok: false, status: 403, error: `${notes.join(' ')} This brief asks for nothing else — edit it to include stock or branded cards.`.trim(), code: 'feature_unavailable' };
+    }
+    const note = notes.length ? notes.join(' ') : null;
 
-    const credits = aiIncluded ? IMAGE_CREDIT_COST : 0;
+    const videoCredits = videoIncluded ? VIDEO_CREDIT_COST : 0;
+    const credits = (aiIncluded ? IMAGE_CREDIT_COST : 0) + videoCredits;
     if (credits > 0) {
         const hold = await holdCredits(db, { orgId, amount: credits });
         if (!hold.ok) return { ok: false, status: 402, error: 'insufficient_credits', code: 'insufficient_credits', cost: credits, balance: hold.balance };
@@ -254,6 +289,7 @@ export async function startRound(db: Db, args: { orgId: number; brief: BriefRow 
         status: 'generating',
         rounds: sql`${visualBriefs.rounds} + 1`,
         creditHold: credits,
+        creditHoldVideo: videoCredits,
         generationStartedAt: new Date(),
         generationNote: note,
         updatedAt: new Date(),
@@ -269,7 +305,14 @@ export async function startRound(db: Db, args: { orgId: number; brief: BriefRow 
         if (credits > 0) await settleHold(db, { orgId, amount: credits, success: false, mediaType: 'image' });
         return { ok: false, status: 409, error: 'Options are already being made for this brief.' };
     }
-    return { ok: true, round: rows[0].rounds, aiIncluded, credits };
+    return { ok: true, round: rows[0].rounds, aiIncluded, videoIncluded, credits };
+}
+
+/** Why AI video cannot be made here, in words — or null when it can. Same two gates as My Content. */
+export async function videoUnavailableReason(db: Db, orgId: number): Promise<string | null> {
+    if (!(await orgHasAssistantFeature(db, orgId, 'ai_video_generation'))) return 'AI video is not switched on for this workspace.';
+    if (!tierCanGenerateVideo(await getActiveTierKeyByOrg(db, orgId))) return 'AI video is on the Saver and Employee plans.';
+    return null;
 }
 
 /**
@@ -281,26 +324,38 @@ export async function startRound(db: Db, args: { orgId: number; brief: BriefRow 
  * credit is still settled exactly once: whichever arrives second matches nothing and settles nothing.
  */
 export async function endRound(db: Db, briefId: number, outcome: {
-    chargeAi: boolean; note: string | null; artDirection?: ArtDirection | null; userId?: number | null;
+    /** The AI IMAGES produced something — charge the image part of the hold. */
+    chargeAi: boolean;
+    /** The AI VIDEO produced a clip — charge the video part. Absent = refund it. */
+    chargeVideo?: boolean;
+    note: string | null; artDirection?: ArtDirection | null; userId?: number | null;
 }): Promise<boolean> {
-    const rows = await db.execute<{ organisation_id: number; held: number }>(sql`
+    const rows = await db.execute<{ organisation_id: number; held: number; held_video: number }>(sql`
         UPDATE visual_briefs b
            SET status = CASE
                    WHEN EXISTS (SELECT 1 FROM visual_brief_options o WHERE o.brief_id = b.id AND o.status = 'approved') THEN 'approved'
                    WHEN EXISTS (SELECT 1 FROM visual_brief_options o WHERE o.brief_id = b.id AND o.status = 'proposed') THEN 'in_review'
                    ELSE 'open' END,
                credit_hold = 0,
+               credit_hold_video = 0,
                generation_note = ${outcome.note},
                art_direction = COALESCE(${outcome.artDirection ? JSON.stringify(outcome.artDirection) : null}::jsonb, b.art_direction),
                updated_at = now()
-          FROM (SELECT id, credit_hold AS held FROM visual_briefs WHERE id = ${briefId} FOR UPDATE) old
+          FROM (SELECT id, credit_hold AS held, credit_hold_video AS held_video FROM visual_briefs WHERE id = ${briefId} FOR UPDATE) old
          WHERE b.id = old.id AND b.status = 'generating'
-     RETURNING b.organisation_id, old.held`);
+     RETURNING b.organisation_id, old.held, old.held_video`);
     const row = rows[0];
     if (!row) return false;
     const held = Number(row.held) || 0;
-    if (held > 0) {
-        await settleHold(db, { orgId: row.organisation_id, amount: held, success: outcome.chargeAi, mediaType: 'image', userId: outcome.userId ?? null });
+    const heldVideo = Math.min(held, Number(row.held_video) || 0);
+    const heldImage = held - heldVideo;
+    // Two parts, settled separately: four images arriving while the clip failed charges the image
+    // credit and refunds the video credits.
+    if (heldImage > 0) {
+        await settleHold(db, { orgId: row.organisation_id, amount: heldImage, success: outcome.chargeAi, mediaType: 'image', userId: outcome.userId ?? null });
+    }
+    if (heldVideo > 0) {
+        await settleHold(db, { orgId: row.organisation_id, amount: heldVideo, success: outcome.chargeVideo === true, mediaType: 'video', userId: outcome.userId ?? null });
     }
     return true;
 }
@@ -342,7 +397,9 @@ async function pastRejections(db: Db, briefId: number): Promise<{ rejections: Pa
             prompt: r.prompt,
         });
     }
-    const shownStockIds = rows.filter((r) => r.source === 'stock' && r.providerAssetId).map((r) => r.providerAssetId!);
+    // Photos and videos share Pexels' id space only through the 'v' prefix on video ids (pexels.ts),
+    // so one exclude list serves both searches.
+    const shownStockIds = rows.filter((r) => (r.source === 'stock' || r.source === 'stock_video') && r.providerAssetId).map((r) => r.providerAssetId!);
     return { rejections, shownStockIds };
 }
 
@@ -352,6 +409,7 @@ export async function runRound(db: Db, briefId: number, userId: number | null): 
     if (!brief) return;
 
     let aiProduced = false;
+    let videoProduced = false;
     let artDirection: ArtDirection | null = null;
     const notes: string[] = brief.generationNote ? [brief.generationNote] : [];
     try {
@@ -362,10 +420,15 @@ export async function runRound(db: Db, briefId: number, userId: number | null): 
         const base = { organisationId: brief.organisationId, briefId: brief.id, round: brief.rounds };
         const ad = artDirection;
 
-        const [stock, ai, cards] = await Promise.allSettled([
+        // The video part of the hold is the authority for AI video, and the rest for AI images — a
+        // source the user ticked but could not have (startRound's note) holds nothing and runs nothing.
+        const imageHeld = brief.creditHold - brief.creditHoldVideo;
+        const [stock, ai, cards, stockVideo, aiVideo] = await Promise.allSettled([
             sources.includes('stock') ? stockOptions(db, brief, ad, shownStockIds) : Promise.resolve([]),
-            sources.includes('ai_image') && brief.creditHold >= IMAGE_CREDIT_COST ? aiOptions(db, brief, ad, userId) : Promise.resolve([]),
+            sources.includes('ai_image') && imageHeld >= IMAGE_CREDIT_COST ? aiOptions(db, brief, ad, userId) : Promise.resolve([]),
             sources.includes('brand_card') ? cardOptions(brief, ad, ctx) : Promise.resolve([]),
+            sources.includes('stock_video') ? stockVideoOptions(db, brief, ad, shownStockIds) : Promise.resolve([]),
+            sources.includes('ai_video') && brief.creditHoldVideo >= VIDEO_CREDIT_COST ? aiVideoOptions(db, brief, ad, userId) : Promise.resolve([]),
         ]);
 
         const options: OptionInsert[] = [];
@@ -380,7 +443,14 @@ export async function runRound(db: Db, briefId: number, userId: number | null): 
         take(cards, (e) => e instanceof Error && e.message === 'brand_card_requires_r2'
             ? 'Branded cards need file storage, which is not set up here.'
             : 'Branded cards could not be drawn this round.');
+        take(stockVideo, (e) => e instanceof PexelsRateLimitError ? 'Stock search is resting for a few minutes, so there are no stock videos this round.' : 'Stock video search failed this round.');
+        take(aiVideo, (e) => e instanceof FalContentPolicyError
+            ? 'The AI video service refused this brief as written. Nothing was charged for it.'
+            : e instanceof Error && e.message === 'video_timeout'
+                ? 'The AI video took too long and was abandoned. Nothing was charged for it.'
+                : 'The AI video could not be made this round. Nothing was charged for it.');
         aiProduced = ai.status === 'fulfilled' && ai.value.length > 0;
+        videoProduced = aiVideo.status === 'fulfilled' && aiVideo.value.length > 0;
 
         if (sources.includes('stock') && stock.status === 'fulfilled' && !stock.value.length) {
             notes.push('No new stock photos matched — the search words are shown under the brief.');
@@ -390,7 +460,7 @@ export async function runRound(db: Db, briefId: number, userId: number | null): 
         console.error('[visual-briefs] round failed:', briefId, err instanceof Error ? err.message : err);
         notes.push('Something went wrong making options. Nothing was charged for anything that was not made — try again.');
     } finally {
-        await endRound(db, briefId, { chargeAi: aiProduced, note: notes.length ? notes.join(' ') : null, artDirection, userId });
+        await endRound(db, briefId, { chargeAi: aiProduced, chargeVideo: videoProduced, note: notes.length ? notes.join(' ') : null, artDirection, userId });
     }
 }
 
@@ -448,6 +518,65 @@ async function aiOptions(db: Db, brief: BriefRow, ad: ArtDirection, userId: numb
         candidates: images.map((i) => ({ url: i.url, width: i.width, height: i.height, contentType: i.contentType })),
     }).catch(() => {});
     return out;
+}
+
+async function stockVideoOptions(db: Db, brief: BriefRow, ad: ArtDirection, exclude: string[]) {
+    const { keywords, candidates } = await searchUniqueVideos(db, brief.organisationId, brief.message || brief.title, {
+        limit: STOCK_VIDEO_OPTIONS, keywords: ad.stockKeywords, exclude,
+    });
+    return candidates.map((c) => ({
+        source: 'stock_video', externalUrl: c.url, mimeType: 'video/mp4', width: c.width || null, height: c.height || null,
+        prompt: keywords, providerAssetId: c.providerAssetId, attributionName: c.photographer, attributionUrl: c.photographerUrl,
+    }));
+}
+
+const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
+
+/**
+ * One 6-second Hailuo clip, waited for inside the round (the round already runs in a background
+ * function with 15 minutes) and copied into R2 — fal's URLs expire. Every attempt writes a
+ * media_generation_jobs row, so the platform-wide failure alert sees this path too. A clip that has
+ * not arrived by VIDEO_POLL_DEADLINE_MS is abandoned and refunded rather than left to the sweep.
+ */
+async function aiVideoOptions(db: Db, brief: BriefRow, ad: ArtDirection, userId: number | null) {
+    const prompt = ad.videoPrompt || ad.imagePrompt;
+    const job = {
+        organisationId: brief.organisationId, userId, assistantId: brief.aiAssistantId, mediaType: 'video',
+        prompt, aspectRatio: brief.aspectRatio, durationSeconds: 6, model: VIDEO_MODEL, creditCost: VIDEO_CREDIT_COST,
+    };
+    let url: string;
+    let contentType = 'video/mp4';
+    try {
+        if (!falConfigured()) {
+            url = MOCK_VIDEO_URL;
+        } else {
+            const sub = await submitVideo({ prompt, durationSeconds: 6 });
+            const deadline = Date.now() + VIDEO_POLL_DEADLINE_MS;
+            while ((await falStatus(sub.statusUrl)) !== 'COMPLETED') {
+                if (Date.now() > deadline) throw new Error('video_timeout');
+                await sleep(VIDEO_POLL_INTERVAL_MS);
+            }
+            const v = extractVideo(await falResult(sub.responseUrl));
+            url = v.url;
+            contentType = v.contentType || contentType;
+        }
+    } catch (err) {
+        const flagged = err instanceof FalContentPolicyError;
+        await db.insert(mediaGenerationJobs).values({
+            ...job, status: flagged ? 'flagged' : 'failed',
+            errorMessage: `[brand-designer] ${err instanceof Error ? err.message : 'video generation failed'}`.slice(0, 1000),
+        }).catch(() => {});
+        throw err;
+    }
+    let storageKey: string | null = null;
+    let externalUrl: string | null = null;
+    if (r2IsConfigured()) {
+        storageKey = (await persistRemoteMediaToR2({ orgId: brief.organisationId, url, contentType, folder: 'briefs', label: 'AI video option' })).storageKey;
+    } else {
+        externalUrl = url;
+    }
+    await db.insert(mediaGenerationJobs).values({ ...job, status: 'completed' }).catch(() => {});
+    return [{ source: 'ai_video', storageKey, externalUrl, mimeType: contentType, width: null, height: null, prompt }];
 }
 
 async function cardOptions(brief: BriefRow, ad: ArtDirection, ctx: BriefContext) {
@@ -512,7 +641,7 @@ export async function decideOption(db: Db, args: {
             .where(and(eq(visualBriefOptions.id, optionId), eq(visualBriefOptions.status, 'proposed')))
             .returning({ id: visualBriefOptions.id });
         if (!claimed.length) return { ok: false, status: 409, error: 'That option was already decided.' };
-        if (opt.storageKey && opt.source !== 'stock') await deleteR2Object(opt.storageKey);
+        if (opt.storageKey && GENERATED_SOURCES.has(opt.source)) await deleteR2Object(opt.storageKey);
         await settleBriefStatus(db, brief.id);
         return { ok: true };
     }
@@ -523,13 +652,22 @@ export async function decideOption(db: Db, args: {
         .returning({ id: visualBriefOptions.id });
     if (!claimed.length) return { ok: false, status: 409, error: 'That option was already decided.' };
 
+    // "Your own" (an upload or a library picture): it is ALREADY a library asset, so approving it
+    // makes no copy — the option simply points at it. Only the campaign link (Phase 3) follows.
+    if (opt.source === OWN_SOURCE && opt.contentAssetId) {
+        await settleBriefStatus(db, brief.id);
+        if (brief.campaignOrderId) await settleCampaignOrder(db, brief.id);
+        return { ok: true, contentAssetId: opt.contentAssetId };
+    }
+
     try {
-        const name = clip(`${brief.title} — ${SOURCE_SPECS[opt.source as keyof typeof SOURCE_SPECS]?.label.replace(/s$/, '') ?? opt.source}`, 120);
+        const isVideo = (opt.mimeType || '').startsWith('video/');
+        const name = clip(`${brief.title} — ${sourceLabel(opt.source).replace(/s$/, '')}`, 120);
         const common = {
-            userId, organisationId: orgId, name, assetType: 'image', mimeType: opt.mimeType,
+            userId, organisationId: orgId, name, assetType: isVideo ? 'video' : 'image', mimeType: opt.mimeType,
             width: opt.width, height: opt.height, aspectRatio: brief.aspectRatio, status: 'pending',
         };
-        const values = opt.source === 'stock'
+        const values = opt.source === 'stock' || opt.source === 'stock_video'
             ? { ...common, externalUrl: opt.externalUrl, provider: 'pexels', providerAssetId: opt.providerAssetId, attributionName: opt.attributionName, attributionUrl: opt.attributionUrl }
             : opt.source === 'brand_card'
                 // libraryKeptAt: a card a human approved is not transient media — without it the
@@ -557,7 +695,7 @@ export async function cancelBrief(db: Db, orgId: number, briefId: number): Promi
     if (!rows.length) return { ok: false, error: 'That brief is being worked on or is already cancelled.' };
     const leftovers = await db.select({ id: visualBriefOptions.id, key: visualBriefOptions.storageKey, source: visualBriefOptions.source })
         .from(visualBriefOptions).where(and(eq(visualBriefOptions.briefId, briefId), eq(visualBriefOptions.status, 'proposed')));
-    for (const o of leftovers) if (o.key && o.source !== 'stock') await deleteR2Object(o.key);
+    for (const o of leftovers) if (o.key && GENERATED_SOURCES.has(o.source)) await deleteR2Object(o.key);
     if (leftovers.length) {
         await db.update(visualBriefOptions).set({ status: 'rejected', rejectReason: 'other: brief cancelled', decidedAt: new Date() })
             .where(inArray(visualBriefOptions.id, leftovers.map((o) => o.id)));
@@ -583,17 +721,87 @@ async function settleCampaignOrder(db: Db, briefId: number): Promise<void> {
     }
 }
 
+// ── "Add your own" ──────────────────────────────────────────────────────────────────────────────
+
+/** How many pictures one "Add your own" may bring — a picker, not a bulk import. */
+export const MAX_OWN_PER_ADD = 8;
+
+/**
+ * Add the user's own pictures to a brief as options: an upload (made into a library asset first,
+ * through My Content's own upload + safety check) or anything already in the library — which is
+ * where a Canva import lands, so this is also how a Canva design joins a brief. Every id is checked
+ * against THIS organisation's library; another tenant's id is silently not added (an IDOR probe
+ * learns nothing) and the result names exactly what was added.
+ *
+ * The option points at the existing asset (content_asset_id) and copies nothing: approving it costs
+ * nothing, and turning it down deletes nothing — it was the user's picture before the brief existed.
+ */
+export async function addOwnOptions(db: Db, args: { orgId: number; briefId: number; contentAssetIds: number[] })
+    : Promise<{ ok: true; added: number[] } | { ok: false; status: number; error: string }> {
+    const [brief] = await db.select().from(visualBriefs)
+        .where(and(eq(visualBriefs.id, args.briefId), eq(visualBriefs.organisationId, args.orgId))).limit(1);
+    if (!brief) return { ok: false, status: 404, error: 'Brief not found.' };
+    if (brief.status === 'cancelled') return { ok: false, status: 409, error: 'This brief was cancelled.' };
+    const ids = [...new Set(args.contentAssetIds.filter((n) => Number.isInteger(n) && n > 0))].slice(0, MAX_OWN_PER_ADD);
+    if (!ids.length) return { ok: false, status: 400, error: 'Choose at least one picture.' };
+    const owned = await db.select({
+        id: contentAssets.id, assetType: contentAssets.assetType, mimeType: contentAssets.mimeType,
+        width: contentAssets.width, height: contentAssets.height, name: contentAssets.name, status: contentAssets.status,
+    }).from(contentAssets).where(and(
+        eq(contentAssets.organisationId, args.orgId),
+        inArray(contentAssets.id, ids),
+        sql`${contentAssets.purgedAt} IS NULL`,
+        inArray(contentAssets.assetType, ['image', 'video']),
+        // A file the safety check rejected never becomes a picture anyone can approve.
+        sql`${contentAssets.status} <> 'rejected'`,
+    ));
+    const existing = await db.select({ assetId: visualBriefOptions.contentAssetId }).from(visualBriefOptions)
+        .where(and(eq(visualBriefOptions.briefId, brief.id), eq(visualBriefOptions.source, OWN_SOURCE)));
+    const already = new Set(existing.map((e) => e.assetId));
+    const fresh = owned.filter((a) => !already.has(a.id));
+    if (fresh.length) {
+        await db.insert(visualBriefOptions).values(fresh.map((a) => ({
+            organisationId: args.orgId, briefId: brief.id, round: Math.max(brief.rounds, 1), source: OWN_SOURCE,
+            mimeType: a.mimeType || (a.assetType === 'video' ? 'video/mp4' : 'image/jpeg'), width: a.width, height: a.height,
+            prompt: a.name, contentAssetId: a.id,
+        })));
+        // Their picture has arrived — the brief is no longer only "waiting on" them.
+        await db.update(visualBriefs).set({ waitingOn: null, updatedAt: new Date() })
+            .where(and(eq(visualBriefs.id, brief.id), sql`${visualBriefs.status} <> 'generating'`));
+        await settleBriefStatus(db, brief.id);
+    }
+    return { ok: true, added: fresh.map((a) => a.id) };
+}
+
+/** The library, for the "Add your own" picker: newest images and videos with signed display URLs. */
+export async function listLibraryForPicker(db: Db, orgId: number, limit = 60) {
+    const rows = await db.select({
+        id: contentAssets.id, name: contentAssets.name, assetType: contentAssets.assetType, provider: contentAssets.provider,
+        storageUrl: contentAssets.storageUrl, storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl,
+    }).from(contentAssets).where(and(
+        eq(contentAssets.organisationId, orgId),
+        sql`${contentAssets.purgedAt} IS NULL`,
+        inArray(contentAssets.assetType, ['image', 'video']),
+        sql`${contentAssets.status} <> 'rejected'`,
+    )).orderBy(desc(contentAssets.createdAt)).limit(limit);
+    const out = [];
+    for (const a of rows) {
+        out.push({ id: a.id, name: a.name, assetType: a.assetType, fromCanva: a.provider === 'canva', url: await resolveAssetDisplayUrl(a) });
+    }
+    return out;
+}
+
 // ── Reading ─────────────────────────────────────────────────────────────────────────────────────
 
 export interface BriefView {
     id: number; title: string; purpose: string; aspectRatio: string; message: string | null; headline: string | null;
     mood: string | null; mustInclude: string | null; mustAvoid: string | null; sources: string[]; status: string;
     origin: string; dueDate: string | null; rounds: number; artDirection: unknown; generationNote: string | null;
-    createdAt: string; roundCredits: number;
+    createdAt: string; roundCredits: number; waitingOn: string | null;
     /** The campaign that commissioned this brief (Phase 3), or null. Its picture joins that campaign. */
     campaign: { id: number; objective: string } | null;
     options: Array<{
-        id: number; round: number; source: string; status: string; url: string | null; width: number | null; height: number | null;
+        id: number; round: number; source: string; status: string; url: string | null; width: number | null; height: number | null; mimeType: string | null;
         prompt: string | null; attributionName: string | null; attributionUrl: string | null; rejectReason: string | null; contentAssetId: number | null;
     }>;
 }
@@ -614,14 +822,26 @@ export async function listBriefs(db: Db, orgId: number, assistantId: number, lim
     const opts = await db.select().from(visualBriefOptions)
         .where(and(eq(visualBriefOptions.organisationId, orgId), inArray(visualBriefOptions.briefId, briefs.map((b) => b.id))))
         .orderBy(desc(visualBriefOptions.round), visualBriefOptions.id);
+    // "Your own" options show the library asset itself — the option row holds no file of its own.
+    const ownIds = opts.filter((o) => o.source === OWN_SOURCE && o.contentAssetId).map((o) => o.contentAssetId!);
+    const ownUrls = new Map<number, string | null>();
+    if (ownIds.length) {
+        const assets = await db.select({
+            id: contentAssets.id, assetType: contentAssets.assetType, storageUrl: contentAssets.storageUrl,
+            storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl,
+        }).from(contentAssets).where(and(eq(contentAssets.organisationId, orgId), inArray(contentAssets.id, ownIds)));
+        for (const a of assets) ownUrls.set(a.id, await resolveAssetDisplayUrl(a));
+    }
     const byBrief = new Map<number, BriefView['options']>();
     for (const o of opts) {
-        // A rejected AI/card option's picture was deleted — no URL to sign. Its row stays for the record.
-        const gone = o.status === 'rejected' && o.source !== 'stock';
-        const url = gone ? null : await resolveAssetDisplayUrl({ assetType: 'image', storageKey: o.storageKey, externalUrl: o.externalUrl });
+        // A rejected generated option's file was deleted — no URL to sign. Its row stays for the record.
+        const gone = o.status === 'rejected' && GENERATED_SOURCES.has(o.source);
+        const isVideo = (o.mimeType || '').startsWith('video/');
+        const url = gone ? null : o.source === OWN_SOURCE ? ownUrls.get(o.contentAssetId ?? -1) ?? null
+            : await resolveAssetDisplayUrl({ assetType: isVideo ? 'video' : 'image', storageKey: o.storageKey, externalUrl: o.externalUrl });
         const list = byBrief.get(o.briefId) ?? [];
         list.push({
-            id: o.id, round: o.round, source: o.source, status: o.status, url, width: o.width, height: o.height, prompt: o.prompt,
+            id: o.id, round: o.round, source: o.source, status: o.status, url, width: o.width, height: o.height, mimeType: o.mimeType, prompt: o.prompt,
             attributionName: o.attributionName, attributionUrl: o.attributionUrl, rejectReason: o.rejectReason, contentAssetId: o.contentAssetId,
         });
         byBrief.set(o.briefId, list);
@@ -633,7 +853,8 @@ export async function listBriefs(db: Db, orgId: number, assistantId: number, lim
             mood: b.mood, mustInclude: b.mustInclude, mustAvoid: b.mustAvoid, sources, status: b.status, origin: b.origin,
             dueDate: b.dueDate ? String(b.dueDate) : null, rounds: b.rounds, artDirection: b.artDirection, generationNote: b.generationNote,
             createdAt: new Date(b.createdAt).toISOString(),
-            roundCredits: sources.includes('ai_image') ? IMAGE_CREDIT_COST : 0,
+            roundCredits: (sources.includes('ai_image') ? IMAGE_CREDIT_COST : 0) + (sources.includes('ai_video') ? VIDEO_CREDIT_COST : 0),
+            waitingOn: b.waitingOn,
             campaign: b.campaignId && objectives.has(b.campaignId) ? { id: b.campaignId, objective: objectives.get(b.campaignId)! } : null,
             options: byBrief.get(b.id) ?? [],
         };
@@ -661,8 +882,8 @@ export async function buildBriefsSnapshot(db: Db, orgId: number, assistantId: nu
     const lines = briefs.map((b) => {
         const waiting = b.options.filter((o) => o.status === 'proposed');
         const approved = b.options.filter((o) => o.status === 'approved').length;
-        const head = `- Brief ${b.id} "${b.title}"${b.campaign ? ` (commissioned by the campaign "${clip(b.campaign.objective, 80)}" — the picture approved joins that campaign)` : ''} — ${b.status === 'generating' ? 'making options now' : b.status.replace('_', ' ')}; ${b.rounds} round${b.rounds === 1 ? '' : 's'}; ${approved} approved; sources: ${b.sources.join(', ')}${b.dueDate ? `; due ${b.dueDate}` : ''}.`;
-        const rows = waiting.map((o, i) => `    • option ${o.id} (#${i + 1} waiting) — ${SOURCE_SPECS[o.source as keyof typeof SOURCE_SPECS]?.label.replace(/s$/, '').toLowerCase() ?? o.source}${o.prompt ? `: ${clip(o.prompt, 90)}` : ''}`);
+        const head = `- Brief ${b.id} "${b.title}"${b.campaign ? ` (commissioned by the campaign "${clip(b.campaign.objective, 80)}" — the picture approved joins that campaign)` : ''} — ${b.status === 'generating' ? 'making options now' : b.status.replace('_', ' ')}; ${b.rounds} round${b.rounds === 1 ? '' : 's'}; ${approved} approved; sources: ${b.sources.join(', ')}${b.dueDate ? `; due ${b.dueDate}` : ''}${b.waitingOn ? `; waiting on ${clip(b.waitingOn, 60)} to add their own` : ''}.`;
+        const rows = waiting.map((o, i) => `    • option ${o.id} (#${i + 1} waiting) — ${sourceLabel(o.source).replace(/s$/, '').toLowerCase()}${o.prompt ? `: ${clip(o.prompt, 90)}` : ''}`);
         return [head, ...rows].join('\n');
     });
     return `YOUR BRIEFS (newest first; option ids are the only ones you may name):\n${lines.join('\n')}\n${credits}\n${guide}`.trim();

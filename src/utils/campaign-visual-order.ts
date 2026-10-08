@@ -23,7 +23,7 @@ import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, campaignAssets, campaigns, visualBriefOptions, visualBriefs } from '../../db/schema';
 import { MAX_CAMPAIGN_ASSETS } from '../config/campaign-creative';
-import { BRIEF_ASPECT_RATIOS, BRIEF_PURPOSES, normaliseBrief } from '../config/visual-brief-vocab';
+import { BRIEF_ASPECT_RATIOS, BRIEF_PURPOSES, normaliseBrief, sourcesAreFree } from '../config/visual-brief-vocab';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -72,7 +72,7 @@ export async function createBriefForOrder(db: Db, ctx: {
         organisationId: ctx.organisationId, aiAssistantId: ctx.targetAssistantId, createdBy: null,
         ...n.brief, origin: 'campaign', campaignId: ctx.campaignId, campaignOrderId: orderId,
     }).returning({ id: visualBriefs.id });
-    return { ok: true, briefId: row.id, allFree: !n.brief.sources.includes('ai_image') };
+    return { ok: true, briefId: row.id, allFree: sourcesAreFree(n.brief.sources) };
 }
 
 /**
