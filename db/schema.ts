@@ -3965,6 +3965,10 @@ export const campaigns = pgTable("campaigns", {
   objective: text().notNull(),
   outcomeMetric: text("outcome_metric").notNull().default("leads"),
   targetValue: integer("target_value"),
+  // 'awareness' | 'consideration' | 'conversion' | 'retention' (db/z-campaign-funnel-stage.sql,
+  // plan §9.6). Decides which outcomes may be the target, what drafting optimises for, and whether
+  // the lead-quality halt may fire. Every pre-§9.6 campaign was a lead campaign, hence the default.
+  funnelStage: text("funnel_stage").notNull().default("conversion"),
   // 'organic' | 'paid' | 'blended'. Phase 1 creates only 'organic'; the others are refused at the
   // HTTP boundary until the ad rails exist.
   mode: text().notNull().default("organic"),
@@ -4011,6 +4015,7 @@ export const campaigns = pgTable("campaigns", {
 }, (t) => [
   index("campaigns_assistant_idx").on(t.organisationId, t.aiAssistantId, t.status),
   index("campaigns_active_idx").on(t.status, t.endsAt).where(sql`status IN ('active','throttled')`),
+  check("campaigns_funnel_stage_check", sql`${t.funnelStage} IN ('awareness','consideration','conversion','retention')`),
   check("campaigns_mode_check", sql`${t.mode} IN ('organic','paid','blended')`),
   check("campaigns_status_check", sql`${t.status} IN ('draft','active','throttled','paused','finished','archived')`),
   check("campaigns_halt_reason_check", sql`${t.status} <> 'paused' OR ${t.haltReason} IS NOT NULL`),

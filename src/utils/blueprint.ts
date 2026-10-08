@@ -13,6 +13,7 @@
 // completeness.
 
 import { audienceLine } from '../config/campaign-audience';
+import { isFunnelStage } from '../config/campaign-vocab';
 import { eq, and, desc, isNull, inArray, sql } from 'drizzle-orm';
 import * as crypto from 'crypto';
 import { getDb } from '../../db/client';
@@ -605,6 +606,7 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
             endsAt: campaigns.endsAt,
             constraints: campaigns.constraints,
             audience: campaigns.audience,
+            funnelStage: campaigns.funnelStage,
             updatedAt: campaigns.updatedAt,
             brief: campaignOrders.brief,
         })
@@ -644,6 +646,8 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
         // otherwise the campaign's. Slow-moving by construction — it changes only on an edit,
         // which recompiles (campaigns.ts edit → recompileCampaignTargets).
         audience: audienceLine(liveCampaign.audience, campaignBrief.audience),
+        // Slow-moving (changes only on an edit, which recompiles) — safe in section content.
+        funnelStage: isFunnelStage(liveCampaign.funnelStage) ? liveCampaign.funnelStage : null,
         // Pace is not computed here on purpose: it needs live outcome counts, and this section
         // must stay slow-moving. It is 'unknown' until the Phase 2 outcome attribution lands,
         // and the directive omits the pace line entirely rather than guessing.

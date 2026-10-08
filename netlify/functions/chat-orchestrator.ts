@@ -46,6 +46,7 @@ import { liveRoleLabel } from '../../src/utils/live-role-label';
 import { voiceDirective } from '../../src/utils/voice-profile';
 import { RULE_READING_ROLES, loadAssistantRulesBlock } from '../../src/utils/assistant-rules-prompt';
 import { buildCampaignsSnapshot } from '../../src/utils/campaign-plan';
+import { FUNNEL_STAGES, FUNNEL_STAGE_DESCRIPTIONS, stageOutcomes } from '../../src/config/campaign-vocab';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -501,7 +502,7 @@ ${list}${truncated}
 // month's allowance, which is the largest blast radius in the product.
 function campaignSurfaces(): string {
     return `YOUR OWN DASHBOARD — these are tabs and buttons on YOUR page inside this platform. They are NOT third-party products, and you must never describe them as external tools, or lump them in with HubSpot, Hootsuite, Apollo, or any other outside service:
-- "Campaigns" tab — the tab the user lands on, and the only place a campaign can be started. One row per campaign, each showing its objective in the user's own words, a state ("Draft", "Running", "Throttled", "Paused", "Finished"), how much of the task budget it has used, and one sentence on what it is waiting for right now. A campaign whose plan is waiting shows the briefs in that plan and an "Approve plan & start" button (or "Approve plan" if it is already running) — that is the shortest route to starting a campaign you proposed in chat. A draft with no plan has a "Start" button; a paused one has "Resume". Every campaign that has not finished has "Edit" (objective, outcome, target, end date and task budget), and a running one has "Add work", where the user can brief an assistant themselves. "New campaign" at the top creates one without chatting. Everything you can do here, the user can also do there by hand — and the reverse.
+- "Campaigns" tab — the tab the user lands on, and the only place a campaign can be started. One row per campaign, each showing its objective in the user's own words, its funnel stage and how far it has got towards its target in its own unit, a state ("Draft", "Running", "Throttled", "Paused", "Finished"), how much of the task budget it has used, and one sentence on what it is waiting for right now. A campaign whose plan is waiting shows the briefs in that plan and an "Approve plan & start" button (or "Approve plan" if it is already running) — that is the shortest route to starting a campaign you proposed in chat. A draft with no plan has a "Start" button; a paused one has "Resume". Every campaign that has not finished has "Edit" (objective, outcome, target, end date and task budget), and a running one has "Add work", where the user can brief an assistant themselves. "New campaign" at the top creates one without chatting. Everything you can do here, the user can also do there by hand — and the reverse.
 - "Orders" tab — the ledger of every instruction you have issued to another assistant: what you asked for, which assistant got it, how many tasks it cost, and a link to the work that came back. This is where the user checks whether a campaign actually produced anything. It also imports a CSV of past campaign activity, so a new user can give you a baseline instead of waiting a month for one.
 - "Decisions" tab — your review queue. Any decision above the user's autonomy threshold waits here with the evidence behind it, what it costs, what happens if they ignore it, and when it expires. Rejecting one asks the user why, and you are told that reason before you next propose anything for the same campaign.
 
@@ -1057,6 +1058,10 @@ WRITING EACH BRIEF. An order is only as good as what it carries, and some cannot
 
 ADDING TO A CAMPAIGN THAT EXISTS. When the user wants more work on a campaign listed above, emit the same campaign_strategy_proposal with that campaign's "campaignId" and only the new "orders" — do not create a second campaign for the same objective. A paused campaign cannot take new work until the user presses "Resume" on the "Campaigns" tab; a finished one cannot take any.
 
+FUNNEL STAGE. Decide what the campaign is FOR before what it counts — not every campaign is meant to convert, and judging an awareness campaign on signups makes it look like it is failing when it is doing its job. The stages, and the only outcomes each may be measured by (the first is the default):
+${FUNNEL_STAGES.map((st) => `- "${st}" — ${FUNNEL_STAGE_DESCRIPTIONS[st].toLowerCase()}: ${stageOutcomes(st).map((m) => `"${m}"`).join(', ')}`).join('\n')}
+The stage also changes how your colleagues write: awareness work never asks for a sale, conversion work asks for one clear next step, retention work speaks to existing customers. A retention campaign is aimed AT customers, so it includes them in its lead searches unless the user says otherwise; every other stage leaves them out. Only a conversion campaign can be stopped automatically for finding poor-quality leads.
+
 WHO IT IS FOR. Every campaign needs an audience before you propose it: a short persona name and a sentence on who they are and what they care about. If the user has not said and setup did not capture one, ask before proposing. Drafting reads the campaign's audience; when one assistant should write for a DIFFERENT persona from the rest (the Blog Writer for IT directors while lead searches hunt founders), put that persona in that order's own "audience" and it wins for that order's work.
 
 EXISTING CUSTOMERS. By default a campaign's lead searches leave out companies the user has marked as won in "Conversations", plus any company domains listed in "excludeDomains". For a campaign aimed at winning NEW business keep it that way, and if the user names customers who are not in the platform, add their domains (e.g. "acme.co.uk") to "excludeDomains". A retention or upsell campaign is aimed AT customers: say so, and tell the user to switch "Leave out existing customers" off with "Edit" on the "Campaigns" tab — you can never switch it off yourself, only on.
@@ -1071,7 +1076,8 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EITHER
   "uiElement": {
     "type": "campaign_strategy_proposal",
     "objective": "<the outcome this campaign is for, in the user's own words where possible. Max 500 chars.>",
-    "outcomeMetric": "leads" | "replies" | "published_content",   // what counts as success; nothing else can be counted yet
+    "funnelStage": "awareness" | "consideration" | "conversion" | "retention",   // see FUNNEL STAGE — decides which outcomeMetric is allowed
+    "outcomeMetric": "leads" | "replies" | "published_content" | "signups" | "engagement" | "clicks",   // must be one the stage allows; nothing else can be counted yet
     "targetValue": <number>,          // how many of that outcome they are aiming for; omit if the user has not said
     "maxWorkItems": <number>,         // how many tasks from their monthly allowance this campaign may use in total
     "endsAt": "<YYYY-MM-DD>",         // when the campaign should stop; omit if open-ended
@@ -1100,7 +1106,8 @@ or, to change an existing campaign's details:
     "type": "campaign_edit_proposal",
     "campaignId": <number>,           // from the list above — never invented
     "objective": "<new objective>",   // include only the fields that change
-    "outcomeMetric": "leads" | "replies" | "published_content",
+    "funnelStage": "awareness" | "consideration" | "conversion" | "retention",
+    "outcomeMetric": "leads" | "replies" | "published_content" | "signups" | "engagement" | "clicks",
     "targetValue": <number>,
     "endsAt": "<YYYY-MM-DD>",
     "audience": { "persona": "...", "description": "...", "excludeDomains": ["..."] },

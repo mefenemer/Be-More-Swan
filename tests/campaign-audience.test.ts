@@ -109,7 +109,8 @@ check('blueprint section 13 reads the campaign audience, with the order\'s takin
 check('an audience edit recompiles the assistants the campaign briefs', () => {
     const api = code(read('netlify/functions/campaigns.ts'));
     const edit = span(api, "action === 'edit'", "action === 'start'", 'edit');
-    assert.match(edit, /patch\.audience !== undefined\) \{[\s\S]{0,40}recompileCampaignTargets|\|\| patch\.audience !== undefined\)/,
+    const cond = span(edit, 'if (patch.objective !== undefined', 'recompileCampaignTargets', 'the recompile condition');
+    assert.match(cond, /patch\.audience !== undefined/,
         'Generation reads the PERSISTED blueprint; an audience change that does not recompile never arrives.');
 });
 
@@ -155,10 +156,10 @@ check('the chat edit handler can only send the exclusion as true', () => {
     assert.match(fn, /excludeExistingCustomers: c\.excludeExistingCustomers === true \? true : undefined/);
 });
 
-check('create keeps the exclusion ON unless false is explicit', () => {
+check('create honours an explicit choice, else the stage default (ON except retention, §9.6)', () => {
     const api = code(read('netlify/functions/campaigns.ts'));
     const create = span(api, "action === 'create'", "action === 'edit'", 'create');
-    assert.match(create, /excludeExistingCustomers: body\.excludeExistingCustomers !== false/);
+    assert.match(create, /typeof body\.excludeExistingCustomers === 'boolean'[\s\S]{0,80}defaultExcludeCustomers\(funnelStage\)/);
     assert.match(create, /audience: normaliseAudience\(body\.audience\)/);
 });
 

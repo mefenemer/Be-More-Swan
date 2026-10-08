@@ -28,9 +28,10 @@ import { persistProposal, type LiveCampaign, type ProposedDecision } from './cam
 import { settleDecisionMirror } from './campaign-mirror';
 import { campaignSpendTotals } from './campaign-ledger';
 import { audienceLine } from '../config/campaign-audience';
+import { countCampaignOutcome } from './campaign-outcomes';
 import {
-    CAMPAIGN_STATUS_LABELS, ORDER_ACTION_SPECS, isOrderAction, orderWorkItems,
-    type CampaignOrderAction, type CampaignStatus,
+    CAMPAIGN_OUTCOME_LABELS, CAMPAIGN_STATUS_LABELS, ORDER_ACTION_SPECS, isOrderAction, orderWorkItems,
+    type CampaignOrderAction, type CampaignOutcomeMetric, type CampaignStatus,
 } from '../config/campaign-vocab';
 
 type Db = Parameters<typeof persistProposal>[0];
@@ -270,6 +271,7 @@ export async function buildCampaignsSnapshot(
                 endsAt: campaigns.endsAt,
                 audience: campaigns.audience,
                 excludeExistingCustomers: campaigns.excludeExistingCustomers,
+                funnelStage: campaigns.funnelStage,
                 maxWorkItems: campaignBudgets.maxWorkItems,
             })
             .from(campaigns)
@@ -306,9 +308,12 @@ export async function buildCampaignsSnapshot(
             const used = t.spentWork + t.committedWork;
             const label = CAMPAIGN_STATUS_LABELS[r.status as CampaignStatus] ?? r.status;
             const who = audienceLine(r.audience);
+            const progress = await countCampaignOutcome(db, { id: r.id, organisationId }, r.outcomeMetric);
+            const metricLabel = (CAMPAIGN_OUTCOME_LABELS[r.outcomeMetric as CampaignOutcomeMetric] ?? r.outcomeMetric).toLowerCase();
             lines.push(
-                `- campaignId ${r.id}: "${r.objective}" — ${label}`
-                + `${r.targetValue ? `, aiming for ${r.targetValue} ${r.outcomeMetric}` : ''}`
+                `- campaignId ${r.id}: "${r.objective}" — ${label}, ${r.funnelStage} stage`
+                + `, measured by ${metricLabel}: ${progress === null ? 'cannot be counted yet' : `${progress} so far`}`
+                + `${r.targetValue ? ` of a target of ${r.targetValue}` : ''}`
                 + `${r.endsAt ? `, ends ${r.endsAt.toISOString().slice(0, 10)}` : ''}`
                 + `, ${used} of ${r.maxWorkItems ?? 0} tasks used or committed`
                 + `, ${who ? `for: ${who}` : 'no audience set'}`

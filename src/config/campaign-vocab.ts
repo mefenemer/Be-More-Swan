@@ -69,14 +69,19 @@ export const CAMPAIGN_STATUS_LABELS: Record<CampaignStatus, string> = {
  * an objective measured by a number nobody can produce is a progress bar wired to nothing, which
  * is exactly how SMART Goals shipped decorative.
  */
-export const CAMPAIGN_OUTCOME_METRICS = ['leads', 'replies', 'signups', 'published_content'] as const;
+export const CAMPAIGN_OUTCOME_METRICS = [
+    'leads', 'replies', 'signups', 'published_content', 'engagement', 'clicks', 'email_engagement',
+] as const;
 export type CampaignOutcomeMetric = typeof CAMPAIGN_OUTCOME_METRICS[number];
 
 export const CAMPAIGN_OUTCOME_LABELS: Record<CampaignOutcomeMetric, string> = {
     leads: 'New leads found',
-    replies: 'Replies from prospects',
+    replies: 'Replies received',
     signups: 'Signups captured',
     published_content: 'Pieces published',
+    engagement: 'Engagements on its posts',
+    clicks: 'Clicks on its tracked links',
+    email_engagement: 'Email opens and clicks',
 };
 
 /**
@@ -85,17 +90,84 @@ export const CAMPAIGN_OUTCOME_LABELS: Record<CampaignOutcomeMetric, string> = {
  */
 export const CAMPAIGN_OUTCOME_SOURCES: Record<CampaignOutcomeMetric, string> = {
     leads: 'assistant_records (record_type=lead) created while the campaign was live',
-    replies: 'lead_threads inbound messages classified as a reply',
-    signups: 'revenue_events — NOT counted until the Phase 2 capture page exists',
-    published_content: 'scheduled_posts + blog_posts with a published state',
+    replies: 'lead_threads with an inbound message, on leads this campaign\'s searches found',
+    signups: 'campaign_attributions (subject audience_contact) — a form signup bound to one of its tracked links',
+    published_content: 'scheduled_posts + blog_posts with a published state, commissioned by its orders',
+    engagement: 'post_insights.total_interactions on the posts its orders produced',
+    clicks: 'campaign_click_events on its tracked links, automated visits excluded',
+    email_engagement: 'NOT counted until an email campaign can belong to a campaign (§9.7)',
 };
 
 /**
  * Outcomes that cannot be counted yet. The UI must not offer these as a target: an objective the
  * platform can never score is worse than no objective, because the campaign will read as failing
- * forever. `signups` needs the Phase 2 BMS-hosted capture page.
+ * forever. `signups` left this list in §9.6 — Form Builder signups bind to tracked links through
+ * campaign_attributions. `email_engagement` waits for §9.7, when an email campaign can belong to
+ * a campaign; until then there is nothing to scope the opens to.
  */
-export const UNAVAILABLE_OUTCOME_METRICS: readonly CampaignOutcomeMetric[] = ['signups'];
+export const UNAVAILABLE_OUTCOME_METRICS: readonly CampaignOutcomeMetric[] = ['email_engagement'];
+
+// ── Funnel stage (plan §9.6) ─────────────────────────────────────────────────
+/**
+ * Not every campaign is meant to convert. An awareness campaign is judged on whether people saw and
+ * engaged with it; judging it on signups makes it read as failing for the whole of its flight, and
+ * — worse — lets the halt rule stop it for doing exactly what it was for. The stage decides three
+ * things: which outcomes may be its target, what drafting is told to optimise for (blueprint §13),
+ * and whether the lead-quality halt may fire at all.
+ */
+export const FUNNEL_STAGES = ['awareness', 'consideration', 'conversion', 'retention'] as const;
+export type FunnelStage = typeof FUNNEL_STAGES[number];
+
+export const FUNNEL_STAGE_LABELS: Record<FunnelStage, string> = {
+    awareness: 'Awareness',
+    consideration: 'Consideration',
+    conversion: 'Conversion',
+    retention: 'Retention',
+};
+
+export const FUNNEL_STAGE_DESCRIPTIONS: Record<FunnelStage, string> = {
+    awareness: 'Get seen by people who do not know you yet',
+    consideration: 'Get people who know you to look closer',
+    conversion: 'Turn interest into leads and signups',
+    retention: 'Keep and grow the customers you have',
+};
+
+/**
+ * What each stage may be measured by, in the order the picker offers them (the first is the
+ * default). Every entry must be countable — an unavailable metric listed here is filtered out by
+ * `stageOutcomes()` rather than offered.
+ */
+export const STAGE_OUTCOME_METRICS: Record<FunnelStage, readonly CampaignOutcomeMetric[]> = {
+    awareness: ['engagement', 'published_content'],
+    consideration: ['clicks', 'engagement', 'replies'],
+    conversion: ['leads', 'signups', 'replies'],
+    retention: ['email_engagement', 'replies', 'engagement', 'clicks'],
+};
+
+/** Campaigns created before §9.6 have no stage; every one of them was a lead campaign. */
+export const DEFAULT_FUNNEL_STAGE: FunnelStage = 'conversion';
+
+export const isFunnelStage = (v: unknown): v is FunnelStage =>
+    typeof v === 'string' && (FUNNEL_STAGES as readonly string[]).includes(v);
+
+/** The countable outcomes a stage may target, default first. */
+export function stageOutcomes(stage: FunnelStage): CampaignOutcomeMetric[] {
+    return STAGE_OUTCOME_METRICS[stage].filter((m) => !UNAVAILABLE_OUTCOME_METRICS.includes(m));
+}
+
+/** `metric` if this stage may be measured by it, otherwise the stage's default. */
+export function outcomeForStage(stage: FunnelStage, metric: unknown): CampaignOutcomeMetric {
+    const allowed = stageOutcomes(stage);
+    return (allowed as readonly unknown[]).includes(metric) ? metric as CampaignOutcomeMetric : allowed[0];
+}
+
+/**
+ * Whether a NEW campaign at this stage leaves existing customers out of its lead searches, when
+ * nobody said. Retention is aimed AT customers; every other stage is finding new ones (§9.2).
+ */
+export function defaultExcludeCustomers(stage: FunnelStage): boolean {
+    return stage !== 'retention';
+}
 
 // ── Orders: what the orchestrator can ask a colleague to do ──────────────────
 /**

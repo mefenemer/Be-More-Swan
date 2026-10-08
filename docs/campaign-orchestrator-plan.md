@@ -497,6 +497,24 @@ chained orders (`blocked` until the predecessor delivers, released by the reconc
 - Unblocks `signups` (`UNAVAILABLE_OUTCOME_METRICS`): Form Builder submissions are already
   attributed via `campaign_attributions`.
 
+**✅ Built 2026-10-08 (not yet deployed). ⚠️ Needs `db/z-campaign-funnel-stage.sql` applied to
+BOTH envs BEFORE the code deploys.** `campaigns.funnel_stage` (NOT NULL DEFAULT 'conversion' —
+every earlier campaign was a lead campaign; inline CHECK, no DROP). Stage → allowed outcomes in
+`STAGE_OUTCOME_METRICS` (vocab); create/edit fall back to the stage default rather than letting an
+awareness campaign count leads. New countable outcomes: `engagement` (post_insights on the posts
+its orders produced), `clicks` (tracked links, bots excluded), and `signups` is now live (Form
+Builder signups via campaign_attributions); `email_engagement` waits for §9.7.
+**Found on the way: nothing counted a campaign's own outcome** — target and metric were stored and
+shown, `replies` was counted nowhere. `src/utils/campaign-outcomes.ts` now counts each metric
+through the campaign's orders and links only (never by date overlap), null = not countable. Rows
+show stage + "37 of 500", the chat snapshot carries the same numbers. Drafting: a per-stage line
+in the §13 directive (awareness never pitches, retention speaks to customers). Halt: only for
+conversion campaigns (`mayProposeHalt`). Retention defaults to including customers.
+**Deviation from the plan:** the four assistant-level KPI cards were NOT made stage-aware — they
+aggregate every campaign an assistant runs, and summing engagements with leads is meaningless.
+Stage-specific measurement lives on each campaign row instead. Pace stays 'unknown'; it can now
+be computed from these counts (a follow-up). Guarded by `tests/campaign-funnel-stage.test.ts`.
+
 ### 9.7 Email nurture
 
 The review asked for HubSpot/Mailchimp; we already have the Email Marketing Assistant (forms,

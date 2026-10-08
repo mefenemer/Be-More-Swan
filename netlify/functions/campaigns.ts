@@ -8,7 +8,7 @@
 //                                 → orders become a PENDING strategy decision, never placed here
 //   POST { action: 'edit',        campaignId, ...fields, viaChat? }
 //                                 fields include audience { persona, description, excludeDomains }
-//                                 and excludeExistingCustomers (§9.2)
+//                                 and excludeExistingCustomers (§9.2), funnelStage (§9.6)
 //   POST { action: 'propose_plan', campaignId, orders[] }    → pending strategy decision (chat)
 //   POST { action: 'start',       campaignId }             → draft|paused → active
 //   POST { action: 'pause',       campaignId, reason }
@@ -50,12 +50,14 @@ import { placeOrder, recompileCampaignTargets } from '../../src/utils/campaign-o
 import { settleDecisionMirror } from '../../src/utils/campaign-mirror';
 import { hiredRoleKeys } from '../../src/utils/campaign-proposer';
 import { normaliseAudience, type CampaignAudience } from '../../src/config/campaign-audience';
+import { countCampaignOutcome } from '../../src/utils/campaign-outcomes';
 import {
     PLANNABLE_STATUSES, fileStrategyPlan, normalisePlanOrders, pendingPlanFor, planProblem, planWorkItems,
 } from '../../src/utils/campaign-plan';
 import {
     CAMPAIGN_ORDER_ACTIONS, CREATABLE_CAMPAIGN_MODES, LIVE_CAMPAIGN_STATUSES, ORDER_ACTION_SPECS,
-    isLinkMedium, isOrderAction, isSelectableOutcomeMetric, orderWorkItems,
+    DEFAULT_FUNNEL_STAGE, defaultExcludeCustomers, isFunnelStage, isLinkMedium, isOrderAction,
+    isSelectableOutcomeMetric, orderWorkItems, outcomeForStage, type FunnelStage,
 } from '../../src/config/campaign-vocab';
 import { isSafeDestination, mintLinkToken } from '../../src/utils/campaign-attribution';
 import { buildTargetingCriteria } from '../../src/utils/ad-networks/linkedin';
@@ -159,6 +161,7 @@ export default withLambda(async (event) => {
                 haltedBy: campaigns.haltedBy,
                 audience: campaigns.audience,
                 excludeExistingCustomers: campaigns.excludeExistingCustomers,
+                funnelStage: campaigns.funnelStage,
                 createdAt: campaigns.createdAt,
                 maxWorkItems: campaignBudgets.maxWorkItems,
                 maxSpendGbp: campaignBudgets.maxSpendGbp,
@@ -189,7 +192,9 @@ export default withLambda(async (event) => {
             // The plan waiting on this campaign, if any. Without it on the row, a campaign agreed
             // in chat shows a bare Start button that would start it with NOTHING commissioned.
             const pendingPlan = await pendingPlanFor(db, r.id);
-            items.push({ ...r, ...totals, orders: live ?? { open: 0, inReview: 0, delivered: 0 }, pendingPlan });
+            // Progress in the campaign's OWN unit (§9.6). null = not countable, never 0.
+            const progress = await countCampaignOutcome(db, { id: r.id, organisationId: orgId }, r.outcomeMetric);
+            items.push({ ...r, ...totals, orders: live ?? { open: 0, inReview: 0, delivered: 0 }, pendingPlan, progress });
         }
 
         // The plan gate travels with the list so the Budget & Control strip can render in one
@@ -276,7 +281,11 @@ export default withLambda(async (event) => {
             return json(400, { error: 'This campaign cannot be given a money budget yet. Its budget is the work it commissions.' });
         }
 
-        const outcomeMetric = isSelectableOutcomeMetric(body.outcomeMetric) ? body.outcomeMetric : 'leads';
+        // The stage decides which outcomes may be the target (§9.6): an awareness campaign asked to
+        // count leads would read as failing for its whole flight, so the metric is checked against
+        // the stage and falls back to the stage's own default rather than being refused.
+        const funnelStage: FunnelStage = isFunnelStage(body.funnelStage) ? body.funnelStage : DEFAULT_FUNNEL_STAGE;
+        const outcomeMetric = outcomeForStage(funnelStage, body.outcomeMetric);
         const maxWorkItems = int(body.maxWorkItems, 1, 1000, 100);
         // The chat card's briefs. Filed below as a PENDING strategy decision — placing them here
         // would be starting the campaign from a chat click (§1.3). Checked against the campaign's
@@ -329,8 +338,12 @@ export default withLambda(async (event) => {
             status: 'draft',
             endsAt: endsAt && !Number.isNaN(endsAt.getTime()) ? endsAt : null,
             audience: normaliseAudience(body.audience),
-            // Only an explicit false turns it off. Absent means the safe default (§9.2).
-            excludeExistingCustomers: body.excludeExistingCustomers !== false,
+            funnelStage,
+            // An explicit choice wins; otherwise the stage decides — retention is aimed AT existing
+            // customers, every other stage is finding new ones (§9.2 / §9.6).
+            excludeExistingCustomers: typeof body.excludeExistingCustomers === 'boolean'
+                ? body.excludeExistingCustomers
+                : defaultExcludeCustomers(funnelStage),
         }).returning({ id: campaigns.id });
 
         await db.insert(campaignBudgets).values({
@@ -391,7 +404,16 @@ export default withLambda(async (event) => {
         if (typeof body.excludeExistingCustomers === 'boolean') patch.excludeExistingCustomers = body.excludeExistingCustomers;
         const objective = str(body.objective, 500);
         if (objective) patch.objective = objective;
-        if (isSelectableOutcomeMetric(body.outcomeMetric)) patch.outcomeMetric = body.outcomeMetric;
+        // Stage and outcome move together: the outcome must be one the (new) stage may be measured
+        // by, so a stage change that would orphan the current metric resets it to the stage default
+        // instead of leaving an awareness campaign counting leads.
+        const nextStage: FunnelStage = isFunnelStage(body.funnelStage)
+            ? body.funnelStage
+            : (isFunnelStage(campaign.funnelStage) ? campaign.funnelStage : DEFAULT_FUNNEL_STAGE);
+        if (isFunnelStage(body.funnelStage) && body.funnelStage !== campaign.funnelStage) patch.funnelStage = body.funnelStage;
+        const wantedMetric = isSelectableOutcomeMetric(body.outcomeMetric) ? body.outcomeMetric : campaign.outcomeMetric;
+        const nextMetric = outcomeForStage(nextStage, wantedMetric);
+        if (nextMetric !== campaign.outcomeMetric) patch.outcomeMetric = nextMetric;
         if (body.targetValue !== undefined) {
             patch.targetValue = isBlank(body.targetValue) ? null : int(body.targetValue, 1, 100000, 10);
         }
@@ -402,7 +424,7 @@ export default withLambda(async (event) => {
         await db.update(campaigns).set(patch).where(eq(campaigns.id, campaign.id));
         // The objective and end date are what the directive says; an edit must reach drafting.
         if (patch.objective !== undefined || patch.outcomeMetric !== undefined || patch.endsAt !== undefined
-            || patch.audience !== undefined) {
+            || patch.audience !== undefined || patch.funnelStage !== undefined) {
             await recompileCampaignTargets(db, campaign.id, 'campaign-edited');
         }
 

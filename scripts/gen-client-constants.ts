@@ -38,6 +38,7 @@ import {
 import {
     CAMPAIGN_STATUS_LABELS, CAMPAIGN_ORDER_STATUS_LABELS, CAMPAIGN_DECISION_LABELS,
     CAMPAIGN_OUTCOME_LABELS, ORDER_ACTION_SPECS, UNAVAILABLE_OUTCOME_METRICS,
+    FUNNEL_STAGES, FUNNEL_STAGE_LABELS, FUNNEL_STAGE_DESCRIPTIONS, DEFAULT_FUNNEL_STAGE, stageOutcomes,
     CAMPAIGN_LINK_MEDIUMS,
 } from '../src/config/campaign-vocab';
 import { PAUSE_REASON_LABELS } from '../src/config/ad-networks';
@@ -328,6 +329,13 @@ ${formatRows}
   var UNAVAILABLE_OUTCOME_METRICS = ${JSON.stringify(UNAVAILABLE_OUTCOME_METRICS)};
   var CAMPAIGN_LINK_MEDIUMS = ${JSON.stringify(CAMPAIGN_LINK_MEDIUMS)};
   var PAUSE_REASON_LABELS = ${JSON.stringify(PAUSE_REASON_LABELS)};
+  // Funnel stage (plan section 9.6). STAGE_OUTCOMES is already filtered to countable metrics, so
+  // the client cannot offer an outcome nothing counts.
+  var FUNNEL_STAGES = ${JSON.stringify(FUNNEL_STAGES)};
+  var FUNNEL_STAGE_LABELS = ${JSON.stringify(FUNNEL_STAGE_LABELS)};
+  var FUNNEL_STAGE_DESCRIPTIONS = ${JSON.stringify(FUNNEL_STAGE_DESCRIPTIONS)};
+  var STAGE_OUTCOMES = ${JSON.stringify(Object.fromEntries(FUNNEL_STAGES.map((st) => [st, stageOutcomes(st)])))};
+  var DEFAULT_FUNNEL_STAGE = ${JSON.stringify(DEFAULT_FUNNEL_STAGE)};
   // Only the fields the browser renders. artefactKind/roleKey stay server-side — the client has no
   // business routing an order, and shipping the routing table would invite it to try. Which
   // actions this workspace can use comes from campaigns.ts list (availableOrderActions).
@@ -394,6 +402,21 @@ ${formatRows}
 
     // Why an ad was paused, in words. ⚠️ An ad that stopped without saying why is the assistant
     // making a decision the user cannot argue with — so this must never fall back to a raw enum.
+    /** Funnel stages in order, with their labels and one-line descriptions. */
+    funnelStages: FUNNEL_STAGES,
+    defaultFunnelStage: DEFAULT_FUNNEL_STAGE,
+    stageLabel: function (st) {
+      var k = String(st == null ? "" : st);
+      return FUNNEL_STAGE_LABELS[k] || k;
+    },
+    stageDescription: function (st) {
+      return FUNNEL_STAGE_DESCRIPTIONS[String(st == null ? "" : st)] || "";
+    },
+    /** The countable outcomes a stage may target, default first. */
+    stageOutcomes: function (st) {
+      return (STAGE_OUTCOMES[String(st == null ? "" : st)] || STAGE_OUTCOMES[DEFAULT_FUNNEL_STAGE]).slice();
+    },
+
     pauseReasonLabel: function (r) {
       var k = String(r == null ? "" : r);
       return PAUSE_REASON_LABELS[k] || k;

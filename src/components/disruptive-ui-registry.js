@@ -915,8 +915,7 @@
 
     const objective = typeof ui.objective === 'string' ? ui.objective.trim() : '';
     const rationale = typeof ui.rationale === 'string' ? ui.rationale.trim() : '';
-    const outcomeMetric = typeof ui.outcomeMetric === 'string' ? ui.outcomeMetric : 'leads';
-    const outcomeLabel = C ? C.outcomeLabel(outcomeMetric) : outcomeMetric;
+    const outcomeMetricRaw = typeof ui.outcomeMetric === 'string' ? ui.outcomeMetric : '';
     const targetValue = Number.isFinite(Number(ui.targetValue)) ? Number(ui.targetValue) : null;
     const maxWorkItems = Number.isFinite(Number(ui.maxWorkItems)) ? Number(ui.maxWorkItems) : null;
     const campaignId = Number.isInteger(Number(ui.campaignId)) && Number(ui.campaignId) > 0 ? Number(ui.campaignId) : null;
@@ -927,8 +926,18 @@
     const audDesc = aud && typeof aud.description === 'string' ? aud.description.trim() : '';
     const excludeDomains = aud && Array.isArray(aud.excludeDomains)
       ? aud.excludeDomains.filter((d) => typeof d === 'string' && d.trim()).map((d) => d.trim()) : [];
-    // Only an explicit false includes customers — the same default the server applies.
-    const excludeCustomers = ui.excludeExistingCustomers !== false;
+    // The stage (§9.6). An unknown value falls back to the default rather than being shown raw.
+    const stage = C && C.funnelStages.indexOf(ui.funnelStage) !== -1 ? ui.funnelStage : (C ? C.defaultFunnelStage : 'conversion');
+    // An explicit choice wins; otherwise the stage decides — the same default the server applies
+    // (defaultExcludeCustomers): retention is aimed AT customers, everything else leaves them out.
+    const excludeCustomers = typeof ui.excludeExistingCustomers === 'boolean'
+      ? ui.excludeExistingCustomers : stage !== 'retention';
+    // The card shows the outcome the SERVER will save: one the stage allows, else the stage's
+    // default (outcomeForStage). Showing the model's choice when the server will replace it would
+    // have the user approve a measure the campaign never uses.
+    const allowedOutcomes = C ? C.stageOutcomes(stage) : ['leads'];
+    const outcomeMetric = allowedOutcomes.indexOf(outcomeMetricRaw) !== -1 ? outcomeMetricRaw : allowedOutcomes[0];
+    const outcomeLabel = C ? C.outcomeLabel(outcomeMetric) : outcomeMetric;
 
     // Only render orders the client can name. An unknown action or role means the model invented
     // one, and listing it would promise the user work no assistant will ever be asked to do.
@@ -971,6 +980,8 @@
         <p class="text-sm text-gray-700 mb-3"><span class="font-bold text-indigo-900">Why:</span> ${esc(rationale)}</p>` : ''}
 
       ${!campaignId ? `
+        <p class="text-sm text-gray-700 mb-1"><span class="font-bold text-indigo-900">Stage:</span>
+          ${esc(C ? C.stageLabel(stage) : stage)}${C && C.stageDescription(stage) ? ` — ${esc(C.stageDescription(stage).toLowerCase())}` : ''}</p>
         <p class="text-sm text-gray-700 mb-1 break-words"><span class="font-bold text-indigo-900">For:</span>
           ${persona || audDesc ? `${esc(persona)}${persona && audDesc ? ' — ' : ''}${esc(audDesc)}` : '<span class="text-amber-700">no audience given yet</span>'}</p>
         <p class="text-xs mb-3 ${excludeCustomers ? 'text-gray-600' : 'text-amber-700 font-bold'}">
@@ -1070,6 +1081,7 @@
           maxWorkItems,
           endsAt: typeof ui.endsAt === 'string' ? ui.endsAt : null,
           audience: aud ? { persona, description: audDesc, excludeDomains } : null,
+          funnelStage: stage,
           excludeExistingCustomers: excludeCustomers,
           orders: orders.map((o) => o.raw),
           // The success line is built from the SERVER's answer, never from the model's intent —
@@ -1115,6 +1127,10 @@
     if (typeof ui.objective === 'string' && ui.objective.trim()) {
       changes.objective = ui.objective.trim();
       rows.push(['Objective', changes.objective]);
+    }
+    if (C && C.funnelStages.indexOf(ui.funnelStage) !== -1) {
+      changes.funnelStage = ui.funnelStage;
+      rows.push(['Stage', C.stageLabel(ui.funnelStage)]);
     }
     if (typeof ui.outcomeMetric === 'string' && C && C.selectableOutcomes.indexOf(ui.outcomeMetric) !== -1) {
       changes.outcomeMetric = ui.outcomeMetric;

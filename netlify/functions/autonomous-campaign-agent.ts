@@ -44,7 +44,7 @@ import { aiAssistants } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { isGlobalAiDisabled, setPlatformConfig } from '../../src/utils/platform-config';
 import {
-    SCENARIO_REQUIREMENTS, buildEscalationProposal, buildHaltProposal, detectLeadQualityDrop,
+    SCENARIO_REQUIREMENTS, mayProposeHalt, buildEscalationProposal, buildHaltProposal, detectLeadQualityDrop,
     detectOutperformingPost, expirePendingDecisions, hasPendingDecision, hiredRoleKeys,
     liveCampaignsForRun, persistProposal, OUTPERFORM_WINDOW_DAYS,
 } from '../../src/utils/campaign-proposer';
@@ -139,7 +139,11 @@ export async function runCampaignProposer(): Promise<CampaignAgentResult> {
             }
 
             // ── Scenario 2 — the search is finding the wrong companies ─────────
-            if (SCENARIO_REQUIREMENTS.halt.every((r) => hired!.has(r))
+            // §9.6: the lead-quality halt judges a campaign on the leads it finds, so it only
+            // applies to a campaign whose JOB is finding leads. An awareness or retention campaign
+            // must never be stopped for not converting — that is the review's sharpest point.
+            if (mayProposeHalt(campaign.funnelStage)
+                && SCENARIO_REQUIREMENTS.halt.every((r) => hired!.has(r))
                 && !await hasPendingDecision(db, campaign.id, 'halt')) {
                 const hit = await detectLeadQualityDrop(db, campaign.organisationId, since24h);
                 if (hit) {

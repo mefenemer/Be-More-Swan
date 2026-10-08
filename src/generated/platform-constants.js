@@ -212,12 +212,19 @@
   var CAMPAIGN_STATUS_LABELS = {"draft":"Draft","active":"Running","throttled":"Throttled","paused":"Paused","finished":"Finished","archived":"Archived"};
   var CAMPAIGN_ORDER_STATUS_LABELS = {"queued":"Queued","issued":"With the assistant","in_review":"In your review","delivered":"Delivered","blocked":"Blocked","cancelled":"Cancelled","rejected":"Rejected"};
   var CAMPAIGN_DECISION_LABELS = {"strategy":"Strategy","reallocation":"Reallocation","escalation":"Escalation","halt":"Halt"};
-  var CAMPAIGN_OUTCOME_LABELS = {"leads":"New leads found","replies":"Replies from prospects","signups":"Signups captured","published_content":"Pieces published"};
+  var CAMPAIGN_OUTCOME_LABELS = {"leads":"New leads found","replies":"Replies received","signups":"Signups captured","published_content":"Pieces published","engagement":"Engagements on its posts","clicks":"Clicks on its tracked links","email_engagement":"Email opens and clicks"};
   var CAMPAIGN_REJECT_REASONS = ["wrong_channel","too_expensive","bad_timing","evidence_unconvincing","off_brand","doing_it_myself","other"];
   var CAMPAIGN_REJECT_REASON_LABELS = {"wrong_channel":"Wrong channel","too_expensive":"Too much work for the return","bad_timing":"Bad timing","evidence_unconvincing":"I disagree with the evidence","off_brand":"Off brand","doing_it_myself":"I’m doing this myself","other":"Something else"};
-  var UNAVAILABLE_OUTCOME_METRICS = ["signups"];
+  var UNAVAILABLE_OUTCOME_METRICS = ["email_engagement"];
   var CAMPAIGN_LINK_MEDIUMS = ["organic","paid","email","social","other"];
   var PAUSE_REASON_LABELS = {"creative_fatigue":"Click-through rate fell well below its own average","cost_per_outcome":"Each result was costing more than the ceiling you set","budget_exhausted":"The campaign reached its spending limit","human":"You paused it","control_lost":"We lost the connection to the ad account and stopped it as a precaution"};
+  // Funnel stage (plan section 9.6). STAGE_OUTCOMES is already filtered to countable metrics, so
+  // the client cannot offer an outcome nothing counts.
+  var FUNNEL_STAGES = ["awareness","consideration","conversion","retention"];
+  var FUNNEL_STAGE_LABELS = {"awareness":"Awareness","consideration":"Consideration","conversion":"Conversion","retention":"Retention"};
+  var FUNNEL_STAGE_DESCRIPTIONS = {"awareness":"Get seen by people who do not know you yet","consideration":"Get people who know you to look closer","conversion":"Turn interest into leads and signups","retention":"Keep and grow the customers you have"};
+  var STAGE_OUTCOMES = {"awareness":["engagement","published_content"],"consideration":["clicks","engagement","replies"],"conversion":["leads","signups","replies"],"retention":["replies","engagement","clicks"]};
+  var DEFAULT_FUNNEL_STAGE = "conversion";
   // Only the fields the browser renders. artefactKind/roleKey stay server-side — the client has no
   // business routing an order, and shipping the routing table would invite it to try. Which
   // actions this workspace can use comes from campaigns.ts list (availableOrderActions).
@@ -278,6 +285,21 @@
 
     // Why an ad was paused, in words. ⚠️ An ad that stopped without saying why is the assistant
     // making a decision the user cannot argue with — so this must never fall back to a raw enum.
+    /** Funnel stages in order, with their labels and one-line descriptions. */
+    funnelStages: FUNNEL_STAGES,
+    defaultFunnelStage: DEFAULT_FUNNEL_STAGE,
+    stageLabel: function (st) {
+      var k = String(st == null ? "" : st);
+      return FUNNEL_STAGE_LABELS[k] || k;
+    },
+    stageDescription: function (st) {
+      return FUNNEL_STAGE_DESCRIPTIONS[String(st == null ? "" : st)] || "";
+    },
+    /** The countable outcomes a stage may target, default first. */
+    stageOutcomes: function (st) {
+      return (STAGE_OUTCOMES[String(st == null ? "" : st)] || STAGE_OUTCOMES[DEFAULT_FUNNEL_STAGE]).slice();
+    },
+
     pauseReasonLabel: function (r) {
       var k = String(r == null ? "" : r);
       return PAUSE_REASON_LABELS[k] || k;

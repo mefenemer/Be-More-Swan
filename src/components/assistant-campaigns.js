@@ -172,11 +172,28 @@
       </div>`;
   }
 
+  // Stage, measure and progress in one line (§9.6). Progress is in the campaign's OWN unit, and
+  // `null` from the server means it cannot be counted — said in words, never drawn as zero.
   function outcomeLine(c) {
     const label = C() ? C().outcomeLabel(c.outcomeMetric) : c.outcomeMetric;
-    return c.targetValue
-      ? `${esc(label)} — aiming for ${esc(String(c.targetValue))}`
-      : esc(label);
+    const stage = c.funnelStage ? `${esc(C() ? C().stageLabel(c.funnelStage) : c.funnelStage)} · ` : '';
+    const n = c.progress;
+    const progress = n === null || n === undefined
+      ? ' — cannot be counted yet'
+      : c.targetValue
+        ? ` — ${esc(String(n))} of ${esc(String(c.targetValue))}`
+        : ` — ${esc(String(n))} so far`;
+    return `${stage}${esc(label)}${progress}`;
+  }
+
+  /** A thin bar under the outcome line, only when there is a target and a count to compare. */
+  function progressBar(c) {
+    if (!c.targetValue || c.progress === null || c.progress === undefined) return '';
+    const pct = Math.min(100, Math.round((Number(c.progress) / Number(c.targetValue)) * 100));
+    return `
+      <div class="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden mt-1">
+        <div class="bg-emerald-600 h-full" style="width:${pct}%"></div>
+      </div>`;
   }
 
   // ── Who it is for (§9.2) ───────────────────────────────────────────────────
@@ -216,6 +233,7 @@
           <div class="min-w-0">
             <p class="font-bold text-gray-900 break-words">${esc(c.objective)}</p>
             <p class="text-xs text-gray-500 mt-0.5">${outcomeLine(c)}</p>
+            ${progressBar(c)}
             ${audienceHtml(c)}
           </div>
           <span class="${chip.cls} shrink-0">${esc(chip.label)}</span>
@@ -427,11 +445,21 @@
     if (!f) return '';
     const c = f.mode === 'edit' ? state.campaigns.find((x) => Number(x.id) === Number(f.id)) : null;
     if (f.mode === 'edit' && !c) return '';
-    const outcomes = (C() && C().selectableOutcomes) || ['leads'];
+    // The stage picks the outcomes on offer (§9.6). Held on state.form so a stage change can
+    // re-render the form with the right list; the outcome's data-keep key carries the stage so a
+    // choice valid for one stage is never restored into another's list.
+    const stages = (C() && C().funnelStages) || ['conversion'];
+    if (!f.stage) f.stage = (c && c.funnelStage) || (C() ? C().defaultFunnelStage : 'conversion');
+    const outcomes = (C() && C().stageOutcomes(f.stage)) || ['leads'];
+    const currentOutcome = c && outcomes.indexOf(c.outcomeMetric) !== -1 ? c.outcomeMetric : outcomes[0];
     const v = (key, dflt) => (c && c[key] != null ? c[key] : dflt);
     const ends = c && c.endsAt ? String(c.endsAt).slice(0, 10) : '';
     const aud = c && c.audience && typeof c.audience === 'object' ? c.audience : {};
-    const excludeCustomers = !c || c.excludeExistingCustomers !== false;
+    // Editing keeps the campaign's own setting. Creating follows the stage: retention is aimed AT
+    // customers, every other stage leaves them out — and the checkbox's keep-key carries the stage
+    // so switching stage re-applies that default instead of restoring the previous stage's tick.
+    const excludeCustomers = c ? c.excludeExistingCustomers !== false : f.stage !== 'retention';
+    const exclKey = c ? 'f-excl' : `f-excl-${f.stage}`;
     return `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-4 space-y-3" data-cmp-form>
         <p class="text-sm font-bold text-gray-900">${f.mode === 'edit' ? 'Edit campaign' : 'New campaign'}</p>
@@ -440,10 +468,15 @@
             placeholder="e.g. 50 new leads from UK accountancy firms by the end of March"
             class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">${esc(v('objective', ''))}</textarea>
         </label>
+        <label class="block text-xs font-bold text-gray-600">What is this campaign for?
+          <select data-cmpf="funnelStage" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+            ${stages.map((st) => `<option value="${esc(st)}" ${st === f.stage ? 'selected' : ''}>${esc(C() ? C().stageLabel(st) : st)}${C() && C().stageDescription(st) ? ` — ${esc(C().stageDescription(st))}` : ''}</option>`).join('')}
+          </select>
+        </label>
         <div class="flex flex-wrap gap-3">
           <label class="block text-xs font-bold text-gray-600 flex-1 min-w-[12rem]">What counts as success
-            <select data-cmpf="outcomeMetric" data-keep="f-outcome" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
-              ${outcomes.map((m) => `<option value="${esc(m)}" ${m === v('outcomeMetric', 'leads') ? 'selected' : ''}>${esc(C() ? C().outcomeLabel(m) : m)}</option>`).join('')}
+            <select data-cmpf="outcomeMetric" data-keep="f-outcome-${esc(f.stage)}" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-normal">
+              ${outcomes.map((m) => `<option value="${esc(m)}" ${m === currentOutcome ? 'selected' : ''}>${esc(C() ? C().outcomeLabel(m) : m)}</option>`).join('')}
             </select>
           </label>
           <label class="block text-xs font-bold text-gray-600">Aiming for (optional)
@@ -472,7 +505,7 @@
           </label>
         </div>
         <label class="flex items-start gap-2 text-xs text-gray-700">
-          <input type="checkbox" data-cmpf="excludeExistingCustomers" data-keep="f-excl" ${excludeCustomers ? 'checked' : ''} class="mt-0.5">
+          <input type="checkbox" data-cmpf="excludeExistingCustomers" data-keep="${esc(exclKey)}" ${excludeCustomers ? 'checked' : ''} class="mt-0.5">
           <span><span class="font-bold">Leave out existing customers.</span> Lead searches for this campaign skip companies you have marked as won in Conversations. Untick it only for a campaign aimed at your customers.</span>
         </label>
         <label class="block text-xs font-bold text-gray-600">Also leave out (optional)
@@ -1623,6 +1656,12 @@
   }
 
   document.addEventListener('change', (e) => {
+    const stageSel = e.target.closest('[data-cmpf="funnelStage"]');
+    if (stageSel && state.form) {
+      state.form.stage = stageSel.value;
+      if (state.rendered) render();
+      return;
+    }
     const sel = e.target.closest('[data-cmp-aw-action]');
     if (!sel) return;
     const id = Number(sel.dataset.cmpAwAction);
@@ -1671,6 +1710,7 @@
       if (!objective) { formSay('Say what this campaign should achieve.', 'error'); return; }
       const payload = {
         objective,
+        funnelStage: val('funnelStage'),
         outcomeMetric: val('outcomeMetric'),
         // Blank means "no target" / "no end date" — sent as null, never as 0.
         targetValue: val('targetValue') ? Number(val('targetValue')) : null,
